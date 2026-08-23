@@ -1,0 +1,30 @@
+name: Temporary package-lock sync
+
+on:
+  push:
+    branches: [v1.9.5-fix-subagents]
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: v1.9.5-fix-subagents
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Sync lockfile metadata
+        shell: pwsh
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          if (git diff --cached --quiet) { exit 0 }
+          git commit -m "chore: sync package lock for 1.9.5"
+          git push origin HEAD:v1.9.5-fix-subagents
