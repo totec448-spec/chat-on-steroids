@@ -48,6 +48,7 @@ const ALLOWED_LINKS = new Set([
   'https://platform.openai.com/settings/organization/tunnels',
   'https://platform.openai.com/settings/organization/api-keys',
   'https://github.com/openai/tunnel-client/releases',
+  'https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Extension.zip',
   'https://developers.openai.com/api/docs/guides/secure-mcp-tunnels',
   'https://developers.openai.com/api/docs/guides/developer-mode'
 ]);
