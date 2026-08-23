@@ -360,9 +360,21 @@
                     choose <strong>Load unpacked</strong> and pick the folder the button opens. It
                     pairs with this app by itself — there is no code to type.
                   </p>
+                  <p class="hint">
+                    <strong>Required for sub-agents:</strong> the companion extension must be loaded
+                    and connected in ChatGPT. Without it, Chat On Steroids cannot identify, open or
+                    coordinate worker chats.
+                  </p>
                   <div class="step-actions">
                     <button class="btn btn-solid" id="bridgeFolder" type="button">
                       <svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Open extension folder
+                    </button>
+                    <button
+                      class="btn"
+                      type="button"
+                      data-link="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Extension.zip"
+                    >
+                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Download extension ZIP
                     </button>
                     <button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button>
                     <span class="chosen" id="bridgeState"></span>
@@ -530,7 +542,7 @@
                   <div class="setting">
                     <span class="setting-text">
                       <b>Sub-agent workers</b>
-                      <em>Most worker chats one run may open. The tools themselves are a permission.</em>
+                      <em>Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.</em>
                     </span>
                     <input id="maWorkers" class="num" type="number" min="1" max="8" step="1" />
                     <span class="unit">max</span>
