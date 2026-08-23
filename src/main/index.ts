@@ -211,14 +211,19 @@ void app.whenReady().then(async () => {
     await shell.openExternal(url);
   });
 
+  // Persistence is a process-lifetime dependency of the broker, not a feature-toggle
+  // dependency. Multi-agent can be enabled from Settings without restarting the process;
+  // keeping both sinks wired from startup guarantees the first spawn can cross its durable
+  // acceptance barrier even when this launch began with multi-agent disabled.
+  onSwarmPersist(() => writeDurableSoon(SWARM_STATE, snapshotSwarm()));
+  onSwarmPersistNow((snapshot) => writeDurableNow(SWARM_STATE, snapshot));
+
   // A multi-agent run outlives this process. Restoring it before the bridge starts
   // means a worker that never joined gets its chat re-requested through the same queue
   // as a fresh one, rather than being stranded with a key nobody has.
   onRetiredWorkersPersist(() => writeDurableSoon(RETIRED_WORKERS_STATE, snapshotRetiredWorkers()));
   restoreRetiredWorkers(await readDurable<RetiredWorkersSnapshot>(RETIRED_WORKERS_STATE));
   if (getConfig().multiAgent.enabled) {
-    onSwarmPersist(() => writeDurableSoon(SWARM_STATE, snapshotSwarm()));
-    onSwarmPersistNow((snapshot) => writeDurableNow(SWARM_STATE, snapshot));
     restoreSwarm(await readDurable<SwarmSnapshot>(SWARM_STATE));
   }
   // Continuation recovery is after swarm restore because an interrupted durable rebind may
