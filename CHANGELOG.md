@@ -9,6 +9,19 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [1.9.5] — 2026-08-23
+
+### Added
+- **The extension requirement is explicit where sub-agents are configured.** Setup now says
+  worker chats require the companion extension to be loaded and connected, Chat settings repeats
+  that requirement, and Setup includes a direct download link for the standalone extension ZIP.
+
+### Fixed
+- **Sub-agents can be enabled without restarting Chat On Steroids.** Swarm persistence hooks are
+  now wired for the lifetime of the main process instead of only when multi-agent was enabled at
+  startup, so the first `spawn` after enabling the feature can cross its durable acceptance
+  barrier normally.
+
 ## [1.9.4] — 2026-08-22
 
 ### Added
@@ -143,4 +156,5 @@ Pre-public beta milestone.
 ### Added
 - Transactional batch edits and process output cursors.
 
+[1.9.5]: https://github.com/totec448-spec/chat-on-steroids/releases/tag/v1.9.5
 [1.9.4]: https://github.com/totec448-spec/chat-on-steroids/releases/tag/v1.9.4
