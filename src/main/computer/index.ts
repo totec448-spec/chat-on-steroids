@@ -27,6 +27,7 @@ import { HELPER_SCRIPT } from './helper.js';
 export const DEFAULT_SCREENSHOT_WIDTH = 1280;
 export const MAX_SCREENSHOT_WIDTH = 2560;
 const HELPER_TIMEOUT_MS = 30_000;
+const HELPER_STARTUP_GRACE_MS = 10_000;
 const MAX_FRAMES = 16;
 
 export class ComputerError extends Error {
@@ -157,6 +158,8 @@ interface HelperRuntime {
   stdoutBuffer: string;
   stderrTail: string;
   pending: PendingHelperRequest | null;
+  /** True after the helper has produced its first valid protocol reply. */
+  ready: boolean;
 }
 
 let helperRuntime: HelperRuntime | null = null;
@@ -249,7 +252,8 @@ async function startHelper(): Promise<HelperRuntime> {
       child,
       stdoutBuffer: '',
       stderrTail: '',
-      pending: null
+      pending: null,
+      ready: false
     };
     let started = false;
 
@@ -291,6 +295,7 @@ async function startHelper(): Promise<HelperRuntime> {
           continue;
         }
         const reply = parsed as Record<string, any>;
+        runtime.ready = true;
         clearTimeout(pending.timer);
         runtime.pending = null;
         if (reply['ok'] === false) {
@@ -397,7 +402,7 @@ async function sendHelperRequest(request: Record<string, unknown>): Promise<Reco
     const timer = setTimeout(() => {
       if (runtime.pending !== pending) return;
       rejectAfterHelperRetirement(runtime, pending, new ComputerError('The desktop helper did not answer in time.'));
-    }, helperTimeoutMs(request));
+    }, helperTimeoutMs(request) + (runtime.ready ? 0 : HELPER_STARTUP_GRACE_MS));
     pending = { resolve, reject, timer };
     runtime.pending = pending;
     runtime.child.stdin.write(`${JSON.stringify(request)}\n`, 'utf8', (error) => {

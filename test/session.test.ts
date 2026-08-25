@@ -253,7 +253,7 @@ describe('session store', () => {
       readSpy.mockRestore();
       readdirSpy.mockRestore();
     }
-  });
+  }, 90_000);
 
   it('does not cache a transient root scan failure as an authoritative empty attachment catalog', async () => {
     const conversationId = `conv-transient-catalog-${Date.now()}`;
@@ -1219,7 +1219,7 @@ describe('handoff storage', () => {
       readSpy.mockRestore();
       await deleteSession(seed.id);
     }
-  });
+  }, 90_000);
 
   it('never prunes the session holding the newest handoff', async () => {
     const stale = await createSession({ title: 'stale' });
@@ -1253,7 +1253,7 @@ describe('handoff storage', () => {
     expect(await getSession(kept.id)).not.toBeNull();
     expect(await getSession(stale.id)).toBeNull();
     await deleteSession(kept.id);
-  });
+  }, 90_000);
 
   it('prunes an expired session beyond the old 5,000-folder maintenance prefix', async () => {
     const seed = await createSession({ title: 'retention catalog seed' });

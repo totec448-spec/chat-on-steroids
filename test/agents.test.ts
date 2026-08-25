@@ -9,6 +9,7 @@
 
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Caller } from '../src/main/agents.js';
 
@@ -1908,6 +1909,7 @@ describe('through the MCP endpoint', () => {
 
     const started = Date.now();
     const shell = `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    const heldMarker = path.join(dir, 'held-call-started.txt');
     const pending = post(
       {
         jsonrpc: '2.0',
@@ -1916,16 +1918,25 @@ describe('through the MCP endpoint', () => {
         params: {
           name: 'exec_command',
           arguments: {
-            cmd: "Start-Sleep -Milliseconds 350; Write-Output 'held-call-done'",
+            cmd: "Set-Content -LiteralPath 'held-call-started.txt' -Value 'started' -NoNewline; Start-Sleep -Milliseconds 750; Write-Output 'held-call-done'",
             workdir: dir,
             shell,
-            yield_time_ms: 10_000
+            yield_time_ms: 30_000
           }
         }
       },
       { 'x-request-id': `${requestId}/relay` }
     );
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    const heldDeadline = Date.now() + 20_000;
+    while (Date.now() < heldDeadline) {
+      try {
+        await fs.access(heldMarker);
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    }
+    await expect(fs.readFile(heldMarker, 'utf8')).resolves.toContain('started');
 
     expect(noteWorkerRevived('worker-1', 'c-worker-1', revival.messageIds)).toBe(true);
     const offeredAt = snapshotSwarm()!.agents.find((entry) => entry.info.id === 'worker-1')!.queue[0]!.offeredAt!;
@@ -1945,7 +1956,7 @@ describe('through the MCP endpoint', () => {
     const later = await asChat('c-worker-1', 'status');
     expect(later).not.toContain('wake text belongs to the browser user turn');
     expect(pendingCount('worker-1')).toBe(0);
-  });
+  }, 45_000);
 
   it('keeps a terminal worker tombstone only for finish retry and re-offers the lost finish inbox', async () => {
     startSwarm(1);
