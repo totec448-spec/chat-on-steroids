@@ -151,7 +151,9 @@ describe('desktop helper retirement ordering', () => {
     );
     // Window metadata has its own short deadline; the 30s watchdog remains only the
     // final boundary for unknown operations.
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await Promise.resolve();
+    expect(fake.terminateProcessTree).toHaveBeenCalledWith(9000);
 
     expect(firstSettled).toBe(false);
     const second = listWindows();
