@@ -241,12 +241,47 @@
 }
 
 .clf-stage-detail {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   opacity: 0.82;
+}
+
+.clf-stage-close {
+  display: inline-grid;
+  flex: none;
+  width: 1.65rem;
+  height: 1.65rem;
+  margin: -0.25rem -0.35rem -0.25rem auto;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  opacity: 0.55;
+}
+
+.clf-stage-close[hidden] {
+  display: none;
+}
+
+.clf-stage-close:hover {
+  background: color-mix(in srgb, currentColor 9%, transparent);
+  opacity: 0.9;
+}
+
+.clf-stage-close:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 45%, transparent);
+  outline-offset: 1px;
+  opacity: 1;
 }
 
 /*
@@ -1058,6 +1093,139 @@
 
 .clf-switch[data-clf-on='1'] .clf-switch-knob {
   transform: translateX(14px);
+}
+
+/* The specific goal, sitting under the Goal switch it belongs to.
+   Indented to the switch's own text column and set in the note's size, so it reads as part
+   of that row rather than as a second setting. The accent is this app's amber — the same
+   colour the sheet already uses to say "this needs you" — because until a goal is written
+   there is nothing here to be on or off. */
+.clf-menu-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 8px 10px;
+  margin-top: -4px;
+}
+
+.clf-menu-goal-text {
+  font-size: 12px;
+  line-height: 1.4;
+  opacity: 0.75;
+  overflow-wrap: anywhere;
+}
+
+.clf-menu-goal-link {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  gap: 6px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, currentColor 30%, #f59e0b);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.clf-menu-goal-link:hover:not(:disabled) {
+  background: var(--clf-menu-hover);
+}
+
+.clf-menu-goal-link:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 45%, transparent);
+  outline-offset: -2px;
+}
+
+.clf-menu-goal-link:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.clf-menu-goal-plus {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.clf-menu-goal-input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--clf-menu-line);
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  /* Grows with the goal, up to the point where the sheet itself would stop fitting. */
+  min-height: 66px;
+  max-height: 40vh;
+  resize: vertical;
+}
+
+.clf-menu-goal-input:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 35%, #f59e0b);
+  outline-offset: -1px;
+}
+
+.clf-menu-goal-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.clf-menu-goal-buttons button {
+  padding: 5px 12px;
+  border: 1px solid var(--clf-menu-line);
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.clf-menu-goal-buttons button:hover:not(:disabled) {
+  background: var(--clf-menu-hover);
+}
+
+.clf-menu-goal-buttons button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.clf-menu-goal-save {
+  border-color: transparent !important;
+  background: #10a37f !important;
+  color: #fff;
+}
+
+.clf-menu-goal-save:hover:not(:disabled) {
+  background: #0e8f6f !important;
+}
+
+/* Clearing a goal ends a loop somebody set up deliberately, so it is set apart from Cancel
+   rather than sitting beside it as a third equal button. */
+.clf-menu-goal-clear {
+  margin-left: auto;
+  color: color-mix(in srgb, currentColor 45%, #dc2626);
+}
+
+.clf-menu-goal-note {
+  font-size: 12px;
+  line-height: 1.35;
+  opacity: 0.62;
+  overflow-wrap: anywhere;
+}
+
+.clf-menu-goal-note[data-clf-warn='1'],
+.clf-menu-goal-link [data-clf-warn='1'] {
+  color: color-mix(in srgb, currentColor 45%, #f59e0b);
+  opacity: 1;
 }
 
 /* The button's old job, kept: one action row under a hairline, so it reads as an action

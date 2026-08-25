@@ -28,9 +28,13 @@ import { getConfig, updateConfig } from './config.js';
 import { getSecret, setSecret } from './secrets.js';
 import {
   ackGoalDraft,
+  draftOpeningMessage,
   goalKeyPresent,
+  goalObjectiveFor,
   goalViewFor,
   retireGoalDrafts,
+  retireGoalDraftsFor,
+  setGoalObjective,
   startGoalDraft
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
@@ -90,6 +94,7 @@ import {
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
 import { requestCorrelation } from './session/correlation.js';
+import { MAX_GOAL_OBJECTIVE_CHARS } from '../shared/goal.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
 export const DEFAULT_PORTS = [8765, 8766, 8767, 8768, 8769];
@@ -138,6 +143,15 @@ const COMMAND_TTL_MS = 30 * 60_000;
 const MAX_COMMANDS = 20;
 const MAX_COMMAND_RECEIPTS = 64;
 const COMMANDS_STATE = 'bridge-commands';
+/**
+ * Durable explicit-disconnect marker stored in the bridge credential slot itself.
+ *
+ * Generated bridge tokens are base64url, so `!` can never collide with a real credential.
+ * Keeping the latch in the same encrypted, serialized secret store makes revocation and
+ * pairing one source of truth across app restarts instead of inventing a second state file
+ * that could disagree with the token after a crash.
+ */
+const BROWSER_DISCONNECTED = '!browser-disconnected';
 
 /**
  * How recently a ChatGPT tab must have talked to this app to count as open.
@@ -293,6 +307,7 @@ export interface BridgeCommand {
 let server: http.Server | null = null;
 let port: number | null = null;
 let lastSeenAt: number | null = null;
+let browserPresenceTimer: NodeJS.Timeout | null = null;
 let commands: Command[] = [];
 let commandReceipts: CommandReceipt[] = [];
 const commandLeaseWrites = new Map<string, Promise<boolean>>();
@@ -311,10 +326,12 @@ function changed(): void {
 }
 
 export async function bridgeStatus(): Promise<BridgeStatus> {
+  const stored = await getSecret('bridgeToken');
   return {
     running: server !== null,
     port,
-    paired: (await getSecret('bridgeToken')) !== null,
+    paired: stored !== null && stored !== BROWSER_DISCONNECTED,
+    present: browserPresent(),
     lastSeenAt
   };
 }
@@ -326,7 +343,26 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
  * gone quiet — in both cases "no tab reported that conversation" means nothing.
  */
 export function browserPresent(): boolean {
-  return lastSeenAt !== null && Date.now() - lastSeenAt < BROWSER_PRESENT_MS;
+  return server !== null && lastSeenAt !== null && Date.now() - lastSeenAt < BROWSER_PRESENT_MS;
+}
+
+/**
+ * Records one authenticated browser sighting and schedules the inverse state transition.
+ *
+ * Presence is process-local, unlike pairing. The extension polls frequently, so every new
+ * sighting pushes this deadline out. If those polls stop because Chrome/extension went away,
+ * the timer emits exactly the state change the renderer otherwise has no reason to request.
+ */
+function noteBrowserSeen(): boolean {
+  const wasPresent = browserPresent();
+  lastSeenAt = Date.now();
+  if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
+  browserPresenceTimer = setTimeout(() => {
+    browserPresenceTimer = null;
+    if (!browserPresent()) changed();
+  }, BROWSER_PRESENT_MS + 1);
+  browserPresenceTimer.unref?.();
+  return !wasPresent;
 }
 
 /**
@@ -336,7 +372,11 @@ export function browserPresent(): boolean {
  * rather than a setup: there is nothing to press to connect.
  */
 export async function unpair(): Promise<void> {
-  await setSecret('bridgeToken', '');
+  // Clearing the credential is ambiguous: it is also what a fresh install or repaired
+  // secrets store looks like, and those are intentionally allowed to provision silently.
+  // This impossible-as-a-token sentinel preserves the user's explicit intent across both
+  // the extension's next poll and an app restart.
+  await setSecret('bridgeToken', BROWSER_DISCONNECTED);
   logInfo('bridge: browser disconnected');
   changed();
 }
@@ -422,8 +462,12 @@ async function authorised(req: http.IncomingMessage): Promise<boolean> {
   const header = req.headers.authorization;
   if (typeof header !== 'string' || !header.startsWith('Bearer ')) return false;
   const token = await getSecret('bridgeToken');
-  if (!token) return false;
+  if (!token || token === BROWSER_DISCONNECTED) return false;
   return safeEqual(header.slice(7), token);
+}
+
+async function browserDisconnected(): Promise<boolean> {
+  return (await getSecret('bridgeToken')) === BROWSER_DISCONNECTED;
 }
 
 function readBody(req: http.IncomingMessage): Promise<unknown> {
@@ -677,10 +721,29 @@ function conversationId(value: unknown): string | null {
  * off for every worker, whatever the global switch says. `agentForConversation` returns null
  * when there is no run or the chat belongs to none of it — that is the solo case.
  */
-function goalEnabledFor(id: string): boolean {
-  if (!getConfig().goal.enabled) return false;
+function goalWorkerChat(id: string): boolean {
   const agent = agentForConversation(id);
-  return agent === null || agent === PRIME_ID;
+  return agent !== null && agent !== PRIME_ID;
+}
+
+function goalEnabledFor(id: string): boolean {
+  if (goalWorkerChat(id)) return false;
+  return getConfig().goal.enabled;
+}
+
+/**
+ * May the loop act in this chat at all — by the switch, or by this chat's own goal?
+ *
+ * The switch is the standing rule for every chat: keep going whenever ChatGPT itself says
+ * something it was asked for is unfinished. A *specific goal* is one chat's own instruction,
+ * given deliberately, naming the finish line; asking somebody to also find and flip a global
+ * switch before the goal they just typed does anything would be asking them to say yes twice.
+ * So either is enough — and the worker rule still overrides both, because there the prime is
+ * already the author of the user's turns.
+ */
+function goalActiveFor(id: string): boolean {
+  if (goalWorkerChat(id)) return false;
+  return getConfig().goal.enabled || goalObjectiveFor(id) !== '';
 }
 
 // -------------------------------------------------------------------- routes
@@ -730,6 +793,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
   // Identification only. Deliberately says nothing about roots, permissions or state.
   if (route === '/hello') {
+    const stored = await getSecret('bridgeToken');
     return json(
       res,
       200,
@@ -738,7 +802,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         version: APP_VERSION,
         bridge: BRIDGE_PROTOCOL,
         compatible: protocolCompatible(req),
-        paired: (await getSecret('bridgeToken')) !== null
+        paired: stored !== null && stored !== BROWSER_DISCONNECTED,
+        disconnected: stored === BROWSER_DISCONNECTED
       },
       origin
     );
@@ -749,11 +814,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 426, { error: 'incompatible_extension', bridge: BRIDGE_PROTOCOL, version: APP_VERSION }, origin);
     }
     if (rateLimited()) return json(res, 429, { error: 'rate_limited' }, origin);
+    let body: unknown;
     try {
-      await readBody(req);
+      body = await readBody(req);
     } catch (err) {
       if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
       return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const reconnect = Boolean(body && typeof body === 'object' && !Array.isArray(body) && (body as Record<string, unknown>)['reconnect'] === true);
+    if ((await browserDisconnected()) && !reconnect) {
+      return json(res, 409, { error: 'browser_disconnected' }, origin);
     }
     // Silent provisioning on loopback.
     //
@@ -770,12 +840,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // refuses anything that is not a chrome-extension:// origin, above.
     const token = randomBytes(32).toString('base64url');
     await setSecret('bridgeToken', token);
-    lastSeenAt = Date.now();
+    noteBrowserSeen();
     logInfo('bridge: browser extension connected and provisioned');
     changed();
     return json(res, 200, { token }, origin);
   }
 
+  // A deliberate revocation is different from a stale credential. The extension repairs a
+  // normal 401 by silently provisioning once, so naming this state on the first protected
+  // request is what prevents that repair path from undoing the user's Disconnect click.
+  if (await browserDisconnected()) return json(res, 401, { error: 'browser_disconnected' }, origin);
   if (!(await authorised(req))) return json(res, 401, { error: 'unauthorised' }, origin);
   if (!protocolCompatible(req)) {
     return json(res, 426, { error: 'incompatible_extension', bridge: BRIDGE_PROTOCOL, version: APP_VERSION }, origin);
@@ -783,7 +857,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // Charge only an authenticated extension. A random local process must not be able to
   // consume the browser's shared budget before failing origin/authentication.
   if (rateLimited()) return json(res, 429, { error: 'rate_limited' }, origin);
-  lastSeenAt = Date.now();
+  if (noteBrowserSeen()) changed();
 
   if (route === '/status') {
     const live = liveConversations();
@@ -1169,6 +1243,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           enabled: goalEnabledFor(id),
           hasKey: await goalKeyPresent(),
           model: getConfig().goal.model,
+          // This chat's own goal, and never a worker's: the loop is off there whatever is
+          // stored, and reporting one would let the page offer to drive a chat the prime owns.
+          objective: goalWorkerChat(id) ? '' : goalObjectiveFor(id),
+          // Why the switch is drawn off when the user did not turn it off. Without this the
+          // menu says "Goal off" in a worker chat and looks like a setting that failed to save.
+          blocked: goalWorkerChat(id) ? 'worker' : '',
           draft: goalViewFor(id, goalClient)
         },
         // Local calls still executing for *this chat*. ChatGPT-native compaction waits for
@@ -1451,7 +1531,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!turnId) return json(res, 400, { error: 'bad_turn_id' }, origin);
     // Checked here as well as in the page, because the page's copy of the setting is a poll
     // old and this is the request that spends somebody's OpenRouter credit.
-    if (!goalEnabledFor(id)) return json(res, 409, { error: 'goal_disabled' }, origin);
+    if (!goalActiveFor(id)) return json(res, 409, { error: 'goal_disabled' }, origin);
     if (!(await goalKeyPresent())) return json(res, 409, { error: 'no_api_key' }, origin);
     const live = liveConversations().find((entry) => entry.conversationId === id);
     const known = live ? null : await findSessionByConversation(id, { requireUnique: true });
@@ -1497,6 +1577,63 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   /**
+   * The specific goal one chat is being driven towards.
+   *
+   * Set from the composer's settings sheet and held for as long as the app runs. Empty text
+   * clears it, which is also what reaching the goal does — see the stop branch in goal.ts.
+   *
+   * Whatever is in flight for this chat is retired on the way through, because a draft is
+   * frozen with the goal it was started under: without this, saving a new goal would still
+   * type the old one's message into the chat one last time.
+   */
+  if (route === '/goal/objective' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const id = conversationId(body['conversationId']);
+    if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    // A worker's user turns are the prime's to write. Refusing to *hold* a goal here, rather
+    // than only refusing to act on one, keeps that rule in one place: nothing downstream has
+    // to remember that this particular stored goal is one it must never use.
+    if (goalWorkerChat(id)) return json(res, 409, { error: 'goal_worker_chat' }, origin);
+    const text = typeof body['text'] === 'string' ? body['text'] : '';
+    if (text.length > MAX_GOAL_OBJECTIVE_CHARS * 2) return tooLarge(res, origin);
+    const objective = setGoalObjective(id, text);
+    retireGoalDraftsFor(id);
+    logInfo(objective ? `bridge: chat ${id} was given a specific goal` : `bridge: the specific goal for chat ${id} was cleared`);
+    return json(res, 200, { objective }, origin);
+  }
+
+  /**
+   * The opening message for a chat that has no id yet.
+   *
+   * Everything else here is keyed by conversation, and a New Chat has none — ChatGPT assigns
+   * one only when a message is sent, and the message being asked for is that one. So this
+   * route holds nothing, streams nothing and is answered in place: the page waits for it,
+   * types it, and comes back to /goal/objective with the real id once ChatGPT has issued it.
+   */
+  if (route === '/goal/open' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const text = typeof body['text'] === 'string' ? body['text'] : '';
+    if (text.length > MAX_GOAL_OBJECTIVE_CHARS * 2) return tooLarge(res, origin);
+    if (!text.trim()) return json(res, 400, { error: 'no_objective' }, origin);
+    if (!(await goalKeyPresent())) return json(res, 409, { error: 'no_api_key' }, origin);
+    const drafted = await draftOpeningMessage(text);
+    if ('error' in drafted) return json(res, 502, { error: drafted.error }, origin);
+    return json(res, 200, drafted, origin);
+  }
+
+  /**
    * The two switches the composer's settings menu owns.
    *
    * Deliberately these two and nothing else. Everything else in this app's settings decides
@@ -1504,6 +1641,32 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
    * able to widen that; these are the two that only decide what the app does with a chat
    * that is already recorded.
    */
+  /**
+   * The same two settings, read rather than written.
+   *
+   * `/activity` carries them on every poll, but it is addressed by conversation and a New
+   * Chat has none — and a New Chat is now somewhere a goal can be written, so the sheet
+   * above that composer has to be able to say what the settings are. Nothing here is
+   * conversation-scoped, so nothing here can be: no objective, no block, no draft.
+   */
+  if (route === '/settings' && req.method === 'GET') {
+    return json(
+      res,
+      200,
+      {
+        context: contextView(),
+        goal: {
+          enabled: getConfig().goal.enabled,
+          hasKey: await goalKeyPresent(),
+          model: getConfig().goal.model,
+          objective: '',
+          blocked: ''
+        }
+      },
+      origin
+    );
+  }
+
   if (route === '/settings' && req.method === 'POST') {
     let body: Record<string, unknown>;
     try {
@@ -2056,6 +2219,13 @@ async function startBridgeOnce(): Promise<number | null> {
       // has nobody to ask until this moment — and queue() folds a replayed worker into
       // the restored command for the same worker rather than opening a second tab.
       await restoreCommands();
+      // A settings-driven stop/start is not a process restart: the in-memory commands survive,
+      // so restoreCommands() quite correctly skips their durable duplicates. stopBridge(),
+      // however, cleared their memory-only deadline timers. Re-arm those retained leases from
+      // their durable claimedAt before delivery is allowed to inspect the queue; otherwise an
+      // expired lease looks queued again and can open the same bootstrap a second time, while
+      // a still-live lease can sit forever with no timer to end it.
+      rearmRetainedCommandDeadlines();
       onSpawnRequest((workers) => {
         for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task);
       });
@@ -2101,8 +2271,13 @@ export async function stopBridge(): Promise<void> {
   if (bridgeStarting) await bridgeStarting.catch(() => null);
   const instance = server;
   if (!instance) return;
+  if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
+  browserPresenceTimer = null;
   server = null;
   port = null;
+  // A stopped listener cannot currently see the extension. Require one fresh authenticated
+  // request after the next start rather than carrying a recent sighting across bridge lifetimes.
+  lastSeenAt = null;
   for (const command of commands) {
     if (command.timer) clearTimeout(command.timer);
     command.timer = null;
@@ -2642,6 +2817,19 @@ function armDeadline(command: Command, delay = COMMAND_DEADLINE_MS): void {
   command.timer.unref?.();
 }
 
+/** Re-arms leased commands whose timers were intentionally cleared by stopBridge(). */
+function rearmRetainedCommandDeadlines(): void {
+  const now = Date.now();
+  const expired: Command[] = [];
+  for (const command of commands) {
+    if (command.claimedAt === null || command.timer) continue;
+    const remaining = command.claimedAt + COMMAND_DEADLINE_MS - now;
+    if (remaining > 0) armDeadline(command, remaining);
+    else expired.push(command);
+  }
+  for (const command of expired) expire(command);
+}
+
 /**
  * The deadline passed. Decide what actually happened, then end it either way.
  *
@@ -3024,6 +3212,8 @@ export async function restoreCommands(): Promise<void> {
 /** Test seam. */
 export function resetBridgeForTests(): void {
   for (const command of commands) if (command.timer) clearTimeout(command.timer);
+  if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
+  browserPresenceTimer = null;
   commands = [];
   commandReceipts = [];
   commandLeaseWrites.clear();

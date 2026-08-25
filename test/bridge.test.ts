@@ -26,9 +26,10 @@ vi.mock('electron', () => ({
 }));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
-const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
+const { initSecretsPath, resetSecretsCacheForTests, setSecret } = await import('../src/main/secrets.js');
 const {
   bridgePort,
+  bridgeStatus,
   cancelResume,
   commandUrl,
   pendingCommands,
@@ -277,7 +278,8 @@ describe('who is allowed to talk to it', () => {
     expect(reply.body.bridge).toBe(BRIDGE_PROTOCOL);
     expect(reply.body.paired).toBe(false);
     // Identification must not double as a status leak.
-    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired']);
+    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired', 'disconnected']);
+    expect(reply.body.disconnected).toBe(false);
     expect(reply.body.compatible).toBe(true);
   });
 
@@ -343,6 +345,62 @@ describe('provisioning', () => {
     expect((await request('GET', '/status')).status).toBe(200);
     await unpair();
     expect((await request('GET', '/status')).status).toBe(401);
+  });
+
+  it('keeps an app-side disconnect latched until the browser explicitly reconnects', async () => {
+    await pair();
+    await unpair();
+    // Drop the decrypted in-process cache. The next bridge read now has to recover the
+    // disconnect marker from the encrypted file, the relevant half of an app restart.
+    resetSecretsCacheForTests();
+
+    // First-install provisioning is silent, but this browser was deliberately revoked by
+    // the app. A background poll must not be able to turn that revocation into a new token.
+    const silent = await request('POST', '/pair', { auth: null });
+    expect(silent.status).toBe(409);
+    expect(silent.body.error).toBe('browser_disconnected');
+    expect((await request('GET', '/hello', { auth: null })).body).toMatchObject({
+      paired: false,
+      disconnected: true
+    });
+
+    // The extension popup's Connect action is the explicit counterpart. Only that intent
+    // clears the durable app-side latch and mints a usable token again.
+    const reconnect = await request('POST', '/pair', { auth: null, body: { reconnect: true } });
+    expect(reconnect.status).toBe(200);
+    token = reconnect.body.token as string;
+    expect((await request('GET', '/status')).status).toBe(200);
+    expect((await request('GET', '/hello', { auth: null })).body).toMatchObject({
+      paired: true,
+      disconnected: false
+    });
+  });
+
+  it('does not treat a persisted pairing token as proof the browser is present after restart', async () => {
+    await pair();
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
+
+    // Pairing is durable authorization; browser presence belongs to this app process. A
+    // restart keeps the token but has not seen the extension yet, so setup must not call it
+    // connected merely because an old credential survived on disk.
+    resetBridgeForTests();
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, lastSeenAt: null });
+  });
+
+  it('requires a fresh browser sighting after the local bridge itself restarts', async () => {
+    await pair();
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
+
+    await stopBridge();
+    expect(await bridgeStatus()).toMatchObject({ running: false, paired: true, present: false, lastSeenAt: null });
+    const restarted = await startBridge();
+    expect(restarted).not.toBeNull();
+    base = `http://127.0.0.1:${restarted}`;
+    expect(await bridgeStatus()).toMatchObject({ running: true, paired: true, present: false, lastSeenAt: null });
+
+    // Authorization survived, so the first normal extension poll proves presence again.
+    expect((await request('GET', '/status')).status).toBe(200);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
   });
 });
 
@@ -2239,6 +2297,32 @@ describe('restarting the bridge', () => {
     // run that no longer exists, so startup's ordinary tidy pass retires it before delivery.
     expect(pendingCommands()).toEqual([]);
   });
+
+  it('re-arms an in-memory leased command instead of reopening it after stop/start', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'work' }], caller: { conversationId: PRIME_CHAT } });
+    await waitForOpened(1);
+    const leased = await redeem();
+    expect(leased.agent).toBe('worker-1');
+
+    const realNow = Date.now;
+    const leasedAt = realNow();
+    await stopBridge();
+    try {
+      // The old deadline timer is gone because stopBridge deliberately cleared it. Advance
+      // only the clock: on restart an implementation that forgets to re-arm/expire the
+      // retained lease sees it as deliverable and opens the exact same bootstrap again.
+      Date.now = () => leasedAt + 91_000;
+      const port = await startBridge();
+      expect(port).not.toBeNull();
+      base = `http://127.0.0.1:${port}`;
+      expect(opened).toHaveLength(1);
+      expect(pendingCommands()).toEqual([]);
+      expect(swarmState().agents.find((entry) => entry.id === 'worker-1')?.state).toBe('failed');
+    } finally {
+      Date.now = realNow;
+    }
+  });
 });
 
 // -------------------------------------------------------------------- goal loop
@@ -2255,7 +2339,7 @@ describe('the goal loop over the bridge', () => {
     await saveConfig({
       ...defaultConfig(),
       sessions: { ...defaultConfig().sessions, record: true },
-      goal: { enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' }
+      goal: { ...defaultConfig().goal, enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' }
     });
     await setSecret('openRouterApiKey', 'sk-or-bridge');
     resetGoalStateForTests();
@@ -2399,8 +2483,8 @@ describe('the goal loop over the bridge', () => {
   });
 
   /**
-   * The whole round trip: the draft starts, the answer streams in, the page acknowledges it
-   * once, and the next poll no longer offers a message to type.
+   * The whole round trip: the draft starts, the structured answer arrives, the page
+   * acknowledges it once, and the next poll no longer offers a message to type.
    */
   it('drafts once, hands the message over once, and forgets it on acknowledgement', async () => {
     await pair();
@@ -2415,14 +2499,15 @@ describe('the goal loop over the bridge', () => {
     const realFetch = globalThis.fetch;
     globalThis.fetch = (async () => {
       calls++;
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          const payload = JSON.stringify({ choices: [{ delta: { content: 'what about the tests' } }] });
-          controller.enqueue(new TextEncoder().encode('data: ' + payload + '\ndata: [DONE]\n'));
-          controller.close();
-        }
+      return Response.json({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ action: 'continue', reply: 'what about the tests' })
+            }
+          }
+        ]
       });
-      return new Response(body, { status: 200 });
     }) as never;
 
     try {
@@ -2484,12 +2569,174 @@ describe('the goal loop over the bridge', () => {
     expect(getConfig().capabilities).toEqual(capabilities);
   });
 
+  /**
+   * A chat given its own goal, which is the other way into the same loop.
+   *
+   * The standing switch answers "should this app write my next message in general". A goal
+   * answers "here is where this chat has to get to" — which is a stronger statement, made
+   * about one chat, at the moment it is made. So it arms the loop on its own: somebody who
+   * has just written down the finish line should not then have to find a second switch.
+   */
+  it('arms the loop for one chat from its own goal, with the standing switch off', async () => {
+    await pair();
+    const chat = 'cafe0021-0000-4000-8000-000000000021';
+    await saveConfig({
+      ...defaultConfig(),
+      sessions: { ...defaultConfig().sessions, record: true },
+      goal: { ...defaultConfig().goal, enabled: false }
+    });
+    await request('POST', '/events', {
+      body: {
+        conversationId: chat,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'start the port', messageId: 'm-goal-obj' }]
+      }
+    });
+
+    const saved = await request('POST', '/goal/objective', {
+      body: { conversationId: chat, text: '  port the module and make the suite green  ' }
+    });
+    expect(saved.status).toBe(200);
+    // Stored as it will be prompted with, and reported back rather than assumed, because the
+    // page draws its own summary line from this answer.
+    expect(saved.body.objective).toBe('port the module and make the suite green');
+
+    const feed = await request('GET', `/activity?conversationId=${chat}`);
+    expect(feed.body.goal).toMatchObject({
+      enabled: false,
+      objective: 'port the module and make the suite green',
+      blocked: ''
+    });
+
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      Response.json({
+        choices: [{ message: { content: JSON.stringify({ action: 'continue', reply: 'the tests are still red' }) } }]
+      })) as never;
+    try {
+      // The switch is still off, and the draft is still allowed — the goal is what allows it.
+      const drafted = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId: 'g-obj' } });
+      expect(drafted.status).toBe(200);
+      expect(getConfig().goal.enabled).toBe(false);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    // Cleared the same way it was set, and the loop goes back to following the switch.
+    const cleared = await request('POST', '/goal/objective', { body: { conversationId: chat, text: '   ' } });
+    expect(cleared.body.objective).toBe('');
+    expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.objective).toBe('');
+  });
+
+  /**
+   * The worker rule, applied to the goal as well as to the draft.
+   *
+   * Refusing to *hold* a goal for a worker, rather than only refusing to act on one, keeps
+   * the rule in one place — nothing downstream has to remember that this particular stored
+   * goal is one it must never use. The feed says why, because a switch drawn off for a
+   * reason nobody stated reads as a setting that failed to save.
+   */
+  it('refuses to hold a goal for a worker chat, and says so on the feed', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'Audit the settings sheet' }], caller: { conversationId: PRIME_CHAT } });
+    const command = await redeem();
+    const worker = 'cafe0022-0000-4000-8000-000000000022';
+    await request('POST', '/commands/ack', {
+      body: { id: command.id, status: 'sent', agent: 'worker-1', conversationId: worker }
+    });
+
+    await request('POST', '/events', {
+      body: {
+        conversationId: worker,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'go', messageId: 'm-goal-worker' }]
+      }
+    });
+
+    const refused = await request('POST', '/goal/objective', {
+      body: { conversationId: worker, text: 'finish the audit' }
+    });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('goal_worker_chat');
+
+    const feed = await request('GET', `/activity?conversationId=${worker}`);
+    expect(feed.body.goal).toMatchObject({ enabled: false, objective: '', blocked: 'worker' });
+  });
+
+  /**
+   * The one goal message that cannot be keyed by conversation, because sending it is what
+   * makes ChatGPT issue the conversation.
+   */
+  it('writes the opening message of a chat that does not exist yet', async () => {
+    await pair();
+    let seen: Array<{ role: string; content: string }> = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      seen = (JSON.parse(String(init.body)) as { messages: typeof seen }).messages;
+      return Response.json({
+        choices: [{ message: { content: JSON.stringify({ action: 'continue', reply: 'rewrite the parser in rust' }) } }]
+      });
+    }) as never;
+
+    try {
+      const opened = await request('POST', '/goal/open', { body: { text: 'rewrite the parser in rust' } });
+      expect(opened.status).toBe(200);
+      expect(opened.body).toEqual({
+        reply: humanReply('rewrite the parser in rust'),
+        model: 'deepseek/deepseek-v4-flash'
+      });
+      expect(seen.at(-1)!.content).toContain('has not started yet');
+
+      // Nothing to open with is a bad request, not an empty message typed into somebody's chat.
+      const blank = await request('POST', '/goal/open', { body: { text: '   ' } });
+      expect(blank.status).toBe(400);
+      expect(blank.body.error).toBe('no_objective');
+
+      await setSecret('openRouterApiKey', '');
+      const keyless = await request('POST', '/goal/open', { body: { text: 'ship it' } });
+      expect(keyless.status).toBe(409);
+      expect(keyless.body.error).toBe('no_api_key');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /**
+   * The settings, read by a composer that is in no chat yet.
+   *
+   * `/activity` carries the same two switches, and it is addressed by conversation — which a
+   * New Chat has none of, and a New Chat is where a goal writes the first message. Nothing
+   * conversation-scoped may appear here, because there is no conversation to scope it to.
+   */
+  it('reports the settings without a conversation to report them for', async () => {
+    await pair();
+    const reply = await request('GET', '/settings');
+    expect(reply.status).toBe(200);
+    expect(reply.body.goal).toEqual({
+      enabled: true,
+      hasKey: true,
+      model: 'deepseek/deepseek-v4-flash',
+      objective: '',
+      blocked: ''
+    });
+    expect(reply.body.context).toMatchObject({ auto: expect.any(Boolean) });
+
+    // Read-only: the switches still change through the POST and nowhere else.
+    await saveConfig({
+      ...defaultConfig(),
+      sessions: { ...defaultConfig().sessions, record: true },
+      goal: { ...defaultConfig().goal, enabled: false }
+    });
+    expect((await request('GET', '/settings')).body.goal.enabled).toBe(false);
+    expect((await request('GET', '/settings', { auth: null })).status).toBe(401);
+  });
+
   /** Same credential rule as everywhere else on this server. */
   it('refuses every goal route without the bearer token', async () => {
     await pair();
     const routes: Array<[string, Record<string, unknown>]> = [
       ['/goal/draft', { conversationId: 'cafe0003-0000-4000-8000-000000000003', turnId: 'g-1' }],
       ['/goal/ack', { conversationId: 'cafe0003-0000-4000-8000-000000000003', token: 'x' }],
+      ['/goal/objective', { conversationId: 'cafe0003-0000-4000-8000-000000000003', text: 'finish it' }],
+      ['/goal/open', { text: 'finish it' }],
       ['/settings', { goal: true }]
     ];
     for (const [route, body] of routes) {

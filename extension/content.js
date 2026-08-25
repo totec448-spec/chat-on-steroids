@@ -100,6 +100,11 @@
   const HIDDEN_ACTIVITY_MS = 30_000;
   /** Keep a previously proven full replacement through brief Fiber/feed disagreement. */
   const REPLACEMENT_GRACE_MS = 8000;
+  /**
+   * User-driven scrolling and ChatGPT's historical virtualization happen in the same burst.
+   * Never change a turn's layout inside that burst; let the viewport settle first.
+   */
+  const PRESENTATION_SCROLL_IDLE_MS = 240;
   const STATUS_MS = 15_000;
   /** Longer than any honest tool call: past this a silent turn is called stalled. */
   const STALL_MS = 10 * 60 * 1000;
@@ -120,6 +125,30 @@
   let SHOW_TIMES = false;
   let renderPreferenceReady = TEST_MODE;
   const renderStreamAllowed = () => RENDER_STREAM && renderPreferenceReady;
+  let lastPresentationScrollInputAt = -Infinity;
+
+  function editableScrollTarget(target) {
+    if (!target || target.nodeType !== 1) return false;
+    const element = target;
+    return Boolean(
+      element.isContentEditable ||
+      (element.closest && element.closest('input, textarea, select, [contenteditable="true"], [role="textbox"]'))
+    );
+  }
+
+  function notePresentationScrollInput(event) {
+    if (!alive || !event) return;
+    if (event.type === 'keydown') {
+      if (editableScrollTarget(event.target)) return;
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Spacebar'].includes(event.key)) return;
+    }
+    lastPresentationScrollInputAt = Date.now();
+  }
+
+  function presentationScrollActive() {
+    return Date.now() - lastPresentationScrollInputAt < PRESENTATION_SCROLL_IDLE_MS;
+  }
 
   async function loadRenderPreference() {
     if (TEST_MODE || !globalThis.chrome || !chrome.storage || !chrome.storage.local) {
@@ -571,6 +600,26 @@
   let goalBusy = false;
   /** When this tab started trying to type a ready draft, so a held composer eventually gives up. */
   let goalTypingSince = 0;
+  /** Terminal Goal card the user dismissed. Keyed to its chat + finished turn across repaints. */
+  let dismissedGoalStage = null;
+  /**
+   * A goal saved for a chat ChatGPT has not named yet.
+   *
+   * The app keys a specific goal by conversation, and a New Chat has no conversation until
+   * its first message has been sent. That first message is the one this very goal is about
+   * to produce, so the goal waits here across exactly one gap — from Save until the id
+   * arrives — and is handed to the app the moment there is something to key it to. See the
+   * "same chat has just learned its own id" branch in observe().
+   */
+  let pendingObjective = '';
+  // Whether the opening message written from that goal actually reached ChatGPT. Only a sent
+  // one survives the conversation reset below, because only a sent one is the reason the id
+  // this tab is about to adopt exists at all.
+  let pendingObjectiveSent = false;
+  /** Set while a specific goal is being saved or its opening message written. */
+  let objectiveBusy = false;
+  /** The last specific-goal failure, in the app's words, until the next attempt replaces it. */
+  let objectiveError = '';
   /**
    * Goal drafts that this tab has already sent to ChatGPT.
    *
@@ -1022,10 +1071,19 @@
     // chat must not draft twice. The watch loop itself notices the change on its own tick and
     // exits; what it leaves behind is what this clears.
     goalTurnId = null;
+    goalConfig = null;
     goalPhase = '';
     goalDraft = null;
     goalError = '';
     goalTypingSince = 0;
+    dismissedGoalStage = null;
+    // A specific goal belongs to the chat it was written for. Carrying a pending one into a
+    // different conversation would attach it to whichever chat happened to be opened next.
+    pendingObjective = '';
+    pendingObjectiveSent = false;
+    objectiveBusy = false;
+    objectiveError = '';
+    removeStagePanel();
     generating = false;
     quietSince = 0;
     quietTurn = null;
@@ -1250,27 +1308,6 @@
   }
 
   /**
-   * Whether this node is part of the answer currently being written.
-   *
-   * Per section, which is the whole point. The rule this replaced was the global
-   * `!nowGenerating`: while any turn was in flight, *no* assistant message could be
-   * recorded — including the settled answers of turns that finished minutes or days
-   * earlier, which is why a reload during a live turn appended the conversation's history
-   * after the live turn had already started, in the wrong order and much later.
-   */
-  function isLiveSection(node, nowGenerating) {
-    if (!nowGenerating || !node) return false;
-    if (genNode && (node === genNode || (genNode.contains && genNode.contains(node)))) return true;
-    const section = sectionOf(node);
-    if (!section) return true;
-    if (!priorSections.has(section)) return true;
-    for (const held of priorMarks) {
-      if (held.node === section) return sectionMark(section) !== held.mark;
-    }
-    return false;
-  }
-
-  /**
    * The local generation a rendered assistant turn belongs to, by node identity.
    *
    * Deliberately not a reverse lookup through `pageTurnIds`. That map runs generation →
@@ -1417,6 +1454,12 @@
     // lifetime is owned by chrome.tabs.onRemoved in background.js; an SPA move is proven
     // here only when another concrete conversation id replaces the old one.
     if (id && id !== conversationId) {
+      // A goal written into a chat that had no id yet, whose opening message is the reason
+      // this id exists. It has to outlive the reset below — which exists to stop a goal
+      // leaking into whatever chat is opened next, and this is the one case where the next
+      // chat *is* the one the goal was written for. Only a message that actually reached
+      // ChatGPT counts; an abandoned attempt is dropped with everything else.
+      const carried = pendingObjectiveSent || !conversationId ? pendingObjective : '';
       if (conversationId) {
         // A genuine move to another *identified* chat: close the old one out and start
         // clean. The order matters — what the old chat left on screen is retired before
@@ -1434,6 +1477,24 @@
         conversationId = id;
         void bindConversation(id);
       }
+      // …and this is the moment a goal saved into a New Chat finally has something to be
+      // saved against. The message that produced this id was written from that goal, so the
+      // chat is already one turn into it; binding here is what lets the ordinary loop pick
+      // it up from the next turn onwards. See pendingObjective.
+      if (carried) {
+        pendingObjective = '';
+        pendingObjectiveSent = false;
+        void ask({ type: 'goal_objective', conversationId: id, text: carried }).then((reply) => {
+          if (!alive || conversationId !== id) return;
+          if (reply && reply.ok === true) {
+            const stored = reply.data && typeof reply.data.objective === 'string' ? reply.data.objective : carried;
+            goalConfig = { ...(goalConfig || {}), objective: stored };
+          } else {
+            objectiveError = replyError(reply) || 'the goal could not be saved to this chat';
+          }
+          injectStage();
+        });
+      }
     }
 
     // `/c/A` -> `/` is ambiguous by itself: ChatGPT uses that shape both for transient
@@ -1443,6 +1504,11 @@
     // resumes unchanged; if it is B, the branch above retires A and resets before anything
     // visible in B is recorded. No timeout and no DOM-position guess participates.
     if (!id && conversationId) {
+      // The route no longer proves that the composer on screen belongs to this chat. Keep
+      // the recorder state until another concrete id settles the A -> / -> B ambiguity, but
+      // do not keep A's presentation mounted over an unbound New Chat composer. If the
+      // route returns to A, the normal observer repaint restores any still-live stage.
+      removeStagePanel();
       void flush();
       return;
     }
@@ -1473,7 +1539,13 @@
     // conversation's earlier history at 4 and 5. A log whose first assistant turn precedes
     // the question that caused it cannot be read back as a session, however complete it is.
     const newUserMessage = reportMessages(nowGenerating);
-    if (newUserMessage) fiberTerminalMessageId = null;
+    if (newUserMessage) {
+      fiberTerminalMessageId = null;
+      // A terminal Goal card explains the answer immediately before this user message.
+      // Once the user has continued manually it is history, not current composer state.
+      // Remember its key just like an X click so the next activity repaint cannot revive it.
+      dismissTerminalGoalStage();
+    }
     if (!nowGenerating) fiberTerminalMessageId = null;
 
     // A new user message after the stop control went quiet is definitive evidence that the
@@ -2983,33 +3055,6 @@
     return plan;
   }
 
-  /**
-   * The label ChatGPT gives *this* connector's tool rows, or '' when unknowable.
-   *
-   * The connector's rows carry no name ChatGPT can show, so it renders them all
-   * identically; a built-in has its own name and stands alone. The largest group of
-   * identically-labelled unmatched rows is therefore this connector's — and a group of
-   * one proves nothing, since a lone built-in looks exactly the same from here. A tie is
-   * genuinely ambiguous. Pure, so it can be tested.
-   */
-  function genericLabel(shapes) {
-    const groups = new Map();
-    for (const shape of shapes) {
-      if (shape.callId) continue;
-      groups.set(shape.original, (groups.get(shape.original) || 0) + 1);
-    }
-    const sorted = [...groups.entries()].sort((a, b) => b[1] - a[1]);
-    const top = sorted[0];
-    if (!top || top[1] < 2) return '';
-    if (sorted.length > 1 && sorted[1][1] === top[1]) return '';
-    return top[0];
-  }
-
-  /** How many of these rows are plausibly this connector's calls. Pure. */
-  function localBlockCount(shapes, learned) {
-    return shapes.filter((shape) => shape.callId || (learned && shape.original === learned)).length;
-  }
-
   /** What ChatGPT itself called this block, before we touched it. */
   function originalLabel(block) {
     if (block.dataset.clfOriginal) return block.dataset.clfOriginal;
@@ -4103,12 +4148,73 @@
     return end > 1 && ourConnectorApp(seen.path.slice(1, end));
   }
 
-  function localConnector(block, localTools) {
-    if (block.dataset.clfCall) return true;
-    const seen = fiberFor(block);
-    if (!seen) return false;
-    if (ourConnectorSeen(seen)) return true;
-    return Boolean(seen.tool && localTools.has(seen.tool) && ourConnectorApp(seen.app));
+  /**
+   * One visible turn whose viewport position should survive an idle Overwrite repaint.
+   *
+   * Prefer a user turn: Overwrite mutates assistant sections only, so the user's question is
+   * a stable ruler below any historical assistant height that changes. The fallback still
+   * helps in a viewport containing only one long assistant response.
+   */
+  function presentationScrollContainer(node) {
+    for (let parent = node && node.parentElement; parent; parent = parent.parentElement) {
+      try {
+        const style = globalThis.getComputedStyle ? globalThis.getComputedStyle(parent) : null;
+        const overflow = style ? String(style.overflowY || '') : '';
+        if (/(?:auto|scroll|overlay)/.test(overflow) && parent.scrollHeight > parent.clientHeight + 1) return parent;
+      } catch {
+        // Keep walking; the window/document fallback below needs no computed style.
+      }
+    }
+    return null;
+  }
+
+  function presentationViewportAnchor(sourceTurns) {
+    const viewport = Number(globalThis.innerHeight) || Number(document.documentElement && document.documentElement.clientHeight) || 0;
+    const pick = (role) => {
+      let best = null;
+      for (const turn of sourceTurns || []) {
+        if (role && turn.role !== role) continue;
+        for (const node of turn.nodes || (turn.node ? [turn.node] : [])) {
+          if (!node || !node.isConnected || typeof node.getBoundingClientRect !== 'function') continue;
+          let rect;
+          try {
+            rect = node.getBoundingClientRect();
+          } catch {
+            continue;
+          }
+          const top = Number(rect && rect.top);
+          const bottom = Number(rect && rect.bottom);
+          if (!Number.isFinite(top) || !Number.isFinite(bottom)) continue;
+          if (bottom < 0 || (viewport > 0 && top > viewport)) continue;
+          // Prefer the first fully/partly visible turn below the top edge. If every candidate
+          // starts above it, choose the one whose top is closest to the viewport.
+          const score = top >= 0 ? top : (viewport > 0 ? viewport : 100000) + Math.abs(top);
+          if (!best || score < best.score) best = { node, top, score, scrollRoot: presentationScrollContainer(node) };
+        }
+      }
+      return best;
+    };
+    return pick('user') || pick(null);
+  }
+
+  /** Counteracts only the layout delta caused synchronously by this presentation pass. */
+  function restorePresentationViewport(anchor) {
+    if (!anchor || !anchor.node || !anchor.node.isConnected || typeof anchor.node.getBoundingClientRect !== 'function') return;
+    let after;
+    try {
+      after = Number(anchor.node.getBoundingClientRect().top);
+    } catch {
+      return;
+    }
+    if (!Number.isFinite(after)) return;
+    const delta = after - anchor.top;
+    if (!Number.isFinite(delta) || Math.abs(delta) < 0.5) return;
+    try {
+      if (anchor.scrollRoot && anchor.scrollRoot.isConnected) anchor.scrollRoot.scrollTop += delta;
+      else if (typeof globalThis.scrollBy === 'function') globalThis.scrollBy(0, delta);
+    } catch {
+      // Presentation compensation is best effort; never make rendering depend on scroll APIs.
+    }
   }
 
   function renderStreams() {
@@ -4120,7 +4226,14 @@
     // as the recorder's observation source, but it contributes zero visible ordering or
     // prose: the local event stream is rendered exactly in the order the app returns it.
     const enabled = renderStreamAllowed() && status.connected === true && status.paired === true;
+    // Historical sections are mounted/unmounted *because* a user is moving the viewport.
+    // Mutating those fresh mounts during the same wheel/touch/key burst changes document
+    // height underneath browser scroll anchoring and is the source of the live up/down jump.
+    // Existing synthetic roots are frozen for the same reason: Fiber can fill in while the
+    // gesture is active, but presentation waits until the reader has stopped moving.
+    if (enabled && presentationScrollActive()) return;
     const sourceTurns = typeof CLF_DOM.presentationTurns === 'function' ? CLF_DOM.presentationTurns() : CLF_DOM.turns();
+    const viewportAnchor = presentationViewportAnchor(sourceTurns);
     // A stable `data-turn-id` is not required for presentation. ChatGPT transiently and, in
     // some renderer builds, permanently exposes assistant sections without one. The preceding
     // user message id is a stronger durable boundary anyway, so an id-less response with an
@@ -4278,6 +4391,7 @@
       CLF_DOM.replaceTurn(turn, root, true);
       if (groupKey) painted.add(groupKey);
     }
+    restorePresentationViewport(viewportAnchor);
   }
 
   /** Mutable structured page rows only. Canonical assistant messages update by messageId. */
@@ -4286,7 +4400,44 @@
   /** What a stream entry currently says, whichever field its kind keeps it in. */
   const snapshotText = (entry) => (entry ? (entry.kind === 'page_tool' ? entry.label : entry.text) : undefined);
 
+  let settingsPulling = false;
+
+  /**
+   * The two settings, read without a conversation to read them from.
+   *
+   * Only for the id-less case. Everywhere else /activity carries the same fields plus the
+   * ones that are per chat — the objective, the block, the draft — and taking them from here
+   * instead would quietly drop those. The goal typed into a New Chat is this tab's own until
+   * ChatGPT issues an id, so it is layered back on rather than read from an app that has
+   * nowhere to store it yet.
+   */
+  async function pullSettings() {
+    if (settingsPulling) return;
+    settingsPulling = true;
+    try {
+      const reply = await ask({ type: 'settings_get' });
+      if (!alive || CLF_DOM.conversationId() || !reply || reply.ok !== true || !reply.data) return;
+      context = readContext(reply.data.context) || context;
+      if (reply.data.goal && typeof reply.data.goal === 'object') {
+        goalConfig = { ...reply.data.goal, objective: pendingObjective };
+      }
+      renderControl();
+      renderMenu();
+    } finally {
+      settingsPulling = false;
+    }
+  }
+
   async function pullActivity() {
+    if (!CLF_DOM.conversationId()) {
+      // A New Chat has no feed: /activity is addressed by conversation, and this composer is
+      // in none. The sheet above it still has to say what the settings are, because a goal
+      // can be written here and the first message is what the goal produces. Deliberately
+      // read off the route rather than the id this tab is holding — that id belongs to the
+      // chat before this composer, and so does its goal. See composerChat().
+      await pullSettings();
+      return;
+    }
     if (pulling || !conversationId || CLF_DOM.conversationId() !== conversationId) return;
     pulling = true;
     const forId = conversationId;
@@ -4566,7 +4717,14 @@
       };
     }
     if (!conversationId) {
-      return { mode: 'off', label: 'Compact', hint: 'Send a message first.', action: 'none' };
+      // Off, not hidden: there is nothing to compact yet, and the sheet behind this button is
+      // still where a goal is written — which is the one thing that can start the chat.
+      return {
+        mode: 'off',
+        label: 'Compact',
+        hint: 'Nothing to compact yet — send a message, or set a goal and it writes one.',
+        action: 'none'
+      };
     }
     return { mode: 'idle', label: 'Compact', hint: '', action: 'start' };
   }
@@ -4583,18 +4741,33 @@
    * setting from memory — a change made in the app's own window shows up here within a tick.
    */
   function settingsView(input) {
-    const { context, goal, compact } = input;
+    const { context, goal, compact, editing } = input;
     const auto = Boolean(context && context.auto);
     const threshold = context && context.threshold > 0 ? context.threshold : 0;
     const goalOn = Boolean(goal && goal.enabled);
     const hasKey = Boolean(goal && goal.hasKey);
+    const objective = goal && typeof goal.objective === 'string' ? goal.objective : '';
+    // The app's own reason, rather than this tab's guess. Today there is exactly one: a
+    // worker chat, where the prime already writes the user's turns.
+    const blocked = goal && typeof goal.blocked === 'string' ? goal.blocked : '';
     const from = threshold > 0 ? `from ${roundK(threshold)} tokens` : '';
+    // Either half is enough to make the loop run here, which is why the summary line says
+    // "on" for a chat that has a goal even while the standing switch is off.
+    const running = (goalOn || Boolean(objective)) && hasKey && !blocked;
     return {
       // Two short lines rather than a sentence: this is read while reaching for something
       // else, and the only questions it answers are "is it on" and "at what point".
       tip: [
         auto ? `Auto-compaction on${from ? `, ${from}` : ''}` : 'Auto-compaction off',
-        goalOn ? (hasKey ? 'Goal on' : 'Goal on — no API key') : 'Goal off'
+        blocked === 'worker'
+          ? 'Goal off — the prime writes this chat'
+          : objective
+            ? 'Goal on — chasing this chat’s goal'
+            : goalOn
+              ? hasKey
+                ? 'Goal on'
+                : 'Goal on — no API key'
+              : 'Goal off'
       ].join('\n'),
       rows: [
         {
@@ -4609,15 +4782,48 @@
           label: 'Goal',
           // The missing key is the note, not a separate warning line. It is the answer to
           // the only question somebody switching this on has.
-          note: !hasKey
-            ? 'OpenRouter API key essential for goal feature'
-            : goalOn
-              ? `replies as you with ${modelLabel(goal.model)}`
-              : 'reply as you until the goal is met',
+          //
+          // So is the worker case, and for a plainer reason: the switch is drawn off there
+          // whatever the setting says, because the prime is the author of a worker's user
+          // turns. Without a word for it, a rule working exactly as designed looked like a
+          // setting that had failed to save — which is precisely how it was reported.
+          note:
+            blocked === 'worker'
+              ? 'off here: the prime agent writes this worker’s messages'
+              : !hasKey
+                ? 'OpenRouter API key essential for goal feature'
+                : objective
+                  ? `on for this chat’s own goal, with ${modelLabel(goal.model)}`
+                  : goalOn
+                    ? `replies as you with ${modelLabel(goal.model)}`
+                    : 'reply as you until the goal is met',
           on: goalOn,
-          warn: !hasKey
+          warn: !hasKey || blocked === 'worker'
         }
       ],
+      /**
+       * The specific goal, under the switch it belongs to.
+       *
+       * A link rather than a third switch, because it is not a mode — it is a piece of text,
+       * and until there is one there is nothing to be on. Saving one is what turns it on.
+       */
+      objective: {
+        text: objective,
+        editing: Boolean(editing),
+        label: objective ? 'change the goal' : 'add specific goal',
+        /** Shown instead of the link once a goal exists, so it can be read without opening it. */
+        summary: objective ? clampLine(objective, 120) : '',
+        hint: objective
+          ? 'Replace or clear the goal this chat is being driven towards.'
+          : 'Write what this chat has to reach. The loop then prompts until it is reached.',
+        available: hasKey && !blocked,
+        unavailable:
+          blocked === 'worker'
+            ? 'A worker chat is already driven by its prime.'
+            : !hasKey
+              ? 'Add an OpenRouter API key in the app first.'
+              : ''
+      },
       // The button's old job, kept as a row rather than dropped: pressing the gear must not
       // have cost anybody the one thing it used to do.
       action: {
@@ -4626,6 +4832,15 @@
         action: compact.action
       }
     };
+  }
+
+  /** One line of somebody else's prose, cut to fit a menu without a mid-word break. */
+  function clampLine(text, max) {
+    const flat = String(text || '').replace(/\s+/g, ' ').trim();
+    if (flat.length <= max) return flat;
+    const cut = flat.slice(0, max);
+    const space = cut.lastIndexOf(' ');
+    return `${(space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd()}…`;
   }
 
   /**
@@ -4963,14 +5178,10 @@
    * it cannot be interrupted by a repaint.
    */
   function injectControl() {
-    // A brand-new ChatGPT tab has nothing to compact yet. Do not burn half the composer
-    // on a disabled "send a message first" control: wait until ChatGPT has assigned the
-    // conversation id, which happens with the first sent turn. If navigation returns to a
-    // fresh chat, remove the old control immediately instead of leaving stale UI behind.
-    if (!CLF_DOM.conversationId()) {
-      if (control && control.root.isConnected) control.root.remove();
-      return;
-    }
+    // A brand-new ChatGPT tab used to have nothing to offer — nothing to compact, no feed to
+    // read, and a disabled "send a message first" button is not worth half a composer. It has
+    // something now: a goal written here is what writes the chat's first message, so the sheet
+    // has to be reachable before there is a chat. Compaction stays unavailable and says why.
     const spot = CLF_DOM.composerActions();
     if (!spot || !spot.host) return;
     if (!control || !control.root.isConnected) {
@@ -5064,8 +5275,172 @@
     return settingsView({
       context,
       goal: goalConfig,
-      compact: currentState()
+      compact: currentState(),
+      editing: menuEditing
     });
+  }
+
+  /**
+   * The specific-goal editor, open or closed, and what is in it while open.
+   *
+   * Held out here rather than read back off the textarea, because renderMenu() rebuilds the
+   * sheet from scratch on every write and would otherwise throw away half a typed sentence
+   * the moment anything else in the sheet changed.
+   */
+  let menuEditing = false;
+  let menuDraft = '';
+
+  function openObjectiveEditor(current) {
+    menuEditing = true;
+    menuDraft = current;
+    objectiveError = '';
+    renderMenu();
+    const box = menuNode && menuNode.querySelector('[data-clf-goal-input]');
+    if (box) {
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
+    }
+  }
+
+  function closeObjectiveEditor() {
+    menuEditing = false;
+    menuDraft = '';
+    renderMenu();
+  }
+
+  /**
+   * Saves this chat's goal and, if it can, starts on it immediately.
+   *
+   * "Immediately" is the point of the feature. Somebody who has just written down where a
+   * chat has to get to should not then have to write its first message as well, and in a
+   * chat already under way they should not have to wait for a turn that may never come. So
+   * saving is also a start signal, and the two shapes it takes are the two shapes a chat can
+   * be in: one that ChatGPT has named, and one that it has not.
+   */
+  async function saveObjective(text) {
+    if (objectiveBusy) return;
+    const goal = String(text || '').trim().slice(0, MAX_OBJECTIVE_CHARS);
+    objectiveBusy = true;
+    objectiveError = '';
+    renderMenu();
+    try {
+      const where = composerChat();
+      if (where.state === 'moving') {
+        // The route names a chat this tab has not observed yet. Neither id is safe to write
+        // into, and the next observation is a tick away.
+        objectiveError = 'this chat is still opening — try again';
+        return;
+      }
+      if (where.state === 'new') {
+        // A New Chat. There is no id to save against yet, so the goal is held here and the
+        // opening message is asked for directly; sending it is what makes ChatGPT issue the
+        // id that the goal is then bound to. See the pendingObjective binding in observe().
+        if (!goal) {
+          pendingObjective = '';
+          pendingObjectiveSent = false;
+          return;
+        }
+        await openWithObjective(goal);
+        return;
+      }
+      const reply = await ask({ type: 'goal_objective', conversationId: where.id, text: goal });
+      if (!reply || reply.ok !== true) {
+        objectiveError = replyError(reply) || 'the app did not answer';
+        return;
+      }
+      const stored = reply.data && typeof reply.data.objective === 'string' ? reply.data.objective : goal;
+      goalConfig = { ...(goalConfig || {}), objective: stored };
+      menuEditing = false;
+      menuDraft = '';
+      if (!stored) return;
+      // A chat that is idle right now would otherwise sit on its new goal until ChatGPT
+      // happened to finish a turn of its own — which, in a chat nobody is typing into, is
+      // never. The turn key is the save, so a second save writes a second message and a
+      // retried one does not.
+      if (!generating && !CLF_DOM.generating() && !goalBusy && !compactCapture && !nativeBusy && !(job && job.busy)) {
+        goalTurnId = `objective-${Date.now().toString(36)}`;
+        goalError = '';
+        const forId = conversationId;
+        const forEpoch = epoch;
+        const forTurn = goalTurnId;
+        goalBusy = true;
+        try {
+          await requestGoalDraft(forTurn, () => alive && conversationId === forId && epoch === forEpoch && goalTurnId === forTurn);
+        } finally {
+          goalBusy = false;
+        }
+      }
+    } finally {
+      objectiveBusy = false;
+      renderMenu();
+      renderControl();
+      injectStage();
+    }
+  }
+
+  /**
+   * Writes and sends the first message of a chat that has no id yet.
+   *
+   * The one goal draft that is not streamed onto the activity feed, because /activity is
+   * addressed by conversation and this chat has no address. It is a plain awaited request,
+   * and the panel above the composer is driven from here rather than from a polled draft —
+   * the run is still visible, it is simply this tab reporting it rather than the app.
+   */
+  async function openWithObjective(goal) {
+    pendingObjective = goal;
+    pendingObjectiveSent = false;
+    // Enough of a config for the panel to draw: the model comes back with the reply, so
+    // until then it says "the model", which is what modelLabel('') is for.
+    goalConfig = { ...(goalConfig || { enabled: true, hasKey: true, model: '' }), objective: goal };
+    menuEditing = false;
+    menuDraft = '';
+    closeMenu();
+    goalPhase = 'requesting';
+    goalError = '';
+    injectStage();
+    const reply = await ask({ type: 'goal_open', text: goal });
+    if (!alive || composerChat().state !== 'new') {
+      // The chat found an id while this was in flight, which means something else was sent
+      // into it. Its own goal is saved through the ordinary route by the binding in observe().
+      goalPhase = '';
+      injectStage();
+      return;
+    }
+    if (!reply || reply.ok !== true) {
+      goalPhase = 'requesting';
+      objectiveError = replyError(reply) || 'the app did not answer';
+      goalError = objectiveError;
+      injectStage();
+      return;
+    }
+    const opening = reply.data && typeof reply.data.reply === 'string' ? reply.data.reply : '';
+    if (reply.data && typeof reply.data.model === 'string') goalConfig.model = reply.data.model;
+    if (!opening) {
+      goalPhase = 'requesting';
+      goalError = 'the model wrote nothing to open with';
+      injectStage();
+      return;
+    }
+    goalPhase = 'sending';
+    injectStage();
+    if (!CLF_DOM.insertPrompt(opening)) {
+      goalError = 'the message box was in use, so nothing was sent';
+      injectStage();
+      return;
+    }
+    await sleep(200);
+    const sent = await CLF_DOM.send();
+    if (!sent) {
+      goalError = 'ChatGPT would not send the message';
+      injectStage();
+      return;
+    }
+    // From here the goal outlives this composer: ChatGPT is about to name the conversation,
+    // and that name is what the goal is finally saved against. See observe().
+    pendingObjectiveSent = true;
+    goalPhase = '';
+    goalError = '';
+    injectStage();
   }
 
   function renderMenu() {
@@ -5073,8 +5448,17 @@
     if (!control || !control.root.isConnected) return void closeMenu();
     const root = menuElement();
     const view = menuView();
+    // Every repaint of this sheet is a rebuild, and one of them can now land while somebody
+    // is halfway through typing a goal — an activity poll repaints it on its own cadence. The
+    // text itself survives in menuDraft; the caret and the focus have to be carried by hand,
+    // or the sentence being written jumps to its end a second later.
+    const typing = root.querySelector('[data-clf-goal-input]');
+    const caret =
+      typing && document.activeElement === typing
+        ? { start: typing.selectionStart, end: typing.selectionEnd }
+        : null;
     root.textContent = '';
-    root.dataset.clfBusy = menuBusy ? '1' : '0';
+    root.dataset.clfBusy = menuBusy || objectiveBusy ? '1' : '0';
 
     for (const row of view.rows) {
       const line = document.createElement('button');
@@ -5105,6 +5489,7 @@
         void setSetting(row.key, !row.on);
       });
       root.append(line);
+      if (row.key === 'goal') root.append(buildObjective(view.objective));
     }
 
     const act = document.createElement('button');
@@ -5125,6 +5510,138 @@
     root.hidden = false;
     control.button.setAttribute('aria-expanded', 'true');
     placeMenu(root, control.button);
+    if (caret) {
+      const box = root.querySelector('[data-clf-goal-input]');
+      if (box) {
+        box.focus();
+        try {
+          box.setSelectionRange(caret.start, caret.end);
+        } catch {
+          // A browser that will not take a selection on a freshly attached node keeps the
+          // focus, which is the half that matters.
+        }
+      }
+    }
+  }
+
+  /**
+   * The specific goal, under the switch: a line of text and a way to change it.
+   *
+   * Closed it is one link, because most of the time there is no goal and the sheet should
+   * not grow a paragraph to say so. Open it is a box, a Save and a Cancel — and a Clear once
+   * there is something to clear, since the only other way to end a goal is to reach it.
+   */
+  function buildObjective(objective) {
+    const box = document.createElement('div');
+    box.className = 'clf-menu-goal';
+    box.dataset.clfGoalOpen = objective.editing ? '1' : '0';
+
+    if (!objective.available) {
+      const why = document.createElement('span');
+      why.className = 'clf-menu-goal-note';
+      why.textContent = objective.unavailable;
+      box.append(why);
+      return box;
+    }
+
+    if (!objective.editing) {
+      if (objective.summary) {
+        const text = document.createElement('span');
+        text.className = 'clf-menu-goal-text';
+        text.textContent = objective.summary;
+        box.append(text);
+      }
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'clf-menu-goal-link';
+      link.disabled = objectiveBusy || menuBusy;
+      link.setAttribute('data-clf-tip', objective.hint);
+      const plus = document.createElement('span');
+      plus.className = 'clf-menu-goal-plus';
+      plus.textContent = objective.summary ? '✎' : '+';
+      plus.setAttribute('aria-hidden', 'true');
+      const word = document.createElement('span');
+      word.textContent = objectiveBusy ? 'working…' : objectiveError || objective.label;
+      if (objectiveError) word.dataset.clfWarn = '1';
+      link.append(word, plus);
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openObjectiveEditor(objective.text);
+      });
+      box.append(link);
+      return box;
+    }
+
+    const input = document.createElement('textarea');
+    input.className = 'clf-menu-goal-input';
+    input.dataset.clfGoalInput = '1';
+    input.rows = 3;
+    input.maxLength = MAX_OBJECTIVE_CHARS;
+    input.placeholder = 'What does this chat have to reach?';
+    input.value = menuDraft;
+    input.disabled = objectiveBusy;
+    input.addEventListener('keydown', (event) => {
+      // Enter sends, exactly as it does in the composer this sheet sits above. A goal that
+      // genuinely needs paragraphs still has shift+enter.
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        void saveObjective(input.value);
+      }
+    });
+    box.append(input);
+
+    const buttons = document.createElement('div');
+    buttons.className = 'clf-menu-goal-buttons';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'clf-menu-goal-save';
+    save.textContent = objectiveBusy ? 'Saving…' : 'Save';
+    save.disabled = objectiveBusy || !menuDraft.trim();
+    save.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void saveObjective(menuDraft);
+    });
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'clf-menu-goal-cancel';
+    cancel.textContent = 'Cancel';
+    cancel.disabled = objectiveBusy;
+    cancel.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeObjectiveEditor();
+    });
+    // Typing does not repaint the sheet — it would take the caret with it — so the one thing
+    // in it that depends on what has been typed is kept in step by hand.
+    input.addEventListener('input', () => {
+      menuDraft = input.value;
+      save.disabled = objectiveBusy || !menuDraft.trim();
+    });
+    buttons.append(save, cancel);
+    if (objective.text) {
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'clf-menu-goal-clear';
+      clear.textContent = 'Clear';
+      clear.disabled = objectiveBusy;
+      clear.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void saveObjective('');
+      });
+      buttons.append(clear);
+    }
+    box.append(buttons);
+    if (objectiveError) {
+      const failure = document.createElement('span');
+      failure.className = 'clf-menu-goal-note';
+      failure.dataset.clfWarn = '1';
+      failure.textContent = objectiveError;
+      box.append(failure);
+    }
+    return box;
   }
 
   /** Above the gear and right-aligned to it, flipped below only when there is no room. */
@@ -5159,11 +5676,25 @@
     document.addEventListener(
       'keydown',
       (event) => {
-        if (menuOpen && event.key === 'Escape') closeMenu();
+        if (!menuOpen || event.key !== 'Escape') return;
+        // One Escape at a time: the goal box first, the sheet after. Losing a half-written
+        // goal because the sheet went with it is the mistake worth not making.
+        if (menuEditing) closeObjectiveEditor();
+        else closeMenu();
       },
       true
     );
-    window.addEventListener('scroll', () => closeMenu(), true);
+    window.addEventListener(
+      'scroll',
+      (event) => {
+        // Scrolling a long goal back into view inside the sheet is not "I am doing something
+        // else now" — it is using the sheet. Only the page moving underneath closes it.
+        const at = event.target;
+        if (at && at.nodeType === 1 && at.closest && at.closest('[data-clf-menu]')) return;
+        closeMenu();
+      },
+      true
+    );
     window.addEventListener('resize', () => closeMenu());
   }
 
@@ -5334,6 +5865,14 @@
       const at = draft && draft.stage === 'failed' ? 2 : (GOAL_STEP_AT[goal.phase] ?? 1);
       return { stage: 'The goal loop stopped', detail: failure, body: '', kind: 'goal-error', ...bar(at) };
     }
+    // A chat opening on a specific goal. There is no answer to read and no turn to settle,
+    // so the first two steps of the ordinary run simply did not happen; saying "sending the
+    // answer to OpenRouter" about a chat with no answer in it yet would be describing a
+    // different run entirely.
+    if (goal.opening) {
+      if (goal.phase === 'sending') return { stage: 'Sending it to ChatGPT', detail: '', body: '', kind: 'goal', ...bar(3) };
+      return { stage: `${who} is writing the first message`, detail: '', body: '', kind: 'goal', ...bar(2) };
+    }
     if (goal.phase === 'done') {
       // The loop's own success condition, and the one state worth spelling out: nothing was
       // typed, and that is the answer rather than a failure to produce one. The bar stops at
@@ -5370,6 +5909,39 @@
 
   let stagePanel = null;
 
+  /** Removes the currently mounted stage without changing the work that produced it. */
+  function removeStagePanel() {
+    if (!stagePanel) return;
+    stagePanel.root.remove();
+    stagePanel = null;
+  }
+
+  /** Only terminal Goal cards linger long enough to need dismissal. */
+  function goalStageDismissKey(view) {
+    if (!view || (view.kind !== 'goal-done' && view.kind !== 'goal-error')) return '';
+    return `${conversationId || 'unknown'}:${goalTurnId || 'terminal'}`;
+  }
+
+  /** Dismisses only a finished/stopped Goal run; active work is never hidden implicitly. */
+  function dismissTerminalGoalStage() {
+    const view = stageView({
+      job,
+      goal: goalConfig
+        ? {
+            phase: goalPhase,
+            error: goalError,
+            model: goalConfig.model,
+            draft: goalDraft,
+            opening: composerChat().state === 'new' && Boolean(pendingObjective)
+          }
+        : null
+    });
+    const key = goalStageDismissKey(view);
+    if (!key) return;
+    dismissedGoalStage = key;
+    removeStagePanel();
+  }
+
   function buildStage() {
     const root = document.createElement('div');
     root.className = 'clf-stage';
@@ -5383,7 +5955,22 @@
     title.className = 'clf-stage-title';
     const detail = document.createElement('span');
     detail.className = 'clf-stage-detail';
-    head.append(title, detail);
+    const close = document.createElement('button');
+    close.className = 'clf-stage-close';
+    close.type = 'button';
+    close.textContent = '×';
+    close.title = 'Dismiss';
+    close.setAttribute('aria-label', 'Dismiss Goal status');
+    close.hidden = true;
+    close.addEventListener('click', () => {
+      // Removing the node alone is not enough: injectStage runs on every activity repaint
+      // and would immediately put the same terminal card back. Remember this exact Goal turn;
+      // the next turn has a different key and is shown normally.
+      if (!stagePanel || stagePanel.root !== root || !stagePanel.dismissKey) return;
+      dismissedGoalStage = stagePanel.dismissKey;
+      removeStagePanel();
+    });
+    head.append(title, detail, close);
 
     const steps = document.createElement('div');
     steps.className = 'clf-stage-steps';
@@ -5392,7 +5979,7 @@
     body.className = 'clf-stage-body';
 
     root.append(head, steps, body);
-    return { root, title, detail, steps, body };
+    return { root, title, detail, close, steps, body, dismissKey: '' };
   }
 
   /**
@@ -5447,19 +6034,51 @@
   }
 
   /**
+   * The chat this composer is really sitting in.
+   *
+   * The route is the authority here, not the id this tab is still holding. Clicking New Chat
+   * leaves that id in place on purpose — an id-less route is also ordinary React churn, and
+   * dropping the conversation on it was its own bug — but a goal written into the composer
+   * that follows belongs to the chat about to be created, not to the one before it. The third
+   * state is the honest one: the route names a chat this tab has not observed yet, and
+   * neither id is safe to write a message into.
+   */
+  function composerChat() {
+    const routeId = CLF_DOM.conversationId();
+    if (!routeId) return { id: '', state: 'new' };
+    if (routeId === conversationId) return { id: routeId, state: 'chat' };
+    return { id: '', state: 'moving' };
+  }
+
+  /**
    * Puts the panel above the composer and keeps it there, on the same terms as the
    * control beside it: ChatGPT replaces this subtree whenever it feels like it.
    */
   function injectStage() {
+    // Stage state is conversation-scoped. A concrete different route is handled by
+    // resetConversation(); an id-less route is the New Chat/transient-router gap. In both
+    // cases the current composer is not proven to belong to the state we would paint.
+    // A chat opening on a specific goal is the one id-less case worth painting: its opening
+    // message is being written right now, and there is no conversation to key it to because
+    // sending that message is what creates one.
+    const opening = composerChat().state === 'new' && Boolean(pendingObjective);
+    if (!opening && (!conversationId || CLF_DOM.conversationId() !== conversationId)) {
+      removeStagePanel();
+      return;
+    }
     const view = stageView({
       job,
-      goal: goalConfig ? { phase: goalPhase, error: goalError, model: goalConfig.model, draft: goalDraft } : null
+      goal: goalConfig
+        ? { phase: goalPhase, error: goalError, model: goalConfig.model, draft: goalDraft, opening }
+        : null
     });
     if (!view) {
-      if (stagePanel) {
-        stagePanel.root.remove();
-        stagePanel = null;
-      }
+      removeStagePanel();
+      return;
+    }
+    const dismissKey = goalStageDismissKey(view);
+    if (dismissKey && dismissedGoalStage === dismissKey) {
+      removeStagePanel();
       return;
     }
     const spot = CLF_DOM.composerStack();
@@ -5486,6 +6105,8 @@
 
     if (stagePanel.title.textContent !== view.stage) stagePanel.title.textContent = view.stage;
     if (stagePanel.detail.textContent !== view.detail) stagePanel.detail.textContent = view.detail;
+    stagePanel.dismissKey = dismissKey;
+    stagePanel.close.hidden = dismissKey === '';
     stagePanel.root.dataset.clfStageKind = view.kind;
     paintStageSteps(stagePanel.steps, view);
     if (stagePanel.body.textContent !== view.body) {
@@ -6215,12 +6836,25 @@
   /** How long a ready draft waits for a composer somebody else is using. */
   const GOAL_TYPING_WINDOW_MS = 2 * 60_000;
 
+  /** The turn endings worth writing a next message about. See noteGoalTurn for the rest. */
+  const GOAL_CONTINUABLE = new Set(['completed', 'interrupted']);
+
+  /** How long a specific goal may be. Matches MAX_GOAL_OBJECTIVE_CHARS in src/shared/goal.ts. */
+  const MAX_OBJECTIVE_CHARS = 4000;
+
+  /** The goal this chat is being driven towards, '' when it has none. */
+  function currentObjective() {
+    return goalConfig && typeof goalConfig.objective === 'string' ? goalConfig.objective : '';
+  }
+
   /** Whether the goal loop could act in this chat at all, before any turn is considered. */
   function goalUsable() {
     return Boolean(
       conversationId &&
         goalConfig &&
-        goalConfig.enabled === true &&
+        // Either the standing switch, or this chat's own goal. The app applies the same rule
+        // to the request itself, and reports no goal at all for a chat the loop may not drive.
+        (goalConfig.enabled === true || currentObjective() !== '') &&
         goalConfig.hasKey === true &&
         // A worker chat is already being driven — by the prime agent, through the agents
         // tool. A second author typing into it is two conversations in one composer.
@@ -6237,9 +6871,18 @@
    */
   function noteGoalTurn(ended, outcome, endedTurnId) {
     if (!endedTurnId || !goalUsable()) return;
-    // Not a finished answer. A stopped, interrupted, failed or stalled turn is exactly the
-    // turn a user is about to say something about themselves.
-    if (outcome !== 'completed') return;
+    // Not a turn to continue from. `stopped` is the user's own hand on the stop button and
+    // is exactly the turn they are about to say something about themselves; `failed` and
+    // `stalled` describe a turn whose text cannot be trusted to say where the work got to.
+    //
+    // `interrupted` used to be refused with them, and that was wrong. It does not mean the
+    // user stopped anything — endOutcome() reaches it only when `userStopped` is false — it
+    // means ChatGPT closed its own turn early, which is the single moment this loop exists
+    // for. Session 2026-08-25-0fb93209 is the whole argument: four consecutive prime turns
+    // ended `interrupted` with "ChatGPT marked the turn interrupted", the answers said in
+    // as many words that work was still unfinished, and the loop declined every one of them
+    // without drawing anything, so from outside it looked like a feature that never ran.
+    if (!GOAL_CONTINUABLE.has(outcome)) return;
     // A compaction owns this turn: its answer is the brief, not a message to reply to, and
     // the chat is about to be replaced anyway.
     if (compactCapture || nativeBusy || (job && job.busy)) return;
@@ -6958,6 +7601,11 @@
   syncTheme();
   wireTips();
   wireMenu();
+  if (typeof globalThis.addEventListener === 'function') {
+    globalThis.addEventListener('wheel', notePresentationScrollInput, { capture: true, passive: true });
+    globalThis.addEventListener('touchmove', notePresentationScrollInput, { capture: true, passive: true });
+    globalThis.addEventListener('keydown', notePresentationScrollInput, true);
+  }
   watchComposer();
   watchToolRows();
   watchTranscript();
@@ -7055,6 +7703,7 @@
       /** So a test settles a turn by the real window rather than a copy of the number. */
       TURN_SETTLE_MS,
       STALL_MS,
+      PRESENTATION_SCROLL_IDLE_MS,
       /** Test-only: production defaults ON; tests opt into renderer cases explicitly. */
       setRenderStream: (on) => {
         RENDER_STREAM = on === true;

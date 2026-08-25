@@ -24,7 +24,7 @@ const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 7;
+const BRIDGE_PROTOCOL = 8;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -85,6 +85,7 @@ let connectionEpoch = 0;
  */
 let pairing = null;
 let pairingEpoch = -1;
+let pairingReconnect = false;
 
 /**
  * When the app was last confirmed to be on `port`, and how long that is believed for.
@@ -342,10 +343,6 @@ function totalBytes() {
   let sum = 2 + journal.length - 1;
   for (const entry of journal) sum += sizeOf(entry);
   return sum;
-}
-
-function overBudget(bytes) {
-  return journal.length > MAX_JOURNAL || bytes > MAX_JOURNAL_BYTES;
 }
 
 function gapEntry(conversationId, kind, text) {
@@ -772,6 +769,7 @@ async function discover(force = false) {
     if (Date.now() - portCheckedAt < PORT_TRUST_MS) return { port, paired: token !== null, compatible: portCompatible !== false, version: appVersion, bridge: appProtocol };
     const body = await hello(port);
     if (body) {
+      if (body.disconnected === true) await latchAppDisconnect();
       portCheckedAt = Date.now();
       portCompatible = body.compatible !== false && body.bridge === BRIDGE_PROTOCOL;
       appVersion = typeof body.version === 'string' ? body.version : null;
@@ -782,6 +780,7 @@ async function discover(force = false) {
   for (const candidate of PORTS) {
     const body = await hello(candidate);
     if (body) {
+      if (body.disconnected === true) await latchAppDisconnect();
       port = candidate;
       portCheckedAt = Date.now();
       portCompatible = body.compatible !== false && body.bridge === BRIDGE_PROTOCOL;
@@ -804,6 +803,19 @@ async function discover(force = false) {
 function forgetPort() {
   portCheckedAt = 0;
   portCompatible = null;
+}
+
+/**
+ * Mirrors an explicit app-side Disconnect into this browser's own durable latch.
+ *
+ * `false` from the app is deliberately not authoritative here: this browser may itself have
+ * been disconnected from the popup, and merely observing an app that is willing to pair is
+ * not user intent to reconnect. Only an explicit successful pair clears the local latch.
+ */
+async function latchAppDisconnect() {
+  token = null;
+  disconnected = true;
+  await persist();
 }
 
 /** One authenticated request. Returns { ok, status, data } and never throws. */
@@ -831,7 +843,12 @@ async function call(path, init = {}, retried = false) {
         authorization: `Bearer ${token}`
       }
     });
+    const data = await response.json().catch(() => ({}));
     if (response.status === 401) {
+      if (data && data.error === 'browser_disconnected') {
+        await latchAppDisconnect();
+        return { ok: false, status: 401, error: 'disconnected', data };
+      }
       // Our token no longer matches the app's — it was reset, or the app's storage was
       // rebuilt. Drop ours and provision a new one once, rather than retrying forever
       // with a credential that will never work again or making the user do it by hand.
@@ -840,7 +857,6 @@ async function call(path, init = {}, retried = false) {
       if (retried) return { ok: false, status: 401, error: 'not_paired' };
       return call(path, init, true);
     }
-    const data = await response.json().catch(() => ({}));
     return { ok: response.ok, status: response.status, data };
   } catch (err) {
     // The request never reached anything, so the belief that the app is on this port is
@@ -862,7 +878,7 @@ async function call(path, init = {}, retried = false) {
  * The token itself stays: it is what keeps a second local program from driving the bridge
  * by accident, and it is why the marker in a chat URL is harmless on its own.
  */
-function provision() {
+function provision(reconnect = false) {
   // Singleflight. Everything that wants a token waits on the same request: `/pair` mints
   // a fresh credential and invalidates the one before it, so two concurrent callers do
   // not get two tokens, they get one working token and one that has already been revoked.
@@ -870,20 +886,22 @@ function provision() {
   // have happened while it was in flight, and a later explicit Connect must be able to mint
   // under the new intent without waiting for/accepting that stale result.
   const intent = connectionEpoch;
-  if (pairing && pairingEpoch === intent) return pairing;
-  const work = pairOnce(intent);
+  if (pairing && pairingEpoch === intent && pairingReconnect === reconnect) return pairing;
+  const work = pairOnce(intent, reconnect);
   const tracked = work.finally(() => {
     if (pairing === tracked) {
       pairing = null;
       pairingEpoch = -1;
+      pairingReconnect = false;
     }
   });
   pairing = tracked;
   pairingEpoch = intent;
+  pairingReconnect = reconnect;
   return tracked;
 }
 
-async function pairOnce(intent = connectionEpoch) {
+async function pairOnce(intent = connectionEpoch, reconnect = false) {
   const found = await discover(true);
   if (!found) return { ok: false, error: 'app_not_found' };
   if (found.compatible === false) return { ok: false, error: 'incompatible_extension' };
@@ -892,10 +910,14 @@ async function pairOnce(intent = connectionEpoch) {
       method: 'POST',
       cache: 'no-store',
       headers: { 'content-type': 'application/json', ...versionHeaders() },
-      body: JSON.stringify({})
+      body: JSON.stringify(reconnect ? { reconnect: true } : {})
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || typeof data.token !== 'string') {
+      if (data && data.error === 'browser_disconnected') {
+        await latchAppDisconnect();
+        return { ok: false, error: 'disconnected', message: data.message };
+      }
       return { ok: false, error: data.error || `HTTP ${response.status}`, message: data.message };
     }
     // The response belongs to the connection state that launched it. A newer Disconnect is
@@ -1116,11 +1138,6 @@ function tabId(sender) {
 function senderDocument(sender) {
   if (!sender || (sender.frameId !== undefined && sender.frameId !== 0)) return null;
   return typeof sender.documentId === 'string' && sender.documentId.length > 0 ? sender.documentId : null;
-}
-
-function terminalSender(sender) {
-  const id = tabId(sender);
-  return id !== null && Object.prototype.hasOwnProperty.call(terminalDocuments, String(id));
 }
 
 function messageEpoch(message) {
@@ -1460,7 +1477,11 @@ const HANDLERS = {
   },
   async pair() {
     await load();
-    const result = await provision();
+    // This message exists only behind the popup's Connect/Retry control. Advance the intent
+    // generation so an older silent provision already on the wire cannot win after this
+    // explicit reconnect, then tell the app this /pair is allowed to clear its durable latch.
+    connectionEpoch++;
+    const result = await provision(true);
     if (result && result.ok) {
       void drainCommandAcks()
         .then(() => drain())
@@ -1782,6 +1803,54 @@ const HANDLERS = {
     });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
+  /**
+   * This chat's specific goal, set or cleared from the settings sheet.
+   *
+   * The text is the user's own and goes straight through; the app bounds and trims it and
+   * answers with what it actually stored, which is what the sheet then draws.
+   */
+  async goal_objective(message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const conversationId = cleanConversationId(message.conversationId);
+    if (!conversationId) return { ok: false, status: 400, error: 'bad_conversation_id' };
+    await noteTabConversation(source, conversationId);
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const result = await call('/goal/objective', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId, text: String(message.text || '') })
+    });
+    return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
+  },
+  /**
+   * The opening message for a chat ChatGPT has not named yet.
+   *
+   * No conversation id, because there is none to send: this is the request whose answer
+   * becomes the message that causes ChatGPT to issue one. Everything else about it is an
+   * ordinary goal draft, and the key stays in the app exactly as it does for those.
+   */
+  async goal_open(message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const result = await call('/goal/open', {
+      method: 'POST',
+      body: JSON.stringify({ text: String(message.text || '') })
+    });
+    return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
+  },
+  /**
+   * The same two settings, for a chat that has no feed to read them from.
+   *
+   * `/activity` carries them otherwise, and it needs a conversation id. A New Chat has none
+   * and is still somewhere a goal can be written, so the sheet above that composer asks for
+   * them directly. Read-only, and conversation-free by construction.
+   */
+  async settings_get(_message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const result = await call('/settings', { method: 'GET' });
+    return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
+  },
   /** The composer's settings menu, which owns exactly two switches. */
   async settings_set(message, _sender, source) {
     await load();
@@ -1825,7 +1894,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'auto_compact_claim',
     'goal_draft',
     'goal_ack',
+    'goal_objective',
+    'goal_open',
     'settings_set',
+    'settings_get',
     'repair_fiber',
     'redeem',
     'ack'

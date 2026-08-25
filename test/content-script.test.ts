@@ -89,6 +89,16 @@ interface Hook {
   settingsView(input: Record<string, unknown>): {
     tip: string;
     rows: Array<{ key: string; label: string; note: string; on: boolean; warn: boolean }>;
+    /** The specific goal this chat is being driven towards, and the affordance that sets it. */
+    objective: {
+      text: string;
+      editing: boolean;
+      label: string;
+      summary: string;
+      hint: string;
+      available: boolean;
+      unavailable: string;
+    };
     action: { label: string; hint: string; action: string };
   };
   toggleMenu(): void;
@@ -125,6 +135,8 @@ interface Hook {
   setRenderStream(on: boolean): void;
   renderStreamEnabled(): boolean;
   setShowTimes(on: boolean): void;
+  /** How long Overwrite leaves a user-driven scroll completely presentation-stable. */
+  PRESENTATION_SCROLL_IDLE_MS: number;
 }
 
 interface Harness {
@@ -2939,6 +2951,90 @@ describe('the app-owned chronological stream', () => {
     expect(replacement.textContent).toContain('Read second.ts');
     expect(replacement.textContent).toContain('Read third.ts');
   });
+
+  it('does not hide or inject a virtualized historical remount while the user is scrolling', async () => {
+    live = await harness(undefined, { activity });
+    renderingOn();
+    const first = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(first, 'wfr-app-stream');
+    live.hook.renderStreams();
+    expect(first.getAttribute('data-clf-turn-replaced')).toBe('1');
+
+    // ChatGPT virtualizes old history by dropping a section and mounting a fresh native copy
+    // as it approaches the viewport. Overwrite used to hide that new native subtree and inject
+    // a differently-sized synthetic one in the same scroll gesture, changing document height
+    // underneath the browser's scroll anchoring.
+    first.remove();
+    const remount = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(remount, 'wfr-app-stream');
+    live.window.dispatchEvent(new live.window.Event('wheel'));
+
+    live.hook.renderStreams();
+
+    expect(remount.getAttribute('data-clf-turn-replaced')).toBeNull();
+    expect(remount.querySelector('.clf-stream')).toBeNull();
+
+    live.advance(live.hook.PRESENTATION_SCROLL_IDLE_MS + 1);
+    live.hook.renderStreams();
+    expect(remount.getAttribute('data-clf-turn-replaced')).toBe('1');
+    expect(remount.querySelector('.clf-stream')).not.toBeNull();
+  });
+
+  it('freezes an already-mounted synthetic stream for the whole user scroll gesture', async () => {
+    live = await harness(undefined, { activity });
+    renderingOn();
+    const section = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(section, 'wfr-app-stream');
+    live.hook.renderStreams();
+    expect(section.querySelector('.clf-when')).toBeNull();
+
+    // A render-signature change stands in for the Fiber/activity changes that arrive while
+    // ChatGPT is virtualizing history. No root.replaceChildren is allowed during the gesture.
+    live.window.dispatchEvent(new live.window.Event('wheel'));
+    live.hook.setShowTimes(true);
+    live.hook.renderStreams();
+    expect(section.querySelector('.clf-when')).toBeNull();
+
+    live.advance(live.hook.PRESENTATION_SCROLL_IDLE_MS + 1);
+    live.hook.renderStreams();
+    expect(section.querySelector('.clf-when')).not.toBeNull();
+  });
+
+  it('preserves a visible user-turn viewport anchor when idle Overwrite changes history height', async () => {
+    live = await harness(undefined, { activity });
+    renderingOn();
+    const historical = assistantTurn(live.document, turnId, []);
+    const visibleUser = userTurn(live.document, 'viewport-anchor', 'Keep this question under my eyes');
+    await bindFiberRequest(historical, 'wfr-app-stream');
+    const thread = live.document.querySelector('#thread') as HTMLElement;
+    thread.style.overflowY = 'auto';
+    Object.defineProperty(thread, 'scrollHeight', { configurable: true, value: 2000 });
+    Object.defineProperty(thread, 'clientHeight', { configurable: true, value: 600 });
+    thread.scrollTop = 500;
+
+    // jsdom does not lay elements out, so model the exact browser geometry that reproduced
+    // the bug: replacing the historical assistant above this user turn makes its viewport top
+    // jump upward by 120px. ChatGPT uses a nested transcript scroller in current builds, so
+    // compensation belongs to that scroll root rather than assuming window.scrollY owns it.
+    Object.defineProperty(visibleUser, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        top: historical.hasAttribute('data-clf-turn-replaced') ? 100 : 220,
+        bottom: historical.hasAttribute('data-clf-turn-replaced') ? 140 : 260,
+        left: 0,
+        right: 600,
+        width: 600,
+        height: 40,
+        x: 0,
+        y: historical.hasAttribute('data-clf-turn-replaced') ? 100 : 220,
+        toJSON: () => ({})
+      })
+    });
+    live.hook.renderStreams();
+
+    expect(historical.getAttribute('data-clf-turn-replaced')).toBe('1');
+    expect(thread.scrollTop).toBe(380);
+  });
 });
 
 describe('where the page stream puts an event that was recorded late', () => {
@@ -5752,10 +5848,23 @@ describe('the activity feed', () => {
 });
 
 describe('the Compact & resume control', () => {
-  it('does not exist on a brand-new chat before the first message is sent', async () => {
+  /**
+   * It used to remove itself here, and that was right while compaction was all it did: a
+   * disabled "send a message first" button is not worth half a composer. A goal changed that.
+   * A goal written into a New Chat is what writes that chat's first message, so the sheet has
+   * to be reachable before there is a chat — and the one thing that still needs a chat says so.
+   */
+  it('exists on a brand-new chat, with compaction unavailable and a reason', async () => {
     live = await harness('https://chatgpt.com/');
     live.hook.injectControl();
-    expect(live.document.querySelector('.clf-composer')).toBeNull();
+
+    const control = live.document.querySelector('.clf-composer') as HTMLElement;
+    expect(control).not.toBeNull();
+    expect(control.dataset.clfMode).toBe('off');
+    expect(live.hook.controlState({ connected: true, conversationId: null, now: Date.now() })).toMatchObject({
+      action: 'none',
+      hint: 'Nothing to compact yet — send a message, or set a goal and it writes one.'
+    });
   });
 
   it('sits in the composer, before the send button once the chat exists', async () => {
@@ -5975,7 +6084,10 @@ describe('the Compact & resume control', () => {
       action: 'start'
     });
     expect(state({ connected: false })).toMatchObject({ mode: 'off', action: 'none' });
-    expect(state({ conversationId: null })).toMatchObject({ mode: 'off', hint: 'Send a message first.' });
+    expect(state({ conversationId: null })).toMatchObject({
+      mode: 'off',
+      hint: 'Nothing to compact yet — send a message, or set a goal and it writes one.'
+    });
   });
 
   /**
@@ -8248,6 +8360,64 @@ describe('the goal loop', () => {
       stage: 'Goal reached',
       kind: 'goal-done'
     });
+
+    const panel = live.document.querySelector('.clf-stage') as HTMLElement;
+    const close = panel.querySelector('.clf-stage-close') as HTMLButtonElement;
+    expect(close.hidden).toBe(false);
+    expect(close.getAttribute('aria-label')).toBe('Dismiss Goal status');
+    close.click();
+    expect(live.document.querySelector('.clf-stage')).toBeNull();
+
+    // Activity polling keeps repainting this terminal state. Dismissal belongs to the Goal
+    // turn rather than just its current node, so the same card must stay gone.
+    live.hook.injectStage();
+    expect(live.document.querySelector('.clf-stage')).toBeNull();
+  });
+
+  it('removes a terminal Goal card when the user continues the same chat manually', async () => {
+    live = await harness(
+      `https://chatgpt.com/c/${CHAT}`,
+      liveFeed(readyDraft('', 'no-reply')).replies
+    );
+    await live.hook.pullActivity();
+    await settle();
+    expect(live.document.querySelector('.clf-stage')).not.toBeNull();
+
+    userTurn(live.document, 'manual-follow-up', 'I will continue from here');
+    live.hook.observe();
+    await settle();
+
+    expect(live.document.querySelector('.clf-stage')).toBeNull();
+    // The app can keep reporting the preceding terminal phase until the next Goal run.
+    // That repaint must not put history back above the active composer.
+    live.hook.injectStage();
+    expect(live.document.querySelector('.clf-stage')).toBeNull();
+  });
+
+  it('removes the old chat terminal Goal card on New Chat and a concrete chat switch', async () => {
+    live = await harness(
+      `https://chatgpt.com/c/${CHAT}`,
+      liveFeed(readyDraft('', 'no-reply')).replies
+    );
+    await live.hook.pullActivity();
+    await settle();
+    expect(live.document.querySelector('.clf-stage')).not.toBeNull();
+
+    // New Chat has no conversation id until its first message. Recorder identity is held
+    // through that ambiguous router gap, but conversation-scoped UI must leave immediately.
+    live.dom.reconfigure({ url: 'https://chatgpt.com/' });
+    live.hook.observe();
+    expect(live.document.querySelector('.clf-stage')).toBeNull();
+    live.hook.injectStage();
+    expect(live.document.querySelector('.clf-stage')).toBeNull();
+
+    // Recreate the old terminal card, then prove the concrete A -> B reset also removes it.
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${CHAT}` });
+    live.hook.injectStage();
+    expect(live.document.querySelector('.clf-stage')).not.toBeNull();
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-cccc-dddd-eeee-ffffffffffff' });
+    live.hook.observe();
+    expect(live.document.querySelector('.clf-stage')).toBeNull();
   });
 
   /**
@@ -8442,5 +8612,244 @@ describe('the goal loop', () => {
     ]);
     expect(steps.map((step) => step.dataset.clfStep)).toEqual(['done', 'done', 'now', 'next']);
     expect(panel.querySelector('.clf-stage-body')!.textContent).toBe('what abo');
+    expect((panel.querySelector('.clf-stage-close') as HTMLButtonElement).hidden).toBe(true);
+  });
+
+  /**
+   * The turn the loop exists for, and the one it used to throw away.
+   *
+   * `interrupted` is not the user stopping anything — endOutcome() reaches it only when
+   * `userStopped` is false — it is ChatGPT closing its own turn early. Session
+   * 2026-08-25-0fb93209 is the case in full: four consecutive prime turns ended
+   * `interrupted`, every answer said in as many words that work was unfinished, and the loop
+   * declined all four without drawing a thing, so from outside it looked like a feature that
+   * had never run.
+   */
+  it('continues a turn ChatGPT cut short by itself', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
+    await live.hook.pullActivity();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'turn-interrupted', []);
+    live.hook.observe();
+    await settle();
+    prose(live.document, section, 'a-interrupted', 'that is as far as I got — the migration is still unfinished');
+    // ChatGPT's own marker, which is what separates this from the user pressing stop.
+    const marker = live.document.createElement('div');
+    marker.setAttribute('data-interrupted', 'true');
+    marker.textContent = 'Stopped';
+    section.append(marker);
+    stopGenerating(live.document);
+    live.hook.observe();
+    await settle();
+
+    // The marker alone never closes a turn — one has gone on emitting for two minutes after
+    // it. The boundary here is the page's own end_turn, exactly as it was in that session.
+    await replyFiber([], [{
+      turnId: 'turn-interrupted',
+      conversationId: CHAT,
+      endMessageId: 'site-final-interrupted',
+      calls: [],
+      messages: [{
+        messageId: 'site-final-interrupted',
+        stable: true,
+        rawText: 'that is as far as I got — the migration is still unfinished',
+        renderedHtml: '<p>that is as far as I got — the migration is still unfinished</p>'
+      }],
+      activities: []
+    }]);
+    await settle();
+    await live.hook.flush();
+    // replyFiber runs on real timers so jsdom can deliver the scan request, which means the
+    // goal watch it starts queued its first poll on one too. This is the only wait in the
+    // suite that has to be a real one; every poll after it is instant again.
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 1_100));
+    await settle(800);
+
+    expect(emitted(live.sent, 'turn_end').map((entry) => entry.event.outcome)).toEqual(['interrupted']);
+    expect(drafts(live)).toHaveLength(1);
+    expect(drafts(live)[0]).toMatchObject({ conversationId: CHAT, turnId: expect.any(String) });
+  });
+
+  /** The user's own hand on the stop button still means they are about to type themselves. */
+  it('still says nothing when the user pressed stop', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
+    await live.hook.pullActivity();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'turn-stopped', []);
+    live.hook.observe();
+    await settle();
+    prose(live.document, section, 'a-stopped', 'half an answer, and then');
+
+    live.document
+      .querySelector('[data-testid="stop-button"]')!
+      .dispatchEvent(new live.window.MouseEvent('click', { bubbles: true }));
+    stopGenerating(live.document);
+    live.hook.observe();
+    await settle(800);
+
+    expect(emitted(live.sent, 'turn_end').map((entry) => entry.event.outcome)).toEqual(['stopped']);
+    expect(drafts(live)).toEqual([]);
+  });
+
+  /**
+   * The whole feature in one gesture, in the chat that does not exist yet.
+   *
+   * A New Chat has no conversation id, no activity feed and — until now — no control in its
+   * composer at all. It is also the most obvious place to write a goal down: nothing has been
+   * said yet, so the goal is the entire request. Sending the message this produces is what
+   * makes ChatGPT issue the id the goal is finally saved against.
+   */
+  it('opens a New Chat on a goal, and writes its first message', async () => {
+    live = await harness('https://chatgpt.com/', {
+      settings_get: () => ({
+        ok: true,
+        data: {
+          context: { auto: false, threshold: 400_000, warn: 400_000, limit: 533_000 },
+          goal: { enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' }
+        }
+      }),
+      goal_open: () => ({ ok: true, data: { reply: 'rewrite the parser in rust', model: MODEL } })
+    });
+    // The feed this page normally reads its settings off refuses a chat with no id, so the
+    // sheet asks for them directly. Without that the row would claim there was no API key.
+    await live.hook.pullActivity();
+    expect(live.sent.filter((message) => message.type === 'settings_get').length).toBeGreaterThan(0);
+    expect(live.sent.filter((message) => message.type === 'activity')).toEqual([]);
+
+    const sends = watchSend(live.document);
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+
+    const link = live.document.querySelector('.clf-menu-goal-link') as HTMLButtonElement;
+    expect(link, 'the sheet offered no way to add a goal').not.toBeNull();
+    link.click();
+    const box = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    box.value = 'rewrite the parser in rust';
+    box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
+    (live.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement).click();
+    await settle(800);
+
+    const asked = live.sent.filter((message) => message.type === 'goal_open');
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ text: 'rewrite the parser in rust' });
+    expect(composerText(live.document)).toBe('rewrite the parser in rust');
+    expect(sends()).toBe(1);
+
+    // And the goal is bound to the chat the moment ChatGPT names it, so the ordinary loop
+    // picks it up from the next turn onwards.
+    live.window.history.replaceState({}, '', `/c/${CHAT}`);
+    live.hook.observe();
+    await settle();
+    const bound = live.sent.filter((message) => message.type === 'goal_objective');
+    expect(bound).toHaveLength(1);
+    expect(bound[0]).toMatchObject({ conversationId: CHAT, text: 'rewrite the parser in rust' });
+  });
+
+  /**
+   * A goal is a sentence somebody writes, and this sheet repaints itself on the activity
+   * poll's cadence — every repaint is a full rebuild. Both halves of that were broken: Save
+   * was built disabled and never heard the typing, and a repaint mid-sentence put the caret
+   * back at the end of it.
+   */
+  it('keeps a half-written goal, its caret and its Save button through a repaint', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
+    await live.hook.pullActivity();
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+    (live.document.querySelector('.clf-menu-goal-link') as HTMLButtonElement).click();
+
+    const box = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    box.focus();
+    box.value = 'port the module';
+    box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
+    box.setSelectionRange(4, 4);
+    expect((live.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement).disabled).toBe(false);
+
+    // What an activity poll does to this sheet, which is rebuild it from scratch.
+    live.hook.renderControl();
+
+    const after = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    expect(after.value).toBe('port the module');
+    expect(live.document.activeElement).toBe(after);
+    expect(after.selectionStart).toBe(4);
+    expect((live.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  /**
+   * The settings sheet, which is where a chat is given its goal and where the reason a
+   * chat cannot have one has to be legible.
+   */
+  describe('the settings sheet', () => {
+    const sheet = (goal: Record<string, unknown>) =>
+      live!.hook.settingsView({
+        context: { auto: true, threshold: 400_000 },
+        goal,
+        compact: { action: 'start', hint: '' }
+      });
+
+    /** The sheet is pure, so one live script is enough to read every shape out of it. */
+    async function open(): Promise<void> {
+      live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
+    }
+
+    it('offers a specific goal under the switch, and shows the one a chat already has', async () => {
+      await open();
+      const empty = sheet({ enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' });
+      expect(empty.objective).toMatchObject({ label: 'add specific goal', summary: '', available: true });
+
+      const set = sheet({
+        enabled: false,
+        hasKey: true,
+        model: MODEL,
+        objective: 'port the module and make the suite green',
+        blocked: ''
+      });
+      expect(set.objective).toMatchObject({
+        label: 'change the goal',
+        summary: 'port the module and make the suite green',
+        available: true
+      });
+      // A goal is enough on its own: nobody who has just written down where a chat has to
+      // get to should have to find and flip a second switch before it does anything.
+      expect(set.tip).toContain('Goal on');
+      expect(set.rows[1]!.note).toContain('on for this chat’s own goal');
+    });
+
+    /**
+     * The reason a switch is drawn off when the user did not turn it off. Without a word for
+     * it, a rule working exactly as designed reads as a setting that failed to save — which
+     * is precisely how it was reported.
+     */
+    it('says why a worker chat cannot be given a goal', async () => {
+      await open();
+      const view = sheet({ enabled: true, hasKey: true, model: MODEL, objective: '', blocked: 'worker' });
+      expect(view.rows[1]!.note).toBe('off here: the prime agent writes this worker’s messages');
+      expect(view.rows[1]!.warn).toBe(true);
+      expect(view.tip).toContain('the prime writes this chat');
+      expect(view.objective).toMatchObject({
+        available: false,
+        unavailable: 'A worker chat is already driven by its prime.'
+      });
+    });
+
+    it('keeps pointing at the missing credential the whole feature runs on', async () => {
+      await open();
+      const view = sheet({ enabled: true, hasKey: false, model: MODEL, objective: '', blocked: '' });
+      expect(view.rows[1]!.note).toBe('OpenRouter API key essential for goal feature');
+      expect(view.objective).toMatchObject({
+        available: false,
+        unavailable: 'Add an OpenRouter API key in the app first.'
+      });
+    });
+
+    /** A goal can be a paragraph; the row it is summarised in is one line of a small menu. */
+    it('cuts a long goal to a line without breaking a word', async () => {
+      await open();
+      const long = `${'finish the migration '.repeat(20)}and ship`;
+      const view = sheet({ enabled: false, hasKey: true, model: MODEL, objective: long, blocked: '' });
+      expect(view.objective.summary.length).toBeLessThanOrEqual(121);
+      expect(view.objective.summary.endsWith('…')).toBe(true);
+      expect(view.objective.summary).not.toMatch(/\s…$/);
+    });
   });
 });

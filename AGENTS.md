@@ -220,6 +220,7 @@ src/main/session/handoff-prompt.ts  the brief injected into the old chat
 src/main/session/summarize.ts human-readable activity summaries
 src/shared/chronology.ts      timeline ordering and folding
 src/shared/session.ts         session/activity/swarm wire types
+src/shared/goal.ts            Goal prompts (continuation + specific goal) and their bounds
 src/shared/types.ts           config/app/IPC types and Capabilities
 
 ── browser ────────────────────────────────────────────────────────────────
@@ -391,7 +392,10 @@ or require a Codex installation.**
 head/tail buffering, yield deadlines, output token policy, interactive stdin, and sessions
 that outlive the call that created them. Windows adaptations (quoting, interrupt) live
 beside the port and stay explicit and tested against model-facing behavior. There is a
-known Ctrl+C vs. natural-exit race worth keeping a regression for. Start at `tools-core.ts`
+known Ctrl+C vs. natural-exit race worth keeping a regression for. The local MCP adaptation
+also accepts `cmds` to run related commands sequentially in one labeled shell session, and an
+empty `write_stdin` poll returns on first output instead of holding Codex's full collection
+window. Start at `tools-core.ts`
 → `unified-exec.ts` → `shell.ts` → `ownership.ts` → `exec-output.ts`.
 
 **`apply_patch`.** Model syntax is Codex V4A. MCP cannot expose a true freeform tool, so
@@ -532,7 +536,9 @@ MAIN-world Fiber helper.
 A second loopback HTTP service on the first free port of **8765–8769**. The extension finds
 it with `/hello`, silently provisions a bearer token with `/pair`, then uses authenticated
 routes: `/status`, `/events`, `/closed`, `/activity`, `/compact/claim-auto`, `/compact`,
-`/commands/redeem`, `/commands/ack`.
+`/goal/draft`, `/goal/ack`, `/goal/objective`, `/goal/open`, `/settings` (GET and POST),
+`/commands/redeem`, `/commands/ack`. `/settings` is the only pair the page may write, and
+its GET exists for the one composer with no conversation to read `/activity` for: a New Chat.
 
 **Must hold.** The token never enters the ChatGPT page — the service worker holds it in
 extension-owned state and the app keeps its counterpart out of config and log surfaces. The
@@ -599,6 +605,45 @@ workspace and prime binding move together or not at all.
 
 ## 17. Renderer, IPC, connection and desktop
 
+**Goal.** `goal.ts` sends only authored user messages and final assistant answers to
+OpenRouter. Its persisted system prompt is editable under Chat → Settings and bounded by the
+same shared limit at config and IPC. The shipped prompt is a strict continuation gate: an
+assistant completion claim means `NO_REPLY`; a new user message is allowed only for a concrete
+requested item the final answer explicitly leaves unfinished. Prompt changes retire existing
+drafts so one draft never mixes old and new instructions. Terminal Goal cards persist for
+visibility but their × dismissal is keyed to the finished turn, so activity repaints cannot
+resurrect the card and the next Goal run still appears normally. They are presentation scoped
+to the exact conversation route: New Chat, a concrete chat switch, or the user's next authored
+message removes the old card immediately while async activity remains navigation-epoch guarded.
+The provider boundary is non-streaming strict JSON Schema with `require_parameters`, excluded
+reasoning and OpenRouter Response Healing. A fixed app-owned output protocol sits after the
+editable policy prompt. Local validation is still authoritative: mixed/wrapped `NO_REPLY` stops,
+tokenizer wrappers are normalized away, and malformed schema, reasoning tags, or an empty cleaned
+reply fail closed before `humanReply()` or the browser can see a sendable payload.
+
+**A chat's own goal.** The same engine, pointed the other way. The composer control is now
+present in a New Chat as well (`injectControl`), because a goal written there is what writes
+that chat's first message; compaction stays unavailable there and says why. `/goal/objective` stores one goal
+per conversation in a bounded in-memory map — deliberately not config: it is per chat, per run,
+and lost on restart like a draft. A stored goal arms the loop for that chat even while the
+standing switch is off (`goalActiveFor` in `bridge.ts`), because writing down a finish line is
+the stronger statement; the worker rule still overrides both, and `/goal/objective` refuses a
+worker chat outright rather than storing a goal nothing may act on. With a goal the continuation
+gate is replaced, not augmented — sending both would ship one prompt that defaults to stopping
+and another that defaults to going — and the empty-conversation refusal inverts: `no_conversation`
+becomes an opening message, since the goal *is* the request. Reaching the goal clears it, so the
+next turn is not measured against a finish line already crossed. `/goal/open` is the one goal
+message not keyed by conversation: a New Chat has no id until the message is sent, so that route
+holds nothing, streams nothing and is awaited by the page, which then binds the goal to the real
+id once ChatGPT issues one.
+
+**Turn outcomes the loop answers.** `completed` and `interrupted`, and no others. `interrupted`
+is not the user stopping anything — `endOutcome()` reaches it only when `userStopped` is false —
+it is ChatGPT closing its own turn early, which is the case the loop exists for. It was refused
+alongside `stopped`/`failed`/`stalled` until 2026-08-25, and silently: session
+`2026-08-25-0fb93209` shows four consecutive prime turns ending `interrupted` with answers that
+said work was unfinished, none of which drew anything at all.
+
 **Renderer/IPC.** `renderer/main.ts` is setup/permissions/connection/activity;
 `renderer/chat.ts` is session timeline, handoff, swarm. To add a capability: narrow
 main-process action → validate in `ipc.ts` → expose exactly that method in
@@ -623,9 +668,12 @@ poll. `diagnostics.ts` builds the UI self-test and must agree with that same gra
 Tests: `tunnel.test.ts`.
 
 **Desktop automation.** `tools-desktop.ts` + `computer/*` for screenshots, UI Automation and
-SendInput/clipboard. Registration-time permission is not enough: each action re-checks, and
-coordinates are validated against the screenshot frame id so stale coordinates are refused.
-Tests: `computer.test.ts`.
+SendInput/clipboard. Registration-time permission is not enough: each action re-checks. The
+helper is prewarmed only when native Desktop capabilities are published; window observation is
+background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
+window geometry; semantic refs bind cached elements to bounded UIA snapshots. Physical input
+revalidates the target, batches report partial completion and route evidence, and compact local
+postconditions avoid model-driven wait/observe loops. Tests: `computer*.test.ts`.
 
 **On-disk state to inspect.** `%APPDATA%\chat-on-steroids\` — `config.json` (non-secret
 validated settings), `sessions\` (durable history), `state\` (small durable indexes, e.g.

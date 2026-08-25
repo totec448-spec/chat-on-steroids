@@ -1,11 +1,14 @@
 /**
  * The goal loop — a second model, standing in for the user, that keeps a chat moving.
  *
- * ChatGPT finishes a long turn. Somebody has to read it and say what is still missing, and
- * for an unattended run that somebody is an OpenRouter model given the same conversation and
- * one instruction: you are the user, write the next message. When it decides the task is
- * finished it writes `NO_REPLY` instead, and nothing is typed at all. That is the whole
- * feature, and the two halves live in different places for a reason:
+ * ChatGPT finishes a long turn. Somebody has to decide whether a requested item is explicitly
+ * still missing, and for an unattended run that somebody is an OpenRouter model given the same
+ * conversation and a strict continuation-gate instruction. Completion is the default: it writes
+ * `NO_REPLY` and nothing is typed. Only a concrete unfinished requirement becomes a message.
+ * OpenRouter is asked for a strict `{ action, reply }` decision and the app validates it before
+ * anything reaches the browser; provider reasoning, tokenizer markers and malformed protocol
+ * output are never user messages. That is the whole feature, and the two halves live in different
+ * places for a reason:
  *
  *   · The *page* owns "the turn is really over". Only the browser can tell a finished answer
  *     from a mid-turn redraw, a tool call, or a reload replaying yesterday's transcript, and
@@ -41,6 +44,12 @@ import { getConfig } from './config.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
 import { readEvents, readRecentEvents } from './session/store.js';
+import {
+  GOAL_OBJECTIVE_OPENING_TURN,
+  GOAL_OBJECTIVE_SYSTEM_PROMPT,
+  MAX_GOAL_OBJECTIVE_CHARS,
+  goalObjectiveMessage
+} from '../shared/goal.js';
 
 /** Where OpenRouter lives. One host, both routes. */
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
@@ -68,6 +77,8 @@ const MODEL_LIST_TIMEOUT_MS = 30_000;
 const MAX_SSE_RECORD_CHARS = 64_000;
 /** Error prose is diagnostic only. Never buffer an arbitrary provider-controlled failure body. */
 const MAX_ERROR_BODY_BYTES = 64 * 1024;
+/** A Goal decision is tiny. Bound the successful provider envelope just like failure prose. */
+const MAX_GOAL_BODY_BYTES = 64 * 1024;
 /** The model catalogue is bounded UI metadata, not an unlimited provider document. */
 const MAX_MODEL_LIST_BODY_BYTES = 8 * 1024 * 1024;
 /** Cache/picker cardinality and field bounds for provider-controlled model metadata. */
@@ -83,40 +94,50 @@ export const MODEL_PAGE_SIZE = 20;
 /**
  * The word that means "say nothing".
  *
- * Matched on the whole trimmed reply rather than searched for, because a model explaining
- * *when* it would answer `NO_REPLY` must not thereby end the run. Punctuation and case are
- * allowed to vary; anything else is a message the user is meant to send.
+ * Exact legacy spelling. The broader protocol guard below also treats a standalone sentinel
+ * inside surrounding scratchpad text as stop: a false stop is recoverable, while typing model
+ * plumbing into ChatGPT starts an unintended turn.
  */
 const NO_REPLY = /^no[\s_-]?reply[\s.!]*$/i;
+/** Standalone protocol sentinel anywhere in legacy output means stop, never "type this". */
+const NO_REPLY_TOKEN = /(?:^|[^\p{L}\p{N}])no[\s_-]?reply[\s.!]*(?=$|[^\p{L}\p{N}])/iu;
+/** Common raw tokenizer/control markers that must never be submitted to ChatGPT. */
+const MODEL_CONTROL_TOKEN = /<\|[^|\r\n]{1,100}\|>|<\/?s>|\[\/?INST\]|<<\/?SYS>>/giu;
+/** Reasoning wrappers are not formatting; their contents are never a user message. */
+const UNSAFE_REASONING_TAG = /<\/?(?:think|analysis|reasoning)\b[^>]*>/iu;
 
-/**
- * The instruction. Deliberately in the second person and deliberately short.
- *
- * The failure this is written against is a model that answers *about* the conversation —
- * "The assistant should now implement X" — which is a review, not a user message, and reads
- * as one the moment it lands in the composer. So the role is stated first, the register is
- * described concretely (lowercase, casual, the way the actual user in this recording writes),
- * and the stopping condition is given a positive value rather than being an exception: saying
- * nothing when the work is done is the goal, not a failure to produce output.
- */
+/** App-owned transport contract. The editable prompt decides policy, never wire syntax. */
+const GOAL_OUTPUT_PROTOCOL =
+  'Return only the app decision described by the response schema. Use action "stop" when the editable instruction would say NO_REPLY. ' +
+  'Use action "continue" only with the exact short user message in reply. Put no reasoning, counting, labels, tokenizer markers, or protocol words in reply.';
+
+const GOAL_RESPONSE_FORMAT = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'goal_decision',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['stop', 'continue'],
+          description: 'stop when the requested work is complete; continue only for explicit unfinished requested work'
+        },
+        reply: {
+          type: 'string',
+          description: 'empty for stop; for continue, only the short message to send as the user'
+        }
+      },
+      required: ['action', 'reply'],
+      additionalProperties: false
+    }
+  }
+} as const;
+
+/** The persisted instruction used for the next draft. Exported for focused contract tests. */
 export function goalSystemPrompt(): string {
-  return (
-    'You are the user in this conversation, not an assistant. The messages labelled "user" are yours; the ' +
-    'messages labelled "assistant" are ChatGPT answering you.\n\n' +
-    'Your job: read what you originally asked for and what ChatGPT has done about it, then write your next ' +
-    'message so the work carries on.\n\n' +
-    'Write exactly like the user in this recording writes: lowercase, casual, short, no greeting, no sign-off, ' +
-    'no politeness padding, no markdown headings, no bullet lists unless the user uses them. One or two ' +
-    'sentences is normal. Say what is still missing, what to do next, or what to fix — concretely, naming the ' +
-    'thing. Never review or narrate the assistant\'s work back to it, never say "the assistant should", never ' +
-    'explain that you are continuing, and never mention that you are a model or that anything is automated.\n\n' +
-    'If the goal you originally asked for has been fully implemented and there is genuinely nothing left worth ' +
-    'asking for, reply with exactly:\n\nNO_REPLY\n\n' +
-    'NO_REPLY is the right answer whenever the work is done — prefer it over inventing more work, over asking ' +
-    'for polish nobody asked for, and over thanking anyone. Nothing is sent when you write it.\n\n' +
-    'Otherwise reply with the message itself and nothing else: no quotes around it, no preamble, no explanation ' +
-    'of your reasoning.'
-  );
+  return getConfig().goal.prompt;
 }
 
 /** How a draft is going, in the order it goes. */
@@ -148,6 +169,15 @@ export interface GoalDraftView {
 
 interface GoalDraft extends GoalDraftView {
   sessionId: string;
+  /** Frozen with the draft, just like its model, so one request never mixes two settings saves. */
+  systemPrompt: string;
+  /**
+   * This chat's specific goal, frozen with the draft. Empty for an ordinary Goal Mode run.
+   *
+   * Present means a different instruction, a different default (continue rather than stop),
+   * and one thing the gate never allows: a conversation with no user message in it yet.
+   */
+  objective: string;
   /** Browser tab that owns the right to type/ack this draft. Empty only for legacy callers. */
   clientId: string;
   startedAt: number;
@@ -160,6 +190,50 @@ interface GoalDraft extends GoalDraftView {
 
 /** At most one draft per conversation. A new turn replaces the old chat's finished draft. */
 const drafts = new Map<string, GoalDraft>();
+
+/**
+ * The specific goal a chat is being driven towards, keyed by conversation.
+ *
+ * Held here rather than in the config file for the same reason the drafts are: it belongs to
+ * one conversation, not to the app, and writing a growing list of chat-scoped strings into
+ * the settings the user edits by hand would be putting session state somewhere it does not
+ * belong. It does not survive an app restart, and that is the honest behaviour — a loop that
+ * silently resumed typing into somebody's chat after a crash is worse than one that stops.
+ *
+ * Bounded, because a tab that lives all day moves between chats. Oldest goes first, and a
+ * re-set moves an entry back to the newest end.
+ */
+const goalObjectives = new Map<string, string>();
+/** Enough for every chat anybody has open at once, several times over. */
+const MAX_OBJECTIVES = 64;
+
+/** This chat's specific goal, or '' when it has none. */
+export function goalObjectiveFor(conversationId: string): string {
+  return goalObjectives.get(conversationId) ?? '';
+}
+
+/**
+ * Sets or clears one chat's goal. Empty text clears it.
+ *
+ * Returns what is now stored, already trimmed and bounded, so the caller reports the stored
+ * value rather than the one it sent — the two differ whenever the text was over the cap.
+ */
+export function setGoalObjective(conversationId: string, text: string): string {
+  const goal = text.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+  goalObjectives.delete(conversationId);
+  if (!goal) return '';
+  goalObjectives.set(conversationId, goal);
+  while (goalObjectives.size > MAX_OBJECTIVES) {
+    const oldest = goalObjectives.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    goalObjectives.delete(oldest);
+  }
+  return goal;
+}
+
+export function clearGoalObjective(conversationId: string): void {
+  goalObjectives.delete(conversationId);
+}
 
 export function goalSettings(): { enabled: boolean; model: string; reasoning: string } {
   const goal = getConfig().goal;
@@ -253,9 +327,28 @@ export function retireGoalDrafts(): number {
   return retired;
 }
 
+/**
+ * Retires whatever one chat has in flight, leaving every other chat alone.
+ *
+ * A draft is frozen with the instruction and the goal it was started under. Changing that
+ * chat's goal therefore has to reach the request already running, or the last thing typed
+ * into the conversation would be a message written against the goal the user just replaced.
+ */
+export function retireGoalDraftsFor(conversationId: string): boolean {
+  const draft = drafts.get(conversationId);
+  if (!draft || draft.acknowledged) return false;
+  draft.acknowledged = true;
+  draft.abort?.abort();
+  if (draft.settledAt === 0) draft.settledAt = Date.now();
+  draft.text = '';
+  draft.reply = '';
+  return true;
+}
+
 export function resetGoalStateForTests(): void {
   for (const draft of drafts.values()) draft.abort?.abort();
   drafts.clear();
+  goalObjectives.clear();
   firstUserCache.clear();
   modelCache = null;
 }
@@ -301,6 +394,8 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     token: `goal-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
     conversationId: input.conversationId,
     sessionId: input.sessionId,
+    systemPrompt: settings.prompt,
+    objective: goalObjectiveFor(input.conversationId),
     clientId,
     turnId: input.turnId,
     stage: 'sending',
@@ -330,6 +425,66 @@ function settle(draft: GoalDraft, stage: GoalStage, error: string | null = null)
   draft.settledAt = Date.now();
 }
 
+/**
+ * One OpenRouter decision, with none of the draft bookkeeping around it.
+ *
+ * Two callers want exactly this and nothing more: `run`, answering a finished turn inside a
+ * chat the app is recording, and `draftOpeningMessage`, answering a chat that does not exist
+ * yet and therefore has no draft, no session and no conversation id at all. Sharing one
+ * request is what keeps the opening message under the same protocol guard, the same body
+ * caps and the same refusal rules as every other message this app has ever typed.
+ */
+interface GoalRequest {
+  key: string;
+  model: string;
+  /** In order, ahead of the conversation. The wire protocol is appended here, not by callers. */
+  system: string[];
+  messages: ChatMessage[];
+  signal: AbortSignal;
+  /** Called as legacy SSE text arrives, so a streaming panel can show it being written. */
+  publish?: (text: string) => void;
+}
+
+async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision | { action: 'http'; error: string }> {
+  const settings = getConfig().goal;
+  const body: Record<string, unknown> = {
+    model: request.model,
+    // Response Healing works only for non-streaming structured responses. Goal decisions
+    // are tiny; correctness at the composer boundary matters more than token-by-token UI.
+    stream: false,
+    messages: [
+      ...request.system.map((content) => ({ role: 'system', content })),
+      { role: 'system', content: GOAL_OUTPUT_PROTOCOL },
+      ...request.messages
+    ],
+    response_format: GOAL_RESPONSE_FORMAT,
+    plugins: [{ id: 'response-healing' }],
+    // OpenRouter otherwise may route to a provider that silently ignores response_format.
+    provider: { require_parameters: true }
+  };
+  // Reasoning may still be used, but it is never part of the response body this app parses.
+  // OpenRouter documents `exclude` as supported across models even when effort selection is
+  // not. `default` therefore means "provider-selected effort", not "return its scratchpad".
+  body['reasoning'] = {
+    ...(settings.reasoning === 'default' ? {} : { effort: settings.reasoning }),
+    exclude: true
+  };
+
+  const response = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${request.key}`,
+      'content-type': 'application/json',
+      ...ATTRIBUTION_HEADERS
+    },
+    body: JSON.stringify(body),
+    signal: request.signal
+  });
+  if (!response.ok || !response.body) return { action: 'http', error: await httpFailure(response) };
+  const completion = await readGoalCompletion(response, request.publish);
+  return normalizeGoalDecision(completion.text, completion.legacy);
+}
+
 async function run(draft: GoalDraft): Promise<void> {
   const key = await getSecret('openRouterApiKey');
   if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
@@ -340,7 +495,11 @@ async function run(draft: GoalDraft): Promise<void> {
   // can contain assistant prose without the user row that gave it meaning; treating that as a
   // usable conversation asks the second model to invent what the user wants and can create a
   // brand-new task. Fail closed until at least one recorded user message anchors the request.
-  if (messages.length === 0 || !messages.some((message) => message.role === 'user')) {
+  //
+  // A chat carrying a specific goal is the one case where that anchor is neither needed nor
+  // evidence of a recovery failure: the user stated the request themselves, before the
+  // conversation existed, and writing its opening message is the whole job. See setGoalObjective.
+  if (!draft.objective && (messages.length === 0 || !messages.some((message) => message.role === 'user'))) {
     return settle(draft, 'failed', 'no_conversation');
   }
 
@@ -348,44 +507,35 @@ async function run(draft: GoalDraft): Promise<void> {
   draft.abort = abort;
   const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const settings = getConfig().goal;
-    const body: Record<string, unknown> = {
+    const decision = await requestGoalDecision({
+      key,
       model: draft.model,
-      stream: true,
-      messages: [{ role: 'system', content: goalSystemPrompt() }, ...messages]
-    };
-    // `default` means "send nothing and let the provider decide", which is not the same as
-    // sending an effort the model may not have.
-    if (settings.reasoning !== 'default') body['reasoning'] = { effort: settings.reasoning };
-
-    const response = await fetch(`${OPENROUTER_BASE}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${key}`,
-        'content-type': 'application/json',
-        ...ATTRIBUTION_HEADERS
-      },
-      body: JSON.stringify(body),
-      signal: abort.signal
+      system: draft.objective
+        ? [GOAL_OBJECTIVE_SYSTEM_PROMPT, goalObjectiveMessage(draft.objective)]
+        : [draft.systemPrompt],
+      messages: messages.length > 0 ? messages : [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
+      signal: abort.signal,
+      publish: (text) => {
+        draft.stage = 'answering';
+        if (drafts.get(draft.conversationId) === draft) draft.text = text;
+      }
     });
     if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
-    if (!response.ok || !response.body) {
-      return settle(draft, 'failed', await httpFailure(response));
-    }
-    draft.stage = 'answering';
-    const text = await readStream(response.body, draft);
-    if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
-    const reply = text.trim();
-    if (!reply) return settle(draft, 'failed', 'empty_reply');
-    if (NO_REPLY.test(reply)) {
+    if (decision.action === 'http') return settle(draft, 'failed', decision.error);
+    if (decision.action === 'invalid') return settle(draft, 'failed', decision.error);
+    if (decision.action === 'stop') {
       logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent`);
+      // A specific goal has exactly one ending, and this is it. Leaving it set would put the
+      // chat straight back into the loop on its next turn, against a finish line it has
+      // already crossed — the user asked for a goal, not for a chat that never ends.
+      if (draft.objective) clearGoalObjective(draft.conversationId);
       draft.reply = '';
       return settle(draft, 'no-reply');
     }
     // Typed rather than written. See humanReply: the em dashes go, and a couple of the
     // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
-    draft.reply = humanReply(reply);
-    logInfo(`goal: drafted ${reply.length} characters for ${draft.conversationId} with ${draft.model}`);
+    draft.reply = humanReply(decision.reply);
+    logInfo(`goal: drafted ${decision.reply.length} characters for ${draft.conversationId} with ${draft.model}`);
     settle(draft, 'ready');
   } catch (err) {
     const detail = (err as Error).message;
@@ -399,6 +549,52 @@ async function run(draft: GoalDraft): Promise<void> {
   } finally {
     clearTimeout(timer);
     draft.abort = null;
+  }
+}
+
+/**
+ * The opening message for a chat that does not exist yet.
+ *
+ * Every other draft in this module belongs to a conversation: it is keyed by one, streamed
+ * onto that conversation's activity feed, and acknowledged against it. A New Chat given a
+ * goal has none of that — ChatGPT assigns an id only once a message has been sent, which is
+ * the very message being asked for here — so this one is a plain request and a plain answer,
+ * awaited by the page that will type it.
+ *
+ * It is deliberately not idempotent, because there is nothing yet to key idempotency to. The
+ * page holds that end: one save, one call, and the result goes into an empty composer.
+ */
+export async function draftOpeningMessage(
+  objective: string
+): Promise<{ reply: string; model: string } | { error: string }> {
+  const goal = objective.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+  if (!goal) return { error: 'no_objective' };
+  const key = await getSecret('openRouterApiKey');
+  if (!key) return { error: 'no_api_key' };
+  const model = getConfig().goal.model;
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const decision = await requestGoalDecision({
+      key,
+      model,
+      system: [GOAL_OBJECTIVE_SYSTEM_PROMPT, goalObjectiveMessage(goal)],
+      messages: [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
+      signal: abort.signal
+    });
+    if (decision.action === 'http') return { error: decision.error };
+    if (decision.action === 'invalid') return { error: decision.error };
+    // Stopping before the first word has been said is the model refusing the goal rather
+    // than meeting it, and an empty opening message would leave somebody looking at a chat
+    // that never started with nothing on screen to say why.
+    if (decision.action === 'stop') return { error: 'nothing_to_open_with' };
+    logInfo(`goal: drafted an opening message of ${decision.reply.length} characters with ${model}`);
+    return { reply: humanReply(decision.reply), model };
+  } catch (err) {
+    const detail = (err as Error).message;
+    return { error: abort.signal.aborted ? 'timeout_or_cancelled' : `request_failed: ${detail}` };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -459,6 +655,108 @@ async function boundedResponseText(response: Response, maxBytes: number): Promis
   }
 }
 
+interface GoalCompletion {
+  text: string;
+  /** Compatibility seam for the pre-structured SSE tests/older gateways. */
+  legacy: boolean;
+}
+
+/** Reads the structured non-streaming response OpenRouter was asked for, under a hard cap. */
+async function readGoalCompletion(
+  response: Response,
+  publish?: (text: string) => void
+): Promise<GoalCompletion> {
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('text/event-stream')) {
+    // Older gateways and retained parser regressions can still answer in the previous shape.
+    // The normalizer below applies stricter sentinel/control-token rules to this path.
+    if (!response.body) return { text: '', legacy: true };
+    return { text: await readStream(response.body, publish), legacy: true };
+  }
+
+  const raw = await boundedResponseText(response, MAX_GOAL_BODY_BYTES);
+  let parsed: unknown;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    throw new Error('malformed_completion_response');
+  }
+  if (parsed && typeof parsed === 'object' && 'error' in parsed && (parsed as { error?: unknown }).error) {
+    throw new Error('provider_completion_error');
+  }
+  const choices = parsed && typeof parsed === 'object' ? (parsed as { choices?: unknown }).choices : null;
+  const choice = Array.isArray(choices) ? choices[0] : null;
+  const message = choice && typeof choice === 'object' ? (choice as { message?: unknown }).message : null;
+  const content = message && typeof message === 'object' ? (message as { content?: unknown }).content : null;
+  if (typeof content !== 'string') throw new Error('malformed_completion_response');
+  if (content.length > MAX_MESSAGE_CHARS + 2_048) throw new Error('reply_too_long');
+  return { text: content, legacy: false };
+}
+
+type GoalDecision =
+  | { action: 'stop' }
+  | { action: 'continue'; reply: string }
+  | { action: 'invalid'; error: string };
+
+/** Removes provider/tokenizer wrappers while preserving the proposed human message itself. */
+function cleanGoalReply(value: string): { text: string; hadControl: boolean } {
+  const normalized = value.normalize('NFKC');
+  const withoutInvisible = normalized.replace(/[\u0000\u200B-\u200D\u2060\uFEFF]/g, '');
+  const withoutControl = withoutInvisible.replace(MODEL_CONTROL_TOKEN, '');
+  return { text: withoutControl.trim(), hadControl: withoutControl !== withoutInvisible };
+}
+
+/**
+ * Converts untrusted model output into the only two states the browser may act on.
+ *
+ * Production responses must be strict JSON. Legacy SSE remains readable for compatibility,
+ * but is fail-closed around the stop sentinel: `NO_REPLY` anywhere means stop, so scratchpad
+ * prefixes such as "Counting flush: NO_REPLY" can never become a user message. Raw tokenizer
+ * markers are removed; an empty or still-marked result is refused rather than typed.
+ */
+function normalizeGoalDecision(raw: string, legacy: boolean): GoalDecision {
+  const trimmed = raw.trim();
+  if (!trimmed) return { action: 'invalid', error: 'empty_reply' };
+
+  if (legacy) {
+    if (NO_REPLY_TOKEN.test(trimmed) || NO_REPLY.test(trimmed)) return { action: 'stop' };
+    const cleaned = cleanGoalReply(trimmed);
+    if (!cleaned.text) return { action: 'invalid', error: cleaned.hadControl ? 'control_tokens_only' : 'empty_reply' };
+    if (cleaned.text.includes('<|') || cleaned.text.includes('|>') || UNSAFE_REASONING_TAG.test(cleaned.text)) {
+      return { action: 'invalid', error: 'unsafe_control_tokens' };
+    }
+    return { action: 'continue', reply: cleaned.text };
+  }
+
+  let decision: unknown;
+  try {
+    decision = JSON.parse(trimmed);
+  } catch {
+    return { action: 'invalid', error: 'invalid_goal_decision_json' };
+  }
+  if (!decision || typeof decision !== 'object' || Array.isArray(decision)) {
+    return { action: 'invalid', error: 'invalid_goal_decision_schema' };
+  }
+  const object = decision as Record<string, unknown>;
+  if (Object.keys(object).some((key) => key !== 'action' && key !== 'reply')) {
+    return { action: 'invalid', error: 'invalid_goal_decision_schema' };
+  }
+  if ((object.action !== 'stop' && object.action !== 'continue') || typeof object.reply !== 'string') {
+    return { action: 'invalid', error: 'invalid_goal_decision_schema' };
+  }
+  if (object.action === 'stop') return { action: 'stop' };
+  // A continue decision that leaks the stop protocol is ambiguous. Stopping is the only safe
+  // interpretation: it spends no prompt and cannot make ChatGPT act on internal machinery.
+  if (NO_REPLY_TOKEN.test(object.reply) || NO_REPLY.test(object.reply)) return { action: 'stop' };
+  const cleaned = cleanGoalReply(object.reply);
+  if (!cleaned.text) return { action: 'invalid', error: cleaned.hadControl ? 'control_tokens_only' : 'empty_reply' };
+  if (cleaned.text.includes('<|') || cleaned.text.includes('|>') || UNSAFE_REASONING_TAG.test(cleaned.text)) {
+    return { action: 'invalid', error: 'unsafe_control_tokens' };
+  }
+  if (cleaned.text.length > MAX_MESSAGE_CHARS) return { action: 'invalid', error: 'reply_too_long' };
+  return { action: 'continue', reply: cleaned.text };
+}
+
 /**
  * Reads an SSE completion stream, publishing as it goes.
  *
@@ -467,7 +765,10 @@ async function boundedResponseText(response: Response, maxBytes: number): Promis
  * of every chunk is carried into the next one; the version that assumed chunk boundaries were
  * line boundaries dropped whichever token happened to straddle one.
  */
-async function readStream(body: ReadableStream<Uint8Array>, draft: GoalDraft): Promise<string> {
+async function readStream(
+  body: ReadableStream<Uint8Array>,
+  publish?: (text: string) => void
+): Promise<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffered = '';
@@ -512,7 +813,7 @@ async function readStream(body: ReadableStream<Uint8Array>, draft: GoalDraft): P
     if (text.length + delta.length > MAX_MESSAGE_CHARS) throw new Error('reply_too_long');
     text += delta;
     // Published as it arrives: this is what the panel above the composer is streaming.
-    if (drafts.get(draft.conversationId) === draft) draft.text = text;
+    publish?.(text);
     return false;
   };
   try {

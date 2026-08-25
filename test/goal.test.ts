@@ -47,6 +47,13 @@ function stream(chunks: string[]): Response {
 
 const delta = (text: string): string => `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n`;
 
+/** The non-streaming strict response shape requested from OpenRouter in production. */
+function decision(action: 'stop' | 'continue', reply = ''): Response {
+  return Response.json({
+    choices: [{ message: { content: JSON.stringify({ action, reply }) } }]
+  });
+}
+
 /** Waits for a draft to leave the two stages that mean "still working". */
 async function settled(conversationId: string): Promise<NonNullable<ReturnType<typeof goal.goalViewFor>>> {
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -74,7 +81,7 @@ beforeEach(async () => {
   goal.resetGoalStateForTests();
   await saveConfig({
     ...defaultConfig(),
-    goal: { enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' }
+    goal: { ...defaultConfig().goal, enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' }
   });
   await setSecret('openRouterApiKey', 'sk-or-test');
 });
@@ -89,15 +96,15 @@ describe('the instruction the goal model is given', () => {
    * conversation — "the assistant should now implement X" — which reads as a review the
    * moment it lands in somebody's composer.
    */
-  it('makes the model the user, with a register and a way to stop', () => {
+  it('stops on a completion claim and continues only explicit requested remainders', () => {
     const prompt = goal.goalSystemPrompt();
-    expect(prompt).toContain('You are the user in this conversation, not an assistant.');
-    expect(prompt).toContain('lowercase, casual, short');
+    expect(prompt).toContain('Your default action is to stop.');
+    expect(prompt).toContain('If ChatGPT says "done", it is time to stop.');
+    expect(prompt).toContain('Treat that completion claim as authoritative.');
+    expect(prompt).toContain('Continue only when the latest assistant message explicitly says');
+    expect(prompt).toContain('Never create a new requirement.');
     expect(prompt).toContain('NO_REPLY');
-    // Stopping is given a positive value rather than being an exception, because a model
-    // that treats silence as failure invents work to avoid it.
-    expect(prompt).toContain('NO_REPLY is the right answer whenever the work is done');
-    expect(prompt).toContain('never say "the assistant should"');
+    expect(prompt).toContain('When in doubt, output NO_REPLY.');
   });
 });
 
@@ -192,6 +199,16 @@ describe('what leaves this machine', () => {
   });
 
   it('sends the whole conversation with the instruction in front of it', async () => {
+    const customPrompt = 'CUSTOM GOAL PROMPT: stop with NO_REPLY; otherwise name the missing requested item.';
+    await saveConfig({
+      ...defaultConfig(),
+      goal: {
+        ...defaultConfig().goal,
+        enabled: true,
+        model: 'deepseek/deepseek-v4-flash',
+        prompt: customPrompt
+      }
+    });
     const session = await createSession({ title: 'goal', conversationId: 'c-goal-2' });
     await appendEvent(session.id, {
       time: 1_000,
@@ -210,7 +227,7 @@ describe('what leaves this machine', () => {
     let sent: any = null;
     globalThis.fetch = (async (url: string, init: RequestInit) => {
       sent = { url, headers: init.headers, body: JSON.parse(String(init.body)) };
-      return stream([delta('what about the tests'), 'data: [DONE]\n']);
+      return decision('continue', 'what about the tests');
     }) as never;
 
     goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-goal-2', turnId: 'g-1' });
@@ -223,13 +240,21 @@ describe('what leaves this machine', () => {
     expect((sent.headers as Record<string, string>).authorization).toBe('Bearer sk-or-test');
     expect(sent.body.model).toBe('deepseek/deepseek-v4-flash');
     expect(sent.body.messages[0].role).toBe('system');
-    expect(sent.body.messages.slice(1)).toEqual([
+    expect(sent.body.messages[0].content).toBe(customPrompt);
+    expect(sent.body.messages[1]).toMatchObject({ role: 'system' });
+    expect(sent.body.messages[1].content).toContain('response schema');
+    expect(sent.body.messages.slice(2)).toEqual([
       { role: 'user', content: 'build the parser' },
       { role: 'assistant', content: 'parser written, tests pending' }
     ]);
-    // `default` means "send nothing and let the provider decide", which is not the same as
-    // sending an effort the model may not have.
-    expect(sent.body.reasoning).toBeUndefined();
+    expect(sent.body.stream).toBe(false);
+    expect(sent.body.reasoning).toEqual({ exclude: true });
+    expect(sent.body.response_format).toMatchObject({
+      type: 'json_schema',
+      json_schema: { name: 'goal_decision', strict: true }
+    });
+    expect(sent.body.plugins).toEqual([{ id: 'response-healing' }]);
+    expect(sent.body.provider).toEqual({ require_parameters: true });
   });
 
   it('does not ask OpenRouter to invent a continuation when no user goal was recorded', async () => {
@@ -362,7 +387,7 @@ describe('what leaves this machine', () => {
   it('asks for a reasoning effort only when one was chosen', async () => {
     await saveConfig({
       ...defaultConfig(),
-      goal: { enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'high' }
+      goal: { ...defaultConfig().goal, enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'high' }
     });
     const session = await createSession({ title: 'goal', conversationId: 'c-goal-3' });
     await appendEvent(session.id, {
@@ -375,12 +400,12 @@ describe('what leaves this machine', () => {
     let body: any = null;
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
       body = JSON.parse(String(init.body));
-      return stream([delta('next bit please'), 'data: [DONE]\n']);
+      return decision('continue', 'next bit please');
     }) as never;
 
     goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-goal-3', turnId: 'g-1' });
     await settled('c-goal-3');
-    expect(body.reasoning).toEqual({ effort: 'high' });
+    expect(body.reasoning).toEqual({ effort: 'high', exclude: true });
   });
 });
 
@@ -470,19 +495,60 @@ describe('the reply', () => {
     expect(view.reply).toBe('');
   });
 
-  /**
-   * Matched on the whole trimmed reply, never searched for: a model explaining *when* it
-   * would answer NO_REPLY must not thereby end the run.
-   */
-  it('does not stop because the words appear inside a real message', async () => {
+  /** Protocol words are never safe composer prose; ambiguity stops instead of self-prompting. */
+  it('fails closed when legacy output wraps NO_REPLY in scratchpad prose', async () => {
     const sessionId = await seed('c-mentions');
     globalThis.fetch = (async () =>
-      stream([delta('dont write NO_REPLY until the tests pass'), 'data: [DONE]\n'])) as never;
+      stream([delta('⑥ Counting flush: ~50 NO_REPLY'), 'data: [DONE]\n'])) as never;
 
     goal.startGoalDraft({ sessionId, conversationId: 'c-mentions', turnId: 'g-1' });
     const view = await settled('c-mentions');
+    expect(view.stage).toBe('no-reply');
+    expect(view.reply).toBe('');
+  });
+
+  it('accepts a strict structured continuation and strips tokenizer wrappers', async () => {
+    const sessionId = await seed('c-structured-continue');
+    globalThis.fetch = (async () => decision('continue', '<|begin_of_sentence|>what about the tests')) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-structured-continue', turnId: 'g-1' });
+    const view = await settled('c-structured-continue');
     expect(view.stage).toBe('ready');
-    expect(view.reply).toBe(goal.humanReply('dont write NO_REPLY until the tests pass'));
+    expect(view.reply).toBe(goal.humanReply('what about the tests'));
+    expect(view.reply).not.toContain('<|');
+  });
+
+  it('accepts a strict structured stop decision', async () => {
+    const sessionId = await seed('c-structured-stop');
+    globalThis.fetch = (async () => decision('stop')) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-structured-stop', turnId: 'g-1' });
+    const view = await settled('c-structured-stop');
+    expect(view.stage).toBe('no-reply');
+    expect(view.reply).toBe('');
+  });
+
+  it('never types a structured reply made only of tokenizer control markers', async () => {
+    const sessionId = await seed('c-control-only');
+    globalThis.fetch = (async () => decision('continue', '<|begin_of_sentence|>')) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-control-only', turnId: 'g-1' });
+    const view = await settled('c-control-only');
+    expect(view.stage).toBe('failed');
+    expect(view.error).toBe('control_tokens_only');
+    expect(view.reply).toBe('');
+  });
+
+  it('rejects non-schema content in a normal OpenRouter completion envelope', async () => {
+    const sessionId = await seed('c-non-schema');
+    globalThis.fetch = (async () =>
+      Response.json({ choices: [{ message: { content: 'random provider scratchpad' } }] })) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-non-schema', turnId: 'g-1' });
+    const view = await settled('c-non-schema');
+    expect(view.stage).toBe('failed');
+    expect(view.error).toBe('invalid_goal_decision_json');
+    expect(view.reply).toBe('');
   });
 
   it('accepts the stopping word however the model punctuated it', async () => {
@@ -1073,5 +1139,179 @@ describe('the message a person would have typed', () => {
     expect(view.stage).toBe('ready');
     expect(view.reply).not.toMatch(/[—–]/);
     expect(view.reply).toBe(goal.humanReply('the tests still fail — look at the id-less sections'));
+  });
+});
+
+/**
+ * A chat with a specific goal is the same engine pointed the other way.
+ *
+ * The ordinary loop defaults to silence, because in a normal chat the request is whatever
+ * the user last typed and inventing more of it is the failure mode. A goal inverts that: the
+ * user named the finish line up front and handed the wheel over, so the loop keeps talking
+ * until the line is crossed — including, uniquely, when nothing has been said yet at all.
+ */
+describe('a chat driven towards a specific goal', () => {
+  /** The system messages one request was actually built from, in order. */
+  function capture(): { seen: { role: string; content: string }[] } {
+    const box = { seen: [] as { role: string; content: string }[] };
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { messages: { role: string; content: string }[] };
+      box.seen = body.messages;
+      return decision('continue', 'the migration is still missing. add it and run the suite');
+    }) as never;
+    return box;
+  }
+
+  it('swaps the continuation gate for the goal, and puts the goal itself in the prompt', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-obj-1' });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'start on the port', truncated: false, chars: 17 }
+    });
+    goal.setGoalObjective('c-obj-1', 'port the whole module to typescript and make the suite green');
+    const box = capture();
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-obj-1', turnId: 'g-obj-1' });
+    const view = await settled('c-obj-1');
+
+    expect(view.stage).toBe('ready');
+    const system = box.seen.filter((message) => message.role === 'system').map((message) => message.content);
+    expect(system[0]).toContain('keep prompting ChatGPT until the goal stated below is reached');
+    expect(system[1]).toContain('port the whole module to typescript and make the suite green');
+    // The standing instruction is the *other* mode's, and sending both would give the model
+    // one prompt telling it to default to stopping and another telling it to default to going.
+    expect(system.join('\n')).not.toContain('Your default action is to stop.');
+    expect(box.seen.at(-1)).toEqual({ role: 'user', content: 'start on the port' });
+  });
+
+  /**
+   * The one case the gate refuses outright. `no_conversation` exists because a half-recovered
+   * recording can hold assistant prose with no user row behind it, and asking a model to
+   * continue that is asking it to invent the request. A goal *is* the request, written down
+   * before the chat existed, so the same emptiness means the opposite thing.
+   */
+  it('writes the first message of a chat that has said nothing yet', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-obj-empty' });
+    goal.setGoalObjective('c-obj-empty', 'get the release out');
+    const box = capture();
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-obj-empty', turnId: 'g-obj-empty' });
+    const view = await settled('c-obj-empty');
+
+    expect(view.stage).toBe('ready');
+    expect(view.error).toBeNull();
+    expect(box.seen.at(-1)).toEqual({
+      role: 'user',
+      content: 'The conversation has not started yet. Write its opening message.'
+    });
+  });
+
+  it('refuses the same empty conversation when there is no goal to supply the request', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-obj-none' });
+    globalThis.fetch = (async () => decision('continue', 'should never be asked')) as never;
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-obj-none', turnId: 'g-obj-none' });
+    const view = await settled('c-obj-none');
+
+    expect(view.stage).toBe('failed');
+    expect(view.error).toBe('no_conversation');
+  });
+
+  /**
+   * A goal has exactly one ending. Left in place it would put the chat straight back into
+   * the loop on its next turn, against a finish line it has already crossed.
+   */
+  it('clears the goal once the model says it is reached', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-obj-done' });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'ship it', truncated: false, chars: 7 }
+    });
+    goal.setGoalObjective('c-obj-done', 'get the release out');
+    globalThis.fetch = (async () => decision('stop')) as never;
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-obj-done', turnId: 'g-obj-done' });
+    const view = await settled('c-obj-done');
+
+    expect(view.stage).toBe('no-reply');
+    expect(goal.goalObjectiveFor('c-obj-done')).toBe('');
+  });
+
+  it('trims and bounds what it stores, and reports back what it stored', () => {
+    expect(goal.setGoalObjective('c-obj-trim', '   finish the docs   ')).toBe('finish the docs');
+    expect(goal.goalObjectiveFor('c-obj-trim')).toBe('finish the docs');
+    expect(goal.setGoalObjective('c-obj-trim', 'x'.repeat(9_000))).toHaveLength(4_000);
+    expect(goal.setGoalObjective('c-obj-trim', '  ')).toBe('');
+    expect(goal.goalObjectiveFor('c-obj-trim')).toBe('');
+  });
+
+  /**
+   * A draft is frozen with the goal it was started under, so replacing the goal has to reach
+   * the request already in flight — otherwise the last thing typed into the chat is a message
+   * written against the goal the user just replaced.
+   */
+  it('retires the draft in flight when the goal changes', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-obj-swap' });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'go', truncated: false, chars: 2 }
+    });
+    globalThis.fetch = (async () => new Promise<Response>(() => undefined)) as never;
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-obj-swap', turnId: 'g-obj-swap' });
+    expect(goal.goalViewFor('c-obj-swap')).not.toBeNull();
+    expect(goal.retireGoalDraftsFor('c-obj-swap')).toBe(true);
+    expect(goal.goalViewFor('c-obj-swap')).toBeNull();
+    // …and only that chat's, and only once.
+    expect(goal.retireGoalDraftsFor('c-obj-swap')).toBe(false);
+  });
+});
+
+/**
+ * The opening message of a chat ChatGPT has not named yet.
+ *
+ * No conversation id exists to key a draft to, because sending this very message is what
+ * makes ChatGPT issue one. It therefore runs outside the draft map entirely — and still has
+ * to go through the same protocol guard, the same caps and the same typing pass as every
+ * other message this app puts into somebody's chat.
+ */
+describe('opening a chat on a goal', () => {
+  it('writes the first message from the goal alone', async () => {
+    let seen: { role: string; content: string }[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      seen = (JSON.parse(String(init.body)) as { messages: typeof seen }).messages;
+      return decision('continue', 'rewrite the parser in rust — start with the lexer');
+    }) as never;
+
+    const drafted = await goal.draftOpeningMessage('  rewrite the parser in rust  ');
+
+    expect(drafted).toEqual({
+      reply: goal.humanReply('rewrite the parser in rust — start with the lexer'),
+      model: 'deepseek/deepseek-v4-flash'
+    });
+    expect(seen[0]!.content).toContain('keep prompting ChatGPT until the goal stated below is reached');
+    expect(seen[1]!.content).toContain('rewrite the parser in rust');
+    // Trimmed on the way in, so stray whitespace is not part of the goal it prompts against.
+    expect(seen[1]!.content).not.toContain('  rewrite');
+    expect(seen.at(-1)).toEqual({
+      role: 'user',
+      content: 'The conversation has not started yet. Write its opening message.'
+    });
+  });
+
+  /**
+   * Stopping before a word has been said is the model refusing the goal, not meeting it.
+   * An empty opening message would leave somebody looking at a chat that never started.
+   */
+  it('refuses to open with nothing', async () => {
+    globalThis.fetch = (async () => decision('stop')) as never;
+    expect(await goal.draftOpeningMessage('finish it')).toEqual({ error: 'nothing_to_open_with' });
+    expect(await goal.draftOpeningMessage('   ')).toEqual({ error: 'no_objective' });
   });
 });

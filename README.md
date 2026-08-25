@@ -146,9 +146,10 @@ Compact & Resume asks the current chat to write a handoff, stores it locally, op
 ### The goal loop (optional, off by default)
 
 Long tasks are mostly you typing "carry on" for an hour. With the goal loop on, a second model
-reads each answer ChatGPT finishes and writes that message for you — in your register, lowercase
-and casual — until it decides the thing you originally asked for is done, at which point it
-writes nothing at all and the loop simply stops.
+reads each answer ChatGPT finishes. It sends a short continuation only when the answer explicitly
+identifies requested work that is still missing; when ChatGPT reports the task done, the loop
+returns `NO_REPLY`, types nothing and stops. Completion is the default, so the second model does
+not invent extra testing, polish or follow-up after a finished task.
 
 It runs only when a turn has genuinely finished. The extension waits for the stop control to be
 gone, the answer to stop growing, the tool rail to stop moving and the app to report no local
@@ -156,15 +157,35 @@ call still running, all at once and held for eight seconds — the same barrier 
 waits on, and for the same reason: a message sent into a turn that is still working reads as a
 correction to it.
 
+**Give one chat a specific goal.** The gear beside the composer has an **add specific goal**
+line under the Goal switch. Write what the chat has to reach, press Save, and the same loop
+prompts towards that goal until it is reached — then stops and clears it. A goal is enough on
+its own: you do not have to turn the standing switch on as well. In a **New Chat** it also
+writes the first message, so a goal is all you have to type. Goals are per chat and live in
+memory only, so restarting the app forgets them. A worker chat spawned by an agent run cannot
+be given one — its prime already writes its messages, and the sheet says so.
+
+The loop also answers a turn ChatGPT cut short by itself, not only one it finished cleanly. A
+turn you stopped by hand is still left alone: you are about to type something yourself.
+
 What is sent is only your messages and ChatGPT's final answers. Tool calls, their results and
 the commentary a turn produces while it works never leave the machine; a recorded session holds
 file contents and command output, and none of that belongs in a chat message.
 
 It needs an **OpenRouter API key**, which is stored encrypted alongside the app's other secrets
-and never reaches the browser: the request is made by the app. Set the key, the model and the
-reasoning level under **Chat → Settings**; the model picker lists OpenRouter's catalogue newest
-first, twenty at a time. The switch is also on the gear beside the ChatGPT composer, together
-with automatic compaction.
+and never reaches the browser: the request is made by the app. Set the key, model, reasoning level
+and editable system prompt under **Chat → Settings**; the prompt editor includes a one-click
+restore to the strict shipped default. The model picker lists OpenRouter's catalogue newest first,
+twenty at a time. The switch is also on the gear beside the ChatGPT composer, together with
+automatic compaction. A finished or failed Goal status stays visible above the composer for the
+finished turn, can be dismissed immediately with its top-right ×, and clears automatically when
+you send the next prompt, open New Chat or switch conversations.
+
+Goal decisions use OpenRouter strict JSON Schema with parameter-aware provider routing,
+reasoning excluded from the returned response, and Response Healing for malformed JSON. The app
+validates the result again locally: wrapped `NO_REPLY`, tokenizer markers such as
+`<|begin_of_sentence|>`, reasoning tags, malformed schemas and empty normalized replies stop or
+fail closed and are never typed into ChatGPT.
 
 This spends your OpenRouter credit on every finished turn, and it sends messages to ChatGPT
 without asking each time. Turn it off when you are not watching. The terms note in
