@@ -1511,7 +1511,6 @@ describe('through the MCP endpoint', () => {
     const seq = ++evidenceSeq;
     const requestId = `wfr_agents_${seq}`;
     const pending = replyWithRequestId(requestId, action, args);
-    await waitForRunningToolCall();
     await recordChatObservations(conversationId, [
       { kind: 'turn_start', time: Date.now(), turnId: `t-${seq}` },
       {
@@ -1538,7 +1537,6 @@ describe('through the MCP endpoint', () => {
     const seq = ++evidenceSeq;
     const requestId = `wfr_agents_${seq}`;
     const pending = agentsWithRequestId(requestId, action, args);
-    await waitForRunningToolCall();
     await recordChatObservations(conversationId, [
       { kind: 'turn_start', time: Date.now(), turnId: `t-${seq}` },
       {
