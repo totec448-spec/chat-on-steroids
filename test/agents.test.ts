@@ -9,7 +9,6 @@
 
 import http from 'node:http';
 import { promises as fs } from 'node:fs';
-import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Caller } from '../src/main/agents.js';
 
@@ -76,6 +75,7 @@ const {
   workerRevivalClaimed
 } = await import('../src/main/agents.js');
 const { startMcpServer } = await import('../src/main/mcp/server.js');
+const { runningToolCalls } = await import('../src/main/mcp/call-context.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { recordChatObservations, resetRecorderForTests } = await import('../src/main/session/recorder.js');
@@ -1471,6 +1471,14 @@ describe('through the MCP endpoint', () => {
 
   let evidenceSeq = 0;
 
+  const waitForRunningToolCall = async (timeoutMs = 5_000): Promise<void> => {
+    const deadline = Date.now() + timeoutMs;
+    while (runningToolCalls() === 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(runningToolCalls()).toBeGreaterThan(0);
+  };
+
   const callTool = async (name: string, args: unknown): Promise<string> => {
     const reply = await post({ jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: { name, arguments: args } });
     return ((reply.result?.content ?? []) as Array<{ text?: string }>).map((part) => part.text ?? '').join('\n');
@@ -1503,7 +1511,7 @@ describe('through the MCP endpoint', () => {
     const seq = ++evidenceSeq;
     const requestId = `wfr_agents_${seq}`;
     const pending = replyWithRequestId(requestId, action, args);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await waitForRunningToolCall();
     await recordChatObservations(conversationId, [
       { kind: 'turn_start', time: Date.now(), turnId: `t-${seq}` },
       {
@@ -1530,7 +1538,7 @@ describe('through the MCP endpoint', () => {
     const seq = ++evidenceSeq;
     const requestId = `wfr_agents_${seq}`;
     const pending = agentsWithRequestId(requestId, action, args);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    await waitForRunningToolCall();
     await recordChatObservations(conversationId, [
       { kind: 'turn_start', time: Date.now(), turnId: `t-${seq}` },
       {
@@ -1909,7 +1917,6 @@ describe('through the MCP endpoint', () => {
 
     const started = Date.now();
     const shell = `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
-    const heldMarker = path.join(dir, 'held-call-started.txt');
     const pending = post(
       {
         jsonrpc: '2.0',
@@ -1918,7 +1925,7 @@ describe('through the MCP endpoint', () => {
         params: {
           name: 'exec_command',
           arguments: {
-            cmd: "Set-Content -LiteralPath 'held-call-started.txt' -Value 'started' -NoNewline; Start-Sleep -Milliseconds 750; Write-Output 'held-call-done'",
+            cmd: "Start-Sleep -Milliseconds 750; Write-Output 'held-call-done'",
             workdir: dir,
             shell,
             yield_time_ms: 30_000
@@ -1927,16 +1934,8 @@ describe('through the MCP endpoint', () => {
       },
       { 'x-request-id': `${requestId}/relay` }
     );
-    const heldDeadline = Date.now() + 20_000;
-    while (Date.now() < heldDeadline) {
-      try {
-        await fs.access(heldMarker);
-        break;
-      } catch {
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
-    }
-    await expect(fs.readFile(heldMarker, 'utf8')).resolves.toContain('started');
+    await waitForRunningToolCall();
+    expect(runningToolCalls('c-worker-1')).toBeGreaterThan(0);
 
     expect(noteWorkerRevived('worker-1', 'c-worker-1', revival.messageIds)).toBe(true);
     const offeredAt = snapshotSwarm()!.agents.find((entry) => entry.info.id === 'worker-1')!.queue[0]!.offeredAt!;

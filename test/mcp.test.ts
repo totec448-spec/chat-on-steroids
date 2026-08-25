@@ -2905,7 +2905,7 @@ describe('exec_command and write_stdin', () => {
 
     const first = await core('tools/call', {
       name: 'write_stdin',
-      arguments: { session_id: sessionId, chars: '\r', yield_time_ms: 1_000 }
+      arguments: { session_id: sessionId, chars: '\r', yield_time_ms: 5_000 }
     });
     expect(first.body.result?.isError).not.toBe(true);
     expect(textOf(first)).toContain('first=raw-no-newline');
