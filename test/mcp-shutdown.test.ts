@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { validateNewRoot } from '../src/main/sandbox.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { startMcpServer, type McpEndpoint } from '../src/main/mcp/server.js';
 import { initSessionStore, resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
@@ -28,14 +29,16 @@ it('drains an accepted MCP mutation before closing its response socket', async (
   initSessionStore(dir);
   initDurableStore(dir);
   const cfg = defaultConfig();
+  const rootPath = await validateNewRoot(dir, []);
+  const roots = [{ name: 'probe', path: rootPath }];
   await saveConfig({
     ...cfg,
-    roots: [{ name: 'probe', path: dir }],
+    roots,
     readOnly: false,
     capabilities: { ...cfg.capabilities, command: true }
   });
   endpoint = await startMcpServer(() => ({
-    roots: [{ name: 'probe', path: dir }],
+    roots,
     caps: { ...cfg.capabilities, command: true },
     readOnly: false,
     sessionTools: false,
@@ -101,9 +104,11 @@ it('does not put a force-close deadline on an ordinary endpoint stop', async () 
   initSessionStore(dir);
   initDurableStore(dir);
   const cfg = defaultConfig();
-  await saveConfig({ ...cfg, roots: [{ name: 'probe', path: dir }] });
+  const rootPath = await validateNewRoot(dir, []);
+  const roots = [{ name: 'probe', path: rootPath }];
+  await saveConfig({ ...cfg, roots });
   endpoint = await startMcpServer(() => ({
-    roots: [{ name: 'probe', path: dir }],
+    roots,
     caps: cfg.capabilities,
     readOnly: true,
     sessionTools: false,

@@ -65,7 +65,7 @@ const MAX_LISTED_SESSIONS = 200;
 /** Bound for legacy/model-facing full-list scans. Identity and retention use the uncapped cached catalog. */
 const MAX_SCANNED_SESSIONS = 5_000;
 /** Keep the uncapped authoritative scan fast without opening thousands of files at once. */
-const ATTACHMENT_CATALOG_READ_CONCURRENCY = 32;
+const ATTACHMENT_CATALOG_READ_CONCURRENCY = 64;
 
 let root = '';
 /**
