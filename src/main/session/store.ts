@@ -64,6 +64,8 @@ const MAX_LINE_BYTES = 512 * 1024;
 const MAX_LISTED_SESSIONS = 200;
 /** Bound for legacy/model-facing full-list scans. Identity and retention use the uncapped cached catalog. */
 const MAX_SCANNED_SESSIONS = 5_000;
+/** Keep the uncapped authoritative scan fast without opening thousands of files at once. */
+const ATTACHMENT_CATALOG_READ_CONCURRENCY = 32;
 
 let root = '';
 /**
@@ -1444,12 +1446,16 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
         else throw error;
       }
       const catalog = newAttachmentCatalog();
-      for (const name of names) {
-        if (!/^[0-9a-z-]{8,64}$/i.test(name)) continue;
-        const live = open.get(name);
-        const snapshot = live ? null : await readDurableSnapshot(name).catch(() => null);
-        const summary = live?.summary ?? snapshot?.summary ?? null;
-        if (summary) indexSummary(catalog, summary);
+      const candidates = names.filter((name) => /^[0-9a-z-]{8,64}$/i.test(name));
+      for (let offset = 0; offset < candidates.length; offset += ATTACHMENT_CATALOG_READ_CONCURRENCY) {
+        const summaries = await Promise.all(
+          candidates.slice(offset, offset + ATTACHMENT_CATALOG_READ_CONCURRENCY).map(async (name) => {
+            const live = open.get(name);
+            const snapshot = live ? null : await readDurableSnapshot(name).catch(() => null);
+            return live?.summary ?? snapshot?.summary ?? null;
+          })
+        );
+        for (const summary of summaries) if (summary) indexSummary(catalog, summary);
       }
       catalog.orderedIds = [...catalog.summaries.values()]
         .sort(compareSummariesNewestFirst)

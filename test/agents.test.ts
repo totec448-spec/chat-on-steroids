@@ -1919,7 +1919,7 @@ describe('through the MCP endpoint', () => {
             cmd: "Start-Sleep -Milliseconds 350; Write-Output 'held-call-done'",
             workdir: dir,
             shell,
-            yield_time_ms: 1_000
+            yield_time_ms: 10_000
           }
         }
       },

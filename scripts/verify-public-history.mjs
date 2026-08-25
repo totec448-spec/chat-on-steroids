@@ -82,8 +82,13 @@ function checkHistory() {
   const commits = String(runGit(['rev-list', '--all']).stdout)
     .split(/\r?\n/)
     .filter(Boolean);
+  // pull_request jobs default to a GitHub-generated merge object that can never enter
+  // public history. Its identity belongs to GitHub's test ref, not to the proposed tree.
+  const syntheticPullRequestCommit =
+    process.env.GITHUB_EVENT_NAME === 'pull_request' ? process.env.GITHUB_SHA?.trim() : '';
 
   for (const commit of commits) {
+    if (syntheticPullRequestCommit && commit === syntheticPullRequestCommit) continue;
     const record = String(
       runGit(['show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce%x00%B', commit]).stdout,
     );

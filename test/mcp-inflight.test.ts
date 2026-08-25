@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { validateNewRoot } from '../src/main/sandbox.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import {
   inFlightToolCalls,
@@ -62,10 +63,12 @@ async function serve(): Promise<McpEndpoint> {
   initSessionStore(dir);
   initDurableStore(dir);
   const cfg = defaultConfig();
-  await saveConfig({ ...cfg, roots: [{ name: 'probe', path: dir }], readOnly: false });
+  const rootPath = await validateNewRoot(dir, []);
+  const roots = [{ name: 'probe', path: rootPath }];
+  await saveConfig({ ...cfg, roots, readOnly: false });
   await fs.writeFile(path.join(dir, 'note.txt'), 'hello\n', 'utf8');
   return startMcpServer(() => ({
-    roots: [{ name: 'probe', path: dir }],
+    roots,
     caps: cfg.capabilities,
     readOnly: false,
     sessionTools: false,
