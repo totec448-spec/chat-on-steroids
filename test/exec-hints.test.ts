@@ -611,6 +611,33 @@ describe('saying what to do next', () => {
     expect(execRecoveryHints('a || b', "The token '||' is not a valid statement separator in this version.")).toHaveLength(1);
   });
 
+  it('turns common PowerShell parser diagnostics into a correction at the failure site', () => {
+    const cases = [
+      {
+        command: 'rg -n "unterminated src',
+        output: 'ParserError: The string is missing the terminator: ".\nFullyQualifiedErrorId : TerminatorExpectedAtEndOfString',
+        expected: /balance the quoted argument/i
+      },
+      {
+        command: 'Get-Item -LiteralPath',
+        output: 'ParserError: Missing an argument for parameter LiteralPath.\nFullyQualifiedErrorId : MissingArgument',
+        expected: /supply the missing value/i
+      },
+      {
+        command: 'python - <<EOF',
+        output: 'ParserError: Missing file specification after redirection operator.\nFullyQualifiedErrorId : MissingFileSpecification',
+        expected: /does not support Bash heredocs/i
+      }
+    ];
+
+    for (const item of cases) {
+      const hints = execRecoveryHints(item.command, item.output);
+      expect(hints.join(' '), item.output).toMatch(/PowerShell parsed none of the command/i);
+      expect(hints.join(' '), item.output).toMatch(item.expected);
+      expect(hints.join(' '), item.output).toMatch(/rerun/i);
+    }
+  });
+
   it('stays silent on a shell where the operators work', () => {
     // PowerShell 7 runs `&&` without complaint, so there is no refusal text and no hint. The
     // hint keys off the shell's own error, never off the command containing the operator.
@@ -896,12 +923,16 @@ describe('hinting at a refused line', () => {
     expect(execRecoveryHints('rg -n foo src', 'src/x.ts:4: // the string is missing here')).toHaveLength(0);
   });
 
-  it('does not blame backslash quoting when the command did not contain it', () => {
+  it('does not blame backslash quoting when the command did not contain it, but still explains the parser failure', () => {
     const refusal = [
       'The string is missing the terminator: ".',
       '    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException'
     ].join('\n');
-    expect(execRecoveryHints("Write-Output 'unfinished", refusal)).toHaveLength(0);
+    const hints = execRecoveryHints("Write-Output 'unfinished", refusal);
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).not.toContain('backslash');
+    expect(hints[0]).toMatch(/balance the quoted argument/i);
+    expect(hints[0]).toMatch(/parsed none/i);
   });
 });
 

@@ -4,10 +4,10 @@
  *
  * Two adaptations, both forced by the transport:
  *
- * - Codex's `image_url` keeps its exact `application/octet-stream` MIME. An MCP `image` content
- *   block additionally requires a concrete `mimeType`, so the sniffed format is carried alongside
- *   that upstream data URL for transport. The accepted formats are PNG, JPEG, GIF and WebP, which
- *   matches the format features enabled for Codex's `image` dependency in the current workspace.
+ * - Codex's internal result carries an `image_url`; MCP already has a native `image` content
+ *   block, so the connector sends the bytes once through that transport instead of duplicating
+ *   the same base64 again in structuredContent. The accepted formats are PNG, JPEG, GIF and WebP,
+ *   which matches the format features enabled for Codex's `image` dependency in the current workspace.
  * - `image::load_from_memory` fully decodes the file to prove it is an image. The connector now
  *   does the same semantic check through Sharp/libvips for PNG, JPEG, GIF and WebP, under an
  *   explicit decoded-pixel/memory ceiling so a small compressed file cannot amplify without bound.
@@ -16,10 +16,9 @@
  * the ChatGPT message stream and kills the whole turn, so anything short of proof is a rejection.
  *
  * `MAX_VIEW_IMAGE_BYTES` has no counterpart in Codex, whose only limit is the 512 MiB
- * `read_file` cap. MCP serializes this adapter's image twice (native image content plus the
- * Codex-compatible structured `image_url`), and each copy expands by about 4/3 in base64.
- * The raw-byte ceiling therefore budgets both copies inside an 8 MiB wire envelope instead
- * of pretending an 8 MiB source file is an 8 MiB response.
+ * `read_file` cap. MCP base64 expands the raw bytes by about 4/3, so the raw-byte ceiling
+ * budgets the one native image copy plus ordinary JSON/result metadata inside an 8 MiB wire
+ * envelope instead of pretending an 8 MiB source file is an 8 MiB response.
  */
 
 import sharp from 'sharp';
@@ -42,13 +41,13 @@ export const VIEW_IMAGE_UNSUPPORTED_MESSAGE =
 
 export const VIEW_IMAGE_INVALID_MESSAGE = 'unable to process image: invalid or unsupported image data';
 
-/** Wire budget for both serialized base64 copies plus ordinary JSON/result metadata. */
+/** Wire budget for the serialized base64 image plus ordinary JSON/result metadata. */
 const MAX_VIEW_IMAGE_WIRE_BYTES = 8 * 1024 * 1024;
 const MAX_VIEW_IMAGE_WIRE_OVERHEAD = 64 * 1024;
 /** The connector's raw-image transport limit; see the module comment. */
 export const MAX_VIEW_IMAGE_BYTES = Math.min(
   MAX_IMAGE_BYTES,
-  Math.floor(((MAX_VIEW_IMAGE_WIRE_BYTES - MAX_VIEW_IMAGE_WIRE_OVERHEAD) * 3) / 8)
+  Math.floor(((MAX_VIEW_IMAGE_WIRE_BYTES - MAX_VIEW_IMAGE_WIRE_OVERHEAD) * 3) / 4)
 );
 /** Bound decoded pixels independently of the compressed transport/file ceiling. */
 export const MAX_DECODED_IMAGE_BYTES = 64 * 1024 * 1024;
@@ -170,7 +169,10 @@ export async function viewImage(
 
   let fileBytes: Buffer;
   try {
-    fileBytes = await readFile(path);
+    // Enforce the image transport ceiling on the opened file handle too. The metadata check above
+    // gives the useful error before opening in the common case, while this closes the growth race
+    // between stat and read without ever allocating up to the generic 512 MiB file-read limit.
+    fileBytes = await readFile(path, effectiveMaxBytes);
   } catch (error) {
     throw new ViewImageError(`unable to read image at \`${modelVisiblePath}\`: ${describe(error, path, modelVisiblePath)}`);
   }

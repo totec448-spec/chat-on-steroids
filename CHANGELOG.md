@@ -9,6 +9,171 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.0.1] — 2026-08-25
+
+This is the post-2.0 hardening pass. It is unusually broad because it combines the reusable-worker
+rewrite, a live transcript/Goal investigation, session-store recovery work, the first Computer Use
+overhaul tranche, and an adversarial restart/race audit. The detailed engineering log is in
+`docs/bughunt-2026-08-25.md`.
+
+### Added
+- **Workers are reusable ChatGPT conversations.** A worker that finishes normally now sleeps,
+  preserves its full conversation/history and frees its worker slot. `agents action=message` wakes
+  a sleeping worker in that same chat. If the tab is still open the extension reuses/focuses it;
+  if it was closed the app reopens the exact stored `/c/<conversation>` and types the prime's new
+  instruction as a real user message. Waking requires a free worker slot and fails before queueing
+  or typing when no slot is available. A worker becomes permanently non-revivable only after its
+  recorded context reaches the 400k worker ceiling and it next stops.
+- **Worker revival is crash-safe and durable.** Revival has its own browser command, exact
+  conversation fence, durable lease, receipt replay, app-restart restoration and browser ACK
+  recovery. Browser redemption is now the arbitration cut: once a page owns the durable wake,
+  concurrent MCP liveness cannot steal or duplicate it.
+- **`exec_command` accepts `cmds`** for up to 20 related commands in one shell session, preserving
+  variables/cwd between items and returning labeled per-command exit codes. `max_output_tokens`
+  controls the model-facing output budget, and `write_stdin` keeps the same bounded semantics.
+- **Desktop observations keep immutable recent screenshot frames and UIA snapshots.** Semantic
+  refs point at cached AutomationElement handles scoped to helper generation/snapshot identity,
+  coordinate actions require retained frame identity, and batches expose exact partial-completion
+  and route evidence. Same-call verification can wait for foreground/window/UI conditions and
+  optionally capture the resulting state.
+- **Retained session history is paged in the Chat UI.** The session list now reports the real
+  retained total, loads older pages on scroll and uses cursor deltas for live detail refresh
+  instead of repeatedly resending the same large tail.
+- **Approved roots can be renamed from the Home UI.** The editor survives unrelated renderer
+  pushes, keeps failed drafts for retry and cancels if authoritative state removes or renames the
+  target.
+
+### Changed
+- **Desktop automation's hot path was overhauled without expanding the public two-tool surface.**
+  The helper is prewarmed only when native Desktop capabilities are published, fixed sleeps were
+  removed from common focus/action paths, window/UI/pixel acquisition can use one internal
+  snapshot request, UIA traversal is bounded with TreeWalker + CacheRequest, and read-only window
+  capture tries a background path before any visible-screen fallback.
+- **The tested bundled `tunnel-client` now wins by default.** An explicit configured binary still
+  wins; PATH/common-install copies are fallback only. Tunnel discovery/version checks are cached,
+  and the development bundled path now resolves the repository resource correctly.
+- **Windows command startup is cheaper and more deterministic.** Explicit short yields are honored
+  instead of being clamped to ten seconds, default PowerShell starts without the user profile,
+  shell discovery is memoized, and Java/Go PATH reachability checks are cached against the exact
+  environment while explicit `JAVA_HOME` / `GOROOT` keep priority.
+- **Browser setup now follows actual feature dependency.** The extension is required only when
+  recording or multi-agent is enabled. Durable pairing and live browser presence are separate
+  states, so a stored token alone no longer makes Setup claim the extension is currently connected.
+- **Filesystem-root setup uses the capability set that really needs a root.** Mixed Core/Desktop
+  configurations cannot skip folder approval merely because Desktop is enabled, while genuine
+  screen/control/clipboard-only setups remain allowed without a filesystem root.
+- **The main window adapts to the current Windows work area** instead of forcing a fixed 1080x700
+  non-resizable surface that can exceed small or DPI-scaled displays.
+- **Session retention is continuous rather than startup-only.** It runs immediately, then on a
+  coarse six-hour singleflight interval, honors the current retain-days setting and scans the
+  uncapped attachment catalog instead of an arbitrary first 5,000 directories.
+- **Goal configuration is internally consistent.** Recording-off forces Goal off instead of
+  persisting a combination that cannot ever supply a transcript. A specific goal can still open a
+  New Chat and become its first user message, but an unsent opening goal is never attached to an
+  unrelated existing chat navigated to while the provider request is in flight.
+
+### Fixed
+- **Quitting always quits.** Teardown runs the same ordered phases, but each phase now has its own
+  budget and the sequence always reaches `app.quit()`. Before this, a single task that never
+  settled left an invisible main process running — tray already destroyed, window already gone —
+  still holding the single-instance lock, so every later attempt to start Chat On Steroids did
+  nothing and the only way out was Task Manager.
+- **Terminal sessions no longer outlive the app on Windows.** node-pty's ConPTY backend reports a
+  pid of `0` until its console pipe connects, well after the spawn path recorded it, so every tty
+  session carried pid `0` for life: `list_processes` advertised a pid nobody could act on, and
+  termination skipped `terminateProcessTree` under its own `pid > 0` guard — leaving the shell and
+  its console host alive whenever node-pty had deferred its internal `kill()`. The pid is now read
+  live, and terminating every session at once skips the ones already gone, runs the rest
+  concurrently and no longer abandons the queue behind a single rejection.
+- **Crash recovery no longer trusts stale `meta.json` over newer durable history.** Read-only
+  session listing, handoff lookup and normal reopen paths reconcile event/message high-water state
+  without incorrectly marking historical sessions live.
+- **Request-correlation freshness now behaves like LRU rather than FIFO.** Re-observing a still
+  active request id refreshes its bounded-map order as well as its timestamp, preventing exact
+  ownership from being evicted behind genuinely stale ids.
+- **Expired continuations and worker revivals cannot manufacture a fresh lifetime on restart.**
+  Recovery settles the durable broker/continuation half before pruning transport state and uses a
+  plan -> reconcile -> one durable rewrite -> publish transaction so overlapping traffic cannot
+  persist a half-restored generation. Duplicate same-worker revival rows select the newest valid
+  transport before expiry is applied.
+- **Bridge stop/start no longer leaves stale singleton callbacks active.** Spawn/revive/swarm-end
+  listeners are disposed with the bridge; workers created or woken while the bridge is stopped are
+  replayed only after a fresh start owns the callback again. Retained leased commands also have
+  their original deadline re-armed after restart.
+- **A worker wake cannot be duplicated by browser/MCP overlap.** Existing-tab reuse claims the
+  command before the fallback tab is removed; in-flight MCP calls across the revival ACK cannot
+  consume/re-offer the wake text; wrong-chat and stale-run ACKs fail closed; lost ACKs replay from
+  durable receipts rather than typing a second user message.
+- **Worker finalization retires the right delivery state and preserves final reports.** A settled
+  reusable worker sleeps instead of becoming terminal, stale offered inbox rows do not reinject on
+  the next wake, detached silent workers are maintained periodically even without another MCP
+  ingress, and the run is not released while a final worker report still needs delivery.
+- **App-side browser Disconnect now means disconnect.** The extension cannot silently pair itself
+  again on the next request; only an explicit browser Connect/Retry clears the durable intent latch.
+- **Recovery extension downloads are pinned to the installed app version** instead of following
+  `releases/latest` and potentially manufacturing an app/extension protocol mismatch.
+- **Historical Overwrite no longer fights ChatGPT virtualization while the user scrolls.** Scroll
+  input temporarily freezes presentation rewrites and the first idle repaint anchors/compensates
+  the actual transcript scroller, keeping the visible historical turn stable.
+- **Final assistant turns are recorded and noticed more reliably.** Hidden/background tabs react
+  immediately to the generating -> quiet edge instead of depending on a throttled transcript
+  debounce; Stop removal outside the transcript wakes the recorder; and when healthy Fiber omits
+  `end_turn`, a fresh completed-message action may close the exact terminal sibling only after the
+  quiet window, settled calls and generation ownership all agree. Old Copy buttons, Retry/reused
+  turn ids and earlier siblings cannot certify newer prose.
+- **A transient `interrupted` marker no longer holds a separately proven final response open until
+  the user types again.** The recorded outcome remains interrupted, but exact terminal action
+  evidence can provide the missing boundary. User-pressed Stop remains excluded from Goal.
+- **Only the exact terminal Fiber message is promoted to final.** Commentary or other interim
+  assistant rows remain streaming when a turn ends without terminal evidence, and live assistant
+  chronology uses the local observation clock rather than a skewed ChatGPT `create_time`.
+- **Image/file attachment ids no longer make a real user-text anchor ambiguous.** Overwrite joins
+  only against durable authored user-message ids, preventing attachment objects in the same turn
+  from splitting or misrouting reconstructed activity.
+- **Recorder takeover now removes every ownership channel.** In addition to DOM/window listeners
+  and MutationObservers, the predecessor unregisters `chrome.runtime.onMessage` and
+  `chrome.storage.onChanged`; an `alive=false` recorder cannot answer a health/revival message or
+  repaint after its successor owns the document.
+- **Browser journal loss markers keep exact routing identity.** Queue pressure/rejection gaps retain
+  the source conversation/provisional/agent/command route instead of borrowing another entry's
+  identity, and losses are bucketed per route rather than collapsed across chats/workers.
+- **`view_image` no longer serializes the same base64 twice.** Native MCP image content is the one
+  transported copy, allowing the full bounded image budget without redundant structured output.
+- **Desktop output is bounded where it previously was not.** Clipboard reads are capped per action
+  and in aggregate; `observe what=windows` uses bounded `max_elements`; partial action batches
+  report the exact completed count and failing index.
+- **Ordinary MCP Disconnect cannot force-close an already accepted mutation before its response.**
+  Endpoint stop drains gracefully by default; only final application shutdown opts into the
+  bounded force-close deadline.
+- **Renderer secret/settings races no longer erase newer user input.** API-key fields clear only
+  after successful storage and only if they still contain the submitted snapshot; whitespace-only
+  OpenRouter input cannot remove a stored key; rapid read-only/theme toggles derive from the latest
+  requested settings snapshot rather than stale acknowledged state.
+- **Setup and Chat history no longer pay repeated full metadata scans.** A process-lifetime summary
+  catalog, bounded initial detail tail and sequence cursor deltas keep live refresh proportional to
+  new work while preserving chronological paging across bursts.
+- **Dead/unfinished paths were cleaned up.** The stale `--connect-on-start` self-update handoff was
+  removed because no updater produces it, and seven file-local extension helpers with no normal or
+  reflective caller were deleted.
+- **`exec_command.cmds` no longer trusts command-authored text as batch framing.** Each batch now
+  carries a fresh random framing id, so a command printing text that looks like an exit marker
+  cannot close its section early and corrupt per-command failure classification.
+- **A transient session-root filesystem error cannot poison the process-lifetime session index.**
+  Only a genuinely missing sessions directory is treated as empty; `EBUSY`, `EACCES` and other
+  scan failures fail closed and retry on the next lookup instead of making ownership, retention and
+  latest-handoff discovery blind until restart.
+
+### Validation
+- Release-index gate on 2026-08-25: public-history privacy check and TypeScript typecheck passed,
+  **50 committed Vitest files passed with 1580 passed / 1 skipped**, and `npm run build` produced
+  the main, preload and renderer production bundles successfully. A broader local run that also
+  included intentionally uncommitted standalone regression files passed as well.
+
+### Known compatibility debt
+- `exec_command` / `write_stdin` still represent command output in both the ordinary text content
+  and the required structured Codex-compatible `output` field. Both copies are bounded, but
+  removing either is an end-to-end contract change rather than a safe local optimization.
+
 ## [2.0.0] — 2026-08-24
 
 The first release to carry the goal loop, and the release where the compiler stopped treating

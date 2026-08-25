@@ -12,7 +12,15 @@
  * extension does nothing" into a diagnosable mismatch.
  */
 
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '2.0.1';
+
+/**
+ * Standalone extension recovery must stay on the app's own release. Using GitHub's moving
+ * `latest` asset can pair an older installed app with a newer, incompatible bridge protocol.
+ */
+export function extensionDownloadUrl(version = APP_VERSION): string {
+  return `https://github.com/totec448-spec/chat-on-steroids/releases/download/v${encodeURIComponent(version)}/Chat-On-Steroids-Extension.zip`;
+}
 
 /**
  * 1 — original observations/activity bridge.
@@ -35,5 +43,9 @@ export const APP_VERSION = '2.0.0';
  *     reply came from this app at all, so against a 7 app it silently discards every answer
  *     and reports nothing — which looks exactly like a bridge that is down. The bump turns
  *     that into the 426 the user can act on.
+ * 8 — explicit app-side browser disconnect became a durable pairing state. /hello reports
+ *     `disconnected`, protected routes distinguish that revocation from a stale token, and
+ *     /pair accepts `reconnect: true` only for an explicit browser-side reconnect. An older
+ *     extension would otherwise silently undo the user's app-side Disconnect on its next 401.
  */
-export const BRIDGE_PROTOCOL = 7;
+export const BRIDGE_PROTOCOL = 8;

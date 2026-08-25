@@ -2,16 +2,19 @@
  * Finds the tunnel executables.
  *
  * The installer ships the release that was current when it was built, so a fresh
- * install works without a detour to a GitHub releases page. That copy is the last
- * resort rather than the first: an explicit path the user chose wins, then anything
- * on PATH, then the usual install locations, and only then the bundled one — so a
- * user who has installed a newer tunnel-client keeps using theirs.
+ * install works without a detour to a GitHub releases page. An explicit path the user
+ * chose still wins. Otherwise the bundled copy wins: it is the version this app was
+ * tested with, so an unrelated stale executable on PATH must not silently replace it.
+ * PATH/common locations remain a fallback for development or a damaged/missing bundle.
  */
 
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 export type BinaryName = 'tunnel-client' | 'cloudflared';
+
+const locateCache = new Map<string, string | null>();
+const bundledVersionCache = new Map<string, string | null>();
 
 function exeName(name: BinaryName): string {
   return process.platform === 'win32' ? `${name}.exe` : name;
@@ -48,6 +51,18 @@ function commonDirs(): string[] {
  * `hint` may be either the executable itself or the folder containing it.
  */
 export function locateBinary(name: BinaryName, hint?: string): string | null {
+  const key = [
+    name,
+    hint ?? '',
+    process.platform,
+    process.resourcesPath ?? '',
+    process.env.PATH ?? process.env.Path ?? '',
+    process.env.USERPROFILE ?? '',
+    process.env.LOCALAPPDATA ?? '',
+    process.env.ProgramFiles ?? ''
+  ].join('\u0000');
+  if (locateCache.has(key)) return locateCache.get(key) ?? null;
+
   const fileName = exeName(name);
 
   if (hint && hint.trim() !== '') {
@@ -55,27 +70,46 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
     if (existsSync(trimmed)) {
       // Accept a folder as well as the exe itself, since users paste both.
       const asDir = path.join(trimmed, fileName);
-      if (existsSync(asDir)) return asDir;
-      if (path.basename(trimmed).toLowerCase() === fileName.toLowerCase()) return trimmed;
+      if (existsSync(asDir)) {
+        locateCache.set(key, asDir);
+        return asDir;
+      }
+      if (path.basename(trimmed).toLowerCase() === fileName.toLowerCase()) {
+        locateCache.set(key, trimmed);
+        return trimmed;
+      }
     }
     // cloudflared normally sits beside tunnel-client in the release archive.
     const sibling = path.join(path.dirname(trimmed), fileName);
-    if (existsSync(sibling)) return sibling;
-  }
-
-  const onPath = searchPath(fileName);
-  if (onPath) return onPath;
-
-  for (const dir of commonDirs()) {
-    const candidate = path.join(dir, fileName);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(sibling)) {
+      locateCache.set(key, sibling);
+      return sibling;
+    }
   }
 
   const bundled = bundledDir();
   if (bundled) {
     const candidate = path.join(bundled, fileName);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) {
+      locateCache.set(key, candidate);
+      return candidate;
+    }
   }
+
+  const onPath = searchPath(fileName);
+  if (onPath) {
+    locateCache.set(key, onPath);
+    return onPath;
+  }
+
+  for (const dir of commonDirs()) {
+    const candidate = path.join(dir, fileName);
+    if (existsSync(candidate)) {
+      locateCache.set(key, candidate);
+      return candidate;
+    }
+  }
+  locateCache.set(key, null);
   return null;
 }
 
@@ -88,7 +122,9 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
 function bundledDir(): string | null {
   const packaged = process.resourcesPath ? path.join(process.resourcesPath, 'tunnel') : null;
   if (packaged && existsSync(packaged)) return packaged;
-  const dev = path.resolve(__dirname, '..', '..', 'resources', 'tunnel');
+  // Source: src/main/tunnel -> repo root is three levels up.
+  // Packaged/compiled dev output keeps the same main/tunnel nesting under dist.
+  const dev = path.resolve(__dirname, '..', '..', '..', 'resources', 'tunnel');
   return existsSync(dev) ? dev : null;
 }
 
@@ -96,9 +132,19 @@ function bundledDir(): string | null {
 export function bundledVersion(): string | null {
   const dir = bundledDir();
   if (!dir) return null;
+  if (bundledVersionCache.has(dir)) return bundledVersionCache.get(dir) ?? null;
   try {
-    return readFileSync(path.join(dir, 'VERSION'), 'utf8').trim() || null;
+    const value = readFileSync(path.join(dir, 'VERSION'), 'utf8').trim() || null;
+    bundledVersionCache.set(dir, value);
+    return value;
   } catch {
+    bundledVersionCache.set(dir, null);
     return null;
   }
+}
+
+/** Test seam for environment/path-resolution cases. */
+export function resetTunnelLocatorCacheForTests(): void {
+  locateCache.clear();
+  bundledVersionCache.clear();
 }

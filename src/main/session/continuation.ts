@@ -132,6 +132,7 @@ const byToken = new Map<string, Continuation>();
 const openingBySession = new Map<string, Promise<ContinuationView>>();
 const commitLocks = new Map<string, { to: string; promise: Promise<ContinuationCommitResult> }>();
 export const CONTINUATIONS_STATE = 'continuations';
+const RESUME_SHADOW_COLLISION = 'the replacement chat already belongs to another local session';
 
 interface ContinuationRecord {
   token: string;
@@ -315,6 +316,56 @@ export function continuationByToken(token: string): ContinuationView | null {
   sweep();
   const entry = byToken.get(token);
   return entry ? view(entry) : null;
+}
+
+/**
+ * Repairs the prime binding for chats already hit by the pre-redeem shadow-session race.
+ *
+ * Current builds prevent the race before opening the browser, but an installed build can
+ * already have created B as a small `origin.kind=resume` session and then aborted the real
+ * continuation with {@link RESUME_SHADOW_COLLISION}. That leaves the user in the intended
+ * replacement chat while the reusable-worker run is still bound to A, so every `agents` call
+ * from B gets AGENTS_BUSY.
+ *
+ * This is intentionally much narrower than a takeover API. The durable recorder must prove
+ * that B was app-opened as a resume of source session S, S must still be attached to the exact
+ * conversation A named by the failed continuation, and that continuation must have terminated
+ * for this one historical collision. Only then may the broker's recovery hook move A→B. The
+ * shadow session remains B's recorder history; this repairs agent ownership without deleting
+ * any observations the user made after landing here.
+ */
+export async function repairPrimeFromResumeShadow(conversationId: string): Promise<boolean> {
+  if (!conversationId) return false;
+  let target;
+  try {
+    target = await findSessionByConversation(conversationId, { requireUnique: true });
+  } catch {
+    return false;
+  }
+  const sourceSessionId =
+    target?.origin?.kind === 'resume' && typeof target.origin.fromSessionId === 'string'
+      ? target.origin.fromSessionId
+      : '';
+  if (!target || !sourceSessionId || target.id === sourceSessionId) return false;
+
+  const source = await getSession(sourceSessionId).catch(() => null);
+  if (!source?.conversationId) return false;
+  const failed = [...byToken.values()].find(
+    (entry) =>
+      entry.sessionId === sourceSessionId &&
+      entry.state === 'aborted' &&
+      entry.error === RESUME_SHADOW_COLLISION &&
+      entry.from === source.conversationId
+  );
+  if (!failed) return false;
+
+  const repaired = recoveryHooks.repairPrimeTransfer?.(failed.from, conversationId) ?? false;
+  if (repaired) {
+    logWarn(
+      `continuation ${failed.token.slice(0, 8)} repaired prime ownership in resume shadow chat ${conversationId}`
+    );
+  }
+  return repaired;
 }
 
 /**
@@ -645,7 +696,7 @@ async function reconcileCommitting(entry: Continuation, toConversationId: string
       return { status: 'retryable', reason: `the destination chat ownership could not be checked: ${err instanceof Error ? err.message : String(err)}` };
     }
     if (target && target.id !== entry.sessionId) {
-      const reason = 'the replacement chat already belongs to another local session';
+      const reason = RESUME_SHADOW_COLLISION;
       const rolledBack = await rollbackCommitting(entry, reason);
       return rolledBack ? { status: 'rejected', reason } : { status: 'retryable', reason };
     }
@@ -862,6 +913,8 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       armed: raw.armed === true,
       error: typeof raw.error === 'string' ? raw.error : null
     };
+    const waitingExpired =
+      entry.state !== 'committed' && entry.state !== 'aborted' && now - entry.openedAt >= CONTINUATION_TTL_MS;
     if (entry.handoffId) {
       try {
         entry.handoff = await readHandoff(entry.sessionId, entry.handoffId);
@@ -903,20 +956,37 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
         entry.error = null;
         logInfo(`continuation ${entry.token.slice(0, 8)} recovered after durable commit`);
       } else if (entry.state === 'committing' && session && session.conversationId === entry.from) {
-        thawPrimeTransfer(entry.from);
-        entry.state = entry.claimedBy ? 'claimed' : 'awaiting-chat';
-        entry.to = null;
-        entry.error = 'Recovered before the durable session move; the continuation can be retried.';
-        beginPrimeTransfer(entry.from);
+        if (waitingExpired) {
+          // The WAL proves the durable session move never landed. Restart must not turn an
+          // already-expired ten-minute transaction into a fresh one merely because its
+          // ephemeral transfer lock disappeared with the process.
+          entry.state = 'aborted';
+          entry.to = null;
+          entry.error = 'Recovery found the continuation had already expired before the durable session move.';
+          cancelPrimeTransfer(entry.from);
+        } else {
+          thawPrimeTransfer(entry.from);
+          entry.state = entry.claimedBy ? 'claimed' : 'awaiting-chat';
+          entry.to = null;
+          entry.error = 'Recovered before the durable session move; the continuation can be retried.';
+          beginPrimeTransfer(entry.from);
+        }
       } else {
         entry.state = 'aborted';
         entry.error = 'Recovery found an unexpected session attachment and refused to guess a chat.';
         cancelPrimeTransfer(entry.from);
       }
     } else if (entry.state !== 'aborted') {
+      if (waitingExpired) {
+        // Terminal records are retained up to 2× TTL so duplicate/replayed acknowledgements can
+        // still be answered consistently, but a nonterminal wait gets only the actual 10-minute
+        // lifetime. In particular, never mint a fresh prime-transfer lease on restart.
+        entry.state = 'aborted';
+        entry.error = 'Recovery found the continuation had already expired.';
+        cancelPrimeTransfer(entry.from);
       // A stored brief is required for every post-capture state. Missing/corrupt durable
       // handoff data is not an empty valid brief and must not be typed into a new chat.
-      if (entry.state !== 'awaiting-summary' && !entry.handoff) {
+      } else if (entry.state !== 'awaiting-summary' && !entry.handoff) {
         entry.state = 'aborted';
         entry.error = 'The saved handoff could not be recovered.';
         cancelPrimeTransfer(entry.from);

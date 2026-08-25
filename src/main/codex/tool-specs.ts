@@ -22,13 +22,16 @@ export const EXEC_COMMAND_DESCRIPTION = IS_WINDOWS
 
 export const EXEC_COMMAND_CMD_DESCRIPTION = 'Shell command to execute.';
 
+export const EXEC_COMMAND_CMDS_DESCRIPTION =
+  'Sequential shell commands to run in one shell session. Use this for related checks instead of separate exec_command calls. Each command gets a labeled output section and exit code; all commands run after ordinary non-zero exits, and the overall exit code is the first non-zero code.';
+
 export const EXEC_COMMAND_WORKDIR_DESCRIPTION = 'Working directory for the command. Defaults to the turn cwd.';
 
 export const EXEC_COMMAND_TTY_DESCRIPTION =
   'True allocates a PTY for the command; false or omitted uses plain pipes.';
 
 export const EXEC_COMMAND_YIELD_TIME_DESCRIPTION = IS_WINDOWS
-  ? 'Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 10000-30000 ms.'
+  ? 'Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 250-30000 ms.'
   : 'Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms.';
 
 export const MAX_OUTPUT_TOKENS_DESCRIPTION =
@@ -37,7 +40,9 @@ export const MAX_OUTPUT_TOKENS_DESCRIPTION =
 export const EXEC_COMMAND_SHELL_DESCRIPTION = "Shell binary to launch. Defaults to the user's default shell.";
 
 export const EXEC_COMMAND_LOGIN_DESCRIPTION =
-  'True runs the shell with -l/-i semantics; false disables them. Defaults to true.';
+  IS_WINDOWS
+    ? 'True loads the shell profile; false disables it. Defaults to false on Windows for deterministic, faster commands.'
+    : 'True runs the shell with -l/-i semantics; false disables them. Defaults to true.';
 
 export const WRITE_STDIN_DESCRIPTION =
   'Writes characters to an existing unified exec session and returns recent output.';
@@ -48,7 +53,7 @@ export const WRITE_STDIN_CHARS_DESCRIPTION =
   'Bytes to write to stdin. Defaults to empty, which polls without writing.';
 
 export const WRITE_STDIN_YIELD_TIME_DESCRIPTION =
-  'Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait 5000-300000 ms by default.';
+  'Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait up to 5000-300000 ms by default but return early when the first output arrives.';
 
 /**
  * `APPLY_PATCH_LARK_GRAMMAR` (`core/src/tools/handlers/apply_patch.lark`).

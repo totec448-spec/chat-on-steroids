@@ -636,7 +636,8 @@ describe('the calls a turn says it made', () => {
         order: 0,
         createTime: null,
         rawText: 'A plain live update.',
-        renderedHtml: 'A plain live update.'
+        renderedHtml: 'A plain live update.',
+        sectionIndex: 0
       }
     ]);
   });

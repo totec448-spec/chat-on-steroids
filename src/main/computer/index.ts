@@ -20,15 +20,25 @@ import os from 'node:os';
 import path from 'node:path';
 import { ensureUsablePath, normalizeEnvironment, setEnvValue } from '../env.js';
 import { findWindowsPowerShell, terminateProcessTree } from '../exec.js';
-import { logWarn } from '../logger.js';
+import { logInfo, logWarn } from '../logger.js';
 import { HELPER_SCRIPT } from './helper.js';
 
 /** Width the screenshot is scaled down to, matching computer-use convention. */
 export const DEFAULT_SCREENSHOT_WIDTH = 1280;
 export const MAX_SCREENSHOT_WIDTH = 2560;
 const HELPER_TIMEOUT_MS = 30_000;
+const MAX_FRAMES = 16;
 
-export class ComputerError extends Error {}
+export class ComputerError extends Error {
+  readonly completedCount: number | null;
+  readonly failedIndex: number | null;
+
+  constructor(message: string, details: { completedCount?: number; failedIndex?: number } = {}) {
+    super(message);
+    this.completedCount = details.completedCount ?? null;
+    this.failedIndex = details.failedIndex ?? null;
+  }
+}
 
 export interface Rect {
   x: number;
@@ -77,13 +87,36 @@ export interface Screenshot {
    * For a window capture: whether that window was actually in front when the pixels were
    * taken. Null for whole-screen captures, where the question does not arise.
    *
-   * A window capture asks Windows to activate the window first, because unoccluded pixels
-   * are better — but it does not *require* it. Looking at a window is not an action on it,
-   * and refusing to photograph a window because something else holds focus made the one
-   * recovery path (focus it) unreachable. False here means the image may show whatever is
-   * covering the window, and the caller is expected to say so.
+   * Window capture never activates its target. False means it was not foreground; this is
+   * harmless for direct background capture and relevant only when captureMode says the
+   * helper had to fall back to visible screen pixels.
    */
   focused: boolean | null;
+  /** How window pixels were obtained; screen_fallback can be occluded. */
+  captureMode: 'screen' | 'window' | 'screen_fallback';
+  /** Window id whose geometry this frame is bound to, if any. */
+  windowId: number | null;
+}
+
+export interface ActionResult {
+  cursor: PointerResult | null;
+  clipboard: string[];
+  completedCount: number;
+  routes: Array<'uia' | 'sendinput' | 'focus' | 'local'>;
+}
+
+export type VerificationSpec =
+  | { until: 'foreground'; window: number; timeoutMs?: number }
+  | { until: 'window_exists'; match: string; timeoutMs?: number }
+  | { until: 'window_closed'; match: string; timeoutMs?: number }
+  | { until: 'ui_appears'; window?: number; match: string; role?: string; timeoutMs?: number }
+  | { until: 'ui_disappears'; window?: number; match: string; role?: string; timeoutMs?: number };
+
+export interface VerificationResult {
+  until: VerificationSpec['until'];
+  elapsedMs: number;
+  detail: string;
+  snapshotId: number | null;
 }
 
 export type Action =
@@ -130,9 +163,28 @@ let helperRuntime: HelperRuntime | null = null;
 let helperStarting: Promise<HelperRuntime> | null = null;
 let helperQueue: Promise<void> = Promise.resolve();
 let helperGeneration = 0;
-let findUiWarmGeneration = -1;
 let helperStopping = false;
 const helperRetirements = new Set<Promise<void>>();
+
+function helperTimeoutMs(request: Record<string, unknown>): number {
+  switch (request['op']) {
+    case 'windows':
+    case 'active':
+    case 'focus':
+    case 'cursor':
+      return 5_000;
+    case 'find_ui':
+      return 8_000;
+    case 'capture':
+    case 'snapshot':
+    case 'warm':
+      return 10_000;
+    case 'act':
+      return 15_000;
+    default:
+      return HELPER_TIMEOUT_MS;
+  }
+}
 
 function retireHelper(runtime: HelperRuntime): Promise<void> {
   if (helperRuntime === runtime) helperRuntime = null;
@@ -244,7 +296,14 @@ async function startHelper(): Promise<HelperRuntime> {
         if (reply['ok'] === false) {
           const code = String(reply['error_code'] ?? 'HELPER_ERROR');
           const message = String(reply['message'] ?? 'Desktop helper failed');
-          pending.reject(new ComputerError(`${code}: ${message}`));
+          const completed = Number(reply['completed_count']);
+          const failed = Number(reply['failed_index']);
+          pending.reject(
+            new ComputerError(`${code}: ${message}`, {
+              ...(Number.isInteger(completed) && completed >= 0 ? { completedCount: completed } : {}),
+              ...(Number.isInteger(failed) && failed >= 0 ? { failedIndex: failed } : {})
+            })
+          );
         } else {
           pending.resolve(reply);
         }
@@ -307,6 +366,8 @@ export async function stopComputerHelper(): Promise<void> {
   helperRuntime = null;
   helperStarting = null;
   uiRefs.clear();
+  frames.clear();
+  lastFrame = null;
   if (!runtime) {
     await Promise.allSettled([...helperRetirements]);
     return;
@@ -336,7 +397,7 @@ async function sendHelperRequest(request: Record<string, unknown>): Promise<Reco
     const timer = setTimeout(() => {
       if (runtime.pending !== pending) return;
       rejectAfterHelperRetirement(runtime, pending, new ComputerError('The desktop helper did not answer in time.'));
-    }, HELPER_TIMEOUT_MS);
+    }, helperTimeoutMs(request));
     pending = { resolve, reject, timer };
     runtime.pending = pending;
     runtime.child.stdin.write(`${JSON.stringify(request)}\n`, 'utf8', (error) => {
@@ -352,7 +413,18 @@ async function sendHelperRequest(request: Record<string, unknown>): Promise<Reco
 }
 
 function runHelper(request: Record<string, unknown>): Promise<Record<string, any>> {
-  const result = helperQueue.then(() => sendHelperRequest(request));
+  const queuedAt = Date.now();
+  const operation = typeof request['op'] === 'string' ? request['op'] : 'unknown';
+  const result = helperQueue.then(async () => {
+    const startedAt = Date.now();
+    try {
+      return await sendHelperRequest(request);
+    } finally {
+      logInfo(
+        `desktop timing op=${operation} helper_queue_ms=${startedAt - queuedAt} helper_ms=${Date.now() - startedAt}`
+      );
+    }
+  });
   helperQueue = result.then(
     () => undefined,
     () => undefined
@@ -372,11 +444,14 @@ interface Frame {
   scale: number;
   width: number;
   height: number;
+  windowId: number | null;
+  windowGeometry: Rect | null;
+  captureMode: Screenshot['captureMode'];
 }
 
 let nextFrameId = 1;
 let lastFrame: Frame | null = null;
-let nextUiStateId = 1;
+const frames = new Map<number, Frame>();
 
 /**
  * Serialises whole multi-step acquisitions, not just single helper requests.
@@ -389,14 +464,26 @@ let nextUiStateId = 1;
 let exclusiveQueue: Promise<unknown> = Promise.resolve();
 
 function exclusive<T>(task: () => Promise<T>): Promise<T> {
-  const result = exclusiveQueue.then(task, task);
+  const queuedAt = Date.now();
+  const measured = async (): Promise<T> => {
+    const startedAt = Date.now();
+    try {
+      return await task();
+    } finally {
+      logInfo(`desktop timing exclusive_queue_ms=${startedAt - queuedAt} exclusive_ms=${Date.now() - startedAt}`);
+    }
+  };
+  const result = exclusiveQueue.then(measured, measured);
   exclusiveQueue = result.then(
     () => undefined,
     () => undefined
   );
   return result;
 }
-const uiRefs = new Map<string, { window: number; runtimeKey: string; generation: number }>();
+const uiRefs = new Map<
+  string,
+  { window: number; runtimeKey: string; generation: number; snapshotId: number }
+>();
 
 /**
  * Refs carry the helper generation that minted them. A UI Automation runtime id only
@@ -404,10 +491,10 @@ const uiRefs = new Map<string, { window: number; runtimeKey: string; generation:
  * outstanding ref is meaningless — and acting on one would click whatever now happens to
  * hold that id. Stamping the generation makes that detectable instead of silent.
  */
-function rememberUiRef(window: number, runtimeKey: string, index: number, stateId: number): string {
+function rememberUiRef(window: number, runtimeKey: string, index: number, snapshotId: number): string {
   const generation = helperGeneration;
-  const ref = `g${generation}_e${stateId}_${index + 1}`;
-  uiRefs.set(ref, { window, runtimeKey, generation });
+  const ref = `g${generation}_s${snapshotId}_e${index + 1}`;
+  uiRefs.set(ref, { window, runtimeKey, generation, snapshotId });
   while (uiRefs.size > 1000) {
     const oldest = uiRefs.keys().next().value as string | undefined;
     if (!oldest) break;
@@ -416,7 +503,7 @@ function rememberUiRef(window: number, runtimeKey: string, index: number, stateI
   return ref;
 }
 
-function uiTarget(ref: string): { window: number; runtimeKey: string } {
+function uiTarget(ref: string): { window: number; runtimeKey: string; snapshotId: number } {
   const target = uiRefs.get(ref);
   if (!target) {
     throw new ComputerError(
@@ -429,6 +516,20 @@ function uiTarget(ref: string): { window: number; runtimeKey: string } {
     );
   }
   return target;
+}
+
+function rememberFrame(frame: Frame): void {
+  frames.set(frame.id, frame);
+  lastFrame = frame;
+  while (frames.size > MAX_FRAMES) {
+    const oldest = frames.keys().next().value as number | undefined;
+    if (oldest === undefined) break;
+    frames.delete(oldest);
+  }
+}
+
+function frameById(id: number | undefined): Frame | null {
+  return id === undefined ? null : (frames.get(id) ?? null);
 }
 
 export async function listWindows(): Promise<{ windows: WindowInfo[]; screen: Rect }> {
@@ -453,7 +554,7 @@ export async function findUi(opts: {
   query?: string;
   role?: string;
   maxResults?: number;
-}): Promise<{ window: number; elements: UiElementInfo[] }> {
+}): Promise<{ window: number; snapshotId: number; elements: UiElementInfo[] }> {
   return exclusive(() => findUiLocked(opts, lastFrame));
 }
 
@@ -468,8 +569,9 @@ async function findUiLocked(
     role?: string;
     maxResults?: number;
   },
-  frame: Frame | null
-): Promise<{ window: number; elements: UiElementInfo[] }> {
+  frame: Frame | null,
+  suppliedReply?: Record<string, any>
+): Promise<{ window: number; snapshotId: number; elements: UiElementInfo[] }> {
   const request = {
     op: 'find_ui',
     ...(opts.window === undefined ? {} : { id: opts.window }),
@@ -477,22 +579,16 @@ async function findUiLocked(
     role: opts.role ?? '',
     maxResults: Math.min(100, Math.max(1, Math.floor(opts.maxResults ?? 30)))
   };
-  let reply = await runHelper(request);
-  const generation = helperGeneration;
-  let raw = Array.isArray(reply['elements']) ? (reply['elements'] as Array<Record<string, any>>) : [];
-  // UI Automation can return an empty tree on the very first query immediately after
-  // the helper starts. Retry that one cold miss internally instead of making the model
-  // spend another MCP round trip. Legitimate later empty queries stay fast.
-  if (raw.length === 0 && findUiWarmGeneration !== generation) {
-    findUiWarmGeneration = generation;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    reply = await runHelper(request);
-    raw = Array.isArray(reply['elements']) ? (reply['elements'] as Array<Record<string, any>>) : [];
-  } else {
-    findUiWarmGeneration = generation;
+  const reply = suppliedReply ?? (await runHelper(request));
+  const raw = Array.isArray(reply['elements']) ? (reply['elements'] as Array<Record<string, any>>) : [];
+  const snapshotId = Number(reply['snapshotId']);
+  if (!Number.isInteger(snapshotId) || snapshotId < 1) {
+    throw new ComputerError('The desktop helper returned UI elements without a valid snapshot identity.');
   }
-  const stateId = nextUiStateId++;
   const windowId = Number(reply['window']);
+  logInfo(
+    `desktop uia window_snapshot=${snapshotId} visited=${Number(reply['visited']) || 0} returned=${raw.length} truncated=${reply['truncated'] === true}`
+  );
   const elements = raw.map((item, index): UiElementInfo => {
     const bounds = item['bounds'] as Rect;
     let imageBounds: Rect | null = null;
@@ -518,8 +614,8 @@ async function findUiLocked(
     const runtimeKey = String(item['runtimeKey'] ?? '');
     return {
       ref: runtimeKey
-        ? rememberUiRef(windowId, runtimeKey, index, stateId)
-        : `unavailable-${stateId}-${index + 1}`,
+        ? rememberUiRef(windowId, runtimeKey, index, snapshotId)
+        : `unavailable-${snapshotId}-${index + 1}`,
       name: String(item['name'] ?? ''),
       role: String(item['role'] ?? ''),
       automationId: String(item['automationId'] ?? ''),
@@ -530,7 +626,7 @@ async function findUiLocked(
       imageCenter
     };
   });
-  return { window: windowId, elements };
+  return { window: windowId, snapshotId, elements };
 }
 
 export async function getWindowState(opts: {
@@ -539,35 +635,43 @@ export async function getWindowState(opts: {
   maxElements?: number;
   includeScreenshot?: boolean;
   includeUi?: boolean;
-}): Promise<{ window: WindowInfo; screenshot: Screenshot | null; elements: UiElementInfo[] }> {
-  // The whole acquisition is one critical section. Its screenshot and its element
-  // geometry have to describe the same moment, and no other caller may retarget the
-  // shared frame in between.
+}): Promise<{ window: WindowInfo; snapshotId: number | null; screenshot: Screenshot | null; elements: UiElementInfo[] }> {
   return exclusive(async () => {
-    let window: WindowInfo | null = null;
-    if (opts.window === undefined) {
-      window = (await activeWindow()).window;
-    } else {
-      window = (await listWindows()).windows.find((item) => item.id === opts.window) ?? null;
-    }
-    if (!window) throw new ComputerError('WINDOW_NOT_FOUND: no matching visible window is available');
-
     const includeScreenshot = opts.includeScreenshot !== false;
     const includeUi = opts.includeUi !== false;
-    const shot = includeScreenshot
-      ? await screenshotLocked({ window: window.id, maxWidth: opts.maxWidth })
-      : null;
-    // Map against the frame this call just took, never against the global.
-    const frame: Frame | null = shot
-      ? { id: shot.frameId, region: shot.region, scale: shot.scale, width: shot.width, height: shot.height }
-      : null;
-    const found = includeUi
-      ? await findUiLocked({ window: window.id, maxResults: opts.maxElements ?? 60 }, frame)
-      : { window: window.id, elements: [] as UiElementInfo[] };
-    const elements = includeScreenshot
-      ? found.elements
-      : found.elements.map((element) => ({ ...element, imageBounds: null, imageCenter: null }));
-    return { window, screenshot: shot, elements };
+    const limit = Math.min(MAX_SCREENSHOT_WIDTH, Math.max(320, Math.floor(opts.maxWidth ?? DEFAULT_SCREENSHOT_WIDTH)));
+    const dir = includeScreenshot ? await fs.mkdtemp(path.join(os.tmpdir(), 'clf-shot-')) : null;
+    const file = dir ? path.join(dir, 'screen.png') : null;
+    try {
+      // Target lookup, pixels and UIA are one helper transaction. Besides saving two native
+      // round trips, this is what gives every semantic ref and pixel coordinate one shared
+      // snapshot identity instead of stitching together observations from different moments.
+      const reply = await runHelper({
+        op: 'snapshot',
+        ...(opts.window === undefined ? {} : { id: opts.window }),
+        includeScreenshot,
+        includeUi,
+        maxWidth: limit,
+        maxResults: Math.min(100, Math.max(1, Math.floor(opts.maxElements ?? 60))),
+        ...(file ? { file } : {})
+      });
+      const value = reply['window'];
+      const window = value && typeof value === 'object' ? (value as WindowInfo) : null;
+      if (!window) throw new ComputerError('WINDOW_NOT_FOUND: no matching visible window is available');
+      const shot = file ? await screenshotFromReply(reply, file, window.id) : null;
+      const frame = shot ? frameById(shot.frameId) : null;
+      const found = includeUi
+        ? await findUiLocked({ window: window.id, maxResults: opts.maxElements ?? 60 }, frame, reply)
+        : { window: window.id, snapshotId: null, elements: [] as UiElementInfo[] };
+      return {
+        window,
+        snapshotId: found.snapshotId,
+        screenshot: shot,
+        elements: found.elements
+      };
+    } finally {
+      if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 }
 
@@ -620,6 +724,75 @@ export async function screenshot(opts: {
   crop?: Rect;
 }): Promise<Screenshot> {
   return exclusive(() => screenshotLocked(opts));
+}
+
+async function screenshotFromReply(
+  reply: Record<string, any>,
+  file: string,
+  requestedWindow: number | null,
+  inheritedWindowGeometry?: Rect | null
+): Promise<Screenshot> {
+  const region = reply['region'] as Rect;
+  const size = reply['image'] as { width: number; height: number };
+  if (
+    !region ||
+    !size ||
+    !Number.isFinite(region.x) ||
+    !Number.isFinite(region.y) ||
+    !Number.isFinite(region.width) ||
+    !Number.isFinite(region.height) ||
+    !Number.isFinite(size.width) ||
+    !Number.isFinite(size.height) ||
+    region.width <= 0 ||
+    region.height <= 0 ||
+    size.width <= 0 ||
+    size.height <= 0
+  ) {
+    throw new ComputerError('The desktop helper returned invalid screenshot geometry.');
+  }
+  const readStartedAt = Date.now();
+  const png = await fs.readFile(file).catch(() => {
+    throw new ComputerError('The screen capture produced no image.');
+  });
+  if (png.length === 0) throw new ComputerError('The screen capture came back empty.');
+  const readMs = Date.now() - readStartedAt;
+
+  const rawMode = String(reply['captureMode'] ?? (requestedWindow === null ? 'screen' : 'screen_fallback'));
+  const captureMode: Screenshot['captureMode'] =
+    rawMode === 'window' || rawMode === 'screen_fallback' ? rawMode : 'screen';
+  const scale = size.width / region.width;
+  const frame: Frame = {
+    id: nextFrameId++,
+    region,
+    scale,
+    width: size.width,
+    height: size.height,
+    windowId: requestedWindow,
+    windowGeometry:
+      inheritedWindowGeometry === undefined
+        ? requestedWindow === null
+          ? null
+          : { ...region }
+        : inheritedWindowGeometry,
+    captureMode
+  };
+  rememberFrame(frame);
+  const encodeStartedAt = Date.now();
+  const data = png.toString('base64');
+  logInfo(
+    `desktop timing screenshot_read_ms=${readMs} screenshot_base64_ms=${Date.now() - encodeStartedAt} screenshot_bytes=${png.length}`
+  );
+  return {
+    data,
+    frameId: frame.id,
+    width: frame.width,
+    height: frame.height,
+    region: frame.region,
+    scale: frame.scale,
+    focused: requestedWindow === null ? null : reply['focused'] === true,
+    captureMode,
+    windowId: requestedWindow
+  };
 }
 
 /**
@@ -694,26 +867,12 @@ async function screenshotLocked(
       ...(opts.window === undefined ? {} : { id: opts.window }),
       ...(opts.full === true ? { full: true } : {})
     });
-    const region = reply['region'] as Rect;
-    const size = reply['image'] as { width: number; height: number };
-
-    const png = await fs.readFile(file).catch(() => {
-      throw new ComputerError('The screen capture produced no image.');
-    });
-    if (png.length === 0) throw new ComputerError('The screen capture came back empty.');
-
-    const scale = size.width / region.width;
-    const frameId = nextFrameId++;
-    lastFrame = { id: frameId, region, scale, width: size.width, height: size.height };
-    return {
-      data: png.toString('base64'),
-      frameId,
-      width: size.width,
-      height: size.height,
-      region,
-      scale,
-      focused: opts.window === undefined ? null : reply['focused'] === true
-    };
+    return await screenshotFromReply(
+      reply,
+      file,
+      opts.crop ? (cropFrame === undefined ? lastFrame?.windowId ?? null : cropFrame?.windowId ?? null) : opts.window ?? null,
+      opts.crop ? (cropFrame === undefined ? lastFrame?.windowGeometry ?? null : cropFrame?.windowGeometry ?? null) : undefined
+    );
   } finally {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -736,7 +895,7 @@ export interface PointerResult {
 export async function act(
   actions: Action[],
   opts: { frameId?: number } = {}
-): Promise<{ cursor: PointerResult | null; clipboard: string[] }> {
+): Promise<ActionResult> {
   return exclusive(() => actLocked(actions, opts));
 }
 
@@ -761,29 +920,41 @@ export async function actAndCapture(
       /** Privacy mode: capture whatever window is in front once the actions have run. */
       preferActiveWindow?: boolean;
     };
+    verify?: VerificationSpec;
   } = {}
-): Promise<{ cursor: PointerResult | null; screenshot: Screenshot | null; clipboard: string[] }> {
+): Promise<ActionResult & { screenshot: Screenshot | null; verification: VerificationResult | null }> {
   return exclusive(async () => {
-    const before = lastFrame;
+    const before = opts.frameId === undefined ? lastFrame : frameById(opts.frameId);
     // capture.crop is expressed in pixels of the screenshot the caller saw, exactly like a
     // coordinate action. Another chat/agent can replace the app-global lastFrame between that
     // screenshot and this call, so using whichever frame happens to be current would crop an
     // unrelated picture. Bind the crop to the same explicit frame identity used by pointing.
     if (opts.capture?.crop) {
-      if (!before) throw new ComputerError('Take a screenshot first — crop coordinates need a picture to crop.');
       if (opts.frameId === undefined) {
         throw new ComputerError(
           'FRAME_REQUIRED: captureCrop must include the frameId returned with the screenshot its coordinates came from.'
         );
       }
-      if (opts.frameId !== before.id) {
+      if (!before) {
         throw new ComputerError(
-          `STALE_FRAME: captureCrop is for frame ${opts.frameId}, but the current screen frame is ${before.id}. Take a new screenshot and crop that frame.`
+          `STALE_FRAME: captureCrop is for frame ${opts.frameId}, but that frame is no longer retained. Take a new screenshot and crop that frame.`
         );
       }
     }
     const result = await actLocked(actions, opts);
-    if (!opts.capture) return { cursor: result.cursor, screenshot: null, clipboard: result.clipboard };
+    let verification: VerificationResult | null = null;
+    if (opts.verify) {
+      try {
+        verification = await verifyDesktopLocked(opts.verify);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new ComputerError(
+          `POSTCONDITION_FAILED: completed_count=${result.completedCount}. ${message}`,
+          { completedCount: result.completedCount, failedIndex: result.completedCount }
+        );
+      }
+    }
+    if (!opts.capture) return { ...result, screenshot: null, verification };
 
     const { preferActiveWindow, ...capture } = opts.capture;
     // Resolved here rather than by the caller: the actions may have changed which window
@@ -792,20 +963,94 @@ export async function actAndCapture(
       capture.window = (await activeWindow()).window?.id;
     }
     return {
-      cursor: result.cursor,
+      ...result,
       screenshot: await screenshotLocked(capture, before),
-      clipboard: result.clipboard
+      verification
     };
   });
+}
+
+async function verifyDesktopLocked(spec: VerificationSpec): Promise<VerificationResult> {
+  const startedAt = Date.now();
+  const timeoutMs = Math.min(10_000, Math.max(0, Math.floor(spec.timeoutMs ?? 2_000)));
+  const deadline = startedAt + timeoutMs;
+  const needle = 'match' in spec ? spec.match.trim().toLowerCase() : '';
+  for (;;) {
+    if (spec.until === 'foreground') {
+      const current = (await activeWindow()).window;
+      if (current?.id === spec.window) {
+        return {
+          until: spec.until,
+          elapsedMs: Date.now() - startedAt,
+          detail: `window ${spec.window} is foreground`,
+          snapshotId: null
+        };
+      }
+    } else if (spec.until === 'window_exists' || spec.until === 'window_closed') {
+      const { windows } = await listWindows();
+      const found = windows.find(
+        (window) =>
+          window.title.toLowerCase().includes(needle) || window.process.toLowerCase().includes(needle)
+      );
+      if ((spec.until === 'window_exists' && found) || (spec.until === 'window_closed' && !found)) {
+        return {
+          until: spec.until,
+          elapsedMs: Date.now() - startedAt,
+          detail: found ? `found window ${found.id} ${JSON.stringify(found.title)}` : `no window matches ${JSON.stringify(spec.match)}`,
+          snapshotId: null
+        };
+      }
+    } else {
+      try {
+        const found = await findUiLocked(
+          { window: spec.window, query: spec.match, role: spec.role, maxResults: 1 },
+          null
+        );
+        const present = found.elements.length > 0;
+        if ((spec.until === 'ui_appears' && present) || (spec.until === 'ui_disappears' && !present)) {
+          return {
+            until: spec.until,
+            elapsedMs: Date.now() - startedAt,
+            detail: present
+              ? `found ${found.elements[0]?.ref ?? 'matching control'}`
+              : `no control matches ${JSON.stringify(spec.match)}`,
+            snapshotId: found.snapshotId
+          };
+        }
+      } catch (err) {
+        // A closing window is a satisfied disappearance, but other UIA failures must remain
+        // visible rather than being retried until they look like success.
+        if (
+          spec.until === 'ui_disappears' &&
+          err instanceof ComputerError &&
+          /WINDOW_NOT_FOUND|UIA_FAILED: no accessible window/i.test(err.message)
+        ) {
+          return {
+            until: spec.until,
+            elapsedMs: Date.now() - startedAt,
+            detail: 'target window/control is gone',
+            snapshotId: null
+          };
+        }
+        throw err;
+      }
+    }
+    if (Date.now() >= deadline) {
+      throw new ComputerError(`VERIFY_TIMEOUT: ${spec.until} was not satisfied within ${timeoutMs} ms`);
+    }
+    // UIA/WinEvent providers are inconsistent across frameworks. A short bounded polling
+    // fallback owns the wait locally so the model does not burn turns asking again.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 async function actLocked(
   actions: Action[],
   opts: { frameId?: number }
-): Promise<{ cursor: PointerResult | null; clipboard: string[] }> {
+): Promise<ActionResult> {
   const pointing = new Set(['move', 'click', 'double_click', 'scroll', 'drag']);
   const needsFrame = actions.some((a) => pointing.has(a.type));
-  if (needsFrame && !lastFrame) {
+  if (needsFrame && frames.size === 0) {
     throw new ComputerError('Take a screenshot first — pointing needs a picture to point at.');
   }
   if (needsFrame && opts.frameId === undefined) {
@@ -817,16 +1062,26 @@ async function actLocked(
       'FRAME_REQUIRED: coordinate actions must include the frameId returned with the screenshot they came from.'
     );
   }
-  // The frame is global to this app, so another chat or agent can replace it between the
-  // screenshot a caller saw and the click it sends. Without the id there is no way to
-  // tell that apart from a click on the picture the caller actually looked at.
-  if (needsFrame && opts.frameId !== lastFrame?.id) {
+  const requestedFrame = frameById(opts.frameId);
+  // Keep a small immutable history so an unrelated observation does not invalidate a
+  // caller's coordinates. The helper revalidates a window-bound frame's exact geometry
+  // immediately before input, so retaining it does not turn old pixels into blind clicks.
+  if (needsFrame && !requestedFrame) {
     throw new ComputerError(
-      `STALE_FRAME: these coordinates are for frame ${opts.frameId}, but the current screen frame is ${lastFrame?.id ?? 'none'}. Take a screenshot or call get_window_state again and point at the new frame.`
+      `STALE_FRAME: frame ${opts.frameId} is no longer retained. Take a screenshot or call get_window_state again and point at the new frame.`
     );
   }
   const frame =
-    lastFrame ?? { id: 0, region: { x: 0, y: 0, width: 1, height: 1 }, scale: 1, width: 1, height: 1 };
+    requestedFrame ?? lastFrame ?? {
+      id: 0,
+      region: { x: 0, y: 0, width: 1, height: 1 },
+      scale: 1,
+      width: 1,
+      height: 1,
+      windowId: null,
+      windowGeometry: null,
+      captureMode: 'screen' as const
+    };
   if (needsFrame) {
     const assertPointInFrame = (x: number, y: number, label: string): void => {
       if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= frame.width || y >= frame.height) {
@@ -859,7 +1114,7 @@ async function actLocked(
   // inside that loop used to let an invented/stale ref reject the call only *after* an earlier
   // clipboard write had already happened. Runtime failures can still occur after an action has
   // genuinely started, but deterministic validation errors must not create partial batches.
-  const uiTargets = new Map<string, { window: number; runtimeKey: string }>();
+  const uiTargets = new Map<string, { window: number; runtimeKey: string; snapshotId: number }>();
   for (const action of actions) {
     if (action.type !== 'click_ref' && action.type !== 'set_value') continue;
     if (!uiTargets.has(action.ref)) uiTargets.set(action.ref, uiTarget(action.ref));
@@ -870,12 +1125,23 @@ async function actLocked(
       case 'click_ref': {
         const target = uiTargets.get(action.ref);
         if (!target) throw new ComputerError(`UNKNOWN_UI_REF: ${action.ref}`);
-        return { type: 'click_ui', window: target.window, runtimeKey: target.runtimeKey };
+        return {
+          type: 'click_ui',
+          window: target.window,
+          snapshotId: target.snapshotId,
+          runtimeKey: target.runtimeKey
+        };
       }
       case 'set_value': {
         const target = uiTargets.get(action.ref);
         if (!target) throw new ComputerError(`UNKNOWN_UI_REF: ${action.ref}`);
-        return { type: 'set_value_ui', window: target.window, runtimeKey: target.runtimeKey, value: action.text };
+        return {
+          type: 'set_value_ui',
+          window: target.window,
+          snapshotId: target.snapshotId,
+          runtimeKey: target.runtimeKey,
+          value: action.text
+        };
       }
       case 'move':
       case 'click':
@@ -917,46 +1183,102 @@ async function actLocked(
   // asked for — put text on the clipboard, then press ctrl+v — without giving up the
   // lock in between, which a second call from the tool layer would have done.
   const clipboard: string[] = [];
+  const routes: ActionResult['routes'] = [];
+  let completedCount = 0;
   let batch: ReturnType<typeof mapOne>[] = [];
+  let batchIndices: number[] = [];
   let reply: Record<string, any> | null = null;
   let helperUsed = false;
   const flush = async (): Promise<void> => {
     if (batch.length === 0) return;
-    reply = await runHelper({ op: 'act', actions: batch });
-    helperUsed = true;
+    const sending = batch;
+    const sendingIndices = batchIndices;
     batch = [];
+    batchIndices = [];
+    try {
+      reply = await runHelper({
+        op: 'act',
+        actions: sending,
+        ...(needsFrame
+          ? {
+              frame: {
+                id: frame.id,
+                window: frame.windowId,
+                region: frame.region,
+                windowGeometry: frame.windowGeometry,
+                captureMode: frame.captureMode
+              }
+            }
+          : {})
+      });
+      helperUsed = true;
+      const helperRoutes = Array.isArray(reply['routes']) ? reply['routes'].map(String) : [];
+      for (let index = 0; index < sending.length; index++) {
+        const route = helperRoutes[index];
+        routes.push(route === 'uia' || route === 'focus' ? route : 'sendinput');
+      }
+      completedCount += sending.length;
+    } catch (err) {
+      const partial = err instanceof ComputerError ? (err.completedCount ?? 0) : 0;
+      const failedBatchIndex = err instanceof ComputerError ? (err.failedIndex ?? partial) : partial;
+      for (let index = 0; index < partial; index++) {
+        const action = sending[index];
+        routes.push(action?.['type'] === 'click_ui' || action?.['type'] === 'set_value_ui' ? 'uia' : 'sendinput');
+      }
+      const totalCompleted = completedCount + partial;
+      const originalFailed = sendingIndices[failedBatchIndex] ?? sendingIndices[partial] ?? totalCompleted;
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ComputerError(
+        `PARTIAL_BATCH: completed_count=${totalCompleted} failed_index=${originalFailed}. ${message}`,
+        { completedCount: totalCompleted, failedIndex: originalFailed }
+      );
+    }
   };
-  for (const action of actions) {
+  for (const [index, action] of actions.entries()) {
     if (action.type === 'wait') {
       await flush();
       const ms = Math.min(10_000, Math.max(0, action.ms ?? 2000));
       if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
+      routes.push('local');
+      completedCount += 1;
       continue;
     }
     if (action.type === 'read_clipboard') {
       await flush();
-      clipboard.push((await electronClipboard()).readText());
+      try {
+        clipboard.push((await electronClipboard()).readText());
+      } catch (err) {
+        throw localActionFailure(err, completedCount, index);
+      }
+      routes.push('local');
+      completedCount += 1;
       continue;
     }
     if (action.type === 'write_clipboard') {
       await flush();
-      (await electronClipboard()).writeText(action.text);
+      try {
+        (await electronClipboard()).writeText(action.text);
+      } catch (err) {
+        throw localActionFailure(err, completedCount, index);
+      }
+      routes.push('local');
+      completedCount += 1;
       continue;
     }
     batch.push(mapOne(action));
+    batchIndices.push(index);
   }
   // A pure clipboard/wait batch must not depend on PowerShell/UI Automation at all. This is
   // what makes the connector genuinely useful when the user granted only clipboard access or
   // when the desktop helper is unavailable. Mixed desktop batches still take one final cursor
   // sample after any trailing local wait/clipboard work so the pointer report remains current.
   if (batch.length > 0) {
-    batch.push({ type: 'wait', ms: 0 });
     await flush();
   } else if (helperUsed) {
-    reply = await runHelper({ op: 'act', actions: [{ type: 'wait', ms: 0 }] });
+    reply = await runHelper({ op: 'cursor' });
   }
 
-  if (reply === null) return { cursor: null, clipboard };
+  if (reply === null) return { cursor: null, clipboard, completedCount, routes };
 
   const raw = reply['cursor'] as { x?: unknown; y?: unknown } | undefined;
   const sx = Number(raw?.x);
@@ -964,7 +1286,7 @@ async function actLocked(
   if (!Number.isFinite(sx) || !Number.isFinite(sy)) {
     throw new ComputerError('The desktop helper returned an invalid pointer position.');
   }
-  const current = lastFrame;
+  const current = requestedFrame ?? lastFrame;
   const image = current
     ? {
         x: Math.round((sx - current.region.x) * current.scale),
@@ -978,8 +1300,18 @@ async function actLocked(
       frameId: current?.id ?? null,
       imageSize: current ? { width: current.width, height: current.height } : null
     },
-    clipboard
+    clipboard,
+    completedCount,
+    routes
   };
+}
+
+function localActionFailure(err: unknown, completedCount: number, failedIndex: number): ComputerError {
+  const message = err instanceof Error ? err.message : String(err);
+  return new ComputerError(
+    `PARTIAL_BATCH: completed_count=${completedCount} failed_index=${failedIndex}. ${message}`,
+    { completedCount, failedIndex }
+  );
 }
 
 /**
@@ -1008,5 +1340,20 @@ export async function checkAvailable(): Promise<string | null> {
     const message = err instanceof Error ? err.message : String(err);
     logWarn(`computer use unavailable: ${message}`);
     return message;
+  }
+}
+
+/**
+ * Starts and initializes the helper off the first tool call's critical path.
+ *
+ * Connection owns when Desktop becomes publishable; shutdown remains owned by
+ * `stopComputerHelper`. Clipboard-only configurations deliberately never call this.
+ */
+export async function prewarmComputerHelper(): Promise<void> {
+  try {
+    await runHelper({ op: 'warm' });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logWarn(`computer use prewarm failed: ${message}`);
   }
 }

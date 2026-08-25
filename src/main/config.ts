@@ -22,6 +22,7 @@ import {
   type Root,
   type SessionSettings
 } from '../shared/types.js';
+import { DEFAULT_GOAL_SYSTEM_PROMPT, MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { logError } from './logger.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
 
@@ -116,7 +117,12 @@ const DEFAULT_COMPACTION: CompactionSettings = {
  * of the two: $0.04/M prompt against the pin's $0.057/M.
  */
 export const DEFAULT_GOAL_MODEL = '~deepseek/deepseek-v4-flash-latest';
-const DEFAULT_GOAL: GoalSettings = { enabled: false, model: DEFAULT_GOAL_MODEL, reasoning: 'default' };
+const DEFAULT_GOAL: GoalSettings = {
+  enabled: false,
+  model: DEFAULT_GOAL_MODEL,
+  reasoning: 'default',
+  prompt: DEFAULT_GOAL_SYSTEM_PROMPT
+};
 // Two workers, not three: three concurrent workers reproducibly trips ChatGPT's rate limit
 // ("too many requests"), which strands the run rather than making it faster.
 const DEFAULT_MULTI_AGENT: MultiAgentSettings = { enabled: false, maxWorkers: 2 };
@@ -280,7 +286,16 @@ const configSchema = z.object({
         .enum(GOAL_REASONING_LEVELS)
         .optional()
         .default(DEFAULT_GOAL.reasoning)
-        .catch(DEFAULT_GOAL.reasoning)
+        .catch(DEFAULT_GOAL.reasoning),
+      // Existing configs predate the editor, and a hand-edited blank prompt must not turn
+      // Goal Mode into an unconstrained continuation model. Both adopt the strong default.
+      prompt: z
+        .string()
+        .max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
+        .optional()
+        .default(DEFAULT_GOAL.prompt)
+        .transform((prompt) => (prompt.trim() === '' ? DEFAULT_GOAL.prompt : prompt.trim()))
+        .catch(DEFAULT_GOAL.prompt)
     })
     .optional()
     .default({ ...DEFAULT_GOAL })
@@ -320,6 +335,20 @@ function conservativeRecoveryConfig(): Config {
   };
 }
 
+/**
+ * Repairs feature combinations that cannot work, without silently widening privacy settings.
+ *
+ * Goal Mode reads the local session transcript to decide whether another user turn is needed;
+ * `/goal/draft` explicitly refuses a chat with no recorded session. Enabling recording behind
+ * the user's back would be a privacy surprise, so the only safe repair is to keep recording off
+ * and turn Goal off with it. Keeping this at the config boundary covers renderer, extension and
+ * hand-edited/older config writers alike.
+ */
+function enforceFeatureDependencies(config: Config): Config {
+  if (config.sessions.record || !config.goal.enabled) return config;
+  return { ...config, goal: { ...config.goal, enabled: false } };
+}
+
 let configPath = '';
 let current: Config = defaultConfig();
 // Every UI mutation ultimately lands in the same tiny JSON file. Keep those
@@ -339,7 +368,7 @@ export async function loadConfig(): Promise<Config> {
       logError('Settings file was invalid and has been reset to defaults');
       current = conservativeRecoveryConfig();
     } else {
-      current = adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data)));
+      current = enforceFeatureDependencies(adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data))));
       // Duplicate root names would make a virtual path ambiguous.
       const seen = new Set<string>();
       current.roots = current.roots.filter((r) => {
@@ -443,7 +472,7 @@ export function effectiveCapabilities(config: Config): Capabilities {
 }
 
 async function persistConfig(next: Config): Promise<Config> {
-  const parsed = configSchema.parse(next);
+  const parsed = enforceFeatureDependencies(configSchema.parse(next));
   const tmp = `${configPath}.tmp`;
   await fs.mkdir(path.dirname(configPath), { recursive: true });
   await fs.writeFile(tmp, JSON.stringify(parsed, null, 2), 'utf8');

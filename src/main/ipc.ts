@@ -8,9 +8,10 @@
  * key but can never read it back.
  */
 
-import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
 import { z } from 'zod';
 import { CAPABILITIES, GOAL_REASONING_LEVELS, type AppState, type Config } from '../shared/types.js';
+import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { getConfig, updateConfig } from './config.js';
 import { listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts } from './goal.js';
@@ -30,10 +31,11 @@ import {
   unpair
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
+import { extensionDownloadUrl } from './version.js';
 import {
   deleteSession,
   getSession,
-  listSessions,
+  listSessionPage,
   readEvents,
   readRecentEvents,
   readHandoff
@@ -57,7 +59,6 @@ const ALLOWED_LINKS = new Set([
   'https://platform.openai.com/settings/organization/tunnels',
   'https://platform.openai.com/settings/organization/api-keys',
   'https://github.com/openai/tunnel-client/releases',
-  'https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Extension.zip',
   'https://developers.openai.com/api/docs/guides/secure-mcp-tunnels',
   'https://developers.openai.com/api/docs/guides/developer-mode',
   // Where the key for the goal loop comes from. The button beside the key field is useless
@@ -128,7 +129,8 @@ const settingsPatch = z.object({
         /^~?[a-z0-9._\-]+\/[a-z0-9._\-]+(:[a-z0-9._\-]+)?$/i,
         'Expected an OpenRouter model id like vendor/model'
       ),
-    reasoning: z.enum(GOAL_REASONING_LEVELS)
+    reasoning: z.enum(GOAL_REASONING_LEVELS),
+    prompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
   })
 });
 
@@ -196,7 +198,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     goal: {
       enabled: pick(current.goal.enabled, base.goal.enabled, wanted.goal.enabled),
       model: pick(current.goal.model, base.goal.model, wanted.goal.model),
-      reasoning: pick(current.goal.reasoning, base.goal.reasoning, wanted.goal.reasoning)
+      reasoning: pick(current.goal.reasoning, base.goal.reasoning, wanted.goal.reasoning),
+      prompt: pick(current.goal.prompt, base.goal.prompt, wanted.goal.prompt)
     }
   };
 }
@@ -262,7 +265,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     if (
       before.goal.enabled !== next.goal.enabled ||
       before.goal.model !== next.goal.model ||
-      before.goal.reasoning !== next.goal.reasoning
+      before.goal.reasoning !== next.goal.reasoning ||
+      before.goal.prompt !== next.goal.prompt
     ) {
       retireGoalDrafts();
     }
@@ -444,11 +448,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   // ------------------------------------------------------------- sessions
 
-  handle('sessions:list', async () => {
+  handle('sessions:list', async (payload) => {
+    const { cursor, limit } = z
+      .object({
+        cursor: z
+          .object({
+            updatedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+            id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i)
+          })
+          .optional(),
+        // Keep one renderer payload small even when the store can index much more history.
+        limit: z.number().int().min(1).max(60).optional()
+      })
+      .parse(payload ?? {});
     const config = getConfig();
-    const sessions = (await listSessions()).slice(0, 60);
+    const page = await listSessionPage({ cursor, limit: limit ?? 60 });
+    const sessions = page.sessions;
     return {
       sessions,
+      total: page.total,
+      nextCursor: page.nextCursor,
       activeId: activeSessionId(),
       pressure: sessions.map((summary) => ({
         id: summary.id,
@@ -469,13 +488,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     if (!summary) throw new Error('Session not found');
     // The renderer draws a timeline, not the whole log: the tail is what matters and
     // the rest stays one click away rather than being pushed over IPC every refresh.
-    const cap = limit ?? 300;
+    // The renderer never paints more than 160 rows. Sending nearly twice that on every first
+    // load was pure cloning/IPC work; later refreshes use the sequence cursor below.
+    const cap = limit ?? 160;
     if (from === undefined) {
       const events = await readRecentEvents(id, cap);
-      return { summary, events, total: summary.events };
+      const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), 0);
+      return { summary, events, total: summary.events, nextFrom };
     }
     const events = await readEvents(id, { from, limit: cap });
-    return { summary, events, total: summary.events };
+    const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), from);
+    return { summary, events, total: summary.events, nextFrom };
   });
 
   handle('sessions:delete', async (payload) => {
@@ -511,6 +534,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('bridge:unpair', async () => {
     await unpair();
     return buildState();
+  });
+
+  handle('bridge:downloadExtension', async () => {
+    // This is a recovery path for the extension bundled with *this installed app*. Never use
+    // releases/latest here: an old app must not fetch a newer extension with a newer protocol.
+    await shell.openExternal(extensionDownloadUrl(app.getVersion()));
+    return true;
   });
 
   /**

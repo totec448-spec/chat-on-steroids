@@ -371,8 +371,8 @@
                     </button>
                     <button
                       class="btn"
+                      id="bridgeDownload"
                       type="button"
-                      data-link="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Extension.zip"
                     >
                       <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Download extension ZIP
                     </button>
@@ -542,7 +542,7 @@
                   <!--
                     The goal loop.
 
-                    Four controls in one block because they are one decision: a second model,
+                    One block because these controls make one decision: a second model,
                     given this conversation, writing the next user message when ChatGPT stops.
                     The key comes first because nothing below it works without one - the
                     switch says so in its own hint rather than leaving somebody to find out
@@ -601,6 +601,23 @@
                       <option value="medium">Medium</option>
                       <option value="high">High</option>
                     </select>
+                  </div>
+
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>System prompt</b>
+                      <em>The continuation gate sent to the Goal model. The default stops on “done” and continues only explicit missing work.</em>
+                    </span>
+                    <button class="btn" id="goalPromptEdit" type="button">Edit prompt</button>
+                  </div>
+
+                  <div class="field goal-prompt" id="goalPromptPanel" hidden>
+                    <label for="goalPrompt">Goal system prompt</label>
+                    <textarea id="goalPrompt" rows="14" spellcheck="false"></textarea>
+                    <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
+                    <div class="step-actions">
+                      <button class="btn" id="goalPromptReset" type="button">Restore default</button>
+                    </div>
                   </div>
 
                   <div class="setting">

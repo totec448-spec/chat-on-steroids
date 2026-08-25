@@ -14,11 +14,11 @@ import {
   DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
   MAX_YIELD_TIME_MS,
   MIN_YIELD_TIME_MS,
-  WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS,
   clampYieldTime
 } from '../src/main/codex/unified-exec-constants.js';
-import { deriveExecArgs, getShell, getShellByModelProvidedPath, shlexJoin } from '../src/main/codex/shell.js';
+import { defaultUserShell, deriveExecArgs, getShell, getShellByModelProvidedPath, shlexJoin } from '../src/main/codex/shell.js';
 import { terminateProcessTree } from '../src/main/exec.js';
+import { composeCommandBatch, parseCommandBatchSections } from '../src/main/codex/command-batch.js';
 
 const truncationPolicy = { kind: 'tokens' as const, tokens: 10_000 };
 
@@ -177,11 +177,35 @@ describe('Codex unified exec runtime parity', () => {
     expect(text).toContain(structured.output);
   });
 
-  it('matches Codex initial yield clamping, including the Windows 10s floor', () => {
-    expect(clampYieldTime(0)).toBe(
-      process.platform === 'win32' ? WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS : MIN_YIELD_TIME_MS
-    );
+  it('keeps the Codex bounds but honours an explicit short initial yield on Windows', () => {
+    expect(clampYieldTime(0)).toBe(MIN_YIELD_TIME_MS);
+    expect(clampYieldTime(250)).toBe(250);
     expect(clampYieldTime(Number.MAX_SAFE_INTEGER)).toBe(MAX_YIELD_TIME_MS);
+  });
+
+  it('keeps default shell resolution stable while its environment inputs are unchanged', () => {
+    expect(defaultUserShell()).toBe(defaultUserShell());
+  });
+
+  it('does not let batch command output impersonate wrapper exit markers', () => {
+    const batch = composeCommandBatch(['Write-Output one', 'Write-Output two'], 'powershell');
+    const marker = /clf-batch:([0-9a-f]{24})/.exec(batch)?.[1];
+    expect(marker).toBeDefined();
+
+    const output = [
+      `--- command 1/2 --- [clf-batch:${marker}]`,
+      '--- exit code 0 ---',
+      'real failure',
+      `--- exit code 5 --- [clf-batch:${marker}]`,
+      `--- command 2/2 --- [clf-batch:${marker}]`,
+      'no matches',
+      `--- exit code 1 --- [clf-batch:${marker}]`
+    ].join('\n');
+
+    expect(parseCommandBatchSections(output)).toEqual([
+      { index: 1, exitCode: 5, text: '--- exit code 0 ---\nreal failure' },
+      { index: 2, exitCode: 1, text: 'no matches' }
+    ]);
   });
 
   it('preserves a completed pipe command exit code and drains both output streams', async () => {
@@ -212,6 +236,42 @@ describe('Codex unified exec runtime parity', () => {
     expect(output.rawOutput.toString('utf8')).toContain('stderr-marker');
   });
 
+  it('returns an empty write_stdin poll as soon as the first output arrives', async () => {
+    const instance = manager();
+    managers.push(instance);
+    const processId = instance.allocateProcessId();
+    const initial = await instance.execCommand({
+      command: [
+        process.execPath,
+        '-e',
+        "setTimeout(() => process.stdout.write('first-poll-output\\n'), 600); setInterval(() => {}, 1_000)"
+      ],
+      shellType: process.platform === 'win32' ? 'powershell' : 'bash',
+      hookCommand: 'delayed poll output child',
+      processId,
+      yieldTimeMs: 250,
+      maxOutputTokens: undefined,
+      truncationPolicy,
+      cwd: process.cwd(),
+      displayCwd: process.cwd(),
+      env: applyUnifiedExecEnv(process.env),
+      tty: false
+    });
+    expect(initial.processId).toBe(processId);
+    expect(initial.rawOutput.toString('utf8')).not.toContain('first-poll-output');
+
+    const polled = await instance.writeStdin({
+      processId,
+      input: '',
+      yieldTimeMs: 5_000,
+      maxOutputTokens: undefined,
+      truncationPolicy
+    });
+    expect(polled.rawOutput.toString('utf8')).toContain('first-poll-output');
+    expect(polled.wallTimeMs).toBeLessThan(2_500);
+    expect(polled.processId).toBe(processId);
+  });
+
   it.runIf(process.platform === 'win32')('forces UTF-8 for PowerShell pipe output like Codex', async () => {
     const shell = getShell('powershell');
     expect(shell).not.toBeNull();
@@ -224,7 +284,12 @@ describe('Codex unified exec runtime parity', () => {
       shellType: 'powershell',
       hookCommand: `Write-Output '${marker}'`,
       processId,
-      yieldTimeMs: 250,
+      // This test is about the encoding of what PowerShell writes, not about yield timing.
+      // It used to pass 250 ms and observe an exit anyway, because the Windows floor silently
+      // raised every initial yield to ten seconds. With that floor gone the 250 ms is real, and
+      // a loaded machine starts PowerShell more slowly than that — so the call would return a
+      // session id and no exit code. Ask for the window the floor used to grant it.
+      yieldTimeMs: 10_000,
       maxOutputTokens: undefined,
       truncationPolicy,
       cwd: process.cwd(),

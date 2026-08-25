@@ -23,3 +23,21 @@ const rawFs: typeof nodeFs = (() => {
 
 export const rawPromises = rawFs.promises;
 export const rawCreateReadStream = rawFs.createReadStream;
+
+/**
+ * Windows' native final-path canonicalizer.
+ *
+ * `fs.promises.realpath()` uses Node's portable implementation, which can preserve an NTFS 8.3
+ * spelling such as `CHATGP~1`. `realpath.native()` asks Windows for the final path and expands
+ * that alias, which is the identity the sandbox needs when comparing a native path copied from
+ * command output with an approved long-form root. `original-fs` exposes the same callback API in
+ * packaged Electron, so keep the wrapper here beside the other raw filesystem primitives.
+ */
+export function rawRealpathNative(target: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    rawFs.realpath.native(target, (error, resolved) => {
+      if (error) reject(error);
+      else resolve(resolved);
+    });
+  });
+}

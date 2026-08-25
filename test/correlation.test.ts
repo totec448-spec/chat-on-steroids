@@ -12,6 +12,7 @@ import {
 } from '../src/main/session/store.js';
 import {
   observeRequestCorrelation,
+  observeRequestCorrelations,
   requestCorrelation,
   requestCorrelationConflicted,
   restoreRequestCorrelations,
@@ -74,11 +75,21 @@ describe('request correlation ownership', () => {
     expect(
       observeRequestCorrelation({
         requestId,
+        conversationId: 'conv-a',
+        sessionId: 'session-a',
+        messageId: 'msg-a-refresh',
+        tool: 'read',
+        observedAt: now + 1
+      })
+    ).toBe('same');
+    expect(
+      observeRequestCorrelation({
+        requestId,
         conversationId: 'conv-b',
         sessionId: 'session-b',
         messageId: 'msg-b',
         tool: 'read',
-        observedAt: now + 1
+        observedAt: now + 2
       })
     ).toBe('conflict');
     expect(requestCorrelationConflicted(requestId)).toBe(true);
@@ -99,6 +110,37 @@ describe('request correlation ownership', () => {
     });
 
     expect(requestCorrelation(requestId)?.conversationId).toBe('conv-a');
+  });
+
+  it('evicts by latest same-owner observation rather than original insertion order', () => {
+    const refreshedId = 'wfr_refreshed_old_request';
+    const correlation = (requestId: string, observedAt: number) => ({
+      requestId,
+      conversationId: 'conv-a',
+      sessionId: 'session-a',
+      messageId: `msg-${requestId}`,
+      tool: 'read',
+      observedAt
+    });
+
+    // Fill the bounded registry exactly. The request we care about is deliberately the oldest
+    // insertion, then is observed again immediately before one new id forces an eviction.
+    observeRequestCorrelations([
+      correlation(refreshedId, 1),
+      ...Array.from({ length: 49_999 }, (_, index) => correlation(`wfr_fill_${index}`, index + 2))
+    ]);
+    expect(
+      observeRequestCorrelation({
+        ...correlation(refreshedId, 100_000),
+        messageId: 'msg-refreshed'
+      })
+    ).toBe('same');
+
+    observeRequestCorrelation(correlation('wfr_newest', 100_001));
+
+    expect(requestCorrelation(refreshedId)?.conversationId).toBe('conv-a');
+    expect(requestCorrelation(refreshedId)?.observedAt).toBe(100_000);
+    expect(requestCorrelation('wfr_fill_0')).toBeNull();
   });
 
   it('restores proven request ownership from durable state after an app restart', async () => {

@@ -47,7 +47,14 @@ export interface McpEndpoint {
    * which MCP server answers it, and each path is wired to exactly one (see `buildServer`).
    */
   urls: Record<SurfaceId, string>;
-  stop: () => Promise<void>;
+  /**
+   * Stops accepting new requests and drains accepted ones.
+   *
+   * Ordinary disconnect/reconnect callers omit `forceAfterMs`: severing an active response
+   * after its mutation committed creates an ambiguous retry boundary. Final process shutdown
+   * may opt into a bounded force because the process is exiting either way.
+   */
+  stop: (options?: { forceAfterMs?: number }) => Promise<void>;
 }
 
 /** RFC 9728 §3.1: the metadata for a resource at /x lives at /.well-known/…/x. */
@@ -439,24 +446,29 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     port: address.port,
     url: urls.core,
     urls,
-    stop: () =>
+    stop: (options = {}) =>
       new Promise<void>((resolve) => {
         // Stop accepting new work, but let requests already accepted by the MCP adapter
         // finish and deliver their result. Destroying active sockets here created ambiguous
         // commits: the caller saw `fetch failed` and could retry while the original mutation
-        // continued in this process. `server.close()` drains active connections; a bounded
-        // fallback prevents a wedged client from blocking app shutdown forever.
+        // continued in this process. `server.close()` drains active connections. There is no
+        // force deadline for an ordinary disconnect/reconnect; only final process shutdown
+        // opts into one explicitly, where remaining work cannot outlive the app anyway.
         let settled = false;
-        const force = setTimeout(() => {
-          if (settled) return;
-          logWarn('server drain timed out after 30s; forcing remaining connections closed');
-          server.closeAllConnections();
-        }, 30_000);
-        force.unref?.();
+        const forceAfterMs = options.forceAfterMs;
+        const force =
+          forceAfterMs === undefined
+            ? null
+            : setTimeout(() => {
+                if (settled) return;
+                logWarn(`server drain timed out after ${forceAfterMs}ms during final shutdown; forcing remaining connections closed`);
+                server.closeAllConnections();
+              }, Math.max(0, forceAfterMs));
+        force?.unref?.();
         server.closeIdleConnections?.();
         server.close(() => {
           settled = true;
-          clearTimeout(force);
+          if (force) clearTimeout(force);
           logInfo('server stopped');
           resolve();
         });

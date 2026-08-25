@@ -32,6 +32,7 @@ const {
   freezePrimeTransfer,
   primeConversation,
   primeConversationGone,
+  repairPrimeConversationAfterRecovery,
   resetAgentsForTests,
   spawn,
   swarmRunning,
@@ -43,10 +44,13 @@ const {
   attachSummary,
   claimContinuationNow,
   commitContinuation,
+  continuationByToken,
   continuationForSession,
   openContinuationNow,
+  repairPrimeFromResumeShadow,
   resetContinuationsForTests,
-  restoreContinuations
+  restoreContinuations,
+  setContinuationRecoveryHooks
 } = await import('../src/main/session/continuation.js');
 const { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } = await import('../src/main/session/resume-gate.js');
 const { briefShortfall } = await import('../src/main/session/handoff.js');
@@ -483,11 +487,12 @@ describe('the swarm handover', () => {
     expect(await attachedChat(sessionId)).toBe(CHAT_B);
   });
 
-  it('keeps the run alive while chat A is being replaced, and kills it otherwise', async () => {
+  it('keeps reusable workers attached to the run across an ordinary prime pause and a handover', async () => {
     startSwarm(CHAT_A);
-    expect(primeConversationGone(CHAT_A)).toBe(true);
-    expect(swarmRunning()).toBe(false);
+    expect(primeConversationGone(CHAT_A)).toBe(false);
+    expect(swarmRunning()).toBe(true);
 
+    resetAgentsForTests();
     startSwarm(CHAT_A);
     beginPrimeTransfer(CHAT_A);
     expect(primeConversationGone(CHAT_A)).toBe(false);
@@ -521,6 +526,107 @@ describe('the swarm handover', () => {
 
     expect(commitPrimeTransfer('someone-else', CHAT_B)).toBe(false);
     expect(primeConversation()).toBe(CHAT_A);
+  });
+
+  it('does not revive an already-expired waiting continuation after restart', async () => {
+    vi.useFakeTimers();
+    const openedAt = Date.now();
+    const summary = await createSession({ title: 'expired restore', conversationId: CHAT_A });
+    spawn({ workers: [{ task: 'read the tests' }], caller: { conversationId: CHAT_A } });
+
+    vi.setSystemTime(openedAt + CONTINUATION_TTL_MS + 1);
+    await restoreContinuations({
+      version: 1,
+      savedAt: openedAt,
+      entries: [
+        {
+          token: 'expired-wait-token',
+          sessionId: summary.id,
+          from: CHAT_A,
+          to: null,
+          openedAt,
+          state: 'awaiting-summary',
+          summary: '',
+          handoffId: null,
+          claimedBy: null,
+          armed: false,
+          error: null
+        }
+      ]
+    });
+
+    // Recovery must not mint a fresh transfer lease for a transaction whose own ten-minute
+    // deadline already elapsed. The reusable worker run is independent of that expired
+    // continuation, so losing the prime browser view pauses the run rather than destroying it.
+    expect(continuationByToken('expired-wait-token')?.state).toBe('aborted');
+    expect(primeConversationGone(CHAT_A)).toBe(false);
+    expect(swarmRunning()).toBe(true);
+  });
+});
+
+describe('restart lifetime recovery', () => {
+  it('does not roll an expired pre-commit record back into a fresh transfer', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const summary = await createSession({ title: 'expired committing restore', conversationId: CHAT_A });
+    spawn({ workers: [{ task: 'read the tests' }], caller: { conversationId: CHAT_A } });
+
+    await restoreContinuations({
+      version: 1,
+      savedAt: now,
+      entries: [
+        {
+          token: 'expired-commit-token',
+          sessionId: summary.id,
+          from: CHAT_A,
+          to: CHAT_B,
+          openedAt: now - CONTINUATION_TTL_MS - 1,
+          state: 'committing',
+          summary: SAMPLE_BRIEF,
+          handoffId: null,
+          claimedBy: CHAT_B,
+          armed: true,
+          error: null
+        }
+      ]
+    });
+
+    // The session still being on A proves the durable move never landed. Recovery may not
+    // convert that expired intent back to `claimed` and mint a new transfer lifetime.
+    expect(continuationByToken('expired-commit-token')?.state).toBe('aborted');
+    expect(primeConversationGone(CHAT_A)).toBe(false);
+    expect(swarmRunning()).toBe(true);
+    expect(await attachedChat(summary.id)).toBe(CHAT_A);
+  });
+
+  it('keeps a terminal commit replayable during the second TTL window', async () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const summary = await createSession({ title: 'committed restore', conversationId: CHAT_A });
+    expect(await store.rebindSession(summary.id, CHAT_A, CHAT_B)).toBe(true);
+
+    await restoreContinuations({
+      version: 1,
+      savedAt: now,
+      entries: [
+        {
+          token: 'terminal-replay-token',
+          sessionId: summary.id,
+          from: CHAT_A,
+          to: CHAT_B,
+          openedAt: now - CONTINUATION_TTL_MS - 1,
+          state: 'committed',
+          summary: SAMPLE_BRIEF,
+          handoffId: null,
+          claimedBy: CHAT_B,
+          armed: true,
+          error: null
+        }
+      ]
+    });
+
+    expect(await commitContinuation('terminal-replay-token', CHAT_B)).toBe(true);
+    expect(await attachedChat(summary.id)).toBe(CHAT_B);
   });
 });
 
@@ -685,5 +791,40 @@ describe('the window in which a replacement chat is expected', () => {
     expect(resumeOpeningChat()).toBe(true);
     resetContinuationsForTests();
     expect(resumeOpeningChat()).toBe(false);
+  });
+
+  it('lets the exact app-opened shadow chat recover the prime after the historical collision', async () => {
+    const from = '81818181-1111-2222-3333-444444444444';
+    const to = '82828282-1111-2222-3333-444444444444';
+    const source = await createSession({ title: 'prime before broken resume', conversationId: from });
+    spawn({ workers: [{ task: 'keep the reusable worker alive' }], caller: { conversationId: from } });
+    const opened = await openContinuationNow(source.id, from);
+    await attachSummary(opened.token, SAMPLE_BRIEF);
+    await claimContinuationNow(opened.token, 'resume-shadow-owner');
+
+    // The buggy recorder beat the ACK and stamped B as an app-created resume session. The real
+    // continuation then refused to overwrite that session and the bridge durably aborted it.
+    await createSession({
+      title: 'Resumed · prime before broken resume',
+      conversationId: to,
+      origin: { kind: 'resume', fromSessionId: source.id, agentId: null, task: '' }
+    });
+    expect(await commitContinuation(opened.token, to)).toBe(false);
+    abortContinuation(opened.token, 'the replacement chat already belongs to another local session');
+    expect(primeConversation()).toBe(from);
+
+    setContinuationRecoveryHooks({ repairPrimeTransfer: repairPrimeConversationAfterRecovery });
+    expect(await repairPrimeFromResumeShadow(to)).toBe(true);
+    expect(primeConversation()).toBe(to);
+
+    // Same-origin-looking data without that exact failed WAL is not takeover authority.
+    const stranger = '83838383-1111-2222-3333-444444444444';
+    await createSession({
+      title: 'unrelated resume-looking chat',
+      conversationId: stranger,
+      origin: { kind: 'resume', fromSessionId: source.id, agentId: null, task: '' }
+    });
+    expect(await repairPrimeFromResumeShadow(stranger)).toBe(false);
+    expect(primeConversation()).toBe(to);
   });
 });

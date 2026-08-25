@@ -77,6 +77,7 @@ public static class Clf {
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
   [DllImport("user32.dll")] static extern bool AttachThreadInput(uint from, uint to, bool attach);
+  [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint flags);
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
 
   public struct POINT { public int X, Y; }
@@ -212,6 +213,26 @@ public static class Clf {
     return r.Left + "," + r.Top + "," + (r.Right - r.Left) + "," + (r.Bottom - r.Top);
   }
 
+  public static string Window(long handle) {
+    IntPtr h = new IntPtr(handle);
+    if (!IsWindow(h) || !IsWindowVisible(h)) return "";
+    int len = GetWindowTextLengthW(h);
+    if (len == 0 || (GetWindowLong(h, -20) & 0x00000080) != 0) return "";
+    StringBuilder sb = new StringBuilder(len + 1);
+    GetWindowTextW(h, sb, sb.Capacity);
+    RECT r;
+    if (!GetWindowRect(h, out r) || r.Right - r.Left <= 0 || r.Bottom - r.Top <= 0) return "";
+    uint pid;
+    GetWindowThreadProcessId(h, out pid);
+    string proc = "";
+    try { proc = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { }
+    return string.Join(((char)31).ToString(), new string[] {
+      h.ToInt64().ToString(), sb.ToString(), proc,
+      r.Left.ToString(), r.Top.ToString(), (r.Right - r.Left).ToString(), (r.Bottom - r.Top).ToString(),
+      IsIconic(h) ? "minimized" : (h == GetForegroundWindow() ? "foreground" : "open")
+    });
+  }
+
   public static List<string> Windows() {
     List<string> found = new List<string>();
     EnumWindows(delegate(IntPtr h, IntPtr lp) {
@@ -269,29 +290,52 @@ public static class Clf {
    * write, slow to read back and slow to base64, and nothing downstream ever wants
    * one. Returns the size actually written.
    */
-  public static string Capture(int x, int y, int w, int h, int maxW, string file) {
+  static string SavePng(Bitmap shot, int maxW, string file) {
+    int w = shot.Width, h = shot.Height;
     int outW = w, outH = h;
     if (maxW > 0 && w > maxW) {
       outW = maxW;
       outH = (int)Math.Round((double)h * maxW / w);
       if (outH < 1) outH = 1;
     }
-    using (Bitmap shot = new Bitmap(w, h))
-    using (Graphics g = Graphics.FromImage(shot)) {
-      g.CopyFromScreen(x, y, 0, 0, new Size(w, h), CopyPixelOperation.SourceCopy);
-      if (outW == w && outH == h) {
-        shot.Save(file, System.Drawing.Imaging.ImageFormat.Png);
-      } else {
-        using (Bitmap small = new Bitmap(outW, outH))
-        using (Graphics gs = Graphics.FromImage(small)) {
-          gs.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-          gs.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-          gs.DrawImage(shot, new Rectangle(0, 0, outW, outH));
-          small.Save(file, System.Drawing.Imaging.ImageFormat.Png);
-        }
+    if (outW == w && outH == h) {
+      shot.Save(file, System.Drawing.Imaging.ImageFormat.Png);
+    } else {
+      using (Bitmap small = new Bitmap(outW, outH))
+      using (Graphics gs = Graphics.FromImage(small)) {
+        gs.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        gs.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+        gs.DrawImage(shot, new Rectangle(0, 0, outW, outH));
+        small.Save(file, System.Drawing.Imaging.ImageFormat.Png);
       }
     }
     return outW + "," + outH;
+  }
+
+  public static string Capture(int x, int y, int w, int h, int maxW, string file) {
+    using (Bitmap shot = new Bitmap(w, h))
+    using (Graphics g = Graphics.FromImage(shot)) {
+      g.CopyFromScreen(x, y, 0, 0, new Size(w, h), CopyPixelOperation.SourceCopy);
+      return SavePng(shot, maxW, file);
+    }
+  }
+
+  /** Captures a classic top-level window without changing the foreground. */
+  public static string CaptureWindow(long handle, int maxW, string file) {
+    IntPtr h = new IntPtr(handle);
+    RECT r;
+    if (!IsWindow(h) || IsIconic(h) || !GetWindowRect(h, out r)) return "";
+    int w = r.Right - r.Left, height = r.Bottom - r.Top;
+    if (w <= 0 || height <= 0) return "";
+    using (Bitmap shot = new Bitmap(w, height))
+    using (Graphics g = Graphics.FromImage(shot)) {
+      IntPtr dc = g.GetHdc();
+      bool ok;
+      try { ok = PrintWindow(h, dc, 2); }
+      finally { g.ReleaseHdc(dc); }
+      if (!ok) return "";
+      return SavePng(shot, maxW, file);
+    }
   }
 }
 '@ -ReferencedAssemblies System.Drawing
@@ -332,6 +376,19 @@ function Get-WindowRows {
   return $rows
 }
 
+function Convert-WindowRow([string]$line) {
+  if ([string]::IsNullOrEmpty($line)) { return $null }
+  $f = $line -split ([char]31)
+  return @{
+    id = [int64]$f[0]; title = $f[1]; process = $f[2]
+    x = [int]$f[3]; y = [int]$f[4]; width = [int]$f[5]; height = [int]$f[6]; state = $f[7]
+  }
+}
+
+function Get-WindowRow([int64]$id) {
+  return Convert-WindowRow ([Clf]::Window($id))
+}
+
 function Get-ScreenRect {
   $s = [Clf]::Screen() -split ','
   return @{
@@ -341,9 +398,16 @@ function Get-ScreenRect {
 }
 
 function Try-Focus([int64]$id) {
-  [Clf]::Focus($id) | Out-Null
-  Start-Sleep -Milliseconds 120
-  return ([Clf]::ForegroundId() -eq $id)
+  if ([Clf]::ForegroundId() -eq $id) { return $true }
+  if (-not [Clf]::Focus($id)) { return $false }
+  # Activation is asynchronous for some windows. Confirm the actual foreground state and
+  # stop as soon as it lands instead of charging every call one fixed 120 ms sleep.
+  $timer = [Diagnostics.Stopwatch]::StartNew()
+  do {
+    if ([Clf]::ForegroundId() -eq $id) { return $true }
+    Start-Sleep -Milliseconds 10
+  } while ($timer.ElapsedMilliseconds -lt 250)
+  return $false
 }
 
 function Assert-Focused([int64]$id) {
@@ -357,32 +421,67 @@ function Ui-RuntimeKey($element) {
   try { return (@($element.GetRuntimeId()) -join '.') } catch { return '' }
 }
 
-function Resolve-UiElement([int64]$id, [string]$runtimeKey) {
+$script:UiSnapshots = [ordered]@{}
+$script:NextUiSnapshotId = 1
+$script:MaxUiSnapshots = 16
+
+function Remember-UiSnapshot([int64]$id, $root, $elements) {
+  $snapshotId = $script:NextUiSnapshotId
+  $script:NextUiSnapshotId += 1
+  $byRuntimeKey = @{}
+  foreach ($element in $elements) {
+    $key = Ui-RuntimeKey $element
+    if ($key -and -not $byRuntimeKey.ContainsKey($key)) { $byRuntimeKey[$key] = $element }
+  }
+  $snapshotKey = "s$snapshotId"
+  $script:UiSnapshots[$snapshotKey] = @{
+    window = $id
+    rootRuntimeKey = (Ui-RuntimeKey $root)
+    elements = $byRuntimeKey
+  }
+  while ($script:UiSnapshots.Count -gt $script:MaxUiSnapshots) {
+    $oldest = @($script:UiSnapshots.Keys)[0]
+    $script:UiSnapshots.Remove($oldest)
+  }
+  return $snapshotId
+}
+
+function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
+  $snapshot = $script:UiSnapshots["s$snapshotId"]
+  if ($null -eq $snapshot -or [int64]$snapshot.window -ne $id) {
+    throw "STALE_UI_SNAPSHOT: UI snapshot $snapshotId is no longer active for window $id"
+  }
+  $element = $snapshot.elements[$runtimeKey]
+  if ($null -eq $element) {
+    throw "UI_ELEMENT_GONE: the referenced UI element is not part of snapshot $snapshotId"
+  }
   try {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$id)
   } catch {
     throw "UIA_FAILED: no accessible window with id $id"
   }
   if ($null -eq $root) { throw "UIA_FAILED: no accessible window with id $id" }
-  if ((Ui-RuntimeKey $root) -eq $runtimeKey) { return $root }
   try {
-    $all = $root.FindAll(
-      [System.Windows.Automation.TreeScope]::Descendants,
-      [System.Windows.Automation.Condition]::TrueCondition
-    )
-    for ($i = 0; $i -lt $all.Count; $i++) {
-      $element = $all.Item($i)
-      if ((Ui-RuntimeKey $element) -eq $runtimeKey) { return $element }
+    if ((Ui-RuntimeKey $root) -ne [string]$snapshot.rootRuntimeKey) {
+      throw "STALE_UI_SNAPSHOT: window $id no longer has the UIA root from snapshot $snapshotId"
     }
+    # Reading Current is the liveness check. The element object itself is the cached handle;
+    # never rescan by RuntimeId, because Microsoft permits RuntimeId reuse over time.
+    $null = $element.Current.IsEnabled
+    if ((Ui-RuntimeKey $element) -ne $runtimeKey) {
+      throw "STALE_UI_REF: the cached element identity changed"
+    }
+    return $element
   } catch {
-    throw "UIA_FAILED: $($_.Exception.Message)"
+    $message = $_.Exception.Message
+    if ($message -match '^[A-Z0-9_]+:') { throw $message }
+    throw "UI_ELEMENT_GONE: the referenced UI element is no longer present"
   }
-  throw "UI_ELEMENT_GONE: the referenced UI element is no longer present"
 }
 
 function Act-UiElement($request) {
   $id = [int64]$request.id
-  $element = Resolve-UiElement $id ([string]$request.runtimeKey)
+  $element = Resolve-UiElement $id ([int]$request.snapshotId) ([string]$request.runtimeKey)
   if (-not $element.Current.IsEnabled) { throw "UI_ELEMENT_DISABLED: the referenced element is disabled" }
   $action = [string]$request.action
   if ($action -eq 'set_value') {
@@ -393,20 +492,26 @@ function Act-UiElement($request) {
     $value = [System.Windows.Automation.ValuePattern]$pattern
     if ($value.Current.IsReadOnly) { throw "UI_VALUE_READONLY: the referenced element is read-only" }
     $value.SetValue([string]$request.value)
+    $route = 'uia'
   } elseif ($action -eq 'click') {
     $pattern = $null
     if ($element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
       ([System.Windows.Automation.InvokePattern]$pattern).Invoke()
+      $route = 'uia'
     } else {
+      # A semantic control without InvokePattern has to fall back to physical input. Make
+      # that last resort explicit and safe: the referenced window, not an overlay at the
+      # same desktop coordinates, must be foreground before the pointer goes down.
+      Assert-Focused $id
       $r = $element.Current.BoundingRectangle
       if ($r.Width -le 0 -or $r.Height -le 0) { throw "UI_ELEMENT_OFFSCREEN: the referenced element has no clickable bounds" }
       [Clf]::Click([int][Math]::Round($r.X + $r.Width / 2), [int][Math]::Round($r.Y + $r.Height / 2), 'left', 1)
+      $route = 'sendinput'
     }
   } else {
     throw "BAD_ACTION: unsupported UI element action $action"
   }
-  Start-Sleep -Milliseconds 30
-  return @{ runtimeKey = (Ui-RuntimeKey $element); name = [string]$element.Current.Name }
+  return @{ runtimeKey = (Ui-RuntimeKey $element); name = [string]$element.Current.Name; route = $route }
 }
 
 function Find-UiElements($request) {
@@ -421,46 +526,172 @@ function Find-UiElements($request) {
   $query = ([string]$request.query).Trim().ToLowerInvariant()
   $role = ([string]$request.role).Trim().ToLowerInvariant()
   $limit = if ($request.maxResults) { [Math]::Min(100, [Math]::Max(1, [int]$request.maxResults)) } else { 30 }
+  $visitLimit = if ($request.maxVisited) { [Math]::Min(10000, [Math]::Max($limit, [int]$request.maxVisited)) } else { 3000 }
   $found = @()
+  $handles = New-Object 'System.Collections.Generic.List[object]'
+  $visited = 0
   try {
-    $all = $root.FindAll(
-      [System.Windows.Automation.TreeScope]::Descendants,
-      [System.Windows.Automation.Condition]::TrueCondition
-    )
-    for ($i = 0; $i -lt $all.Count -and $found.Count -lt $limit; $i++) {
+    # ControlView avoids the enormous raw Chromium implementation tree. TreeWalker lets the
+    # limit bound traversal work as well as output; FindAll(Descendants) materialised the full
+    # tree before maxResults could stop it. CacheRequest fetches the projection properties in
+    # bulk rather than paying one cross-process provider call for every Current field.
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $cache = New-Object System.Windows.Automation.CacheRequest
+    $cache.TreeScope = [System.Windows.Automation.TreeScope]::Element
+    $cache.Add([System.Windows.Automation.AutomationElement]::NameProperty)
+    $cache.Add([System.Windows.Automation.AutomationElement]::AutomationIdProperty)
+    $cache.Add([System.Windows.Automation.AutomationElement]::ControlTypeProperty)
+    $cache.Add([System.Windows.Automation.AutomationElement]::IsEnabledProperty)
+    $cache.Add([System.Windows.Automation.AutomationElement]::IsOffscreenProperty)
+    $cache.Add([System.Windows.Automation.AutomationElement]::BoundingRectangleProperty)
+    $stack = New-Object System.Collections.Stack
+    $element = $walker.GetFirstChild($root, $cache)
+    while ($null -ne $element -and $found.Count -lt $limit -and $visited -lt $visitLimit) {
+      $visited += 1
       try {
-        $current = $all.Item($i).Current
+        $current = $element.Cached
         $name = [string]$current.Name
         $automationId = [string]$current.AutomationId
         $control = [string]$current.ControlType.ProgrammaticName
         if ($control.StartsWith('ControlType.')) { $control = $control.Substring(12) }
-        if ($query -and -not ($name.ToLowerInvariant().Contains($query) -or $automationId.ToLowerInvariant().Contains($query))) { continue }
-        if ($role -and -not $control.ToLowerInvariant().Contains($role)) { continue }
-        $r = $current.BoundingRectangle
-        if ($r.Width -le 0 -or $r.Height -le 0) { continue }
-        $found += @{
-          runtimeKey = (Ui-RuntimeKey $all.Item($i))
-          name = $name
-          role = $control
-          automationId = $automationId
-          enabled = [bool]$current.IsEnabled
-          offscreen = [bool]$current.IsOffscreen
-          bounds = @{
-            x = [int][Math]::Round($r.X); y = [int][Math]::Round($r.Y)
-            width = [int][Math]::Round($r.Width); height = [int][Math]::Round($r.Height)
+        $matches = (-not $query -or $name.ToLowerInvariant().Contains($query) -or $automationId.ToLowerInvariant().Contains($query))
+        $matches = $matches -and (-not $role -or $control.ToLowerInvariant().Contains($role))
+        if ($matches) {
+          $r = $current.BoundingRectangle
+          if ($r.Width -gt 0 -and $r.Height -gt 0) {
+            $found += @{
+              runtimeKey = (Ui-RuntimeKey $element)
+              name = $name
+              role = $control
+              automationId = $automationId
+              enabled = [bool]$current.IsEnabled
+              offscreen = [bool]$current.IsOffscreen
+              bounds = @{
+                x = [int][Math]::Round($r.X); y = [int][Math]::Round($r.Y)
+                width = [int][Math]::Round($r.Width); height = [int][Math]::Round($r.Height)
+              }
+            }
+            $handles.Add($element)
           }
         }
       } catch { }
+
+      $sibling = $null
+      try { $sibling = $walker.GetNextSibling($element, $cache) } catch { }
+      if ($null -ne $sibling) { $stack.Push($sibling) }
+      $child = $null
+      try { $child = $walker.GetFirstChild($element, $cache) } catch { }
+      if ($null -ne $child) {
+        $element = $child
+      } elseif ($stack.Count -gt 0) {
+        $element = $stack.Pop()
+      } else {
+        $element = $null
+      }
     }
   } catch {
     throw "UIA_FAILED: $($_.Exception.Message)"
   }
-  return @{ window = $id; elements = @($found) }
+  $snapshotId = Remember-UiSnapshot $id $root $handles
+  return @{
+    window = $id
+    snapshotId = $snapshotId
+    elements = @($found)
+    visited = $visited
+    truncated = ($visited -ge $visitLimit -and $found.Count -lt $limit)
+  }
+}
+
+function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
+  $screen = Get-ScreenRect
+  $id = if ($null -ne $forcedWindow) { [int64]$forcedWindow } elseif ($request.id) { [int64]$request.id } else { $null }
+  $mode = 'screen'
+  $focused = $null
+  if ($request.region) {
+    $x = [int]$request.region.x; $y = [int]$request.region.y
+    $w = [int]$request.region.width; $h = [int]$request.region.height
+  } elseif ($null -ne $id) {
+    $r = [Clf]::Rect([int64]$id) -split ','
+    $x = [int]$r[0]; $y = [int]$r[1]; $w = [int]$r[2]; $h = [int]$r[3]
+    $focused = ([Clf]::ForegroundId() -eq [int64]$id)
+  } elseif ($request.full) {
+    $x = [int]$screen.virtual.x; $y = [int]$screen.virtual.y
+    $w = [int]$screen.virtual.width; $h = [int]$screen.virtual.height
+  } else {
+    $x = 0; $y = 0; $w = [int]$screen.primary.width; $h = [int]$screen.primary.height
+  }
+  if ($w -le 0 -or $h -le 0) { throw "CAPTURE_FAILED: target has no drawable area" }
+  $maxW = if ($request.maxWidth) { [int]$request.maxWidth } else { 0 }
+  $out = $null
+  # PrintWindow is background-first and leaves the foreground alone. Providers that reject
+  # it fall back to truthful screen pixels, explicitly marked as potentially occluded.
+  if ($null -ne $id -and $request.file) {
+    $direct = [Clf]::CaptureWindow([int64]$id, $maxW, [string]$request.file)
+    if ($direct) {
+      $out = $direct -split ','
+      $mode = 'window'
+    } else {
+      $mode = 'screen_fallback'
+    }
+  }
+  if ($null -eq $out) {
+    $out = [Clf]::Capture($x, $y, $w, $h, $maxW, [string]$request.file) -split ','
+  }
+  return @{
+    region = @{ x = $x; y = $y; width = $w; height = $h }
+    image = @{ width = [int]$out[0]; height = [int]$out[1] }
+    screen = $screen.virtual
+    focused = $focused
+    captureMode = $mode
+  }
+}
+
+function Assert-CoordinateFrame($frame) {
+  $region = $frame.region
+  if ($frame.window) {
+    $id = [int64]$frame.window
+    $geometry = if ($frame.windowGeometry) { $frame.windowGeometry } else { $region }
+    $row = Get-WindowRow $id
+    if ($null -eq $row -or $row.state -eq 'minimized') {
+      throw "STALE_FRAME: target window $id is no longer drawable"
+    }
+    if ($row.x -ne [int]$geometry.x -or $row.y -ne [int]$geometry.y -or $row.width -ne [int]$geometry.width -or $row.height -ne [int]$geometry.height) {
+      throw "STALE_FRAME: target window $id moved or resized after frame $($frame.id)"
+    }
+    # A background snapshot is safe to observe, but physical coordinates must land on that
+    # exact window rather than on an overlay. Focus only here, on the mutating path.
+    Assert-Focused $id
+    $after = Get-WindowRow $id
+    if ($null -eq $after -or $after.x -ne [int]$geometry.x -or $after.y -ne [int]$geometry.y -or $after.width -ne [int]$geometry.width -or $after.height -ne [int]$geometry.height) {
+      throw "STALE_FRAME: target window $id changed geometry while it was activated"
+    }
+    return
+  }
+  $screen = Get-ScreenRect
+  $right = [int]$region.x + [int]$region.width
+  $bottom = [int]$region.y + [int]$region.height
+  if ([int]$region.x -lt [int]$screen.virtual.x -or [int]$region.y -lt [int]$screen.virtual.y -or
+      $right -gt ([int]$screen.virtual.x + [int]$screen.virtual.width) -or
+      $bottom -gt ([int]$screen.virtual.y + [int]$screen.virtual.height)) {
+    throw "STALE_FRAME: desktop geometry changed after frame $($frame.id)"
+  }
 }
 
 function Handle-Request($request) {
   $result = @{ ok = $true }
   switch ($request.op) {
+    'warm' {
+      # Touch both Win32 and UIA without reading pixels or changing focus. Connector startup
+      # can pay Add-Type and provider initialization before the first model-facing action.
+      $null = [Clf]::ForegroundId()
+      $null = [System.Windows.Automation.AutomationElement]::RootElement.Current.ProcessId
+      $result.ready = $true
+    }
+    'cursor' {
+      $cursor = [Clf]::Cursor() -split ','
+      $result.cursor = @{ x = [int]$cursor[0]; y = [int]$cursor[1] }
+      $result.foreground = [Clf]::ForegroundId()
+    }
     'windows' {
       $screen = Get-ScreenRect
       $result.windows = @(Get-WindowRows)
@@ -469,75 +700,106 @@ function Handle-Request($request) {
     'active' {
       $screen = Get-ScreenRect
       $foreground = [Clf]::ForegroundId()
-      $result.window = @((Get-WindowRows) | Where-Object { $_.id -eq $foreground } | Select-Object -First 1)[0]
+      $result.window = Get-WindowRow $foreground
       $result.screen = $screen.virtual
     }
     'find_ui' {
       $ui = Find-UiElements $request
       $result.window = $ui.window
+      $result.snapshotId = $ui.snapshotId
       $result.elements = @($ui.elements)
+      $result.visited = $ui.visited
+      $result.truncated = $ui.truncated
     }
     'act_ui' {
       $ui = Act-UiElement $request
       $result.runtimeKey = $ui.runtimeKey
       $result.name = $ui.name
+      $result.route = $ui.route
     }
     'capture' {
-      $screen = Get-ScreenRect
-      if ($request.region) {
-        $x = [int]$request.region.x; $y = [int]$request.region.y
-        $w = [int]$request.region.width; $h = [int]$request.region.height
-      } elseif ($request.id) {
-        $id = [int64]$request.id
-        # Looking at a window is not an action on it, so this never refuses for lack of
-        # focus. It asks Windows to bring the window forward, because unoccluded pixels
-        # are better, and then reports whether that worked so the caller can say the
-        # picture may be covered instead of failing a read the user asked for.
-        $result.focused = (Try-Focus $id)
-        $r = [Clf]::Rect($id) -split ','
-        $x = [int]$r[0]; $y = [int]$r[1]; $w = [int]$r[2]; $h = [int]$r[3]
-      } elseif ($request.full) {
-        $x = [int]$screen.virtual.x; $y = [int]$screen.virtual.y
-        $w = [int]$screen.virtual.width; $h = [int]$screen.virtual.height
-      } else {
-        $x = 0; $y = 0; $w = [int]$screen.primary.width; $h = [int]$screen.primary.height
+      $capture = Capture-Target $request $null
+      foreach ($key in $capture.Keys) { $result[$key] = $capture[$key] }
+    }
+    'snapshot' {
+      $id = if ($request.id) { [int64]$request.id } else { [Clf]::ForegroundId() }
+      $window = Get-WindowRow $id
+      if ($null -eq $window) { throw "WINDOW_NOT_FOUND: no matching visible window is available" }
+      $result.window = $window
+      if ($request.includeScreenshot) {
+        $capture = Capture-Target $request ([Nullable[int64]]$id)
+        foreach ($key in $capture.Keys) { $result[$key] = $capture[$key] }
       }
-      if ($w -le 0 -or $h -le 0) { throw "CAPTURE_FAILED: target has no drawable area" }
-      $maxW = 0
-      if ($request.maxWidth) { $maxW = [int]$request.maxWidth }
-      $out = [Clf]::Capture($x, $y, $w, $h, $maxW, $request.file) -split ','
-      $result.region = @{ x = $x; y = $y; width = $w; height = $h }
-      $result.image = @{ width = [int]$out[0]; height = [int]$out[1] }
-      $result.screen = $screen.virtual
+      if ($request.includeUi) {
+        $uiRequest = @{
+          id = $id
+          query = if ($request.query) { $request.query } else { '' }
+          role = if ($request.role) { $request.role } else { '' }
+          maxResults = $request.maxResults
+          maxVisited = $request.maxVisited
+        }
+        $ui = Find-UiElements $uiRequest
+        $result.snapshotId = $ui.snapshotId
+        $result.elements = @($ui.elements)
+        $result.visited = $ui.visited
+        $result.truncated = $ui.truncated
+      }
     }
     'focus' {
       $id = [int64]$request.id
-      [Clf]::Focus($id) | Out-Null
-      Start-Sleep -Milliseconds 120
+      $result.focused = (Try-Focus $id)
       $result.foreground = [Clf]::ForegroundId()
-      $result.focused = ($result.foreground -eq $id)
     }
     'act' {
-      foreach ($a in $request.actions) {
-        switch ($a.type) {
-          'click_ui'     { Act-UiElement @{ id = $a.window; runtimeKey = $a.runtimeKey; action = 'click' } | Out-Null }
-          'set_value_ui' { Act-UiElement @{ id = $a.window; runtimeKey = $a.runtimeKey; action = 'set_value'; value = $a.value } | Out-Null }
-          'move'         { [Clf]::Move([int]$a.x, [int]$a.y) }
-          'click'        { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, 1) }
-          'double_click' { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, 2) }
-          'scroll'       { [Clf]::Scroll([int]$a.x, [int]$a.y, [int]$a.scroll_x, [int]$a.scroll_y) }
-          'drag'         { [Clf]::Drag([int[]]$a.xs, [int[]]$a.ys, $a.button) }
-          'type'         { [Clf]::Type([string]$a.text) }
-          'keypress'     { [Clf]::Press([uint16[]]@($a.keys | ForEach-Object { Vk $_ })) }
-          'focus'        { Assert-Focused ([int64]$a.window) }
-          'wait'         { Start-Sleep -Milliseconds ([int]$a.ms) }
-          default        { throw "BAD_ACTION: Unknown action: $($a.type)" }
+      $pointing = @($request.actions | Where-Object { $_.type -in @('move','click','double_click','scroll','drag') })
+      if ($pointing.Count -gt 0 -and $request.frame) { Assert-CoordinateFrame $request.frame }
+      $routes = @()
+      $completed = 0
+      for ($index = 0; $index -lt $request.actions.Count; $index++) {
+        $a = $request.actions[$index]
+        try {
+          switch ($a.type) {
+            'click_ui' {
+              $ui = Act-UiElement @{ id = $a.window; snapshotId = $a.snapshotId; runtimeKey = $a.runtimeKey; action = 'click' }
+              $routes += $ui.route
+            }
+            'set_value_ui' {
+              $ui = Act-UiElement @{ id = $a.window; snapshotId = $a.snapshotId; runtimeKey = $a.runtimeKey; action = 'set_value'; value = $a.value }
+              $routes += $ui.route
+            }
+            'move'         { [Clf]::Move([int]$a.x, [int]$a.y); $routes += 'sendinput' }
+            'click'        { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, 1); $routes += 'sendinput' }
+            'double_click' { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, 2); $routes += 'sendinput' }
+            'scroll'       { [Clf]::Scroll([int]$a.x, [int]$a.y, [int]$a.scroll_x, [int]$a.scroll_y); $routes += 'sendinput' }
+            'drag'         { [Clf]::Drag([int[]]$a.xs, [int[]]$a.ys, $a.button); $routes += 'sendinput' }
+            'type'         { [Clf]::Type([string]$a.text); $routes += 'sendinput' }
+            'keypress'     { [Clf]::Press([uint16[]]@($a.keys | ForEach-Object { Vk $_ })); $routes += 'sendinput' }
+            'focus'        { Assert-Focused ([int64]$a.window); $routes += 'focus' }
+            default        { throw "BAD_ACTION: Unknown action: $($a.type)" }
+          }
+          $completed += 1
+        } catch {
+          $message = $_.Exception.Message
+          $code = 'HELPER_ERROR'
+          if ($message -match '^([A-Z0-9_]+):\s*(.+)') {
+            $code = $Matches[1]
+            $message = $Matches[2]
+          }
+          return @{
+            ok = $false
+            error_code = $code
+            message = $message
+            completed_count = $completed
+            failed_index = $index
+            routes = @($routes)
+          }
         }
-        Start-Sleep -Milliseconds 20
       }
       $cursor = [Clf]::Cursor() -split ','
       $result.cursor = @{ x = [int]$cursor[0]; y = [int]$cursor[1] }
       $result.foreground = [Clf]::ForegroundId()
+      $result.completed_count = $completed
+      $result.routes = @($routes)
     }
     default { throw "BAD_REQUEST: Unknown op: $($request.op)" }
   }

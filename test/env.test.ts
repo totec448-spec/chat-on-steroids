@@ -210,6 +210,27 @@ describe.runIf(process.platform === 'win32')('an unset developer toolchain', () 
     expect(envValue(env, 'JAVA_HOME')).toBeUndefined();
   });
 
+  it('does not rescan the same PATH for Java and Go on every fresh command environment', () => {
+    let probes = 0;
+    const probe: ToolchainProbe = {
+      isFile: (target) => {
+        probes++;
+        return target === 'C:\\chosen\\bin\\java.exe' || target === 'C:\\chosen\\bin\\go.exe';
+      },
+      directories: () => []
+    };
+    const source = { ...bareEnv(), Path: 'C:\\chosen\\bin;C:\\Windows\\System32' };
+
+    expect(ensureDevToolchain(normalizeEnvironment(source), probe)).toEqual([]);
+    const firstPass = probes;
+    expect(firstPass).toBeGreaterThan(0);
+
+    // execChildEnvironment() creates a new object each time. Same effective PATH must reuse
+    // the process-lifetime reachability verdict instead of stat'ing every PATH entry again.
+    expect(ensureDevToolchain(normalizeEnvironment(source), probe)).toEqual([]);
+    expect(probes).toBe(firstPass);
+  });
+
   it('adds nothing at all when no toolchain is actually on disk', () => {
     const env = normalizeEnvironment(bareEnv());
     const empty: ToolchainProbe = { isFile: () => false, directories: () => [] };

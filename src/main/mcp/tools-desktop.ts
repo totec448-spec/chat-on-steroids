@@ -26,7 +26,8 @@ import {
   listWindows,
   screenshot,
   waitForWindow,
-  type Action
+  type Action,
+  type VerificationSpec
 } from '../computer/index.js';
 import { logInfo } from '../logger.js';
 import { noteCount, noteDetail } from './call-context.js';
@@ -42,6 +43,11 @@ import {
   type SurfaceRegistrar,
   type ToolContent
 } from './kernel.js';
+
+const DEFAULT_WINDOW_RESULTS = 60;
+const MAX_WINDOW_RESULTS = 100;
+const MAX_CLIPBOARD_LINE_CHARS = 16_000;
+const MAX_CLIPBOARD_OUTPUT_CHARS = 64_000;
 
 const computerActionArg = z.discriminatedUnion('type', [
   z.object({ type: z.literal('click_ref'), ref: z.string().min(1).max(64) }).strict().describe('Click a control by ref from observe.'),
@@ -91,6 +97,17 @@ const computerActionArg = z.discriminatedUnion('type', [
     .describe('Replace the clipboard text; pair with keypress ctrl+v to paste.')
 ]);
 
+const verificationArg = z
+  .object({
+    until: z.enum(['foreground', 'window_exists', 'window_closed', 'ui_appears', 'ui_disappears']),
+    window: windowIdArg.optional(),
+    match: z.string().min(1).max(300).optional(),
+    role: z.string().min(1).max(100).optional(),
+    timeout_ms: z.number().int().min(0).max(10_000).optional(),
+    capture: z.enum(['on_change', 'always', 'never']).optional()
+  })
+  .strict();
+
 export function registerDesktopTools(reg: SurfaceRegistrar): void {
   const { ctx, caps, exposedCaps } = reg;
 
@@ -102,12 +119,10 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
       {
         title: 'Look at the desktop',
         description:
-          'Look at Windows without touching it. Call it with no arguments first: that returns the foreground window, a screenshot of it and its UI Automation elements with refs. ' +
-          'what=windows lists every visible window (filter with match); what=window inspects one window id; what=ui returns just the controls. ' +
-          'wait_for waits until a window whose title matches appears, then reports it. ' +
-          'Refs from here are what computer’s click_ref and set_value take, and they beat pixel coordinates because they resolve the real control again at action time. ' +
-          'Coordinates in a screenshot are image pixels of that frame — pass the frame number back to computer with them. ' +
-          'This never requires a window to be in front and never fails because something else has focus; if a window could not be brought forward, the reply says the picture may be covered.',
+          'Look at Windows without touching it. With no arguments, returns the foreground window, its picture and snapshot-scoped UI controls. ' +
+          'what=windows lists windows; what=window inspects one; what=ui returns controls; wait_for waits for a title. ' +
+          'Pass refs to computer click_ref/set_value and screenshot frameId with pixel coordinates. ' +
+          'Window capture never focuses; a labeled visible-screen fallback may be occluded.',
         inputSchema: z
           .object({
             what: z
@@ -126,7 +141,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               .max(MAX_SCREENSHOT_WIDTH)
               .optional()
               .describe(`Screenshot width. Default ${DEFAULT_SCREENSHOT_WIDTH}.`),
-            max_elements: z.number().int().min(1).max(100).optional().describe('Maximum controls returned. Default 60.')
+            max_elements: z
+              .number()
+              .int()
+              .min(1)
+              .max(MAX_WINDOW_RESULTS)
+              .optional()
+              .describe('Maximum controls or windows returned. Default 60.')
           })
           .superRefine((input, ctx) => {
             const what = input.wait_for ? (input.what ?? 'window') : (input.what ?? 'active');
@@ -147,9 +168,6 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
             const capturesImage = what !== 'windows' && what !== 'ui' && input.screenshot !== false;
             if (input.max_width !== undefined && !capturesImage) {
               ctx.addIssue({ code: 'custom', path: ['max_width'], message: 'max_width requires a screenshot-producing observation' });
-            }
-            if (what === 'windows' && input.max_elements !== undefined) {
-              ctx.addIssue({ code: 'custom', path: ['max_elements'], message: 'max_elements is not used with what=windows' });
             }
           })
           .strict(),
@@ -177,17 +195,22 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           if (what === 'windows') {
             const { windows, screen } = await listWindows();
             const needle = input.match?.toLowerCase() ?? null;
-            const shown = needle
+            const matching = needle
               ? windows.filter(
                   (w) => w.title.toLowerCase().includes(needle) || w.process.toLowerCase().includes(needle)
                 )
               : windows;
+            const limit = Math.min(MAX_WINDOW_RESULTS, Math.max(1, Math.floor(input.max_elements ?? DEFAULT_WINDOW_RESULTS)));
+            const shown = matching.slice(0, limit);
             noteCount(shown.length);
-            logInfo(`tool observe windows (${shown.length}/${windows.length})`);
+            logInfo(`tool observe windows (${shown.length}/${matching.length} matched, ${windows.length} total)`);
             if (shown.length === 0) return ok(prefix(waited, 'No visible windows match.'));
             const lines = shown.map(
               (w) => `${w.id}  ${w.process}  ${w.x},${w.y}  ${w.width}x${w.height}  ${w.state}  ${w.title}`
             );
+            if (shown.length < matching.length) {
+              lines.push(`… showing ${shown.length} of ${matching.length} matching windows; narrow match or raise max_elements`);
+            }
             return ok(
               prefix(
                 waited,
@@ -209,7 +232,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               const flags = `${element.enabled ? '' : ' disabled'}${element.offscreen ? ' offscreen' : ''}`;
               return `${index + 1}. ${element.ref} ${element.role} ${JSON.stringify(element.name)}${id} desktop=${desktop}${image}${flags}`;
             });
-            return ok(prefix(waited, `window: ${result.window}\n${lines.join('\n')}`));
+            return ok(prefix(waited, `window: ${result.window}\nsnapshot: ${result.snapshotId}\n${lines.join('\n')}`));
           }
 
           // A bare "what is on screen right now" with no window at all: cheapest possible
@@ -262,15 +285,14 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
             `window: ${state.window.id}  ${state.window.process}  ${state.window.state}  ${state.window.title}`,
             `bounds: ${state.window.x},${state.window.y} ${state.window.width}x${state.window.height}`
           ];
+          if (state.snapshotId !== null) lines.push(`snapshot: ${state.snapshotId}`);
           if (state.screenshot) {
             lines.push(
               `frame: ${state.screenshot.frameId}  ${state.screenshot.width}x${state.screenshot.height} — pass frameId ${state.screenshot.frameId} with any coordinates you read off it`
             );
-            if (state.screenshot.focused === false) {
-              // Said out loud rather than failed. The picture is still the best available
-              // answer, and the model needs to know it may be looking at whatever is on top.
+            if (state.screenshot.captureMode === 'screen_fallback') {
               lines.push(
-                'note: this window did not come to the front, so the picture may show something covering it. computer action=focus can bring it forward before you act.'
+                'note: background window capture was unavailable, so these are visible screen pixels and may show something covering the target.'
               );
             }
           }
@@ -308,10 +330,8 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
       {
         title: 'Control mouse and keyboard',
         description:
-          'Do things on the desktop, in order, in one call. Prefer click_ref and set_value with refs from observe; they resolve the real control again at action time, so they survive a window moving. ' +
-          'Coordinates are pixels of a screenshot from observe — coordinate actions require that screenshot’s frameId and the call is refused if the screen has been re-captured since. ' +
-          'Batch the steps that belong together and set captureAfter to see the result. ' +
-          'read_clipboard and write_clipboard also run here, in sequence with everything else, so text can be put on the clipboard and pasted in the same call.',
+          'Run ordered desktop actions. Prefer refs from observe; pixels require frameId and target geometry is rechecked. ' +
+          'verify waits for a postcondition. Capture and clipboard steps stay in the batch.',
         inputSchema: z
           .object({
             actions: z.array(computerActionArg).min(1).max(20),
@@ -320,25 +340,48 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               .int()
               .min(1)
               .optional()
-              .describe('Frame the coordinates came from. Required when any action uses x/y coordinates or captureCrop; STALE_FRAME if the screen changed since.'),
+              .describe('Required for coordinate actions or captureCrop.'),
+            verify: verificationArg.optional(),
             captureAfter: z.boolean().optional().describe('Return a fresh screenshot after the actions. Default false.'),
-            captureWindow: windowIdArg.optional().describe('With captureAfter: capture this window instead of the monitor.'),
-            captureFull: z.boolean().optional().describe('With captureAfter: all monitors. Default false.'),
+            captureWindow: windowIdArg.optional().describe('Result capture: this window.'),
+            captureFull: z.boolean().optional().describe('Result capture: all monitors.'),
             captureMaxWidth: z
               .number()
               .int()
               .min(320)
               .max(MAX_SCREENSHOT_WIDTH)
               .optional()
-              .describe(`With captureAfter: width. Default ${DEFAULT_SCREENSHOT_WIDTH}.`),
-            captureCrop: cropArg.optional().describe('With captureAfter: crop in the frame that was current before the actions.')
+              .describe(`Result capture width. Default ${DEFAULT_SCREENSHOT_WIDTH}.`),
+            captureCrop: cropArg.optional().describe('Result crop in the input frame.')
           })
           .superRefine((input, ctx) => {
+            if (input.verify) {
+              const needsWindow = input.verify.until === 'foreground';
+              const needsMatch = input.verify.until !== 'foreground';
+              const isUi = input.verify.until === 'ui_appears' || input.verify.until === 'ui_disappears';
+              if (needsWindow && input.verify.window === undefined) {
+                ctx.addIssue({ code: 'custom', path: ['verify', 'window'], message: 'foreground verification requires window' });
+              }
+              if (needsMatch && input.verify.match === undefined) {
+                ctx.addIssue({ code: 'custom', path: ['verify', 'match'], message: `${input.verify.until} verification requires match` });
+              }
+              if (!isUi && input.verify.role !== undefined) {
+                ctx.addIssue({ code: 'custom', path: ['verify', 'role'], message: 'role is only used by UI verification' });
+              }
+              if (!isUi && input.verify.until !== 'foreground' && input.verify.window !== undefined) {
+                ctx.addIssue({ code: 'custom', path: ['verify', 'window'], message: 'window is only used by foreground or UI verification' });
+              }
+              if (input.verify.until === 'foreground' && input.verify.match !== undefined) {
+                ctx.addIssue({ code: 'custom', path: ['verify', 'match'], message: 'match is not used by foreground verification' });
+              }
+            }
+            const verifyCapture = input.verify?.capture === 'always' || input.verify?.capture === 'on_change';
+            const willCapture = input.captureAfter === true || verifyCapture;
             const captureFields = ['captureWindow', 'captureFull', 'captureMaxWidth', 'captureCrop'] as const;
-            if (input.captureAfter !== true) {
+            if (!willCapture) {
               for (const field of captureFields) {
                 if (input[field] !== undefined) {
-                  ctx.addIssue({ code: 'custom', path: [field], message: `${field} requires captureAfter=true` });
+                  ctx.addIssue({ code: 'custom', path: [field], message: `${field} requires captureAfter=true or verify.capture` });
                 }
               }
               return;
@@ -358,7 +401,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           .strict(),
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
       },
-      async ({ actions, frameId, captureAfter, captureWindow, captureFull, captureMaxWidth, captureCrop }) =>
+      async ({ actions, frameId, verify, captureAfter, captureWindow, captureFull, captureMaxWidth, captureCrop }) =>
         guard('computer', async () => {
           // Not reg.guarded: this tool covers two permissions. Pointer and keyboard steps
           // need "control", the clipboard steps need their own, and one blanket refusal
@@ -422,15 +465,31 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           }
           logInfo(`tool computer ${parsed.map((a) => a.type).join(', ')}`);
           noteDetail(parsed.map((a) => a.type).join(', '));
-          if (captureAfter === true && !caps.screen) {
-            return fail('TOOL_DISABLED: captureAfter needs the See the screen permission.');
+          const verifyCapture = verify?.capture === 'always' || verify?.capture === 'on_change';
+          const wantsCapture = captureAfter === true || verifyCapture;
+          if ((verify || wantsCapture) && !caps.screen) {
+            return fail('TOOL_DISABLED: verification and result capture need the See the screen permission.');
           }
+          const parsedVerify: VerificationSpec | undefined = verify
+            ? verify.until === 'foreground'
+              ? { until: 'foreground', window: verify.window!, timeoutMs: verify.timeout_ms }
+              : verify.until === 'window_exists' || verify.until === 'window_closed'
+                ? { until: verify.until, match: verify.match!, timeoutMs: verify.timeout_ms }
+                : {
+                    until: verify.until,
+                    window: verify.window,
+                    match: verify.match!,
+                    role: verify.role,
+                    timeoutMs: verify.timeout_ms
+                  }
+            : undefined;
           // One lock, one operation: the picture that verifies these actions must be taken
           // before anyone else can touch the desktop.
           const result = await actAndCapture(parsed, {
             frameId,
+            verify: parsedVerify,
             capture:
-              captureAfter === true
+              wantsCapture
                 ? {
                     window: captureWindow,
                     full: captureFull,
@@ -448,12 +507,30 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
             : 'Pointer position was not queried because this batch used only local wait/clipboard actions.';
           // Clipboard reads are the one action that returns something, so they are quoted
           // back in order rather than folded into the "Done:" line.
-          const clipboard = result.clipboard
-            .map((text, index) =>
-              `Clipboard read ${index + 1}: ${text === '' ? '(empty)' : JSON.stringify(text)}`
-            )
-            .join('\n');
-          const done = `Done: ${parsed.map((a) => a.type).join(', ')}. ${pointer}${clipboard ? `\n${clipboard}` : ''}`;
+          const clipboardLines: string[] = [];
+          let clipboardBudget = MAX_CLIPBOARD_OUTPUT_CHARS;
+          for (const [index, text] of result.clipboard.entries()) {
+            if (clipboardBudget <= 0) {
+              clipboardLines.push(`… ${result.clipboard.length - index} more clipboard read(s) omitted by the output cap`);
+              break;
+            }
+            const prefixText = `Clipboard read ${index + 1}: `;
+            const rendered = text === '' ? '(empty)' : JSON.stringify(text);
+            const payloadCap = Math.max(0, Math.min(MAX_CLIPBOARD_LINE_CHARS, clipboardBudget - prefixText.length - 80));
+            const payload =
+              rendered.length <= payloadCap
+                ? rendered
+                : `${rendered.slice(0, payloadCap)}… [truncated; ${text.length} chars original]`;
+            const line = `${prefixText}${payload}`.slice(0, clipboardBudget);
+            clipboardLines.push(line);
+            clipboardBudget -= line.length + 1;
+          }
+          const clipboard = clipboardLines.join('\n');
+          const routeSummary = [...new Set(result.routes)].join('+') || 'local';
+          const verified = result.verification
+            ? `\nVerified ${result.verification.until} in ${result.verification.elapsedMs} ms: ${result.verification.detail}.`
+            : '';
+          const done = `Done ${result.completedCount}/${parsed.length} via ${routeSummary}: ${parsed.map((a) => a.type).join(', ')}. ${pointer}${clipboard ? `\n${clipboard}` : ''}${verified}`;
           const shot = result.screenshot;
           if (shot) {
             return {

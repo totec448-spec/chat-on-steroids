@@ -63,21 +63,34 @@ import {
   PRIME_ID,
   agentForConversation,
   bindConversation,
+  claimWorkerRevival,
   currentRunId,
   failAgent,
+  failWorkerRevival,
   finishWorkerConversation,
+  noteWorkerRevived,
+  onReviveRequest,
   onSpawnRequest,
   onSwarmEnd,
+  pendingWorkerRevivals,
   pendingWorkerSpawns,
   primeConversationGone,
+  requestWorkerRevivals,
+  rollbackWorkerRevivalClaim,
   releaseQuiescentRun,
   retiredWorkerForConversation,
+  sleepSilentDetachedWorkers,
+  sleepWorker,
+  stageQueuedWorkerRevivals,
   swarmState,
   swarmTransferActive,
   noteAgentAlive,
+  noteAgentContextTokens,
   persistCriticalSwarmNow,
   stageWorkerConversationFinish,
-  workerConversationGone
+  workerConversationGone,
+  workerRevivalDeliveredSince,
+  type WorkerRevival
 } from './agents.js';
 import {
   abortContinuation,
@@ -91,6 +104,7 @@ import {
   openContinuationNow,
   resetContinuationsForTests
 } from './session/continuation.js';
+import { noteResumeOpening } from './session/resume-gate.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
 import { requestCorrelation } from './session/correlation.js';
@@ -209,19 +223,36 @@ function boundBrief(text: string): string {
 }
 
 /**
- * What the extension is asked to do: open a fresh ChatGPT chat and type one message.
+ * What the extension is asked to do: open a ChatGPT chat and type one message into it.
  *
- * Two kinds, and both open a *new* chat — there is no longer any command that types into a
- * conversation that already exists. That path existed for reviving a worker and for telling
- * a doomed worker its run was over, and both were ways of driving a chat the app does not
- * own; a run now ends by ending, and a worker that is finished stays finished.
+ * Three kinds. Two of them open a *new* chat; `revive` is the one that deliberately does not.
+ *
+ * There used to be a general "type into an existing conversation" command, and it was removed
+ * for good reasons: it was used to nudge workers the app had already given up on and to tell a
+ * doomed worker its run was over, and both were ways of driving a chat the app does not own on
+ * the strength of a guess about what was happening inside it. `revive` is not that. It is
+ * addressed to one exact conversation this app opened itself and has kept bound to a worker
+ * slot ever since; it carries the prime's own words, in a run that prime is still running; and
+ * it happens only because that prime asked for it in a tool call this app authenticated. The
+ * chat is reopened because the worker in it is being given more work, which is the whole of
+ * what a sleeping worker is for.
  *
  * Only the *spec* is kept, never the finished text. A resume's text belongs to the
- * continuation transaction, which hands it over exactly once, so building the text at
- * hand-out time is what keeps that true.
+ * continuation transaction, which hands it over exactly once; a revival's is whatever that
+ * worker's inbox holds at hand-out time. Building both there is what keeps that true.
  */
 type CommandSpec =
   | { type: 'worker'; agent: string; task: string; runId: string }
+  /**
+   * Waking a sleeping worker in the chat it already has.
+   *
+   * `conversationId` is the target and the fence at once: the page has to already be showing
+   * that exact chat before anything is typed, so a revival cannot be redirected into a fresh
+   * composer, into another worker's chat, or into whatever the user happened to open. `runId`
+   * stops a revival left over from a retired incarnation from ever reaching the same friendly
+   * worker id in a later run.
+   */
+  | { type: 'revive'; agent: string; conversationId: string; runId: string }
   /**
    * The replacement chat for a Compact & Resume.
    *
@@ -289,7 +320,7 @@ interface DurableCommandRecord {
 }
 
 interface DurableCommandSnapshot {
-  version: 3;
+  version: 4;
   commands: DurableCommandRecord[];
   receipts: CommandReceipt[];
 }
@@ -302,6 +333,14 @@ export interface BridgeCommand {
   text: string;
   /** Agent this tab will be, when the command comes from multi-agent mode. */
   agent: string | null;
+  /**
+   * The conversation this command is *for*, when it is for one that already exists.
+   *
+   * Set only for a revival, and the page treats it as a precondition rather than a hint: it
+   * types only if the chat it is looking at is this one. Null is the ordinary case and means
+   * the opposite precondition — a chat with no conversation of its own yet.
+   */
+  conversationId: string | null;
 }
 
 let server: http.Server | null = null;
@@ -311,6 +350,8 @@ let browserPresenceTimer: NodeJS.Timeout | null = null;
 let commands: Command[] = [];
 let commandReceipts: CommandReceipt[] = [];
 const commandLeaseWrites = new Map<string, Promise<boolean>>();
+/** Serializes the broker-claim + browser-lease half of one revival redeem. */
+const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
 let extensionVersion: string | null = null;
@@ -979,6 +1020,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         }
       }
       const result = await recordChatObservations(id, observations, agent);
+      // How full this chat is, measured by the app's own session record rather than by
+      // anything the model said about itself, and fed in before the finish reconciliation
+      // below. That ordering is the whole point: a worker that crossed the context ceiling
+      // during the very turn it is now ending has to end for good, and the broker can only
+      // know that if the measurement lands first. Restart re-derives it from the same place,
+      // because the durable session is what carries the figure across a crash, not the
+      // snapshot: the first observation batch from a restored chat puts it back before that
+      // worker's next sleep or revival.
+      if (agent && result.sessionId) {
+        const summary = await getSession(result.sessionId).catch(() => null);
+        if (summary) noteAgentContextTokens(id, summary.contextTokens);
+      }
       // Workers are one-shot jobs. A settled assistant answer plus its matching turn_end is
       // first-hand page evidence that the worker has completed a turn; waiting for the model
       // to make another MCP call solely to say `finish` leaves normal final answers as zombie
@@ -990,7 +1043,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (workerAgent !== null && result.sessionId) {
         finalText = await workerFinalAcrossBatches(result.sessionId, workerAgent, observations);
       }
-      if (finalText) {
+      if (finalText && workerAgent) {
         const staged = stageWorkerConversationFinish(id, finalText);
         if (staged?.report) {
           // The browser treats HTTP 200 as permission to retire this final observation from
@@ -1013,6 +1066,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           }
           staged.commit();
           await recordAgentMessage(staged.report, 'sent');
+          await wakeQueuedStoppedWorkers([workerAgent]);
         }
       }
       return json(res, 200, { sessionId: result.sessionId, stored: result.stored }, origin);
@@ -1215,7 +1269,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Over the line *and* mid-turn. Both halves matter: the level is what makes it
         // fire at all, and the liveness is what keeps it off a stale chat that is merely
         // being opened — see chatIsWorking.
-        autoCompactReady: autoCompactionReady(summary) && chatIsWorking(live.conversationId),
+        // Worker identity is the conversation itself. Compact & Resume deliberately creates a
+        // different conversation, while the continuation transaction only knows how to move a
+        // run's prime binding. Letting a worker auto-compact therefore strands the worker in B
+        // while the broker still authorises A. Workers stay in their chat until the 400k reuse
+        // ceiling makes their next stop terminal.
+        autoCompactReady:
+          !goalWorkerChat(id) && autoCompactionReady(summary) && chatIsWorking(live.conversationId),
         // What the composer's meter fills against, and what its automatic trigger fires
         // on. Sent from here rather than worked out in the page so that the bar someone
         // is watching and the threshold that acts are the same number: a meter that
@@ -1289,6 +1349,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    if (goalWorkerChat(id)) {
+      return json(
+        res,
+        409,
+        {
+          error: 'worker_compaction_disabled',
+          message: 'Worker chats stay in their existing conversation so the prime can revive them safely.'
+        },
+        origin
+      );
+    }
     const live = liveConversations().find((entry) => entry.conversationId === id);
     const known = live ? null : await findSessionByConversation(id, { requireUnique: true });
     const sessionId = live?.sessionId ?? known?.id ?? null;
@@ -1335,6 +1406,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    if (goalWorkerChat(id)) {
+      return json(
+        res,
+        409,
+        {
+          error: 'worker_compaction_disabled',
+          message: 'Worker chats stay in their existing conversation so the prime can revive them safely.'
+        },
+        origin
+      );
+    }
     const live = liveConversations().find((entry) => entry.conversationId === id);
     const known = live ? null : await findSessionByConversation(id, { requireUnique: true });
     const sessionId = live?.sessionId ?? known?.id ?? null;
@@ -1714,11 +1796,31 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     tidyCommands();
     const wanted = typeof body['id'] === 'string' ? body['id'] : '';
     const client = typeof body['client'] === 'string' ? body['client'].slice(0, 64) : '';
+    const reportedConversation = body['conversationId'] === undefined ? null : conversationId(body['conversationId']);
+    if (body['conversationId'] !== undefined && !reportedConversation) {
+      return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    }
     const command = commands.find((entry) => entry.id === wanted);
     if (!command) {
       // Cancelled, superseded, already sent, or from a previous run of the app. The page
       // does nothing, which is the point: a stale marker must never type anything.
       return json(res, 404, { error: 'no_such_command' }, origin);
+    }
+    if (command.spec.type === 'revive' && !revivalFor(command.spec.agent)) {
+      // tidyCommands() above normally retires these. This is the fail-closed twin of that:
+      // an empty revival has no message of the prime's to type, and a page must never be
+      // handed a command that would put nothing, or scaffolding alone, into a real chat.
+      return json(res, 404, { error: 'no_such_command' }, origin);
+    }
+    if (
+      reportedConversation &&
+      (command.spec.type !== 'revive' || command.spec.conversationId !== reportedConversation)
+    ) {
+      // An existing ChatGPT page is allowed to claim exactly one kind of command: a revival
+      // naming that exact chat. This check happens before the command acquires an owner, so a
+      // copied/stale worker or resume marker cannot steal the real fresh page's lease merely by
+      // being opened inside some already-existing conversation.
+      return json(res, 409, { error: 'command_wrong_conversation' }, origin);
     }
     // One command, one page. `client` is the page's own per-document id, and the first one
     // to redeem owns the command until its lease lapses — a second tab on the same marker
@@ -1738,7 +1840,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // and this is that same attempt arriving. The lease is durable *before* the bootstrap is
     // handed over, so an app restart cannot reopen the same command into a second tab.
     const claimedAt = Date.now();
-    if (!(await persistCommandLease(command, client, claimedAt))) {
+    if (command.spec.type === 'revive') {
+      const claimed = await persistRevivalRedeem(command, client, claimedAt);
+      if (claimed === 'stale') {
+        // A proven MCP call won `waking -> active` before this browser claimed the wake. No
+        // payload has escaped, so the page must not type the same queued words as a second user
+        // message. Retire the now-meaningless bridge command without failing the active worker.
+        retire(command, 'its worker became active before the browser claimed the wake');
+        return json(res, 404, { error: 'no_such_command' }, origin);
+      }
+      if (claimed === 'taken') return json(res, 409, { error: 'command_taken' }, origin);
+      if (claimed === 'broker-not-durable') {
+        return json(res, 503, { error: 'worker_revival_claim_not_durable', retryable: true }, origin);
+      }
+      if (claimed === 'lease-not-durable') {
+        return json(res, 503, { error: 'command_lease_not_durable', retryable: true }, origin);
+      }
+    } else if (!(await persistCommandLease(command, client, claimedAt))) {
       if (command.owner && command.owner !== client) {
         return json(res, 409, { error: 'command_taken' }, origin);
       }
@@ -1848,12 +1966,59 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
     let receipt: CommandReceipt;
     if (status === 'sent') {
-      if (!conversation && command.spec.type === 'resume') {
+      if (!conversation && command.spec.type !== 'worker') {
         // A successful page send without a concrete chat id is ambiguous, not terminal. Keep
         // the one leased attempt alive so the browser can retry its ACK when identity appears.
+        // A revival needs it for a second reason: the chat id is the proof that what was typed
+        // went into the worker's own conversation and not into some other tab.
         return json(res, 503, { error: 'conversation_required', retryable: true }, origin);
       }
-      if (command.spec.type === 'resume') {
+      if (command.spec.type === 'revive') {
+        // Narrowed above.
+        if (!conversation) return json(res, 503, { error: 'conversation_required', retryable: true }, origin);
+        const revive = command.spec;
+        const wrongChat = conversation !== revive.conversationId;
+        const staleRun = revive.runId !== currentRunId();
+        const revival = wrongChat || staleRun ? null : revivalFor(revive.agent);
+        const alreadySent =
+          !wrongChat &&
+          !staleRun &&
+          command.claimedAt !== null &&
+          workerRevivalDeliveredSince(revive.agent, conversation, command.id, command.claimedAt);
+        // The send is an *offer*, not an acknowledgement: the words are in the worker's chat,
+        // and the worker's own next authenticated call is what retires them from its inbox.
+        const woke = revival ? noteWorkerRevived(revive.agent, conversation, revival.messageIds, command.id) : alreadySent;
+        if (woke) {
+          receipt = {
+            id,
+            client: client || command.owner,
+            conversationId: conversation,
+            outcome: 'committed',
+            committed: true,
+            error: null,
+            completedAt: Date.now()
+          };
+        } else {
+          const why = wrongChat
+            ? 'the page that was opened for it was showing a different conversation'
+            : staleRun
+              ? 'the worker run that owns this chat has ended'
+              : 'it was no longer waiting to be woken by the time the browser answered';
+          // Only the first two are this revival's to undo. A worker that stopped waking on its
+          // own has already been put somewhere by whatever did that, and failWorkerRevival()
+          // ignores anything that is not still `waking`, so this cannot invent a failure.
+          failWorkerRevival(revive.agent, why);
+          receipt = {
+            id,
+            client: client || command.owner,
+            conversationId: conversation,
+            outcome: 'terminal-failure',
+            committed: false,
+            error: why,
+            completedAt: Date.now()
+          };
+        }
+      } else if (command.spec.type === 'resume') {
         // Narrowed above.
         if (!conversation) return json(res, 503, { error: 'conversation_required', retryable: true }, origin);
         const result = await commitContinuationResult(command.spec.token, conversation);
@@ -2002,6 +2167,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           completedAt: Date.now()
         };
       }
+    } else if (command.spec.type === 'revive') {
+      const why = error
+        ? `the browser could not reopen the worker's chat — ${error}`
+        : "the browser could not reopen the worker's chat";
+      failWorkerRevival(command.spec.agent, why);
+      receipt = {
+        id,
+        client: client || command.owner,
+        conversationId: conversation,
+        outcome: 'terminal-failure',
+        committed: false,
+        error: why,
+        completedAt: Date.now()
+      };
     } else {
       const why = error ? `the browser could not start the chat — ${error}` : 'the browser could not start the chat';
       if (agent) failAgent(agent, why);
@@ -2016,7 +2195,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       };
     }
 
-    if (command.spec.type === 'worker') {
+    if (command.spec.type === 'worker' || command.spec.type === 'revive') {
       // The browser command and the swarm snapshot are two durable files describing one
       // transition. The receipt must be the *second* one: once bridge-commands says this
       // bootstrap is finished, restart will never redeem it again. If the worker binding /
@@ -2054,6 +2233,32 @@ interface DurableQuiescence {
   quiescent: boolean;
   ended: boolean;
   lastOutcome: string | null;
+}
+
+/**
+ * Turns already-accepted, never-offered worker inbox rows into a browser revival after stop.
+ *
+ * The broker stages the `sleeping -> waking` reservation first; this helper owns the matching
+ * durability barrier and only asks the browser after that exact revision is on disk. Failure is
+ * recoverable: rollback leaves the worker sleeping with the original message still unread.
+ */
+async function wakeQueuedStoppedWorkers(ids: readonly string[]): Promise<void> {
+  const staged = stageQueuedWorkerRevivals(ids);
+  if (staged.waking.length === 0) return;
+  try {
+    if (!(await persistCriticalSwarmNow())) {
+      staged.rollback();
+      logWarn('multi-agent: queued work could not reserve a durable revival after its worker stopped');
+      return;
+    }
+    staged.commit();
+    requestWorkerRevivals(staged.waking);
+  } catch (err) {
+    staged.rollback();
+    logWarn(
+      `multi-agent: queued work could not reserve a durable revival after its worker stopped — ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
 }
 
 /**
@@ -2107,37 +2312,73 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   let state = swarmState();
   if (!state.running) return false;
 
-  // First recover the case where browser completion was durably recorded but the bridge died
-  // before finishWorkerConversation() ran. Invited/unbound workers remain the bootstrap
+  // A detached worker has no browser page left to publish a turn boundary. Its dedicated
+  // silence clock is therefore the only path that can eventually release the slot when the
+  // server-side turn also stops calling tools. This used to run only on later MCP ingress,
+  // which means the exact worker that became completely silent was never reconsidered. Run it
+  // from the bridge's 30-second maintenance loop as well; attached/background workers are
+  // explicitly excluded inside sleepSilentDetachedWorkers and still require durable turn proof.
+  const stoppedWorkers: string[] = [];
+  for (const slept of sleepSilentDetachedWorkers(now)) {
+    if (slept.report) await recordAgentMessage(slept.report, 'sent');
+    stoppedWorkers.push(slept.info.id);
+  }
+  if (stoppedWorkers.length > 0) state = swarmState();
+
+  // The one place a worker that never called finish is allowed to stop holding its slot, and
+  // the only one entitled to say so: durable quiescence is proof that no turn is running, which
+  // page heartbeats and wall-clock silence are not. Invited/unbound workers remain the bootstrap
   // timeout's responsibility; there is no conversation/session whose inactivity we can prove.
-  for (const worker of state.agents.filter((agent) => agent.role === 'worker' && agent.state !== 'finished' && agent.state !== 'failed')) {
+  //
+  // Stopping is sleeping. Nothing observed from outside a chat can tell the difference between
+  // a worker that has finished for good and one that is between tasks, so this sweep never
+  // makes that call: it frees the slot, hands the prime a worker it can wake in the chat it
+  // already has, and leaves the ending to the worker's own finish or to the context ceiling.
+  // `sleeping`/`waking` rows are skipped because they have already stopped, or are being woken.
+  for (const worker of state.agents.filter(
+    (agent) => agent.role === 'worker' && (agent.state === 'active' || agent.state === 'detached')
+  )) {
     if (!worker.conversationId) continue;
     const proof = await durableQuiescence(worker.conversationId, now);
     if (currentRunId() !== runId || swarmTransferActive() || inFlightMcpRequests() > 0 || observationWritesInFlight > 0) return false;
     if (!proof.quiescent) continue;
 
     if (proof.lastOutcome === 'completed') {
+      // It answered and stopped. Its own last message is the report, exactly as if it had
+      // remembered to call finish, and the worker keeps everything it knows.
       const finished = finishWorkerConversation(
         worker.conversationId,
         'Worker turn completed and remained durably inactive for the orphan grace period.'
       );
-      if (finished?.report) await recordAgentMessage(finished.report, 'sent');
+      if (finished?.report) {
+        await recordAgentMessage(finished.report, 'sent');
+        stoppedWorkers.push(worker.id);
+      }
     } else {
-      const failed = failAgent(
+      const slept = sleepWorker(
         worker.id,
         proof.ended
-          ? 'the worker session ended and remained durably inactive'
-          : `the worker turn ended ${proof.lastOutcome ?? 'without a completed outcome'} and remained durably inactive`,
-        `[${worker.id} stale] Its ChatGPT work is durably quiescent after the orphan grace period. The worker slot is free.`
+          ? 'Its ChatGPT chat was closed and its work has been durably quiet since.'
+          : `Its last ChatGPT turn ended ${proof.lastOutcome ?? 'without a completed outcome'} and it has been durably quiet since.`
       );
-      if (failed?.report) await recordAgentMessage(failed.report, 'sent');
+      if (slept?.report) {
+        await recordAgentMessage(slept.report, 'sent');
+        stoppedWorkers.push(worker.id);
+      }
     }
   }
+
+  await wakeQueuedStoppedWorkers(stoppedWorkers);
 
   if (currentRunId() !== runId || swarmTransferActive() || inFlightMcpRequests() > 0 || observationWritesInFlight > 0) return false;
   state = swarmState();
   const workers = state.agents.filter((agent) => agent.role === 'worker');
-  if (workers.length === 0 || workers.some((agent) => agent.state !== 'finished' && agent.state !== 'failed')) return false;
+  // A sleeping worker is not a finished one, and a run that owns one is not abandoned: its
+  // chats are the thing the prime comes back to. Only a run whose every worker has genuinely
+  // ended — finished, failed, or past the context ceiling — can be released from here at all;
+  // anything else waits for the person to clear it in the app.
+  if (workers.length === 0 || workers.some((agent) => !agent.revivable && agent.state !== 'finished' && agent.state !== 'failed')) return false;
+  if (workers.some((agent) => agent.revivable)) return false;
 
   // Normal safe release: every final report has already been acknowledged.
   if (releaseQuiescentRun()) return true;
@@ -2167,6 +2408,17 @@ let dropSwarmEndListener: (() => void) | null = null;
 let staleSwarmTimer: NodeJS.Timeout | null = null;
 let staleSweepInFlight: Promise<boolean> | null = null;
 let bridgeStarting: Promise<number | null> | null = null;
+/**
+ * True while a bound socket is still reconstructing durable command state.
+ *
+ * Binding is not publication. Chrome can discover the localhost port the instant listen()
+ * succeeds, while restoreCommands() may still be awaiting a broker fsync. No request may read
+ * or mutate that half-built command state: doing so can persist a snapshot that silently prunes
+ * the other half of an expired revival before its broker transition is durable.
+ */
+let bridgeRecovering = false;
+let dropSpawnRequestListener: (() => void) | null = null;
+let dropReviveRequestListener: (() => void) | null = null;
 
 function runStaleSwarmSweep(): Promise<boolean> {
   if (staleSweepInFlight) return staleSweepInFlight;
@@ -2177,8 +2429,8 @@ function runStaleSwarmSweep(): Promise<boolean> {
 }
 
 export async function startBridge(): Promise<number | null> {
-  if (server) return port;
   if (bridgeStarting) return bridgeStarting;
+  if (server) return port;
   bridgeStarting = startBridgeOnce();
   try {
     return await bridgeStarting;
@@ -2188,7 +2440,12 @@ export async function startBridge(): Promise<number | null> {
 }
 
 async function startBridgeOnce(): Promise<number | null> {
+  bridgeRecovering = true;
   const instance = http.createServer((req, res) => {
+    if (bridgeRecovering) {
+      json(res, 503, { error: 'bridge_recovering', retryable: true }, originOf(req).origin);
+      return;
+    }
     handle(req, res).catch((err: Error) => {
       logWarn(`bridge request failed: ${err.message}`);
       if (!res.headersSent) json(res, 500, { error: 'internal' }, originOf(req).origin);
@@ -2218,7 +2475,22 @@ async function startBridgeOnce(): Promise<number | null> {
       // any worker chat the broker is still owed — a run restored from disk at startup
       // has nobody to ask until this moment — and queue() folds a replayed worker into
       // the restored command for the same worker rather than opening a second tab.
-      await restoreCommands();
+      try {
+        await restoreCommands();
+      } catch (err) {
+        // Recovery is part of opening the bridge, not best-effort work after it. In particular,
+        // an expired revival cannot be pruned until its broker half is durably stopped. Leaving
+        // the loopback server published after that barrier failed creates a half-started bridge:
+        // later startBridge() calls see `server` and never retry recovery, while unrelated queue
+        // writes can erase the only durable revival row. Close this socket and make the next
+        // start perform recovery from the same durable files again.
+        if (server === instance) server = null;
+        if (port === actual) port = null;
+        bridgeRecovering = false;
+        await new Promise<void>((resolve) => instance.close(() => resolve()));
+        logWarn(`bridge startup recovery failed: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      }
       // A settings-driven stop/start is not a process restart: the in-memory commands survive,
       // so restoreCommands() quite correctly skips their durable duplicates. stopBridge(),
       // however, cleared their memory-only deadline timers. Re-arm those retained leases from
@@ -2226,8 +2498,16 @@ async function startBridgeOnce(): Promise<number | null> {
       // expired lease looks queued again and can open the same bootstrap a second time, while
       // a still-live lease can sit forever with no timer to end it.
       rearmRetainedCommandDeadlines();
-      onSpawnRequest((workers) => {
+      dropSpawnRequestListener?.();
+      dropSpawnRequestListener = onSpawnRequest((workers) => {
         for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task);
+      });
+      // The same replay contract for waking a worker that already has a chat. A run restored
+      // from disk can hold a worker left in `waking` by a crash mid-revival; registering here
+      // is the first moment anything can reopen that tab for it.
+      dropReviveRequestListener?.();
+      dropReviveRequestListener = onReviveRequest((revivals: WorkerRevival[]) => {
+        for (const revival of revivals) queueWorkerRevival(revival.id, revival.conversationId);
       });
       // When a run ends — cleared in the app, finished, or taken over by another chat —
       // its worker chats must stop existing everywhere at once. A queued bootstrap that
@@ -2252,6 +2532,7 @@ async function startBridgeOnce(): Promise<number | null> {
         void runStaleSwarmSweep().catch((err: Error) => logWarn(`stale swarm sweep failed: ${err.message}`));
       }, STALE_SWARM_SWEEP_MS);
       staleSwarmTimer.unref?.();
+      bridgeRecovering = false;
       // Anything restored from the previous run goes out now rather than waiting for a
       // browser to come and ask.
       deliver();
@@ -2260,6 +2541,7 @@ async function startBridgeOnce(): Promise<number | null> {
       return actual;
     }
   }
+  bridgeRecovering = false;
   logWarn(`bridge could not bind any of ports ${PORTS.join(', ')}; the browser extension will not connect`);
   return null;
 }
@@ -2284,6 +2566,10 @@ export async function stopBridge(): Promise<void> {
   }
   dropSwarmEndListener?.();
   dropSwarmEndListener = null;
+  dropSpawnRequestListener?.();
+  dropSpawnRequestListener = null;
+  dropReviveRequestListener?.();
+  dropReviveRequestListener = null;
   if (staleSwarmTimer) clearInterval(staleSwarmTimer);
   staleSwarmTimer = null;
   await new Promise<void>((resolve) => {
@@ -2311,7 +2597,9 @@ export async function stopBridge(): Promise<void> {
 // ------------------------------------------------------------------ commands
 
 function specKey(spec: CommandSpec): string {
-  return spec.type === 'worker' ? `worker:${spec.agent}` : `resume:${spec.sessionId}`;
+  if (spec.type === 'worker') return `worker:${spec.agent}`;
+  if (spec.type === 'revive') return `revive:${spec.agent}`;
+  return `resume:${spec.sessionId}`;
 }
 
 /**
@@ -2322,7 +2610,7 @@ function specKey(spec: CommandSpec): string {
  * run A can be adopted by run B after a crash/restart and keep A's command id alive.
  */
 function commandKey(spec: CommandSpec): string {
-  return spec.type === 'worker' ? `${specKey(spec)}:${spec.runId}` : specKey(spec);
+  return spec.type === 'resume' ? specKey(spec) : `${specKey(spec)}:${spec.runId}`;
 }
 
 const commandPhase = (command: Command): CommandPhase => (command.claimedAt === null ? 'queued' : 'leased');
@@ -2361,7 +2649,7 @@ function commandSnapshot(options: {
     receipts = [...receipts.filter((receipt) => receipt.id !== addReceipt.id), addReceipt];
   }
   receipts = receipts.slice(-MAX_COMMAND_RECEIPTS);
-  return { version: 3, commands: records, receipts };
+  return { version: 4, commands: records, receipts };
 }
 
 function persistCommands(): void {
@@ -2411,6 +2699,88 @@ async function persistCommandLease(
     return await work;
   } finally {
     if (commandLeaseWrites.get(command.id) === work) commandLeaseWrites.delete(command.id);
+  }
+}
+
+type RevivalRedeemResult = 'ok' | 'stale' | 'taken' | 'broker-not-durable' | 'lease-not-durable';
+
+/**
+ * Makes `/commands/redeem` the wake arbitration cut, including process crashes.
+ *
+ * There are two durable files in this transaction and therefore only one safe write order.
+ * The broker's `waking + revivable=false` claim goes first: after it is on disk, an MCP call
+ * from the old server-side turn can no longer steal the wake. Only then is this browser
+ * document written as the durable command owner, and only after both writes does the route
+ * return the prime's text. A crash between the writes therefore leaves a claimed broker wake
+ * but no browser that has received the payload; a retry may finish leasing it safely. A crash
+ * after the owner write restores both halves and only that owner can receive the payload.
+ *
+ * The per-command gate closes the live two-redeemer version of the same split. Without it, two
+ * requests could both observe the idempotent broker claim while the first durability write was
+ * in flight and race for the later command lease.
+ */
+async function persistRevivalRedeem(
+  command: Command,
+  client: string,
+  claimedAt: number
+): Promise<RevivalRedeemResult> {
+  const earlier = commandRedeems.get(command.id);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // Publish our own gate *before* waiting. A third redeemer must queue behind this request,
+  // rather than observing the same predecessor and resuming beside us when it completes.
+  commandRedeems.set(command.id, gate);
+  try {
+    if (earlier) await earlier;
+    if (!commands.includes(command)) return 'stale';
+    if (command.owner && command.owner !== client) return 'taken';
+    if (command.spec.type !== 'revive') return 'stale';
+
+    // Re-check after waiting for a prior redeemer. An MCP call is allowed to win only before
+    // the browser-owned broker claim is installed.
+    const revival = revivalFor(command.spec.agent);
+    if (!revival || revival.conversationId !== command.spec.conversationId) return 'stale';
+    if (!claimWorkerRevival(command.spec.agent, command.spec.conversationId)) return 'stale';
+
+    let brokerDurable = false;
+    try {
+      brokerDurable = await persistCriticalSwarmNow();
+    } catch (err) {
+      logWarn(
+        `bridge: could not persist the broker claim for ${specKey(command.spec)} — ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    if (!brokerDurable) {
+      // No browser payload has escaped. Restore the pre-claim arbitration state and supersede
+      // any failed durable generation with that safe snapshot. If storage itself remains down,
+      // the command is still not handed out; a later retry/restart can recover from either safe
+      // durable side without duplicate injection.
+      if (rollbackWorkerRevivalClaim(command.spec.agent, command.spec.conversationId)) {
+        try {
+          await persistCriticalSwarmNow();
+        } catch (err) {
+          logWarn(
+            `bridge: could not persist rollback of ${specKey(command.spec)} claim — ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+      return 'broker-not-durable';
+    }
+
+    if (!(await persistCommandLease(command, client, claimedAt))) {
+      // Do NOT roll the broker claim back here. It is already the authoritative durable cut.
+      // Keeping the worker browser-owned prevents an MCP call from taking the queued text while
+      // the same page retries the owner write. If a different page already owns the lease, that
+      // owner remains the only one allowed to finish the wake.
+      if (command.owner && command.owner !== client) return 'taken';
+      return 'lease-not-durable';
+    }
+    return 'ok';
+  } finally {
+    release();
+    if (commandRedeems.get(command.id) === gate) commandRedeems.delete(command.id);
   }
 }
 
@@ -2699,6 +3069,24 @@ export function queueWorkerBootstrap(agent: string, task: string): BridgeCommand
 }
 
 /**
+ * Queues the reopening of a sleeping worker's own chat.
+ *
+ * Called by the broker through onReviveRequest, and carrying nothing the broker did not
+ * already prove: the slot is reserved (`waking`) and the conversation is the one bound to it.
+ * The prime's words are deliberately not copied in here — they are read out of that worker's
+ * inbox when the page asks for them, so a revival that waits in the queue hands over what is
+ * true at hand-out time rather than a stale snapshot.
+ */
+export function queueWorkerRevival(agent: string, conversationId: string): BridgeCommand | null {
+  const runId = currentRunId();
+  // Same rule as a bootstrap: authority for one concrete broker incarnation, or nothing.
+  if (!runId || !conversationId) return null;
+  const command = queue({ type: 'revive', agent, conversationId, runId });
+  deliver();
+  return describe(command, null);
+}
+
+/**
  * Queues the replacement chat for a continuation whose brief has been captured.
  *
  * Keyed by session, and carrying the transaction's token rather than any text: the token is
@@ -2786,8 +3174,20 @@ async function deliverOne(): Promise<void> {
   if (!(await persistCommandLease(command, null, claimedAt))) return;
   armDeadline(command);
   changed();
-  const url = commandUrl(command.id);
-  logInfo(`bridge: opening a fresh ChatGPT chat for ${specKey(command.spec)}`);
+  // A revival is the one command that must not open a fresh composer: it names the chat the
+  // worker already has, so the page lands on it and the marker it redeems names it back.
+  const url = commandUrl(command.id, command.spec.type === 'revive' ? command.spec.conversationId : null);
+  // The recorder can see a brand-new ChatGPT conversation before that page's content script has
+  // redeemed this command. Arm the session-transfer gate before the browser gets any chance to
+  // create B, otherwise that early observation invents a shadow session for B and the real A→B
+  // commit quite correctly refuses to overwrite it. The later durable redeem refreshes the same
+  // gate; commit/abort/drop clears it through the continuation state machine.
+  if (command.spec.type === 'resume') noteResumeOpening(command.spec.token);
+  logInfo(
+    command.spec.type === 'revive'
+      ? `bridge: reopening the ChatGPT chat of ${specKey(command.spec)}`
+      : `bridge: opening a fresh ChatGPT chat for ${specKey(command.spec)}`
+  );
   try {
     await openInBrowser(url);
   } catch (err) {
@@ -2874,6 +3274,10 @@ function expire(command: Command): void {
     retire(command, 'its worker is bound and running');
     return;
   }
+  if (spec.type === 'revive' && !revivalFor(spec.agent)) {
+    retire(command, 'its worker is no longer waiting to be woken');
+    return;
+  }
   drop(command, command.lastError ?? 'the chat this app opened did not report back in time');
   deliver();
 }
@@ -2900,6 +3304,12 @@ function retire(command: Command, why: string): void {
  * anything at all.
  */
 function bootstrapText(spec: CommandSpec, summary: string): string {
+  if (spec.type === 'revive') {
+    // Written by the broker, out of that worker's own inbox, at the moment the page asks.
+    // Empty means the broker no longer considers this worker to be waking, and an empty
+    // message is never typed: the redeem route turns that into a stale marker instead.
+    return revivalFor(spec.agent)?.text ?? '';
+  }
   if (spec.type === 'worker') {
     // The brief, then the shortest protocol that still routes: who you are, where reports go,
     // and that other workers are not reachable. Nothing about identity beyond the name,
@@ -2929,6 +3339,11 @@ function bootstrapText(spec: CommandSpec, summary: string): string {
   );
 }
 
+/** The broker's current plan for waking one worker, or null once it is no longer waking. */
+function revivalFor(agent: string): WorkerRevival | null {
+  return pendingWorkerRevivals().find((revival) => revival.id === agent) ?? null;
+}
+
 /**
  * The wire form of a command, and — for a resume — the moment its brief is claimed.
  *
@@ -2951,7 +3366,10 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
     id: command.id,
     kind: 'open-chat',
     text,
-    agent: spec.type === 'worker' ? spec.agent : null
+    agent: spec.type === 'resume' ? null : spec.agent,
+    // The fence the page enforces before it types. Only a revival has one: the other two
+    // kinds open a chat that does not exist yet, so there is nothing to compare against.
+    conversationId: spec.type === 'revive' ? spec.conversationId : null
   };
 }
 
@@ -2978,6 +3396,10 @@ function drop(command: Command, why: string): boolean {
   // opened, it kept the run looking alive to takeover, and the prime went on waiting for
   // a report from a chat that does not exist.
   if (command.spec.type === 'worker') failAgent(command.spec.agent, why);
+  // A revival that never happened is not a worker that failed. Nothing was typed into its
+  // chat, so it goes back to sleeping with its inbox intact and its slot released, and the
+  // prime is told the message it sent is still waiting to be delivered.
+  if (command.spec.type === 'revive') failWorkerRevival(command.spec.agent, why);
   logWarn(`bridge: gave up on ${specKey(command.spec)} — ${why}`);
   changed();
   persistCommands();
@@ -2996,12 +3418,21 @@ function tidyCommands(): void {
   const now = Date.now();
   const runId = currentRunId();
   const pendingWorkers = new Set(pendingWorkerSpawns().map((worker) => worker.id));
+  const wakingWorkers = new Set(pendingWorkerRevivals().map((revival) => revival.id));
   for (const command of [...commands]) {
     const workerAgent = command.spec.type === 'worker' ? command.spec.agent : null;
-    if (command.spec.type === 'worker' && command.spec.runId !== runId) {
+    if (command.spec.type !== 'resume' && command.spec.runId !== runId) {
       // Run turnover is an identity boundary. A command from the retired incarnation is not
       // evidence that the same friendly worker id in the current run is already opening.
       retire(command, `its worker run ${command.spec.runId} is no longer current`);
+      continue;
+    }
+    if (command.spec.type === 'revive' && !wakingWorkers.has(command.spec.agent)) {
+      // The slot stopped waking while this waited: the worker called in by itself, the prime's
+      // send rolled back, or the run cleared it. Retiring rather than dropping is deliberate —
+      // whatever ended the reservation has already put the worker somewhere it belongs, and
+      // failWorkerRevival() on top of that would report a failure that did not happen.
+      retire(command, 'its worker is no longer waiting to be woken');
       continue;
     }
     if (workerAgent && !pendingWorkers.has(workerAgent)) {
@@ -3055,6 +3486,10 @@ function commandOrigin(id: string): SessionOrigin | null {
   const spec = commands.find((entry) => entry.id === id)?.spec;
   if (!spec) return null;
   if (spec.type === 'worker') return { kind: 'worker', fromSessionId: null, agentId: spec.agent, task: spec.task };
+  // A revival opens no chat, so it names none. The conversation it lands in was recorded as a
+  // worker chat when it was first opened, and rewriting that origin now would only overwrite
+  // the task this worker was actually created for with whatever it is being asked next.
+  if (spec.type === 'revive') return null;
   return { kind: 'resume', fromSessionId: spec.sessionId, agentId: null, task: '' };
 }
 
@@ -3072,7 +3507,9 @@ function commandOrigin(id: string): SessionOrigin | null {
  */
 export function cancelWorkerCommands(reason: string, agent?: string): number {
   const doomed = commands.filter(
-    (command) => command.spec.type === 'worker' && (agent === undefined || command.spec.agent === agent)
+    (command) =>
+      (command.spec.type === 'worker' || command.spec.type === 'revive') &&
+      (agent === undefined || command.spec.agent === agent)
   );
   if (doomed.length === 0) return 0;
   const dead = new Set(doomed.map((command) => command.id));
@@ -3096,6 +3533,216 @@ export function pendingCommands(): Array<{ id: string; what: string; lastError: 
   }));
 }
 
+interface CommandRestorePlan {
+  /** Complete post-recovery command set. Nothing here is published until reconciliation ends. */
+  commands: Command[];
+  /** Complete post-recovery receipt set, already TTL-pruned and de-duplicated. */
+  receipts: CommandReceipt[];
+  /** Expired durable wake halves whose separately durable broker reservation must be settled first. */
+  expiredRevivals: Array<{ id: string; spec: Extract<CommandSpec, { type: 'revive' }> }>;
+  /** Resume tokens discovered in the durable command file, published only with the plan. */
+  resumeTokens: Array<{ sessionId: string; token: string }>;
+  /** Number of durable commands newly reconstructed rather than retained from this process. */
+  restored: number;
+}
+
+/** One durable receipt that is still useful, rebuilt field-by-field. */
+function restoredReceipt(raw: Partial<CommandReceipt>, now: number): CommandReceipt | null {
+  if (
+    typeof raw.id !== 'string' || raw.id.length === 0 || raw.id.length > 64 ||
+    (raw.client !== null && raw.client !== undefined && (typeof raw.client !== 'string' || raw.client.length > 64)) ||
+    (raw.conversationId !== null && raw.conversationId !== undefined && typeof raw.conversationId !== 'string') ||
+    (raw.outcome !== 'committed' && raw.outcome !== 'terminal-failure') ||
+    typeof raw.committed !== 'boolean' ||
+    !Number.isFinite(raw.completedAt) ||
+    now - Number(raw.completedAt) > COMMAND_TTL_MS ||
+    (raw.outcome === 'committed') !== raw.committed
+  ) {
+    return null;
+  }
+  return {
+    id: raw.id,
+    client: typeof raw.client === 'string' ? raw.client : null,
+    conversationId: typeof raw.conversationId === 'string' ? raw.conversationId : null,
+    outcome: raw.outcome,
+    committed: raw.committed,
+    error: typeof raw.error === 'string' ? raw.error.slice(0, 200) : null,
+    completedAt: Number(raw.completedAt)
+  };
+}
+
+/**
+ * Rebuilds one command spec against current durable authority.
+ *
+ * Worker/revival rows are scoped to the exact restored run. Resume rows are scoped by the
+ * continuation WAL. Returning null is therefore a retirement decision, not a parse fallback.
+ */
+function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): CommandSpec | null {
+  if (
+    version >= 3 &&
+    raw.type === 'worker' &&
+    typeof (raw as Partial<Extract<CommandSpec, { type: 'worker' }>>).agent === 'string' &&
+    /^[a-z0-9-]{1,40}$/i.test((raw as Extract<CommandSpec, { type: 'worker' }>).agent) &&
+    typeof (raw as Partial<Extract<CommandSpec, { type: 'worker' }>>).task === 'string' &&
+    typeof (raw as Partial<Extract<CommandSpec, { type: 'worker' }>>).runId === 'string'
+  ) {
+    const worker = raw as Extract<CommandSpec, { type: 'worker' }>;
+    if (worker.runId !== currentRunId()) return null;
+    return { type: 'worker', agent: worker.agent, task: worker.task.slice(0, 512 * 1024), runId: worker.runId };
+  }
+  if (
+    version >= 4 &&
+    raw.type === 'revive' &&
+    typeof (raw as Partial<Extract<CommandSpec, { type: 'revive' }>>).agent === 'string' &&
+    /^[a-z0-9-]{1,40}$/i.test((raw as Extract<CommandSpec, { type: 'revive' }>).agent) &&
+    typeof (raw as Partial<Extract<CommandSpec, { type: 'revive' }>>).conversationId === 'string' &&
+    typeof (raw as Partial<Extract<CommandSpec, { type: 'revive' }>>).runId === 'string'
+  ) {
+    const revive = raw as Extract<CommandSpec, { type: 'revive' }>;
+    if (revive.runId !== currentRunId()) return null;
+    return { type: 'revive', agent: revive.agent, conversationId: revive.conversationId, runId: revive.runId };
+  }
+  if (
+    raw.type === 'resume' &&
+    typeof (raw as Partial<Extract<CommandSpec, { type: 'resume' }>>).sessionId === 'string' &&
+    typeof (raw as Partial<Extract<CommandSpec, { type: 'resume' }>>).token === 'string'
+  ) {
+    const resume = raw as Extract<CommandSpec, { type: 'resume' }>;
+    const continuation = continuationByToken(resume.token);
+    if (!continuation || continuation.sessionId !== resume.sessionId || continuation.state === 'aborted') return null;
+    return { type: 'resume', sessionId: resume.sessionId, token: resume.token };
+  }
+  return null;
+}
+
+/** Snapshot an explicit command set. Restore must never serialize the live globals mid-plan. */
+function restoredCommandSnapshot(
+  plannedCommands: readonly Command[],
+  plannedReceipts: readonly CommandReceipt[],
+  now: number
+): DurableCommandSnapshot {
+  return {
+    version: 4,
+    commands: plannedCommands.map(durableCommand),
+    receipts: plannedReceipts
+      .filter((receipt) => now - receipt.completedAt <= COMMAND_TTL_MS)
+      .slice(-MAX_COMMAND_RECEIPTS)
+  };
+}
+
+/**
+ * Pure-with-respect-to-bridge-state reconstruction of the durable file.
+ *
+ * A settings stop/start deliberately retains in-memory commands; those are newer authority and
+ * win every duplicate. Disk contributes only missing commands/receipts. Most importantly this
+ * function never pushes into `commands`, arms a timer or publishes a receipt while later recovery
+ * awaits can still fail.
+ */
+function planCommandRestore(
+  saved: { version?: number; commands?: unknown; receipts?: unknown },
+  now: number
+): CommandRestorePlan | null {
+  const version = saved.version;
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4 || !Array.isArray(saved.commands)) return null;
+
+  const plannedCommands = [...commands];
+  const plannedReceipts = commandReceipts
+    .filter((receipt) => now - receipt.completedAt <= COMMAND_TTL_MS)
+    .slice(-MAX_COMMAND_RECEIPTS);
+  const receiptIds = new Set(plannedReceipts.map((receipt) => receipt.id));
+  if (version !== 1 && Array.isArray(saved.receipts)) {
+    for (const raw of saved.receipts as Array<Partial<CommandReceipt>>) {
+      const receipt = restoredReceipt(raw, now);
+      if (!receipt || receiptIds.has(receipt.id)) continue;
+      receiptIds.add(receipt.id);
+      plannedReceipts.push(receipt);
+    }
+    if (plannedReceipts.length > MAX_COMMAND_RECEIPTS) {
+      plannedReceipts.splice(0, plannedReceipts.length - MAX_COMMAND_RECEIPTS);
+    }
+  }
+
+  const retainedKeys = new Set(plannedCommands.map((command) => commandKey(command.spec)));
+  const expiredRevivals: Array<{ id: string; spec: Extract<CommandSpec, { type: 'revive' }> }> = [];
+  const resumeTokens: Array<{ sessionId: string; token: string }> = plannedCommands
+    .filter((command): command is Command & { spec: Extract<CommandSpec, { type: 'resume' }> } => command.spec.type === 'resume')
+    .map((command) => ({ sessionId: command.spec.sessionId, token: command.spec.token }));
+  const durableCandidates = new Map<
+    string,
+    { raw: Partial<DurableCommandRecord>; spec: CommandSpec; createdAt: number }
+  >();
+  let restored = 0;
+
+  for (const raw of saved.commands as Array<Partial<DurableCommandRecord>>) {
+    const specRaw = raw.spec as Partial<CommandSpec> | undefined;
+    if (!specRaw || typeof raw.id !== 'string' || raw.id.length === 0 || raw.id.length > 64) continue;
+    const spec = restoredCommandSpec(version, specRaw);
+    if (!spec) continue;
+    const createdAt = typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) ? raw.createdAt : 0;
+    const key = commandKey(spec);
+    // In-memory state survived a settings stop/start and is newer authority than the disk
+    // snapshot it produced. A stale old durable row for the same worker must never cancel or
+    // replace that newer live transport merely because both have the same friendly key.
+    if (retainedKeys.has(key) || receiptIds.has(raw.id)) continue;
+    const prior = durableCandidates.get(key);
+    // Corrupt/legacy files can contain two incarnations of one transport key. Pick authority
+    // first, then apply TTL semantics to that one record only. Newer createdAt wins; a later
+    // record wins a tie so reconstruction is deterministic for whole-file duplicates.
+    if (!prior || createdAt >= prior.createdAt) durableCandidates.set(key, { raw, spec, createdAt });
+  }
+
+  for (const { raw, spec, createdAt } of durableCandidates.values()) {
+    if (spec.type === 'resume') resumeTokens.push({ sessionId: spec.sessionId, token: spec.token });
+    if (now - createdAt > COMMAND_TTL_MS) {
+      if (spec.type === 'revive') expiredRevivals.push({ id: raw.id!, spec });
+      continue;
+    }
+
+    const continuation = spec.type === 'resume' ? continuationByToken(spec.token) : null;
+    const legacyAlreadyClaimed =
+      version === 1 && continuation !== null &&
+      (continuation.state === 'claimed' || continuation.state === 'committing' || continuation.state === 'committed');
+    const persistedLeased = version !== 1 && raw.phase === 'leased';
+    const leased = persistedLeased || legacyAlreadyClaimed;
+    let claimedAt = leased && typeof raw.claimedAt === 'number' && Number.isFinite(raw.claimedAt) ? raw.claimedAt : null;
+    if (leased && claimedAt === null) claimedAt = now;
+    if (claimedAt !== null && claimedAt > now + COMMAND_DEADLINE_MS) claimedAt = now;
+    plannedCommands.push({
+      id: raw.id!,
+      spec,
+      createdAt,
+      claimedAt,
+      timer: null,
+      lastError: typeof raw.lastError === 'string' ? raw.lastError : null,
+      owner: leased && typeof raw.owner === 'string' ? raw.owner.slice(0, 64) : null
+    });
+    restored += 1;
+  }
+
+  // Retained commands normally win over disk, but TTL still applies to the retained transport
+  // itself. For revivals that expiry has a separately durable broker half, so select that exact
+  // command id for reconciliation and omit only that incarnation from the publish plan. A newer
+  // retained revival is not touched by an older expired disk row because disk candidates for its
+  // key were discarded above before expiry was considered.
+  const expiredRetainedRevivalIds = new Set<string>();
+  for (const command of plannedCommands) {
+    if (command.spec.type !== 'revive' || now - command.createdAt <= COMMAND_TTL_MS) continue;
+    expiredRevivals.push({ id: command.id, spec: command.spec });
+    expiredRetainedRevivalIds.add(command.id);
+  }
+  const commandsAfterExpiredRevival = plannedCommands.filter(
+    (command) => !expiredRetainedRevivalIds.has(command.id)
+  );
+
+  return {
+    commands: commandsAfterExpiredRevival,
+    receipts: plannedReceipts.slice(-MAX_COMMAND_RECEIPTS),
+    expiredRevivals,
+    resumeTokens,
+    restored
+  };
+}
+
 /**
  * Reloads commands left over from a previous run.
  *
@@ -3108,105 +3755,73 @@ export function pendingCommands(): Array<{ id: string; what: string; lastError: 
  */
 export async function restoreCommands(): Promise<void> {
   const saved = await readDurable<{ version?: number; commands?: unknown; receipts?: unknown }>(COMMANDS_STATE);
-  if (!saved || (saved.version !== 1 && saved.version !== 2 && saved.version !== 3) || !Array.isArray(saved.commands)) return;
+  if (!saved) return;
   const now = Date.now();
-  if ((saved.version === 2 || saved.version === 3) && Array.isArray(saved.receipts)) {
-    for (const raw of saved.receipts as Array<Partial<CommandReceipt>>) {
-      if (
-        typeof raw.id !== 'string' || raw.id.length === 0 || raw.id.length > 64 ||
-        (raw.client !== null && raw.client !== undefined && (typeof raw.client !== 'string' || raw.client.length > 64)) ||
-        (raw.conversationId !== null && raw.conversationId !== undefined && typeof raw.conversationId !== 'string') ||
-        (raw.outcome !== 'committed' && raw.outcome !== 'terminal-failure') ||
-        typeof raw.committed !== 'boolean' ||
-        !Number.isFinite(raw.completedAt) ||
-        now - Number(raw.completedAt) > COMMAND_TTL_MS
-      ) {
-        continue;
+  const plan = planCommandRestore(saved, now);
+  if (!plan) return;
+
+  if (plan.expiredRevivals.length > 0) {
+    let brokerRelevant = false;
+    for (const expired of plan.expiredRevivals) {
+      const revive = expired.spec;
+      // Run id was already validated above. Check the exact conversation too so a stale command
+      // for an earlier binding cannot knock down a newer wake for the same friendly worker id.
+      // `brokerRelevant` deliberately survives a prior failed recovery attempt: that attempt may
+      // already have moved the live worker back to sleeping while the durable swarm is still
+      // waking. A later startup must fsync the *current* broker state before it may prune the old
+      // command, even though pendingWorkerRevivals() no longer lists it.
+      if (agentForConversation(revive.conversationId) !== revive.agent) continue;
+      brokerRelevant = true;
+      const owed = pendingWorkerRevivals().find(
+        (entry) => entry.id === revive.agent && entry.conversationId === revive.conversationId
+      );
+      if (!owed) continue;
+      failWorkerRevival(revive.agent, 'its durable revival expired while the app was not running');
+    }
+
+    if (brokerRelevant) {
+      // Crash order is load-bearing: durable `sleeping` first, command pruning second. If the
+      // command vanished first and the process died here, the next startup would restore
+      // `waking` with no matching old command and recreate the fresh-TTL bug.
+      let persisted = false;
+      try {
+        persisted = await persistCriticalSwarmNow();
+      } catch (err) {
+        throw new Error(
+          `could not durably settle expired worker revival(s); bridge startup must retry before pruning them — ${err instanceof Error ? err.message : String(err)}`
+        );
       }
-      if ((raw.outcome === 'committed') !== raw.committed) continue;
-      commandReceipts.push({
-        id: raw.id,
-        client: typeof raw.client === 'string' ? raw.client : null,
-        conversationId: typeof raw.conversationId === 'string' ? raw.conversationId : null,
-        outcome: raw.outcome,
-        committed: raw.committed,
-        error: typeof raw.error === 'string' ? raw.error.slice(0, 200) : null,
-        completedAt: Number(raw.completedAt)
-      });
+      if (!persisted) {
+        throw new Error('could not durably settle expired worker revival(s); bridge startup must retry before pruning them');
+      }
     }
-    pruneReceipts(now);
+
   }
-  let restored = 0;
-  const expired: Command[] = [];
-  for (const raw of saved.commands as Array<Partial<DurableCommandRecord>>) {
-    const specRaw = raw.spec as Partial<CommandSpec> | undefined;
-    if (!specRaw || typeof raw.id !== 'string' || raw.id.length === 0 || raw.id.length > 64) continue;
-    let spec: CommandSpec | null = null;
-    if (
-      saved.version === 3 &&
-      specRaw.type === 'worker' &&
-      typeof (specRaw as Partial<Extract<CommandSpec, { type: 'worker' }>>).agent === 'string' &&
-      /^[a-z0-9-]{1,40}$/i.test((specRaw as Extract<CommandSpec, { type: 'worker' }>).agent) &&
-      typeof (specRaw as Partial<Extract<CommandSpec, { type: 'worker' }>>).task === 'string' &&
-      typeof (specRaw as Partial<Extract<CommandSpec, { type: 'worker' }>>).runId === 'string'
-    ) {
-      const worker = specRaw as Extract<CommandSpec, { type: 'worker' }>;
-      // Broker state is restored before bridge state. Only a command issued by that exact
-      // restored incarnation may survive. v1/v2 worker rows deliberately do not migrate:
-      // they predate run scoping, so there is no fact on disk that can prove which run owned
-      // them. The restored broker immediately re-requests any genuinely owed worker tab.
-      if (worker.runId !== currentRunId()) continue;
-      spec = { type: 'worker', agent: worker.agent, task: worker.task.slice(0, 512 * 1024), runId: worker.runId };
-    } else if (
-      specRaw.type === 'resume' &&
-      typeof (specRaw as Partial<Extract<CommandSpec, { type: 'resume' }>>).sessionId === 'string' &&
-      typeof (specRaw as Partial<Extract<CommandSpec, { type: 'resume' }>>).token === 'string'
-    ) {
-      const resume = specRaw as Extract<CommandSpec, { type: 'resume' }>;
-      const continuation = continuationByToken(resume.token);
-      if (!continuation || continuation.sessionId !== resume.sessionId || continuation.state === 'aborted') continue;
-      spec = { type: 'resume', sessionId: resume.sessionId, token: resume.token };
-      rememberToken(resume.sessionId, resume.token);
-    }
-    if (!spec) continue;
-    const createdAt = typeof raw.createdAt === 'number' ? raw.createdAt : 0;
-    if (now - createdAt > COMMAND_TTL_MS) continue;
-    if (receiptFor(raw.id)) continue;
-    if (commands.some((entry) => commandKey(entry.spec) === commandKey(spec))) continue;
-    const continuation = spec.type === 'resume' ? continuationByToken(spec.token) : null;
-    const legacyAlreadyClaimed =
-      saved.version === 1 && continuation !== null &&
-      (continuation.state === 'claimed' || continuation.state === 'committing' || continuation.state === 'committed');
-    const persistedLeased = (saved.version === 2 || saved.version === 3) && raw.phase === 'leased';
-    const leased = persistedLeased || legacyAlreadyClaimed;
-    let claimedAt = leased && typeof raw.claimedAt === 'number' && Number.isFinite(raw.claimedAt) ? raw.claimedAt : null;
-    if (leased && claimedAt === null) claimedAt = now;
-    if (claimedAt !== null && claimedAt > now + COMMAND_DEADLINE_MS) claimedAt = now;
-    const restoredCommand: Command = {
-      id: raw.id,
-      spec,
-      createdAt,
-      claimedAt,
-      timer: null,
-      lastError: typeof raw.lastError === 'string' ? raw.lastError : null,
-      owner: leased && typeof raw.owner === 'string' ? raw.owner.slice(0, 64) : null
-    };
-    commands.push(restoredCommand);
-    if (claimedAt !== null) {
-      const remaining = claimedAt + COMMAND_DEADLINE_MS - now;
-      if (remaining > 0) armDeadline(restoredCommand, remaining);
-      else expired.push(restoredCommand);
-    }
-    restored += 1;
+
+  // One explicit durable rewrite from the local plan. No live bridge state participates in this
+  // snapshot, so an overlapping callback/request cannot smuggle a half-restored generation onto
+  // disk. If storage fails after broker reconciliation, the safe old disk row remains and
+  // durable.ts retains this exact newer generation for retry; publishing the already-reconciled
+  // plan in memory is safe because admission is still fenced by bridgeRecovering.
+  let rewriteDurable = true;
+  try {
+    await writeDurableNow(COMMANDS_STATE, restoredCommandSnapshot(plan.commands, plan.receipts, now));
+    rewriteDurable = false;
+  } catch (err) {
+    logWarn(`bridge: could not persist reconstructed command state — ${err instanceof Error ? err.message : String(err)}`);
   }
-  for (const command of expired) expire(command);
-  if (restored > 0) {
-    logInfo(`bridge: restored ${restored} chat command(s) from the previous run`);
+
+  // This is the only publication point of restore. Everything above operated on local arrays;
+  // everything below may again use ordinary live command helpers and timers.
+  commands = plan.commands;
+  commandReceipts = plan.receipts;
+  for (const token of plan.resumeTokens) rememberToken(token.sessionId, token.token);
+  rearmRetainedCommandDeadlines();
+  if (plan.restored > 0) {
+    logInfo(`bridge: restored ${plan.restored} chat command(s) from the previous run`);
     changed();
   }
-  // Persist the migration/pruning result. In particular, a v1 resume is never silently lost
-  // again, and any v2 leased phase we just trusted remains explicit on the next restart.
-  persistCommands();
+  if (rewriteDurable) persistCommands();
 }
 
 /** Test seam. */
@@ -3217,6 +3832,8 @@ export function resetBridgeForTests(): void {
   commands = [];
   commandReceipts = [];
   commandLeaseWrites.clear();
+  commandRedeems.clear();
+  bridgeRecovering = false;
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;

@@ -12,11 +12,16 @@
  * Enforcement lives here, in code. It is never delegated to prompt text.
  */
 
-import { rawPromises as fs } from './rawfs.js';
+import { rawPromises as fs, rawRealpathNative } from './rawfs.js';
 import path from 'node:path';
 import type { Root } from '../shared/types.js';
 
 const IS_WINDOWS = process.platform === 'win32';
+
+/** Final-path identity, using Windows' native canonicalizer when path spelling is ambiguous. */
+async function canonicalRealpath(target: string): Promise<string> {
+  return IS_WINDOWS ? rawRealpathNative(target) : fs.realpath(target);
+}
 
 /** Windows treats these as devices no matter which directory they appear in. */
 const RESERVED_NAMES = new Set([
@@ -149,7 +154,7 @@ async function realpathDeepest(absPath: string): Promise<{ real: string; missing
   const missing: string[] = [];
   for (;;) {
     try {
-      return { real: await fs.realpath(current), missing };
+      return { real: await canonicalRealpath(current), missing };
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err;
@@ -166,9 +171,18 @@ async function realpathDeepest(absPath: string): Promise<{ real: string; missing
 /** Reads the canonical path of an approved root, failing loudly if it has gone away. */
 async function realRoot(root: Root): Promise<string> {
   try {
-    return await fs.realpath(root.path);
+    const current = await canonicalRealpath(root.path);
+    // roots:add persists validateNewRoot()'s canonical path. Re-resolving that pathname is a
+    // liveness check, not permission to follow a new reparse target: otherwise replacing the
+    // approved directory itself with a junction silently moves the sandbox boundary to whatever
+    // unapproved tree the junction names. Path equivalence is case-insensitive on Windows via
+    // isContained(), matching the rest of this module's containment rules.
+    if (!isContained(root.path, current) || !isContained(current, root.path)) {
+      throw new SandboxError(`Root "/${root.name}" changed on disk. Remove it and approve the folder again.`);
+    }
+    return current;
   } catch {
-    throw new SandboxError(`Root "/${root.name}" is not available right now`);
+    throw new SandboxError(`Root "/${root.name}" is not available or changed on disk. Remove it and approve the folder again.`);
   }
 }
 
@@ -225,16 +239,39 @@ async function normaliseNativePath(roots: readonly Root[], input: string): Promi
   // before any normalization happens.
   const withoutNativeRoot = trimmed.replace(/^[A-Za-z]:[\\/]+/, '').replace(/^\\\\[^\\/]+[\\/]+[^\\/]+[\\/]*/, '');
   for (const segment of withoutNativeRoot.split(/[/\\]+/).filter((part) => part.length > 0)) checkSegment(segment);
+  // Approved roots categorically reject UNC paths. Do not ask Windows to resolve a network
+  // share merely to discover that it cannot belong to any root: an unreachable host can turn
+  // an immediate sandbox refusal into seconds of blocking DNS/SMB work.
+  if (trimmed.startsWith('\\\\')) {
+    const names = roots.map((r) => `/${r.name}`).join(', ') || '(none approved)';
+    throw new SandboxError(
+      `Native path "${trimmed}" is not inside an approved folder. ` +
+        `Approved roots: ${names} — call list_roots to see what each one maps to.`
+    );
+  }
   const native = path.resolve(trimmed);
+  let canonicalNative: string;
+  try {
+    const { real, missing } = await realpathDeepest(native);
+    canonicalNative = missing.length === 0 ? real : path.join(real, ...missing);
+  } catch {
+    canonicalNative = native;
+  }
   for (const root of roots) {
     let rootReal: string;
     try {
-      rootReal = await fs.realpath(root.path);
+      rootReal = await realRoot(root);
     } catch {
       continue;
     }
-    if (!isContained(rootReal, native)) continue;
-    return toVirtualPath(root, rootReal, native);
+    if (isContained(rootReal, canonicalNative)) {
+      return toVirtualPath(root, rootReal, canonicalNative);
+    }
+    // Preserve the useful distinction between a genuinely outside native path and a spelling
+    // that started under the approved root but was redirected out by a junction/symlink.
+    if (isContained(rootReal, native)) {
+      throw new SandboxError('Path escapes its approved folder via a link');
+    }
   }
   const names = roots.map((r) => `/${r.name}`).join(', ') || '(none approved)';
   throw new SandboxError(
@@ -344,7 +381,7 @@ export async function validateNewRoot(folderPath: string, existing: readonly Roo
   if (folderPath.startsWith('\\\\')) {
     throw new SandboxError('Network (UNC) paths are not supported. Map it to a drive letter first.');
   }
-  const real = await fs.realpath(folderPath);
+  const real = await canonicalRealpath(folderPath);
   const stat = await fs.stat(real);
   if (!stat.isDirectory()) {
     throw new SandboxError('That is not a folder');
@@ -356,7 +393,7 @@ export async function validateNewRoot(folderPath: string, existing: readonly Roo
   for (const other of existing) {
     let otherReal: string;
     try {
-      otherReal = await fs.realpath(other.path);
+      otherReal = await canonicalRealpath(other.path);
     } catch {
       continue;
     }

@@ -8,6 +8,7 @@ import {
   MAX_VIEW_IMAGE_BYTES,
   viewImage
 } from '../src/main/codex/view-image.js';
+import { readFile as readCodexFile } from '../src/main/codex/filesystem.js';
 
 const roots: string[] = [];
 
@@ -214,13 +215,24 @@ function webpWithPlausibleVp8PrefixButNoBitstream(): Buffer {
 }
 
 describe('Codex view_image runtime parity', () => {
-  it('budgets both MCP base64 copies inside the connector wire envelope', () => {
+  it('budgets the native MCP base64 image inside the connector wire envelope', () => {
     const encodedChars = 4 * Math.ceil(MAX_VIEW_IMAGE_BYTES / 3);
-    expect(encodedChars * 2 + 64 * 1024).toBeLessThanOrEqual(8 * 1024 * 1024);
+    expect(encodedChars + 64 * 1024).toBeLessThanOrEqual(8 * 1024 * 1024);
   });
 
   afterEach(async () => {
     await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  it('lets image callers impose a smaller hard read ceiling than the generic 512 MiB primitive', async () => {
+    const root = await tempRoot();
+    const file = path.join(root, 'bounded.bin');
+    await writeFile(file, Buffer.alloc(4097, 0x61));
+
+    // `view_image` has a much smaller wire budget than generic Codex file reads. The read
+    // primitive must enforce that caller-specific ceiling on the opened handle, including a file
+    // that grows after an earlier metadata check.
+    await expect(readCodexFile(file, 4096)).rejects.toThrow(/too large|4096/i);
   });
 
   it('rejects a structurally framed PNG that cannot be decoded', async () => {

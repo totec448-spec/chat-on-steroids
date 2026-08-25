@@ -3,11 +3,11 @@
  */
 
 import path from 'node:path';
-import { app, BrowserWindow, Menu, Tray, nativeImage, session, shell } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, screen, session, shell } from 'electron';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
-import { connect, disconnect, getStatus, onStatusChange } from './connection.js';
+import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
-import { logError, logInfo } from './logger.js';
+import { logError, logInfo, logWarn } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
 import { setBrowserOpener, startBridge, stopBridge } from './bridge.js';
@@ -42,6 +42,9 @@ import {
   setContinuationRecoveryHooks,
   type ContinuationSnapshot
 } from './session/continuation.js';
+import { startSessionRetentionMaintenance } from './session/retention.js';
+import { runShutdownSequence } from './shutdown.js';
+import { windowLayoutForWorkArea } from './window-layout.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -52,9 +55,7 @@ let tray: Tray | null = null;
 let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
-// One-shot startup flag used by the self-update path. It reconnects this launch
-// without changing the user's persistent auto-connect preference.
-const connectOnStart = process.argv.includes('--connect-on-start');
+let stopSessionRetention: (() => void) | null = null;
 
 // One instance only: two copies would fight over the tunnel and the config file.
 if (!app.requestSingleInstanceLock()) {
@@ -62,15 +63,9 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function createWindow(): void {
+  const layout = windowLayoutForWorkArea(screen.getPrimaryDisplay().workArea);
   window = new BrowserWindow({
-    // The layout is a fixed frame: three cards over a log over a nav bar, sized to
-    // fit exactly. Resizing could only break it, so the window does not resize.
-    width: 1080,
-    height: 700,
-    // 700 must be the space the layout actually gets, not 700 minus the title bar.
-    useContentSize: true,
-    resizable: false,
-    maximizable: false,
+    ...layout,
     fullscreenable: false,
     show: false,
     autoHideMenuBar: true,
@@ -279,15 +274,17 @@ void app.whenReady().then(async () => {
   if (getConfig().sessions.record || getConfig().multiAgent.enabled) {
     void startBridge();
   }
-  if (getConfig().sessions.record) {
-    void pruneSessions(getConfig().sessions.retainDays)
-      .then((removed) => {
-        if (removed > 0) logInfo(`removed ${removed} session(s) past the retention window`);
-      })
-      .catch((err: Error) => logError(`session pruning failed: ${err.message}`));
-  }
+  // Retention governs recordings already stored on disk, independent of whether recording is
+  // currently enabled. The tray app can stay alive for days, so run once now and keep a coarse
+  // maintenance timer rather than making expiry depend on the next process restart.
+  stopSessionRetention = startSessionRetentionMaintenance({
+    retainDays: () => getConfig().sessions.retainDays,
+    prune: pruneSessions,
+    onRemoved: (removed) => logInfo(`removed ${removed} session(s) past the retention window`),
+    onError: (err) => logError(`session pruning failed: ${err.message}`)
+  });
 
-  if (getConfig().ui.autoConnect || connectOnStart) void connect();
+  if (getConfig().ui.autoConnect) void connect();
 });
 
 app.on('before-quit', () => {
@@ -304,29 +301,31 @@ app.on('will-quit', (event) => {
   event.preventDefault();
   if (shutdownStarted) return;
   shutdownStarted = true;
+  stopSessionRetention?.();
+  stopSessionRetention = null;
   tray?.destroy();
   tray = null;
 
-  const runPhase = async (name: string, tasks: Array<Promise<unknown>>): Promise<void> => {
-    const results = await Promise.allSettled(tasks);
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        const message = result.reason instanceof Error ? result.reason.message : String(result.reason);
-        logError(`shutdown ${name} failed: ${message}`);
-      }
-    }
-  };
-
-  void (async () => {
-    // Phase 1: stop both listeners from admitting work and let accepted requests drain.
-    await runPhase('admission/drain', [disconnect(), stopBridge()]);
-    // Phase 2: only after request handlers are done may their owned child processes go.
-    await runPhase('process cleanup', [unifiedExecManager.terminateAllProcesses(), stopComputerHelper()]);
-    // Phase 3: recorder work can enqueue both session projections and named durable state.
-    await runPhase('recorder flush', [flushRecorder()]);
-    // These are independent writers. One rejection must never skip the other flush.
-    await runPhase('durable flush', [flushSessions(), flushDurable()]);
-  })().finally(() => {
+  void runShutdownSequence(
+    [
+      // Phase 1: stop both listeners from admitting work and let accepted requests drain.
+      // The budget has to clear the drains it contains, or it would silently defeat them:
+      // the bridge force-closes wedged localhost sockets at 15s and the MCP endpoint forces
+      // its own drain at 30s. This is the outer bound on both, not a competing one.
+      { name: 'admission/drain', budgetMs: 40_000, run: () => [shutdownConnection(), stopBridge()] },
+      // Phase 2: only after request handlers are done may their owned child processes go.
+      {
+        name: 'process cleanup',
+        budgetMs: 15_000,
+        run: () => [unifiedExecManager.terminateAllProcesses(), stopComputerHelper()]
+      },
+      // Phase 3: recorder work can enqueue both session projections and named durable state.
+      { name: 'recorder flush', budgetMs: 10_000, run: () => [flushRecorder()] },
+      // These are independent writers. One rejection must never skip the other flush.
+      { name: 'durable flush', budgetMs: 10_000, run: () => [flushSessions(), flushDurable()] }
+    ],
+    { warn: logWarn, error: logError }
+  ).finally(() => {
     shutdownComplete = true;
     app.quit();
   });

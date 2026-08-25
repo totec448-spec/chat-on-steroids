@@ -3,8 +3,6 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repo = process.cwd();
-const extensionDownload =
-  'https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Extension.zip';
 
 describe('runtime multi-agent enable regression', () => {
   it('wires the immediate swarm persistence sink before the multi-agent restore gate', async () => {
@@ -19,15 +17,21 @@ describe('runtime multi-agent enable regression', () => {
 });
 
 describe('companion extension setup contract', () => {
-  it('keeps the standalone extension link both visible and allowed by main-process IPC', async () => {
-    const [html, ipc] = await Promise.all([
+  it('keeps standalone recovery visible without pointing an installed app at releases/latest', async () => {
+    const [html, renderer, preload, ipc] = await Promise.all([
       readFile(path.join(repo, 'src/renderer/index.html'), 'utf8'),
+      readFile(path.join(repo, 'src/renderer/main.ts'), 'utf8'),
+      readFile(path.join(repo, 'src/preload/index.ts'), 'utf8'),
       readFile(path.join(repo, 'src/main/ipc.ts'), 'utf8')
     ]);
 
-    expect(html).toContain(extensionDownload);
+    expect(html).toMatch(/id="bridgeDownload"[\s\S]*?Download extension ZIP/i);
     expect(html).toMatch(/Required for sub-agents/i);
     expect(html).toMatch(/Requires the Chrome extension to be loaded and connected/i);
-    expect(ipc).toContain(extensionDownload);
+    expect(html).not.toContain('/releases/latest/');
+    expect(ipc).not.toContain('/releases/latest/');
+    expect(renderer).toContain('api.downloadExtension()');
+    expect(preload).toContain("call<boolean>('bridge:downloadExtension')");
+    expect(ipc).toContain("handle('bridge:downloadExtension'");
   });
 });

@@ -44,8 +44,9 @@ import {
 } from '../codex/apply-patch/index.js';
 import { DEFAULT_APPLY_PATCH_FILE_UPDATE_MODE } from '../codex/apply-patch/mode.js';
 import { maybeParseApplyPatchForExec } from '../codex/apply-patch/invocation.js';
+import { composeCommandBatch, parseCommandBatchSections } from '../codex/command-batch.js';
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
-import { DEFAULT_TRUNCATION_POLICY, unifiedExecManager } from '../codex/manager.js';
+import { DEFAULT_TRUNCATION_POLICY, EXEC_OUTPUT_CEILING_POLICY, unifiedExecManager } from '../codex/manager.js';
 import {
   execOwnershipDenied,
   forgetExecOwner,
@@ -69,6 +70,7 @@ import {
   APPLY_PATCH_ARGUMENT_DESCRIPTION,
   APPLY_PATCH_DESCRIPTION,
   EXEC_COMMAND_CMD_DESCRIPTION,
+  EXEC_COMMAND_CMDS_DESCRIPTION,
   EXEC_COMMAND_DESCRIPTION,
   EXEC_COMMAND_LOGIN_DESCRIPTION,
   EXEC_COMMAND_SHELL_DESCRIPTION,
@@ -97,10 +99,13 @@ import { ensureDevToolchain } from '../toolchain.js';
 import {
   agentForCaller,
   currentRunId,
+  freeWorkerSlots,
   identify,
+  noteAgentContextTokens,
   persistCriticalSwarmNow,
   PRIME_ID,
   requestWorkerBootstraps,
+  requestWorkerRevivals,
   stageFinishAgent,
   stageMessages,
   stageSpawn,
@@ -108,6 +113,7 @@ import {
   swarmState,
   type Caller
 } from '../agents.js';
+import { repairPrimeFromResumeShadow } from '../session/continuation.js';
 import {
   currentCall,
   currentCaller,
@@ -120,6 +126,7 @@ import {
   awaitFreshCallOrigin,
   recordAgentMessage
 } from '../session/recorder.js';
+import { findSessionByConversation } from '../session/store.js';
 import {
   adoptAgent,
   fail,
@@ -157,6 +164,16 @@ const int32Number = z
   .number()
   .refine((value) => Number.isInteger(value) && value >= -2_147_483_648 && value <= 2_147_483_647);
 const unsignedIntegerNumber = z.number().refine((value) => Number.isSafeInteger(value) && value >= 0);
+const excludeFolderPattern = z
+  .string()
+  .min(1)
+  .max(100)
+  .refine(
+    (value) =>
+      !/[\\/]/.test(value) &&
+      (value.indexOf('*') === -1 || (value.endsWith('*') && value.indexOf('*') === value.length - 1)),
+    'exclude entries must be folder names with at most one trailing * prefix wildcard'
+  );
 
 const unifiedExecOutputSchema = z
   .object({
@@ -169,17 +186,6 @@ const unifiedExecOutputSchema = z
       .describe('Session identifier to pass to write_stdin when the process is still running.'),
     original_token_count: z.number().optional().describe('Approximate token count before output truncation.'),
     output: z.string().describe('Command output text, possibly truncated.')
-  })
-  .strict();
-
-const viewImageOutputSchema = z
-  .object({
-    image_url: z.string().describe('Data URL for the loaded image.'),
-    detail: z
-      .enum(['high', 'original'])
-      .describe(
-        'Image detail hint returned by view_image. Returns `high` for default resized behavior or `original` when original resolution is preserved.'
-      )
   })
   .strict();
 
@@ -230,7 +236,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           'a PNG/JPEG/GIF/WebP comes back as an image, and anything else returns its metadata and why it was not decoded. ' +
           'Paths may contain * ? and ** and are expanded here. Every result starts with a header giving size, timestamps and line count. ' +
           `The line-number prefix is display metadata, not file content — strip it before quoting text into apply_patch. ` +
-          `A line range applies to every file the call resolves to. Text/listing output is bounded; the whole call stops after about ${formatBytes(MAX_READ_BYTES)} of returned payload.`,
+          `A line range applies to every file the call resolves to. A typical 1,500-line source file fits in the default read: do not pre-paginate it. ` +
+          `Batch related paths in one call; only continue from a line when the returned header says more lines follow. The aggregate payload remains bounded at about ${formatBytes(MAX_READ_BYTES)}.`,
         inputSchema: z
           .object({
             paths: z
@@ -252,7 +259,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               .min(1)
               .max(MAX_READ_BYTES)
               .optional()
-              .describe(`Per-text-file payload cap. Default ${DEFAULT_READ_BYTES}; maximum ${MAX_READ_BYTES}.`)
+              .describe(
+                `Per-text-file payload cap. Default ${formatBytes(DEFAULT_READ_BYTES)}; maximum ${formatBytes(MAX_READ_BYTES)}. Omit it for ordinary source files.`
+              )
           })
           .strict(),
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
@@ -383,8 +392,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           .object({
             path: z.string().describe(VIEW_IMAGE_PATH_DESCRIPTION)
           })
-          .strict(),
-        outputSchema: viewImageOutputSchema
+          .strict()
       },
       async ({ path }) =>
         guard('view_image', async () => {
@@ -398,8 +406,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             const image = await viewImage(resolved.real, null, undefined, resolved.virtual);
             logInfo(`tool view_image ${resolved.virtual} (${formatBytes(image.bytes)})`);
             return {
-              content: [{ type: 'image' as const, data: image.base64, mimeType: image.mimeType }],
-              structuredContent: { image_url: image.imageUrl, detail: image.detail }
+              content: [{ type: 'image' as const, data: image.base64, mimeType: image.mimeType }]
             };
           } catch (error) {
             if (error instanceof ViewImageError) return fail(error.message);
@@ -442,7 +449,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             mode: z.enum(['name', 'content']).optional().describe('Default name.'),
             include: z.string().max(200).optional().describe('Glob filter such as **/*.ts'),
             exclude: z
-              .array(z.string().max(100))
+              .array(excludeFolderPattern)
               .max(50)
               .optional()
               .describe('Folder names to skip; trailing * is a prefix match. Replaces the defaults — pass [] to search everywhere.'),
@@ -600,7 +607,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
         description: EXEC_COMMAND_DESCRIPTION,
         inputSchema: z
           .object({
-            cmd: z.string().describe(EXEC_COMMAND_CMD_DESCRIPTION),
+            cmd: z.string().optional().describe(EXEC_COMMAND_CMD_DESCRIPTION),
+            cmds: z.array(z.string()).min(1).max(20).optional().describe(EXEC_COMMAND_CMDS_DESCRIPTION),
             workdir: z.string().optional().describe(EXEC_COMMAND_WORKDIR_DESCRIPTION),
             tty: z.boolean().optional().describe(EXEC_COMMAND_TTY_DESCRIPTION),
             yield_time_ms: unsignedIntegerNumber.optional().describe(EXEC_COMMAND_YIELD_TIME_DESCRIPTION),
@@ -608,18 +616,31 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             shell: z.string().optional().describe(EXEC_COMMAND_SHELL_DESCRIPTION),
             login: z.boolean().optional().describe(EXEC_COMMAND_LOGIN_DESCRIPTION)
           })
-          .strict(),
+          .strict()
+          .superRefine((input, refinement) => {
+            if ((input.cmd === undefined) === (input.cmds === undefined)) {
+              refinement.addIssue({
+                code: 'custom',
+                path: [],
+                message: 'exec_command requires exactly one of cmd or cmds'
+              });
+            }
+          }),
         outputSchema: unifiedExecOutputSchema
       },
       async (input) =>
         reg.guarded('command', 'exec_command', async () => {
           const dir = await resolveCwd(ctx, input.workdir);
-          const virtualCommandPath = strayVirtualPath(input.cmd, ctx.roots);
-          if (virtualCommandPath) {
-            return fail(
-              `INVALID_COMMAND_PATH: ${virtualCommandPath} is an app virtual path, but shell commands do not understand virtual paths. ` +
-                `Use workdir plus a relative path, or use the approved folder's native Windows path. No command was run.`
-            );
+          const rawCommands = input.cmd === undefined ? input.cmds! : [input.cmd];
+          const isBatch = input.cmd === undefined;
+          for (const [index, rawCommand] of rawCommands.entries()) {
+            const virtualCommandPath = strayVirtualPath(rawCommand, ctx.roots);
+            if (virtualCommandPath) {
+              return fail(
+                `INVALID_COMMAND_PATH${isBatch ? ` in command ${index + 1}` : ''}: ${virtualCommandPath} is an app virtual path, but shell commands do not understand virtual paths. ` +
+                  `Use workdir plus a relative path, or use the approved folder's native Windows path. No command was run.`
+              );
+            }
           }
           const shell = input.shell === undefined ? defaultUserShell() : getShellByModelProvidedPath(input.shell, dir.real);
           if (!shell) {
@@ -646,21 +667,34 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // going to reject outright. Repairing first means the rest of the pipeline sees a
           // line PowerShell can actually parse, and a line it cannot repair is left exactly
           // as written for the shell to refuse and the hint to explain.
-          const repaired = repairPowerShellQuoting(input.cmd, shell.shellType);
-          const normalized = normalizeShellCommand(repaired.cmd, shell.shellType, (relativeDirectory = '.') =>
-            nodeFs.readdirSync(nodePath.resolve(dir.real, relativeDirectory))
-          );
+          const commandNotes: string[] = [];
+          const boundCommands = rawCommands.map((rawCommand, index) => {
+            const repaired = repairPowerShellQuoting(rawCommand, shell.shellType);
+            const normalized = normalizeShellCommand(repaired.cmd, shell.shellType, (relativeDirectory = '.') =>
+              nodeFs.readdirSync(nodePath.resolve(dir.real, relativeDirectory))
+            );
+            const prefix = (note: string): string => (isBatch ? `Command ${index + 1}: ${note}` : note);
+            commandNotes.push(...repaired.notes.map(prefix), ...normalized.notes.map(prefix));
+            return bindBundledRipgrep(
+              normalized.cmd,
+              shell.shellType,
+              shell.shellType === 'powershell' ? locateRipgrep() : null
+            );
+          });
           // PowerShell resolves profile functions/aliases before applications on PATH. The app
           // deliberately ships ripgrep, parses rg's flags against that exact version, and puts
           // it first on child PATH, so a profile-defined `rg` is not a harmless customization:
           // it breaks the assumptions of the normalizer and makes exit-code attribution
           // unknowable. Bind ordinary bare rg/ripgrep invocations to the shipped executable.
-          const boundCommand = bindBundledRipgrep(
-            normalized.cmd,
-            shell.shellType,
-            shell.shellType === 'powershell' ? locateRipgrep() : null
-          );
-          const useLoginShell = input.login ?? true;
+          const boundCommand = isBatch ? composeCommandBatch(boundCommands, shell.shellType) : boundCommands[0]!;
+          const commandDetail = isBatch
+            ? `[batch ${rawCommands.length}] ${rawCommands.join(' ; ')}`
+            : rawCommands[0]!;
+          // PowerShell profiles are user-custom startup programs. Loading them for every
+          // connector command adds arbitrary output/aliases and can spend seconds on network
+          // profile work before the requested command even begins. Keep explicit login=true,
+          // but make the deterministic/no-profile path the Windows default.
+          const useLoginShell = input.login ?? process.platform !== 'win32';
           const command = deriveExecArgs(shell, boundCommand, useLoginShell);
           const processId = unifiedExecManager.allocateProcessId();
           // Process ids are deliberately small/reusable, while chat ownership lives in a
@@ -676,48 +710,50 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // Current Codex intercepts an explicit `apply_patch` shell invocation before spawning
             // the shell process. The parser is the port of apply-patch/src/invocation.rs and uses
             // the same tree-sitter-bash grammar/query as upstream.
-            const interceptedPatch = maybeParseApplyPatchForExec(command, dir.real);
-            if (interceptedPatch.kind === 'correctness_error') {
-              unifiedExecManager.releaseProcessId(processId);
-              return fail(`apply_patch verification failed: ${interceptedPatch.error.message}`);
-            }
-            if (interceptedPatch.kind === 'body') {
-              try {
-                const patchRun = await runParsedPatch(interceptedPatch.args, ctx.roots, dir);
-                if (patchRun.result.isError || patchRun.content === null) return patchRun.result;
-
-                // `exec_command.rs` converts a successful intercepted patch into an
-                // ExecCommandToolOutput with zero wall time and no process/exit/chunk metadata.
-                const output: ExecCommandToolOutput = {
-                  chunkId: '',
-                  wallTimeMs: 0,
-                  rawOutput: Buffer.from(patchRun.content, 'utf8'),
-                  truncationPolicy: DEFAULT_TRUNCATION_POLICY,
-                  maxOutputTokens: input.max_output_tokens,
-                  processId: null,
-                  exitCode: null,
-                  originalTokenCount: null,
-                  outputOmittedBytes: null
-                };
-                noteExec({ running: false, exitCode: null, timedOut: false, durationMs: 0 });
-                noteDetail(input.cmd.replace(/\s+/g, ' ').slice(0, 120));
-                return {
-                  content: [{ type: 'text' as const, text: execCommandResponseText(output) }],
-                  structuredContent: execCommandStructuredOutput(output)
-                };
-              } finally {
+            if (!isBatch) {
+              const interceptedPatch = maybeParseApplyPatchForExec(command, dir.real);
+              if (interceptedPatch.kind === 'correctness_error') {
                 unifiedExecManager.releaseProcessId(processId);
+                return fail(`apply_patch verification failed: ${interceptedPatch.error.message}`);
+              }
+              if (interceptedPatch.kind === 'body') {
+                try {
+                  const patchRun = await runParsedPatch(interceptedPatch.args, ctx.roots, dir);
+                  if (patchRun.result.isError || patchRun.content === null) return patchRun.result;
+
+                  // `exec_command.rs` converts a successful intercepted patch into an
+                  // ExecCommandToolOutput with zero wall time and no process/exit/chunk metadata.
+                  const output: ExecCommandToolOutput = {
+                    chunkId: '',
+                    wallTimeMs: 0,
+                    rawOutput: Buffer.from(patchRun.content, 'utf8'),
+                    truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
+                    maxOutputTokens: input.max_output_tokens,
+                    processId: null,
+                    exitCode: null,
+                    originalTokenCount: null,
+                    outputOmittedBytes: null
+                  };
+                  noteExec({ running: false, exitCode: null, timedOut: false, durationMs: 0 });
+                  noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
+                  return {
+                    content: [{ type: 'text' as const, text: execCommandResponseText(output) }],
+                    structuredContent: execCommandStructuredOutput(output)
+                  };
+                } finally {
+                  unifiedExecManager.releaseProcessId(processId);
+                }
               }
             }
 
             const output = await unifiedExecManager.execCommand({
               command,
               shellType: shell.shellType,
-              hookCommand: boundCommand,
+              hookCommand: commandDetail,
               processId,
               yieldTimeMs: input.yield_time_ms ?? DEFAULT_EXEC_YIELD_TIME_MS,
               maxOutputTokens: input.max_output_tokens,
-              truncationPolicy: DEFAULT_TRUNCATION_POLICY,
+              truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
               cwd: dir.real,
               displayCwd: dir.virtual,
               env: execChildEnvironment(),
@@ -743,7 +779,22 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // error made a session's error count meaningless; see exec-hints.ts for why this
             // cannot launder a real failure. `benign` only ever *withholds* the error mark —
             // it never turns a genuine non-zero exit into a success.
-            const benign = nonZeroExitIsBenign(boundCommand, output.exitCode, responseText);
+            // A batch has one exit code and several commands, so the single-command classifier
+            // cannot be handed the wrapper script — it would be asking whether a `for` loop is a
+            // search. Classify each section on its own command and its own output instead. This
+            // matters most for the case batching exists to serve: several ripgrep searches, where
+            // "no matches" is exit 1 and reporting the batch as failed is what makes a model run
+            // the whole thing again. Require a complete set of sections, so a truncated tail
+            // cannot let an unseen real failure pass as benign.
+            const batchSections = isBatch ? parseCommandBatchSections(responseText) : [];
+            const nonZeroSections = batchSections.filter((section) => section.exitCode !== 0);
+            const benign = isBatch
+              ? batchSections.length === rawCommands.length &&
+                nonZeroSections.length > 0 &&
+                nonZeroSections.every((section) =>
+                  nonZeroExitIsBenign(boundCommands[section.index - 1] ?? '', section.exitCode, section.text)
+                )
+              : nonZeroExitIsBenign(boundCommand, output.exitCode, responseText);
             noteExec({
               ...(output.processId === null ? {} : { id: String(output.processId) }),
               running: output.processId !== null,
@@ -752,16 +803,21 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               durationMs: output.wallTimeMs,
               benignExit: benign
             });
-            noteDetail(input.cmd.replace(/\s+/g, ' ').slice(0, 120));
+            noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
             logInfo(`tool exec_command ${shell.shellType} -> ${output.processId ?? `exit ${output.exitCode ?? 'unknown'}`}`);
             // `benign` was previously spent only on the error count, leaving the model to read
             // `Process exited with code 1` under an empty body and re-run a search that had
             // already answered. It is the same classification, now also said out loud.
             const notes = [
-              ...repaired.notes,
-              ...normalized.notes,
-              ...(benign ? [benignExitNote(boundCommand)] : []),
-              ...execRecoveryHints(boundCommand, responseText)
+              ...commandNotes,
+              ...(benign
+                ? isBatch
+                  ? nonZeroSections.map(
+                      (section) => `Command ${section.index}: ${benignExitNote(boundCommands[section.index - 1] ?? '')}`
+                    )
+                  : [benignExitNote(boundCommand)]
+                : []),
+              ...execRecoveryHints(rawCommands.join('\n'), responseText)
             ];
             return {
               content: [{ type: 'text' as const, text: withExecNotes(responseText, notes) }],
@@ -812,7 +868,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               input: input.chars ?? '',
               yieldTimeMs: input.yield_time_ms ?? DEFAULT_WRITE_STDIN_YIELD_TIME_MS,
               maxOutputTokens: input.max_output_tokens,
-              truncationPolicy: DEFAULT_TRUNCATION_POLICY
+              truncationPolicy: EXEC_OUTPUT_CEILING_POLICY
             });
             if (output.processId === null) forgetExecOwner(input.session_id);
             noteExec({
@@ -870,18 +926,34 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
  * act on and is kept to a sentence or two; ids, states and counts are machine state and belong
  * in a shape the caller can read without parsing English.
  */
+/**
+ * Re-measures how full each sleeping worker's chat is, before the prime may wake one.
+ *
+ * The context ceiling is what makes a stop final, and it is measured from the app's own
+ * durable session for that conversation rather than from anything a model reported. The
+ * broker keeps the figure in memory and in its snapshot, but a chat that grew while this app
+ * was not running — or one whose snapshot predates the measurement entirely — would otherwise
+ * be woken into a conversation with no room left in it. Reading it here, on the one call that
+ * can wake a worker, is what makes the ceiling survive a crash rather than a restart quietly
+ * handing back a worker the prime was already told was finished.
+ */
+async function measureSleepingWorkers(): Promise<void> {
+  for (const info of swarmState().agents) {
+    if (info.role !== 'worker' || info.state !== 'sleeping' || !info.conversationId) continue;
+    const summary = await findSessionByConversation(info.conversationId, { requireUnique: true }).catch(() => null);
+    if (summary) noteAgentContextTokens(info.conversationId, summary.contextTokens);
+  }
+}
+
 function registerAgentsTool(reg: SurfaceRegistrar): void {
   reg.register(
     'agents',
     {
       title: 'Multi-agent run',
       description:
-        'Run ChatGPT worker agents on this machine. ' +
-        'spawn — create workers; the calling chat becomes the run\'s prime and each worker opens in its own ChatGPT conversation with its brief in it. A worker sees only what you send: shared instructions go in "context" once, each job in its own "task". ' +
-        'message — the prime may message any worker, a worker only "prime"; send several at once in "messages". Replies arrive on later tool results, so never wait or poll. ' +
-        'status — every agent, its task, and what is waiting. ' +
-        'finish — workers only, terminal. ' +
-        'An agent is the conversation it runs in, so no call here carries a key.',
+        'Run ChatGPT workers. spawn creates the run; use it once, then prefer message to wake sleeping workers in their existing chats. ' +
+        'message: prime→worker or worker→prime; a sleeping worker wakes only when a slot is free. Replies arrive on later tool results, so never poll. ' +
+        'status shows the run. finish reports a worker result and puts it to sleep; it stays reusable until its chat reaches the context ceiling.',
       inputSchema: z.object({
         action: z.enum(['spawn', 'message', 'status', 'finish']).describe('What to do.'),
         context: z
@@ -889,9 +961,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(4000)
           .optional()
           .describe(
-            'spawn: what every worker here needs, written once — the app puts it in front of each task, so never ' +
-              'repeat it there. Repo, conventions file, what not to touch, how to validate, what to report. ' +
-              'e.g. "Work in C:\\repo. Follow AGENTS.md. Change nothing unrelated. Run npm test. Do not commit."'
+            'spawn: shared instructions prepended to every task, e.g. repo, conventions, edit limits and validation.'
           ),
         workers: z
           .array(
@@ -902,18 +972,16 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 .min(1)
                 .max(4000)
                 .describe(
-                  'This worker\'s own job — with "context", all it sees: objective, files, constraints, what to hand ' +
-                    'back. Workers write code as readily as they report, so name the files this one may edit. ' +
-                    'e.g. {"label":"Security","task":"Audit attribution in session/correlation.ts; list paths that ' +
-                    'misattribute a call. Read only."} · {"label":"Implementer","task":"Make delivery all-or-nothing ' +
-                    'in agents.ts, update its test, run npm test, report the diff."}'
+                  'This worker\'s job: objective, relevant files, constraints and expected handoff.'
                 )
             }).strict()
           )
           .min(1)
           .max(8)
           .optional()
-          .describe('spawn: the workers to create.'),
+          .describe(
+            'spawn: workers to create. Later, reuse sleeping workers with message.'
+          ),
         messages: z
           .array(
             z.object({
@@ -925,10 +993,14 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(16)
           .optional()
           .describe(
-            'message: several at once, delivered together or not at all — prefer this to one call per recipient. ' +
-              'e.g. [{"to":"worker-1","text":"Ignore the UI."},{"to":"worker-3","text":"Check the README."}]'
+            'message: atomic batch; prefer this to one call per recipient.'
           ),
-        to: z.string().min(1).max(40).optional().describe('message: one recipient, e.g. prime or worker-2.'),
+        to: z
+          .string()
+          .min(1)
+          .max(40)
+          .optional()
+          .describe('message: one recipient; messaging a sleeping worker wakes it.'),
         text: z.string().min(1).max(4000).optional().describe('message: what to say.'),
         result: z
           .string()
@@ -936,9 +1008,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(4000)
           .optional()
           .describe(
-            'finish: your handoff to the prime, all it ever sees of your work. Four headings, in order, factual: ' +
-              'RESULT (what you found or did), CHANGES (each file created/edited/deleted, one per line, or None), ' +
-              'VALIDATION (what you ran and what it said, or None), BLOCKERS (or None).'
+            'finish: factual handoff under RESULT / CHANGES / VALIDATION / BLOCKERS.'
           )
       })
       .superRefine((input, ctx) => {
@@ -1010,14 +1080,20 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // visible only after the exact broker revision above is durable.
           requestWorkerBootstraps(created.map((worker) => worker.id));
           await adoptAgent(PRIME_ID);
+          const invited = created.filter((worker) => worker.state === 'invited');
+          const sleeping = created.filter((worker) => worker.state === 'sleeping' && worker.revivable);
           return {
             content: [
               {
                 type: 'text' as const,
                 text:
                   (becamePrime ? `This conversation is now the prime agent of run ${runId}. ` : '') +
-                  `${created.length} worker(s) starting: ${created.map((info) => `${info.id} (${info.label})`).join(', ')}. ` +
-                  'Their chats are opening with their briefs already in them. Carry on with your own work — results and ' +
+                  `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state})`).join(', ')}. ` +
+                  (invited.length > 0 ? 'New worker chats are opening with their briefs already in them. ' : '') +
+                  (sleeping.length > 0
+                    ? `${sleeping.map((worker) => worker.id).join(', ')} already finished that earlier piece and is sleeping in its existing chat; wake it with action=message instead of spawning a duplicate. `
+                    : '') +
+                  'Carry on with your own work — results and ' +
                   'messages arrive at the end of later tool results, so there is nothing to wait for and never anything ' +
                   'to poll. A short correction with action=message while a worker is still going is far cheaper than ' +
                   'the alternative.'
@@ -1045,9 +1121,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           }
           const items = batch.length > 0 ? batch : single;
           if (items.length === 0) return fail('agents action=message requires to and text, or a messages array.');
+          // Before any slot is reserved: a sleeping worker whose chat has since crossed the
+          // context ceiling is not revivable, and this is the call that would otherwise wake it.
+          const caller = await callerNow(startedAt);
+          await measureSleepingWorkers();
           // One call, one identity resolution, one all-or-nothing delivery: a prime
           // redirecting its whole run cannot end up with two of its three messages sent.
-          const staged = stageMessages(await callerNow(startedAt), items);
+          const staged = stageMessages(caller, items);
           let accepted = false;
           try {
             let durable = false;
@@ -1068,19 +1148,30 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             throw error;
           }
           const sent = staged.messages;
+          const woken = staged.waking;
+          // Reopening a sleeping worker's chat is a browser side effect, so it happens only
+          // after the broker revision that reserved its slot is durable — exactly as a spawn's
+          // tabs do. Nothing has been typed into that chat yet at this point.
+          if (woken.length > 0) requestWorkerRevivals(woken);
           for (const message of sent) await recordAgentMessage(message, 'sent');
           return {
             content: [
               {
                 type: 'text' as const,
                 text:
-                  `Queued for ${sent.map((message) => message.to).join(', ')}. Carry on with the work — a reply, if ` +
-                  'there is one, arrives at the end of a later tool result.'
+                  `Queued for ${sent.map((message) => message.to).join(', ')}. ` +
+                  (woken.length > 0
+                    ? `${woken.join(', ')} ${woken.length === 1 ? 'was' : 'were'} asleep and ${woken.length === 1 ? 'is' : 'are'} ` +
+                      'being woken in the same chat, with everything already known there still in it; your message is ' +
+                      'the next thing it reads. '
+                    : '') +
+                  'Carry on with the work — a reply, if there is one, arrives at the end of a later tool result.'
               }
             ],
             structuredContent: {
               action: 'message',
-              queued: sent.map((message) => ({ id: message.id, to: message.to }))
+              queued: sent.map((message) => ({ id: message.id, to: message.to })),
+              waking: woken
             }
           };
         }
@@ -1122,9 +1213,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 type: 'text' as const,
                 text: repeat
                   ? `${info.id} was already ${info.state} and the prime agent already has that result, so nothing was ` +
-                    'sent again. You are done: stop working and stop calling tools.'
-                  : `${info.id} marked finished. The prime agent has your result. You are done: stop working and stop ` +
-                    'calling tools.'
+                    'sent again. Stop working and stop calling tools.'
+                  : info.state === 'finished'
+                    ? `${info.id} is finished. The prime agent has your result. This chat has also reached its context ` +
+                      'limit, so there will be no more work in it: stop working and stop calling tools.'
+                    : `${info.id} reported and is now asleep. The prime agent has your result and your worker slot is ` +
+                      'free. Stop working and stop calling tools; if the prime has more for you it will say so here in ' +
+                      'this same chat, and you pick up from what you already know.'
               }
             ],
             structuredContent: { action: 'finish', self: info.id, state: info.state, repeat }
@@ -1136,8 +1231,23 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         // chat is told AGENTS_BUSY and nothing else — not who the prime is, not how many
         // workers there are, not what any of them are doing.
         const me = identify(await callerNow(startedAt));
+        await measureSleepingWorkers();
         const state = swarmState();
         const failed = state.agents.filter((info) => info.state === 'failed');
+        // The word the model reads here is the whole answer to "may I use this worker again".
+        // A sleeping worker is not a spent one, and calling it finished in this table is what
+        // sends a prime off to spawn a fourth chat for work its first worker already knows the
+        // background to.
+        const shown = (info: { state: string; revivable: boolean }): string =>
+          info.state === 'sleeping'
+            ? info.revivable
+              ? 'sleeping (reported; waiting for new instructions)'
+              : 'sleeping'
+            : info.state === 'waking'
+              ? 'waking (your message is being delivered to its chat)'
+              : info.state;
+        const asleep = state.agents.filter((info) => info.state === 'sleeping' && info.revivable);
+        const slots = freeWorkerSlots();
         return {
           content: [
             {
@@ -1147,17 +1257,26 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 state.agents
                   .map(
                     (info) =>
-                      `${info.id}  ${info.role}  ${info.state}  waiting ${info.pending}  ${info.label}` +
+                      `${info.id}  ${info.role}  ${shown(info)}  waiting ${info.pending}  ${info.label}` +
                       (info.result
-                        ? `\n    ${info.state === 'failed' ? 'failure' : info.state === 'finished' ? 'result' : 'result so far (not finished)'}: ${info.result.slice(0, 300)}`
+                        ? `\n    ${info.state === 'failed' ? 'failure' : info.state === 'finished' ? 'result' : 'latest result'}: ${info.result.slice(0, 300)}`
                         : '')
                   )
                   .join('\n') +
+                (me.id === PRIME_ID
+                  ? `\n\n${slots} of your worker slots ${slots === 1 ? 'is' : 'are'} free.` +
+                    (asleep.length > 0
+                      ? ` ${asleep.map((info) => info.id).join(', ')} ${asleep.length === 1 ? 'is' : 'are'} asleep and ` +
+                        'can be woken with agents action=message, in the chat they already have and with everything ' +
+                        'they learned there still in it. Prefer that to action=spawn' +
+                        (slots === 0 ? ', once a slot frees up.' : '.')
+                      : '')
+                  : '') +
                 // Said in words as well as in the table: a failed worker will not report, and
                 // waiting for it is the mistake this line prevents.
                 (failed.length > 0
-                  ? `\n\n${failed.map((info) => info.id).join(', ')} will not report. Do that work yourself or create ` +
-                    'a replacement worker; do not wait for them.'
+                  ? `\n\n${failed.map((info) => info.id).join(', ')} will not report. Do that work yourself or wake ` +
+                    'another worker; do not wait for them.'
                   : '')
             }
           ],
@@ -1165,11 +1284,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             action: 'status',
             run_id: currentRunId(),
             self: me.id,
+            free_worker_slots: slots,
             agents: state.agents.map((info) => ({
               id: info.id,
               role: info.role,
               label: info.label,
               state: info.state,
+              revivable: info.revivable,
               waiting: info.pending,
               result: info.result ?? null
             }))
@@ -1217,6 +1338,11 @@ async function callerNow(startedAt: number, options: { exact?: boolean } = {}): 
   if (resolved) {
     const call = currentCall();
     if (call) call.caller.conversationId = resolved;
+    // A pre-fix Compact & Resume can leave this exact app-opened replacement chat with its own
+    // shadow session while the reusable-worker run is still bound to the source chat. Repair
+    // only that durably-proven historical failure before membership is evaluated; unrelated
+    // conversations still hit AGENTS_BUSY exactly as before.
+    await repairPrimeFromResumeShadow(resolved);
   }
   if (!resolved) {
     logWarn(
@@ -1241,6 +1367,128 @@ interface ParsedPatchRun {
   result: ToolResult;
   content: string | null;
   exitCode: number | null;
+}
+
+/** Existing bytes kept so a failed model-facing patch can restore its pre-call state. */
+interface PatchRollbackSnapshot {
+  virtual: string;
+  bytes: Buffer | null;
+}
+
+/** Keep the connector's atomicity promise bounded even when many large files are patched. */
+const MAX_PATCH_ROLLBACK_BYTES = 64 * 1024 * 1024;
+
+async function readOptionalPatchBytes(real: string): Promise<Buffer | null> {
+  try {
+    const stat = await fs.lstat(real);
+    if (!stat.isFile()) throw new Error('apply_patch target changed from a file before execution');
+    return await fs.readFile(real);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function capturePatchRollbackSnapshots(resolution: PatchResolution): Promise<Map<string, PatchRollbackSnapshot>> {
+  const snapshots = new Map<string, PatchRollbackSnapshot>();
+  let total = 0;
+  for (const [real, virtual] of resolution.virtualPaths) {
+    const bytes = await readOptionalPatchBytes(real);
+    total += bytes?.length ?? 0;
+    if (total > MAX_PATCH_ROLLBACK_BYTES) {
+      throw new Error(
+        `apply_patch touches more than ${formatBytes(MAX_PATCH_ROLLBACK_BYTES)} of existing file data; split it into smaller patches so atomic rollback stays bounded.`
+      );
+    }
+    snapshots.set(real, { virtual, bytes });
+  }
+  return snapshots;
+}
+
+function samePatchState(left: Buffer | null, right: Buffer | null): boolean {
+  if (left === null || right === null) return left === right;
+  return left.equals(right);
+}
+
+function expectedPatchStates(
+  snapshots: ReadonlyMap<string, PatchRollbackSnapshot>,
+  delta: AppliedPatchDelta
+): Map<string, Buffer | null> {
+  const expected = new Map<string, Buffer | null>();
+  for (const [real, snapshot] of snapshots) expected.set(real, snapshot.bytes);
+  for (const { path: real, change } of delta.changes) {
+    if (change.kind === 'add') {
+      expected.set(real, Buffer.from(change.content, 'utf8'));
+    } else if (change.kind === 'delete') {
+      expected.set(real, null);
+    } else if (change.movePath === null) {
+      expected.set(real, Buffer.from(change.newContent, 'utf8'));
+    } else {
+      expected.set(real, null);
+      expected.set(change.movePath, Buffer.from(change.newContent, 'utf8'));
+    }
+  }
+  return expected;
+}
+
+/**
+ * Best-effort transaction rollback for the connector's stronger contract around raw Codex.
+ *
+ * Only a path still equal to the state recorded in the runtime delta is rewritten. If another
+ * process changed it concurrently, leave that user's newer data alone and report rollback as
+ * incomplete instead of "restoring" over an identity we can no longer prove belongs to us.
+ */
+async function rollbackFailedPatch(
+  snapshots: Map<string, PatchRollbackSnapshot>,
+  delta: AppliedPatchDelta
+): Promise<{ complete: boolean; note: string }> {
+  const expected = expectedPatchStates(snapshots, delta);
+  const problems: string[] = [];
+
+  for (const [real, snapshot] of snapshots) {
+    let current: Buffer | null;
+    try {
+      current = await readOptionalPatchBytes(real);
+    } catch {
+      problems.push(`${snapshot.virtual}: could not inspect current state`);
+      continue;
+    }
+    if (samePatchState(current, snapshot.bytes)) continue;
+    const patchState = expected.get(real) ?? null;
+    if (!samePatchState(current, patchState)) {
+      problems.push(`${snapshot.virtual}: changed outside the recorded patch state`);
+      continue;
+    }
+    try {
+      if (snapshot.bytes === null) await fs.rm(real, { force: true });
+      else await fs.writeFile(real, snapshot.bytes);
+    } catch {
+      problems.push(`${snapshot.virtual}: restore failed`);
+    }
+  }
+
+  // Prove the final state rather than assuming successful write/remove calls meant restoration.
+  for (const [real, snapshot] of snapshots) {
+    try {
+      if (!samePatchState(await readOptionalPatchBytes(real), snapshot.bytes)) {
+        if (!problems.some((problem) => problem.startsWith(`${snapshot.virtual}:`))) {
+          problems.push(`${snapshot.virtual}: restore verification failed`);
+        }
+      }
+    } catch {
+      if (!problems.some((problem) => problem.startsWith(`${snapshot.virtual}:`))) {
+        problems.push(`${snapshot.virtual}: restore verification failed`);
+      }
+    }
+  }
+
+  if (problems.length === 0) {
+    delta.changes.splice(0);
+    delta.exact = true;
+    return { complete: true, note: 'All file changes from this failed patch were rolled back.' };
+  }
+  delta.exact = false;
+  return { complete: false, note: `WARNING: failed patch rollback was incomplete: ${problems.join('; ')}` };
 }
 
 /** Shared execution path for the standalone tool and exec_command's upstream apply_patch intercept. */
@@ -1287,12 +1535,25 @@ async function runParsedPatch(
   } catch (error) {
     return { result: fail(friendlyError(error)), content: null, exitCode: null };
   }
+  if (caps !== undefined) {
+    try {
+      const denial = await patchEffectCapabilityDenial(effectiveArgs.hunks, caps, resolution.resolve);
+      if (denial !== null) return { result: fail(denial), content: null, exitCode: null };
+    } catch (error) {
+      return { result: fail(friendlyError(error)), content: null, exitCode: null };
+    }
+  }
+  // Move-only is a separate permission from Edit. Upstream's default update mode normalizes
+  // even context-only moves to LF, so a CRLF file would be byte-rewritten under Move alone.
+  // Preserve line endings whenever Edit is unavailable; any real content change was already
+  // rejected by patchCapabilityDenial before resolution.
+  const patchUpdateMode = caps !== undefined && !caps.edit ? 'preserve_line_endings' : DEFAULT_APPLY_PATCH_FILE_UPDATE_MODE;
 
   try {
     await verifyApplyPatchArgs(
       effectiveArgs,
       effectiveBase.real,
-      DEFAULT_APPLY_PATCH_FILE_UPDATE_MODE,
+      patchUpdateMode,
       resolution.resolve
     );
   } catch (error) {
@@ -1303,15 +1564,29 @@ async function runParsedPatch(
     };
   }
 
+  let rollbackSnapshots: Map<string, PatchRollbackSnapshot> | null = null;
+  if (caps !== undefined) {
+    try {
+      rollbackSnapshots = await capturePatchRollbackSnapshots(resolution);
+    } catch (error) {
+      return { result: fail(friendlyError(error)), content: null, exitCode: null };
+    }
+  }
+
   const execution = await executeApplyPatch({
     patch: effectiveArgs.patch,
     cwd: effectiveBase.real,
-    updateFileMode: DEFAULT_APPLY_PATCH_FILE_UPDATE_MODE,
+    updateFileMode: patchUpdateMode,
     resolvePath: resolution.resolve
   });
+  let rollbackNote = '';
+  if (execution.exitCode !== 0 && rollbackSnapshots !== null) {
+    const rollback = await rollbackFailedPatch(rollbackSnapshots, execution.delta);
+    rollbackNote = rollback.note;
+  }
   const stdout = safePatchOutput(execution.stdout, resolution);
-  const stderr = safePatchOutput(execution.stderr, resolution);
-  const aggregatedOutput = safePatchOutput(execution.aggregatedOutput, resolution);
+  const stderr = safePatchOutput(`${execution.stderr}${rollbackNote ? `${execution.stderr.endsWith('\n') || execution.stderr === '' ? '' : '\n'}${rollbackNote}\n` : ''}`, resolution);
+  const aggregatedOutput = `${stdout}${stderr}`;
   const content = formatExecOutputForModel(
     {
       exitCode: execution.exitCode,
@@ -1365,6 +1640,48 @@ function patchCapabilityDenial(hunks: readonly Hunk[], caps: Capabilities): stri
   return null;
 }
 
+/**
+ * Permission checks whose answer depends on the filesystem effect rather than patch syntax.
+ *
+ * Codex intentionally lets `Add File` replace an existing regular file and lets a move replace
+ * an occupied destination. Those are useful patch semantics, but in this product they are edits
+ * to existing data, not "create" or pure "move" effects. Require Edit in addition to the syntax
+ * permission before handing such a patch to the runtime.
+ */
+async function patchEffectCapabilityDenial(
+  hunks: readonly Hunk[],
+  caps: Capabilities,
+  resolve: PatchPathResolver
+): Promise<string | null> {
+  const exists = async (target: string): Promise<boolean> => {
+    try {
+      await fs.lstat(target);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  };
+  const samePath = (left: string, right: string): boolean =>
+    process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+
+  for (const hunk of hunks) {
+    if (hunk.kind === 'add_file') {
+      if (!caps.edit && (await exists(resolve(hunk.path, '')))) {
+        return 'TOOL_DISABLED: this patch replaces an existing file but Edit files is disabled.';
+      }
+      continue;
+    }
+    if (hunk.kind !== 'update_file' || hunk.movePath === null || caps.edit) continue;
+    const source = resolve(hunk.path, '');
+    const destination = resolve(hunk.movePath, '');
+    if (!samePath(source, destination) && (await exists(destination))) {
+      return 'TOOL_DISABLED: this patch replaces an existing move destination but Edit files is disabled.';
+    }
+  }
+  return null;
+}
+
 interface PatchResolution {
   resolve: PatchPathResolver;
   /** Real path -> safe virtual path, used only for recorder change evidence. */
@@ -1398,18 +1715,49 @@ async function resolvePatchPaths(
   const realBySpelling = new Map<string, string>();
   const virtualPaths = new Map<string, string>();
   const displayRewrites = new Map<string, string>();
+  // The Codex verifier/runtime is sequential: a later hunk may legally read a path an earlier
+  // Add/Move created, or may deliberately fail because an earlier Delete/Move removed it. Path
+  // resolution has to model that same presence state instead of consulting only pre-patch disk.
+  const pendingPresence = new Map<string, boolean>();
+  const pathKey = (real: string): string => (process.platform === 'win32' ? real.toLowerCase() : real);
 
-  const add = async (spelledPath: string, allowMissing: boolean): Promise<void> => {
-    const resolved = await resolveIn(roots, spelledPath, { base: baseVirtual, allowMissing });
+  const add = async (spelledPath: string, requireExisting: boolean): Promise<string> => {
+    // First resolve the sandbox identity without requiring the leaf to exist. This gives later
+    // hunks a stable real key even when the path exists only in the patch's simulated state.
+    let resolved = await resolveIn(roots, spelledPath, { base: baseVirtual, allowMissing: true });
+    const state = pendingPresence.get(pathKey(resolved.real));
+    // An untouched initial Update/Delete keeps the old strict Not-found behaviour. Once an
+    // earlier hunk has established presence/absence, the verifier owns the sequential verdict.
+    if (requireExisting && state === undefined) {
+      resolved = await resolveIn(roots, spelledPath, { base: baseVirtual, allowMissing: false });
+    }
     realBySpelling.set(spelledPath, resolved.real);
     virtualPaths.set(resolved.real, resolved.virtual);
     displayRewrites.set(resolved.real, resolved.virtual);
     if (isNativeWindowsPath(spelledPath)) displayRewrites.set(spelledPath, resolved.virtual);
+    return resolved.real;
   };
 
   for (const hunk of hunks) {
-    await add(hunk.path, hunk.kind === 'add_file');
-    if (hunk.kind === 'update_file' && hunk.movePath !== null) await add(hunk.movePath, true);
+    if (hunk.kind === 'add_file') {
+      const target = await add(hunk.path, false);
+      pendingPresence.set(pathKey(target), true);
+      continue;
+    }
+    if (hunk.kind === 'delete_file') {
+      const target = await add(hunk.path, true);
+      pendingPresence.set(pathKey(target), false);
+      continue;
+    }
+
+    const source = await add(hunk.path, true);
+    if (hunk.movePath === null) {
+      pendingPresence.set(pathKey(source), true);
+      continue;
+    }
+    const destination = await add(hunk.movePath, false);
+    pendingPresence.set(pathKey(source), false);
+    pendingPresence.set(pathKey(destination), true);
   }
 
   const resolve: PatchPathResolver = (spelledPath) => {

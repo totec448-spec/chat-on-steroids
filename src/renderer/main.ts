@@ -13,8 +13,15 @@
  */
 
 import type { AppApi, SettingsPatch } from '../preload/index.js';
+import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
 import type { AppState, Capability, LogEntry, SurfaceStatus } from '../shared/types.js';
-import { CAPABILITY_DETAILS, CAPABILITY_LABELS, CAPABILITY_TOOLS, WRITE_CAPABILITIES } from '../shared/types.js';
+import {
+  browserExtensionRequired,
+  CAPABILITY_DETAILS,
+  CAPABILITY_LABELS,
+  CAPABILITY_TOOLS,
+  WRITE_CAPABILITIES
+} from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, el, icon, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat } from './chat.js';
@@ -447,11 +454,10 @@ function isRunning(value: AppState['status']['state']): boolean {
 /** What still has to happen before connecting can work, in the order of the wizard. */
 function missingStep(next: AppState): { step: string; text: string } | null {
   const { config } = next;
-  // Mirrors the connect gate in connection.ts: a folder is what almost every setup needs,
-  // but a desktop-only setup — screen, control or just the clipboard — is a real
-  // configuration whose tools never touch a folder, and demanding one there is a dead end.
-  const desktopOnly = next.status.surfaces.some((surface) => surface.id === 'desktop' && surface.available);
-  if (config.roots.length === 0 && !desktopOnly) {
+  // This is the same capability rule as the main-process admission gate. Desktop and
+  // clipboard may legitimately be rootless; enabling one must not hide a root still needed
+  // by an effective file/patch/command capability on Core.
+  if (config.roots.length === 0 && requiresApprovedFilesystemRoot(config)) {
     return { step: 'folder', text: 'Choose a folder to share — step 1.' };
   }
   if (config.tunnel.kind === 'openai') {
@@ -465,6 +471,167 @@ function missingStep(next: AppState): { step: string; text: string } | null {
     return { step: 'connect', text: 'cloudflared was not found on this PC.' };
   }
   return null;
+}
+
+interface RootRenameState {
+  targetName: string;
+  targetPath: string;
+  draft: string;
+  selectionStart: number | null;
+  selectionEnd: number | null;
+  selectionDirection: 'forward' | 'backward' | 'none' | null;
+  focused: boolean;
+  committing: boolean;
+}
+
+let rootRename: RootRenameState | null = null;
+let repaintingRoots = false;
+
+/**
+ * The rename editor is transient DOM, but the draft is user state. Whole-state pushes repaint
+ * the folder list, so capture that state before the old input is detached and recreate the
+ * editor only while the exact authoritative root still exists unchanged.
+ */
+function captureRootRenameInput(input: HTMLInputElement, rename: RootRenameState): void {
+  if (rootRename !== rename) return;
+  rename.draft = input.value;
+  rename.focused = document.activeElement === input;
+  if (rename.focused) {
+    rename.selectionStart = input.selectionStart;
+    rename.selectionEnd = input.selectionEnd;
+    rename.selectionDirection = input.selectionDirection;
+  }
+}
+
+function cancelRootRename(): void {
+  rootRename = null;
+  if (state) paintRoots(state.config.roots);
+}
+
+async function commitRootRename(input: HTMLInputElement, rename: RootRenameState): Promise<void> {
+  if (rootRename !== rename || rename.committing) return;
+  captureRootRenameInput(input, rename);
+  const nextName = rename.draft.trim().toLowerCase();
+  if (!nextName || nextName === rename.targetName) {
+    cancelRootRename();
+    return;
+  }
+
+  rename.committing = true;
+  input.disabled = true;
+  const result = await run(api.renameRoot(rename.targetName, nextName));
+  // An authoritative state push can remove or rename the target while IPC is in flight. Never
+  // resurrect that cancelled editor when this older request finishes.
+  if (rootRename !== rename) return;
+  if (result) {
+    rootRename = null;
+    apply(result);
+    return;
+  }
+
+  // Failure is retryable user input, not a reason to throw the draft away.
+  rename.committing = false;
+  paintRoots(state?.config.roots ?? []);
+}
+
+function rootRow(root: AppState['config']['roots'][number]): HTMLElement {
+  const row = el('div', 'root');
+  const renameState =
+    rootRename?.targetName === root.name && rootRename.targetPath === root.path ? rootRename : null;
+  const name = el('b', '', `/${root.name}`);
+  let label: HTMLElement = name;
+
+  if (renameState) {
+    const input = document.createElement('input');
+    input.className = 'root-rename';
+    input.value = renameState.draft;
+    input.maxLength = 32;
+    input.disabled = renameState.committing;
+    input.setAttribute('aria-label', `Rename /${root.name}`);
+    input.addEventListener('input', () => captureRootRenameInput(input, renameState));
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        void commitRootRename(input, renameState);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelRootRename();
+      }
+    });
+    input.addEventListener('blur', () => {
+      // replaceChildren() may itself blur the old node in a real browser. paintRoots already
+      // captured its draft/focus/caret immediately before detaching it, so treating that blur
+      // as user intent would both lose focus restoration and accidentally commit on a status push.
+      if (repaintingRoots) return;
+      captureRootRenameInput(input, renameState);
+      void commitRootRename(input, renameState);
+    });
+    label = input;
+  }
+
+  const rename = document.createElement('button');
+  rename.className = 'btn';
+  rename.type = 'button';
+  rename.title = `Rename /${root.name}`;
+  rename.append(icon('i-pencil'));
+  rename.addEventListener('click', () => {
+    rootRename = {
+      targetName: root.name,
+      targetPath: root.path,
+      draft: root.name,
+      selectionStart: 0,
+      selectionEnd: root.name.length,
+      selectionDirection: 'none',
+      focused: true,
+      committing: false
+    };
+    paintRoots(state?.config.roots ?? []);
+  });
+
+  const remove = document.createElement('button');
+  remove.className = 'btn';
+  remove.type = 'button';
+  remove.title = `Stop sharing /${root.name}`;
+  remove.append(icon('i-trash'));
+  remove.addEventListener('click', async () => {
+    const result = await run(api.removeRoot(root.name));
+    if (result) apply(result);
+  });
+  const path = el('span', '', root.path);
+  path.title = root.path;
+  row.append(icon('i-folder'), label, path, rename, remove);
+  return row;
+}
+
+function paintRoots(roots: AppState['config']['roots']): void {
+  const active = document.querySelector<HTMLInputElement>('.root-rename');
+  if (active && rootRename) captureRootRenameInput(active, rootRename);
+
+  if (
+    rootRename &&
+    !roots.some((root) => root.name === rootRename!.targetName && root.path === rootRename!.targetPath)
+  ) {
+    rootRename = null;
+  }
+
+  repaintingRoots = true;
+  try {
+    $('rootList').replaceChildren(...roots.map(rootRow));
+  } finally {
+    repaintingRoots = false;
+  }
+
+  if (!rootRename?.focused) return;
+  const input = document.querySelector<HTMLInputElement>('.root-rename');
+  if (!input) return;
+  input.focus();
+  if (rootRename.selectionStart !== null && rootRename.selectionEnd !== null) {
+    input.setSelectionRange(
+      rootRename.selectionStart,
+      rootRename.selectionEnd,
+      rootRename.selectionDirection ?? undefined
+    );
+  }
 }
 
 // ----------------------------------------------------------------- render
@@ -534,24 +701,7 @@ function apply(next: AppState): void {
   paintGroups();
 
   // ---- folders
-  $('rootList').replaceChildren(
-    ...config.roots.map((root) => {
-      const row = el('div', 'root');
-      const remove = document.createElement('button');
-      remove.className = 'btn';
-      remove.type = 'button';
-      remove.title = `Stop sharing /${root.name}`;
-      remove.append(icon('i-trash'));
-      remove.addEventListener('click', async () => {
-        const result = await run(api.removeRoot(root.name));
-        if (result) apply(result);
-      });
-      const path = el('span', '', root.path);
-      path.title = root.path;
-      row.append(icon('i-folder'), el('b', '', `/${root.name}`), path, remove);
-      return row;
-    })
-  );
+  paintRoots(config.roots);
   $('rootsEmpty').hidden = config.roots.length > 0;
 
   // ---- nav badge
@@ -584,8 +734,10 @@ function apply(next: AppState): void {
   );
 
   const openai = config.tunnel.kind === 'openai';
+  const browserRequired = browserExtensionRequired(config);
   step('tunnel').hidden = !openai;
   step('key').hidden = !openai;
+  step('browser').hidden = !browserRequired;
   // Only this method needs a tunnel per connector. Cloudflare and manual publish the
   // whole address, so both connectors already ride the one tunnel on their own paths.
   const desktopSurface = status.surfaces.find((surface) => surface.id === 'desktop');
@@ -659,10 +811,11 @@ function apply(next: AppState): void {
     (surface) => surface.available && !surface.optional && surface.lastRequestAt === null
   );
   if (status.lastRequestAt !== null && !requiredUnverified) done.add('chatgpt');
-  // The browser half of the product. A paired extension is the only proof it is installed
-  // and talking, and without it the timeline, Compact & resume and sub-agents are all dark
-  // — which is why this is a setup step now rather than a paragraph inside a settings pane.
-  if (next.bridge.paired) done.add('browser');
+  // Pairing is durable authorization, not liveness. A token surviving an app restart says
+  // only that this extension is allowed to connect; setup is complete when a required browser
+  // has actually checked in during this process. If no enabled feature needs the browser,
+  // this optional step is hidden and deliberately cannot block the wizard.
+  if (!browserRequired || next.bridge.present) done.add('browser');
   const current = order.find((name) => !done.has(name)) ?? null;
   for (const name of order) {
     const node = step(name);
@@ -1110,14 +1263,20 @@ $('closeChecks').addEventListener('click', () => {
 
 $('themeBtn').addEventListener('click', () => {
   if (!state) return;
-  const next = state.config.ui.theme === 'dark' ? 'light' : 'dark';
+  // A save can still be waiting on main-process lifecycle work. Toggle from the latest
+  // requested value, not merely the last acknowledged state, or two quick clicks both choose
+  // the same target and behave like one click.
+  const current = requestedSettings?.ui.theme ?? state.config.ui.theme;
+  const next = current === 'dark' ? 'light' : 'dark';
   // Applied immediately so the click feels instant; the save confirms it.
   document.documentElement.dataset.theme = next;
   void save({ theme: next });
 });
 
 $('readOnlyBtn').addEventListener('click', () => {
-  if (state) void save({ readOnly: !state.config.readOnly });
+  if (!state) return;
+  const current = requestedSettings?.readOnly ?? state.config.readOnly;
+  void save({ readOnly: !current });
 });
 
 $('addFolder').addEventListener('click', () => void addFolder());
@@ -1155,10 +1314,13 @@ $('copyLogJson').addEventListener('click', async () => {
 // The API key is written on blur so it is not saved keystroke by keystroke.
 $('apiKey').addEventListener('blur', async () => {
   const input = $<HTMLInputElement>('apiKey');
-  if (input.value === '') return;
-  const next = await run(api.setApiKey(input.value));
-  input.value = '';
+  const submitted = input.value;
+  if (submitted === '') return;
+  const next = await run(api.setApiKey(submitted));
   if (next) {
+    // Do not erase a newer value typed while safeStorage/IPC was still resolving the previous
+    // blur. On failure keep the submitted value too, so the user can retry instead of losing it.
+    if (input.value === submitted) input.value = '';
     apply(next);
     toast('API key stored');
   }
@@ -1187,6 +1349,8 @@ document.addEventListener('click', (event) => {
   const link = (event.target as HTMLElement).closest<HTMLElement>('[data-link]');
   if (link?.dataset.link) void run(api.openLink(link.dataset.link));
 });
+
+$('bridgeDownload').addEventListener('click', () => void run(api.downloadExtension()));
 
 api.onStateChanged(apply);
 api.onLogEntry(addLogLine);

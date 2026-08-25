@@ -1,10 +1,11 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { BinaryReadError, readTextFile, walkFiles } from '../src/main/codex/read-backend.js';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { BinaryReadError, listDirectoryLevel, readTextFile, walkFiles } from '../src/main/codex/read-backend.js';
 import { MAX_READ_FILE_BYTES, MAX_WALK_DEPTH } from '../src/main/codex/filesystem.js';
 import { FsOpError } from '../src/main/fsops.js';
-import { makeTempDir, removeTempDir, writeTree } from './helpers.js';
+import { rawPromises } from '../src/main/rawfs.js';
+import { DIR_LINK, makeTempDir, removeTempDir, writeTree } from './helpers.js';
 
 /*
  * `read-backend.readTextFile` is what every `read` call actually runs. It used to have no tests of
@@ -115,6 +116,30 @@ describe('readTextFile', () => {
     expect(result.bytesReturned).toBeLessThanOrEqual(64);
   });
 
+  it('does not scan a file to EOF for an advisory line count after it grows past the count budget', async () => {
+    const target = at('growing-after-stat.txt');
+    await fs.writeFile(target, 'first\n', 'utf8');
+    const realLstat = rawPromises.lstat.bind(rawPromises);
+    const lstat = vi.spyOn(rawPromises, 'lstat').mockImplementationOnce(async (candidate, options?: any) => {
+      const small = await realLstat(candidate as any, options);
+      if (String(candidate) === target) {
+        // Grow only after the metadata snapshot exists. readTextFile therefore sees the exact
+        // stale-size shape a concurrently written log creates in production.
+        await fs.writeFile(target, `first\n${'later\n'.repeat(900_000)}`, 'utf8');
+      }
+      return small as any;
+    });
+    try {
+      const result = await readTextFile(target, { startLine: 1, endLine: 1, maxBytes: 64 });
+      expect(result.text).toBe('first');
+      expect(result.hasMore).toBe(true);
+      expect(result.totalLines).toBeNull();
+    } finally {
+      lstat.mockRestore();
+      await fs.rm(target, { force: true });
+    }
+  });
+
   it('strips CR from CRLF files', async () => {
     const result = await readTextFile(at('crlf.txt'));
     expect(result.text).toBe('one\ntwo\nthree');
@@ -169,6 +194,24 @@ describe('readTextFile', () => {
 
     expect(result.files.some((file) => file.endsWith('/needle.ts'))).toBe(false);
     expect(result.truncated).toBe(true);
+  });
+
+  it('does not follow a directory link outside the listed root just to classify the child', async () => {
+    const listedRoot = at('tree');
+    const outsideTarget = at('outside-list-target');
+    const escape = path.join(listedRoot, 'escape-dir');
+    await fs.mkdir(outsideTarget);
+    await fs.symlink(outsideTarget, escape, DIR_LINK);
+    try {
+      const result = await listDirectoryLevel(listedRoot, '/tree', 50);
+      expect(result.entries.find((entry) => entry.name === 'escape-dir')).toMatchObject({
+        type: 'other',
+        bytes: null
+      });
+    } finally {
+      await fs.rm(escape, { recursive: true, force: true });
+      await fs.rm(outsideTarget, { recursive: true, force: true });
+    }
   });
 
   it('refuses a directory', async () => {

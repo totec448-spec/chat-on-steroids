@@ -4,6 +4,7 @@
  */
 
 import { promises as fs } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Root } from '../src/shared/types.js';
@@ -272,6 +273,27 @@ describe('resolvePath — links and reparse points', () => {
     await expectRefused('/project/secret-link.txt');
     await fs.unlink(link);
   });
+
+  it.runIf(IS_WINDOWS)('does not let replacing the approved root with a junction retarget its permission', async () => {
+    const original = path.join(base, 'approved-swap');
+    const moved = path.join(base, 'approved-swap-moved');
+    const target = path.join(base, 'unapproved-swap-target');
+    await writeTree(original, { 'allowed.txt': 'allowed' });
+    await writeTree(target, { 'secret.txt': 'SECRET OUTSIDE THE APPROVED ROOT' });
+    const canonical = await validateNewRoot(original, []);
+    const swapRoots: Root[] = [{ name: 'swap', path: canonical }];
+
+    await fs.rename(original, moved);
+    await fs.symlink(target, original, DIR_LINK);
+    try {
+      // Sanity: Windows itself follows the replacement junction to the unapproved target.
+      await expect(fs.readFile(path.join(original, 'secret.txt'), 'utf8')).resolves.toBe('SECRET OUTSIDE THE APPROVED ROOT');
+      await expect(resolvePath(swapRoots, '/swap/secret.txt')).rejects.toThrow(/root.*(?:changed|available)|approve again/i);
+    } finally {
+      await fs.rm(original, { recursive: true, force: true });
+      await fs.rename(moved, original);
+    }
+  });
 });
 
 describe('isContained', () => {
@@ -374,6 +396,22 @@ describe('validateNewRoot', () => {
 
 /** Native drive paths copied from command output are normalized back into the virtual sandbox. */
 describe.runIf(IS_WINDOWS)('a native Windows path', () => {
+  it('accepts the DOS 8.3 spelling of an approved file as the same native path', async () => {
+    const long = path.join(approved, 'sub', 'nested.txt');
+    const short = execFileSync(
+      process.env.ComSpec || 'cmd.exe',
+      ['/d', '/s', '/c', `for %I in ("${long}") do @echo %~sI`],
+      { encoding: 'utf8' }
+    ).trim();
+    // Some volumes disable 8.3 aliases. The regression is meaningful only when Windows
+    // actually supplies a distinct short spelling for the file.
+    if (!short.includes('~') || short.toLowerCase() === long.toLowerCase()) return;
+
+    const resolved = await resolvePath(roots, short);
+    expect(resolved.real).toBe(long);
+    expect(resolved.virtual).toBe('/project/sub/nested.txt');
+  });
+
   it('resolves a file inside an approved root', async () => {
     const resolved = await resolvePath(roots, path.join(approved, 'sub', 'nested.txt'));
     expect(resolved.real).toBe(path.join(approved, 'sub', 'nested.txt'));

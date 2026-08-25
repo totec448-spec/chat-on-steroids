@@ -60,20 +60,33 @@ const {
   restoreContinuations
 } = await import('../src/main/session/continuation.js');
 const {
+  acknowledgeOffers,
   PRIME_ID,
   beginPrimeTransfer,
   bindConversation,
   cancelPrimeTransfer,
   finishAgent,
   currentRunId,
+  DETACHED_SILENCE_MS,
+  noteAgentAlive,
+  noteAgentContextTokens,
+  noteWorkerRevived,
+  offerMessages,
+  pendingWorkerRevivals,
   requestWorkerBootstraps,
+  requestWorkerRevivals,
   spawn,
+  stageMessages,
   pendingWorkerSpawns,
   onSwarmPersistNow,
+  persistCriticalSwarmNow,
   retiredWorkerForConversation,
   resetSwarm,
+  restoreSwarm,
   snapshotSwarm,
-  swarmState
+  swarmState,
+  WORKER_CONTEXT_CEILING_TOKENS,
+  workerConversationGone
 } = await import(
   '../src/main/agents.js'
 );
@@ -179,6 +192,19 @@ function request(
     if (payload !== null) req.write(payload);
     req.end();
   });
+}
+
+/**
+ * Sends from the prime exactly the way the `agents` tool does.
+ *
+ * A message crosses its durable barrier first and is published second; only then may the
+ * browser be asked to reopen anybody's chat. Doing those two steps in this order here is
+ * what makes these tests exercise the real wake path rather than a shortcut into it.
+ */
+function wake(items: ReadonlyArray<{ to: string; text: string }>): void {
+  const staged = stageMessages({ conversationId: PRIME_CHAT }, items);
+  staged.commit();
+  if (staged.waking.length > 0) requestWorkerRevivals(staged.waking);
 }
 
 async function waitForOpened(count = 1): Promise<void> {
@@ -1039,6 +1065,33 @@ describe('automatic compaction', () => {
     expect(reply.status).toBe(409);
     expect(reply.body.error).toBe('session_not_recorded');
   });
+
+  it('never compacts a worker out of the conversation that is its agent identity', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac04';
+    spawn({ workers: [{ task: 'stay in this worker chat' }], caller: { conversationId: PRIME_CHAT } });
+    expect(bindConversation('worker-1', conversationId)).toBe(true);
+
+    await withThreshold(10_000, async () => {
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [{ kind: 'turn_start', time: Date.now(), turnId: 'worker-turn-live' }, ...over()]
+        }
+      });
+      const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      expect(activity.body.tokens).toBeGreaterThan(10_000);
+      expect(activity.body.autoCompactReady).toBe(false);
+
+      const automatic = await request('POST', '/compact/claim-auto', { body: { conversationId } });
+      expect(automatic.status).toBe(409);
+      expect(automatic.body.error).toBe('worker_compaction_disabled');
+
+      const manual = await request('POST', '/compact', { body: { conversationId } });
+      expect(manual.status).toBe(409);
+      expect(manual.body.error).toBe('worker_compaction_disabled');
+    });
+  });
 });
 
 describe('delivering a bootstrap', () => {
@@ -1066,6 +1119,46 @@ describe('delivering a bootstrap', () => {
     expect(ack.status).toBe(200);
     expect(ack.body.committed).toBe(true);
     expect(pendingCommands()).toEqual([]);
+  });
+
+  it('protects a resume destination before the browser opener can record a shadow session', async () => {
+    await pair();
+    const from = '91919191-1111-2222-3333-444444444444';
+    const destination = '92929292-1111-2222-3333-444444444444';
+    const { sessionId, token: continuation } = await compactedSession(from, 'carry this session forward');
+    let earlyObservation: Promise<{ sessionId: string | null; stored: number }> | null = null;
+
+    // This is the live 2026-08-25 race: the replacement page can expose conversation B and
+    // flush an already-journalled observation before B has redeemed its continuation marker.
+    // Unless the bridge announces the pending replacement *before* opening the browser, the
+    // recorder eagerly creates a second local session for B. The later ACK then refuses the
+    // real A→B move with "the replacement chat already belongs to another local session".
+    setBrowserOpener(async () => {
+      earlyObservation = recordChatObservations(destination, [
+        { kind: 'conversation_title', time: Date.now(), text: 'Resumed · carry this session forward' }
+      ]);
+    });
+
+    const command = queueResume(sessionId, continuation)!;
+    await vi.waitFor(() => expect(earlyObservation).not.toBeNull());
+
+    const redeemed = await request('POST', '/commands/redeem', {
+      body: { id: command.id, client: 'resume-tab-before-recorder' }
+    });
+    expect(redeemed.status).toBe(200);
+
+    const ack = await request('POST', '/commands/ack', {
+      body: {
+        id: command.id,
+        status: 'sent',
+        conversationId: destination,
+        client: 'resume-tab-before-recorder'
+      }
+    });
+    expect(ack.status).toBe(200);
+    expect(ack.body.committed).toBe(true);
+    await expect(earlyObservation!).resolves.toMatchObject({ sessionId });
+    expect((await getSession(sessionId))?.conversationId).toBe(destination);
   });
 
   /** One page owns one command. A second document on the same marker gets nothing. */
@@ -1346,7 +1439,7 @@ describe('delivering a bootstrap', () => {
     }
   });
 
-  it('restores a durable version-3 command receipt so a lost ACK response can be replayed after restart', async () => {
+  it('restores a durable command receipt so a lost ACK response can be replayed after restart', async () => {
     await pair();
     spawn({ workers: [{ task: 'prove receipt recovery' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem(undefined, 'receipt-replay-page');
@@ -1363,7 +1456,7 @@ describe('delivering a bootstrap', () => {
     expect(first.body).toMatchObject({ final: true, committed: true, conversationId });
     await flushDurable();
     const stored = await readDurable<{ version?: number; receipts?: Array<{ id?: string }> }>('bridge-commands');
-    expect(stored?.version).toBe(3);
+    expect(stored?.version).toBe(4);
     expect(stored?.receipts?.some((entry) => entry.id === command.id)).toBe(true);
 
     // Simulate the main-process restart after the durable commit but before the browser got
@@ -1509,7 +1602,13 @@ describe('delivering a bootstrap', () => {
     spawn({ workers: [{ task: 'finish before the run closes' }], caller: { conversationId: primeConversation } });
     const workerConversation = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     expect(bindConversation('worker-1', workerConversation)).toBe(true);
+    noteAgentContextTokens(workerConversation, WORKER_CONTEXT_CEILING_TOKENS);
     finishAgent({ conversationId: workerConversation }, 'worker finished before the prime went away');
+    // This test is about the post-run retired-worker fence, not pending-report survival. A
+    // terminal report must be delivered before the run may retire; the separate agent tests
+    // cover closing the prime while that report is still owed.
+    offerMessages(PRIME_ID);
+    acknowledgeOffers(PRIME_ID);
 
     const primeClosed = await request('POST', '/closed', { body: { conversationId: primeConversation } });
     expect(primeClosed.body.ok).toBe(true);
@@ -1530,7 +1629,620 @@ describe('delivering a bootstrap', () => {
     });
   });
 
-  it('auto-finishes a one-shot worker when its settled assistant turn completes', async () => {
+  /**
+   * Waking a sleeping worker, end to end over the real server.
+   *
+   * A revival is the one command that names a chat that already exists. Everything about it
+   * is therefore fenced on that chat: the page is opened at `/c/<id>`, the redeemed command
+   * names the same id back, and the browser has to say which conversation it typed into
+   * before the broker will believe the worker is awake.
+   */
+  it("opens the worker's own chat to wake it, and treats the typed message as an offer", async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'cafecafe-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'the first half is done');
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
+
+    wake([{ to: 'worker-1', text: 'now do the second half' }]);
+    await waitForOpened(2);
+
+    // No fresh composer: the chat the worker already has, with the marker on it.
+    const url = new URL(opened[1]!);
+    expect(url.pathname).toBe(`/c/${conversationId}`);
+    const id = url.searchParams.get('clf')!;
+
+    // The page says which conversation it is showing, and only a revival for that exact
+    // chat may be claimed from inside an existing conversation.
+    const wrongTab = await request('POST', '/commands/redeem', {
+      body: { id, client: 'tab-someone-else', conversationId: 'ffffffff-1111-4222-8333-444444444444' }
+    });
+    expect(wrongTab.status).toBe(409);
+    expect(wrongTab.body.error).toBe('command_wrong_conversation');
+
+    const claimed = await request('POST', '/commands/redeem', {
+      body: { id, client: 'tab-worker-again', conversationId }
+    });
+    expect(claimed.status).toBe(200);
+    expect(claimed.body.command).toMatchObject({ id, agent: 'worker-1', conversationId });
+    // What gets typed is the prime's own words, as a user message in the worker's chat.
+    expect(claimed.body.command.text).toContain('now do the second half');
+
+    const ack = await request('POST', '/commands/ack', {
+      body: { id, status: 'sent', conversationId, client: 'tab-worker-again' }
+    });
+    expect(ack.status).toBe(200);
+    expect(ack.body).toMatchObject({ committed: true, conversationId });
+    const worker = swarmState().agents.find((agent) => agent.id === 'worker-1')!;
+    expect(worker.state).toBe('active');
+    expect(worker.conversationId).toBe(conversationId);
+    // Typed is not read. The words are in its chat; its own next authenticated call is what
+    // takes them out of its inbox.
+    expect(worker.pending).toBe(1);
+  });
+
+  it('lets an MCP call win only before the browser redeems the sleeping-worker wake', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'abababab-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'the first half is done');
+    wake([{ to: 'worker-1', text: 'one browser wake only' }]);
+    await waitForOpened(2);
+    const id = new URL(opened[1]!).searchParams.get('clf')!;
+
+    // Before /redeem owns the wake, a proven call is the stronger fact: the old server-side turn
+    // never really stopped. It takes the worker active and receives the queued text through the
+    // ordinary MCP inbox path exactly once.
+    expect(noteAgentAlive(conversationId, 'call')?.revived).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+    expect(offerMessages('worker-1').map((message) => message.text)).toEqual(['one browser wake only']);
+
+    // The page that arrives later no longer has authority to type the same text as a user turn.
+    const stale = await request('POST', '/commands/redeem', {
+      body: { id, client: 'tab-too-late', conversationId }
+    });
+    expect(stale.status).toBe(404);
+    expect(stale.body.error).toBe('no_such_command');
+  });
+
+  it('keeps a redeemed revival browser-owned until its exact sent acknowledgement', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'acacacac-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'the first half is done');
+    wake([{ to: 'worker-1', text: 'browser has the arbitration cut' }]);
+    await waitForOpened(2);
+    const id = new URL(opened[1]!).searchParams.get('clf')!;
+
+    const claimed = await request('POST', '/commands/redeem', {
+      body: { id, client: 'tab-browser-owner', conversationId }
+    });
+    expect(claimed.status).toBe(200);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'waking',
+      revivable: false
+    });
+
+    // A late old-turn MCP call is liveness, but no longer wake authority. In particular it
+    // cannot get the queued prime instruction through a tool result while the page holds it.
+    expect(noteAgentAlive(conversationId, 'call')?.revived).toBe(false);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+    expect(offerMessages('worker-1')).toEqual([]);
+
+    const ack = await request('POST', '/commands/ack', {
+      body: { id, status: 'sent', conversationId, client: 'tab-browser-owner' }
+    });
+    expect(ack.status).toBe(200);
+    expect(ack.body).toMatchObject({ committed: true, conversationId });
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+    // The browser already typed this as a real user message; it is acknowledgement-only now.
+    expect(offerMessages('worker-1')).toEqual([]);
+  });
+
+  it('returns no revival payload when the browser wake claim itself is not durable, then retries safely', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'adadadad-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'the first half is done');
+    wake([{ to: 'worker-1', text: 'do not hand this out before the broker claim fsyncs' }]);
+    await waitForOpened(2);
+    const id = new URL(opened[1]!).searchParams.get('clf')!;
+
+    let failOnce = true;
+    onSwarmPersistNow(async (snapshot) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('synthetic claim fsync failure');
+      }
+      await writeDurableNow('swarm', snapshot);
+    });
+    const first = await request('POST', '/commands/redeem', {
+      body: { id, client: 'tab-claim-retry', conversationId }
+    });
+    expect(first.status).toBe(503);
+    expect(first.body).toMatchObject({ error: 'worker_revival_claim_not_durable', retryable: true });
+    expect(first.body.command).toBeUndefined();
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'waking',
+      revivable: true
+    });
+
+    // The failed generation was superseded by the rollback snapshot, so the same page can retry
+    // from the pre-cut state. Only the successful second durable claim is allowed to expose text.
+    const second = await request('POST', '/commands/redeem', {
+      body: { id, client: 'tab-claim-retry', conversationId }
+    });
+    expect(second.status).toBe(200);
+    expect(second.body.command.text).toContain('do not hand this out before the broker claim fsyncs');
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'waking',
+      revivable: false
+    });
+  });
+
+  it('replays a committed sent ACK after a crash between worker fsync and command receipt without duplicating the wake', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'aeaeaeae-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'the first half is done');
+    wake([{ to: 'worker-1', text: 'this user message already reached ChatGPT' }]);
+    await waitForOpened(2);
+    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    const client = 'tab-lost-ack-response';
+    const redeemed = await request('POST', '/commands/redeem', {
+      body: { id, client, conversationId }
+    });
+    expect(redeemed.status).toBe(200);
+
+    // This is the exact middle of /commands/ack: semantic send committed in agents.ts and that
+    // state fsynced, but bridge-commands still contains the leased command and no receipt yet.
+    const revival = pendingWorkerRevivals()[0]!;
+    expect(noteWorkerRevived('worker-1', conversationId, revival.messageIds, id)).toBe(true);
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    await flushDurable();
+    const durableSwarm = await readDurable<any>('swarm');
+    const durableCommands = await readDurable<any>('bridge-commands');
+    expect(durableCommands?.commands?.some((entry: any) => entry?.id === id)).toBe(true);
+    expect(durableCommands?.receipts?.some((entry: any) => entry?.id === id)).toBe(false);
+
+    // Process restart. Ordinary MCP-result offers become uncertain on restore, but a revival
+    // offer remains acknowledgement-only because the browser already submitted it as user text.
+    resetSwarm();
+    resetBridgeForTests();
+    restoreSwarm(durableSwarm);
+    await restoreCommands();
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+    expect(offerMessages('worker-1')).toEqual([]);
+    const restoredOfferedAt = snapshotSwarm()!.agents.find((entry) => entry.info.id === 'worker-1')!.queue[0]!.offeredAt!;
+    expect(acknowledgeOffers('worker-1', false, restoredOfferedAt + 1)).toHaveLength(1);
+    expect(offerMessages('worker-1')).toEqual([]);
+
+    // The browser's lost HTTP response is retried against the restored leased command. The
+    // durable revival offer proves the semantic send already committed, so rebuild the same
+    // committed receipt instead of reporting a false terminal failure.
+    const retry = await request('POST', '/commands/ack', {
+      body: { id, status: 'sent', conversationId, client }
+    });
+    expect(retry.status).toBe(200);
+    expect(retry.body).toMatchObject({ committed: true, outcome: 'committed', conversationId });
+    const storedAfterRetry = await readDurable<any>('bridge-commands');
+    expect(storedAfterRetry?.receipts?.some((entry: any) => entry?.id === id && entry?.committed === true)).toBe(true);
+  });
+
+  it('puts the worker back to sleep, with its slot and its message intact, when the browser cannot wake it', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'dadadada-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'reported, waiting for more');
+    wake([{ to: 'worker-1', text: 'one more thing' }]);
+    await waitForOpened(2);
+    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    await request('POST', '/commands/redeem', { body: { id, client: 'tab-doomed', conversationId } });
+
+    const primeBefore = swarmState().agents.find((agent) => agent.role === 'prime')!.pending;
+    const ack = await request('POST', '/commands/ack', {
+      body: { id, status: 'failed', error: 'the tab was closed', client: 'tab-doomed' }
+    });
+    expect(ack.status).toBe(200);
+    expect(ack.body).toMatchObject({ committed: false });
+
+    // Nothing was typed, so nothing was delivered. The worker is exactly where it was, the
+    // slot it had reserved is free again, and the prime is told rather than left waiting.
+    const worker = swarmState().agents.find((agent) => agent.id === 'worker-1')!;
+    expect(worker.state).toBe('sleeping');
+    expect(worker.revivable).toBe(true);
+    expect(worker.pending).toBe(1);
+    expect(swarmState().agents.find((agent) => agent.role === 'prime')!.pending).toBe(primeBefore + 1);
+
+    // And it can simply be tried again, into the same chat.
+    wake([{ to: 'worker-1', text: 'try that again' }]);
+    await waitForOpened(3);
+    expect(new URL(opened[2]!).pathname).toBe(`/c/${conversationId}`);
+  });
+
+  it('does not grant an expired durable worker revival a fresh TTL after restart', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'edededed-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'reported, waiting for more');
+    wake([{ to: 'worker-1', text: 'this must not get another thirty minutes after restart' }]);
+    await waitForOpened(2);
+    await flushDurable();
+
+    const durable = await readDurable<any>('bridge-commands');
+    const revive = durable?.commands?.find((entry: any) => entry?.spec?.type === 'revive');
+    expect(revive).toBeTruthy();
+    revive.createdAt = Date.now() - 30 * 60_000 - 5_000;
+    await writeDurableNow('bridge-commands', durable);
+
+    // Main-process restart: broker authority survived as `waking`, bridge memory did not. The
+    // old bug simply skipped this expired command, then startup replay saw the still-waking
+    // broker row and minted a brand-new command with a fresh 30-minute TTL.
+    resetBridgeForTests();
+    opened.length = 0;
+    setBrowserOpener(async (url) => {
+      opened.push(url);
+    });
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+
+    await restoreCommands();
+
+    const worker = swarmState().agents.find((agent) => agent.id === 'worker-1')!;
+    expect(worker.state).toBe('sleeping');
+    expect(worker.pending).toBe(1);
+    expect(pendingWorkerRevivals()).toEqual([]);
+    expect(pendingCommands()).toEqual([]);
+    expect(requestWorkerRevivals(['worker-1'])).toBe(0);
+    expect(opened).toEqual([]);
+
+    // Recovery order matters: broker stop first, bridge prune second. A crash after command
+    // pruning must never be able to restore `waking` with no old command and recreate the TTL.
+    const storedSwarm = await readDurable<any>('swarm');
+    expect(storedSwarm?.agents?.find((entry: any) => entry?.info?.id === 'worker-1')?.info?.state).toBe('sleeping');
+    const storedCommands = await readDurable<any>('bridge-commands');
+    expect(storedCommands?.commands?.some((entry: any) => entry?.spec?.type === 'revive')).toBe(false);
+  });
+
+  it('keeps an expired revival durable and closes a half-started bridge when broker recovery cannot persist', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'eeeeeeee-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'reported, waiting for more');
+    wake([{ to: 'worker-1', text: 'expired wake must survive failed recovery' }]);
+    await waitForOpened(2);
+    await flushDurable();
+    const durable = await readDurable<any>('bridge-commands');
+    const revive = durable?.commands?.find((entry: any) => entry?.spec?.type === 'revive');
+    expect(revive).toBeTruthy();
+    revive.createdAt = Date.now() - 30 * 60_000 - 5_000;
+    await writeDurableNow('bridge-commands', durable);
+
+    await stopBridge();
+    resetBridgeForTests();
+    let failOnce = true;
+    onSwarmPersistNow(async (snapshot) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('synthetic swarm fsync failure');
+      }
+      await writeDurableNow('swarm', snapshot);
+    });
+
+    const failed = await startBridge();
+    expect(failed).toBeNull();
+    expect(bridgePort()).toBeNull();
+    // Command pruning is forbidden until sleeping is durable, so the only recoverable half of
+    // the transaction is still on disk after the failed startup.
+    const afterFailure = await readDurable<any>('bridge-commands');
+    expect(afterFailure?.commands?.some((entry: any) => entry?.spec?.type === 'revive')).toBe(true);
+
+    const restarted = await startBridge();
+    expect(restarted).not.toBeNull();
+    base = `http://127.0.0.1:${restarted}`;
+    const worker = swarmState().agents.find((agent) => agent.id === 'worker-1')!;
+    expect(worker.state).toBe('sleeping');
+    expect(worker.pending).toBe(1);
+    const afterRetry = await readDurable<any>('bridge-commands');
+    expect(afterRetry?.commands?.some((entry: any) => entry?.spec?.type === 'revive')).toBe(false);
+  });
+
+  it('publishes none of a reconstructed command set when expired-revival recovery aborts', async () => {
+    await pair();
+    spawn({
+      workers: [{ task: 'become the expired revival' }, { task: 'remain a valid restored bootstrap' }],
+      caller: { conversationId: PRIME_CHAT }
+    });
+    const bootstrap = await redeem();
+    const conversationId = 'edededed-1111-4222-8333-555555555555';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    await waitForOpened(2);
+    const workerTwoId = new URL(opened[1]!).searchParams.get('clf')!;
+    finishAgent({ conversationId }, 'first worker is reusable');
+    wake([{ to: 'worker-1', text: 'this revival will be expired on disk' }]);
+    await flushDurable();
+    const durable = await readDurable<any>('bridge-commands');
+    const revive = durable?.commands?.find((entry: any) => entry?.spec?.type === 'revive');
+    expect(revive).toBeTruthy();
+    expect(durable?.commands?.some((entry: any) => entry?.id === workerTwoId)).toBe(true);
+    revive.createdAt = Date.now() - 30 * 60_000 - 5_000;
+    await writeDurableNow('bridge-commands', durable);
+
+    await stopBridge();
+    resetBridgeForTests();
+    let failOnce = true;
+    onSwarmPersistNow(async (snapshot) => {
+      if (failOnce) {
+        failOnce = false;
+        throw new Error('synthetic recovery barrier failure');
+      }
+      await writeDurableNow('swarm', snapshot);
+    });
+
+    const failed = await startBridge();
+    expect(failed).toBeNull();
+    expect(bridgePort()).toBeNull();
+    // The old incremental restore pushed worker-2 into the global command array before awaiting
+    // the expired revival's swarm fsync. When that fsync failed, the bridge was closed but this
+    // half-restored command stayed published in memory. Recovery is now plan -> reconcile ->
+    // publish, so an aborted plan exposes exactly nothing.
+    expect(pendingCommands()).toEqual([]);
+    const stillDurable = await readDurable<any>('bridge-commands');
+    expect(stillDurable?.commands?.some((entry: any) => entry?.id === revive.id)).toBe(true);
+    expect(stillDurable?.commands?.some((entry: any) => entry?.id === workerTwoId)).toBe(true);
+
+    const restarted = await startBridge();
+    expect(restarted).not.toBeNull();
+    base = `http://127.0.0.1:${restarted}`;
+    expect(pendingCommands().some((entry) => entry.id === workerTwoId)).toBe(true);
+    expect(pendingCommands().some((entry) => entry.id === revive.id)).toBe(false);
+  });
+
+  it('does not admit command traffic while restore is reconciling an expired revival', async () => {
+    await pair();
+    spawn({
+      workers: [{ task: 'write the audit' }, { task: 'stay pending while recovery is tested' }],
+      caller: { conversationId: PRIME_CHAT }
+    });
+    const bootstrap = await redeem();
+    const conversationId = 'efefefef-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    // ACKing worker-1 advances delivery to worker-2. Leave that real second bootstrap leased:
+    // it is valid against the restored broker and therefore survives tidyCommands() while the
+    // expired worker-1 revival below is being reconciled.
+    await waitForOpened(2);
+    const overlapId = new URL(opened[1]!).searchParams.get('clf')!;
+    finishAgent({ conversationId }, 'reported, waiting for more');
+    wake([{ to: 'worker-1', text: 'expired wake must not overlap restore traffic' }]);
+    await flushDurable();
+
+    const durable = await readDurable<any>('bridge-commands');
+    const revive = durable?.commands?.find((entry: any) => entry?.spec?.type === 'revive');
+    expect(revive).toBeTruthy();
+    revive.createdAt = Date.now() - 30 * 60_000 - 5_000;
+    await writeDurableNow('bridge-commands', durable);
+
+    await stopBridge();
+    resetBridgeForTests();
+    let releaseRecovery!: () => void;
+    let recoveryEntered!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      recoveryEntered = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releaseRecovery = resolve;
+    });
+    onSwarmPersistNow(async (snapshot) => {
+      recoveryEntered();
+      await held;
+      await writeDurableNow('swarm', snapshot);
+    });
+
+    const starting = startBridge();
+    await entered;
+    let secondSettled = false;
+    const secondStart = startBridge().then((value) => {
+      secondSettled = true;
+      return value;
+    });
+    await Promise.resolve();
+    try {
+      expect(secondSettled).toBe(false);
+      // The socket may already be bound, but it is not a bridge until command recovery commits.
+      // No request is allowed to mutate the half-built command array or durable snapshot.
+      const recoveringPort = bridgePort();
+      expect(recoveringPort).not.toBeNull();
+      base = `http://127.0.0.1:${recoveringPort}`;
+      const overlap = await request('POST', '/commands/redeem', {
+        body: { id: overlapId, client: 'tab-during-restore' }
+      });
+      expect(overlap.status).toBe(503);
+      expect(overlap.body).toMatchObject({ error: 'bridge_recovering', retryable: true });
+
+      const duringRecovery = await readDurable<any>('bridge-commands');
+      expect(duringRecovery?.commands?.some((entry: any) => entry?.id === revive.id)).toBe(true);
+    } finally {
+      releaseRecovery();
+    }
+
+    const restarted = await starting;
+    expect(restarted).not.toBeNull();
+    await expect(secondStart).resolves.toBe(restarted);
+    base = `http://127.0.0.1:${restarted}`;
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
+    const after = await readDurable<any>('bridge-commands');
+    expect(after?.commands?.some((entry: any) => entry?.id === revive.id)).toBe(false);
+    expect(after?.commands?.some((entry: any) => entry?.id === overlapId)).toBe(true);
+  });
+
+  it('does not let an older expired disk revival cancel a newer retained wake for the same worker', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'survive a stale durable revival row' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'acacacac-1111-4222-8333-777777777777';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'sleep before the first wake');
+
+    wake([{ to: 'worker-1', text: 'old wake whose transport will remain stale on disk' }]);
+    await waitForOpened(2);
+    const oldId = new URL(opened[1]!).searchParams.get('clf')!;
+    const oldRedeem = await request('POST', '/commands/redeem', {
+      body: { id: oldId, client: 'old-revival-page', conversationId }
+    });
+    expect(oldRedeem.status).toBe(200);
+    await flushDurable();
+    const staleDisk = await readDurable<any>('bridge-commands');
+    const staleRevive = staleDisk?.commands?.find((entry: any) => entry?.id === oldId);
+    expect(staleRevive).toBeTruthy();
+
+    // Semantically settle/remove R in live state. Then manufacture the exact safe-side disk
+    // failure shape: broker/live state has moved on, but the old bridge file still contains R.
+    const failedOld = await request('POST', '/commands/ack', {
+      body: { id: oldId, status: 'failed', error: 'synthetic old transport failure', client: 'old-revival-page' }
+    });
+    expect(failedOld.status).toBe(200);
+    expect(swarmState().agents.find((entry) => entry.id === 'worker-1')?.state).toBe('sleeping');
+
+    const fresh = stageMessages({ conversationId: PRIME_CHAT }, [
+      { to: 'worker-1', text: 'new wake must outrank the stale disk transport' }
+    ]);
+    fresh.commit();
+    expect(fresh.waking).toEqual(['worker-1']);
+    expect(requestWorkerRevivals(fresh.waking)).toBe(1);
+    await vi.waitFor(() => {
+      const revive = pendingCommands().find((entry) => entry.what === 'revive:worker-1');
+      expect(revive).toBeTruthy();
+      expect(revive!.id).not.toBe(oldId);
+    });
+    const newId = pendingCommands().find((entry) => entry.what === 'revive:worker-1')!.id;
+    expect(swarmState().agents.find((entry) => entry.id === 'worker-1')?.state).toBe('waking');
+
+    // Keep only the old transport on disk and make it expired. writeDurableNow supersedes the
+    // fresh command's pending debounced snapshot, while the fresh command itself remains in
+    // memory exactly as a settings-driven stop/start would retain it.
+    staleRevive.createdAt = Date.now() - 30 * 60_000 - 5_000;
+    staleDisk.commands = [staleRevive];
+    staleDisk.receipts = [];
+    await writeDurableNow('bridge-commands', staleDisk);
+    await stopBridge();
+
+    const port = await startBridge();
+    expect(port).not.toBeNull();
+    base = `http://127.0.0.1:${port}`;
+    const worker = swarmState().agents.find((entry) => entry.id === 'worker-1')!;
+    expect(worker.state).toBe('waking');
+    expect(pendingCommands().some((entry) => entry.id === newId)).toBe(true);
+    expect(pendingCommands().some((entry) => entry.id === oldId)).toBe(false);
+    const rewritten = await readDurable<any>('bridge-commands');
+    expect(rewritten?.commands?.some((entry: any) => entry?.id === newId)).toBe(true);
+    expect(rewritten?.commands?.some((entry: any) => entry?.id === oldId)).toBe(false);
+  });
+
+  it('selects the newest durable revival before applying expiry to duplicate same-worker rows', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'survive duplicate durable revival rows' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'adadadad-1111-4222-8333-888888888888';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'sleep before duplicate-row wake');
+    wake([{ to: 'worker-1', text: 'new durable wake must survive its stale duplicate' }]);
+    await waitForOpened(2);
+    await flushDurable();
+
+    const durable = await readDurable<any>('bridge-commands');
+    const newest = durable?.commands?.find((entry: any) => entry?.spec?.type === 'revive');
+    expect(newest).toBeTruthy();
+    const oldId = 'stale-duplicate-revival';
+    const old = {
+      ...newest,
+      id: oldId,
+      createdAt: Date.now() - 30 * 60_000 - 5_000,
+      phase: 'queued',
+      claimedAt: null,
+      owner: null
+    };
+    durable.commands = [old, newest];
+    await writeDurableNow('bridge-commands', durable);
+
+    // Cold bridge-memory restart: unlike the retained-live regression above, authority now has
+    // to be selected entirely from the durable file. Expiry is a property of the selected
+    // transport incarnation, not of the friendly worker key shared by both rows.
+    resetBridgeForTests();
+    await restoreCommands();
+    expect(swarmState().agents.find((entry) => entry.id === 'worker-1')?.state).toBe('waking');
+    expect(pendingCommands().some((entry) => entry.id === newest.id)).toBe(true);
+    expect(pendingCommands().some((entry) => entry.id === oldId)).toBe(false);
+    const rewritten = await readDurable<any>('bridge-commands');
+    expect(rewritten?.commands?.some((entry: any) => entry?.id === newest.id)).toBe(true);
+    expect(rewritten?.commands?.some((entry: any) => entry?.id === oldId)).toBe(false);
+  });
+
+  it('refuses to believe a revival that reports a different chat, and undoes it', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'bacabaca-7654-3210-fedc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'reported, waiting for more');
+    wake([{ to: 'worker-1', text: 'wake up' }]);
+    await waitForOpened(2);
+    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    await request('POST', '/commands/redeem', { body: { id, client: 'tab-wandered' } });
+
+    // The page redeemed before ChatGPT had finished routing it and typed somewhere else.
+    // Reporting the send is not proof of where it landed; the chat id is.
+    const ack = await request('POST', '/commands/ack', {
+      body: { id, status: 'sent', conversationId: 'ffffffff-1111-4222-8333-444444444444', client: 'tab-wandered' }
+    });
+    expect(ack.status).toBe(200);
+    expect(ack.body).toMatchObject({ committed: false });
+    const worker = swarmState().agents.find((agent) => agent.id === 'worker-1')!;
+    expect(worker.state).toBe('sleeping');
+    expect(worker.conversationId).toBe(conversationId);
+  });
+
+  it('puts a reusable worker to sleep when its settled assistant turn completes', async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
@@ -1560,11 +2272,12 @@ describe('delivering a bootstrap', () => {
     });
     expect(recorded.status).toBe(200);
     const worker = swarmState().agents.find((agent) => agent.id === 'worker-1')!;
-    expect(worker.state).toBe('finished');
+    expect(worker.state).toBe('sleeping');
+    expect(worker.revivable).toBe(true);
     expect(worker.result).toContain('Final audit: request IDs are the authority');
   });
 
-  it('auto-finishes a worker when its final assistant row and matching turn_end arrive in separate event batches', async () => {
+  it('puts a reusable worker to sleep when its final assistant row and matching turn_end arrive in separate event batches', async () => {
     await pair();
     spawn({ workers: [{ task: 'finish across journal batches' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
@@ -1606,7 +2319,8 @@ describe('delivering a bootstrap', () => {
     });
     expect(final.status).toBe(200);
     const worker = swarmState().agents.find((agent) => agent.id === 'worker-1')!;
-    expect(worker.state).toBe('finished');
+    expect(worker.state).toBe('sleeping');
+    expect(worker.revivable).toBe(true);
     expect(worker.result).toContain('one journal flush after its turn_end');
   });
 
@@ -1708,7 +2422,7 @@ describe('delivering a bootstrap', () => {
       // flow cannot infer from `immediateEntered` that the callback has run, so name the runtime
       // proof explicitly instead of letting it narrow the outer variable to its initial null.
       const projectedAfterEntry = projected as SwarmSnapshot | null;
-      expect(projectedAfterEntry?.agents.find((agent) => agent.info.id === 'worker-1')?.info.state).toBe('finished');
+      expect(projectedAfterEntry?.agents.find((agent) => agent.info.id === 'worker-1')?.info.state).toBe('sleeping');
       expect(projectedAfterEntry?.agents.find((agent) => agent.info.id === PRIME_ID)?.queue[0]?.text).toContain(
         'Final result hidden until the acceptance write lands.'
       );
@@ -1723,7 +2437,7 @@ describe('delivering a bootstrap', () => {
       release();
       const recorded = await recording;
       expect(recorded.status).toBe(200);
-      expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('finished');
+      expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
       expect(swarmState().agents.find((agent) => agent.id === PRIME_ID)?.pending).toBe(1);
     } finally {
       release();
@@ -1744,6 +2458,7 @@ describe('delivering a bootstrap', () => {
       { kind: 'turn_start', time: now, turnId: 'g-worker-stale' },
       { kind: 'turn_end', time: now + 1, turnId: 'g-worker-stale', outcome: 'completed' }
     ], 'worker-1');
+    noteAgentContextTokens(workerConversation, WORKER_CONTEXT_CEILING_TOKENS);
     finishAgent({ conversationId: workerConversation }, 'worker finished, report still pending');
     expect(swarmState().running).toBe(true);
     expect(swarmState().agents.find((agent) => agent.role === 'prime')?.pending).toBe(1);
@@ -1753,6 +2468,31 @@ describe('delivering a bootstrap', () => {
 
     expect(await sweepStaleSwarm(now + STALE_SWARM_MS + 5_000)).toBe(true);
     expect(swarmState().running).toBe(false);
+  });
+
+  it('periodically sleeps a silent detached worker and wakes already-queued work without another MCP call', async () => {
+    spawn({ workers: [{ task: 'detached silence maintenance' }], caller: { conversationId: PRIME_CHAT } });
+    const workerConversation = 'silent-detached-worker';
+    expect(bindConversation('worker-1', workerConversation)).toBe(true);
+    const detachedAt = Date.now();
+    expect(workerConversationGone(workerConversation)).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('detached');
+
+    const queued = stageMessages({ conversationId: PRIME_CHAT }, [
+      { to: 'worker-1', text: 'when that old turn is done, inspect the parser' }
+    ]);
+    expect(queued.waking).toEqual([]);
+    queued.commit();
+
+    // No page and, crucially, no later worker MCP request. The bridge's own maintenance timer
+    // must eventually run the detached-only silence rule, free the slot, and reserve the queued
+    // instruction as a wake in the same stored conversation.
+    expect(await sweepStaleSwarm(detachedAt + DETACHED_SILENCE_MS - 1)).toBe(false);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('detached');
+    expect(await sweepStaleSwarm(detachedAt + DETACHED_SILENCE_MS + 1_000)).toBe(false);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+    expect(pendingWorkerRevivals()[0]).toMatchObject({ id: 'worker-1', conversationId: workerConversation });
+    expect(pendingWorkerRevivals()[0]?.text).toContain('inspect the parser');
   });
 
   it('never stale-releases a run whose durable prime turn is still open', async () => {
@@ -1767,6 +2507,7 @@ describe('delivering a bootstrap', () => {
       { kind: 'turn_start', time: now, turnId: 'g-worker-done' },
       { kind: 'turn_end', time: now + 1, turnId: 'g-worker-done', outcome: 'completed' }
     ], 'worker-1');
+    noteAgentContextTokens(workerConversation, WORKER_CONTEXT_CEILING_TOKENS);
     finishAgent({ conversationId: workerConversation }, 'done while prime still works');
 
     expect(await sweepStaleSwarm(now + STALE_SWARM_MS + 10_000)).toBe(false);
@@ -1795,6 +2536,7 @@ describe('delivering a bootstrap', () => {
       { kind: 'turn_start', time: now, turnId: 'g-worker-detached' },
       { kind: 'turn_end', time: now + 1, turnId: 'g-worker-detached', outcome: 'completed' }
     ], 'worker-1');
+    noteAgentContextTokens(workerConversation, WORKER_CONTEXT_CEILING_TOKENS);
     finishAgent({ conversationId: workerConversation }, 'worker done before broker crash');
 
     expect(await sweepStaleSwarm(now + STALE_SWARM_MS + 10_000)).toBe(true);
@@ -1814,6 +2556,7 @@ describe('delivering a bootstrap', () => {
       { kind: 'turn_start', time: now, turnId: 'g-worker-transfer' },
       { kind: 'turn_end', time: now + 1, turnId: 'g-worker-transfer', outcome: 'completed' }
     ], 'worker-1');
+    noteAgentContextTokens(workerConversation, WORKER_CONTEXT_CEILING_TOKENS);
     finishAgent({ conversationId: workerConversation }, 'done before transfer');
     expect(beginPrimeTransfer(PRIME_CHAT)).toBe(true);
 
@@ -2296,6 +3039,58 @@ describe('restarting the bridge', () => {
     // And the command is not handed out on the way back up either: its worker belongs to a
     // run that no longer exists, so startup's ordinary tidy pass retires it before delivery.
     expect(pendingCommands()).toEqual([]);
+  });
+
+  it('does not queue or open a newly spawned worker through a stale bridge callback while stopped', async () => {
+    await stopBridge();
+    opened.length = 0;
+
+    // onSpawnRequest/onReviveRequest are singleton broker callbacks, not part of the HTTP
+    // server object. Before they had disposers, stopBridge() removed only the swarm-end listener,
+    // so a new worker created while the bridge was down still called queueWorkerBootstrap() and
+    // could even launch Chrome through the stale opener. Nothing transport-facing may happen
+    // until the next start registers a fresh callback and replays broker-owned work.
+    spawn({ workers: [{ task: 'must wait for bridge restart' }], caller: { conversationId: PRIME_CHAT } });
+    expect(pendingCommands()).toEqual([]);
+    expect(opened).toEqual([]);
+
+    const port = await startBridge();
+    expect(port).not.toBeNull();
+    base = `http://127.0.0.1:${port}`;
+    await waitForOpened(1);
+    expect(pendingCommands().map((command) => command.what)).toEqual(['worker:worker-1']);
+  });
+
+  it('does not queue or reopen a sleeping worker through a stale revival callback while stopped', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'be reusable across a bridge restart' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'abababab-1111-4222-8333-666666666666';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'sleeping before bridge stop');
+    expect(swarmState().agents.find((entry) => entry.id === 'worker-1')?.state).toBe('sleeping');
+
+    await stopBridge();
+    opened.length = 0;
+    const staged = stageMessages({ conversationId: PRIME_CHAT }, [
+      { to: 'worker-1', text: 'this must wait until the bridge is started again' }
+    ]);
+    staged.commit();
+    expect(staged.waking).toEqual(['worker-1']);
+    expect(requestWorkerRevivals(staged.waking)).toBe(1);
+    // The broker owns a durable waking reservation, but the stopped bridge owns no callback and
+    // therefore creates neither a transport row nor a browser side effect yet.
+    expect(pendingCommands()).toEqual([]);
+    expect(opened).toEqual([]);
+
+    const port = await startBridge();
+    expect(port).not.toBeNull();
+    base = `http://127.0.0.1:${port}`;
+    await waitForOpened(1);
+    expect(new URL(opened[0]!).pathname).toBe(`/c/${conversationId}`);
+    expect(pendingCommands().map((command) => command.what)).toEqual(['revive:worker-1']);
   });
 
   it('re-arms an in-memory leased command instead of reopening it after stop/start', async () => {

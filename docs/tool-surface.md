@@ -16,7 +16,7 @@ permission boundaries and use separate secret tokenized local paths.
 
 The Desktop connector is optional. Core is the main connector.
 
-On a fresh 1.9.4 config, all tool permissions, session recording and multi-agent mode are
+On a fresh current config, all tool permissions, session recording and multi-agent mode are
 enabled, while read-only mode is off. Existing configs keep explicit choices during upgrades;
 missing legacy permissions are not silently widened.
 
@@ -32,8 +32,11 @@ the current permission.
 ### `read`
 
 Reads approved paths. It accepts one or more paths, lists a directory one level deep, expands
-bounded globs, supports line ranges for one text file, and can return supported image content.
-Path resolution and result-size limits are enforced by the app.
+bounded globs, supports line ranges, and can return supported image content. Path resolution
+and result-size limits are enforced by the app: the per-file default payload is 256 KB, which
+covers an ordinary source file whole, and the aggregate payload for one call stays bounded at
+512 KB. The defaults are set so that batching paths into one call and reading a file whole are
+the cheap path, because the round trip costs far more than the bytes.
 
 ### `view_image`
 
@@ -56,10 +59,21 @@ Directory deletion and arbitrary binary writes are deliberately not hidden patch
 Runs a command in a real Windows shell. This permission is **not** confined to approved
 folders. Long-running commands return an opaque `session_id` that `write_stdin` can continue.
 
+It takes exactly one of `cmd` (a single command) or `cmds` (up to 20 commands run sequentially
+in one shell session). A batch shares one process, so variables, environment changes and the
+working directory carry across its items; each item gets a labeled output section and its own
+exit code, an ordinary non-zero result does not stop the rest, and the call's exit code is the
+first non-zero one. Batching exists to spend one connector round trip instead of several on
+related checks. The `apply_patch` interception and the benign-non-zero-exit classification
+apply to single-command calls only.
+
 ### `write_stdin`
 
 Writes to or polls a live command session by `session_id`, with optional yield time and output
-budget. A blank `chars` value is a poll rather than a separate process-status tool.
+budget. A blank `chars` value is a poll rather than a separate process-status tool. An empty
+poll returns as soon as the process produces output rather than holding the full yield window;
+anything that arrives afterwards stays buffered for the next poll. A non-empty write keeps
+Codex's collection-window behaviour so one interactive response is gathered whole.
 
 ### `session`
 
@@ -87,10 +101,19 @@ Compact & Resume is app/browser orchestration. There is no model-visible `save_h
 
 Available while multi-agent mode is enabled. It has exactly four actions:
 
-- `spawn` creates worker chats from one shared context plus per-worker tasks.
-- `message` sends one message or an all-or-nothing batch.
-- `status` reports the run and workers.
-- `finish` is the worker's terminal handoff to the prime.
+- `spawn` creates worker chats from one shared context plus per-worker tasks. Used once per run:
+  a run that needs a worker again reuses one it already has.
+- `message` sends one message or an all-or-nothing batch. Messaging a sleeping worker is what
+  wakes it, in the chat it already has.
+- `status` reports the run and workers, including who is asleep and how many worker slots are free.
+- `finish` is a worker's handoff to the prime. It reports a result and puts that worker to sleep.
+
+Workers sleep rather than end. A worker that has reported keeps its ChatGPT conversation and
+stays reusable; its worker slot is free while it sleeps, so the limit counts only workers that
+are actually working. Waking one needs a free slot, reopens or refocuses that worker's own chat,
+and types the prime's message into it as an ordinary user message. A worker becomes permanently
+finished only when its chat reaches the context ceiling (400,000 tokens by the app's own session
+accounting); crossing it never interrupts work in flight, it only makes the next stop the last one.
 
 There is no model-supplied agent credential or `agent_key`. Worker/prime identity is bound to
 the ChatGPT conversation using extension evidence; control calls fail closed when that identity
@@ -100,14 +123,24 @@ cannot be proven.
 
 ### `observe`
 
-Reads desktop state without moving focus: screenshots, windows and UI-control information.
-Screen access is independent from mouse/keyboard control.
+Reads desktop state without moving focus: screenshots, windows and snapshot-scoped UI-control
+information. Window capture tries a direct background path first and labels a visible-screen
+fallback when the pixels may be occluded. Screen access is independent from mouse/keyboard
+control.
 
 ### `computer`
 
 Executes a bounded batch of desktop actions. The current action set is:
 `click_ref`, `set_value`, `click`, `double_click`, `move`, `drag`, `scroll`, `type`, `keypress`,
 `focus`, `wait`, `read_clipboard`, and `write_clipboard`.
+
+Recent screenshot frames are retained independently; a coordinate action names its frame and
+the helper revalidates target-window geometry immediately before physical input. Semantic refs
+address cached UI Automation elements from one bounded snapshot and fail stale rather than
+rescanning by a reusable RuntimeId. Batches report completed-step and route evidence, including
+the exact failing index on partial failure. An optional compact `verify` postcondition can wait
+for a foreground window, window open/close, or UI control appearance/disappearance and capture
+the resulting state in the same tool call.
 
 Each step is checked against the current screen/control/clipboard permissions. Read-only mode
 can keep observation available while disabling state-changing desktop actions.

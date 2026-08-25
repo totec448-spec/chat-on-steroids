@@ -29,9 +29,13 @@ const mocks = vi.hoisted(() => {
     caps,
     config,
     report: null as null | ((report: Record<string, unknown>) => void),
-    starts: 0
+    starts: 0,
+    prewarm: vi.fn(async () => undefined),
+    endpointStop: vi.fn(async (_options?: { forceAfterMs?: number }) => undefined)
   };
 });
+
+vi.mock('../src/main/computer/index.js', () => ({ prewarmComputerHelper: mocks.prewarm }));
 
 vi.mock('../src/main/config.js', () => ({
   getConfig: () => mocks.config,
@@ -50,7 +54,7 @@ vi.mock('../src/main/mcp/server.js', () => ({
       core: 'http://127.0.0.1:45678/mcp/core/core-token',
       desktop: 'http://127.0.0.1:45678/mcp/desktop/desktop-token'
     },
-    stop: vi.fn(async () => undefined)
+    stop: mocks.endpointStop
   }))
 }));
 
@@ -73,6 +77,25 @@ describe('connection surface state', () => {
   beforeEach(() => {
     mocks.report = null;
     mocks.starts = 0;
+    mocks.prewarm.mockClear();
+    mocks.endpointStop.mockClear();
+    Object.assign(mocks.caps, {
+      browse: true,
+      search: true,
+      read: true,
+      metadata: true,
+      create: false,
+      edit: false,
+      move: false,
+      deleteFile: false,
+      command: false,
+      screen: false,
+      control: false,
+      clipboardRead: false,
+      clipboardWrite: false
+    });
+    mocks.config.roots = [{ name: 'workspace', path: 'C:\\workspace' }];
+    mocks.config.readOnly = true;
     mocks.config.tunnel.kind = 'cloudflared';
     mocks.config.tunnel.tunnelId = '';
     mocks.config.tunnel.binaryPath = '';
@@ -99,6 +122,18 @@ describe('connection surface state', () => {
     });
   });
 
+  it('keeps ordinary disconnect graceful and reserves forced MCP drain for final shutdown', async () => {
+    const connection = await import('../src/main/connection.js');
+
+    await connection.connect();
+    await connection.disconnect();
+    expect(mocks.endpointStop).toHaveBeenLastCalledWith();
+
+    await connection.connect();
+    await connection.shutdownConnection();
+    expect(mocks.endpointStop).toHaveBeenLastCalledWith({ forceAfterMs: 30_000 });
+  });
+
   it('shows terminal tunnel reports as connector errors instead of an endless starting state', async () => {
     const connection = await import('../src/main/connection.js');
     await connection.connect();
@@ -123,5 +158,67 @@ describe('connection surface state', () => {
 
     expect(mocks.starts).toBe(2);
     expect(connection.getStatus().state).toBe('connected');
+  });
+
+  it('prewarms the helper only when a native Desktop capability is published', async () => {
+    mocks.caps.screen = true;
+    const connection = await import('../src/main/connection.js');
+    await connection.connect();
+    expect(mocks.prewarm).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a Desktop permission hide a missing root required by Core capabilities', async () => {
+    mocks.config.roots = [];
+    mocks.caps.screen = true;
+    const connection = await import('../src/main/connection.js');
+
+    await connection.connect();
+
+    expect(mocks.starts).toBe(0);
+    expect(connection.getStatus()).toMatchObject({
+      state: 'disconnected',
+      detail: 'Add a folder before connecting.'
+    });
+  });
+
+  it('still requires a root for command even though command execution itself is not root-confined', async () => {
+    mocks.config.roots = [];
+    mocks.config.readOnly = false;
+    Object.assign(mocks.caps, {
+      browse: false,
+      search: false,
+      read: false,
+      metadata: false,
+      command: true,
+      screen: true
+    });
+    const connection = await import('../src/main/connection.js');
+
+    await connection.connect();
+
+    expect(mocks.starts).toBe(0);
+    expect(connection.getStatus().detail).toBe('Add a folder before connecting.');
+  });
+
+  it('keeps genuinely rootless Desktop and clipboard setups connectable', async () => {
+    mocks.config.roots = [];
+    Object.assign(mocks.caps, {
+      browse: false,
+      search: false,
+      read: false,
+      metadata: false,
+      screen: true
+    });
+    const desktop = await import('../src/main/connection.js');
+    await desktop.connect();
+    expect(desktop.getStatus().state).toBe('connected');
+    expect(mocks.starts).toBe(1);
+
+    await desktop.disconnect();
+    mocks.caps.screen = false;
+    mocks.caps.clipboardRead = true;
+    await desktop.connect();
+    expect(desktop.getStatus().state).toBe('connected');
+    expect(mocks.starts).toBe(2);
   });
 });

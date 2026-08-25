@@ -144,6 +144,41 @@ function compileIncludeMatcher(pattern: string, caseSensitive: boolean): (relPat
   };
 }
 
+/** Translate the connector's deliberately small glob grammar into ripgrep's richer grammar. */
+function ripgrepIncludeGlob(pattern: string): string {
+  let out = '';
+  for (const char of pattern) {
+    // These are the only metacharacters the connector itself promises.
+    if (char === '*' || char === '?' || char === '/') {
+      out += char;
+      continue;
+    }
+    // Ripgrep assigns extra meaning to these; the connector treats them literally.
+    if (char === '\\' || char === '[' || char === ']' || char === '{' || char === '}' || char === '!') {
+      out += `\\${char}`;
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
+/**
+ * Converts the connector's folder-name exclude syntax to ripgrep's glob syntax.
+ *
+ * Excludes are deliberately much simpler than globs: a folder name is literal, except for one
+ * optional trailing `*` meaning "this name prefix". The JS fallback enforces exactly that and is
+ * case-insensitive, so passing the raw text to `rg --glob` was wrong in two ways: stored casing
+ * such as `BUILD` bypassed `build`, and characters such as `[` acquired glob semantics. Escape
+ * every glob metacharacter in the literal part and use `--iglob` for parity.
+ */
+function ripgrepExcludeGlob(raw: string): string {
+  const prefix = raw.endsWith('*');
+  const literal = prefix ? raw.slice(0, -1) : raw;
+  const escaped = literal.replace(/[\\*?\[\]{}]/g, '\\$&');
+  return `!**/${escaped}${prefix ? '*' : ''}/**`;
+}
+
 function textEncodingFromHead(head: Buffer): TextEncoding {
   if (head.length >= 2 && head[0] === 0xff && head[1] === 0xfe) return 'utf-16le';
   if (head.length >= 2 && head[0] === 0xfe && head[1] === 0xff) return 'utf-16be';
@@ -174,8 +209,8 @@ async function searchWithRipgrep(
   ];
   if (!req.caseSensitive) args.push('--ignore-case');
   if (!req.regex) args.push('--fixed-strings');
-  if (req.include) args.push('--glob', req.include);
-  for (const excluded of req.exclude) args.push('--glob', `!**/${excluded}/**`);
+  if (req.include) args.push(req.caseSensitive ? '--glob' : '--iglob', ripgrepIncludeGlob(req.include));
+  for (const excluded of req.exclude) args.push('--iglob', ripgrepExcludeGlob(excluded));
   args.push('--', req.query, targetIsFile ? realTarget : '.');
 
   return new Promise<SearchOutcome>((resolve, reject) => {
@@ -268,12 +303,17 @@ async function searchWithRipgrep(
     child.stderr.on('data', (chunk: Buffer) => {
       stderr = `${stderr}${chunk.toString('utf8')}`.slice(-8000);
     });
-    child.once('error', (error) => finish(error));
+    child.once('error', (error) => {
+      const code = (error as NodeJS.ErrnoException).code;
+      finish(new Error(`ripgrep could not start${code ? ` (${code})` : ''}`));
+    });
     child.once('close', (code) => {
       if (stdout.trim()) consider(stdout.trim());
       // rg uses 1 for "no matches". A deliberate limit/time kill can return any code.
       if (stoppedBecause !== null || code === 0 || code === 1) finish();
-      else finish(new Error(`ripgrep failed${code === null ? '' : ` (exit ${code})`}: ${stderr.trim() || 'unknown error'}`));
+      // Never surface rg's raw stderr here. For an exact file it can echo the hidden native
+      // approved-root path after a rename/ACL race; the model only needs the backend verdict.
+      else finish(new Error(`ripgrep search failed${code === null ? '' : ` (exit ${code})`}`));
     });
     const timer = setTimeout(() => {
       if (stoppedBecause === null) stoppedBecause = 'time';
@@ -425,6 +465,12 @@ export async function searchOneFile(
   req: Pick<SearchRequest, 'query' | 'mode' | 'include' | 'caseSensitive' | 'regex' | 'maxResults' | 'deadline'>
 ): Promise<SearchOutcome> {
   const started = Date.now();
+  const rel = path.basename(virtualPath);
+  // Ripgrep deliberately ignores glob filters when the search target is one explicit file.
+  // Apply the connector's include contract before selecting either backend so both paths agree.
+  if (req.include && !compileIncludeMatcher(req.include, req.caseSensitive)(rel)) {
+    return { hits: [], filesScanned: 1, truncated: false, stoppedBecause: null, elapsedMs: Date.now() - started };
+  }
   if (req.mode === 'content') {
     // Both the bundled-rg path (`--max-filesize`) and the JS fallback intentionally skip files
     // above this ceiling. For an explicitly named file, returning plain "No matches" is false:
@@ -456,10 +502,6 @@ export async function searchOneFile(
       );
     }
     if (req.regex) throw new Error('Regex content search requires the bundled ripgrep runtime.');
-  }
-  const rel = path.basename(virtualPath);
-  if (req.include && !compileIncludeMatcher(req.include, req.caseSensitive)(rel)) {
-    return { hits: [], filesScanned: 1, truncated: false, stoppedBecause: null, elapsedMs: Date.now() - started };
   }
   if (req.mode === 'name') {
     const haystack = req.caseSensitive ? rel : rel.toLowerCase();

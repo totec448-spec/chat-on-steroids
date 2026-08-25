@@ -24,7 +24,7 @@ vi.mock('electron', () => ({
     encryptString: (value: string) => Buffer.from(value, 'utf8'),
     decryptString: (buffer: Buffer) => buffer.toString('utf8')
   },
-  app: { getPath: () => '', getVersion: () => '0.0.0', getAppPath: () => process.cwd(), isPackaged: false }
+  app: { getPath: () => '', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
 }));
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
@@ -50,7 +50,8 @@ const {
   spawn
 } = await import('../src/main/agents.js');
 const { registerIpc } = await import('../src/main/ipc.js');
-const { shell } = await import('electron');
+const { app, shell } = await import('electron');
+const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
@@ -104,6 +105,8 @@ afterAll(async () => {
 
 beforeEach(async () => {
   vi.mocked(shell.openPath).mockReset().mockResolvedValue('');
+  vi.mocked(shell.openExternal).mockReset().mockResolvedValue(undefined);
+  vi.mocked(app.getVersion).mockReset().mockReturnValue('0.0.0');
   resetSwarm();
   resetBridgeForTests();
   resetWorkspaces();
@@ -166,6 +169,15 @@ describe('bounded IPC identities and OS launch results', () => {
     };
     expect(reply.ok).toBe(false);
     expect(reply.error).toMatch(/could not open.*access is denied/i);
+  });
+
+  it('opens the extension recovery ZIP from the installed app version, never releases/latest', async () => {
+    vi.mocked(app.getVersion).mockReturnValueOnce('1.8.8');
+    const reply = await handlers.get('bridge:downloadExtension')!(null, undefined);
+
+    expect(reply).toEqual({ ok: true, data: true });
+    expect(shell.openExternal).toHaveBeenCalledWith(extensionDownloadUrl('1.8.8'));
+    expect(vi.mocked(shell.openExternal).mock.calls[0]?.[0]).not.toContain('/releases/latest/');
   });
 
   it('bounds and validates an agent id before it reaches the global broker', async () => {
@@ -331,6 +343,22 @@ describe('the goal model id', () => {
     const reply = await save(settings({ record: false, multiAgent: false }));
     expect(reply.ok, reply.error).toBe(true);
     expect(getConfig().goal.model).toBe(defaultConfig().goal.model);
+  });
+});
+
+describe('the editable goal system prompt', () => {
+  it('stores a deliberate custom prompt', async () => {
+    const prompt = 'Only continue explicit missing work. Return NO_REPLY when ChatGPT says done.';
+    const base = settings({ record: false, multiAgent: false });
+    const reply = await save({ ...base, goal: { ...base.goal, prompt } });
+    expect(reply.ok, reply.error).toBe(true);
+    expect(getConfig().goal.prompt).toBe(prompt);
+  });
+
+  it('refuses blank and unbounded prompts at the renderer boundary', async () => {
+    const base = settings({ record: false, multiAgent: false });
+    expect((await save({ ...base, goal: { ...base.goal, prompt: '   ' } })).ok).toBe(false);
+    expect((await save({ ...base, goal: { ...base.goal, prompt: 'x'.repeat(20_001) } })).ok).toBe(false);
   });
 });
 

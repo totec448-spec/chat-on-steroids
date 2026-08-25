@@ -170,6 +170,7 @@ describe('session store', () => {
     // The durable create updates the derived attachment catalog directly. No second global
     // metadata scan is needed merely to discover the session this process just committed.
     expect(rootReads()).toBe(1);
+    readdir.mockRestore();
   });
 
   it('invalidates a cached miss before an in-flight session creation can be hidden by it', async () => {
@@ -250,6 +251,35 @@ describe('session store', () => {
       expect((await findSessionByConversation(conversationId, { requireUnique: true }))?.id).toBe(targetId);
     } finally {
       readSpy.mockRestore();
+      readdirSpy.mockRestore();
+    }
+  });
+
+  it('does not cache a transient root scan failure as an authoritative empty attachment catalog', async () => {
+    const conversationId = `conv-transient-catalog-${Date.now()}`;
+    const created = await createSession({ conversationId, title: 'durable attachment' });
+    await flushSessions();
+    resetSessionStoreForTests();
+
+    const rootPath = sessionsRoot();
+    const realReaddir = fs.readdir.bind(fs);
+    let failedOnce = false;
+    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(
+      (async (target: Parameters<typeof fs.readdir>[0], ...args: unknown[]) => {
+        if (!failedOnce && String(target) === rootPath) {
+          failedOnce = true;
+          throw Object.assign(new Error('transient session-root read failure'), { code: 'EBUSY' });
+        }
+        return (realReaddir as (...callArgs: unknown[]) => ReturnType<typeof fs.readdir>)(target, ...args);
+      }) as typeof fs.readdir
+    );
+
+    try {
+      await expect(findSessionByConversation(conversationId, { requireUnique: true })).rejects.toMatchObject({
+        code: 'EBUSY'
+      });
+      expect((await findSessionByConversation(conversationId, { requireUnique: true }))?.id).toBe(created.id);
+    } finally {
       readdirSpy.mockRestore();
     }
   });
@@ -721,6 +751,186 @@ describe('session store', () => {
     expect(events.map((event) => event.seq)).toEqual([1, 2]);
   });
 
+  it('reconciles durable journal state when a crash loses the debounced metadata write', async () => {
+    const summary = await createSession({ title: 'stale meta journal recovery' });
+    const handoffId = '2026-08-25-crash001';
+    await appendEvent(summary.id, { time: 10, source: 'extension', kind: 'turn_start', turnId: 'turn-crash' });
+    await appendEvent(summary.id, {
+      time: 11,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'durable before the crash', truncated: false, chars: 24 }
+    });
+    await appendEvent(summary.id, {
+      time: 12,
+      source: 'extension',
+      kind: 'chat_error',
+      message: { text: 'also durable', truncated: false, chars: 12 }
+    });
+    await saveHandoff({
+      id: handoffId,
+      sessionId: summary.id,
+      createdAt: 13,
+      text: 'TASK — recover this durable handoff',
+      sourceEvents: 3,
+      sourceTokens: 10,
+      notes: []
+    });
+    await appendEvent(summary.id, {
+      time: 13,
+      source: 'app',
+      kind: 'handoff',
+      handoffId,
+      chars: 34,
+      reason: 'manual'
+    });
+
+    const staleMeta = JSON.parse(
+      await fs.readFile(path.join(sessionsRoot(), summary.id, 'meta.json'), 'utf8')
+    ) as { events: number; lastHandoffId: string | null };
+    expect(staleMeta.events).toBe(0);
+    expect(staleMeta.lastHandoffId).toBeNull();
+
+    // Simulate process death before the 1.5 s metadata debounce fires. The next mutation opens
+    // from disk and must project the four already-durable records before applying sequence 5.
+    resetSessionStoreForTests();
+    const afterCrash = await appendEvent(summary.id, {
+      time: 14,
+      source: 'app',
+      kind: 'note',
+      message: { text: 'after restart', truncated: false, chars: 13 }
+    });
+    expect(afterCrash.seq).toBe(5);
+
+    const recovered = await getSession(summary.id);
+    expect(recovered).toMatchObject({
+      events: 5,
+      userMessages: 1,
+      errors: 1,
+      activeTurnId: 'turn-crash',
+      lastHandoffId: handoffId,
+      lastHandoffAt: 13
+    });
+  });
+
+  it('repairs a stale metadata projection on the first read after restart without a new mutation', async () => {
+    const summary = await createSession({ title: 'read-only crash recovery' });
+    const handoffId = '2026-08-25-readonly1';
+    await appendEvent(summary.id, { time: 30, source: 'extension', kind: 'turn_start', turnId: 'turn-read' });
+    await appendEvent(summary.id, {
+      time: 31,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'survived on disk', truncated: false, chars: 16 }
+    });
+    await saveHandoff({
+      id: handoffId,
+      sessionId: summary.id,
+      createdAt: 32,
+      text: 'TASK — read-only recovery',
+      sourceEvents: 2,
+      sourceTokens: 8,
+      notes: []
+    });
+    await appendEvent(summary.id, {
+      time: 32,
+      source: 'app',
+      kind: 'handoff',
+      handoffId,
+      chars: 25,
+      reason: 'manual'
+    });
+
+    const metaPath = path.join(sessionsRoot(), summary.id, 'meta.json');
+    expect(JSON.parse(await fs.readFile(metaPath, 'utf8'))).toMatchObject({ events: 0, lastHandoffId: null });
+
+    // Simulate process death before the metadata debounce. There is deliberately no append,
+    // reopen or other mutation after reset: merely opening history must repair the projection.
+    resetSessionStoreForTests();
+    const recovered = await getSession(summary.id);
+    expect(recovered).toMatchObject({
+      events: 3,
+      userMessages: 1,
+      activeTurnId: 'turn-read',
+      lastHandoffId: handoffId,
+      lastHandoffAt: 32
+    });
+    expect(JSON.parse(await fs.readFile(metaPath, 'utf8'))).toMatchObject({
+      events: 3,
+      userMessages: 1,
+      lastHandoffId: handoffId
+    });
+  });
+
+  it('reconciles a canonical message revision newer than the metadata checkpoint', async () => {
+    const summary = await createSession({ title: 'stale meta canonical recovery' });
+    const messageId = 'canonical-crash-revision';
+    await upsertMessageEvent(summary.id, {
+      time: 20,
+      source: 'extension',
+      kind: 'user_message',
+      messageId,
+      message: { text: 'small', truncated: false, chars: 5 }
+    });
+    await flushSessions();
+
+    const revised = await upsertMessageEvent(summary.id, {
+      time: 21,
+      source: 'extension',
+      kind: 'user_message',
+      messageId,
+      message: { text: 'x'.repeat(400), truncated: false, chars: 400 }
+    });
+    const checkpoint = JSON.parse(
+      await fs.readFile(path.join(sessionsRoot(), summary.id, 'meta.json'), 'utf8')
+    ) as { estimatedTokens: number };
+    expect(checkpoint.estimatedTokens).toBeLessThan(eventTokens(revised.event));
+
+    resetSessionStoreForTests();
+    const afterCrash = await appendEvent(summary.id, {
+      time: 22,
+      source: 'app',
+      kind: 'note',
+      message: { text: 'open recovered state', truncated: false, chars: 20 }
+    });
+    expect(afterCrash.seq).toBe(revised.event.seq + 1);
+
+    const recovered = await getSession(summary.id);
+    expect(recovered?.events).toBe(2);
+    expect(recovered?.userMessages).toBe(1);
+    const expectedTokens = eventTokens(revised.event) + eventTokens(afterCrash);
+    expect(recovered?.estimatedTokens).toBe(expectedTokens);
+    expect(recovered?.contextTokens).toBe(expectedTokens);
+  });
+
+  it('repairs a canonical message revision while building the read-only session list after restart', async () => {
+    const summary = await createSession({ title: 'catalog crash recovery' });
+    const messageId = 'canonical-read-only-revision';
+    await upsertMessageEvent(summary.id, {
+      time: 40,
+      source: 'extension',
+      kind: 'user_message',
+      messageId,
+      message: { text: 'tiny', truncated: false, chars: 4 }
+    });
+    await flushSessions();
+
+    const revised = await upsertMessageEvent(summary.id, {
+      time: 41,
+      source: 'extension',
+      kind: 'user_message',
+      messageId,
+      message: { text: 'r'.repeat(800), truncated: false, chars: 800 }
+    });
+    resetSessionStoreForTests();
+
+    const listed = (await listSessions()).find((entry) => entry.id === summary.id);
+    expect(listed?.userMessages).toBe(1);
+    expect(listed?.events).toBe(1);
+    expect(listed?.estimatedTokens).toBe(eventTokens(revised.event));
+    expect(listed?.contextTokens).toBe(eventTokens(revised.event));
+  });
+
   it('stores assets once per content and refuses a malformed asset id', async () => {
     const summary = await createSession({ title: 'assets' });
     const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -939,6 +1149,30 @@ describe('handoff storage', () => {
     await deleteSession(newer.id);
   });
 
+  it('reports a durable handoff after restart even when meta.json missed its debounced projection', async () => {
+    const summary = await createSession({ title: 'handoff crash recovery' });
+    const handoffId = '2026-08-25-crash002';
+    await saveHandoff(handoff(summary.id, handoffId, 3_000));
+    await appendEvent(summary.id, {
+      time: 3_000,
+      source: 'app',
+      kind: 'handoff',
+      handoffId,
+      chars: 23,
+      reason: 'manual'
+    });
+
+    const staleMeta = JSON.parse(
+      await fs.readFile(path.join(sessionsRoot(), summary.id, 'meta.json'), 'utf8')
+    ) as { lastHandoffId: string | null };
+    expect(staleMeta.lastHandoffId).toBeNull();
+
+    resetSessionStoreForTests();
+    expect((await latestHandoff())?.id).toBe(handoffId);
+    expect((await getSession(summary.id))?.lastHandoffId).toBe(handoffId);
+    await deleteSession(summary.id);
+  });
+
   it('finds the newest handoff even when its session is beyond the 5,000-folder maintenance cap', async () => {
     const seed = await createSession({ title: 'handoff catalog seed' });
     const seedSummary = await getSession(seed.id);
@@ -1013,10 +1247,93 @@ describe('handoff storage', () => {
 
     const removed = await pruneSessions(30);
     expect(removed).toBeGreaterThanOrEqual(1);
-    const ids = (await listSessions()).map((entry) => entry.id);
-    expect(ids).toContain(kept.id);
-    expect(ids).not.toContain(stale.id);
+    // Retention is not the UI's first 200 rows. Check durable existence directly so this
+    // invariant stays valid even when the retained handoff is intentionally old in a large
+    // test history.
+    expect(await getSession(kept.id)).not.toBeNull();
+    expect(await getSession(stale.id)).toBeNull();
     await deleteSession(kept.id);
+  });
+
+  it('prunes an expired session beyond the old 5,000-folder maintenance prefix', async () => {
+    const seed = await createSession({ title: 'retention catalog seed' });
+    const seedSummary = await getSession(seed.id);
+    expect(seedSummary).not.toBeNull();
+    resetSessionStoreForTests();
+
+    const names = Array.from({ length: 5001 }, (_, index) => `prune-${String(index).padStart(5, '0')}`);
+    const targetId = names.at(-1)!;
+    const recent = Date.now();
+    const expired = recent - 90 * 24 * 3600_000;
+    const rootPath = sessionsRoot();
+    const realReaddir = fs.readdir.bind(fs);
+    const realReadFile = fs.readFile.bind(fs);
+    const realStat = fs.stat.bind(fs);
+    const realRm = fs.rm.bind(fs);
+    const removed: string[] = [];
+
+    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(
+      (async (target: Parameters<typeof fs.readdir>[0], ...args: unknown[]) => {
+        const location = String(target);
+        if (location === rootPath) return names;
+        if (path.basename(location) === 'messages' && path.basename(path.dirname(location)).startsWith('prune-')) return [];
+        return (realReaddir as (...callArgs: unknown[]) => ReturnType<typeof fs.readdir>)(target, ...args);
+      }) as typeof fs.readdir
+    );
+    const readSpy = vi.spyOn(fs, 'readFile').mockImplementation(
+      (async (target: Parameters<typeof fs.readFile>[0], ...args: unknown[]) => {
+        const file = String(target);
+        const id = path.basename(path.dirname(file));
+        if (id.startsWith('prune-') && file.endsWith('meta.json')) {
+          return JSON.stringify({
+            ...seedSummary,
+            id,
+            title: id,
+            updatedAt: id === targetId ? expired : recent,
+            endedAt: recent,
+            conversationId: null,
+            chatIds: [],
+            lastHandoffId: null,
+            lastHandoffAt: null,
+            __historySeq: 0
+          });
+        }
+        if (id.startsWith('prune-') && file.endsWith('messages.json')) return '{}';
+        return (realReadFile as (...callArgs: unknown[]) => ReturnType<typeof fs.readFile>)(target, ...args);
+      }) as typeof fs.readFile
+    );
+    const statSpy = vi.spyOn(fs, 'stat').mockImplementation(
+      (async (target: Parameters<typeof fs.stat>[0], ...args: unknown[]) => {
+        const file = String(target);
+        if (path.basename(path.dirname(file)).startsWith('prune-') && file.endsWith('events.jsonl')) {
+          const error = Object.assign(new Error('synthetic missing journal'), { code: 'ENOENT' });
+          throw error;
+        }
+        return (realStat as (...callArgs: unknown[]) => ReturnType<typeof fs.stat>)(target, ...args);
+      }) as typeof fs.stat
+    );
+    const rmSpy = vi.spyOn(fs, 'rm').mockImplementation(
+      (async (target: Parameters<typeof fs.rm>[0], ...args: unknown[]) => {
+        const id = path.basename(String(target));
+        if (id.startsWith('prune-')) {
+          removed.push(id);
+          return;
+        }
+        return (realRm as (...callArgs: unknown[]) => ReturnType<typeof fs.rm>)(target, ...args);
+      }) as typeof fs.rm
+    );
+
+    try {
+      expect(await pruneSessions(30)).toBe(1);
+      expect(removed).toEqual([targetId]);
+    } finally {
+      rmSpy.mockRestore();
+      statSpy.mockRestore();
+      readSpy.mockRestore();
+      readdirSpy.mockRestore();
+      resetSessionStoreForTests();
+      await deleteSession(seed.id);
+    }
   });
 
   it('splits a long brief on blank lines and keeps every character', () => {

@@ -6,7 +6,6 @@
  */
 
 export const MIN_YIELD_TIME_MS = 250;
-export const WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS = 10_000;
 /** Minimum yield time for an empty `write_stdin`. */
 export const MIN_EMPTY_YIELD_TIME_MS = 5_000;
 export const MAX_YIELD_TIME_MS = 30_000;
@@ -46,15 +45,12 @@ export const UNIFIED_EXEC_ENV: ReadonlyArray<readonly [string, string]> = [
 export const DEFAULT_TERMINAL_ROWS = 24;
 export const DEFAULT_TERMINAL_COLS = 80;
 
-/**
- * The Windows floor is why an ordinary command can appear to wait: on this platform Codex
- * refuses to yield a session id sooner than ten seconds, so a command that finishes in
- * 200 ms still returns in 200 ms, but one that does not is waited on for the full floor.
- */
 export function clampYieldTime(yieldTimeMs: number): number {
-  const floored =
-    process.platform === 'win32' ? Math.max(yieldTimeMs, WINDOWS_INITIAL_EXEC_YIELD_TIME_FLOOR_MS) : yieldTimeMs;
-  return Math.min(Math.max(floored, MIN_YIELD_TIME_MS), MAX_YIELD_TIME_MS);
+  // Keep Codex's 10 s *default*, but honour an explicit shorter yield on Windows. The local
+  // connector uses managed sessions specifically so a dev server/watcher can hand control back
+  // to the model immediately; forcing every still-running first call to sit for ten seconds made
+  // `yield_time_ms: 250` a lie and dominated normal coding latency for no local correctness gain.
+  return Math.min(Math.max(yieldTimeMs, MIN_YIELD_TIME_MS), MAX_YIELD_TIME_MS);
 }
 
 export function resolveMaxTokens(maxTokens: number | undefined): number {

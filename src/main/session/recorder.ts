@@ -1097,9 +1097,9 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
 
 /** Waits for every queued tool call to be written. Called before the app quits. */
 export async function flushRecorder(): Promise<void> {
-  // Twice: the chain is extended by calls whose attribution was still resolving when the
-  // first await was set up, and settling those adds their writes to the end of it.
-  await recordChain.catch(() => undefined);
+  // Every call appends its eventual write to recordChain synchronously, before its attribution
+  // promise resolves. One snapshot therefore already covers every call admitted before shutdown;
+  // the old second await was leftover from the earlier design that queued only after attribution.
   await recordChain.catch(() => undefined);
   if (attributionRepairTimer) {
     clearTimeout(attributionRepairTimer);

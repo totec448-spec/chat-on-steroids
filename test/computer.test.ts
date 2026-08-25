@@ -63,6 +63,18 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
     expect(typeof shot.focused).toBe('boolean');
   });
 
+  it('does not move foreground focus while observing a background window', async () => {
+    const before = (await activeWindow()).window;
+    if (!before) return;
+    const { windows } = await listWindows();
+    const background = windows.find((window) => window.id !== before.id && window.state !== 'minimized');
+    if (!background) return;
+
+    const shot = await screenshot({ window: background.id, maxWidth: 320 });
+    expect(['window', 'screen_fallback']).toContain(shot.captureMode);
+    expect((await activeWindow()).window?.id).toBe(before.id);
+  });
+
   it('crops using coordinates from the most recent returned frame', async () => {
     const base = await screenshot({ maxWidth: 320 });
     const width = Math.min(100, base.width);
@@ -87,7 +99,8 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
     expect(result.window).toBeGreaterThan(0);
     expect(Array.isArray(result.elements)).toBe(true);
     expect(result.elements.length).toBeLessThanOrEqual(5);
-    for (const element of result.elements) expect(element.ref).toMatch(/^g\d+_e\d+_\d+$/);
+    expect(result.snapshotId).toBeGreaterThan(0);
+    for (const element of result.elements) expect(element.ref).toMatch(/^g\d+_s\d+_e\d+$/);
   });
 
   it('returns a Codex-style window state with semantic UI refs', async () => {
@@ -97,23 +110,30 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
     expect(state.window.id).toBeGreaterThan(0);
     expect(state.screenshot).toBeNull();
     expect(state.elements.length).toBeLessThanOrEqual(8);
-    for (const element of state.elements) expect(element.ref).toMatch(/^g\d+_e\d+_\d+$/);
+    expect(state.snapshotId).toBeGreaterThan(0);
+    for (const element of state.elements) expect(element.ref).toMatch(/^g\d+_s\d+_e\d+$/);
   });
 
   it('refuses an invented semantic element ref instead of clicking cached coordinates', async () => {
     await expect(act([{ type: 'click_ref', ref: 'g1_e999999_999999' }])).rejects.toThrow(/UNKNOWN_UI_REF/);
   });
 
-  it('refuses coordinates from a frame the screen has moved on from', async () => {
-    const stale = await screenshot({ maxWidth: 320 });
+  it('keeps a recent immutable frame usable across an unrelated observation', async () => {
+    const earlier = await screenshot({ maxWidth: 320 });
     const current = await screenshot({ maxWidth: 320 });
-    expect(current.frameId).toBeGreaterThan(stale.frameId);
+    expect(current.frameId).toBeGreaterThan(earlier.frameId);
 
-    await expect(act([{ type: 'move', x: 1, y: 1 }], { frameId: stale.frameId })).rejects.toThrow(/STALE_FRAME/);
-    // The current frame works. Omitting the identity must fail closed: another caller can
-    // replace the app-global lastFrame between screenshot and action.
+    // Another caller taking a picture no longer invalidates this frame. A window-bound
+    // frame is revalidated against its HWND and geometry inside the helper before input.
+    await expect(act([{ type: 'move', x: 1, y: 1 }], { frameId: earlier.frameId })).resolves.toBeTruthy();
     await expect(act([{ type: 'move', x: 1, y: 1 }], { frameId: current.frameId })).resolves.toBeTruthy();
     await expect(act([{ type: 'move', x: 1, y: 1 }])).rejects.toThrow(/FRAME_REQUIRED/);
+  });
+
+  it('refuses a frame after the bounded immutable history evicts it', async () => {
+    const old = await screenshot({ maxWidth: 320 });
+    for (let index = 0; index < 16; index++) await screenshot({ maxWidth: 320 });
+    await expect(act([{ type: 'move', x: 1, y: 1 }], { frameId: old.frameId })).rejects.toThrow(/STALE_FRAME/);
   });
 
   it('does not check the frame for semantic refs, which do not use coordinates', async () => {
@@ -153,6 +173,27 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
     expect(other.frameId).toBe(result.screenshot!.frameId + 1);
   });
 
+  it('waits for a compact postcondition inside the same action call', async () => {
+    const current = (await activeWindow()).window;
+    if (!current) return;
+    const result = await actAndCapture([{ type: 'wait', ms: 0 }], {
+      verify: { until: 'foreground', window: current.id, timeoutMs: 250 }
+    });
+    expect(result.completedCount).toBe(1);
+    expect(result.verification).toMatchObject({ until: 'foreground', snapshotId: null });
+  });
+
+  it('marks all executed actions when postcondition verification times out', async () => {
+    await expect(
+      actAndCapture([{ type: 'wait', ms: 0 }], {
+        verify: { until: 'window_exists', match: 'clf-window-that-cannot-exist-5f2dc5', timeoutMs: 0 }
+      })
+    ).rejects.toMatchObject({
+      completedCount: 1,
+      message: expect.stringMatching(/POSTCONDITION_FAILED: completed_count=1.*VERIFY_TIMEOUT/)
+    });
+  });
+
   it('resolves a captureAfter crop against the frame that was current before the actions', async () => {
     const base = await screenshot({ maxWidth: 320 });
     const width = Math.min(64, base.width);
@@ -166,14 +207,19 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
     expect(result.screenshot!.height).toBe(height);
   });
 
-  it('refuses a captureAfter crop whose screenshot identity is missing or stale', async () => {
-    const stale = await screenshot({ maxWidth: 320 });
+  it('requires a retained screenshot identity for captureAfter crops', async () => {
+    const earlier = await screenshot({ maxWidth: 320 });
     const current = await screenshot({ maxWidth: 320 });
     const crop = { x: 0, y: 0, width: Math.min(32, current.width), height: Math.min(24, current.height) };
 
     await expect(actAndCapture([{ type: 'wait', ms: 0 }], { capture: { crop } })).rejects.toThrow(/FRAME_REQUIRED/);
     await expect(
-      actAndCapture([{ type: 'wait', ms: 0 }], { frameId: stale.frameId, capture: { crop } })
+      actAndCapture([{ type: 'wait', ms: 0 }], { frameId: earlier.frameId, capture: { crop } })
+    ).resolves.toBeTruthy();
+
+    for (let index = 0; index < 16; index++) await screenshot({ maxWidth: 320 });
+    await expect(
+      actAndCapture([{ type: 'wait', ms: 0 }], { frameId: earlier.frameId, capture: { crop } })
     ).rejects.toThrow(/STALE_FRAME/);
   });
 

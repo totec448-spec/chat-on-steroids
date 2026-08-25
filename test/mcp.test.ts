@@ -767,15 +767,24 @@ describe('surface boundaries', () => {
     // Per tool as well as per surface, so one schema cannot quietly eat the whole budget
     // while the total stays under it. `computer` is the largest by design: fourteen
     // discriminated action variants, each spelling out its own arguments, is what keeps
-    // its validation errors small and its action set explicit. `agents` is the second
-    // exception, and a narrower one: its description is where the prime learns to write
+    // its validation errors small and its action set explicit. `exec_command` earns a narrow
+    // exception for the `cmds` contract that removes whole connector round trips, including
+    // the one-shell and per-command-exit semantics. `agents` is the other exception: its description is where the prime learns to write
     // shared context once instead of per worker, to batch messages into one call, and to
     // hand back RESULT/CHANGES/VALIDATION/BLOCKERS — bytes spent once at discovery to save
     // a great many in every run that follows.
     for (const tool of [...coreTools, ...desktopTools]) {
       const bytes = Buffer.byteLength(JSON.stringify(tool), 'utf8');
       const budget =
-        tool.name === 'computer' ? 6_000 : tool.name === 'apply_patch' ? 5_000 : tool.name === 'agents' ? 3_400 : 3_000;
+        tool.name === 'computer'
+          ? 6_000
+          : tool.name === 'apply_patch'
+            ? 5_000
+            : tool.name === 'agents'
+              ? 3_400
+              : tool.name === 'exec_command'
+                ? 3_500
+                : 3_000;
       expect(bytes, `${tool.name} schema is ${bytes} bytes`).toBeLessThan(budget);
     }
   });
@@ -835,7 +844,14 @@ describe('2025-era clients', () => {
     expect(instructions).toContain('PowerShell does not expand * or ? for native programs');
     // Progress guidance lives once at server level rather than bloating every tool description.
     expect(instructions).toContain('Keep the user visibly informed more than usual while you work');
-    // Short enough not to burn the model's context on every conversation.
+    // The two round-trip levers the recorded sessions actually pay for. Both are instructions
+    // rather than tool descriptions because they are about *how many calls to make*, which is a
+    // decision taken before any one tool's schema is read.
+    expect(instructions).toContain('exec_command cmds');
+    expect(instructions).toContain('read a file whole rather than in windows');
+    // Short enough not to burn the model's context on every conversation. Everything added
+    // since this bound was set paid for itself by tightening a line that said the same thing
+    // at greater length; raise it only for guidance that removes calls, never for prose.
     expect(instructions.length).toBeLessThan(2500);
   });
 
@@ -856,6 +872,11 @@ describe('2025-era clients', () => {
     });
     expect(desktopReply.body.result.instructions).toContain(surfaceDefinition('core').connectorName);
     expect(desktopReply.body.result.instructions).toContain('observe');
+    // The most repeated desktop pattern in the recorded sessions was a batch containing
+    // nothing but a fixed sleep and a screenshot, run again and again. `verify` is the
+    // replacement, and it only helps if the instructions point at it by name.
+    expect(desktopReply.body.result.instructions).toContain('Do not poll with a batch that only waits');
+    expect(desktopReply.body.result.instructions).toContain('verify');
   });
 
   it('lists tools without an initialize handshake', async () => {
@@ -879,11 +900,7 @@ describe('2025-era clients', () => {
     expect(Object.keys(schema?.properties ?? {})).toEqual(['path']);
     expect(schema?.required).toEqual(['path']);
     expect(schema?.additionalProperties).toBe(false);
-    expect(tool?.outputSchema).toMatchObject({
-      type: 'object',
-      required: ['image_url', 'detail'],
-      additionalProperties: false
-    });
+    expect(tool?.outputSchema).toBeUndefined();
 
     const reply = await core('tools/call', {
       name: 'view_image',
@@ -895,8 +912,7 @@ describe('2025-era clients', () => {
     expect(image?.mimeType).toBe('image/png');
     expect(typeof image?.data).toBe('string');
     expect(Buffer.from(String(image?.data), 'base64').subarray(0, 4)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-    expect(reply.body.result?.structuredContent).toMatchObject({ detail: 'high' });
-    expect(reply.body.result?.structuredContent?.image_url).toMatch(/^data:application\/octet-stream;base64,/);
+    expect(reply.body.result?.structuredContent).toBeUndefined();
   });
 });
 
@@ -950,6 +966,14 @@ describe('capability gating', () => {
       arguments: { patch: addPatch('/workspace/split.txt', ['one']) }
     });
     expect(added.body.result?.isError).toBeFalsy();
+    expect(await fs.readFile(path.join(approved, 'split.txt'), 'utf8')).toBe('one\n');
+
+    const addOverExisting = await core('tools/call', {
+      name: 'apply_patch',
+      arguments: { patch: addPatch('/workspace/split.txt', ['overwritten through add']) }
+    });
+    expect(addOverExisting.body.result?.isError).toBe(true);
+    expect(textOf(addOverExisting)).toContain('Edit files is disabled');
     expect(await fs.readFile(path.join(approved, 'split.txt'), 'utf8')).toBe('one\n');
 
     const updated = await core('tools/call', {
@@ -1480,6 +1504,27 @@ describe('desktop capabilities', () => {
     expect(failed(conflictingTargets)).toBe(true);
   });
 
+  it('validates compact computer postconditions and keeps screen permission live', async () => {
+    ctx.caps = withCaps({ control: true, screen: true });
+    ctx.readOnly = false;
+    const malformed = await desktop('tools/call', {
+      name: 'computer',
+      arguments: { actions: [{ type: 'wait', ms: 0 }], verify: { until: 'foreground' } }
+    });
+    expect(failed(malformed)).toBe(true);
+
+    ctx.caps = withCaps({ control: true, screen: false });
+    const disabled = await desktop('tools/call', {
+      name: 'computer',
+      arguments: {
+        actions: [{ type: 'wait', ms: 0 }],
+        verify: { until: 'foreground', window: 123, timeout_ms: 0 }
+      }
+    });
+    expect(failed(disabled)).toBe(true);
+    expect(textOf(disabled)).toContain('See the screen');
+  });
+
   it('rejects observe options whose selected view would silently ignore them', async () => {
     ctx.caps = withCaps({ screen: true });
     const strayTimeout = await desktop('tools/call', {
@@ -1795,6 +1840,27 @@ describe('bounded output', () => {
     expect(text).not.toContain('continue from line');
   });
 
+  it('reads a typical 1,500-line source file whole by default and tells the model not to pre-paginate', async () => {
+    const lines = Array.from({ length: 1_500 }, (_, index) =>
+      `${String(index + 1).padStart(4, '0')} export const measuredDefaultReadLine = '${'x'.repeat(64)}';`
+    );
+    await fs.writeFile(path.join(approved, 'long-default-read.ts'), `${lines.join('\n')}\n`, 'utf8');
+
+    const readTool = toolList(await core('tools/list')).find((tool) => tool.name === 'read')!;
+    expect(String(readTool.description)).toMatch(/1,500-line source file/i);
+    expect(String(readTool.description)).toMatch(/do not pre-paginate/i);
+
+    const reply = await core('tools/call', {
+      name: 'read',
+      arguments: { paths: ['/workspace/long-default-read.ts'] }
+    });
+    const text = textOf(reply);
+    expect(failed(reply), text).toBe(false);
+    expect(text).toContain('lines 1-1500 of 1500');
+    expect(text).toContain('1500 export const measuredDefaultReadLine');
+    expect(text).not.toContain('continue from line');
+  });
+
   /*
    * The line count is the header's answer to "how long is this file", and a range is exactly when
    * that matters: 3 lines with no denominator cannot be told apart from a whole file. The read
@@ -2022,6 +2088,26 @@ describe('apply_patch', () => {
     ctx.caps = withCaps({ create: true, edit: true, move: true, deleteFile: true });
   });
 
+  it('resolves later hunks against files created earlier in the same patch', async () => {
+    const reply = await core('tools/call', {
+      name: 'apply_patch',
+      arguments: {
+        patch: [
+          '*** Begin Patch',
+          '*** Add File: /workspace/fresh-sequential.ts',
+          '+const fresh = 1;',
+          '*** Update File: /workspace/fresh-sequential.ts',
+          '@@',
+          '-const fresh = 1;',
+          '+const fresh = 2;',
+          '*** End Patch'
+        ].join('\n')
+      }
+    });
+    expect(reply.body.result?.isError, textOf(reply)).toBeFalsy();
+    expect(await fs.readFile(path.join(approved, 'fresh-sequential.ts'), 'utf8')).toBe('const fresh = 2;\n');
+  });
+
   it('adds, updates, moves and deletes through one tool', async () => {
     const added = await core('tools/call', {
       name: 'apply_patch',
@@ -2067,8 +2153,30 @@ describe('apply_patch', () => {
   // context-only line. That line changes no content and must not quietly require Edit.
   it('renames without Edit, and still refuses to rewrite content', async () => {
     const source = path.join(approved, 'rename-me.txt');
-    await fs.writeFile(source, `keep this${String.fromCharCode(10)}`, 'utf8');
+    const occupied = path.join(approved, 'rename-occupied.txt');
+    // A move-only permission must preserve bytes. The default Codex update mode normalizes
+    // CRLF to LF, so this catches an implementation that performs a text rewrite just to rename.
+    await fs.writeFile(source, 'keep this\r\n', 'utf8');
+    await fs.writeFile(occupied, `do not replace${String.fromCharCode(10)}`, 'utf8');
     ctx.caps = withCaps({ move: true, edit: false });
+
+    const overwrite = await core('tools/call', {
+      name: 'apply_patch',
+      arguments: {
+        patch: [
+          '*** Begin Patch',
+          '*** Update File: /workspace/rename-me.txt',
+          '*** Move to: /workspace/rename-occupied.txt',
+          '@@',
+          ' keep this',
+          '*** End Patch'
+        ].join(String.fromCharCode(10))
+      }
+    });
+    expect(overwrite.body.result?.isError).toBe(true);
+    expect(textOf(overwrite)).toContain('Edit files is disabled');
+    expect(await fs.readFile(source, 'utf8')).toContain('keep this');
+    expect(await fs.readFile(occupied, 'utf8')).toContain('do not replace');
 
     const moved = await core('tools/call', {
       name: 'apply_patch',
@@ -2084,7 +2192,7 @@ describe('apply_patch', () => {
       }
     });
     expect(moved.body.result?.isError, textOf(moved)).toBeFalsy();
-    expect(await fs.readFile(path.join(approved, 'renamed.txt'), 'utf8')).toContain('keep this');
+    expect(await fs.readFile(path.join(approved, 'renamed.txt'), 'utf8')).toBe('keep this\r\n');
 
     const rewritten = await core('tools/call', {
       name: 'apply_patch',
@@ -2102,7 +2210,7 @@ describe('apply_patch', () => {
     });
     expect(rewritten.body.result?.isError).toBe(true);
     expect(textOf(rewritten)).toContain('TOOL_DISABLED');
-    expect(await fs.readFile(path.join(approved, 'renamed.txt'), 'utf8')).toContain('keep this');
+    expect(await fs.readFile(path.join(approved, 'renamed.txt'), 'utf8')).toBe('keep this\r\n');
   });
 
   it('rejects an empty move-only Update hunk, matching current Codex', async () => {
@@ -2157,6 +2265,41 @@ describe('apply_patch', () => {
     expect(textOf(reply)).toContain('M /workspace/batch-b.txt');
     expect(await fs.readFile(a, 'utf8')).toBe('ALPHA\n');
     expect(await fs.readFile(b, 'utf8')).toBe('BETA\n');
+  });
+
+  it.runIf(IS_WINDOWS)('rolls back earlier files when a later commit fails after verification', async () => {
+    const a = path.join(approved, 'batch-runtime-fail-a.txt');
+    const b = path.join(approved, 'batch-runtime-fail-b.txt');
+    await fs.writeFile(a, 'alpha\n', 'utf8');
+    await fs.writeFile(b, 'beta\n', 'utf8');
+    // Read-only is ideal here: verification and patch matching can still read B, so the failure
+    // occurs only at the second runtime write, after A has already committed in raw Codex.
+    await fs.chmod(b, 0o444);
+    try {
+      const reply = await core('tools/call', {
+        name: 'apply_patch',
+        arguments: {
+          patch: [
+            '*** Begin Patch',
+            '*** Update File: /workspace/batch-runtime-fail-a.txt',
+            '@@',
+            '-alpha',
+            '+ALPHA',
+            '*** Update File: /workspace/batch-runtime-fail-b.txt',
+            '@@',
+            '-beta',
+            '+BETA',
+            '*** End Patch'
+          ].join('\n')
+        }
+      });
+      expect(reply.body.result?.isError).toBe(true);
+      expect(textOf(reply)).toContain('rolled back');
+      expect(await fs.readFile(a, 'utf8')).toBe('alpha\n');
+      expect(await fs.readFile(b, 'utf8')).toBe('beta\n');
+    } finally {
+      await fs.chmod(b, 0o666).catch(() => undefined);
+    }
   });
 
   it('leaves every target untouched when one hunk in the patch does not apply', async () => {
@@ -2597,6 +2740,7 @@ describe('exec_command and write_stdin', () => {
 
     expect(Object.keys(exec.inputSchema.properties)).toEqual([
       'cmd',
+      'cmds',
       'workdir',
       'tty',
       'yield_time_ms',
@@ -2604,9 +2748,13 @@ describe('exec_command and write_stdin', () => {
       'shell',
       'login'
     ]);
-    expect(exec.inputSchema.required).toEqual(['cmd']);
+    expect(exec.inputSchema.required ?? []).toEqual([]);
     expect(exec.inputSchema.additionalProperties).toBe(false);
     expect(exec.inputSchema.properties.workdir.type).toBe('string');
+    expect(exec.inputSchema.properties.cmds.type).toBe('array');
+    expect(exec.inputSchema.properties.cmds.items.type).toBe('string');
+    expect(String(exec.inputSchema.properties.cmds.description)).toMatch(/one shell session/i);
+    expect(String(exec.inputSchema.properties.cmds.description)).toMatch(/exit code/i);
     expect(exec.inputSchema.properties.tty.type).toBe('boolean');
     expect(exec.inputSchema.properties.yield_time_ms.type).toBe('number');
     expect(exec.inputSchema.properties.max_output_tokens.type).toBe('number');
@@ -2638,6 +2786,69 @@ describe('exec_command and write_stdin', () => {
     }
     expect(stdin.outputSchema).toEqual(exec.outputSchema);
   });
+
+  it.runIf(IS_WINDOWS)('runs cmds sequentially in one shell with labeled per-command exit codes', async () => {
+    const reply = await core('tools/call', {
+      name: 'exec_command',
+      arguments: {
+        cmds: [
+          "$measuredBatchValue='same-shell'",
+          'Write-Output "value=$measuredBatchValue"; cmd /c exit 7',
+          'Write-Output "after=$measuredBatchValue"'
+        ],
+        workdir: '/workspace',
+        yield_time_ms: 5_000
+      }
+    });
+    const text = textOf(reply);
+    expect(failed(reply), text).toBe(false);
+    expect(text).toContain('--- command 1/3 ---');
+    expect(text).toContain('--- command 2/3 ---');
+    expect(text).toContain('--- command 3/3 ---');
+    expect(text).toContain('--- exit code 7 ---');
+    expect(text).toContain('value=same-shell');
+    expect(text).toContain('after=same-shell');
+    expect(reply.body.result?.structuredContent).toMatchObject({ exit_code: 7 });
+
+    for (const arguments_ of [{}, { cmd: 'Write-Output one', cmds: ['Write-Output two'] }]) {
+      const invalid = await core('tools/call', { name: 'exec_command', arguments: arguments_ });
+      expect(failed(invalid), textOf(invalid)).toBe(true);
+      expect(textOf(invalid)).toMatch(/exactly one of cmd or cmds/i);
+    }
+  });
+
+  it.runIf(IS_WINDOWS)('reads a batch exit per command, so one search finding nothing is not a failure', async () => {
+    // The batch that `cmds` exists for is several searches at once, and a search that finds
+    // nothing exits 1. Handing the wrapper script to the single-command classifier would ask
+    // whether a `for` loop is a search, so the batch used to report a plain failure and invite
+    // the model to run all of it again — the exact round trip batching was meant to remove.
+    const searches = await core('tools/call', {
+      name: 'exec_command',
+      arguments: {
+        cmds: ['rg -n "second" notes.txt', 'rg -n "no-such-pattern-anywhere" notes.txt'],
+        workdir: '/workspace',
+        yield_time_ms: 8_000
+      }
+    });
+    const searchText = textOf(searches);
+    expect(searchText).toContain('--- exit code 1 ---');
+    // Named per command, because only one of the two is the one that found nothing.
+    expect(searchText).toMatch(/Command 2: Exit code 1 from/);
+    expect(searchText).toContain('is a result, not a failure');
+
+    // A real failure inside a batch stays a failure and gets no exoneration.
+    const broken = await core('tools/call', {
+      name: 'exec_command',
+      arguments: {
+        cmds: ['Write-Output first', 'cmd /c exit 3'],
+        workdir: '/workspace',
+        yield_time_ms: 8_000
+      }
+    });
+    const brokenText = textOf(broken);
+    expect(brokenText).toContain('--- exit code 3 ---');
+    expect(brokenText).not.toContain('is a result, not a failure');
+  }, 60_000);
 
   it('uses Codex response and session semantics for quick and interactive commands', async () => {
     const quick = await core('tools/call', {

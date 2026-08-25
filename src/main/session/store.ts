@@ -62,7 +62,7 @@ export const MAX_OVERFLOW_ASSET_CHARS = 8 * 1024 * 1024;
 const MAX_LINE_BYTES = 512 * 1024;
 /** How many sessions the UI shows. Lookups and pruning still see every session. */
 const MAX_LISTED_SESSIONS = 200;
-/** Hard stop on directory enumeration, so a pathological folder cannot hang the app. */
+/** Bound for legacy/model-facing full-list scans. Identity and retention use the uncapped cached catalog. */
 const MAX_SCANNED_SESSIONS = 5_000;
 
 let root = '';
@@ -77,8 +77,10 @@ let root = '';
 const missingCurrentConversations = new Set<string>();
 
 interface AttachmentCatalog {
-  /** Durable summary projection used only to rank/validate attachment ids. */
+  /** Durable summary projection used for attachment identity and the renderer summary index. */
   summaries: Map<string, SessionSummary>;
+  /** Durable closed-session order. Open sessions are overlaid live and excluded while paging. */
+  orderedIds: string[];
   current: Map<string, Set<string>>;
   historical: Map<string, Set<string>>;
 }
@@ -86,15 +88,18 @@ interface AttachmentCatalog {
 /**
  * Derived, rebuildable attachment index. Durable `meta.json` remains the authority.
  *
- * The UI/maintenance list intentionally caps directory scans at 5,000. Conversation identity
- * cannot use that cap: an arbitrary readdir prefix is not proof that an older chat has no
- * owner. The catalog performs one uncapped metadata pass on first ownership lookup, then all
- * normal `/activity` and recorder lookups are O(1) in the number of sessions. Attachment
- * mutations update it only after their durable write lands.
+ * Some model-facing compatibility reads intentionally cap directory scans at 5,000. Conversation
+ * identity and retention cannot use that cap: an arbitrary readdir prefix is not proof that an
+ * older chat has no owner or is exempt from expiry. The catalog performs one uncapped,
+ * crash-reconciling pass on first authoritative lookup, then normal `/activity`, renderer and
+ * retention reads reuse it. Attachment mutations update it only after their durable write lands.
  */
 let attachmentCatalog: AttachmentCatalog | null = null;
 let attachmentCatalogLoading: Promise<AttachmentCatalog> | null = null;
-/** Changes only when session↔conversation ownership changes, not for ordinary metadata ticks. */
+/**
+ * Invalidates an in-flight catalog build on ownership changes or when a live overlay retires.
+ * Ordinary event/meta ticks do not touch it.
+ */
 let attachmentEpoch = 0;
 const MAX_MISSING_CONVERSATION_CACHE = 1024;
 
@@ -150,6 +155,8 @@ function assertSessionId(id: string): void {
 interface OpenSession {
   summary: SessionSummary;
   nextSeq: number;
+  /** Highest durable journal/message seq already reflected by `summary`. */
+  historySeq: number;
   /** Recent durable events, so incremental /activity polls do not reread the whole JSONL. */
   tail: SessionEvent[];
   /** Serialises appends so two events can never interleave inside one line. */
@@ -163,6 +170,14 @@ interface OpenSession {
 const open = new Map<string, OpenSession>();
 /** One disk reconstruction per session; direct concurrent callers must share it. */
 const opening = new Map<string, Promise<OpenSession>>();
+interface DurableSessionSnapshot {
+  summary: SessionSummary;
+  messages: Map<string, MessageEvent>;
+  historySeq: number;
+  reconciled: boolean;
+}
+/** Read-only recovery also shares one durable high-water check/rebuild per session. */
+const reconciling = new Map<string, Promise<DurableSessionSnapshot | null>>();
 const MAX_EVENT_TAIL = 4096;
 /** Hard ceiling for a bounded recent-history disk read. */
 const MAX_RECENT_READ_BYTES = 8 * 1024 * 1024;
@@ -181,6 +196,15 @@ type NewMessageEvent = MessageEvent extends infer Event
     ? Omit<Event, 'seq'>
     : never
   : never;
+
+/** Internal checkpoint field persisted beside the public summary projection. */
+const META_HISTORY_SEQ = '__historySeq';
+type PersistedSummary = SessionSummary & { [META_HISTORY_SEQ]?: number };
+interface MetaCheckpoint {
+  summary: SessionSummary;
+  /** Null means metadata written by a version that did not yet persist a history watermark. */
+  historySeq: number | null;
+}
 
 function messageKey(event: Pick<MessageEvent, 'kind' | 'messageId'>): string | null {
   return event.messageId ? `${event.kind}\u0000${event.messageId}` : null;
@@ -231,14 +255,15 @@ function emptySummary(id: string, title: string, conversationId: string | null):
  * Split out so a *staged* summary can be written before it is published into memory. That
  * ordering is what makes the compaction rebind safe to fail: see rebindSession.
  */
-async function writeSummary(summary: SessionSummary): Promise<void> {
+async function writeSummary(summary: SessionSummary, historySeq: number): Promise<void> {
   const dir = sessionDir(summary.id);
   const target = path.join(dir, 'meta.json');
   const backup = path.join(dir, 'meta.backup.json');
   const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
+  const persisted: PersistedSummary = { ...summary, [META_HISTORY_SEQ]: historySeq };
   await fs.mkdir(dir, { recursive: true });
   try {
-    await fs.writeFile(tmp, JSON.stringify(summary, null, 2), 'utf8');
+    await fs.writeFile(tmp, JSON.stringify(persisted, null, 2), 'utf8');
     // Preserve the last validated checkpoint. Never copy arbitrary corrupt bytes over the
     // backup: parse/id validation is what makes this a recovery source rather than a second
     // name for the same damage.
@@ -263,7 +288,12 @@ async function writeSummary(summary: SessionSummary): Promise<void> {
 }
 
 async function writeMeta(entry: OpenSession): Promise<void> {
-  await writeSummary(entry.summary);
+  await writeSummary(entry.summary, entry.historySeq);
+  // The attachment catalog is also the process-lifetime summary index used by the paged UI.
+  // Ordinary event ticks stay in `open` and are overlaid live, but once metadata is actually
+  // written keep the cached durable projection current too. Do not rebuild attachment maps:
+  // rename/end/token changes do not change conversation ownership.
+  publishCachedSummary(entry.summary, false);
   entry.metaDirty = false;
 }
 
@@ -345,6 +375,7 @@ export async function createSession(options: {
   const entry: OpenSession = {
     summary,
     nextSeq: 1,
+    historySeq: 0,
     tail: [],
     queue: Promise.resolve(),
     messages: new Map(),
@@ -492,11 +523,23 @@ async function writeCanonicalMessage(id: string, key: string, event: MessageEven
   }
 }
 
-/** Explicit slow-path reconstruction used only when both metadata checkpoints are invalid. */
-async function rebuildSummaryFromHistory(id: string, messages: Map<string, MessageEvent>): Promise<SessionSummary> {
-  const summary = emptySummary(id, 'Recovered session', null);
-  let sawEvent = false;
-  const messageSeqs = new Set<number>();
+/**
+ * Explicit slow-path reconstruction from the durable journal plus canonical message shards.
+ *
+ * A stale metadata checkpoint cannot be patched incrementally for canonical revisions: the
+ * shard contains only the newest body, so the token weight of the superseded revision is gone.
+ * Rebuild the history-derived projection exactly, then preserve metadata-only facts (title,
+ * attachment lineage, compaction latch, close state) from the last valid checkpoint.
+ */
+async function rebuildSummaryFromHistory(
+  id: string,
+  messages: Map<string, MessageEvent>,
+  checkpoint: SessionSummary | null,
+  historySeq: number
+): Promise<SessionSummary> {
+  const rebuilt = emptySummary(id, 'Recovered session', null);
+  let sawProjected = false;
+  const canonicalKeys = new Set(messages.keys());
   let carry = Buffer.alloc(0);
   const handle = await fs.open(path.join(sessionDir(id), 'events.jsonl'), 'r').catch(() => null);
   const accept = (line: Buffer): void => {
@@ -504,19 +547,27 @@ async function rebuildSummaryFromHistory(id: string, messages: Map<string, Messa
     try {
       const event = JSON.parse(line.toString('utf8')) as SessionEvent;
       if (!event || typeof event.seq !== 'number' || typeof event.kind !== 'string') return;
-      if (!sawEvent && event.kind === 'session_start') {
-        summary.title = event.title || summary.title;
-        summary.startedAt = event.time;
-        summary.updatedAt = event.time;
+      // Once a stable website message has a canonical shard, any old append-only snapshot with
+      // the same identity is legacy storage for that same logical event, not another event.
+      if (
+        (event.kind === 'user_message' || event.kind === 'assistant_message') &&
+        messageKey(event) &&
+        canonicalKeys.has(messageKey(event)!)
+      ) {
+        return;
       }
+      if (!sawProjected) {
+        rebuilt.startedAt = event.time;
+        rebuilt.updatedAt = event.time;
+      }
+      if (!sawProjected && event.kind === 'session_start') rebuilt.title = event.title || rebuilt.title;
       const eventConversation = 'conversationId' in event && typeof event.conversationId === 'string' ? event.conversationId : null;
       if (eventConversation) {
-        summary.conversationId = eventConversation;
-        if (!summary.chatIds.includes(eventConversation)) summary.chatIds.push(eventConversation);
+        rebuilt.conversationId = eventConversation;
+        if (!rebuilt.chatIds.includes(eventConversation)) rebuilt.chatIds.push(eventConversation);
       }
-      if (event.kind === 'user_message' || event.kind === 'assistant_message') messageSeqs.add(event.seq);
-      applyToSummary(summary, event);
-      sawEvent = true;
+      applyToSummary(rebuilt, event);
+      sawProjected = true;
     } catch {
       // A torn or corrupt line costs that line, not the complete session projection.
     }
@@ -545,15 +596,100 @@ async function rebuildSummaryFromHistory(id: string, messages: Map<string, Messa
   } finally {
     await handle?.close().catch(() => undefined);
   }
-  for (const message of messages.values()) {
-    if (!messageSeqs.has(message.seq)) applyToSummary(summary, message);
+  for (const message of [...messages.values()].sort((left, right) => left.seq - right.seq)) {
+    if (!sawProjected) {
+      rebuilt.startedAt = message.time;
+      rebuilt.updatedAt = message.time;
+    }
+    applyToSummary(rebuilt, message);
+    sawProjected = true;
   }
-  if (!sawEvent && messages.size === 0) {
+  if (!sawProjected) {
     throw new Error(`Session ${id} has no recoverable metadata or history`);
   }
+
+  const summary = checkpoint
+    ? {
+        ...checkpoint,
+        updatedAt: Math.max(checkpoint.updatedAt, rebuilt.updatedAt),
+        events: rebuilt.events,
+        userMessages: rebuilt.userMessages,
+        toolCalls: rebuilt.toolCalls,
+        errors: rebuilt.errors,
+        estimatedTokens: rebuilt.estimatedTokens,
+        // `contextTokens` may have been reset by a durable rebind, which is metadata-only and
+        // therefore cannot be reconstructed from the event log. Every history mutation changes
+        // lifetime/context token totals by the same delta, so applying the rebuilt lifetime delta
+        // to the checkpoint preserves that reset while still recovering message revisions exactly.
+        contextTokens: Math.max(0, checkpoint.contextTokens + (rebuilt.estimatedTokens - checkpoint.estimatedTokens)),
+        lastHandoffId: rebuilt.lastHandoffId,
+        lastHandoffAt: rebuilt.lastHandoffAt,
+        lastTurnOutcome: rebuilt.lastTurnOutcome,
+        activeTurnId: rebuilt.activeTurnId ?? null,
+        agents: [...new Set([...checkpoint.agents, ...rebuilt.agents])]
+      }
+    : rebuilt;
   logWarn(`session ${id}: rebuilt metadata from durable event/message history`);
-  await writeSummary(summary);
+  await writeSummary(summary, historySeq);
   return summary;
+}
+
+/**
+ * Reads the durable source of truth without making the session live.
+ *
+ * `meta.json` is a projection and can legitimately lag the journal or a canonical message
+ * shard after a crash. Read-only callers still need the repaired projection, but routing them
+ * through `ensureOpen()` would change lifetime semantics: merely viewing old history would put
+ * it in `open` and make retention skip it. This helper performs the same high-water recovery
+ * while leaving `open` untouched.
+ */
+async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot | null> {
+  assertSessionId(id);
+  const existing = reconciling.get(id);
+  if (existing) return existing;
+  const work = (async () => {
+    const messages = await readCanonicalMessages(id);
+    let messageSeq = 0;
+    for (const event of messages.values()) messageSeq = Math.max(messageSeq, event.seq);
+    const journalSeq = await lastSeqOnDisk(id);
+    const historySeq = Math.max(journalSeq, messageSeq);
+    const checkpoint = await readMetaCheckpoint(id);
+
+    if (checkpoint?.historySeq === historySeq) {
+      return { summary: checkpoint.summary, messages, historySeq, reconciled: false };
+    }
+    if (checkpoint && checkpoint.historySeq === null && historySeq === 0) {
+      // Legacy empty session: there is no history to replay, only a missing watermark.
+      await writeSummary(checkpoint.summary, 0);
+      return { summary: checkpoint.summary, messages, historySeq: 0, reconciled: true };
+    }
+    if (!checkpoint && historySeq === 0) return null;
+
+    const summary = await rebuildSummaryFromHistory(id, messages, checkpoint?.summary ?? null, historySeq);
+    return { summary, messages, historySeq, reconciled: true };
+  })();
+  reconciling.set(id, work);
+  try {
+    return await work;
+  } finally {
+    if (reconciling.get(id) === work) reconciling.delete(id);
+  }
+}
+
+async function readAuthoritativeSummary(id: string): Promise<SessionSummary | null> {
+  const live = open.get(id);
+  if (live) return live.summary;
+  const becomingLive = opening.get(id);
+  if (becomingLive) return (await becomingLive).summary;
+  const snapshot = await readDurableSnapshot(id);
+  if (!snapshot) return null;
+  // If a process-lifetime catalog already exists, or one is concurrently being built and may
+  // already have passed this row, invalidate/update it after a recovery write. The catalog's own
+  // build calls readDurableSnapshot directly, so its normal stale-row repairs do not self-loop.
+  if (snapshot.reconciled && (attachmentCatalog || attachmentCatalogLoading)) {
+    publishAttachmentSummary(snapshot.summary);
+  }
+  return snapshot.summary;
 }
 
 async function ensureOpen(id: string): Promise<OpenSession> {
@@ -564,20 +700,22 @@ async function ensureOpen(id: string): Promise<OpenSession> {
   if (inFlight) return inFlight;
   const reconstruction = (async () => {
     await sealTornTail(id);
-    const messages = await readCanonicalMessages(id);
-    const summary = (await readMeta(id)) ?? (await rebuildSummaryFromHistory(id, messages));
-    let messageSeq = 0;
-    for (const event of messages.values()) messageSeq = Math.max(messageSeq, event.seq);
+    const snapshot = await readDurableSnapshot(id);
+    if (!snapshot) throw new Error(`Session ${id} has no recoverable metadata or history`);
     const entry: OpenSession = {
-      summary,
-      nextSeq: Math.max(await lastSeqOnDisk(id), messageSeq) + 1,
+      summary: snapshot.summary,
+      nextSeq: snapshot.historySeq + 1,
+      historySeq: snapshot.historySeq,
       tail: [],
       queue: Promise.resolve(),
-      messages,
+      messages: snapshot.messages,
       metaDirty: false,
       metaTimer: null
     };
     open.set(id, entry);
+    if (snapshot.reconciled && (attachmentCatalog || attachmentCatalogLoading)) {
+      publishAttachmentSummary(entry.summary);
+    }
     return entry;
   })();
   opening.set(id, reconstruction);
@@ -660,7 +798,7 @@ export async function claimAutoCompaction(
     // automatic compaction for the whole chat.
     if (!stillWorking()) return false;
     const staged: SessionSummary = { ...entry.summary, autoCompactTriggeredAt: Date.now() };
-    await writeSummary(staged);
+    await writeSummary(staged, entry.historySeq);
     Object.assign(entry.summary, staged);
     entry.metaDirty = false;
     return true;
@@ -712,6 +850,7 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
       entry.tail.push(full);
       if (entry.tail.length > MAX_EVENT_TAIL) entry.tail.splice(0, entry.tail.length - MAX_EVENT_TAIL);
       applyToSummary(entry.summary, full);
+      entry.historySeq = full.seq;
       scheduleMeta(entry);
       return full;
     });
@@ -847,6 +986,7 @@ export function upsertMessageEvent(
         entry.summary.updatedAt = Math.max(entry.summary.updatedAt, nextEvent.time);
         if (full.agent && !entry.summary.agents.includes(full.agent)) entry.summary.agents.push(full.agent);
       }
+      entry.historySeq = full.seq;
       scheduleMeta(entry);
       return { event: full, changed: true };
     });
@@ -894,7 +1034,11 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
         if (options.agent && parsed.agent !== options.agent) return false;
         return true;
       });
-      return chronological(cached).slice(0, limit);
+      // `from` is a sequence cursor. Page in sequence order first and only then apply the
+      // presentation chronology inside that bounded page; otherwise chronology may move a later
+      // row ahead of an earlier seq at the slice boundary and advancing the cursor would skip it.
+      const page = cached.sort((left, right) => left.seq - right.seq).slice(0, limit);
+      return chronological(page);
     }
   }
   let raw: string;
@@ -943,6 +1087,10 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
   // to move unrelated/replayed page history across turn boundaries and disagreed with the
   // extension renderer, which already used the shared rule. One function now defines the
   // transcript order everywhere.
+  if (options.from !== undefined) {
+    const page = out.sort((left, right) => left.seq - right.seq).slice(0, limit);
+    return chronological(page);
+  }
   return chronological(out).slice(0, limit);
 }
 
@@ -1109,10 +1257,12 @@ export async function rewriteUnattributedToolCalls(
       agents: []
     };
     for (const event of kept) applyToSummary(staged, event);
-    await writeSummary(staged);
+    const rewrittenHistorySeq = kept.at(-1)?.seq ?? 0;
+    await writeSummary(staged, rewrittenHistorySeq);
 
     Object.assign(entry.summary, staged);
     entry.nextSeq = kept.length + 1;
+    entry.historySeq = rewrittenHistorySeq;
     entry.tail = kept.slice(-MAX_EVENT_TAIL);
     entry.metaDirty = false;
   });
@@ -1123,32 +1273,43 @@ export async function rewriteUnattributedToolCalls(
   await rewrite;
 }
 
-function normalizeSummary(id: string, raw: string): SessionSummary | null {
+function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
   try {
-    const parsed = JSON.parse(raw) as SessionSummary;
+    const parsed = JSON.parse(raw) as PersistedSummary;
     if (parsed?.id !== id) return null;
+    const historySeq =
+      Number.isSafeInteger(parsed[META_HISTORY_SEQ]) && (parsed[META_HISTORY_SEQ] as number) >= 0
+        ? (parsed[META_HISTORY_SEQ] as number)
+        : null;
+    const { [META_HISTORY_SEQ]: _historySeq, ...publicFields } = parsed;
+    const publicSummary = publicFields as SessionSummary;
     // A meta.json written before agents, app-opened chats or the session lineage existed
     // has no such field. A session recorded before the lineage was a single chat by
     // definition, and everything it holds was in that chat's context, so both defaults are
     // the truth rather than a placeholder.
     return {
-      ...parsed,
-      agents: Array.isArray(parsed.agents) ? parsed.agents : [],
-      origin: parsed.origin ?? null,
-      chatIds: Array.isArray(parsed.chatIds)
-        ? parsed.chatIds
-        : parsed.conversationId
-          ? [parsed.conversationId]
-          : [],
-      contextTokens: typeof parsed.contextTokens === 'number' ? parsed.contextTokens : parsed.estimatedTokens,
-      autoCompactTriggeredAt: typeof parsed.autoCompactTriggeredAt === 'number' ? parsed.autoCompactTriggeredAt : null
+      historySeq,
+      summary: {
+        ...publicSummary,
+        agents: Array.isArray(publicSummary.agents) ? publicSummary.agents : [],
+        origin: publicSummary.origin ?? null,
+        chatIds: Array.isArray(publicSummary.chatIds)
+          ? publicSummary.chatIds
+          : publicSummary.conversationId
+            ? [publicSummary.conversationId]
+            : [],
+        contextTokens:
+          typeof publicSummary.contextTokens === 'number' ? publicSummary.contextTokens : publicSummary.estimatedTokens,
+        autoCompactTriggeredAt:
+          typeof publicSummary.autoCompactTriggeredAt === 'number' ? publicSummary.autoCompactTriggeredAt : null
+      }
     };
   } catch {
     return null;
   }
 }
 
-async function readMeta(id: string): Promise<SessionSummary | null> {
+async function readMetaCheckpoint(id: string): Promise<MetaCheckpoint | null> {
   const dir = sessionDir(id);
   try {
     const primary = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.json'), 'utf8'));
@@ -1169,6 +1330,10 @@ async function readMeta(id: string): Promise<SessionSummary | null> {
   return null;
 }
 
+async function readMeta(id: string): Promise<SessionSummary | null> {
+  return (await readMetaCheckpoint(id))?.summary ?? null;
+}
+
 function addAttachment(map: Map<string, Set<string>>, conversationId: string, sessionId: string): void {
   if (!conversationId) return;
   const ids = map.get(conversationId) ?? new Set<string>();
@@ -1185,15 +1350,41 @@ function removeAttachment(map: Map<string, Set<string>>, conversationId: string,
 }
 
 function indexSummary(catalog: AttachmentCatalog, summary: SessionSummary): void {
-  catalog.summaries.set(summary.id, { ...summary, chatIds: [...summary.chatIds] });
+  catalog.summaries.set(summary.id, { ...summary, chatIds: [...summary.chatIds], agents: [...summary.agents] });
   if (summary.conversationId) addAttachment(catalog.current, summary.conversationId, summary.id);
   for (const chatId of summary.chatIds) addAttachment(catalog.historical, chatId, summary.id);
 }
 
 function unindexSummary(catalog: AttachmentCatalog, summary: SessionSummary): void {
   catalog.summaries.delete(summary.id);
+  const orderedAt = catalog.orderedIds.indexOf(summary.id);
+  if (orderedAt >= 0) catalog.orderedIds.splice(orderedAt, 1);
   if (summary.conversationId) removeAttachment(catalog.current, summary.conversationId, summary.id);
   for (const chatId of summary.chatIds) removeAttachment(catalog.historical, chatId, summary.id);
+}
+
+function insertSummaryOrder(catalog: AttachmentCatalog, summary: SessionSummary): void {
+  let low = 0;
+  let high = catalog.orderedIds.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    const other = catalog.summaries.get(catalog.orderedIds[middle]!);
+    if (!other || compareSummariesNewestFirst(summary, other) < 0) high = middle;
+    else low = middle + 1;
+  }
+  catalog.orderedIds.splice(low, 0, summary.id);
+}
+
+/** Refreshes only the summary projection; attachment ownership is unchanged. */
+function publishCachedSummary(summary: SessionSummary, reorder: boolean): void {
+  const catalog = attachmentCatalog;
+  if (!catalog) return;
+  const clone = { ...summary, chatIds: [...summary.chatIds], agents: [...summary.agents] };
+  catalog.summaries.set(summary.id, clone);
+  if (!reorder) return;
+  const orderedAt = catalog.orderedIds.indexOf(summary.id);
+  if (orderedAt >= 0) catalog.orderedIds.splice(orderedAt, 1);
+  insertSummaryOrder(catalog, clone);
 }
 
 /** Update the derived index only after an attachment mutation is durable. */
@@ -1205,6 +1396,7 @@ function publishAttachmentSummary(summary: SessionSummary): void {
   const previous = catalog.summaries.get(summary.id);
   if (previous) unindexSummary(catalog, previous);
   indexSummary(catalog, summary);
+  insertSummaryOrder(catalog, catalog.summaries.get(summary.id)!);
 }
 
 /** Remove one durable session from the derived ownership index. */
@@ -1216,8 +1408,16 @@ function publishAttachmentRemoval(sessionId: string): void {
   if (previous) unindexSummary(catalog, previous);
 }
 
+/** A closing live session must become the durable ordered row before its live overlay vanishes. */
+function publishClosedSummary(summary: SessionSummary): void {
+  // If the first catalog pass already read this row before close, force that in-flight snapshot
+  // to retry. Once a catalog exists, this is just one binary-positioned row update.
+  attachmentEpoch += 1;
+  publishCachedSummary(summary, true);
+}
+
 function newAttachmentCatalog(): AttachmentCatalog {
-  return { summaries: new Map(), current: new Map(), historical: new Map() };
+  return { summaries: new Map(), orderedIds: [], current: new Map(), historical: new Map() };
 }
 
 /**
@@ -1236,15 +1436,24 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
       let names: string[];
       try {
         names = await fs.readdir(root);
-      } catch {
-        names = [];
+      } catch (error) {
+        // A fresh install legitimately has no sessions directory yet. Any other failure is not
+        // evidence that the durable catalog is empty. Caching EBUSY/EACCES/IO errors here poisons
+        // every ownership, retention and latest-handoff lookup for the rest of the process.
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') names = [];
+        else throw error;
       }
       const catalog = newAttachmentCatalog();
       for (const name of names) {
         if (!/^[0-9a-z-]{8,64}$/i.test(name)) continue;
-        const summary = await readMeta(name);
+        const live = open.get(name);
+        const snapshot = live ? null : await readDurableSnapshot(name).catch(() => null);
+        const summary = live?.summary ?? snapshot?.summary ?? null;
         if (summary) indexSummary(catalog, summary);
       }
+      catalog.orderedIds = [...catalog.summaries.values()]
+        .sort(compareSummariesNewestFirst)
+        .map((summary) => summary.id);
       if (attachmentEpoch !== epoch) continue;
       attachmentCatalog = catalog;
       return catalog;
@@ -1261,11 +1470,9 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
 /**
  * Every readable session, newest first. Live summaries win over what is on disk.
  *
- * The whole directory is enumerated before anything is sorted or capped. Slicing an
- * arbitrary readdir order first — which is what this used to do — meant that past a
- * few hundred sessions the newest handoff could simply fall outside the window, so
- * "resume the last session" would resume some other one, and pruning would spare the
- * wrong folders. Reading a few hundred small meta.json files is cheap next to that.
+ * Legacy/model-facing bounded list. Do not use this for correctness properties that promise
+ * to see every retained session; identity, latest-handoff recovery and retention use the
+ * uncapped process catalog instead.
  */
 async function readAllSummaries(): Promise<SessionSummary[]> {
   assertReady();
@@ -1301,30 +1508,93 @@ async function readAllSummaries(): Promise<SessionSummary[]> {
  * and use it only where "every session" is part of the contract.
  */
 async function readEverySummary(): Promise<SessionSummary[]> {
-  assertReady();
-  let names: string[];
-  try {
-    names = await fs.readdir(root);
-  } catch {
-    return [];
-  }
-  const summaries: SessionSummary[] = [];
-  for (const name of names) {
-    if (!/^[0-9a-z-]{8,64}$/i.test(name)) continue;
-    const live = open.get(name);
-    const summary = live ? live.summary : await readMeta(name);
-    if (summary) summaries.push({ ...summary });
-  }
-  summaries.sort((a, b) => b.updatedAt - a.updatedAt);
-  return summaries;
+  const catalog = await ensureAttachmentCatalog();
+  const summaries = new Map<string, SessionSummary>();
+  for (const summary of catalog.summaries.values()) summaries.set(summary.id, summary);
+  // Live projections are authoritative between debounced meta writes.
+  for (const entry of open.values()) summaries.set(entry.summary.id, entry.summary);
+  return [...summaries.values()].map((summary) => ({ ...summary })).sort(compareSummariesNewestFirst);
 }
 
-/** Newest first, capped for the UI. */
+export interface SessionListCursor {
+  updatedAt: number;
+  id: string;
+}
+
+export interface SessionPage {
+  sessions: SessionSummary[];
+  total: number;
+  nextCursor: SessionListCursor | null;
+}
+
+function compareSummariesNewestFirst(left: SessionSummary, right: SessionSummary): number {
+  if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
+  if (left.id === right.id) return 0;
+  return left.id < right.id ? 1 : -1;
+}
+
+function comesAfterCursor(summary: SessionSummary, cursor: SessionListCursor): boolean {
+  return summary.updatedAt < cursor.updatedAt || (summary.updatedAt === cursor.updatedAt && summary.id < cursor.id);
+}
+
+/**
+ * One bounded UI page from a process-lifetime summary index.
+ *
+ * The first call pays the one metadata discovery pass that identity already needs. Every hot
+ * refresh after that is memory-only in the number of retained summaries plus the tiny live
+ * overlay; no coalesced recorder tick rereads thousands of meta.json files. The cursor is the
+ * last visible sort key rather than an offset, so a live session moving to the front cannot make
+ * history pagination duplicate/skip the boundary it already crossed.
+ */
+export async function listSessionPage(options: {
+  limit?: number;
+  cursor?: SessionListCursor;
+} = {}): Promise<SessionPage> {
+  const catalog = await ensureAttachmentCatalog();
+  const limit = Math.max(1, Math.min(MAX_LISTED_SESSIONS, Math.floor(options.limit ?? MAX_LISTED_SESSIONS)));
+  const openIds = new Set(open.keys());
+  const candidates: SessionSummary[] = [];
+
+  // Open summaries are authoritative between debounced metadata writes. There are normally one
+  // or a handful, so overlay them explicitly instead of rebuilding/sorting every retained row.
+  for (const entry of open.values()) {
+    if (options.cursor && !comesAfterCursor(entry.summary, options.cursor)) continue;
+    candidates.push({ ...entry.summary, chatIds: [...entry.summary.chatIds], agents: [...entry.summary.agents] });
+  }
+
+  // The durable order is already maintained incrementally. Collect only one page plus one
+  // sentinel; a hot first-page refresh therefore stays O(page + open sessions), even with
+  // thousands of retained sessions. Deep pages scan to their cursor only when the user asks.
+  let durableEligible = 0;
+  let durableHasMore = false;
+  for (const id of catalog.orderedIds) {
+    if (openIds.has(id)) continue;
+    const summary = catalog.summaries.get(id);
+    if (!summary || (options.cursor && !comesAfterCursor(summary, options.cursor))) continue;
+    if (durableEligible > limit) {
+      durableHasMore = true;
+      break;
+    }
+    candidates.push({ ...summary, chatIds: [...summary.chatIds], agents: [...summary.agents] });
+    durableEligible += 1;
+  }
+
+  candidates.sort(compareSummariesNewestFirst);
+  const sessions = candidates.slice(0, limit);
+  const last = sessions.at(-1);
+  const hasMore = durableHasMore || candidates.length > sessions.length;
+  const nextCursor = hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null;
+  let total = catalog.summaries.size;
+  for (const id of openIds) if (!catalog.summaries.has(id)) total += 1;
+  return { sessions, total, nextCursor };
+}
+
+/** Newest first, capped for older internal/UI callers. */
 export async function listSessions(): Promise<SessionSummary[]> {
-  return (await readAllSummaries()).slice(0, MAX_LISTED_SESSIONS);
+  return (await listSessionPage({ limit: MAX_LISTED_SESSIONS })).sessions;
 }
 
-/** Full bounded maintenance view. Never use this directly for UI payloads. */
+/** Full bounded compatibility/model-facing view. Never use it for retention or identity. */
 export async function listAllSessions(): Promise<SessionSummary[]> {
   return readAllSummaries();
 }
@@ -1420,9 +1690,8 @@ export async function sessionDurableModifiedAt(id: string): Promise<number | nul
 
 export async function getSession(id: string): Promise<SessionSummary | null> {
   assertSessionId(id);
-  const live = open.get(id);
-  if (live) return { ...live.summary };
-  return readMeta(id);
+  const summary = await readAuthoritativeSummary(id);
+  return summary ? { ...summary } : null;
 }
 
 export async function endSession(id: string): Promise<void> {
@@ -1435,6 +1704,7 @@ export async function endSession(id: string): Promise<void> {
   await enqueueSessionOperation(entry, 'end', async () => {
     entry.summary.endedAt = Date.now();
     await writeMeta(entry);
+    publishClosedSummary(entry.summary);
   });
   if (open.get(id) === entry) open.delete(id);
 }
@@ -1551,7 +1821,7 @@ export async function rebindSession(
     };
 
     try {
-      await writeSummary(staged);
+      await writeSummary(staged, entry.historySeq);
     } catch (err) {
       logWarn(`session ${id} could not be moved to ${toConversationId}: ${(err as Error).message}`);
       return false;
@@ -1765,7 +2035,9 @@ export async function latestHandoff(): Promise<Handoff | null> {
 export async function pruneSessions(retainDays: number): Promise<number> {
   if (retainDays <= 0) return 0;
   const cutoff = Date.now() - retainDays * 24 * 60 * 60 * 1000;
-  const sessions = await readAllSummaries();
+  // Retention is a completeness contract, not a UI query. Reuse the uncapped process-lifetime
+  // catalog so an arbitrary `readdir()` prefix can never make session 5,001 immortal.
+  const sessions = await readEverySummary();
   const newestHandoff = await latestHandoff();
   let removed = 0;
   for (const summary of sessions) {
@@ -1802,6 +2074,7 @@ export function resetSessionStoreForTests(): void {
   for (const entry of open.values()) if (entry.metaTimer) clearTimeout(entry.metaTimer);
   open.clear();
   opening.clear();
+  reconciling.clear();
   sessionAssetUsage.clear();
   globalAssetUsage = null;
   missingCurrentConversations.clear();

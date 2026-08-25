@@ -52,8 +52,8 @@ export function invalidInput(message: string): NodeJS.ErrnoException {
   return error;
 }
 
-function fileTooLargeError(): NodeJS.ErrnoException {
-  return invalidInput(`file is too large to read: limit is ${MAX_READ_FILE_BYTES} bytes`);
+function fileTooLargeError(limitBytes: number = MAX_READ_FILE_BYTES): NodeJS.ErrnoException {
+  return invalidInput(`file is too large to read: limit is ${limitBytes} bytes`);
 }
 
 function errorCode(error: unknown): string | undefined {
@@ -170,14 +170,22 @@ export async function canonicalize(path: string): Promise<string> {
   return await rawPromises.realpath(path);
 }
 
-/** `DirectFileSystem::read_file`, with the same size check on both sides of the read. */
-export async function readFile(path: string): Promise<Buffer> {
+/**
+ * `DirectFileSystem::read_file`, with the same size check on both sides of the read.
+ *
+ * `maxBytes` lets a narrower transport impose its own ceiling on the *opened handle* instead of
+ * doing a racy metadata check and then falling back to this primitive's much larger 512 MiB cap.
+ */
+export async function readFile(path: string, maxBytes: number = MAX_READ_FILE_BYTES): Promise<Buffer> {
+  const limitBytes = Number.isFinite(maxBytes)
+    ? Math.max(1, Math.min(MAX_READ_FILE_BYTES, Math.floor(maxBytes)))
+    : MAX_READ_FILE_BYTES;
   const { handle, stats } = await openFileForRead(path);
   try {
-    if (stats.size > MAX_READ_FILE_BYTES) throw fileTooLargeError();
+    if (stats.size > limitBytes) throw fileTooLargeError(limitBytes);
     // `take(MAX + 1)`: one byte past the cap is read so a file that grew since the stat is
     // caught by the second check rather than silently truncated.
-    const limit = MAX_READ_FILE_BYTES + 1;
+    const limit = limitBytes + 1;
     const buffer = Buffer.allocUnsafe(Math.min(FILE_READ_CHUNK_SIZE, limit));
     const chunks: Buffer[] = [];
     let total = 0;
@@ -190,7 +198,7 @@ export async function readFile(path: string): Promise<Buffer> {
       total += bytesRead;
     }
     const bytes = Buffer.concat(chunks, total);
-    if (bytes.length > MAX_READ_FILE_BYTES) throw fileTooLargeError();
+    if (bytes.length > limitBytes) throw fileTooLargeError(limitBytes);
     return bytes;
   } finally {
     await handle.close().catch(() => {});
@@ -256,27 +264,20 @@ export async function getMetadata(path: string): Promise<FileMetadata> {
 }
 
 /**
- * `DirectFileSystem::read_directory`.
+ * `DirectFileSystem::read_directory`, with one sandbox-facing hardening at the directory edge.
  *
- * An entry whose type cannot be determined is skipped rather than reported: a symlink to a
- * deleted target drops out of the listing instead of failing the whole read.
+ * The parent path has already been authorised by the caller, but its children have not. Following
+ * a child symlink here merely to classify it lets a directory listing learn metadata about a target
+ * outside the approved root before that child ever passes through resolvePath(). Keep links opaque
+ * at enumeration time; explicit access to one is canonicalised and containment-checked separately.
  */
 export async function readDirectory(path: string): Promise<ReadDirectoryEntry[]> {
   const dirents = await rawPromises.readdir(path, { withFileTypes: true });
   const entries: ReadDirectoryEntry[] = [];
   for (const dirent of dirents) {
-    let isDirectory = dirent.isDirectory();
-    let isFile = dirent.isFile();
-    if (dirent.isSymbolicLink()) {
-      let metadata: Stats;
-      try {
-        metadata = await rawPromises.stat(nodePath.join(path, dirent.name));
-      } catch {
-        continue;
-      }
-      isDirectory = metadata.isDirectory();
-      isFile = metadata.isFile();
-    }
+    const isLink = dirent.isSymbolicLink();
+    const isDirectory = !isLink && dirent.isDirectory();
+    const isFile = !isLink && dirent.isFile();
     entries.push({ fileName: dirent.name, isDirectory, isFile });
   }
   return entries;

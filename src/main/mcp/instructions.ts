@@ -49,19 +49,27 @@ function coreInstructions(ctx: ToolContext): string {
     // Taught once here rather than in every tool description: it is one rule that holds
     // across read, find, exec_command and apply_patch alike, and repeating it per tool would
     // cost more context than the shorthand saves.
-    'Once you use a full path, this chat remembers that project, and later paths may be relative to it: /project/src/main.ts, then src/other.ts. Use a full path again to move to another project. If a relative path is refused, this chat has no folder yet — use a full one.',
-    'read takes several paths at once, lists a folder, expands globs and returns images — use one call, not five. A start_line/end_line range applies to every file the call reads.',
+    'Once you use a full path this chat remembers that project, so later paths may be relative to it; use a full path again to move to another project. If a relative path is refused, this chat has no folder yet — use a full one.',
+    // Reading is three milliseconds of work behind a multi-second round trip, so the expensive
+    // mistake is splitting one file across calls, not asking for too much in one. The default
+    // per-file budget already covers an ordinary source file whole.
+    'read takes several paths at once, lists a folder, expands globs and returns images — use one call, not five, and read a file whole rather than in windows. A start_line/end_line range applies to every file the call reads; use one only to revisit a known region.',
     // The gap that produced the most repeated shell failures: a POSIX shell expands globs
     // before the program runs and PowerShell does not, so the program receives the asterisk.
     'PowerShell does not expand * or ? for native programs. Pass ripgrep filename patterns as -g \'*.go\', and expand other globs with Get-ChildItem before use.',
-    'In PowerShell, bare rg/ripgrep is bound to Chat On Steroids’ bundled ripgrep binary. This keeps its version/exit semantics deterministic even if a user profile defines an rg alias or function; use an explicit path if you intentionally need a different executable.',
+    'Bare rg/ripgrep in PowerShell is bound to this app’s bundled ripgrep; name an explicit path for a different one.',
     // Two bash habits that Windows PowerShell answers with a failure the output does not
     // explain. Neither can be rewritten safely — stripping the redirect changes what the
     // command returns, and `;` is not what `&&` means — so they are said once, up front.
-    'In Windows PowerShell do not append 2>&1 to a native program: its stderr is already captured, and redirecting it leaves $? false even when the program exited 0. PowerShell 5.1 also has no && or ||: write A; if ($?) { B } for A && B, and A; if (-not $?) { B } for A || B.',
+    'In Windows PowerShell do not append 2>&1 to a native program: stderr is already captured, and redirecting it leaves $? false even after exit 0. PowerShell 5.1 has no && or ||: use cmds, or A; if ($?) { B }.',
     'Never send read’s line-number prefixes to apply_patch; they are display metadata, not file content.',
     'apply_patch is the only way to change files: it adds, updates, moves and deletes, and it is atomic across files.',
     'exec_command runs git, npm, builds, tests and anything else; a long-running one gives you a session_id to continue with write_stdin.',
+    // The recorded sessions show this done by hand — several checks glued together with
+    // Write-Output banners inside one cmd — whenever the model happened to think of it, and
+    // split across separate calls whenever it did not. `cmds` is that habit made explicit, and
+    // it earns its space here because the saving is a round trip per command, not shell time.
+    'Send related commands as exec_command cmds: [...] rather than one call each: they run in order in one shell session, each with its own labeled section and exit code, and a non-zero result does not stop the rest.',
     // The one exception to the virtual-path rule above, and the model has to be told: cmd
     // is a program, not a path, so it reaches the shell exactly as written.
     'exec_command’s workdir is virtual, but its cmd is not translated — set workdir and write paths inside the command relative to it.',
@@ -87,7 +95,7 @@ function coreInstructions(ctx: ToolContext): string {
     'say in one short line what you are doing. On longer work, send another short progress update',
     'after a few meaningful calls or when the phase changes; do not stay silent until the end.',
     'Report findings, changes, failures and plan changes immediately, and name the paths you modified.',
-    'Batch routine reads and searches instead of narrating every trivial call.'
+    'Do not narrate every trivial call.'
   );
 
   if (sessionTools) {
@@ -133,6 +141,12 @@ function desktopInstructions(ctx: ToolContext): string {
     'only for its focus action — so when something steals focus, look first and act on what you see.',
     'Coordinates are pixels of a screenshot frame. Coordinate actions require frameId so a click cannot land on a screen',
     'that has since changed. Batch the actions that belong together and use captureAfter to verify the result.',
+    // Waiting was the single most repeated desktop pattern in the recorded sessions: a batch of
+    // nothing but a fixed sleep plus a screenshot, over and over, because the model had no way to
+    // say what it was waiting *for*. verify is that way, and it waits inside the one call.
+    'Do not poll with a batch that only waits. When an action needs time to take effect, say what you are',
+    'waiting for with verify — until foreground, window_exists, window_closed, ui_appears or ui_disappears —',
+    'and it waits for that condition and captures the result inside the same call.',
     // Said here as well as in the schema: the clipboard is reached through computer rather
     // than through a tool of its own, and a model looking for a "clipboard" tool finds none.
     'The clipboard lives in computer too — read_clipboard and write_clipboard run in sequence with',

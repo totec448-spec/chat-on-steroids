@@ -252,7 +252,7 @@ export async function readTextFile(
   // Past `endLine` the scan keeps going to learn the file's length, but only while that is
   // cheap enough to be worth a header line — see MAX_LINE_COUNT_BYTES. Over that, stop at the
   // range and leave the total unknown rather than drag a huge file through memory for a number.
-  const countToEnd = metadata.size <= MAX_LINE_COUNT_BYTES;
+  let countToEnd = metadata.size <= MAX_LINE_COUNT_BYTES;
 
   const out: string[] = [];
   let bytesReturned = 0;
@@ -264,6 +264,7 @@ export async function readTextFile(
   let budgetExhausted = false;
   let sawAllLines = true;
   let decoder: TextDecoder | null = null;
+  let bytesScanned = 0;
   /** Set once a line beyond the requested range exists. Output-budget truncation is tracked separately. */
   let passedRange = false;
 
@@ -299,6 +300,12 @@ export async function readTextFile(
   };
 
   for await (const chunk of readFileStream(realPath)) {
+    bytesScanned += chunk.length;
+    // The pre-open metadata is only a hint. A live log can grow after that stat, and without
+    // this streamed high-water a 20-line range could keep reading gigabytes solely to compute
+    // an advisory total. Once the actual read crosses the cheap-count budget, finish only the
+    // range/output the caller asked for and stop claiming an EOF-derived line total.
+    if (bytesScanned > MAX_LINE_COUNT_BYTES) countToEnd = false;
     if (decoder === null) {
       if (sniffBinaryBytes(chunk.subarray(0, Math.min(BINARY_SNIFF_BYTES, chunk.length)))) {
         throw new BinaryReadError(

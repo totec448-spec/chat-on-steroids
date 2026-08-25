@@ -16,6 +16,26 @@ afterAll(async () => {
 });
 
 describe('settings migration', () => {
+  it('never leaves Goal enabled while session recording is off', async () => {
+    const impossible = {
+      ...defaultConfig(),
+      sessions: { ...defaultConfig().sessions, record: false },
+      goal: { ...defaultConfig().goal, enabled: true }
+    };
+
+    // Every writer goes through saveConfig/updateConfig, including the renderer and extension.
+    const saved = await saveConfig(impossible);
+    expect(saved.sessions.record).toBe(false);
+    expect(saved.goal.enabled).toBe(false);
+
+    // Hand-edited or older persisted state gets the same privacy-preserving repair on load:
+    // Goal turns off rather than silently turning recording back on.
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(impossible), 'utf8');
+    const loaded = await loadConfig();
+    expect(loaded.sessions.record).toBe(false);
+    expect(loaded.goal.enabled).toBe(false);
+  });
+
   it('preserves old settings when new safe-default capabilities and UI prefs are added', async () => {
     const oldConfig = {
       roots: [{ name: 'project', path: 'C:\\Users\\example\\project' }],
@@ -354,17 +374,27 @@ describe('the goal loop settings', () => {
     expect(config.goal.enabled).toBe(false);
     expect(config.goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
     expect(config.goal.reasoning).toBe('default');
+    expect(config.goal.prompt).toContain('Your default action is to stop.');
+    expect(config.goal.prompt).toContain('If ChatGPT says "done", it is time to stop.');
   });
 
-  it('keeps the model and reasoning level that were chosen', async () => {
+  it('keeps the model, reasoning level and system prompt that were chosen', async () => {
+    const prompt = 'Custom continuation gate. Reply NO_REPLY when finished.';
     await saveConfig({
       ...defaultConfig(),
-      goal: { enabled: true, model: 'openai/gpt-5.2-mini:nitro', reasoning: 'high' }
+      goal: {
+        ...defaultConfig().goal,
+        enabled: true,
+        model: 'openai/gpt-5.2-mini:nitro',
+        reasoning: 'high',
+        prompt
+      }
     });
     expect((await loadConfig()).goal).toEqual({
       enabled: true,
       model: 'openai/gpt-5.2-mini:nitro',
-      reasoning: 'high'
+      reasoning: 'high',
+      prompt
     });
   });
 
@@ -382,6 +412,7 @@ describe('the goal loop settings', () => {
     );
     const loaded = await loadConfig();
     expect(loaded.goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
+    expect(loaded.goal.prompt).toBe(defaultConfig().goal.prompt);
     expect(loaded.goal.enabled).toBe(true);
     expect(loaded.roots).toEqual(config.roots);
   });
@@ -393,8 +424,30 @@ describe('the goal loop settings', () => {
     expect((await loadConfig()).goal).toEqual({
       enabled: false,
       model: '~deepseek/deepseek-v4-flash-latest',
-      reasoning: 'default'
+      reasoning: 'default',
+      prompt: defaultConfig().goal.prompt
     });
+  });
+
+  it('repairs a blank prompt to the safe continuation-gate default', async () => {
+    const config = defaultConfig();
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, goal: { ...config.goal, prompt: '   ' } }), 'utf8');
+    expect((await loadConfig()).goal.prompt).toBe(defaultConfig().goal.prompt);
+  });
+
+  it('repairs an invalid prompt without discarding unrelated settings', async () => {
+    const config = {
+      ...defaultConfig(),
+      roots: [{ name: 'project', path: 'C:\\Users\\example\\project' }]
+    };
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, goal: { ...config.goal, prompt: 'x'.repeat(20_001) } }),
+      'utf8'
+    );
+    const loaded = await loadConfig();
+    expect(loaded.goal.prompt).toBe(defaultConfig().goal.prompt);
+    expect(loaded.roots).toEqual(config.roots);
   });
 
   /** Corruption is not consent here either: a broken file must not switch the loop on. */

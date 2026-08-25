@@ -97,7 +97,7 @@ vi.mock('../src/main/exec.js', () => ({
   findWindowsPowerShell: () => 'powershell.exe',
   terminateProcessTree: fake.terminateProcessTree
 }));
-vi.mock('../src/main/logger.js', () => ({ logWarn: vi.fn() }));
+vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 
 import { listWindows } from '../src/main/computer/index.js';
 
@@ -149,7 +149,9 @@ describe('desktop helper retirement ordering', () => {
         firstError = error;
       }
     );
-    await vi.advanceTimersByTimeAsync(30_000);
+    // Window metadata has its own short deadline; the 30s watchdog remains only the
+    // final boundary for unknown operations.
+    await vi.advanceTimersByTimeAsync(5_000);
 
     expect(firstSettled).toBe(false);
     const second = listWindows();

@@ -13,7 +13,7 @@ import { lineDelta, type LineDelta } from './diffstat.js';
 import { TextMatchError, applyTextEdit } from './text-match.js';
 
 /** Default and maximum text payload returned by one model-visible `read` section. */
-export const DEFAULT_READ_BYTES = 64 * 1024;
+export const DEFAULT_READ_BYTES = 256 * 1024;
 export const MAX_READ_BYTES = 512 * 1024;
 /** Above this a metadata-only line count is skipped rather than scanning the whole file. */
 const MAX_LINE_COUNT_BYTES = MAX_READ_BYTES * 8;

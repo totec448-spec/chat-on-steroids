@@ -1,8 +1,8 @@
 /**
  * The desktop window's layout contract.
  *
- * The window is a fixed size and its content is a fixed set of controls, so a control
- * going missing is a layout failure rather than a styling opinion. On the installed build
+ * The window has a preferred size and a fixed set of controls, so a control going missing
+ * at that size or after a supported resize is a layout failure rather than a styling opinion. On the installed build
  * the session card's header held the title, a three-way view switcher and three buttons in
  * one flex row, and at the window's own default width "Compact & resume" — the primary
  * action of the whole app — was pushed entirely off the right edge. Not clipped: absent.
@@ -276,8 +276,8 @@ describe('the settings sheet', () => {
   });
 
   /**
-   * The goal loop is four controls and they belong together: the switch, the key that makes
-   * it work, the model it spends that key on, and how hard that model thinks. The key comes
+   * The goal loop controls belong together: the switch, key, model, reasoning and editable
+   * continuation instruction. The key comes
    * before the picker, because a picker that cannot reach OpenRouter without one is not the
    * first thing to meet.
    */
@@ -287,8 +287,11 @@ describe('the settings sheet', () => {
     expect(order.indexOf('goalEnabled')).toBeGreaterThanOrEqual(0);
     expect(order.indexOf('goalKey')).toBeLessThan(order.indexOf('goalPick'));
     expect(order.indexOf('goalPick')).toBeLessThan(order.indexOf('goalReasoning'));
+    expect(order.indexOf('goalReasoning')).toBeLessThan(order.indexOf('goalPromptEdit'));
     // Closed until asked for: the catalogue is several hundred long and costs a round trip.
     expect(document.getElementById('goalModels')!.hasAttribute('hidden')).toBe(true);
+    expect(document.getElementById('goalPromptPanel')!.hasAttribute('hidden')).toBe(true);
+    expect(document.getElementById('goalPrompt')?.tagName).toBe('TEXTAREA');
   });
 
   /** One threshold. Three inputs for the same number is three ways to disagree. */
@@ -320,9 +323,9 @@ describe('the settings sheet', () => {
       }
       expect(listened![1], `#${input.id} never saves`).toContain(`'${input.id}'`);
     }
-    // Selects save the same way, and the sheet has one.
-    for (const select of pane.querySelectorAll('select')) {
-      expect(listened![1], `#${select.id} never saves`).toContain(`'${select.id}'`);
+    // Selects and textareas save through the same change listener.
+    for (const field of pane.querySelectorAll('select, textarea')) {
+      expect(listened![1], `#${field.id} never saves`).toContain(`'${field.id}'`);
     }
   });
 });
@@ -366,6 +369,16 @@ describe('the window as a whole', () => {
     expect(css).not.toMatch(/overflow-x:\s*(auto|scroll)/);
     expect(css).not.toMatch(/overflow:\s*(auto|scroll)\s+/);
     // The one scrolling surface in the app is vertical only.
+    expect(rule('.scroll')).toContain('overflow: hidden auto');
+  });
+
+  it('keeps setup and settings vertically reachable when the window is short', () => {
+    // The page itself stays fixed so header/nav remain put; long forms own the vertical scroll.
+    expect(rule("[data-panel='setup'].is-active")).toContain('overflow: hidden auto');
+
+    const settings = document.querySelector('.view[data-view="settings"]')!;
+    const settingsScroller = settings.closest('#chatBody.scroll');
+    expect(settingsScroller, 'settings is not inside the bounded scrolling body').not.toBeNull();
     expect(rule('.scroll')).toContain('overflow: hidden auto');
   });
 });

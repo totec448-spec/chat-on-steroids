@@ -167,6 +167,28 @@ export function primeWorkspace(primeConversationId: string | null): Workspace | 
   return found;
 }
 
+/**
+ * Collapses the live swarm prime's agent-scoped cwd back into its ordinary chat identity.
+ *
+ * While a run exists, the kernel resolves prime tool calls as `agent:prime`, so that key is
+ * the authority for workspace changes made during the run. Once the run ends those same calls
+ * go back to `chat:<conversation>`. Recency comparison is the wrong tool at this boundary: two
+ * writes may share one millisecond, and the generic primeWorkspace() tie-break deliberately
+ * favours the chat key for inheritance. Ending the run is an explicit identity transition, so
+ * copy the agent value when present and then remove the temporary key. Removing it also keeps
+ * a later run from inheriting a previous run's prime cwd when the new prime has none yet.
+ */
+export function releasePrimeWorkspace(primeConversationId: string | null): boolean {
+  prune();
+  const held = workspaces.get('agent:prime');
+  if (!held) return false;
+  if (primeConversationId) {
+    setWorkspaceFor(`chat:${primeConversationId}`, { virtual: held.virtual, real: held.real });
+  }
+  workspaces.delete('agent:prime');
+  return true;
+}
+
 /** The workspace a named conversation has learned, for code running outside its calls. */
 export function workspaceForChat(conversationId: string | null): Workspace | null {
   if (!conversationId) return null;

@@ -43,6 +43,7 @@ const fake = vi.hoisted(() => {
             ? {
                 ok: true,
                 window: 77,
+                snapshotId: 41,
                 elements: [
                   {
                     runtimeKey: 'old-helper-runtime-id',
@@ -80,7 +81,7 @@ vi.mock('../src/main/exec.js', () => ({
   findWindowsPowerShell: () => 'powershell.exe',
   terminateProcessTree: vi.fn(async () => undefined)
 }));
-vi.mock('../src/main/logger.js', () => ({ logWarn: vi.fn() }));
+vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 
 import { act, findUi } from '../src/main/computer/index.js';
 

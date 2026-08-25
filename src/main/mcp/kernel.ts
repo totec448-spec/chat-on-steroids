@@ -41,14 +41,17 @@ import {
   AgentError,
   acknowledgeOffers,
   endedWorkerNotice,
-  failSilentDetachedWorkers,
+  sleepSilentDetachedWorkers,
   noteAgentAlive,
   agentForCaller,
   agentForFinishCaller,
   hasRetiredWorkerLeases,
   offerMessages,
+  persistCriticalSwarmNow,
+  requestWorkerRevivals,
   releaseQuiescentRun,
   retiredWorkerForConversation,
+  stageQueuedWorkerRevivals,
   swarmRunning
 } from '../agents.js';
 import type { SurfaceId } from './surfaces.js';
@@ -405,17 +408,41 @@ async function dispatchTracked(
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.
   //
-  // A detached worker that has also stopped calling is given up on here rather than on a
+  // A detached worker that has also stopped calling is put to sleep here rather than on a
   // timer: nothing about a run changes while nothing is happening, and this is the moment
-  // something is happening.
-  for (const gone of failSilentDetachedWorkers()) {
-    if (gone.report) await recordAgentMessage(gone.report, 'sent');
+  // something is happening. Sleep rather than failure, so being early about a slow worker
+  // costs the run nothing — its own next call takes the slot straight back.
+  const quietWorkers = sleepSilentDetachedWorkers();
+  for (const quiet of quietWorkers) {
+    if (quiet.report) await recordAgentMessage(quiet.report, 'sent');
   }
   // And this call is itself first-hand evidence that its own conversation is alive. That is
   // what undoes a worker given up on because its tab went away — the turn never stopped, so
   // the call arrives from a chat the app had written off, and the write-off was wrong.
   const alive = noteAgentAlive(context.caller.conversationId);
   if (alive?.report) await recordAgentMessage(alive.report, 'sent');
+  // A prime message accepted while a worker's tab was closed could not safely be injected while
+  // that server-side turn might still be running. If the silence check above has now proved the
+  // worker stopped, carry that already-durable unread work into a revival instead of leaving it
+  // stranded until the prime happens to send a second message. Do this after noteAgentAlive so a
+  // tool call from the supposedly quiet worker wins and simply keeps the worker active.
+  const deferredWake = stageQueuedWorkerRevivals(quietWorkers.map((entry) => entry.info.id));
+  if (deferredWake.waking.length > 0) {
+    try {
+      if (await persistCriticalSwarmNow()) {
+        deferredWake.commit();
+        requestWorkerRevivals(deferredWake.waking);
+      } else {
+        deferredWake.rollback();
+        logWarn('multi-agent: could not durably reserve queued work for a worker that just fell asleep');
+      }
+    } catch (err) {
+      deferredWake.rollback();
+      logWarn(
+        `multi-agent: could not durably reserve queued work for a worker that just fell asleep — ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
   context.agent = isFinish ? agentForFinishCaller(context.caller) : agentForCaller(context.caller);
   const retiredWorker = retiredWorkerForConversation(context.caller.conversationId);
   // A worker that really is over learns so on its own next call. Without this its calls
@@ -475,7 +502,9 @@ async function dispatchTracked(
   // a new MCP request with a new id, so that id cannot prove the previous finish result was
   // seen. The broker therefore re-offers rather than assuming; see acknowledgeOffers.
   if (context.agent) {
-    for (const message of acknowledgeOffers(context.agent, isFinish)) await recordAgentMessage(message, 'delivered');
+    for (const message of acknowledgeOffers(context.agent, isFinish, startedAt)) {
+      await recordAgentMessage(message, 'delivered');
+    }
   }
   // This is the MCP call's wall-clock latency. A managed child can outlive the call, and
   // its own lifetime is process evidence; letting that number overwrite ToolCallRecord's
@@ -485,6 +514,7 @@ async function dispatchTracked(
   // result before recording so session(action=read, tool_call=T…) is genuine wire forensics rather than a
   // subtly earlier internal value that omits the worker report most likely to matter later.
   const delivered = withInbox(context.agent, result, isFinish);
+  const recorderStartedAt = Date.now();
   const recording = recordToolCall({
     tool: name,
     args,
@@ -502,8 +532,19 @@ async function dispatchTracked(
   // of completing the MCP call. The recorder catches storage failures and returns null, so a
   // broken history never breaks the tool itself. Only the degraded/unidentified path remains
   // fire-and-forget because it may still spend a grace window waiting for page evidence.
-  if (context.caller.conversationId) await recording;
-  else holdWhileSettling(context, recording);
+  if (context.caller.conversationId) {
+    await recording;
+    if (name === 'observe' || name === 'computer') {
+      logInfo(`desktop timing recorder_wait_ms=${Date.now() - recorderStartedAt} attributed=true`);
+    }
+  } else {
+    if (name === 'observe' || name === 'computer') {
+      void recording.then(() =>
+        logInfo(`desktop timing recorder_wait_ms=0 recorder_async_ms=${Date.now() - recorderStartedAt} attributed=false`)
+      );
+    }
+    holdWhileSettling(context, recording);
+  }
   // Retire a completed run only after this call has had every chance to acknowledge and
   // receive its inbox. Doing it inside acknowledgeOffers would let `agents status` destroy
   // the run halfway through identifying itself; here the handler and result are already done.

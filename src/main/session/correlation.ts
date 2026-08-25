@@ -134,7 +134,15 @@ function merge(input: RequestCorrelation): 'stored' | 'same' | 'conflict' {
   // for that same old conversation id. Re-observing the same request from that stale page must
   // not move an already-proved in-flight request into the newer stale session.
   if (previous.value.conversationId === input.conversationId) {
-    previous.value.observedAt = Math.max(previous.value.observedAt, input.observedAt);
+    if (input.observedAt > previous.value.observedAt) {
+      previous.value.observedAt = input.observedAt;
+      // trim() uses insertion order as the bounded registry's freshness order. Updating the
+      // timestamp without moving this key left a live, repeatedly observed old request at the
+      // eviction head, so enough newer ids could discard it while genuinely stale ids stayed.
+      // Delete+set is only for the already-proved same owner; contradictions remain sticky.
+      byRequest.delete(input.requestId);
+      byRequest.set(input.requestId, previous);
+    }
     return 'same';
   }
 
@@ -251,8 +259,11 @@ export function observeRequestCorrelations(
 ): Array<'stored' | 'same' | 'conflict'> {
   let changed = false;
   const results = inputs.map((input) => {
+    const previousObservedAt = byRequest.get(input.requestId)?.value?.observedAt;
     const result = merge(input);
-    if (result !== 'same') changed = true;
+    // A same-owner observation can still advance durable freshness/order. Persist that too so
+    // an app restart cannot resurrect the pre-refresh eviction order.
+    if (result !== 'same' || (previousObservedAt !== undefined && input.observedAt > previousObservedAt)) changed = true;
     return result;
   });
   if (changed) persist();

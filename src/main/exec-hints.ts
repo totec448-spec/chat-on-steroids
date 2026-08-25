@@ -1326,6 +1326,25 @@ export function execRecoveryHints(command: string, outputText: string): string[]
     );
   }
 
+  const bashQuoteFailure = command.includes('\\"') && /The string (?:is missing the terminator|starting:)/i.test(outputText);
+  const parserFailure =
+    /\bParserError\b/i.test(outputText) ||
+    /FullyQualifiedErrorId\s*:\s*(?:TerminatorExpectedAtEndOfString|MissingArgument|MissingExpressionAfterToken|MissingFileSpecification|RedirectionNotSupported|UnexpectedToken|EmptyPipeElement)/i.test(
+      outputText
+    );
+  if (parserFailure && !invalidOperator && !bashQuoteFailure) {
+    const correction = /TerminatorExpectedAtEndOfString|missing the terminator/i.test(outputText)
+      ? 'Balance the quoted argument; for literal regexes and paths, prefer one single-quoted PowerShell argument.'
+      : /MissingArgument|missing an argument/i.test(outputText)
+        ? 'Supply the missing value after the named parameter or comma, quoting it as one argument when it contains shell punctuation.'
+        : /MissingFileSpecification|RedirectionNotSupported|redirection operator/i.test(outputText)
+          ? 'PowerShell does not support Bash heredocs such as `<<EOF`; use a PowerShell here-string piped to the program, or write the content with Set-Content.'
+          : 'Use the reported line and character to correct the unexpected or incomplete token; split unrelated checks into `exec_command.cmds`.';
+    hints.push(
+      `PowerShell parsed none of the command, so no statement ran. ${correction} Correct the syntax and rerun the command.`
+    );
+  }
+
   if (/JAVA_HOME is not set/i.test(outputText)) {
     hints.push(
       'No Java could be found automatically. Point JAVA_HOME at a JDK for this command, e.g. ' +

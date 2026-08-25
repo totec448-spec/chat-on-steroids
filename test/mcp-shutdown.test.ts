@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { startMcpServer, type McpEndpoint } from '../src/main/mcp/server.js';
@@ -93,4 +93,29 @@ it('drains an accepted MCP mutation before closing its response socket', async (
   expect(result.status).toBe(200);
   expect(result.text).toContain('Process exited with code 0');
   await expect(fs.readFile(path.join(dir, 'after-stop.txt'), 'utf8')).resolves.toContain('after');
+});
+
+it('does not put a force-close deadline on an ordinary endpoint stop', async () => {
+  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clf-mcp-graceful-stop-'));
+  initConfigPath(dir);
+  initSessionStore(dir);
+  initDurableStore(dir);
+  const cfg = defaultConfig();
+  await saveConfig({ ...cfg, roots: [{ name: 'probe', path: dir }] });
+  endpoint = await startMcpServer(() => ({
+    roots: [{ name: 'probe', path: dir }],
+    caps: cfg.capabilities,
+    readOnly: true,
+    sessionTools: false,
+    agentTools: false
+  }));
+  const timeout = vi.spyOn(globalThis, 'setTimeout');
+  try {
+    const stopping = endpoint.stop();
+    endpoint = null;
+    await stopping;
+    expect(timeout.mock.calls.some((call) => call[1] === 30_000)).toBe(false);
+  } finally {
+    timeout.mockRestore();
+  }
 });

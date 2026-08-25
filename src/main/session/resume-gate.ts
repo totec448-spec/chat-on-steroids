@@ -33,9 +33,26 @@ export const RESUME_CLAIM_WINDOW_MS = 60_000;
 
 const claims = new Map<string, number>();
 
-/** Records that a replacement chat has taken this continuation's brief and is opening. */
-export function noteResumeClaim(token: string): void {
+/** Records that a replacement chat is expected to appear imminently. */
+function noteExpectedResume(token: string): void {
   claims.set(token, Date.now());
+}
+
+/**
+ * Arms the recorder gate before the browser is opened for a queued resume.
+ *
+ * This has to precede `openExternal()`, not merely the page's later redeem. Chrome/ChatGPT can
+ * expose the new conversation quickly enough for an already-journalled service-worker event to
+ * reach the recorder before the content script has redeemed its marker. That observation must
+ * wait for the A→B commit rather than inventing a shadow local session for B.
+ */
+export function noteResumeOpening(token: string): void {
+  noteExpectedResume(token);
+}
+
+/** Records that a replacement chat has durably taken this continuation's brief and is opening. */
+export function noteResumeClaim(token: string): void {
+  noteExpectedResume(token);
 }
 
 /** Records that the move landed, or was given up on, so nothing waits on it any longer. */

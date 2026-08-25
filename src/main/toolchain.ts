@@ -137,21 +137,52 @@ function byVersionDescending(left: string, right: string): number {
   return left < right ? 1 : left > right ? -1 : 0;
 }
 
-/** Whether the environment can already run `executable` without any help from us. */
-function onPath(env: MutableEnvironment, executable: string, probe: ToolchainProbe): boolean {
-  return pathEntries(env).some((entry) => probe.isFile(path.join(entry, executable)));
-}
-
 interface Discovery {
   javaHome: string | null;
   goRoot: string | null;
 }
 
 let cached: Discovery | null = null;
+let reachability = new WeakMap<ToolchainProbe, Map<string, { java: boolean; go: boolean }>>();
 
 /** Forgets memoised discovery. Tests only; the real filesystem does not change under us. */
 export function resetToolchainCache(): void {
   cached = null;
+  reachability = new WeakMap();
+}
+
+/**
+ * Whether the current PATH already exposes Java/Go, memoised by probe + exact PATH value.
+ *
+ * `exec_command` builds a fresh child-environment object for every call, so caching on object
+ * identity would buy nothing. The PATH string is the actual input to this question and is
+ * process-stable in ordinary use. Keep a tiny per-probe LRU-ish map so deliberately varied
+ * test/caller environments cannot grow process memory without bound.
+ */
+function pathReachability(env: MutableEnvironment, probe: ToolchainProbe): { java: boolean; go: boolean } {
+  const key = envValue(env, 'PATH') ?? '';
+  let cache = reachability.get(probe);
+  if (!cache) {
+    cache = new Map();
+    reachability.set(probe, cache);
+  }
+  const held = cache.get(key);
+  if (held) return held;
+
+  let java = false;
+  let go = false;
+  for (const entry of pathEntries(env)) {
+    if (!java && probe.isFile(path.join(entry, 'java.exe'))) java = true;
+    if (!go && probe.isFile(path.join(entry, 'go.exe'))) go = true;
+    if (java && go) break;
+  }
+  const found = { java, go };
+  cache.set(key, found);
+  if (cache.size > 16) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  return found;
 }
 
 function discover(env: MutableEnvironment, probe: ToolchainProbe): Discovery {
@@ -178,8 +209,13 @@ export function ensureDevToolchain(env: MutableEnvironment, probe: ToolchainProb
   if (process.platform !== 'win32') return [];
   const added: string[] = [];
 
-  const needsJava = envValue(env, 'JAVA_HOME') === undefined && !onPath(env, 'java.exe', probe);
-  const needsGo = envValue(env, 'GOROOT') === undefined && !onPath(env, 'go.exe', probe);
+  const existingJavaHome = envValue(env, 'JAVA_HOME');
+  const existingGoRoot = envValue(env, 'GOROOT');
+  const reachable = existingJavaHome === undefined || existingGoRoot === undefined
+    ? pathReachability(env, probe)
+    : { java: true, go: true };
+  const needsJava = existingJavaHome === undefined && !reachable.java;
+  const needsGo = existingGoRoot === undefined && !reachable.go;
   if (!needsJava && !needsGo) return added;
 
   const found = discover(env, probe);

@@ -45,13 +45,38 @@
  * in one step, before the model in that chat has said anything. So the first user message in
  * a worker chat is the task itself — there is no handshake to perform, no key to quote, and
  * nothing a worker has to do before it can start working.
+ *
+ * ## Workers sleep; they do not end
+ *
+ * A worker used to be one job in one throwaway chat. It reported, its slot became a
+ * tombstone, and more work meant another `spawn` — another conversation, discarded again
+ * minutes later. That is exactly the pattern ChatGPT itself pushes back on, and it threw away
+ * the most valuable thing the run had: a chat that already understood the task.
+ *
+ * So the end of a worker's *turn* is not the end of the worker. It goes to `sleeping` in the
+ * chat it already has, keeping its conversation, its transcript, its workspace and its inbox,
+ * and it releases its slot while it is there. `agents action=message` to a sleeping worker is
+ * a revival: the broker reserves a slot, the app reopens that exact `/c/<id>`, and the
+ * extension types the prime's message into it as an ordinary user message. None of that needs
+ * the tab to still be open, and none of it needs the model to remember anything.
+ *
+ * Three things put a worker to sleep, and they are all the app's observations rather than the
+ * model's assertions: an explicit `agents action=finish`, a settled final assistant answer in
+ * its chat, and silence long enough that no turn can still be running. Waking is symmetric —
+ * a revival the prime asked for, or a proven tool call from a worker that turned out not to
+ * have been asleep after all.
+ *
+ * The one thing that is genuinely terminal is the worker's own context. Past
+ * {@link WORKER_CONTEXT_CEILING_TOKENS} there is nothing left to reuse, so the next time that
+ * worker stops working it stops for good. Crossing the ceiling never *stops* a worker
+ * mid-task: it only decides what the end of that task means.
  */
 
 import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, SwarmState } from '../shared/session.js';
 import { getConfig } from './config.js';
 import { logInfo, logWarn } from './logger.js';
-import { inheritWorkspace } from './workspace.js';
+import { inheritWorkspace, releasePrimeWorkspace } from './workspace.js';
 
 export const PRIME_ID = 'prime';
 
@@ -103,7 +128,7 @@ const MAX_LABEL_CHARS = 60;
 export const TRANSFER_TTL_MS = 10 * 60_000;
 
 /**
- * How long a detached worker may make no proven tool call before the run gives up on it.
+ * How long a detached worker may make no proven tool call before the run puts it to sleep.
  *
  * The counterweight to {@link workerConversationGone} no longer being fatal. A closed tab is
  * not evidence that a worker stopped — the turn runs on OpenAI's servers — but it does remove
@@ -111,8 +136,25 @@ export const TRANSFER_TTL_MS = 10 * 60_000;
  * ending left for a worker nobody is watching. Long enough to sit through a slow model turn
  * and a long tool call, short enough that an abandoned slot frees itself without the user
  * having to clear it.
+ *
+ * It is no longer a failure, because it no longer has to be: a slept worker keeps its chat and
+ * the prime can wake it. Silence now costs the run a slot back, not a worker.
  */
 export const DETACHED_SILENCE_MS = 5 * 60_000;
+
+/**
+ * The context a worker chat may reach before it stops being worth reviving.
+ *
+ * The same 400k figure the app uses for its own context ceiling, and for the same reason: it
+ * is where ChatGPT has actually been observed to stop accepting more. Past it a revival would
+ * reopen a chat with no room left to work in, so that worker's next stop is its last one.
+ *
+ * It is never a stop signal. A worker that crosses the line mid-task keeps its slot, keeps its
+ * inbox and keeps working until that work is done; all the crossing changes is that the sleep
+ * at the end of it is `finished` instead.
+ */
+export const WORKER_CONTEXT_CEILING_TOKENS = 400_000;
+
 
 export class AgentError extends Error {}
 
@@ -155,11 +197,46 @@ export class IdentityLostError extends AgentError {
  *
  * `detached` is deliberately *not* here. That is the state of a worker whose ChatGPT tab is
  * gone while its turn is not: it still holds its slot, still resolves for its own
- * conversation, still has an inbox, and still finishes the ordinary way. Every caller of
+ * conversation, still has an inbox, and still reports the ordinary way. Every caller of
  * this function has to keep treating it as live — that is the whole reason the state exists.
+ *
+ * Nor is `sleeping`. A sleeping worker is a member of the run in every sense except that it
+ * is not working: it keeps its conversation, its transcript and its queue, and the prime can
+ * wake it by messaging it. Terminal means *this worker will never work again*, and only the
+ * context ceiling, a bootstrap that never came up, and a person clearing the row mean that.
  */
 export function isOver(state: AgentState): boolean {
   return state === 'finished' || state === 'failed';
+}
+
+/**
+ * Whether this state consumes one of the run's worker slots.
+ *
+ * The slot is capacity to be *working*, not membership of the run. `invited` and `waking` are
+ * both "a chat is being opened or typed into for this worker right now", and both have to hold
+ * a slot or two concurrent revivals could claim the same one. `sleeping` holds nothing: that
+ * is what lets a run own more workers than it can ever run at once.
+ */
+export function occupiesSlot(state: AgentState): boolean {
+  return state === 'invited' || state === 'active' || state === 'detached' || state === 'waking';
+}
+
+/** Whether this worker's own chat has grown past the point where reviving it buys anything. */
+function ceilingCrossed(info: AgentInfo): boolean {
+  return info.contextTokens >= WORKER_CONTEXT_CEILING_TOKENS;
+}
+
+/**
+ * Whether this agent has stopped working, whether or not it can be started again.
+ *
+ * The question `finish` idempotence asks. A worker that has already reported and gone to sleep
+ * must answer a repeated `finish` as the retry it is: taking the second call literally would
+ * queue the prime a second copy of the same report with no way to tell that from two genuine
+ * ones, which is the bug the original terminal-state check existed to prevent and which
+ * sleeping would otherwise reopen.
+ */
+function hasStopped(state: AgentState): boolean {
+  return isOver(state) || state === 'sleeping';
 }
 
 interface Agent {
@@ -191,6 +268,16 @@ interface Run {
    * preflighted handover into an expired one and split the session from its swarm.
    */
   transfer: { from: string; at: number; frozen: boolean } | null;
+  /**
+   * When the prime's ChatGPT chat was last reported gone, or null while it is there.
+   *
+   * Telemetry, not a deadline. There is deliberately no clock attached to it: the case this
+   * whole mode now exists to serve is a prime that stops, gets feedback from the user hours
+   * later, and carries on with the same workers, and any timeout at all would turn a long
+   * enough pause back into the destroyed-run bug. Cleared the instant the prime chat proves
+   * it exists again.
+   */
+  primeGoneAt: number | null;
 }
 
 let run: Run | null = null;
@@ -252,6 +339,16 @@ interface FinishStageState {
   agent: Agent;
   info: AgentInfo;
   report: AgentMessage;
+  /**
+   * Normal inbox rows whose delivery this finish observation itself proves.
+   *
+   * Explicit `agents finish` gets this proof later from the kernel's ordinary
+   * acknowledgeOffers() call. Browser-owned finalization has no next MCP call, so its settled
+   * assistant answer is the only acknowledgement point. Keep these ids in the same staged
+   * durability projection as the sleeping state/report; mutating the live queue before that
+   * write succeeds would silently lose work on a crash/rejected write.
+   */
+  acknowledgedMessageIds: string[];
   settled: boolean;
 }
 const activeFinishStages = new Map<Agent, FinishStageState>();
@@ -397,13 +494,16 @@ export function pendingWorkerSpawns(): WorkerSpawn[] {
  * Registration replays whatever is already owed: startup restores the run before the bridge
  * exists, so the restore itself has nobody to ask for a tab.
  */
-export function onSpawnRequest(handler: (workers: WorkerSpawn[]) => void): void {
+export function onSpawnRequest(handler: (workers: WorkerSpawn[]) => void): () => void {
   spawnRequest = handler;
   const owed = pendingWorkerSpawns();
   if (owed.length > 0) {
     handler(owed);
     logInfo(`multi-agent: ${owed.length} worker chat(s) still owed a tab`);
   }
+  return () => {
+    if (spawnRequest === handler) spawnRequest = null;
+  };
 }
 
 // ------------------------------------------------------------------ identity
@@ -538,7 +638,9 @@ function makeWorker(id: string, label: string, task: string): Agent {
       conversationId: null,
       detachedAt: null,
       lastSeenAt: null,
-      revivable: false
+      revivable: false,
+      sleptAt: null,
+      contextTokens: 0
     },
     queue: []
   };
@@ -562,10 +664,33 @@ function makePrime(conversationId: string): Agent {
       conversationId,
       detachedAt: null,
       lastSeenAt: Date.now(),
-      revivable: false
+      revivable: false,
+      sleptAt: null,
+      contextTokens: 0
     },
     queue: []
   };
+}
+
+// --------------------------------------------------------------------- slots
+
+/** Workers currently holding one of the run's slots, awake or being woken. */
+function workingWorkers(): Agent[] {
+  if (!run) return [];
+  return [...run.agents.values()].filter(
+    (agent) => agent.info.role === 'worker' && occupiesSlot(agent.info.state) && !unpublishedAgents.has(agent)
+  );
+}
+
+/**
+ * How many more workers this run may have awake at once.
+ *
+ * Sleeping workers are deliberately not counted. A run that has spawned eight workers and put
+ * seven of them to sleep has seven free slots and eight chats it can go back to, which is the
+ * whole shape this mode is now built around.
+ */
+export function freeWorkerSlots(): number {
+  return Math.max(0, getConfig().multiAgent.maxWorkers - workingWorkers().length);
 }
 
 function recount(agent: Agent): void {
@@ -589,6 +714,10 @@ function primeAgent(): Agent {
  */
 function endRun(reason: string): void {
   if (!run) return;
+  // The prime's tool calls switch from `agent:prime` back to its conversation identity the
+  // instant this run disappears. Collapse that temporary workspace identity first so the next
+  // relative path cannot revive the project the chat was using before it spawned workers.
+  releasePrimeWorkspace(run.primeConversationId);
   const retired: RetiredChat[] = [...run.agents.values()]
     // Keep the conversation fence after the active-run tombstone disappears. A terminal
     // worker is still a worker chat: `finish` stops its broker role, not the ChatGPT turn or
@@ -830,17 +959,33 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
       primeConversationId: conversationId,
       startedAt: Date.now(),
       agents: new Map([[PRIME_ID, makePrime(conversationId)]]),
-      transfer: null
+      transfer: null,
+      primeGoneAt: null
     };
   }
 
-  const live = [...run.agents.values()].filter((agent) => agent.info.role === 'worker' && !isOver(agent.info.state));
+  // Slot accounting, not membership. Sleeping workers are part of the run and are not counted:
+  // a run may own far more of them than it can ever have awake at once, and that is the point.
+  const live = workingWorkers();
+  // A sleeping worker is still the same worker chat, and that matters for spawn idempotence
+  // even though it no longer occupies a slot. If the original spawn tool result was lost, a
+  // fast worker can finish and fall asleep before the prime retries the exact request. Matching
+  // only slot-holders here would then create a duplicate chat for work this run already did.
+  // Terminal workers are deliberately excluded: once a worker is finished for good or failed,
+  // an identical later spawn really is asking for a replacement.
+  const reusable = [...run.agents.values()].filter(
+    (agent) =>
+      agent.info.role === 'worker' &&
+      agent.info.state === 'sleeping' &&
+      agent.info.revivable &&
+      !unpublishedAgents.has(agent)
+  );
 
   // The same request arriving twice is one request. A tool result that never reached
   // ChatGPT leaves a model with no idea its workers exist, and the obvious thing for it to
   // do is ask again; creating a second identical set is how a user ends up with four
   // sub-agent chats they asked for twice.
-  const repeat = matchExistingRequest(planned, live);
+  const repeat = matchExistingRequest(planned, [...live, ...reusable]);
   if (repeat) {
     if (!options.deferDelivery) requestWorkerBootstraps(repeat.map((agent) => agent.info.id));
     logInfo(`multi-agent: repeated spawn matched ${repeat.length} existing worker(s) in run ${run.runId}`);
@@ -1002,6 +1147,7 @@ function newMessage(from: string, to: string, text: string): AgentMessage {
     offeredAt: null,
     offers: 0,
     offeredOnFinish: false,
+    offeredViaRevival: false,
     ackedAt: null
   };
 }
@@ -1019,6 +1165,13 @@ export function sendMessage(caller: Caller, toId: string, text: string): AgentMe
 export interface StagedAgentMessages {
   /** Stable copies for the caller to record/report after commit. */
   messages: AgentMessage[];
+  /**
+   * Sleeping workers this batch reserved a slot for.
+   *
+   * Their chats are reopened only after commit, for the same reason worker tabs are: a browser
+   * side effect must never happen for a broker revision that disk went on to reject.
+   */
+  waking: string[];
   /** Makes the already-durable queue entries visible to the recipient. Pure in-memory publish. */
   commit: () => void;
   /** Removes an unaccepted batch and supersedes any failed durable snapshot with the safe state. */
@@ -1062,6 +1215,8 @@ export function stageMessages(
 
   const planned: Array<{ to: Agent; message: AgentMessage }> = [];
   const perRecipient = new Map<string, number>();
+  /** Sleeping recipients this batch is about to wake, and therefore about to take a slot for. */
+  const reserved = new Set<Agent>();
   for (const [index, item] of items.entries()) {
     const where = items.length > 1 ? ` (message ${index + 1} of ${items.length})` : '';
     const trimmed = item.text?.trim() ?? '';
@@ -1087,8 +1242,40 @@ export function stageMessages(
     assertRoute(from, to);
     if (isOver(to.info.state)) {
       throw new AgentError(
-        `${toId} has ${to.info.state === 'failed' ? 'failed' : 'finished'} and is no longer listening${where}`
+        to.info.state === 'failed'
+          ? `${toId} has failed and is no longer listening${where}`
+          : `${toId} is finished for good — its own chat reached the context limit, so it cannot be woken` +
+            `${where}. Spawn a new worker for this work.`
       );
+    }
+    // A revival already crossing the browser is its own in-flight transaction, exactly like a
+    // spawn or a finish, and for the same reason: this call's `waking` list is what causes the
+    // browser to be asked for anything at all. A second message would see the worker already
+    // reserved, report nothing to wake, and be durably queued behind a revival that may yet
+    // roll back to `sleeping` — leaving the prime's words in a chat nothing is going to open.
+    if (to.info.state === 'waking') {
+      throw new AgentError(
+        `REVIVE_IN_PROGRESS: ${toId} is being woken right now${where}. Nothing was sent; send this again once it is ` +
+          'awake, or once you are told the revival failed.'
+      );
+    }
+    if (to.info.state === 'sleeping') {
+      if (!to.info.conversationId) {
+        throw new AgentError(
+          `${toId} is asleep but this app never learned which chat it is in, so it cannot be woken${where}.`
+        );
+      }
+      // Waking is the one send that needs capacity, because the recipient is not running. The
+      // slot is reserved here, synchronously, so two messages to two sleeping workers cannot
+      // both be told the same last slot is theirs. Refused rather than queued: a message that
+      // sits unread in a chat nobody is going to open is worse than being told to wait.
+      if (!reserved.has(to) && freeWorkerSlots() - reserved.size <= 0) {
+        throw new AgentError(
+          `NO_FREE_SLOT: ${toId} is asleep and all ${getConfig().multiAgent.maxWorkers} worker slots are busy, so it ` +
+            `cannot be woken right now${where}. Nothing was sent. Wait for a worker to report and try again.`
+        );
+      }
+      reserved.add(to);
     }
     // Counted per recipient across the batch: three messages to one worker with two slots
     // left has to be refused here, not half-delivered and then refused by enqueue.
@@ -1102,12 +1289,16 @@ export function stageMessages(
     unpublishedMessages.add(message);
     enqueue(to, message);
   }
+  // Reservation is part of the same all-or-nothing plan as the queue entries: every check
+  // above has passed by now, so no recipient can still turn out to be unreachable.
+  for (const agent of reserved) beginRevival(agent);
   changed();
   const messages = planned.map(({ message }) => ({ ...message }));
   let settled = false;
   const recipients = [...new Set(planned.map(({ to }) => to))];
   return {
     messages,
+    waking: [...reserved].map((agent) => agent.info.id),
     commit: () => {
       if (settled) return;
       settled = true;
@@ -1124,6 +1315,16 @@ export function stageMessages(
         unpublishedMessages.delete(message);
         const index = to.queue.indexOf(message);
         if (index >= 0) to.queue.splice(index, 1);
+      }
+      // The slot goes back with the message it was reserved for. A rejected write must not
+      // leave a worker `waking` with nothing on its way to wake it.
+      for (const agent of reserved) {
+        if (agent.info.state !== 'waking') continue;
+        returnWakingWorkerToStopped(
+          agent,
+          Date.now(),
+          'Its pending revival was rolled back before any new work was accepted.'
+        );
       }
       for (const recipient of recipients) recount(recipient);
       // writeDurableNow deliberately retains a failed generation for retry. Queue a *newer*
@@ -1158,10 +1359,17 @@ export function sendMessages(
 export function offerMessages(id: string, onFinish = false): AgentMessage[] {
   const agent = run?.agents.get(id);
   if (!agent) return [];
+  // Once the browser owns a wake, its queued text has exactly one delivery path: the real user
+  // message the content script is about to submit. Letting an MCP result carry the same inbox
+  // while `waking` would duplicate that instruction before the browser ACK. And after the ACK,
+  // `offeredViaRevival` is stronger evidence than an ordinary result offer: that text was
+  // already accepted by ChatGPT and must never be injected into a tool result again.
+  const browserOwnsWake = agent.info.role === 'worker' && agent.info.state === 'waking' && !agent.info.revivable;
+  if (browserOwnsWake) return [];
   const waiting: AgentMessage[] = [];
   let offeredChars = 0;
   for (const message of agent.queue) {
-    if (message.ackedAt !== null || unpublishedMessages.has(message)) continue;
+    if (message.ackedAt !== null || message.offeredViaRevival || unpublishedMessages.has(message)) continue;
     if (waiting.length > 0 && offeredChars + message.text.length > MAX_INBOX_OFFER_CHARS) break;
     waiting.push(message);
     offeredChars += message.text.length;
@@ -1188,11 +1396,20 @@ export function offerMessages(id: string, onFinish = false): AgentMessage[] {
  * `finish`, which would otherwise let a worker's own retry count an unread message as
  * delivered and then terminalise it.
  */
-export function acknowledgeOffers(id: string, byFinish = false): AgentMessage[] {
+export function acknowledgeOffers(id: string, byFinish = false, callStartedAt = Number.POSITIVE_INFINITY): AgentMessage[] {
   const agent = run?.agents.get(id);
   if (!agent) return [];
   const offered = agent.queue.filter(
-    (message) => message.ackedAt === null && message.offeredAt !== null && !(byFinish && message.offeredOnFinish)
+    (message) =>
+      message.ackedAt === null &&
+      message.offeredAt !== null &&
+      // A call proves only what was already delivered before that call began. This matters for
+      // revival ACKs because the browser can submit the user message while an older MCP handler
+      // is still running. Letting that older call retire the newly offered row would make a
+      // post-crash retry indistinguishable from successful acknowledgement. Strictly earlier,
+      // rather than <=, also closes the same-millisecond ordering ambiguity.
+      message.offeredAt < callStartedAt &&
+      !(byFinish && message.offeredOnFinish)
   );
   if (offered.length === 0) return [];
   const now = Date.now();
@@ -1232,6 +1449,10 @@ export function releaseQuiescentRun(options: { allowPendingReports?: boolean; re
     return false;
   }
   const workers = [...run.agents.values()].filter((agent) => agent.info.role === 'worker');
+  // Terminal means terminal. A sleeping worker is not finished with, it is between jobs, and
+  // releasing the run around it would throw away the chat the prime is most likely to want
+  // next — which is the whole reason the state exists. A run therefore now ends when every
+  // worker in it has genuinely ended, or when the user clears it.
   if (workers.length === 0 || workers.some((agent) => !isOver(agent.info.state))) return false;
   const prime = run.agents.get(PRIME_ID);
   if (!prime) return false;
@@ -1291,14 +1512,20 @@ function planFinish(agent: Agent, result: string): { info: AgentInfo; report: Ag
         message.ackedAt === null && (message.offeredAt === null || message.offeredOnFinish)
     )
     .map((message) => message.id);
+  // A finish is evidence that this piece of work is over, and nothing more than that. The
+  // worker's chat is still there, still holds everything it learned, and is still the cheapest
+  // place to put the next piece of work — so it sleeps rather than ends, unless its own context
+  // has grown past the point where reopening it would achieve anything.
+  const terminal = ceilingCrossed(agent.info);
+  const now = Date.now();
   const info: AgentInfo = {
     ...agent.info,
-    state: 'finished',
-    finishedAt: Date.now(),
+    state: terminal ? 'finished' : 'sleeping',
+    finishedAt: terminal ? now : null,
+    sleptAt: now,
+    detachedAt: null,
     result: result.slice(0, MAX_MESSAGE_CHARS),
-    // `detached` deliberately carries revivable=true because a closed tab is not evidence that
-    // the server-side turn stopped. A real finish *is* that evidence.
-    revivable: false
+    revivable: !terminal
   };
   const caveat =
     unconfirmed.length > 0
@@ -1306,32 +1533,101 @@ function planFinish(agent: Agent, result: string): { info: AgentInfo; report: Ag
         `${unconfirmed.slice(0, 5).join(', ')}${unconfirmed.length > 5 ? ', …' : ''}. ` +
         'Assume it may not have read them and check the result against what you asked for.)'
       : '';
-  const report = newMessage(agent.info.id, PRIME_ID, `[${agent.info.id} finished] ${info.result}${caveat}`);
+  // A worker that stops is a freed slot, and the prime is the only party that can use it —
+  // but nothing in the final report ever said so. The recorded runs show the consequence: a
+  // prime that has just been told a worker ended sits on remaining work rather than putting
+  // that capacity back to use, because "finished" reads as an ending rather than as capacity
+  // coming back. Counting is done against the workers that outlive this one, since `agent`
+  // still holds its slot at plan time.
+  const max = getConfig().multiAgent.maxWorkers;
+  const stillWorking = run
+    ? [...run.agents.values()].filter(
+        (other) =>
+          other.info.role === 'worker' &&
+          other.info.id !== agent.info.id &&
+          occupiesSlot(other.info.state)
+      ).length
+    : 0;
+  const free = Math.max(0, max - stillWorking);
+  const slots =
+    free > 0
+      ? `${free} of ${max} worker slot${max === 1 ? '' : 's'} ${free === 1 ? 'is' : 'are'} free. `
+      : '';
+  // The one line in this whole file the prime reliably acts on, so it says the thing that
+  // changed: this worker is reusable. Spawning a replacement for work its own chat already
+  // understands is both the expensive answer and the one that fills ChatGPT with abandoned
+  // conversations, which is the behaviour reusable workers exist to stop.
+  const capacity = terminal
+    ? `
+(${agent.info.id} is finished for good: its own chat has reached the context limit, so it cannot be woken again. ` +
+      `${slots}Spawn a new worker for any remaining work.)`
+    : `
+(${agent.info.id} is sleeping, not gone. ${slots}It keeps this chat and everything it has already worked out, so send ` +
+      `it more work with agents action=message to="${agent.info.id}" — that wakes it up where it left off. Prefer that ` +
+      'to action=spawn: a new worker starts from nothing.)';
+  const report = newMessage(
+    agent.info.id,
+    PRIME_ID,
+    `[${agent.info.id} ${terminal ? 'finished' : 'reported'}] ${info.result}${caveat}${capacity}`
+  );
   return { info, report };
 }
 
+/**
+ * Upgrades a finish that is still behind its immediate durability barrier when session
+ * accounting proves the worker crossed the 400k ceiling in the meantime.
+ *
+ * The live Agent intentionally stays active until commit, so the staged overlay is the state
+ * that is about to become authoritative. Leaving that overlay at sleeping/revivable=true while
+ * writing contextTokens>=400k creates a crash snapshot that revives a worker which should be
+ * terminal. Keep the staged report identity stable and update only its projected authority and
+ * wording.
+ */
+function upgradeStagedFinishAtCeiling(agent: Agent): boolean {
+  const stage = activeFinishStages.get(agent);
+  if (
+    !stage ||
+    stage.settled ||
+    stage.run !== run ||
+    stage.info.state === 'finished' ||
+    !ceilingCrossed(agent.info)
+  ) {
+    return false;
+  }
+  const terminal = planFinish(agent, stage.info.result ?? '');
+  stage.info.state = 'finished';
+  stage.info.finishedAt = stage.info.sleptAt ?? terminal.info.finishedAt ?? Date.now();
+  stage.info.revivable = false;
+  stage.info.contextTokens = agent.info.contextTokens;
+  stage.report.text = terminal.report.text;
+  return true;
+}
+
 function publishFinish(agent: Agent, info: AgentInfo, report: AgentMessage, durability: SwarmMutationDurability): void {
-  // Only terminal authority fields are committed from the plan. Liveness/detach telemetry may
+  // Only the authority fields are committed from the plan. Liveness/detach telemetry may
   // legitimately have advanced while an immediate disk write was awaiting I/O and must not be
   // rewound to the copy captured before that await.
-  agent.info.state = 'finished';
+  agent.info.state = info.state;
   agent.info.finishedAt = info.finishedAt;
+  agent.info.sleptAt = info.sleptAt;
+  agent.info.detachedAt = null;
   agent.info.result = info.result;
-  agent.info.revivable = false;
-  // What survives is the tombstone: identity, task, result and conversation. The conversation
-  // is deliberately kept so a retried finish from that same chat is recognised as the retry it is.
+  agent.info.revivable = info.revivable;
+  // The conversation is kept either way, and for two reasons now: a retried finish from that
+  // same chat is recognised as the retry it is, and — while the worker is only sleeping — that
+  // id is the whole of what a later revival needs to reopen the chat and type into it.
   const prime = primeAgent();
-  // Over the queue limit on purpose: the worker is about to stop existing and has no way to
-  // retry its final report.
+  // Over the queue limit on purpose: the worker is about to stop calling tools and has no way
+  // to retry its own report.
   prime.queue.push(report);
   recount(prime);
-  logInfo(`multi-agent: ${agent.info.id} finished`);
+  logInfo(`multi-agent: ${agent.info.id} ${info.state === 'finished' ? 'finished for good' : 'is sleeping'}`);
   changed(durability);
 }
 
-function stageFinish(agent: Agent, result: string): StagedFinish {
-  if (isOver(agent.info.state)) {
-    logInfo(`multi-agent: ${agent.info.id} called finish again after it had already ${agent.info.state}`);
+function stageFinish(agent: Agent, result: string, acknowledgedMessageIds: readonly string[] = []): StagedFinish {
+  if (hasStopped(agent.info.state)) {
+    logInfo(`multi-agent: ${agent.info.id} called finish again after it had already stopped (${agent.info.state})`);
     return {
       info: { ...agent.info },
       report: null,
@@ -1347,7 +1643,13 @@ function stageFinish(agent: Agent, result: string): StagedFinish {
   }
   if (!run) throw new AgentError('No sub-agent run is active.');
   const planned = planFinish(agent, result);
-  const stage: FinishStageState = { run, agent, ...planned, settled: false };
+  const stage: FinishStageState = {
+    run,
+    agent,
+    ...planned,
+    acknowledgedMessageIds: [...new Set(acknowledgedMessageIds)],
+    settled: false
+  };
   activeFinishStages.set(agent, stage);
   // This critical revision is represented only as an overlay in the immediate snapshot. Live
   // status/inbox readers and the ordinary debounce still see the active worker until commit.
@@ -1361,7 +1663,21 @@ function stageFinish(agent: Agent, result: string): StagedFinish {
     if (accepted) {
       // The exact projected terminal row + report already crossed the immediate durable barrier.
       // Publishing those same facts changes only live readers and the debounced mirror.
-      if (!isOver(agent.info.state)) publishFinish(agent, stage.info, stage.report, 'telemetry');
+      if (!hasStopped(agent.info.state)) {
+        if (stage.acknowledgedMessageIds.length > 0) {
+          const acked = new Set(stage.acknowledgedMessageIds);
+          const now = Date.now();
+          let delivered = 0;
+          for (const message of agent.queue) {
+            if (message.ackedAt !== null || !acked.has(message.id)) continue;
+            message.ackedAt = now;
+            delivered += 1;
+          }
+          agent.info.delivered += delivered;
+          recount(agent);
+        }
+        publishFinish(agent, stage.info, stage.report, 'telemetry');
+      }
       return;
     }
     // A failed write generation can remain queued for durable.ts retry. Emit a newer safe
@@ -1369,8 +1685,12 @@ function stageFinish(agent: Agent, result: string): StagedFinish {
     changed();
   };
   return {
-    info: { ...planned.info },
-    report: { ...planned.report },
+    // These are the staged authority objects themselves. A session measurement may cross the
+    // context ceiling while the fsync is in flight; upgradeStagedFinishAtCeiling() then updates
+    // these same objects so both the durable snapshot and the eventual tool/bridge result say
+    // what actually committed.
+    info: stage.info,
+    report: stage.report,
     repeat: false,
     commit: () => settle(true),
     rollback: () => settle(false)
@@ -1392,8 +1712,8 @@ export function stageFinishAgent(caller: Caller, result: string): StagedFinish {
  */
 export function finishAgent(caller: Caller, result: string): FinishResult {
   const agent = finishTarget(caller);
-  if (isOver(agent.info.state)) {
-    logInfo(`multi-agent: ${agent.info.id} called finish again after it had already ${agent.info.state}`);
+  if (hasStopped(agent.info.state)) {
+    logInfo(`multi-agent: ${agent.info.id} called finish again after it had already stopped (${agent.info.state})`);
     return { info: { ...agent.info }, report: null, repeat: true };
   }
   const planned = planFinish(agent, result);
@@ -1414,7 +1734,7 @@ export function finishAgent(caller: Caller, result: string): FinishResult {
 export function finishWorkerConversation(conversationId: string, result: string): FinishResult | null {
   if (!run || !conversationId) return null;
   const agent = agentForConversationId(conversationId);
-  if (!agent || agent.info.role !== 'worker' || isOver(agent.info.state)) return null;
+  if (!agent || agent.info.role !== 'worker' || hasStopped(agent.info.state)) return null;
   return finishAgent({ conversationId }, result);
 }
 
@@ -1422,8 +1742,16 @@ export function finishWorkerConversation(conversationId: string, result: string)
 export function stageWorkerConversationFinish(conversationId: string, result: string): StagedFinish | null {
   if (!run || !conversationId) return null;
   const agent = agentForConversationId(conversationId);
-  if (!agent || agent.info.role !== 'worker' || isOver(agent.info.state)) return null;
-  return stageFinish(agent, result);
+  if (!agent || agent.info.role !== 'worker' || hasStopped(agent.info.state)) return null;
+  // A settled browser answer is evidence the worker got past the preceding ordinary tool
+  // result. Those are exactly the rows the next authenticated MCP call would retire. There is
+  // no such next call when the worker simply answers and stops, so stage their retirement with
+  // the browser-owned finish itself. Rows offered by a finish result remain excluded for the
+  // same lost-result retry reason as acknowledgeOffers(byFinish=true).
+  const acknowledged = agent.queue
+    .filter((message) => message.ackedAt === null && message.offeredAt !== null && !message.offeredOnFinish)
+    .map((message) => message.id);
+  return stageFinish(agent, result, acknowledged);
 }
 
 /**
@@ -1475,6 +1803,507 @@ export function failAgent(
   return { info: { ...agent.info }, report: { ...report }, repeat: false };
 }
 
+// -------------------------------------------------------------- sleep / wake
+
+/**
+ * Puts a worker to sleep on evidence that it stopped working, without ending it.
+ *
+ * The app-owned half of the lifecycle, and the reason a run can outlive any individual piece
+ * of work. Every caller here is an observation rather than a verdict — a settled final answer,
+ * a chat that went quiet with its tab gone, a durably quiescent turn — so none of them may
+ * throw anything away. The conversation, the transcript, the workspace and the unacknowledged
+ * queue all survive, because the next thing that happens to this worker is most likely the
+ * prime waking it up in that same chat.
+ *
+ * The context ceiling is the one thing that makes a stop final, and it is read here rather
+ * than enforced anywhere earlier: a worker that crossed it mid-task was never interrupted, it
+ * simply has no room left for another task once this one ends.
+ */
+function sleepAgent(agent: Agent, reason: string): FinishResult | null {
+  if (!run || agent.info.role !== 'worker') return null;
+  if (hasStopped(agent.info.state)) return null;
+  // A finish crossing its own durable acceptance barrier is the stronger, more specific
+  // statement about the same transition. Never publish two of them.
+  if (activeFinishStages.has(agent)) return null;
+  const terminal = ceilingCrossed(agent.info);
+  const now = Date.now();
+  agent.info.state = terminal ? 'finished' : 'sleeping';
+  agent.info.sleptAt = now;
+  agent.info.finishedAt = terminal ? now : null;
+  agent.info.detachedAt = null;
+  agent.info.revivable = !terminal;
+  recount(agent);
+  const report = newMessage(
+    agent.info.id,
+    PRIME_ID,
+    terminal
+      ? `[${agent.info.id} finished] ${reason} Its chat has also reached the context limit, so it cannot be woken ` +
+        'again. Its worker slot is free; spawn a new worker if that work still matters.'
+      : `[${agent.info.id} is sleeping] ${reason} Its worker slot is free and its chat is intact — wake it with ` +
+        `agents action=message to="${agent.info.id}" when you have more for it, rather than spawning a new worker.`
+  );
+  const prime = primeAgent();
+  prime.queue.push(report);
+  recount(prime);
+  logInfo(`multi-agent: ${agent.info.id} ${terminal ? 'finished for good' : 'is sleeping'} — ${reason}`);
+  changed();
+  return { info: { ...agent.info }, report: { ...report }, repeat: false };
+}
+
+/**
+ * Sleeps a worker the browser proved has stopped, addressed by its own chat.
+ *
+ * The counterpart of {@link finishWorkerConversation} for the paths that have an observation
+ * but no result text of the worker's own.
+ */
+export function sleepWorkerConversation(conversationId: string, reason: string): FinishResult | null {
+  if (!run || !conversationId) return null;
+  const agent = agentForConversationId(conversationId);
+  if (!agent || agent.info.role !== 'worker') return null;
+  return sleepAgent(agent, reason);
+}
+
+/** Sleeps a worker by slot id. Used by sweeps that already know which row they proved quiet. */
+export function sleepWorker(id: string, reason: string): FinishResult | null {
+  const agent = run?.agents.get(id);
+  if (!agent) return null;
+  return sleepAgent(agent, reason);
+}
+
+/**
+ * What the app has to do in the browser to wake one worker, and which messages ride on it.
+ *
+ * Carries the conversation because that *is* the worker: reviving is reopening one exact
+ * `/c/<id>` and typing into it. Carries the ids as well as the text so that acceptance can
+ * mark exactly the messages that were typed as offered, rather than whatever happened to be
+ * queued by the time the browser answered — a message marked offered but never delivered is
+ * retired by the worker's next call and lost.
+ */
+export interface WorkerRevival {
+  id: string;
+  conversationId: string;
+  runId: string;
+  text: string;
+  messageIds: string[];
+}
+
+let reviveRequest: ((revivals: WorkerRevival[]) => void) | null = null;
+
+/**
+ * The bridge registers here, exactly as it does for spawn bootstraps.
+ *
+ * Registration replays whatever is already owed, for the same reason: a restart restores the
+ * run before the bridge exists, so a worker left mid-revival has nobody to ask for a tab.
+ */
+export function onReviveRequest(handler: (revivals: WorkerRevival[]) => void): () => void {
+  reviveRequest = handler;
+  const owed = pendingWorkerRevivals();
+  if (owed.length > 0) {
+    handler(owed);
+    logInfo(`multi-agent: ${owed.length} worker chat(s) still owed a revival`);
+  }
+  return () => {
+    if (reviveRequest === handler) reviveRequest = null;
+  };
+}
+
+/** Workers whose slot is reserved and whose chat has not been typed into yet. */
+export function pendingWorkerRevivals(): WorkerRevival[] {
+  if (!run) return [];
+  const out: WorkerRevival[] = [];
+  for (const agent of run.agents.values()) {
+    if (agent.info.state !== 'waking' || !agent.info.conversationId) continue;
+    const plan = planRevivalText(agent);
+    out.push({
+      id: agent.info.id,
+      conversationId: agent.info.conversationId,
+      runId: run.runId,
+      text: plan.text,
+      messageIds: plan.messageIds
+    });
+  }
+  return out;
+}
+
+/**
+ * Gives the browser exclusive ownership of an in-flight wake before it receives the text.
+ *
+ * `waking + revivable=true` is the arbitration window: a late MCP call from the old server-side
+ * turn may still prove that worker never really stopped and take it back to `active`. Once the
+ * exact revival command has been durably redeemed, however, that same late call must not steal
+ * the transaction after the browser already owns its payload. Reuse `revivable=false` only while
+ * state is `waking`; every other state already gives that bit its ordinary meaning.
+ *
+ * The bridge makes this mutation durable before returning the command body. If that barrier
+ * fails it calls {@link rollbackWorkerRevivalClaim}, restoring the pre-claim arbitration state.
+ */
+export function claimWorkerRevival(id: string, conversationId: string): boolean {
+  const agent = run?.agents.get(id);
+  if (!agent || agent.info.state !== 'waking' || agent.info.conversationId !== conversationId) return false;
+  if (!agent.info.revivable) return true;
+  agent.info.revivable = false;
+  changed('critical');
+  return true;
+}
+
+/** Rolls back only the browser-claim marker while the wake is otherwise still untouched. */
+export function rollbackWorkerRevivalClaim(id: string, conversationId: string): boolean {
+  const agent = run?.agents.get(id);
+  if (!agent || agent.info.state !== 'waking' || agent.info.conversationId !== conversationId || agent.info.revivable) {
+    return false;
+  }
+  agent.info.revivable = true;
+  changed('critical');
+  return true;
+}
+
+/** True only while a browser-owned wake is between durable redeem and sent/failed ACK. */
+export function workerRevivalClaimed(conversationId: string | null | undefined): boolean {
+  if (!run || !conversationId) return false;
+  const agent = boundAgent(conversationId);
+  return Boolean(agent?.info.role === 'worker' && agent.info.state === 'waking' && !agent.info.revivable);
+}
+
+/**
+ * Durable evidence that a browser-owned wake already crossed its semantic send boundary.
+ *
+ * `/commands/ack` writes the worker snapshot before it writes the bridge receipt. A crash in
+ * between therefore restores the leased command but may restore the worker as active/sleeping
+ * rather than `waking`. The browser must be able to retry that ACK without the bridge turning a
+ * successful send into a terminal failure. A revival-offer stamped no earlier than this
+ * command's owner lease is the exact broker-side evidence of that prior send; acknowledged rows
+ * count too, because the worker may have made its next call before the browser's HTTP retry.
+ */
+export function workerRevivalDeliveredSince(
+  id: string,
+  conversationId: string,
+  commandId: string,
+  claimedAt: number
+): boolean {
+  const agent = run?.agents.get(id);
+  if (!agent || !conversationId || agent.info.conversationId !== conversationId) return false;
+  if (commandId && agent.info.lastRevivalCommandId === commandId) return true;
+  // Backward-compatible evidence for a snapshot written between introduction of durable
+  // revival offers and the exact command-id marker. New sends always take the exact branch.
+  return agent.queue.some(
+    (message) =>
+      message.offeredViaRevival === true &&
+      message.offeredAt !== null &&
+      message.offeredAt >= claimedAt
+  );
+}
+
+/**
+ * The user message the extension types into a woken worker's chat.
+ *
+ * The prime's own words, delivered the way a person would deliver them, because that is what
+ * they are: this app is not asking the worker to go and fetch something, it is handing it the
+ * instruction. The short parenthetical afterwards exists only because the worker's last turn
+ * ended with it being told to stop — without it, a well-behaved worker reads a new user turn
+ * and still believes it is finished.
+ */
+function planRevivalText(agent: Agent): { text: string; messageIds: string[] } {
+  const waiting: AgentMessage[] = [];
+  let chars = 0;
+  for (const message of agent.queue) {
+    if (message.ackedAt !== null || unpublishedMessages.has(message)) continue;
+    if (waiting.length > 0 && chars + message.text.length > MAX_INBOX_OFFER_CHARS) break;
+    waiting.push(message);
+    chars += message.text.length;
+  }
+  const body = waiting.map((message) => message.text).join('\n\n');
+  const text =
+    (body || 'The prime agent has more work for you; check your inbox on the next tool result.') +
+    `\n\n(Chat On Steroids: you are still ${agent.info.id} in the same run, and this is the prime agent talking to ` +
+    'you again in the chat you already know. Pick up from what you did here before rather than starting over. ' +
+    'Report with agents action=message to="prime" as you go and action=finish when this piece is done.)';
+  return { text, messageIds: waiting.map((message) => message.id) };
+}
+
+/**
+ * Reserves a slot for a sleeping worker and asks the browser to wake it, or refuses.
+ *
+ * Slot reservation is the whole reason this is a state transition rather than a side effect.
+ * Two messages to two sleeping workers arriving at once must not both see the same last free
+ * slot, so the transition into `waking` — which {@link occupiesSlot} counts — happens here,
+ * synchronously, before anything touches the browser.
+ */
+function beginRevival(agent: Agent): void {
+  agent.info.state = 'waking';
+  agent.info.sleptAt = null;
+  agent.info.detachedAt = null;
+  // True only for the pre-claim arbitration window. A proven tool call may still show that the
+  // old server-side turn never stopped and take the worker active; `/commands/redeem` flips this
+  // false durably before it returns any payload, after which the browser owns the wake instead.
+  agent.info.revivable = true;
+  logInfo(`multi-agent: ${agent.info.id} is being woken in conversation ${agent.info.conversationId}`);
+}
+
+/**
+ * Reserves workers that have stopped with prime work which was never offered to them.
+ *
+ * A message sent while a worker is `detached` cannot safely be injected immediately: its
+ * server-side turn may still be running. Once that worker is later proved stopped, however,
+ * leaving the already-accepted message in a sleeping inbox strands it until the prime happens
+ * to send a *second* message. This stages the missing handoff from "stopped" to "waking".
+ *
+ * No browser side effect happens here. The caller must persist this critical revision, commit
+ * it, and only then call requestWorkerRevivals(). That keeps the same durable-before-publish
+ * boundary as an ordinary message-to-sleeping-worker revival.
+ */
+export function stageQueuedWorkerRevivals(ids: readonly string[]): {
+  waking: string[];
+  commit: () => void;
+  rollback: () => void;
+} {
+  if (!run || ids.length === 0) return { waking: [], commit: () => undefined, rollback: () => undefined };
+  const wanted = new Set(ids);
+  const reserved: Array<{ agent: Agent; sleptAt: number | null }> = [];
+  for (const agent of run.agents.values()) {
+    if (
+      agent.info.role !== 'worker' ||
+      !wanted.has(agent.info.id) ||
+      agent.info.state !== 'sleeping' ||
+      !agent.info.revivable ||
+      !agent.info.conversationId ||
+      ceilingCrossed(agent.info)
+    ) {
+      continue;
+    }
+    const hasUnseen = agent.queue.some(
+      (message) =>
+        message.ackedAt === null &&
+        message.offeredAt === null &&
+        !unpublishedMessages.has(message)
+    );
+    if (!hasUnseen || freeWorkerSlots() <= 0) continue;
+    const sleptAt = agent.info.sleptAt;
+    beginRevival(agent);
+    reserved.push({ agent, sleptAt });
+  }
+  if (reserved.length === 0) return { waking: [], commit: () => undefined, rollback: () => undefined };
+  changed();
+  let settled = false;
+  return {
+    waking: reserved.map(({ agent }) => agent.info.id),
+    commit: () => {
+      if (settled) return;
+      settled = true;
+      changed('telemetry');
+    },
+    rollback: () => {
+      if (settled) return;
+      settled = true;
+      for (const { agent, sleptAt } of reserved) {
+        if (agent.info.state !== 'waking') continue;
+        returnWakingWorkerToStopped(
+          agent,
+          sleptAt ?? Date.now(),
+          'Its queued-work revival was rolled back before the browser could safely deliver it.'
+        );
+      }
+      changed();
+    }
+  };
+}
+
+/**
+ * Publishes revival bootstraps for workers that are still genuinely waking.
+ *
+ * The second half of the `message` transaction, mirroring {@link requestWorkerBootstraps}: the
+ * broker plans and reserves first, that revision is made durable, and only then is a browser
+ * asked to open anything. A retry after a failed disk barrier is safe because a worker that is
+ * already awake is skipped.
+ */
+export function requestWorkerRevivals(ids: readonly string[]): number {
+  if (!run || ids.length === 0) return 0;
+  const wanted = new Set(ids);
+  const owed = pendingWorkerRevivals().filter((revival) => wanted.has(revival.id));
+  if (owed.length === 0) return 0;
+  if (reviveRequest) reviveRequest(owed);
+  else logWarn('multi-agent: no browser extension is paired, so sleeping worker chats cannot be reopened');
+  return owed.length;
+}
+
+/**
+ * The browser proved it typed the prime's message into the worker's own chat.
+ *
+ * That send is the delivery, so it is recorded as an *offer* rather than an acknowledgement,
+ * on exactly the terms every other inbox offer gets: the worker's next authenticated call is
+ * what retires those rows. Nothing here is taken on trust from the model — the conversation
+ * the extension reports has to be the one this slot is bound to, or the revival is not this
+ * worker's.
+ */
+export function noteWorkerRevived(
+  id: string,
+  conversationId: string,
+  messageIds: readonly string[],
+  commandId: string | null = null
+): boolean {
+  const agent = run?.agents.get(id);
+  if (!agent || agent.info.state !== 'waking') return false;
+  if (!conversationId || agent.info.conversationId !== conversationId) {
+    logWarn(`multi-agent: refused a revival ack for ${id} naming conversation ${conversationId}`);
+    return false;
+  }
+  const now = Date.now();
+  agent.info.state = 'active';
+  agent.info.revivable = false;
+  agent.info.finishedAt = null;
+  agent.info.sleptAt = null;
+  agent.info.result = null;
+  agent.info.lastSeenAt = now;
+  if (!agent.info.activatedAt) agent.info.activatedAt = now;
+  if (commandId) agent.info.lastRevivalCommandId = commandId;
+  const offered = new Set(messageIds);
+  for (const message of agent.queue) {
+    if (message.ackedAt !== null || !offered.has(message.id)) continue;
+    message.offeredAt = now;
+    message.offers += 1;
+    message.offeredOnFinish = false;
+    message.offeredViaRevival = true;
+  }
+  recount(agent);
+  logInfo(`multi-agent: ${id} is awake again in conversation ${conversationId}`);
+  changed();
+  return true;
+}
+
+/**
+ * Permanently closes a worker that is already stopped and is now known to be at the context
+ * ceiling. This can happen after it was first reported sleeping, or while a wake transaction
+ * is being rolled back.
+ *
+ * Messages never offered to the worker cannot ever be consumed once this state is terminal.
+ * Remove those rows and tell the prime exactly what became undeliverable rather than leaving a
+ * finished worker with a permanently nonzero inbox. Already-offered rows stay for the existing
+ * lost-result retry semantics: they may genuinely have reached the worker.
+ */
+function finishStoppedWorkerAtCeiling(agent: Agent, reason: string, sleptAt = Date.now()): AgentMessage {
+  const now = Date.now();
+  const neverOffered = agent.queue.filter(
+    (message) => message.ackedAt === null && message.offeredAt === null && !unpublishedMessages.has(message)
+  );
+  if (neverOffered.length > 0) {
+    const doomed = new Set(neverOffered);
+    agent.queue = agent.queue.filter((message) => !doomed.has(message));
+  }
+
+  agent.info.state = 'finished';
+  agent.info.sleptAt = sleptAt;
+  agent.info.finishedAt = now;
+  agent.info.detachedAt = null;
+  agent.info.revivable = false;
+  recount(agent);
+
+  const missed =
+    neverOffered.length > 0
+      ? ` ${neverOffered.length} queued message${neverOffered.length === 1 ? '' : 's'} could not be delivered before that limit` +
+        ` (${neverOffered
+          .slice(0, 3)
+          .map((message) => `“${message.text.slice(0, 180)}”`)
+          .join(', ')}${neverOffered.length > 3 ? ', …' : ''}). Those instructions are no longer queued.`
+      : '';
+  const report = newMessage(
+    agent.info.id,
+    PRIME_ID,
+    `[${agent.info.id} finished for good] ${reason} Its chat has reached the context limit, so it cannot be woken again.` +
+      `${missed} Its worker slot is free; spawn a new worker for any remaining work.`
+  );
+  const prime = primeAgent();
+  prime.queue.push(report);
+  recount(prime);
+  return report;
+}
+
+/** Returns a failed/rolled-back wake to the only stopped state its current context permits. */
+function returnWakingWorkerToStopped(agent: Agent, sleptAt: number, reason: string): AgentMessage | null {
+  if (ceilingCrossed(agent.info)) return finishStoppedWorkerAtCeiling(agent, reason, sleptAt);
+  agent.info.state = 'sleeping';
+  agent.info.sleptAt = sleptAt;
+  agent.info.finishedAt = null;
+  agent.info.detachedAt = null;
+  agent.info.revivable = true;
+  recount(agent);
+  return null;
+}
+
+/**
+ * The browser could not wake this worker, so the slot it was holding goes back.
+ *
+ * Deliberately not a failure of the worker. Nothing was typed into its chat, its queue is
+ * untouched and still unacknowledged, and the chat itself is exactly as reusable as it was a
+ * moment ago — so it returns to `sleeping` and the prime can try again. The prime is told,
+ * because it is holding a message it believes was delivered.
+ */
+export function failWorkerRevival(id: string, why: string): AgentMessage | null {
+  const agent = run?.agents.get(id);
+  if (!agent || agent.info.state !== 'waking') return null;
+  const terminal = returnWakingWorkerToStopped(
+    agent,
+    Date.now(),
+    `The browser could not complete its revival: ${why}`
+  );
+  if (terminal) {
+    logWarn(`multi-agent: could not wake ${id}; the chat crossed its context ceiling while revival was in flight`);
+    changed();
+    return terminal;
+  }
+  const report = newMessage(
+    id,
+    PRIME_ID,
+    `[${id} could not be woken] ${why} It is still asleep and still holds everything it knew, and what you sent it is ` +
+      'still queued unread. Its slot is free again: try agents action=message to="' +
+      id +
+      '" once more, or do that work another way.'
+  );
+  const prime = primeAgent();
+  prime.queue.push(report);
+  recount(prime);
+  logWarn(`multi-agent: could not wake ${id} — ${why}`);
+  changed();
+  return report;
+}
+
+/**
+ * What the local session store measured this agent's own chat to be carrying.
+ *
+ * Fed from the durable session that records this exact conversation, never from anything a
+ * model said about itself. Monotonic within a run: a conversation's context only grows, and a
+ * transient read of a half-rebuilt summary must not be able to un-cross the ceiling and make a
+ * worker revivable again after the prime was told it was finished.
+ */
+export function noteAgentContextTokens(conversationId: string | null | undefined, tokens: number): void {
+  if (!run || !conversationId || !Number.isFinite(tokens) || tokens < 0) return;
+  const agent = boundAgent(conversationId);
+  if (!agent || agent.info.contextTokens >= tokens) return;
+  const crossed = !ceilingCrossed(agent.info) && tokens >= WORKER_CONTEXT_CEILING_TOKENS;
+  agent.info.contextTokens = tokens;
+  // Crossing never stops anything. A worker in the middle of a task keeps its slot, its inbox
+  // and its right to report; all that changes is that it can no longer be woken afterwards,
+  // which is only decided the next time it stops.
+  if (crossed && agent.info.role === 'worker') {
+    const staged = upgradeStagedFinishAtCeiling(agent);
+    if (!staged && agent.info.state === 'sleeping') {
+      finishStoppedWorkerAtCeiling(
+        agent,
+        'A late measurement crossed the context ceiling after this worker had already stopped.'
+      );
+    } else if (hasStopped(agent.info.state)) {
+      agent.info.revivable = false;
+    }
+    logInfo(
+      `multi-agent: ${agent.info.id} passed the ${WORKER_CONTEXT_CEILING_TOKENS} token ceiling; it keeps working but cannot be woken again`
+    );
+    // The crossing can revoke wake authority or rewrite a staged finish projection. That is a
+    // critical state edge, not optional telemetry: crash recovery must never resurrect the old
+    // revivable state after this process has already measured the terminal ceiling.
+    changed('critical');
+    return;
+  }
+  changed('telemetry');
+}
+
 // -------------------------------------------------------- prime lifecycle
 
 /** Whether a run exists at all. */
@@ -1506,20 +2335,62 @@ export function swarmTransferActive(): boolean {
 }
 
 /**
- * The prime chat has gone: end the run.
+ * The prime chat's tab has gone.
  *
  * Called by the bridge when the prime's tab reports that it closed or navigated away with no
- * transfer open. Deliberately owned by the extension rather than inferred from silence, and
- * deliberately not asked of the model: a swarm whose coordinator is gone has nobody to
- * report to, and workers that keep going are tabs writing files for a run nobody is reading.
+ * transfer open. It used to end the run on the spot, and with one-shot workers that was right:
+ * a swarm whose coordinator is gone has nobody to report to, and workers that keep going are
+ * tabs writing files for a run nobody is reading.
+ *
+ * Reusable workers change what a closed prime tab means. The run's whole value is now the
+ * chats it has accumulated — workers that already understand the task, asleep and waiting for
+ * the next thing to do — and the user's own loop is *the prime stops, I read something else, I
+ * come back and give it feedback*. Closing that tab in between is a pause, not a decision, and
+ * ending the run over it destroyed every sleeping worker in it. There is deliberately no
+ * timeout on the pause either: a run that is worth resuming after ten minutes is worth
+ * resuming the next morning, and any clock here would only move the same bug further out.
+ *
+ * So the prime detaches, exactly as a worker does, and the run waits. It ends here only when
+ * there is genuinely nothing left to come back to — no worker still working and none that
+ * could be woken — which is the same condition the run would have ended on anyway. Otherwise
+ * the user's escape hatch is the explicit one: Clear swarm in the app.
  */
 export function primeConversationGone(conversationId: string): boolean {
   if (!run || run.primeConversationId !== conversationId) return false;
   // A handover in flight is the one case where the prime chat is *supposed* to go away.
   if (run.transfer && !transferExpired(run.transfer)) return false;
-  endRun('the prime conversation was closed');
+  const prime = run.agents.get(PRIME_ID);
+  // A terminal worker report is still part of the run until the prime has actually received
+  // and acknowledged it. Ending the run merely because every worker is now terminal destroys
+  // exactly the result their terminalisation produced. A closed prime tab therefore remains a
+  // pause while any prime inbox row is outstanding; reopening the same chat can collect it and
+  // ordinary releaseQuiescentRun() retires the run once delivery is safe.
+  const pendingPrimeReport = Boolean(prime?.queue.some((message) => message.ackedAt === null));
+  const reusable = [...run.agents.values()].some(
+    (agent) => agent.info.role === 'worker' && (occupiesSlot(agent.info.state) || canBeRevived(agent.info))
+  );
+  if (!reusable && !pendingPrimeReport) {
+    endRun('the prime conversation was closed and no worker was left to come back to');
+    changed();
+    return true;
+  }
+  if (prime && prime.info.state !== 'detached') {
+    prime.info.state = 'detached';
+    prime.info.detachedAt = Date.now();
+  }
+  if (run.primeGoneAt === null) {
+    run.primeGoneAt = Date.now();
+    logInfo(
+      `multi-agent: the prime chat ${conversationId} closed, but its run keeps ${pendingPrimeReport ? 'its undelivered reports' : 'its workers'} until the user returns or clears it`
+    );
+  }
   changed();
-  return true;
+  return false;
+}
+
+/** Whether the prime may wake this agent by messaging it. */
+function canBeRevived(info: AgentInfo): boolean {
+  return info.role === 'worker' && info.state === 'sleeping' && info.revivable;
 }
 
 /**
@@ -1541,9 +2412,14 @@ export function primeConversationGone(conversationId: string): boolean {
 export function workerConversationGone(conversationId: string): boolean {
   if (!run || !conversationId) return false;
   const worker = [...run.agents.values()].find(
-    (agent) => agent.info.role === 'worker' && agent.info.conversationId === conversationId && !isOver(agent.info.state)
+    (agent) =>
+      agent.info.role === 'worker' &&
+      agent.info.conversationId === conversationId &&
+      occupiesSlot(agent.info.state)
   );
-  if (!worker || worker.info.state === 'detached') return false;
+  // A sleeping worker's tab closing is not an event: it was not working, it holds no slot, and
+  // the chat is reopened from its id the next time the prime wants it.
+  if (!worker || worker.info.state === 'detached' || worker.info.state === 'waking') return false;
   worker.info.state = 'detached';
   worker.info.detachedAt = Date.now();
   worker.info.revivable = true;
@@ -1594,9 +2470,41 @@ export function noteAgentAlive(conversationId: string | null | undefined, source
   const agent = boundAgent(conversationId);
   if (!agent) return null;
   const now = Date.now();
-  const ended = agent.info.role === 'worker' && agent.info.state !== 'active' && agent.info.state !== 'invited';
-  // A worker that reported, or that was ended on the work's own evidence, stays ended: its
-  // chat calling again is a model that has not stopped, not a slot to reopen.
+  if (agent.info.role === 'prime') {
+    agent.info.lastSeenAt = now;
+    // The prime chat is back. Whether it was closed and reopened or merely lost its extension
+    // for a moment, the run is attended again and nothing about it is abandoned.
+    const returned = run.primeGoneAt !== null || agent.info.state === 'detached';
+    if (returned) {
+      run.primeGoneAt = null;
+      agent.info.state = 'active';
+      agent.info.detachedAt = null;
+      logInfo(`multi-agent: the prime chat ${conversationId} is back, so its run carries on`);
+      changed();
+    }
+    return { agentId: agent.info.id, revived: returned, report: null };
+  }
+  // A sleeping worker's *page* is not evidence that it is working. Its tab stays open after
+  // its turn settles and keeps reporting the same transcript, so waking on that would undo
+  // every sleep the moment it happened and hand the slot straight back. A proven tool call is
+  // different: the model in that chat is running, whatever the app decided a moment ago.
+  const sleeping = agent.info.state === 'sleeping' || agent.info.state === 'waking';
+  if (sleeping && source === 'page') {
+    agent.info.lastSeenAt = now;
+    return { agentId: agent.info.id, revived: false, report: null };
+  }
+  // A model turn can keep making connector calls after its browser tab was closed. That call
+  // proves the server-side worker is still alive, but it does not prove a page exists again.
+  // Keeping `detached` preserves the silence-based escape hatch for a turn whose final call is
+  // the last thing this app ever sees; a real page observation below is what clears detachment.
+  if (agent.info.state === 'detached' && source === 'call') {
+    agent.info.lastSeenAt = now;
+    return { agentId: agent.info.id, revived: false, report: null };
+  }
+  const ended =
+    agent.info.state !== 'active' && agent.info.state !== 'invited';
+  // A worker that was ended on the work's own evidence stays ended: its chat calling again is
+  // a model that has not stopped, not a slot to reopen.
   if (!ended || (agent.info.state !== 'detached' && !agent.info.revivable)) {
     agent.info.lastSeenAt = now;
     return { agentId: agent.info.id, revived: false, report: null };
@@ -1605,21 +2513,27 @@ export function noteAgentAlive(conversationId: string | null | undefined, source
   agent.info.state = 'active';
   agent.info.detachedAt = null;
   agent.info.finishedAt = null;
+  agent.info.sleptAt = null;
   agent.info.revivable = false;
   agent.info.lastSeenAt = now;
   if (was === 'failed') agent.info.result = null;
   if (!agent.info.activatedAt) agent.info.activatedAt = now;
-  // Only a revival from `failed` needs saying: that is the one the prime was told about, in
-  // so many words, with an instruction to carry on without this worker. Leaving that standing
-  // is how the same work gets done twice.
+  // Two revivals need saying, and both for the same reason: the prime was told something
+  // about this worker that has just stopped being true, and left standing it is how the same
+  // work gets done twice or a slot gets counted free while somebody is using it. A worker
+  // coming back from `detached` needs nothing said — the prime was never told it had gone.
   let report: AgentMessage | null = null;
-  if (was === 'failed') {
+  if (was === 'failed' || was === 'sleeping') {
+    const how = source === 'page' ? 'reappeared in the browser' : 'made another tool call';
     report = newMessage(
       agent.info.id,
       PRIME_ID,
-      `[${agent.info.id} is back] It was reported gone, but it is working again — it just ${
-        source === 'page' ? 'reappeared in the browser' : 'made another tool call'
-      }. Ignore that earlier report: do not redo its work, and expect its result normally.`
+      was === 'failed'
+        ? `[${agent.info.id} is back] It was reported gone, but it is working again — it just ${how}. ` +
+          'Ignore that earlier report: do not redo its work, and expect its result normally.'
+        : `[${agent.info.id} is awake again] It was reported asleep with its slot free, but it never actually ` +
+          `stopped — it just ${how}. It is working, it holds its slot again, and its result will arrive the ` +
+          'ordinary way. You do not need to wake it.'
     );
     const prime = primeAgent();
     prime.queue.push(report);
@@ -1648,8 +2562,10 @@ function boundAgent(conversationId: string): Agent | null {
  * made them. So the chat kept working — the one thing nobody wanted — and the user watched a
  * worker it had ended carry on. This is the sentence that tells it, on its own next call.
  *
- * `null` for everything else, including a `detached` worker (still working, still welcome)
- * and a revivable one (about to be revived by this very call instead).
+ * `null` for everything else, including a `detached` worker (still working, still welcome), a
+ * revivable one (about to be revived by this very call instead) and a sleeping one — a call
+ * from a sleeping worker's chat means it was not asleep, and {@link noteAgentAlive} has
+ * already taken its slot back by the time this is asked.
  */
 export function endedWorkerNotice(conversationId: string | null | undefined): string | null {
   if (!run || !conversationId) return null;
@@ -1664,31 +2580,36 @@ export function endedWorkerNotice(conversationId: string | null | undefined): st
 }
 
 /**
- * Ends detached workers that have also stopped being seen.
+ * Sleeps detached workers that have also stopped being seen.
  *
  * The other half of "a closed tab is not a finished worker": with the tab gone, page evidence
  * can no longer report the turn ending, so silence is the only ending left. Nothing here is a
  * heartbeat lease — the clock is the last moment this app had first-hand evidence of that
  * conversation, and a restart restarts it rather than inheriting an unpersisted one, so a
- * worker is never failed on the strength of a number that was merely never written down.
+ * worker is never stopped on the strength of a number that was merely never written down.
  *
- * The failure stays revivable. A worker that was quiet for six minutes and then calls again
- * was, evidently, not finished.
+ * It sleeps rather than fails, which is what makes being wrong here cheap. A worker that was
+ * quiet for six minutes and then calls again was evidently still working, and its own call
+ * takes the slot straight back; a worker that really had stopped is exactly as reusable as one
+ * that reported properly. Nothing is thrown away either way.
+ *
+ * This is the one silence clock left in the broker, and it exists only because a detached
+ * worker has no page to prove anything about its turn. An *attached* worker is never slept on
+ * silence here: its tab can sit open reporting nothing while a long tool-free generation runs,
+ * so freeing that slot needs durable proof that no turn is open — which lives with the session
+ * store, in the bridge's quiescence sweep, not here.
  */
-export function failSilentDetachedWorkers(now = Date.now()): FinishResult[] {
+export function sleepSilentDetachedWorkers(now = Date.now()): FinishResult[] {
   if (!run) return [];
   const out: FinishResult[] = [];
   for (const agent of [...run.agents.values()]) {
     if (agent.info.role !== 'worker' || agent.info.state !== 'detached') continue;
     const since = Math.max(agent.info.detachedAt ?? 0, agent.info.lastSeenAt ?? 0, livenessFloor);
     if (now - since < DETACHED_SILENCE_MS) continue;
-    const outcome = failAgent(
-      agent.info.id,
-      'its chat was closed and nothing was seen from it afterwards',
-      `[${agent.info.id} gone] Its ChatGPT chat was closed and it has neither called a tool nor reappeared since, so ` +
-        'this app can no longer see what it is doing. The worker slot is free. Continue without it, or spawn a ' +
-        'replacement if that work still matters.',
-      { revivable: true }
+    const outcome = sleepAgent(
+      agent,
+      'Its ChatGPT chat was closed and it has neither called a tool nor reappeared since, so this app can no longer ' +
+        'see what it is doing.'
     );
     if (outcome) out.push(outcome);
   }
@@ -1880,7 +2801,7 @@ export function agentForConversation(conversationId: string): string | null {
  */
 export function bindConversation(id: string, conversationId: string): boolean {
   const agent = run?.agents.get(id);
-  if (!agent || agent.info.role !== 'worker' || isOver(agent.info.state)) return false;
+  if (!agent || agent.info.role !== 'worker' || hasStopped(agent.info.state)) return false;
   return activateWorker(agent, conversationId);
 }
 
@@ -1979,6 +2900,10 @@ export function clearAgent(id: string): ClearResult {
   const agent = run?.agents.get(id);
   if (!agent) return { cleared: 'none', report: null, reason: `${id} is not part of this run` };
   if (isOver(agent.info.state)) return { cleared: 'none', report: null, reason: `${id} has already ended` };
+  // Clearing a sleeping worker is the user saying they are done with that chat for good. It is
+  // still a terminalisation, so it goes through failAgent like any other; what makes it worth
+  // saying separately is that the row was not costing the run a slot.
+
   const reason = 'the user cleared this worker in the app';
   const outcome = failAgent(
     id,
@@ -2086,10 +3011,21 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
               ...agent.info,
               state: finish.info.state,
               finishedAt: finish.info.finishedAt,
+              sleptAt: finish.info.sleptAt,
               result: finish.info.result,
               revivable: finish.info.revivable
             }
           : { ...agent.info };
+        const finishAcknowledged =
+          includeUnpublished && finish && !finish.settled && finish.run === run
+            ? new Set(finish.acknowledgedMessageIds)
+            : null;
+        if (finishAcknowledged && finishAcknowledged.size > 0) {
+          const newlyDelivered = agent.queue.filter(
+            (message) => message.ackedAt === null && finishAcknowledged.has(message.id)
+          ).length;
+          info.delivered += newlyDelivered;
+        }
         // Acknowledged messages are already durable session events; what has to survive here
         // is the in-flight tail. Staged finish reports exist only in this immediate projection:
         // publishing one to the live prime queue before the write succeeds recreates the
@@ -2097,9 +3033,18 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
         const queue = agent.queue
           .filter(
             (message) =>
-              message.ackedAt === null && (includeUnpublished || !unpublishedMessages.has(message))
+              message.ackedAt === null &&
+              (!finishAcknowledged || !finishAcknowledged.has(message.id)) &&
+              (includeUnpublished || !unpublishedMessages.has(message))
           )
           .map((message) => ({ ...message }));
+        if (finishAcknowledged) {
+          // Restore recounts these fields from the queue, but the immediately accepted snapshot
+          // should already be internally truthful as well: crash recovery/UI readers must not
+          // see an empty projected inbox paired with pre-ACK pending/awaiting counters.
+          info.pending = queue.length;
+          info.awaitingAck = queue.filter((message) => message.offeredAt !== null).length;
+        }
         if (includeUnpublished && agent.info.id === PRIME_ID) {
           queue.push(...stagedFinishes.map((stage) => ({ ...stage.report })));
         }
@@ -2111,9 +3056,11 @@ function buildSwarmSnapshot(includeUnpublished: boolean): SwarmSnapshot | null {
 /**
  * Restores a run from disk.
  *
- * Messages that were in flight come back unoffered rather than delivered: the app cannot
- * know whether the result carrying them ever arrived, and offering one twice is the
- * recoverable half of that uncertainty. An open transfer is deliberately not restored — a
+ * Messages that were in an ordinary MCP result come back unoffered rather than delivered: the
+ * app cannot know whether that result ever arrived, and offering one twice is the recoverable
+ * half of that uncertainty. A browser revival is different: its `sent` ACK proves ChatGPT
+ * accepted the prime's words as a real user message, so that row keeps its offer marker and is
+ * acknowledgement-only after restart. An open transfer is deliberately not restored — a
  * handover interrupted by a restart is abandoned, and the prime stays where it was.
  */
 export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
@@ -2134,11 +3081,27 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   for (const entry of snapshot.agents) {
     if (!entry?.info?.id) continue;
     const agent: Agent = {
-      info: { ...entry.info },
+      info: {
+        ...entry.info,
+        // Written by builds that had no sleep state at all. Absent is not zero-with-meaning:
+        // a run restored from one of those has never measured its workers' context, and
+        // starting them at 0 is the honest reading — the ceiling is re-crossed from the live
+        // session summary within one observation batch of the chat doing anything.
+        sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,
+        contextTokens: Number.isFinite(entry.info.contextTokens) ? entry.info.contextTokens : 0,
+        lastRevivalCommandId:
+          typeof entry.info.lastRevivalCommandId === 'string' && entry.info.lastRevivalCommandId
+            ? entry.info.lastRevivalCommandId
+            : null
+      },
       queue: (Array.isArray(entry.queue) ? entry.queue : []).map((message) => ({
         ...message,
-        offeredAt: null,
-        offeredOnFinish: message.offeredOnFinish ?? false
+        offeredAt:
+          message.offeredViaRevival === true && typeof message.offeredAt === 'number' && Number.isFinite(message.offeredAt)
+            ? message.offeredAt
+            : null,
+        offeredOnFinish: message.offeredOnFinish ?? false,
+        offeredViaRevival: message.offeredViaRevival === true
       }))
     };
     if (agent.info.role === 'worker') {
@@ -2157,6 +3120,33 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
       // that invariant across snapshots written by the build that leaked revivable=true from
       // `detached` into `finished`.
       if (agent.info.state === 'finished' && agent.info.revivable) {
+        agent.info.revivable = false;
+        repaired = true;
+      }
+      // A worker mid-revival at the restart, and the one state that must survive as itself.
+      // `waking` is not a browser detail: it is the durable record that the prime's message
+      // was accepted, that a slot is being held for it, and that nothing has typed it yet. The
+      // browser command may or may not have survived, and either way it is the broker that is
+      // owed a tab here — `onReviveRequest` replays every waking worker the moment the bridge
+      // registers, and queue() folds that replay into a restored command rather than opening a
+      // second one. Demoting it to `sleeping` instead is what would lose the message: nothing
+      // would ask for the revival again, and a durably accepted send would sit unread forever.
+      //
+      // Only a waking worker with no chat to be woken into is repaired, because there is
+      // nothing a browser could be asked to open for it.
+      if (agent.info.state === 'waking' && !agent.info.conversationId) {
+        agent.info.state = 'sleeping';
+        agent.info.sleptAt ??= snapshot.savedAt || Date.now();
+        agent.info.revivable = false;
+        repaired = true;
+        logWarn(`multi-agent: restored ${agent.info.id} out of waking; it has no chat to be woken in`);
+      }
+      // Sleeping is only ever reusable, so a snapshot that says otherwise is a snapshot whose
+      // worker has nothing left to be woken into. Terminalise it rather than leaving a row the
+      // prime can address and nothing can deliver to.
+      if (agent.info.state === 'sleeping' && (!agent.info.revivable || !agent.info.conversationId)) {
+        agent.info.state = 'finished';
+        agent.info.finishedAt ??= agent.info.sleptAt ?? (snapshot.savedAt || Date.now());
         agent.info.revivable = false;
         repaired = true;
       }
@@ -2187,7 +3177,11 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
     primeConversationId: snapshot.primeConversationId,
     startedAt: snapshot.startedAt || snapshot.savedAt || Date.now(),
     agents,
-    transfer: null
+    transfer: null,
+    // Not persisted, and deliberately so: a restart is not evidence about the prime's tab
+    // either way, and starting a run back up as "attended" is the reading that keeps its
+    // sleeping workers.
+    primeGoneAt: null
   };
   // This process has been watching for exactly no time. Every `lastSeenAt` that came back
   // from disk predates the restart and cannot be evidence of silence since it.
@@ -2215,6 +3209,7 @@ export function resetAgentsForTests(): void {
   retiredWorkers.clear();
   livenessFloor = 0;
   spawnRequest = null;
+  reviveRequest = null;
   persist = null;
   persistNow = null;
   criticalMutationRevision = 0;

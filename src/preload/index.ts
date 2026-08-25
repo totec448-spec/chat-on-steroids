@@ -43,12 +43,22 @@ export interface SessionList {
   sessions: SessionSummary[];
   activeId: string | null;
   pressure: Array<TokenPressure & { id: string }>;
+  /** Total retained sessions, not merely the current IPC page. */
+  total: number;
+  nextCursor: SessionListCursor | null;
+}
+
+export interface SessionListCursor {
+  updatedAt: number;
+  id: string;
 }
 
 export interface SessionDetail {
   summary: SessionSummary | null;
   events: SessionEvent[];
   total: number;
+  /** First sequence not represented by this response; pass back as `from` for live deltas. */
+  nextFrom: number;
 }
 
 const api = {
@@ -73,13 +83,15 @@ const api = {
 
   // Sessions, compaction and the browser bridge. Everything here is read-only or a
   // named action; there is still no channel that takes a path or a command.
-  listSessions: () => call<SessionList>('sessions:list'),
+  listSessions: (options?: { cursor?: SessionListCursor; limit?: number }) =>
+    call<SessionList>('sessions:list', options ?? {}),
   getSession: (id: string, options?: { from?: number; limit?: number }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 
   unpairExtension: () => call<AppState>('bridge:unpair'),
+  downloadExtension: () => call<boolean>('bridge:downloadExtension'),
   // The renderer can ask where the extension is and ask for it to be opened, but the
   // path it gets back is only ever displayed: the open happens in the main process
   // against a folder the renderer never chose.

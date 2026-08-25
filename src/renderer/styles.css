@@ -14,8 +14,8 @@
    nothing invents its own — because a window this dense reads as calmer when the
    shapes agree with each other.
 
-   The window is a fixed 1080x700 frame (see createWindow), so the layout is a grid
-   that fits exactly and scrolls inside its own panes rather than growing the page.
+   The window prefers 1080x700 but can shrink to the current display and can be resized,
+   so long content scrolls inside its own panes rather than growing or clipping the page.
    --------------------------------------------------------------------------- */
 
 :root {
@@ -312,7 +312,7 @@ main {
 
 [data-panel='setup'].is-active {
   display: block;
-  overflow: auto;
+  overflow: hidden auto;
 }
 
 .top {
@@ -812,6 +812,17 @@ main {
   color: var(--blue);
 }
 
+.root-rename {
+  width: 150px;
+  min-width: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--blue);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+}
+
 .root span {
   margin-left: auto;
   color: var(--faint);
@@ -828,7 +839,8 @@ main {
   opacity: 0;
 }
 
-.root:hover .btn {
+.root:hover .btn,
+.root:focus-within .btn {
   opacity: 1;
 }
 
@@ -1221,6 +1233,7 @@ main {
 input[type='text'],
 input[type='password'],
 input[type='number'],
+textarea,
 select {
   width: 100%;
   padding: 8px 12px;
@@ -1235,10 +1248,22 @@ select {
 input[type='text']:focus,
 input[type='password']:focus,
 input[type='number']:focus,
+textarea:focus,
 select:focus {
   outline: 0;
   border-color: var(--ink);
   box-shadow: 0 0 0 3px var(--ring);
+}
+
+textarea {
+  min-height: 230px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.goal-prompt textarea {
+  font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
 }
 
 input[readonly] {

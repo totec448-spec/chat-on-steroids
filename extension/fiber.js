@@ -275,42 +275,6 @@
   }
 
   /**
-   * The thought object that owns this rendered branch, when the branch exposes exactly one.
-   *
-   * Live ChatGPT hangs the same `props.message` thought object at several wrapper depths, so
-   * seeing one id repeatedly is expected. Seeing two different thought ids on one branch is
-   * ambiguity and fails closed rather than picking the nearest one.
-   */
-  function thoughtOf(fiber) {
-    let found = null;
-    let at = fiber;
-    for (let up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
-      const props = at.memoizedProps;
-      if (!props || typeof props !== 'object') continue;
-      const candidates = [];
-      if (thoughtMessage(props.message)) candidates.push(props.message);
-      if (Array.isArray(props.messages)) {
-        for (let index = 0; index < props.messages.length; index++) {
-          if (thoughtMessage(props.messages[index])) candidates.push(props.messages[index]);
-        }
-      }
-      for (let index = 0; index < candidates.length; index++) {
-        const message = candidates[index];
-        const id = str(message.id);
-        if (!id) continue;
-        if (found && found.id !== id) return null;
-        const meta = message.metadata && typeof message.metadata === 'object' ? message.metadata : null;
-        found = {
-          id,
-          workingTurnId: meta ? str(meta.working_turn_id) : null,
-          turnExchangeId: meta ? str(meta.turn_exchange_id) : null
-        };
-      }
-    }
-    return found;
-  }
-
-  /**
    * ChatGPT's row-local identity for a rendered thought item.
    *
    * The live renderer exposes `memoizedProps.item = { type: 'thought', key:
@@ -590,6 +554,7 @@
     if (assistantCandidates.length === 0 && userCandidates.length === 0) return [];
 
     const blocks = [];
+    const blockSections = [];
     for (let sectionAt = 0; sectionAt < sections.length; sectionAt++) {
       const section = sections[sectionAt];
       let found;
@@ -604,6 +569,7 @@
         const parent = block.parentElement && block.parentElement.closest ? block.parentElement.closest(MARKDOWN) : null;
         if (parent && section.contains(parent)) continue;
         blocks.push(block);
+        blockSections.push(sectionAt);
       }
     }
 
@@ -723,7 +689,14 @@
       } catch {
         renderedHtml = '';
       }
-      if (renderedHtml) out[target].renderedHtml = renderedHtml;
+      if (renderedHtml) {
+        out[target].renderedHtml = renderedHtml;
+        // This is rendered ownership, not model identity: the message id above came from the
+        // Fiber/model join, and this ordinal says which exact sibling section supplied its
+        // unique visible block. content.js uses it only as corroboration for a completed-message
+        // action when end_turn is missing; no unique rendered join means null/fail closed.
+        out[target].sectionIndex = blockSections[at];
+      }
     }
     out.sort((left, right) => left.order - right.order);
     return out;

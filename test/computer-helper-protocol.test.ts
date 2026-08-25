@@ -70,7 +70,7 @@ vi.mock('../src/main/exec.js', () => ({
   findWindowsPowerShell: () => 'powershell.exe',
   terminateProcessTree: fake.terminateProcessTree
 }));
-vi.mock('../src/main/logger.js', () => ({ logWarn: vi.fn() }));
+vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 
 import { listWindows } from '../src/main/computer/index.js';
 

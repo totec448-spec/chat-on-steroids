@@ -169,6 +169,15 @@
   let painted = false;
 
   let alive = true;
+  /** DOM/window bindings owned by this recorder instance and removed on takeover. */
+  const stopCleanups = [];
+  function rememberCleanup(cleanup) {
+    stopCleanups.push(cleanup);
+  }
+  function listen(target, type, listener, options) {
+    target.addEventListener(type, listener, options);
+    rememberCleanup(() => target.removeEventListener(type, listener, options));
+  }
   let status = { connected: false, paired: false, disconnected: false };
 
   /**
@@ -386,6 +395,16 @@
   let quietTurn = null;
   let quietOutcome = null;
   /**
+   * Assistant sections that already had a completed-message action before this generation.
+   *
+   * Section ownership is deliberately stronger than remembering one HTMLElement. Retry can
+   * reuse an assistant section and React can remount its old Copy button as a new DOM node; node
+   * identity would call that stale action "fresh". Sampled from the previous observation, like
+   * baselineSections below, so a genuinely new section/action mounted on the same tick Stop first
+   * appears is not accidentally classified as history.
+   */
+  let completionActionBaselineSections = new WeakSet();
+  /**
    * A reloaded page rediscovers historical user messages on its first observation because
    * the in-memory seen set is new. Those are baseline, not proof that a new turn began.
    * Cleared after that one observation; every later genuinely new user message while a
@@ -481,6 +500,8 @@
   let priorMarks = [];
   /** Assistant sections present at the end of the last observation. See priorSections. */
   let baselineSections = [];
+  /** Sections from the previous observation which already exposed a completed-message action. */
+  let baselineCompletionSections = [];
   /** What the newest of those said then, so a reused section can prove it has moved. */
   let baselineMarks = [];
   /**
@@ -1088,6 +1109,7 @@
     quietSince = 0;
     quietTurn = null;
     quietOutcome = null;
+    completionActionBaselineSections = new WeakSet();
     resumedFirstObservation = false;
     turnId = null;
     genNode = null;
@@ -1095,6 +1117,7 @@
     priorMarks = [];
     baselineSections = [];
     baselineMarks = [];
+    baselineCompletionSections = [];
     userStopped = false;
     stallReported = false;
     fiberTerminalMessageId = null;
@@ -1292,10 +1315,89 @@
     // A browser where Fiber genuinely is unavailable still needs a usable lifecycle, so the
     // old DOM rule remains there behind this capability check.
     if (!fiberPresent && answerText(turn).length > 0) return { outcome: 'completed' };
+    // Fiber normally supplies the exact `end_turn:true` message and refreshFiber() closes from
+    // that immediately. The live 2026-08-25 failure proved that a visibly final response can
+    // occasionally lose that bit while the page still mounts its completed-message action row.
+    // Use that only as *corroboration*, never as a replacement for Fiber: exact turn ownership,
+    // public prose, no unanswered connector call, a fresh completed-message action, and the
+    // existing Stop-gone settle window must all agree. This keeps the old multi-second tool-phase
+    // Stop dropout open, including its transient data-interrupted marker.
+    if (fiberPresent && answerText(turn).length > 0 && fiberQuietTerminal(turn)) {
+      return { outcome: 'completed' };
+    }
     if (turnStartedAt > 0 && Date.now() - lastChangeAt > STALL_MS) {
       return { outcome: 'stalled', detail: 'no visible output and no progress for ten minutes' };
     }
     return { outcome: 'unknown' };
+  }
+
+  /**
+   * The exact public assistant message corroborated as terminal by the quiet page, or null.
+   *
+   * Scope both Fiber and the final-action row to the generation-owned DOM node whenever one is
+   * known. ChatGPT reuses data-turn-id across later requests and CLF_DOM intentionally groups
+   * those rendered sections for presentation; asking that merged logical turn for "the" Fiber
+   * descriptor or first Copy button makes an old response mask the new one forever.
+   */
+  function fiberQuietTerminal(turn) {
+    if (!turn || !CLF_DOM.completionAction) return null;
+    const nodes = turn.nodes || (turn.node ? [turn.node] : []);
+    const ownedNode = genNode && nodes.includes(genNode) ? genNode : null;
+    const fiber = ownedNode ? fiberTurnForNode(ownedNode) : fiberTurnFor(turn);
+    if (!fiber) return null;
+    if ((fiber.calls || []).some((call) => !call || call.answered !== true)) return null;
+
+    // A single ChatGPT response can grow across several sibling <section> elements. genNode is
+    // intentionally pinned to the first section this local generation touched, and quietTurn is
+    // intentionally a snapshot from the first Stop-gone observation. Neither may therefore be
+    // used as a frozen list of where the response can later finish: the live 2026-08-25
+    // foreground failure put its final prose + Copy action on S2 while both still pointed at S1.
+    //
+    // Refresh the *membership*, not the identity. Every section fiber.js says belongs to this
+    // exact descriptor carries the current scanToken:index stamp, so object identity here is a
+    // stronger join than ChatGPT's reused data-turn-id. Never widen to all nodes of the logical
+    // DOM turn: turns() deliberately groups equal page ids globally for recorder compatibility,
+    // and an old response with a recycled id can still have its stale Copy action mounted.
+    const exactNodes = [];
+    for (const current of CLF_DOM.turns()) {
+      if (current?.role !== 'assistant') continue;
+      for (const node of current.nodes || (current.node ? [current.node] : [])) {
+        if (fiberTurnForNode(node) === fiber) exactNodes.push(node);
+      }
+    }
+    if (exactNodes.length === 0) return null;
+    const messages = (fiber.messages || []).filter((message) => message && message.role !== 'user' && message.rawText);
+    const terminal = messages.length > 0 ? messages[messages.length - 1] : null;
+    const terminalId = terminal?.rawMessageId || terminal?.messageId || null;
+    if (!terminalId) return null;
+
+    // Descriptor equality alone is insufficient. One long response can have an earlier sibling
+    // whose completed-message action is already mounted and a newer sibling whose prose is still
+    // live; using "any Copy in exactNodes" would let the old action certify the new prose during
+    // a transient Stop dropout. Require rendered ownership of the *chosen terminal Fiber
+    // message*, then require the action on that exact sibling only.
+    let terminalNode = null;
+    if (
+      Number.isInteger(terminal.sectionIndex) &&
+      terminal.sectionIndex >= 0 &&
+      terminal.sectionIndex < exactNodes.length
+    ) {
+      terminalNode = exactNodes[terminal.sectionIndex] || null;
+    } else if (CLF_DOM.messagesIn) {
+      // Backward-compatible/fail-closed fallback for a helper reply without sectionIndex (and
+      // for explicit data-message-id renderers): locate the raw model id in one exact sibling.
+      const owners = [];
+      for (const node of exactNodes) {
+        const rendered = CLF_DOM.messagesIn({ role: 'assistant', id: turn.id || null, node, nodes: [node] });
+        if (rendered.some((message) => message && message.role === 'assistant' && message.id === terminalId)) owners.push(node);
+      }
+      if (owners.length === 1) terminalNode = owners[0];
+    }
+    if (!terminalNode) return null;
+    if (completionActionBaselineSections.has(terminalNode)) return null;
+    const action = CLF_DOM.completionAction({ nodes: [terminalNode] });
+    if (!action) return null;
+    return terminalId;
   }
 
   /** The turn section a node is rendered in, or null. */
@@ -1391,10 +1493,17 @@
     // other named turn by accident. Modern generations always mint/adopt an id; this is the
     // fail-closed guard for stale/legacy/reinjected state.
     const endedTurnId = turnId;
+    // A quiet completed turn whose Fiber object lost end_turn can still have one exact terminal
+    // public message, corroborated by the completed-message action row. Capture that identity
+    // before `generating`/`genNode` are torn down so the post-turn Fiber settle scan may promote
+    // only that message to final. Unknown/interrupted/failed/stopped turns capture nothing.
+    const corroboratedTerminalMessageId =
+      result.outcome === 'completed' && ended ? fiberQuietTerminal(ended) : null;
     generating = false;
     quietSince = 0;
     quietTurn = null;
     quietOutcome = null;
+    completionActionBaselineSections = new WeakSet();
     if (ended && endedTurnId) {
       for (const node of ended.nodes || [ended.node]) {
         if (node) settledGenerations.set(node, { turnId: endedTurnId, mark: sectionMark(node) });
@@ -1413,11 +1522,21 @@
       // omit `data-turn-id` entirely, and the post-turn settle window still has to be able
       // to find this generation's Fiber descriptor; the node carries fiber.js's own
       // `data-clf-fiber-turn` stamp, which is present whether or not the page id is.
-      fiberSettled = { pageTurnId: ended?.id || null, localTurnId: endedTurnId, pageTurn: ended || null };
+      fiberSettled = {
+        pageTurnId: ended?.id || null,
+        localTurnId: endedTurnId,
+        pageTurn: ended || null,
+        terminalMessageId: corroboratedTerminalMessageId || null
+      };
       fiberSettleUntil = Date.now() + FIBER_SETTLE_MS;
     }
     if (endedTurnId && publishFinal && result.outcome === 'completed') {
-      void refreshFiber({ pageTurnId: ended?.id || null, localTurnId: endedTurnId, pageTurn: ended || null });
+      void refreshFiber({
+        pageTurnId: ended?.id || null,
+        localTurnId: endedTurnId,
+        pageTurn: ended || null,
+        terminalMessageId: corroboratedTerminalMessageId || null
+      });
     }
     if (endedTurnId) emit({ kind: 'turn_end', turnId: endedTurnId, ...result });
     // The compaction turn settling is the moment the brief exists. Read here, from this
@@ -1459,7 +1578,8 @@
       // leaking into whatever chat is opened next, and this is the one case where the next
       // chat *is* the one the goal was written for. Only a message that actually reached
       // ChatGPT counts; an abandoned attempt is dropped with everything else.
-      const carried = pendingObjectiveSent || !conversationId ? pendingObjective : '';
+      const abandonedOpening = Boolean(pendingObjective) && !pendingObjectiveSent;
+      const carried = pendingObjectiveSent ? pendingObjective : '';
       if (conversationId) {
         // A genuine move to another *identified* chat: close the old one out and start
         // clean. The order matters — what the old chat left on screen is retired before
@@ -1471,11 +1591,22 @@
         conversationId = id;
         resetConversation();
       } else {
-        // The same chat has just learned its own id — ChatGPT assigns one only once the
-        // first turn is under way. This is not a new conversation, so turn state stays,
-        // and the worker renames the observations it already journalled under this tab.
+        // An id-less tab can become concrete in two very different ways: our own proven
+        // opening send created this conversation, or the user opened an already-existing chat.
+        // Only the former owns a pending goal. Without that send receipt, carrying the goal here
+        // would silently attach it to whichever sidebar chat happened to be opened next.
         conversationId = id;
         void bindConversation(id);
+        if (abandonedOpening) {
+          pendingObjective = '';
+          pendingObjectiveSent = false;
+          goalConfig = null;
+          goalDraft = null;
+          goalPhase = '';
+          goalError = '';
+          objectiveError = '';
+          removeStagePanel();
+        }
       }
       // …and this is the moment a goal saved into a New Chat finally has something to be
       // saved against. The message that produced this id was written from that goal, so the
@@ -1570,6 +1701,11 @@
       quietOutcome = null;
       userStopped = false;
       stallReported = false;
+      // Same previous-observation boundary as priorSections: by the time Stop first appears the
+      // new response may already have mounted its section and its final action. Snapshotting the
+      // current DOM here would call that genuine new evidence stale. Conversely, every section
+      // that *already* had Copy last observation stays stale even if React remounts the button.
+      completionActionBaselineSections = new WeakSet(baselineCompletionSections);
       genCount++;
       turnId = `g-${RUN_ID}-${epoch}-${genCount}`;
       genNode = null;
@@ -1736,7 +1872,16 @@
       // never a terminal boundary on its own. User stop is already explicit; a new user
       // message is handled above, and Fiber end_turn closes independently in refreshFiber().
       const markerOnlyInterrupted = result.outcome === 'interrupted' && !userStopped;
-      if (userStopped || (!markerOnlyInterrupted && result.outcome !== 'unknown' && quietFor >= TURN_SETTLE_MS)) {
+      // `interrupted` itself is only an outcome marker, but a *separate* exact completed-message
+      // proof can supply the missing boundary: current generation-owned Fiber descriptor, no
+      // unanswered calls, and this response's fresh Copy-message action. Keep the latched
+      // interrupted outcome for the record, while no longer forcing the user to type another
+      // message merely to prove the already-finished turn ended.
+      const corroboratedTerminalBoundary = markerOnlyInterrupted && Boolean(fiberQuietTerminal(quietTurn || turn));
+      if (
+        userStopped ||
+        ((result.outcome !== 'unknown' && (!markerOnlyInterrupted || corroboratedTerminalBoundary)) && quietFor >= TURN_SETTLE_MS)
+      ) {
         // The turn the end is about is the one that was on screen when it went quiet.
         // Re-reading it here would pick up whatever ChatGPT has rendered since, which during
         // a settle window can be a different section entirely.
@@ -1776,6 +1921,9 @@
     // generation ever binds to a section further back than that.
     baselineSections = assistantSections(observedTurns);
     baselineMarks = baselineSections.slice(-3).map((node) => ({ node, mark: sectionMark(node) }));
+    baselineCompletionSections = CLF_DOM.completionAction
+      ? baselineSections.filter((node) => Boolean(CLF_DOM.completionAction({ nodes: [node] })))
+      : [];
     resumedFirstObservation = false;
     void flush();
   }
@@ -1810,7 +1958,7 @@
     } catch {
       seededPath = null;
     }
-    new MutationObserver((records) => {
+    const observer = new MutationObserver((records) => {
       // Recorder takeover cannot disconnect observers created by the predecessor's isolated
       // world, so `alive` is the ownership fence. Without it every extension reload leaves a
       // watcher behind that still scans connector mutations and starts a MAIN-world Fiber
@@ -1833,7 +1981,9 @@
         if (!alive || !sameChat()) return;
         void flush();
       });
-    }).observe(document.body, { childList: true, subtree: true });
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    rememberCleanup(() => observer.disconnect());
   }
 
   /**
@@ -1845,8 +1995,30 @@
   function watchTranscript() {
     if (typeof MutationObserver !== 'function' || !document.body) return;
     let timer = null;
-    new MutationObserver((records) => {
-      if (!alive || timer !== null || !sameChat()) return;
+    let urgentQueued = false;
+    const observer = new MutationObserver((records) => {
+      if (!alive || !sameChat()) return;
+      // Stop is mounted under the composer, outside TURN_SECTION. In a background tab the final
+      // prose can arrive while Stop still exists (scheduling the throttled debounce below), and
+      // Stop removal can then be the *only* terminal mutation. Check the local->page generation
+      // edge before filtering to transcript mutations so that composer-side Stop removal wakes
+      // the recorder in a microtask. observe() still owns every completion rule and therefore
+      // remains conservative on transient tool-phase dropouts.
+      if (generating && !CLF_DOM.generating()) {
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        if (!urgentQueued) {
+          urgentQueued = true;
+          void Promise.resolve().then(() => {
+            urgentQueued = false;
+            if (!alive || !sameChat()) return;
+            observe();
+          });
+        }
+        return;
+      }
       const relevant = records.some((record) => {
         const target = record.target && record.target.nodeType === 1 ? record.target : record.target.parentElement;
         if (!target || (target.closest && target.closest('.clf-stream'))) return false;
@@ -1858,6 +2030,15 @@
         return false;
       });
       if (!relevant) return;
+      // Background tabs are allowed to throttle setTimeout aggressively. The ordinary 250 ms
+      // debounce below is therefore not a reliable way to notice the one mutation that matters
+      // most: ChatGPT has just dropped its Stop control and the final transcript mutation has
+      // landed. If this document already believed a generation was open, inspect that terminal
+      // candidate in a microtask immediately. `observe()` still fails closed on transient Stop
+      // dropouts, and Fiber `end_turn` remains the exact early-completion proof, so this does not
+      // revive the old interrupted-marker false positive. It only removes a throttled timer from
+      // the path that starts turn_end -> Goal in a hidden tab.
+      if (timer !== null) return;
       // Streaming Markdown can mutate once per token and a virtualized history mount can
       // deliver hundreds of DOM records in one navigation. Running the full conversation
       // scan synchronously for every MutationObserver turn is what made clicking a large
@@ -1869,7 +2050,13 @@
         if (!alive) return;
         observe();
       }, TRANSCRIPT_OBSERVE_MS);
-    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    rememberCleanup(() => {
+      observer.disconnect();
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    });
   }
 
   const TURN_SECTION = 'section[data-testid^="conversation-turn"]';
@@ -2181,7 +2368,11 @@
             ? entry.createTime
             : null,
         rawText,
-        renderedHtml
+        renderedHtml,
+        sectionIndex:
+          Number.isInteger(entry.sectionIndex) && entry.sectionIndex >= 0 && entry.sectionIndex < 64
+            ? entry.sectionIndex
+            : null
       };
       const priorAt = messageIndex.get(messageId);
       if (priorAt === undefined) {
@@ -2766,17 +2957,20 @@
         // upgrading every message in a completed turn to `final:true` made interim prose look
         // like a sequence of finished answers and could let recovery treat the wrong one as
         // completion evidence.
+        const corroboratedTerminal =
+          !turn.endMessageId && turn === ownedPageTurn && settled?.terminalMessageId
+            ? settled.terminalMessageId
+            : null;
+        const terminalMessageId = turn.endMessageId || corroboratedTerminal;
         const exactTerminal = Boolean(
-          turn.endMessageId &&
-            (message.rawMessageId === turn.endMessageId || message.messageId === turn.endMessageId)
+          terminalMessageId &&
+            (message.rawMessageId === terminalMessageId || message.messageId === terminalMessageId)
         );
-        const state = turn.endMessageId
+        const state = terminalMessageId
           ? exactTerminal
             ? 'final'
             : 'streaming'
-          : generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1))
-            ? 'streaming'
-            : 'final';
+          : 'streaming';
         // The transcript is independent of MCP correlation and must be durable as soon as
         // ChatGPT exposes a public message id. A thought parent is a stronger logical anchor
         // when available, but it is not permission to record: waiting for it dropped the
@@ -2795,13 +2989,21 @@
         if (messagesReported.get(message.messageId) === signature) continue;
         messagesReported.set(message.messageId, signature);
         if (state === 'streaming') lastChangeAt = Date.now();
+        const liveAssistant =
+          Boolean(localOwner) ||
+          (generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1)));
         emit({
           kind: 'assistant_message',
           messageId: message.messageId,
           turnId: localOwner || undefined,
           text: message.rawText,
           renderedHtml: message.renderedHtml,
-          ...(message.createTime ? { time: message.createTime, authoredTime: true } : {}),
+          // create_time is stamped by ChatGPT's server clock while turn/tool events use the
+          // machine clock. They are not guaranteed to agree: the live 2026-08-25 turn recorded
+          // this response 14 seconds before the user message that caused it. For a current or
+          // locally-owned turn, first observation is the comparable clock. Historical backfill
+          // has no local turn anchor, so it keeps authored create_time instead.
+          ...(!liveAssistant && message.createTime ? { time: message.createTime, authoredTime: true } : {}),
           state,
           final: state === 'final'
         });
@@ -2849,21 +3051,26 @@
     const nodes = turn.nodes || (turn.node ? [turn.node] : []);
     let found = null;
     for (const node of nodes) {
-      if (!node || !node.getAttribute) continue;
-      const stamp = node.getAttribute('data-clf-fiber-turn');
-      if (stamp === null || stamp === '') continue;
-      const split = stamp.lastIndexOf(':');
-      if (split <= 0 || stamp.slice(0, split) !== fiberScanToken) continue;
-      const rawIndex = stamp.slice(split + 1);
-      if (!/^\d+$/.test(rawIndex)) continue;
-      const index = Number(rawIndex);
-      if (!Number.isInteger(index) || index < 0) continue;
-      const descriptor = fiberTurns.get(index) || null;
+      const descriptor = fiberTurnForNode(node);
       if (!descriptor) continue;
       if (found && found !== descriptor) return null;
       found = descriptor;
     }
     return found;
+  }
+
+  /** Fiber turn descriptor stamped onto exactly one rendered assistant section. */
+  function fiberTurnForNode(node) {
+    if (!fiberPresent || !node || !node.getAttribute) return null;
+    const stamp = node.getAttribute('data-clf-fiber-turn');
+    if (stamp === null || stamp === '') return null;
+    const split = stamp.lastIndexOf(':');
+    if (split <= 0 || stamp.slice(0, split) !== fiberScanToken) return null;
+    const rawIndex = stamp.slice(split + 1);
+    if (!/^\d+$/.test(rawIndex)) return null;
+    const index = Number(rawIndex);
+    if (!Number.isInteger(index) || index < 0) return null;
+    return fiberTurns.get(index) || null;
   }
 
   /**
@@ -3679,10 +3886,23 @@
       if (!prior || prior.role !== 'user') continue;
       const ids = new Set();
       for (const message of CLF_DOM.messagesIn(prior)) {
-        if (message && message.role === 'user' && message.id) ids.add(message.id);
+        if (
+          message &&
+          message.role === 'user' &&
+          message.id &&
+          // Image/file attachments can expose their own page message object inside the same
+          // user turn. The recorder intentionally stores only authored user text as a durable
+          // anchor, so an attachment-only id is not a second conversation boundary and must
+          // not make this response ambiguous. Intersect with the app's durable anchors first;
+          // two *recorded* user messages in one visible turn remain ambiguous and fail closed.
+          userAnchorByMessage.has(message.id)
+        ) {
+          ids.add(message.id);
+        }
       }
       // A user turn with no stable id cannot anchor anything. More than one stable id is a
-      // renderer transition/branch we also refuse to guess through.
+      // renderer transition/branch we also refuse to guess through. Attachment-only page ids
+      // are excluded above because they are not authored-message boundaries in the recording.
       if (ids.size !== 1) return null;
       return userAnchorByMessage.get(ids.values().next().value) || null;
     }
@@ -4942,12 +5162,12 @@
       if (anchor && anchor !== tipFor && tipTimer === null) return;
       hideTip();
     };
-    document.addEventListener('pointerover', open, true);
-    document.addEventListener('focusin', open, true);
-    document.addEventListener('pointerout', close, true);
-    document.addEventListener('focusout', close, true);
-    document.addEventListener('pointerdown', hideTip, true);
-    window.addEventListener('scroll', hideTip, true);
+    listen(document, 'pointerover', open, true);
+    listen(document, 'focusin', open, true);
+    listen(document, 'pointerout', close, true);
+    listen(document, 'focusout', close, true);
+    listen(document, 'pointerdown', hideTip, true);
+    listen(window, 'scroll', hideTip, true);
   }
 
   /** The context settings out of /activity, or null if the app sent none. */
@@ -5400,8 +5620,12 @@
     injectStage();
     const reply = await ask({ type: 'goal_open', text: goal });
     if (!alive || composerChat().state !== 'new') {
-      // The chat found an id while this was in flight, which means something else was sent
-      // into it. Its own goal is saved through the ordinary route by the binding in observe().
+      // This request never proved that *our* opening message was sent. The route may now be an
+      // unrelated existing chat the user selected while generation was in flight, so discard the
+      // pending ownership claim rather than letting a later observer bind it there.
+      pendingObjective = '';
+      pendingObjectiveSent = false;
+      goalConfig = null;
       goalPhase = '';
       injectStage();
       return;
@@ -5663,39 +5887,31 @@
    * accumulate one set per re-render for as long as the tab is open.
    */
   function wireMenu() {
-    document.addEventListener(
-      'pointerdown',
-      (event) => {
-        if (!menuOpen) return;
-        const at = event.target;
-        if (at && at.nodeType === 1 && at.closest && (at.closest('[data-clf-menu]') || at.closest('.clf-compact-btn'))) return;
-        closeMenu();
-      },
-      true
-    );
-    document.addEventListener(
-      'keydown',
-      (event) => {
-        if (!menuOpen || event.key !== 'Escape') return;
-        // One Escape at a time: the goal box first, the sheet after. Losing a half-written
-        // goal because the sheet went with it is the mistake worth not making.
-        if (menuEditing) closeObjectiveEditor();
-        else closeMenu();
-      },
-      true
-    );
-    window.addEventListener(
-      'scroll',
-      (event) => {
-        // Scrolling a long goal back into view inside the sheet is not "I am doing something
-        // else now" — it is using the sheet. Only the page moving underneath closes it.
-        const at = event.target;
-        if (at && at.nodeType === 1 && at.closest && at.closest('[data-clf-menu]')) return;
-        closeMenu();
-      },
-      true
-    );
-    window.addEventListener('resize', () => closeMenu());
+    const pointerdown = (event) => {
+      if (!menuOpen) return;
+      const at = event.target;
+      if (at && at.nodeType === 1 && at.closest && (at.closest('[data-clf-menu]') || at.closest('.clf-compact-btn'))) return;
+      closeMenu();
+    };
+    const keydown = (event) => {
+      if (!menuOpen || event.key !== 'Escape') return;
+      // One Escape at a time: the goal box first, the sheet after. Losing a half-written
+      // goal because the sheet went with it is the mistake worth not making.
+      if (menuEditing) closeObjectiveEditor();
+      else closeMenu();
+    };
+    const scroll = (event) => {
+      // Scrolling a long goal back into view inside the sheet is not "I am doing something
+      // else now" — it is using the sheet. Only the page moving underneath closes it.
+      const at = event.target;
+      if (at && at.nodeType === 1 && at.closest && at.closest('[data-clf-menu]')) return;
+      closeMenu();
+    };
+    const resize = () => closeMenu();
+    listen(document, 'pointerdown', pointerdown, true);
+    listen(document, 'keydown', keydown, true);
+    listen(window, 'scroll', scroll, true);
+    listen(window, 'resize', resize);
   }
 
   function renderControl() {
@@ -6878,7 +7094,7 @@
     // `interrupted` used to be refused with them, and that was wrong. It does not mean the
     // user stopped anything — endOutcome() reaches it only when `userStopped` is false — it
     // means ChatGPT closed its own turn early, which is the single moment this loop exists
-    // for. Session 2026-08-25-0fb93209 is the whole argument: four consecutive prime turns
+    // for. A retained live regression is the whole argument: four consecutive prime turns
     // ended `interrupted` with "ChatGPT marked the turn interrupted", the answers said in
     // as many words that work was still unfinished, and the loop declined every one of them
     // without drawing anything, so from outside it looked like a feature that never ran.
@@ -7193,6 +7409,24 @@
   }
 
   /**
+   * The conversation this document was opened at, read once before ChatGPT rewrites anything.
+   *
+   * Null for the ordinary case — a chat with no id of its own yet — and set only when the app
+   * pointed the browser at one exact `/c/<id>`, which it does for exactly one reason: waking a
+   * sleeping worker in the chat it already has. Read at script start rather than at send time
+   * so that the SPA navigating this document afterwards cannot turn a stale marker into
+   * permission to type into whatever chat the user ended up on.
+   */
+  const OPENED_CONVERSATION = (() => {
+    try {
+      const match = /^\/c\/([0-9a-f-]{8,64})/i.exec(location.pathname);
+      return match ? match[1] : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  /**
    * The command id this page was opened for, from ?clf= or #clf=.
    *
    * Both, because ChatGPT's router rewrites the query on its own and the fragment
@@ -7213,9 +7447,10 @@
   /**
    * Picks up the instruction this tab was opened for. Once per document, and that is all.
    *
-   * Only ever on a conversation that does not exist yet — a worker's own chat, or the
-   * replacement for a compacted session. Never in an existing chat, and never over a
-   * composer the user has already started typing into.
+   * On a conversation that does not exist yet — a worker's own chat, or the replacement for
+   * a compacted session — or, for a revival, in the one existing chat the app named when it
+   * opened this page and nowhere else. Never over a composer the user has started typing
+   * into, and never in a chat this command did not name.
    *
    * One page, one marker, one attempt, and every exit reports its outcome. This used to be
    * three in-page attempts driven off the one-second observation tick, with a periodic
@@ -7230,7 +7465,8 @@
    * A message this tab actually sent is reported as sent even if the conversation id never
    * turns up, because the alternative would be typing the same instruction twice.
    */
-  let commandDone = false;
+  const commandsHandled = new Set();
+  let commandInFlight = false;
   /**
    * Fresh app-opened chats do not journal their first observations until the command ACK.
    *
@@ -7279,56 +7515,123 @@
     });
   }
 
-  async function runCommand() {
-    const id = markerId();
-    if (commandDone || !id) return;
-    commandDone = true;
+  async function runCommand(id = markerId(), fromUrl = true, onClaim = null) {
+    // Once per command rather than once per document. A worker's tab is opened by a bootstrap
+    // and then lives on, and the prime waking that worker later is a second command for the
+    // same page: a document-wide latch would refuse every revival a worker ever gets.
+    if (!id || commandInFlight || commandsHandled.has(id)) {
+      if (typeof onClaim === 'function') onClaim(false);
+      return;
+    }
+    commandsHandled.add(id);
+    commandInFlight = true;
     // `runCommand()` is invoked immediately before the first `observe()` and runs
     // synchronously up to its first await, so this closes the race before any event can flush.
     commandJournalGate = true;
+    let claimReported = false;
+    const reportClaim = (claimed) => {
+      if (claimReported) return;
+      claimReported = true;
+      if (typeof onClaim === 'function') onClaim(claimed === true);
+    };
     try {
-      await deliverCommand(id);
+      await deliverCommand(id, fromUrl, reportClaim);
     } finally {
+      reportClaim(false);
+      commandInFlight = false;
       commandJournalGate = false;
       void flush();
     }
   }
 
-  async function deliverCommand(id) {
-    // Every command opens a chat that does not exist yet, so a page that already has a
-    // conversation is not the page this command is for — a stale marker carried into an
-    // existing chat by history, a back button, or a copied URL. Refused before the redeem,
-    // so it neither types into somebody's chat nor claims a command the genuinely fresh tab
-    // is still holding.
-    if (CLF_DOM.conversationId()) return;
+  async function deliverCommand(id, fromUrl = true, reportClaim = () => undefined) {
+    // Which conversation, if any, this delivery is entitled to type into.
+    //
+    // For a marker in this document's own URL it is the one the app opened the page at, read
+    // before ChatGPT could rewrite anything: `/c/<id>` for a revival, nothing at all for the
+    // two commands that open a chat which does not exist yet. A marker that turns up in an
+    // existing chat with no conversation in its own opening URL is neither of those — a stale
+    // marker carried in by history, a back button or a copied link — and is refused before the
+    // redeem, so it neither types into somebody's chat nor claims a command a genuinely fresh
+    // tab is still holding.
+    //
+    // A command handed over by the service worker has no marker in this URL and no useful
+    // opening URL either: a worker's tab was opened at `/` and only became `/c/<id>` when its
+    // own bootstrap was answered, so the page it was opened at says nothing about the chat it
+    // has now. What fences that path instead is the pair of exact conversation checks around
+    // it — the service worker only offers the job to a document already showing the chat the
+    // command names, and the redeemed command's own `conversationId` is compared below.
+    const openedConversation = fromUrl ? OPENED_CONVERSATION : CLF_DOM.conversationId();
+    if (CLF_DOM.conversationId() && !openedConversation) return;
 
     // RUN_ID names this document. It is what makes the command single-owner: a second tab
     // on the same marker is a different document and is refused, while this one's own
     // request is answered.
-    const reply = await ask({ type: 'redeem', id, client: RUN_ID });
+    const reply = await ask({
+      type: 'redeem',
+      id,
+      client: RUN_ID,
+      ...(openedConversation ? { conversationId: openedConversation } : {})
+    });
     if (!reply || reply.ok !== true) {
       // The app could not be reached at all, so there is nothing to acknowledge and nothing
       // to acknowledge it to. Its own deadline ends the command; this page stops here.
+      reportClaim(false);
       return;
     }
     const boot = reply.command;
     if (!boot) {
       // Cancelled, superseded, taken by another page, or from a previous run of the app.
       // A stale marker types nothing.
+      reportClaim(false);
       return;
     }
 
+    // `/commands/redeem` persists RUN_ID as the command owner before returning `boot`. This is
+    // the exact boundary the service worker needs before it may close the app-opened fallback:
+    // a response here means this document owns the durable lease, not merely that an async
+    // attempt was started. If the fallback got there first, `boot` is null and the false path
+    // above leaves that winning tab alive.
+    reportClaim(true);
+
     const fail = (why) => ask({ type: 'ack', id: boot.id, status: 'failed', error: why, client: RUN_ID });
+    // What this command is for, as the app states it. A revival names the conversation and
+    // will not be typed anywhere else; the two chat-opening commands name none, and their
+    // precondition is the opposite one — that this page still has no conversation at all.
+    const target = typeof boot.conversationId === 'string' && boot.conversationId ? boot.conversationId : null;
+    if (fromUrl && openedConversation && !target) {
+      // Current bridges reject this before leasing the command. Keep the page-side half too:
+      // an older bridge (or a stale test fixture) must still never let a worker/resume marker
+      // found in an existing chat terminalise the command that belongs to a fresh page.
+      return;
+    }
+    if (!fromUrl && !target) {
+      // Only a command that names a conversation is ever handed to an existing document.
+      return void (await fail('it was offered to a chat that already exists and it does not name one'));
+    }
+    if (target && openedConversation !== target) {
+      return void (await fail('the page that was opened for it was showing a different conversation'));
+    }
+    if (!target && CLF_DOM.conversationId()) {
+      return void (await fail('the marked fresh chat changed before bootstrap send; nothing was sent'));
+    }
+    const onTarget = () => (target ? CLF_DOM.conversationId() === target : !CLF_DOM.conversationId());
     // Redeeming the command proves which *document* owns it, not which SPA route that
     // document will still be showing after the await. ChatGPT can navigate this same
     // document to an existing conversation while the worker/app answer is in flight. An
     // empty composer there looks exactly like the marked fresh one, so text checks cannot
     // fence the irreversible send. Keep proving both facts that made this page eligible:
     // the marker still names this command, and ChatGPT still has not assigned/opened a chat.
-    const stillFreshTarget = () => alive && markerId() === id && !CLF_DOM.conversationId();
+    // A command handed over by the service worker has no marker in this tab's URL to check;
+    // the conversation fence above is the stronger half of the same proof and applies to it.
+    const stillOnTarget = () => alive && (!fromUrl || markerId() === id) && onTarget();
     const failIfRetargeted = async () => {
-      if (stillFreshTarget()) return false;
-      await fail('the marked fresh chat changed before bootstrap send; nothing was sent');
+      if (stillOnTarget()) return false;
+      await fail(
+        target
+          ? 'the chat this message was for changed before it was sent; nothing was sent'
+          : 'the marked fresh chat changed before bootstrap send; nothing was sent'
+      );
       return true;
     };
     if (await failIfRetargeted()) return;
@@ -7384,6 +7687,18 @@
     agent = boot.agent || null;
     agentCommandId = agent && typeof boot.id === 'string' ? boot.id : null;
 
+    // A revival already names and repeatedly proved the exact conversation before the send.
+    // Once ChatGPT accepts that user message there is nothing left to discover, and waiting on
+    // a 500 ms timer creates a duplicate-delivery window in background tabs: the page can reload
+    // or be suspended after the send but before the ACK, causing the app to roll the worker back
+    // asleep and type the same prime instruction again on the next wake. Report the irreversible
+    // send immediately with the already-proven target. Fresh worker/resume commands still need
+    // the loop below because ChatGPT has not assigned their new conversation id yet.
+    if (target) {
+      await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: target, agent, client: RUN_ID });
+      return;
+    }
+
     // The conversation id only exists once ChatGPT has accepted the message, and it is the
     // whole point of the report: for a worker it is what binds the slot to this chat and
     // starts it, and for a resume it is what the session is moved onto. Bounded by the same
@@ -7403,16 +7718,13 @@
 
   // ----------------------------------------------------------------- start
 
-  document.addEventListener(
-    'click',
-    (event) => {
-      const stop = CLF_DOM.stopButton();
-      if (stop && event.target instanceof Node && stop.contains(event.target)) userStopped = true;
-    },
-    true
-  );
+  const noteStopClick = (event) => {
+    const stop = CLF_DOM.stopButton();
+    if (stop && event.target instanceof Node && stop.contains(event.target)) userStopped = true;
+  };
+  listen(document, 'click', noteStopClick, true);
 
-  window.addEventListener('pagehide', (event) => {
+  const notePageHide = (event) => {
     // Hand over anything still queued before this script stops existing. The worker
     // outlives the page, so this is the last chance for these observations to survive.
     void flush();
@@ -7423,7 +7735,8 @@
     if (event.persisted) return;
     // Conversation lifetime is owned by the service worker's tab tracking. A document
     // pagehide also happens on reload, so closing here corrupts live turn identity.
-  });
+  };
+  listen(window, 'pagehide', notePageHide);
 
   function every(ms, fn) {
     const timer = setInterval(() => {
@@ -7490,6 +7803,7 @@
         if (stagePanel && !stagePanel.root.isConnected) injectStage();
       });
       observer.observe(document.body, { childList: true, subtree: true });
+      rememberCleanup(() => observer.disconnect());
     } catch {
       // The one-second tick is the fallback, and it is enough on its own.
     }
@@ -7497,7 +7811,8 @@
 
   /** Apply popup changes immediately in every open ChatGPT tab. */
   if (globalThis.chrome && chrome.storage && chrome.storage.onChanged) {
-    chrome.storage.onChanged.addListener((changes, areaName) => {
+    const storageChanged = (changes, areaName) => {
+      if (!alive) return;
       if (areaName !== 'local' || !changes) return;
       let changed = false;
       if (changes[RENDER_STREAM_KEY]) {
@@ -7513,12 +7828,20 @@
       renderPreferenceReady = true;
       paint();
       renderStreams();
-    });
+    };
+    chrome.storage.onChanged.addListener(storageChanged);
+    if (typeof chrome.storage.onChanged.removeListener === 'function') {
+      rememberCleanup(() => chrome.storage.onChanged.removeListener(storageChanged));
+    }
   }
 
   /** Popup commands target this tab directly; no bridge credential is involved. */
   if (globalThis.chrome && chrome.runtime && chrome.runtime.onMessage) {
-    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    const runtimeMessage = (message, _sender, sendResponse) => {
+      // Recorder takeover revokes every browser-facing control channel, not only observation.
+      // A predecessor left registered in this same isolated world can otherwise win a ping or
+      // revival response race against its successor even though sendToWorker() is already inert.
+      if (!alive) return false;
       if (!message || typeof message.type !== 'string') return false;
       // background.js uses this only to distinguish a live isolated-world recorder from the
       // dead context Chrome leaves behind when an unpacked extension is reloaded while the
@@ -7557,6 +7880,26 @@
         sendResponse({ ok: true, enabled: RENDER_STREAM });
         return false;
       }
+      // A revival the service worker wants to hand to the document that already has this chat.
+      // The response is deliberately delayed until `/commands/redeem` made this exact document
+      // the durable owner. background.js may close the app-opened fallback only after that fact,
+      // never merely because this listener managed to start an async function.
+      if (message.type === 'clf-run-command') {
+        const wanted = typeof message.id === 'string' ? message.id : '';
+        const conversation = typeof message.conversationId === 'string' ? message.conversationId : '';
+        if (!wanted || !conversation || CLF_DOM.conversationId() !== conversation) {
+          sendResponse({ ok: false, error: 'wrong_conversation' });
+          return false;
+        }
+        if (commandInFlight || commandsHandled.has(wanted)) {
+          sendResponse({ ok: false, error: 'busy' });
+          return false;
+        }
+        void runCommand(wanted, false, (claimed) => {
+          sendResponse({ ok: true, claimed: claimed === true });
+        });
+        return true;
+      }
       if (message.type === 'clf-overwrite-now') {
         if (!renderStreamAllowed()) {
           sendResponse({ ok: false, error: 'overwrite_disabled' });
@@ -7572,7 +7915,11 @@
         return true;
       }
       return false;
-    });
+    };
+    chrome.runtime.onMessage.addListener(runtimeMessage);
+    if (typeof chrome.runtime.onMessage.removeListener === 'function') {
+      rememberCleanup(() => chrome.runtime.onMessage.removeListener(runtimeMessage));
+    }
   }
 
   // A marked page has exactly one job before ordinary page restoration: deliver the
@@ -7602,9 +7949,9 @@
   wireTips();
   wireMenu();
   if (typeof globalThis.addEventListener === 'function') {
-    globalThis.addEventListener('wheel', notePresentationScrollInput, { capture: true, passive: true });
-    globalThis.addEventListener('touchmove', notePresentationScrollInput, { capture: true, passive: true });
-    globalThis.addEventListener('keydown', notePresentationScrollInput, true);
+    listen(globalThis, 'wheel', notePresentationScrollInput, { capture: true, passive: true });
+    listen(globalThis, 'touchmove', notePresentationScrollInput, { capture: true, passive: true });
+    listen(globalThis, 'keydown', notePresentationScrollInput, true);
   }
   watchComposer();
   watchToolRows();
@@ -7624,12 +7971,13 @@
   });
   scheduleActivityPull(ACTIVITY_MS);
   if (typeof document !== 'undefined' && document.addEventListener) {
-    document.addEventListener('visibilitychange', () => {
+    const visibilityChanged = () => {
       if (document.visibilityState !== 'visible') return;
       if (activityTimer !== null) clearTimeout(activityTimer);
       activityTimer = null;
       scheduleActivityPull(0);
-    });
+    };
+    listen(document, 'visibilitychange', visibilityChanged);
   }
   every(STATUS_MS, checkStatus);
 
@@ -7654,11 +8002,31 @@
       clearTimeout(activityTimer);
       activityTimer = null;
     }
+    for (const cleanup of stopCleanups.splice(0)) {
+      try {
+        cleanup();
+      } catch {
+        // Detached DOM and an invalidated extension world are both normal takeover states.
+      }
+    }
     try {
       // Hand ChatGPT's own labels back before the successor paints its own.
       unpaint();
     } catch {
       // A detached/rewritten DOM is not worth failing a handover over.
+    }
+    try {
+      hideTip();
+      if (tipNode) tipNode.remove();
+      tipNode = null;
+      closeMenu();
+      if (menuNode) menuNode.remove();
+      menuNode = null;
+      removeStagePanel();
+      if (control && control.root) control.root.remove();
+      control = null;
+    } catch {
+      // Presentation cleanup is best effort; ownership was already revoked by `alive=false`.
     }
   };
 

@@ -174,6 +174,7 @@ Do not "restore" these from an older document:
 ```text
 ── shell / config ─────────────────────────────────────────────────────────
 src/main/index.ts             Electron startup, window/tray, shutdown, security shell
+src/main/shutdown.ts          ordered teardown phases, each individually bounded
 src/main/config.ts            validated settings, migrations, defaults, read-only caps
 src/main/connection.ts        MCP + tunnel lifecycle, per-surface publication & status
 src/main/ipc.ts               every renderer→main operation and main→renderer push
@@ -267,6 +268,13 @@ sandbox on, navigation and window creation constrained, permission requests deni
 explicitly supported. Never weaken that to solve a renderer convenience problem. Every new
 long-lived process, timer, listener, queue or durable writer names its shutdown owner —
 teardown covers tunnels, both listeners, process sessions, then flushes session and durable state.
+
+`will-quit` calls `preventDefault()` and owns the decision to quit from then on, and it
+destroys the tray before teardown starts. So teardown is not merely ordered, it is **bounded**:
+`shutdown.ts` gives each phase its own budget and always reaches `app.quit()`. A task that
+never settles would otherwise strand an invisible main process holding the single-instance
+lock, and every later launch of the app would silently do nothing. Per-task bounds are not a
+substitute for that — "each piece is bounded" is a different claim from "the sequence ends".
 
 ## 6. MCP surfaces and discovery — `surfaces.ts`, `tools.ts`, `server.ts`
 
@@ -527,7 +535,11 @@ removal and navigation away. **Reload is not conversation close.** Content-scrip
 means *handed to the journal*, not *stored by the app*, and the journal must never silently
 lose something it already acknowledged as durable. Recovery must validate **every** context
 whose health it needs — proving the isolated recorder is alive says nothing about a dead
-MAIN-world Fiber helper.
+MAIN-world Fiber helper. Recorder takeover is total ownership transfer: the predecessor must
+disconnect MutationObservers and DOM/window handlers **and** unregister extension-level
+`chrome.runtime.onMessage` / `chrome.storage.onChanged` listeners. An `alive=false` predecessor
+must never answer a health check, compete for a worker-revival command, or repaint Overwrite
+after the successor owns the document.
 
 **Tests.** `content-script.test.ts`, `fiber.test.ts`, `extension.test.ts`.
 
@@ -595,13 +607,38 @@ is rebound by the extension reporting its chat, never by something a model can p
 → acknowledged by the next authenticated tool call. Offering on a result is **not** proof
 the model received it. Never delete a message merely because it was offered.
 
+**Workers sleep; they do not end.** `finish` reports a result and puts that worker to
+*sleep*: it keeps its conversation, keeps its history, and stays revivable. Sleeping frees
+its worker slot, so `maxWorkers` counts working workers only — a run can use a third worker
+and still wake the first one afterwards. The same sleep happens without the tool call, from
+durable evidence that the worker stopped: a settled final assistant turn, or quiescence
+proven by `activeTurnId`/live-generating state rather than by a page heartbeat.
+
+**Waking is messaging.** `agents action=message` to a sleeping worker reserves a free slot
+inside the same durable barrier that queues the message, and only after that commit does the
+browser get asked for anything. The revival is an ordinary durable bridge command whose spec
+names the worker's own `conversationId`: the app opens `/c/<id>?clf=<command>`, the service
+worker hands the job to that chat's existing tab if it is open (closing the duplicate it was
+about to be typed in, then focusing the real one), and the content script types the prime's
+words as a genuine user message. No free slot means the send is refused outright — nothing is
+queued and nothing is typed. A revival that fails puts the worker back to `sleeping`, returns
+the slot, leaves the message queued, and tells the prime.
+
+**The ceiling is the only ending.** A worker becomes terminally `finished` when its chat
+reaches `WORKER_CONTEXT_CEILING_TOKENS` (400k), measured from the app's own durable session
+summary — never from a model-carried counter. Crossing it does **not** interrupt work in
+flight; it makes the *next* stop permanent. Because workers outlive their tabs and their
+prime's tab, closing the prime chat pauses the run instead of ending it: the user comes back,
+the prime resumes, and the same workers are still there.
+
 **Finish and cleanup.** `finish` is idempotent; final worker output routes to prime; the run
-releases only when worker state and final-report delivery make it safe. Orphan cleanup uses
+releases only when nothing revivable is left and final-report delivery makes it safe. Orphan cleanup uses
 durable quiescence plus the wider in-flight MCP/observation counters — not a heartbeat
 guess. Compact & Resume may move the prime conversation while preserving the run; session,
 workspace and prime binding move together or not at all.
 
-**Tests.** `agents.test.ts`, `swarm.test.ts`.
+**Tests.** `agents.test.ts`, `swarm.test.ts`; the revival's browser half is in
+`bridge.test.ts`, `extension.test.ts` and `content-script.test.ts`.
 
 ## 17. Renderer, IPC, connection and desktop
 
@@ -641,8 +678,8 @@ id once ChatGPT issues one.
 is not the user stopping anything — `endOutcome()` reaches it only when `userStopped` is false —
 it is ChatGPT closing its own turn early, which is the case the loop exists for. It was refused
 alongside `stopped`/`failed`/`stalled` until 2026-08-25, and silently: session
-`2026-08-25-0fb93209` shows four consecutive prime turns ending `interrupted` with answers that
-said work was unfinished, none of which drew anything at all.
+A retained live regression shows four consecutive prime turns ending `interrupted` with answers
+that said work was unfinished, none of which drew anything at all.
 
 **Renderer/IPC.** `renderer/main.ts` is setup/permissions/connection/activity;
 `renderer/chat.ts` is session timeline, handoff, swarm. To add a capability: narrow
@@ -818,6 +855,7 @@ and real HTTP in many of them.
 | `renderer-state` | unsolicited pushes must not clobber a focused dirty field |
 | `resume` | resume and handoff paths |
 | `sandbox` | path, root and containment policy — the security suite |
+| `shutdown` | bounded teardown phases; terminal sessions really dying |
 | `search` | glob translation and `find` behavior |
 | `secrets` | safeStorage-backed secret store |
 | `session` | recorder merge and durable store behavior |

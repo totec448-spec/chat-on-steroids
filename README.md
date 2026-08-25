@@ -63,7 +63,7 @@ The app has no replacement chat UI and does not host a model. It runs quietly in
 
 Use a normal ChatGPT conversation with the custom app enabled. OpenAI's built-in **Agent mode** currently does not use custom apps; Chat On Steroids' experimental worker chats are a separate browser-augmentation feature.
 
-The recommended connection uses OpenAI's Secure MCP Tunnel. Release builds bundle a pinned, checksum-verified [`tunnel-client`](https://github.com/openai/tunnel-client/releases) for the installer's CPU architecture. An explicit binary you choose, a copy on `PATH`, or a normal install location can still override the bundled one. Cloudflare and self-hosted HTTPS tunnels remain available as alternatives.
+The recommended connection uses OpenAI's Secure MCP Tunnel. Release builds bundle a pinned, checksum-verified [`tunnel-client`](https://github.com/openai/tunnel-client/releases) for the installer's CPU architecture. An **explicit binary path you configure** wins; otherwise the bundled tested copy wins, with `PATH` / normal install locations used only as fallback. Cloudflare and self-hosted HTTPS tunnels remain available as alternatives.
 
 ## Three-minute setup
 
@@ -151,11 +151,13 @@ identifies requested work that is still missing; when ChatGPT reports the task d
 returns `NO_REPLY`, types nothing and stops. Completion is the default, so the second model does
 not invent extra testing, polish or follow-up after a finished task.
 
-It runs only when a turn has genuinely finished. The extension waits for the stop control to be
-gone, the answer to stop growing, the tool rail to stop moving and the app to report no local
-call still running, all at once and held for eight seconds — the same barrier a compaction brief
-waits on, and for the same reason: a message sent into a turn that is still working reads as a
-correction to it.
+It runs only when a turn has genuinely finished. The strongest signal is ChatGPT's exact Fiber
+`end_turn` evidence for the current response. When that bit is missing, the extension stays
+conservative: Stop must remain gone through the four-second settle window, the answer and tool
+rail must be quiet, no connector call may still be unanswered, and a fresh completed-message
+action must belong to the exact terminal assistant section. Hidden tabs do not depend on a
+throttled debounce timer to notice the final Stop removal. A message sent into a turn that is
+still working would read as a correction to it, so ambiguous/interim states stay open.
 
 **Give one chat a specific goal.** The gear beside the composer has an **add specific goal**
 line under the Goal switch. Write what the chat has to reach, press Save, and the same loop
@@ -196,6 +198,21 @@ applies here too.
 
 Fresh installs currently enable multi-agent mode with **two workers** by default; the hard maximum is eight. One prime chat can open worker chats and exchange brokered messages with them. Workers cannot message each other directly.
 
+Workers are **reusable conversations**, not disposable one-shot tabs. When a worker reports its
+result, or the app durably observes that its turn has naturally settled, it normally goes to
+sleep and frees its worker slot while keeping the full ChatGPT conversation. Messaging that
+sleeping worker wakes the same conversation again. If its tab is still open the extension reuses
+and focuses that exact tab; if it was closed, the app reopens the stored `/c/<conversation>` and
+types the prime's new instruction there as an ordinary user message. Waking consumes a free slot
+and is refused before anything is queued or typed when no slot is available. At roughly 400k
+recorded context tokens a worker becomes non-revivable after its next stop instead of being
+reused indefinitely.
+
+Agent identity is deliberately fail-closed. `spawn`, worker messaging and other identity-sensitive
+operations require the companion extension to prove which ChatGPT conversation made the MCP call.
+If the same chat is being used from a client the extension cannot observe, such as a phone app,
+ordinary Core tools can still work but multi-agent control is refused rather than guessed.
+
 This is experimental browser automation, and parallel chats can edit the same files or spend account limits quickly. Use it only on work you can recover, keep worker ownership explicit, and turn the feature off when you do not want ChatGPT tabs opened or coordinated automatically. The terms note in [Experimental browser augmentation and OpenAI terms](#experimental-browser-augmentation-and-openai-terms) applies here.
 
 ## Troubleshooting
@@ -203,6 +220,7 @@ This is experimental browser automation, and parallel chats can edit the same fi
 - **Tools missing or still visible after a permission change:** refresh/review the custom app in ChatGPT, or recreate it if needed, then start a new conversation so it discovers the current schema.
 - **Extension says app not found:** session recording or multi-agent mode must be on for the browser bridge to run; then reopen the extension popup.
 - **Extension version mismatch:** reload the unpacked extension after every app update.
+- **`agents` says `UNIDENTIFIED_CALLER`:** open/use that same ChatGPT conversation in the paired desktop browser so the extension can observe its connector request id. The app intentionally will not infer agent identity from the active tab or timing.
 - **SmartScreen warning:** expected for the unsigned beta. Verify `SHA256SUMS.txt` before choosing **More info → Run anyway**.
 - **Tunnel unavailable:** use the app's Advanced settings to point at an explicit `tunnel-client.exe` / `cloudflared.exe`, or use the bundled tunnel client from the release build.
 

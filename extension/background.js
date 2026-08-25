@@ -276,7 +276,7 @@ async function persistJournalNow() {
         durabilityGap = true;
         journal.push(
           gapEntry(
-            journal.length > 0 ? journal[journal.length - 1].conversationId : null,
+            journal.length > 0 ? journal[journal.length - 1] : null,
             'chat_error',
             '⚠ The browser refused to store this extension’s pending observations. Until the app accepts them they exist only in memory, so closing the browser or reloading the extension would lose them.'
           )
@@ -345,8 +345,29 @@ function totalBytes() {
   return sum;
 }
 
-function gapEntry(conversationId, kind, text) {
-  return { conversationId, agent: null, gap: true, event: { kind, time: Date.now(), text } };
+/**
+ * Copies the identity that decides where one queued observation may be delivered.
+ *
+ * A fresh chat has no conversation id yet, so `provisional` is just as important as the
+ * eventual id. Worker provenance also has to stay on the exact row that carried it: combining
+ * an agent label from one row with another row's command id would manufacture authority.
+ */
+function routeOf(entry) {
+  return {
+    conversationId: entry && typeof entry.conversationId === 'string' ? entry.conversationId : null,
+    provisional: entry && typeof entry.provisional === 'string' ? entry.provisional : null,
+    agent: entry && typeof entry.agent === 'string' ? entry.agent : null,
+    agentCommandId: entry && typeof entry.agentCommandId === 'string' ? entry.agentCommandId : null
+  };
+}
+
+function routeKey(entry) {
+  const route = routeOf(entry);
+  return JSON.stringify([route.conversationId, route.provisional, route.agent, route.agentCommandId]);
+}
+
+function gapEntry(source, kind, text) {
+  return { ...routeOf(source), gap: true, event: { kind, time: Date.now(), text } };
 }
 
 /**
@@ -397,8 +418,7 @@ function makeRoom(tighten = false) {
   // Pass one: progress and other non-essential lines, oldest first. The gap marker is
   // inserted on the first removal and counts against the limits while we keep trimming,
   // so pressure can never make the algorithm delete its own evidence of what was lost.
-  let dropped = 0;
-  let progressGap = null;
+  const progressGaps = new Map();
   let progressAt = 0;
   while (!fits()) {
     while (
@@ -411,15 +431,18 @@ function makeRoom(tighten = false) {
     const index = progressAt;
     const entry = removeAt(index);
     if (!entry) break;
-    dropped++;
-    if (!progressGap) {
-      progressGap = gapEntry(entry.conversationId, 'progress', '');
-      insertAt(index, progressGap);
+    const key = routeKey(entry);
+    let bucket = progressGaps.get(key);
+    if (!bucket) {
+      bucket = { gap: gapEntry(entry, 'progress', ''), dropped: 0 };
+      progressGaps.set(key, bucket);
+      insertAt(index, bucket.gap);
       progressAt = index + 1;
     }
+    bucket.dropped++;
     setGapText(
-      progressGap,
-      `⚠ ${dropped} progress line(s) observed here were dropped in the browser before the app accepted them. The app was unreachable and the local queue was full.`
+      bucket.gap,
+      `⚠ ${bucket.dropped} progress line(s) observed here were dropped in the browser before the app accepted them. The app was unreachable and the local queue was full.`
     );
   }
   if (fits()) return;
@@ -427,9 +450,7 @@ function makeRoom(tighten = false) {
   // Pass two: essentials themselves have to go. This is real loss, so keep one durable
   // marker naming exactly what kinds disappeared. As above, the marker is present while
   // trimming, which guarantees the final journal is genuinely inside both caps.
-  const counts = {};
-  let lost = 0;
-  let lossGap = null;
+  const lossGaps = new Map();
   let lossAt = 0;
   while (!fits()) {
     while (lossAt < journal.length && journal[lossAt].gap) lossAt++;
@@ -437,19 +458,22 @@ function makeRoom(tighten = false) {
     const index = lossAt;
     const entry = removeAt(index);
     if (!entry) break;
-    lost++;
-    counts[entry.event.kind] = (counts[entry.event.kind] || 0) + 1;
-    if (!lossGap) {
-      lossGap = gapEntry(entry.conversationId, 'chat_error', '');
-      insertAt(index, lossGap);
+    const key = routeKey(entry);
+    let bucket = lossGaps.get(key);
+    if (!bucket) {
+      bucket = { gap: gapEntry(entry, 'chat_error', ''), lost: 0, counts: {} };
+      lossGaps.set(key, bucket);
+      insertAt(index, bucket.gap);
       lossAt = index + 1;
     }
-    const detail = Object.entries(counts)
+    bucket.lost++;
+    bucket.counts[entry.event.kind] = (bucket.counts[entry.event.kind] || 0) + 1;
+    const detail = Object.entries(bucket.counts)
       .map(([kind, count]) => `${count} ${kind}`)
       .join(', ');
     setGapText(
-      lossGap,
-      `⚠ ${lost} observation(s) (${detail}) were lost in the browser before the app accepted them: the local journal hit its storage limit while the app was unreachable. This part of the history is incomplete.`
+      bucket.gap,
+      `⚠ ${bucket.lost} observation(s) (${detail}) were lost in the browser before the app accepted them: the local journal hit its storage limit while the app was unreachable. This part of the history is incomplete.`
     );
   }
 }
@@ -610,7 +634,7 @@ async function drainOnce(preferredConversationId = null) {
       journal = journal.filter((entry) => entry !== rejected);
       journal.unshift(
         gapEntry(
-          conversationId,
+          rejected,
           'chat_error',
           '⚠ One browser observation was too large for the local bridge and was replaced by this explicit gap.'
         )
@@ -627,7 +651,7 @@ async function drainOnce(preferredConversationId = null) {
         if (!rejected.gap) {
           journal.unshift(
             gapEntry(
-              conversationId,
+              rejected,
               'chat_error',
               `⚠ One browser observation was rejected by the local bridge (HTTP ${result.status}) and was replaced by this explicit gap.`
             )
@@ -948,10 +972,12 @@ async function pairOnce(intent = connectionEpoch, reconnect = false) {
  * The app answers 404 for a command that has been cancelled, superseded, or already
  * sent, so a stale marker types nothing.
  */
-async function redeemCommand(id, client) {
+async function redeemCommand(id, client, conversationId = null) {
   await load();
   if (!id || settled.includes(id)) return { ok: true, command: null };
-  const result = await call('/commands/redeem', { method: 'POST', body: JSON.stringify({ id, client }) });
+  const body = { id, client };
+  if (typeof conversationId === 'string' && conversationId) body.conversationId = conversationId;
+  const result = await call('/commands/redeem', { method: 'POST', body: JSON.stringify(body) });
   if (result.status === 404) return { ok: true, command: null, gone: true };
   // Another page already owns this command. Not an error to report: this page simply is not
   // the one the app is talking to, and it must type nothing.
@@ -1412,7 +1438,7 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
 function conversationFromUrl(value) {
   try {
     const url = new URL(String(value || ''));
-    if (url.hostname !== 'chatgpt.com') return null;
+    if (url.protocol !== 'https:' || (url.hostname !== 'chatgpt.com' && url.hostname !== 'chat.openai.com')) return null;
     const match = /^\/c\/([0-9a-f-]{8,64})/i.exec(url.pathname);
     return match ? match[1] : null;
   } catch {
@@ -1863,7 +1889,11 @@ const HANDLERS = {
   },
   /** The marked page asking for the one command it was opened for. */
   async redeem(message) {
-    return redeemCommand(String(message.id || ''), String(message.client || ''));
+    return redeemCommand(
+      String(message.id || ''),
+      String(message.client || ''),
+      typeof message.conversationId === 'string' ? message.conversationId : null
+    );
   },
   async ack(message, _sender, source) {
     return ackCommand(
@@ -1918,9 +1948,122 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+/** The command marker the app puts in a URL it opens, from either the query or the fragment. */
+function markerFromUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    const fromQuery = url.searchParams.get('clf');
+    if (fromQuery) return fromQuery;
+    const hash = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash;
+    return new URLSearchParams(hash).get('clf');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps a revival in the tab that chat is already open in.
+ *
+ * The app opens a URL; the browser makes a tab. That is the right answer for the two
+ * commands that open a chat which does not exist yet, and the wrong one for the command that
+ * names a chat the user may well be looking at right now: waking a worker would leave them
+ * with the same conversation open twice, once per revival, which is exactly the pile of
+ * ChatGPT tabs this whole design exists to avoid.
+ *
+ * So the marker is intercepted at the moment the tab is created — before it has navigated,
+ * loaded ChatGPT, or run a content script — and, if that conversation is already open
+ * somewhere, handed to the document that has it. That tab is focused, because a message from
+ * the prime is something the user should be able to see arriving, and the empty tab the
+ * browser just made is closed again.
+ *
+ * A ping proves only that an existing recorder is alive. It does not prove command ownership:
+ * while the service worker awaits that ping the newly opened `/c/<id>?clf=...` page can finish
+ * loading and durably redeem the same command. The existing document must therefore redeem the
+ * bridge lease itself and report `claimed:true` before the fallback is removed. Whichever page
+ * wins that durable lease stays alive; a mere health reply can never kill the winner.
+ */
+async function reuseOpenChatTab(openedTabId, conversation, commandId) {
+  let tabs = [];
+  try {
+    tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+  } catch {
+    return false;
+  }
+  const existing = tabs.filter(
+    (tab) => tab && typeof tab.id === 'number' && tab.id !== openedTabId && conversationFromUrl(tab.url) === conversation
+  );
+  if (existing.length === 0) return false;
+  for (const candidate of existing) {
+    try {
+      const alive = await chrome.tabs.sendMessage(candidate.id, { type: 'clf-recorder-ping' });
+      if (!alive || alive.ok !== true || alive.recorderVersion !== PAGE_RECORDER_VERSION) continue;
+    } catch {
+      // Two copies of one chat can survive an extension reload differently. A dead first match
+      // must not hide a healthy second one and force a third duplicate to remain open.
+      continue;
+    }
+    let reply = null;
+    try {
+      reply = await chrome.tabs.sendMessage(candidate.id, {
+        type: 'clf-run-command',
+        id: commandId,
+        conversationId: conversation
+      });
+    } catch {
+      // It died after the ping but before it could acquire the lease. Try another already-open
+      // copy; if none can claim, the app-opened fallback remains the ordinary delivery path.
+      continue;
+    }
+    if (!reply || reply.ok !== true || reply.claimed !== true) continue;
+
+    // This document now owns the command durably. The marked fallback can no longer redeem it,
+    // so removing that tab cannot destroy the only owner or cause duplicate user-message sends.
+    try {
+      await chrome.tabs.remove(openedTabId);
+    } catch {
+      // The fallback may already have been closed by the user. Ownership is still safely here.
+    }
+    try {
+      await chrome.tabs.update(candidate.id, { active: true });
+      if (typeof candidate.windowId === 'number') await chrome.windows.update(candidate.windowId, { focused: true });
+    } catch {
+      // Focus is a courtesy. The claimed document owns delivery even if Chrome cannot raise it.
+    }
+    return true;
+  }
+  return false;
+}
+
+// Chrome may fire tabs.onCreated before either url or pendingUrl is populated, then publish
+// the real target on tabs.onUpdated. One marked revival gets exactly one reuse attempt per tab:
+// retrying on every loading/status update could hand the same command to the existing document
+// twice, while never retrying after a URL-less onCreated leaks a duplicate worker tab.
+const revivalReuseAttempted = new Set();
+
+function maybeReuseRevivalTab(tabId, url) {
+  if (typeof tabId !== 'number' || revivalReuseAttempted.has(tabId)) return false;
+  const conversation = conversationFromUrl(url);
+  const commandId = markerFromUrl(url);
+  // Only ever a marked URL naming a concrete conversation, which is only ever a revival.
+  if (!conversation || !commandId) return false;
+  revivalReuseAttempted.add(tabId);
+  void reuseOpenChatTab(tabId, conversation, commandId).catch(() => undefined);
+  return true;
+}
+
+// Guarded like every other listener registration here: an older Chrome, or a harness that
+// stubs only the tab APIs this extension used to need, must not fail to load the worker.
+if (chrome.tabs && chrome.tabs.onCreated && typeof chrome.tabs.onCreated.addListener === 'function') {
+  chrome.tabs.onCreated.addListener((tab) => {
+    const url = typeof tab?.pendingUrl === 'string' && tab.pendingUrl ? tab.pendingUrl : tab?.url;
+    maybeReuseRevivalTab(tab?.id, url);
+  });
+}
+
 // Document unload is not conversation lifetime. A real tab close is: reload keeps the
 // same tab id, while closing it wakes the service worker and retires only that tab's claim.
 chrome.tabs.onRemoved.addListener((id) => {
+  revivalReuseAttempted.delete(id);
   void serializeTab(id, async () => {
     const documentId = await markTerminal(id);
     return releaseTab(id, null, documentId);
@@ -1934,6 +2077,7 @@ chrome.tabs.onRemoved.addListener((id) => {
 // by the content script when another concrete conversation id appears.
 chrome.tabs.onUpdated.addListener((id, changeInfo) => {
   if (!changeInfo) return;
+  if (typeof changeInfo.url === 'string') maybeReuseRevivalTab(id, changeInfo.url);
   const fullNavigation = changeInfo.status === 'loading';
   const leftChatGpt = typeof changeInfo.url === 'string' && !isChatGptUrl(changeInfo.url);
   if (!fullNavigation && !leftChatGpt) return;

@@ -147,6 +147,17 @@ describe('name search', () => {
 });
 
 describe('single-file search', () => {
+  it('applies include filters to an explicitly named content file before ripgrep can ignore them', async () => {
+    const out = await searchOneFile(path.join(dir, 'src', 'index.ts'), '/root/src/index.ts', {
+      query: 'console.log',
+      mode: 'content',
+      include: '*.md',
+      caseSensitive: false,
+      maxResults: 10
+    });
+    expect(out.hits).toEqual([]);
+  });
+
   it('reports that an oversized explicit content file was not searched instead of claiming no matches', async () => {
     const oversized = path.join(dir, 'src', 'oversized.log');
     const handle = await fs.open(oversized, 'w');
@@ -209,6 +220,22 @@ describe('single-file search', () => {
 });
 
 describe('content search', () => {
+  it('treats ripgrep-only include metacharacters literally like the connector matcher', async () => {
+    const tree = await makeTempDir('clf-search-include-literal-');
+    try {
+      await writeTree(tree, {
+        'sandbo[x].ts': 'needle literal bracket\n',
+        'sandbox.ts': 'needle wildcard trap\n'
+      });
+      const out = await search(
+        req({ realDir: tree, query: 'needle', mode: 'content', include: 'sandbo[x].ts', exclude: [] })
+      );
+      expect(out.hits.map((hit) => hit.path)).toEqual(['/root/sandbo[x].ts']);
+    } finally {
+      await removeTempDir(tree);
+    }
+  });
+
   it('returns the line number and the matching line', async () => {
     const out = await search(req({ query: 'findme', mode: 'content' }));
     const hit = out.hits.find((h) => h.path === '/root/README.md');
@@ -232,6 +259,33 @@ describe('content search', () => {
     const paths = out.hits.map((h) => h.path);
     expect(paths).not.toContain('/root/node_modules/pkg/index.js');
     expect(paths).not.toContain('/root/.git/config');
+  });
+
+  it('gives ripgrep the same literal, case-insensitive folder-exclude semantics as the JS fallback', async () => {
+    const tree = await makeTempDir('clf-search-exclude-parity-');
+    try {
+      await writeTree(tree, {
+        'BUILD/hidden.txt': 'needle\n',
+        'odd[dir]/hidden.txt': 'needle\n',
+        'oddd/visible.txt': 'needle\n',
+        'keep/visible.txt': 'needle\n'
+      });
+      const out = await search(
+        req({
+          realDir: tree,
+          query: 'needle',
+          mode: 'content',
+          exclude: ['build', 'odd[dir]']
+        })
+      );
+      const paths = out.hits.map((hit) => hit.path);
+      expect(paths).not.toContain('/root/BUILD/hidden.txt');
+      expect(paths).not.toContain('/root/odd[dir]/hidden.txt');
+      expect(paths).toContain('/root/oddd/visible.txt');
+      expect(paths).toContain('/root/keep/visible.txt');
+    } finally {
+      await removeTempDir(tree);
+    }
   });
 
   it('caps results', async () => {

@@ -273,11 +273,29 @@ class UnifiedExecProcess {
   private child: ChildProcess | null = null;
   private pty: PtyProcess | null = null;
   readonly tty: boolean;
-  readonly pid: number;
+  private readonly spawnPid: number;
 
   private constructor(tty: boolean, pid: number) {
     this.tty = tty;
-    this.pid = pid;
+    this.spawnPid = pid;
+  }
+
+  /**
+   * The session leader's OS pid, read through to the live handle rather than snapshotted.
+   *
+   * node-pty's Windows ConPTY backend connects asynchronously: `pty.spawn()` hands back a
+   * handle whose `pid` is still 0, and it is filled in later, when the conout pipe reports
+   * `ready_datapipe` — comfortably after `EARLY_EXIT_GRACE_PERIOD_MS`. Recording it at
+   * construction therefore stored 0 for every Windows tty session for the session's whole
+   * life. That made `list_processes` advertise a pid nobody can act on, and, worse, made
+   * `terminate()` fail its own `pid > 0` test and skip `terminateProcessTree` entirely — so
+   * whenever node-pty had deferred its internal `kill()` (it queues the call until the pty is
+   * ready), nothing ever killed the shell, and its console host outlived the app. Every
+   * consumer reads this well after connect, so reading through is both correct and enough.
+   */
+  get pid(): number {
+    const live = this.pty?.pid ?? 0;
+    return live > 0 ? live : this.spawnPid;
   }
 
   static async spawn(params: SpawnParams): Promise<UnifiedExecProcess> {
@@ -481,6 +499,9 @@ class UnifiedExecProcess {
       } catch {
         /* already gone */
       }
+      // node-pty queues `kill()` until the pty reports ready and drops it silently if that
+      // never happens, so the process tree is the authority here, not the handle. `pid` is a
+      // live read for exactly this reason.
       if (this.pid > 0) await terminateProcessTree(this.pid, true);
     } else if (this.child?.pid !== undefined) {
       await terminateProcessTree(this.child.pid, true);
@@ -780,7 +801,11 @@ export class UnifiedExecProcessManager {
 
       const start = Date.now();
       const wallStart = performance.now();
-      const collected = await collectOutputUntilDeadline(process, start + yieldTimeMs);
+      // Empty calls are polls, not collection windows. Once the process produces anything,
+      // returning it immediately saves the caller another multi-second connector round trip;
+      // bytes that arrive later remain in the draining buffer for the next poll. Non-empty
+      // writes keep Codex's collection-window behavior so one interactive response is gathered.
+      const collected = await collectOutputUntilDeadline(process, start + yieldTimeMs, request.input === '');
       const wallTimeMs = Math.max(0, performance.now() - wallStart);
 
       const originalTokenCount = approxTokensFromByteCount(collected.totalBytes());
@@ -860,7 +885,13 @@ export class UnifiedExecProcessManager {
     const entries = [...this.processes.values()];
     this.processes.clear();
     this.reservedProcessIds.clear();
-    for (const entry of entries) await entry.process.terminate();
+    // App shutdown is the caller that matters, so this has to behave like `terminateProcess`
+    // does for one id: skip the sessions that are already gone rather than spending a taskkill
+    // on each. Awaiting them one after another also made a quit cost the *sum* of every
+    // termination, and let a single rejection abandon every session queued behind it.
+    await Promise.allSettled(
+      entries.filter((entry) => !entry.process.hasExited()).map((entry) => entry.process.terminate())
+    );
   }
 
   private refreshProcessState(processId: number): ProcessStatus {
@@ -920,7 +951,11 @@ type ProcessStatus =
  * waiting the full deadline and gives the output stream at most 50 ms more to close, so a
  * command that finished in 20 ms does not spend the whole 10 s yield window proving it.
  */
-async function collectOutputUntilDeadline(process: UnifiedExecProcess, deadline: number): Promise<HeadTailBuffer> {
+async function collectOutputUntilDeadline(
+  process: UnifiedExecProcess,
+  deadline: number,
+  returnOnFirstOutput = false
+): Promise<HeadTailBuffer> {
   const collected = new HeadTailBuffer();
   let exitSignalReceived = process.cancelled;
   let postExitDeadline: number | null = null;
@@ -970,6 +1005,7 @@ async function collectOutputUntilDeadline(process: UnifiedExecProcess, deadline:
     }
 
     collected.pushBuffer(drained);
+    if (returnOnFirstOutput) break;
     exitSignalReceived ||= process.cancelled;
     if (Date.now() >= deadline) break;
   }

@@ -190,18 +190,35 @@ export function getShellByModelProvidedPath(shellPath: string, cwd: string = pro
   return getShell(shellType, shellPath);
 }
 
+let cachedDefaultShell: { key: string; shell: DetectedShell } | null = null;
+
+function defaultShellCacheKey(): string {
+  return [
+    process.platform,
+    process.env['PATH'] ?? process.env['Path'] ?? '',
+    process.env['PATHEXT'] ?? '',
+    process.env['SHELL'] ?? ''
+  ].join('\u0000');
+}
+
 export function defaultUserShell(): DetectedShell {
+  const key = defaultShellCacheKey();
+  if (cachedDefaultShell?.key === key) return cachedDefaultShell.shell;
+  let shell: DetectedShell;
   if (process.platform === 'win32') {
-    return getShell('powershell') ?? ultimateFallbackShell();
+    shell = getShell('powershell') ?? ultimateFallbackShell();
+  } else {
+    const configured = userShellPath();
+    const detected = configured ? detectShellType(configured) : null;
+    const userDefault = detected ? getShell(detected) : null;
+    const withFallback =
+      process.platform === 'darwin'
+        ? (userDefault ?? getShell('zsh') ?? getShell('bash'))
+        : (userDefault ?? getShell('bash') ?? getShell('zsh'));
+    shell = withFallback ?? ultimateFallbackShell();
   }
-  const configured = userShellPath();
-  const detected = configured ? detectShellType(configured) : null;
-  const userDefault = detected ? getShell(detected) : null;
-  const withFallback =
-    process.platform === 'darwin'
-      ? (userDefault ?? getShell('zsh') ?? getShell('bash'))
-      : (userDefault ?? getShell('bash') ?? getShell('zsh'));
-  return withFallback ?? ultimateFallbackShell();
+  cachedDefaultShell = { key, shell };
+  return shell;
 }
 
 /** `Shell::derive_exec_args`: the argv Codex hands the operating system. */

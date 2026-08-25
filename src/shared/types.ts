@@ -152,10 +152,9 @@ export type GoalReasoning = (typeof GOAL_REASONING_LEVELS)[number];
  * The goal loop: a second model, standing in for the user, that keeps a chat going.
  *
  * When ChatGPT finishes a turn, the recorded conversation — every user message and every
- * final ChatGPT answer, and nothing else — is sent to an OpenRouter model with one
- * instruction: you are the user, say what is still missing. What it writes is typed into
- * the composer and sent. When it judges the task done it writes `NO_REPLY` and nothing is
- * sent at all, which is how the loop ends.
+ * final ChatGPT answer, and nothing else — is sent to an OpenRouter model with an editable
+ * continuation-gate instruction. A completion claim produces `NO_REPLY`; only a concrete
+ * requested item the final answer explicitly leaves unfinished becomes a user message.
  *
  * Off by default, and useless without an OpenRouter API key: the key is the credential the
  * whole feature runs on, so the UI says so rather than failing quietly at the first turn.
@@ -165,6 +164,8 @@ export interface GoalSettings {
   /** An OpenRouter model id, exactly as its `/models` listing spells it. */
   model: string;
   reasoning: GoalReasoning;
+  /** Editable continuation-gate instruction sent as the OpenRouter system message. */
+  prompt: string;
 }
 
 /**
@@ -325,10 +326,24 @@ export interface LogEntry {
 export interface BridgeStatus {
   running: boolean;
   port: number | null;
-  /** True once a browser extension has been issued this app's token. */
+  /** Durable authorization: true once a browser extension has been issued this app's token. */
   paired: boolean;
+  /** Live presence: true only while this app process has heard from the extension recently. */
+  present: boolean;
   /** Epoch ms of the last message from the extension, or null. */
   lastSeenAt: number | null;
+}
+
+/**
+ * Whether the enabled product surface currently needs the companion browser extension.
+ *
+ * Recording consumes browser observations, and multi-agent uses the browser to open/bind
+ * worker chats. Goal and compaction also execute through that bridge, but both depend on a
+ * recorded session, so they are not independently viable reasons to require a browser when
+ * recording itself is off.
+ */
+export function browserExtensionRequired(config: Pick<Config, 'sessions' | 'multiAgent'>): boolean {
+  return config.sessions.record || config.multiAgent.enabled;
 }
 
 export interface AppState {

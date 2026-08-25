@@ -24,7 +24,8 @@ import type {
 } from '../shared/session.js';
 import { ATTRIBUTION_LABELS, TURN_OUTCOME_LABELS, foldProgress } from '../shared/session.js';
 import { chronological } from '../shared/chronology.js';
-import type { AppState, Config } from '../shared/types.js';
+import { DEFAULT_GOAL_SYSTEM_PROMPT, MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
+import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, el, icon, run, toast } from './dom.js';
 
 const api = window.api;
@@ -57,6 +58,8 @@ const GOAL_SCROLL_MARGIN = 72;
 const MAX_TIMELINE_ROWS = 160;
 const MAX_TIMELINE_TEXT_CHARS = 2 * 1024 * 1024;
 const MAX_RENDERED_HTML_CHARS = 256 * 1024;
+const SESSION_PAGE_SIZE = 60;
+const SESSION_SCROLL_MARGIN = 72;
 
 /**
  * Which agent's events the timeline is showing.
@@ -82,10 +85,18 @@ let visible = false;
 
 let sessions: SessionSummary[] = [];
 let pressure = new Map<string, TokenPressure>();
+let sessionTotal = 0;
+let sessionPageCursor: { updatedAt: number; id: string } | null = null;
+let sessionPageLoading = false;
+/** True after the user has explicitly paged beyond the newest page. */
+let loadedOlderSessions = false;
 let activeId: string | null = null;
 let selectedId: string | null = null;
 let events: SessionEvent[] = [];
 let totalEvents = 0;
+/** The session whose `events`/cursor pair belongs together. */
+let detailFor: string | null = null;
+let detailCursor: number | null = null;
 /** The last swarm the app reported, so the header can summarise it without the log. */
 let swarm: SwarmState | null = null;
 /** Badges the list is currently drawn with. See repaintBadges. */
@@ -119,6 +130,11 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
   // Still working, as far as this app knows — only its browser tab is gone. Said as
   // "no tab" rather than "detached" because that is the part a user can act on.
   detached: { text: 'no tab', tone: 'is-active' },
+  // Between jobs, not over. Its chat is intact and the prime can put it back to work in it,
+  // so the word has to read as a pause rather than as an ending — a user who reads "finished"
+  // here closes the tab, which is the one thing that costs nothing and helps nothing.
+  sleeping: { text: 'sleeping', tone: '' },
+  waking: { text: 'waking', tone: 'is-active' },
   finished: { text: 'finished', tone: 'is-finished' },
   failed: { text: 'failed', tone: 'is-failed' }
 };
@@ -211,9 +227,15 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 async function deleteSession(id: string): Promise<void> {
   const done = await run(api.deleteSession(id));
   if (done === null) return;
+  sessions = sessions.filter((entry) => entry.id !== id);
+  pressure.delete(id);
+  sessionTotal = Math.max(0, sessionTotal - 1);
   if (selectedId === id) {
     selectedId = null;
     events = [];
+    totalEvents = 0;
+    detailFor = null;
+    detailCursor = null;
     handoff = null;
     handoffFor = null;
     detailLoadGeneration++;
@@ -223,17 +245,75 @@ async function deleteSession(id: string): Promise<void> {
   await loadSessions();
 }
 
+function sortSessionRows(rows: SessionSummary[]): SessionSummary[] {
+  return rows.sort((left, right) => {
+    if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
+    if (left.id === right.id) return 0;
+    return left.id < right.id ? 1 : -1;
+  });
+}
+
+function mergeSessionRows(rows: SessionSummary[]): void {
+  const merged = new Map(sessions.map((entry) => [entry.id, entry]));
+  for (const entry of rows) merged.set(entry.id, entry);
+  sessions = sortSessionRows([...merged.values()]);
+}
+
 async function loadSessions(): Promise<void> {
   const generation = ++sessionsLoadGeneration;
-  const list = await run(api.listSessions());
+  const list = await run(api.listSessions({ limit: SESSION_PAGE_SIZE }));
   if (!list || generation !== sessionsLoadGeneration) return;
-  sessions = list.sessions;
+  // Once older pages have been requested, a hot refresh only replaces/updates the newest page.
+  // Throwing the older rows away here would make scrolling history vanish every 400 ms while a
+  // live chat is recording. Before pagination begins, replacing the first page is cheaper and
+  // also removes a session that was deleted elsewhere.
+  if (loadedOlderSessions) mergeSessionRows(list.sessions);
+  else {
+    sessions = list.sessions;
+    sessionPageCursor = list.nextCursor ?? null;
+  }
+  sessionTotal = typeof list.total === 'number' ? list.total : list.sessions.length;
   activeId = list.activeId;
-  pressure = new Map(list.pressure.map((entry) => [entry.id, entry]));
-  if (selectedId !== null && !sessions.some((s) => s.id === selectedId)) selectedId = null;
+  if (loadedOlderSessions) {
+    for (const entry of list.pressure) pressure.set(entry.id, entry);
+  } else {
+    pressure = new Map(list.pressure.map((entry) => [entry.id, entry]));
+  }
+  if (selectedId !== null && !sessions.some((s) => s.id === selectedId)) {
+    selectedId = null;
+    detailFor = null;
+    detailCursor = null;
+  }
   if (selectedId === null) selectedId = activeId ?? sessions[0]?.id ?? null;
   paintSessions();
   await loadDetail();
+}
+
+async function loadMoreSessions(): Promise<void> {
+  if (sessionPageLoading || !sessionPageCursor || sessions.length >= sessionTotal) return;
+  sessionPageLoading = true;
+  const cursor = sessionPageCursor;
+  try {
+    const page = await run(api.listSessions({ cursor, limit: SESSION_PAGE_SIZE }));
+    if (!page) return;
+    mergeSessionRows(page.sessions);
+    loadedOlderSessions = true;
+    sessionTotal = page.total;
+    sessionPageCursor = page.nextCursor;
+    for (const entry of page.pressure) pressure.set(entry.id, entry);
+    paintSessions();
+  } finally {
+    sessionPageLoading = false;
+  }
+}
+
+function maybePageSessions(): void {
+  if (!visible || !sessionPageCursor || sessions.length >= sessionTotal) return;
+  const pane = $('sessionList').closest<HTMLElement>('.scroll');
+  if (!pane) return;
+  if (pane.scrollHeight - pane.scrollTop - pane.clientHeight <= SESSION_SCROLL_MARGIN) {
+    void loadMoreSessions();
+  }
 }
 
 function paintSessions(): void {
@@ -243,11 +323,40 @@ function paintSessions(): void {
   $('sessionsEmpty').hidden = sessions.length > 0;
 
   const recording = deps.state()?.config.sessions.record === true;
+  const retained = `${sessionTotal} retained session${sessionTotal === 1 ? '' : 's'}`;
+  const shown = sessions.length < sessionTotal ? `${sessions.length} of ${retained} shown` : retained;
+  const more = sessionPageCursor && sessions.length < sessionTotal ? ' · scroll for older history' : '';
   $('sessionsFoot').textContent = recording
-    ? `${sessions.length} recorded session${sessions.length === 1 ? '' : 's'}${
-        activeId ? ' · one live now' : ''
-      }`
-    : 'Recording is off. Turn it on in Settings to record new sessions.';
+    ? `${shown}${more}${activeId ? ' · one live now' : ''}`
+    : `Recording is off · ${shown}${more}`;
+}
+
+function canonicalMessageKey(event: SessionEvent): string | null {
+  if ((event.kind === 'user_message' || event.kind === 'assistant_message') && event.messageId) {
+    return `${event.kind}\u0000${event.messageId}`;
+  }
+  return null;
+}
+
+/** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
+function mergeDetailDelta(delta: SessionEvent[]): void {
+  const merged = [...events];
+  const messageRows = new Map<string, number>();
+  for (let index = 0; index < merged.length; index++) {
+    const key = canonicalMessageKey(merged[index]!);
+    if (key) messageRows.set(key, index);
+  }
+  for (const event of delta) {
+    const key = canonicalMessageKey(event);
+    const index = key ? messageRows.get(key) : undefined;
+    if (index !== undefined) merged[index] = event;
+    else {
+      if (key) messageRows.set(key, merged.length);
+      merged.push(event);
+    }
+  }
+  const folded = chronological(foldProgress(merged));
+  events = folded.slice(Math.max(0, folded.length - MAX_TIMELINE_ROWS));
 }
 
 async function loadDetail(): Promise<void> {
@@ -257,10 +366,15 @@ async function loadDetail(): Promise<void> {
     handoffLoadGeneration++;
     events = [];
     totalEvents = 0;
+    detailFor = null;
+    detailCursor = null;
     paintDetail();
     return;
   }
-  const detail = await run(api.getSession(wanted));
+  const incremental = detailFor === wanted && detailCursor !== null;
+  const detail = await run(
+    api.getSession(wanted, incremental ? { from: detailCursor!, limit: MAX_TIMELINE_ROWS } : { limit: MAX_TIMELINE_ROWS })
+  );
   if (!detail || generation !== detailLoadGeneration || selectedId !== wanted) return;
   // User/assistant prose is canonical in messages.json, while structured page activity stays
   // append-only by design: ChatGPT can grow one commentary caption or rewrite one activity
@@ -268,10 +382,24 @@ async function loadDetail(): Promise<void> {
   // their stable progressId/messageId names, then chronology places that row at its first
   // appearance. This helper existed already but was never wired into the desktop reader,
   // which is why "Inspecting…" and "Inspected…" still appeared as siblings.
-  events = chronological(foldProgress(detail.events));
+  if (incremental) mergeDetailDelta(detail.events);
+  else {
+    const folded = chronological(foldProgress(detail.events));
+    events = folded.slice(Math.max(0, folded.length - MAX_TIMELINE_ROWS));
+    detailFor = wanted;
+  }
+  detailCursor =
+    typeof detail.nextFrom === 'number'
+      ? detail.nextFrom
+      : detail.events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), incremental ? detailCursor! : 0);
   totalEvents = detail.total;
   paintDetail();
   void loadHandoff();
+  // A burst can contain more than one renderer-sized page between coalesced notifications.
+  // Drain it page by page rather than silently jumping the cursor or lifting the payload cap.
+  if (incremental && detail.events.length === MAX_TIMELINE_ROWS && selectedId === wanted) {
+    window.setTimeout(() => void loadDetail(), 0);
+  }
 }
 
 async function loadHandoff(): Promise<void> {
@@ -755,9 +883,13 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad' } {
   // Detached is a live worker with no tab: its turn is running on OpenAI's servers and its
   // tool calls still arrive here, so it is counted among the working rather than the lost.
   if (count('detached') > 0) parts.push(`${count('detached')} working with no tab`);
+  if (count('waking') > 0) parts.push(`${count('waking')} waking up`);
+  // Said as "waiting" rather than counted with the finished ones: these are the run's reusable
+  // chats, and the number the user wants is how much of the run is still available to it.
+  if (count('sleeping') > 0) parts.push(`${count('sleeping')} sleeping`);
   if (count('finished') > 0) parts.push(`${count('finished')} finished`);
   if (count('failed') > 0) parts.push(`${count('failed')} failed`);
-  const live = count('invited') + count('active') + count('detached');
+  const live = count('invited') + count('active') + count('detached') + count('waking');
   return {
     text: `${workers.length === 1 ? '1 worker' : `${workers.length} workers`} · ${parts.join(' · ')}`,
     tone: count('failed') > 0 ? 'is-bad' : live > 0 ? 'is-live' : ''
@@ -888,7 +1020,9 @@ export function chatSettingsPatch(current: Config): {
       // The chosen model is held here rather than in an input, because it is picked from a
       // list and never typed. `current` is the fallback for the first save after a repaint.
       model: goalModel || current.goal.model,
-      reasoning: $<HTMLSelectElement>('goalReasoning').value as Config['goal']['reasoning']
+      reasoning: $<HTMLSelectElement>('goalReasoning').value as Config['goal']['reasoning'],
+      // Blank means "restore the safe default", not "send an unconstrained system message".
+      prompt: $<HTMLTextAreaElement>('goalPrompt').value.trim() || DEFAULT_GOAL_SYSTEM_PROMPT
     }
   };
 }
@@ -993,7 +1127,7 @@ function maybePageGoalModels(): void {
 
 /** Keep an in-progress form edit when an unrelated main-process push carries the old value. */
 function applyChatValue(
-  input: HTMLInputElement | HTMLSelectElement,
+  input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement,
   value: string,
   previous: string | number | undefined
 ): void {
@@ -1011,17 +1145,24 @@ function applyChatChecked(input: HTMLInputElement, value: boolean, previous: boo
 function applyGoal(state: AppState, previous?: Config): void {
   const { config } = state;
   goalModel = config.goal.model;
-  applyChatChecked($<HTMLInputElement>('goalEnabled'), config.goal.enabled, previous?.goal.enabled);
+  const goalToggle = $<HTMLInputElement>('goalEnabled');
+  applyChatChecked(goalToggle, config.goal.enabled, previous?.goal.enabled);
+  // Goal reads the local recorded transcript. Keep the dependency visible at the switch rather
+  // than accepting a click that the config boundary must immediately repair back to off.
+  goalToggle.disabled = !config.sessions.record;
   applyChatValue($<HTMLSelectElement>('goalReasoning'), config.goal.reasoning, previous?.goal.reasoning);
+  applyChatValue($<HTMLTextAreaElement>('goalPrompt'), config.goal.prompt, previous?.goal.prompt);
   // The one sentence somebody switching this on needs, and the exact words the extension
   // shows under the same switch — two places saying the same thing differently is how a
   // missing key turns into a support question.
-  $('goalHint').textContent = !state.hasGoalKey
-    ? 'OpenRouter API key essential for goal feature.'
-    : config.goal.enabled
-      ? 'A second model reads each finished answer and writes your next message, until it decides the goal is met.'
-      : 'Off — nothing is sent to OpenRouter and nothing is typed into your chats.';
-  $('goalHint').classList.toggle('is-warn', !state.hasGoalKey);
+  $('goalHint').textContent = !config.sessions.record
+    ? 'Turn on session recording first — Goal needs the recorded conversation to decide what is still missing.'
+    : !state.hasGoalKey
+      ? 'OpenRouter API key essential for goal feature.'
+      : config.goal.enabled
+        ? 'A second model reads each finished answer and writes your next message, until it decides the goal is met.'
+        : 'Off — nothing is sent to OpenRouter and nothing is typed into your chats.';
+  $('goalHint').classList.toggle('is-warn', !config.sessions.record || !state.hasGoalKey);
   $('goalModelName').textContent = config.goal.model;
   $<HTMLInputElement>('goalKey').placeholder = state.hasGoalKey ? '•••••••• stored' : 'sk-or-v1-…';
   $('goalKeyState').textContent = state.hasGoalKey
@@ -1032,6 +1173,18 @@ function applyGoal(state: AppState, previous?: Config): void {
 }
 
 function wireGoal(save: () => Promise<void>): void {
+  $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
+  $('goalPromptEdit').addEventListener('click', () => {
+    const panel = $('goalPromptPanel');
+    panel.hidden = !panel.hidden;
+    $('goalPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    if (!panel.hidden) $<HTMLTextAreaElement>('goalPrompt').focus();
+  });
+  $('goalPromptReset').addEventListener('click', async () => {
+    $<HTMLTextAreaElement>('goalPrompt').value = DEFAULT_GOAL_SYSTEM_PROMPT;
+    await save();
+    toast('Goal prompt restored to default');
+  });
   // The catalogue is fetched on the first press and kept afterwards: the picker closing is
   // not a reason to spend another round trip on a list that changes weekly.
   $('goalPick').addEventListener('click', () => {
@@ -1055,10 +1208,16 @@ function wireGoal(save: () => Promise<void>): void {
   // field is emptied the moment it has been handed over.
   $('goalKey').addEventListener('blur', async () => {
     const input = $<HTMLInputElement>('goalKey');
-    if (input.value === '') return;
-    const next = await run(api.setGoalKey(input.value.trim()));
-    input.value = '';
+    const submitted = input.value;
+    const key = submitted.trim();
+    // Whitespace is not a key. Passing it through trim as an empty string used to invoke the
+    // remove-key path and then claim a key was stored.
+    if (key === '') return;
+    const next = await run(api.setGoalKey(key));
     if (next) {
+      // A blur can be followed immediately by refocus + new typing while IPC is in flight.
+      // Clear only the exact value that successfully crossed the secret-store boundary.
+      if (input.value === submitted) input.value = '';
       applyGoal(next);
       toast('OpenRouter key stored');
     }
@@ -1091,7 +1250,15 @@ function applyAutoCompactHint(config: Config): void {
  * `sessRecord` is deliberately absent — it lives in the Home permission list now, with
  * every other switch that decides what ChatGPT can reach, and saves from there.
  */
-const CHAT_INPUTS = ['sessRetain', 'autoCompact', 'autoCompactTokens', 'maWorkers', 'goalEnabled', 'goalReasoning'];
+const CHAT_INPUTS = [
+  'sessRetain',
+  'autoCompact',
+  'autoCompactTokens',
+  'maWorkers',
+  'goalEnabled',
+  'goalReasoning',
+  'goalPrompt'
+];
 
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */
 export function chatApply(state: AppState, previous?: Config): void {
@@ -1114,13 +1281,20 @@ export function chatApply(state: AppState, previous?: Config): void {
   applyGoal(state, previous);
 
   // Extension bridge. Connecting is automatic, so this reports rather than asks.
+  const browserRequired = browserExtensionRequired(config);
   $<HTMLButtonElement>('bridgeUnpair').disabled = !bridge.paired;
-  $('bridgeState').textContent = !bridge.running
-    ? 'The local bridge is off. Turn recording or multi-agent mode on to start it.'
-    : bridge.paired
-      ? `Connected. Listening on 127.0.0.1:${bridge.port ?? '?'} · last message ${ago(bridge.lastSeenAt)}.`
-      : `Listening on 127.0.0.1:${bridge.port ?? '?'} · no browser has connected yet.`;
-  $('bridgeState').classList.toggle('is-warn', bridge.running && !bridge.paired);
+  $('bridgeState').textContent = !browserRequired
+    ? 'Browser-backed features are off. The extension is not needed right now.'
+    : !bridge.running
+      ? 'The local bridge is off even though recording or multi-agent mode needs it.'
+      : bridge.present
+        ? `Connected. Listening on 127.0.0.1:${bridge.port ?? '?'} · last message ${ago(bridge.lastSeenAt)}.`
+        : bridge.paired
+          ? `Authorized, but the browser extension is not currently connected. ${
+              bridge.lastSeenAt === null ? 'It has not checked in since this app started.' : `Last seen ${ago(bridge.lastSeenAt)}.`
+            }`
+          : `Listening on 127.0.0.1:${bridge.port ?? '?'} · no browser is authorized or connected yet.`;
+  $('bridgeState').classList.toggle('is-warn', browserRequired && !bridge.present);
   void showExtensionPath();
 
   if (sessions.length > 0) paintSessions();
@@ -1181,6 +1355,8 @@ export function initChat(next: Deps): void {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');
     if (!row?.dataset.id || row.dataset.id === selectedId) return;
     selectedId = row.dataset.id;
+    detailFor = null;
+    detailCursor = null;
     // A different session is a different set of calls; nothing here should arrive open.
     openTools.clear();
     handoff = null;
@@ -1188,6 +1364,7 @@ export function initChat(next: Deps): void {
     paintSessions();
     void loadDetail();
   });
+  $('sessionList').closest<HTMLElement>('.scroll')?.addEventListener('scroll', maybePageSessions);
 
   $('chatView').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-view]');

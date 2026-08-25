@@ -314,8 +314,8 @@ async function applyHunksToFiles(
         path: destination,
         change: { kind: 'add', content: newContents, overwrittenContent: overwrittenMoveContent }
       });
-      await withContext(ensureNotDirectory(resolved), () => `Failed to remove original ${resolved}`);
       try {
+        await withContext(ensureNotDirectory(resolved), () => `Failed to remove original ${resolved}`);
         await withContext(
           remove(resolved, { recursive: false, force: false }),
           () => `Failed to remove original ${resolved}`
@@ -323,6 +323,36 @@ async function applyHunksToFiles(
       } catch (error) {
         const sideEffectFree = await removeFailureWasSideEffectFree(resolved, originalContents);
         delta.exact = delta.exact && sideEffectFree;
+        // The destination was already committed before source removal. If the source is proven
+        // unchanged, restore the destination to its exact pre-move state so an EPERM/sharing
+        // violation cannot destroy an existing destination while returning an error. When the
+        // source state is uncertain, keep the destination: removing the only surviving copy
+        // would turn an ambiguous delete into certain data loss.
+        if (sideEffectFree) {
+          let destinationStillOurs = false;
+          try {
+            destinationStillOurs = (await readFileText(destination)) === newContents;
+          } catch {
+            destinationStillOurs = false;
+          }
+          // Never restore a stale preimage over somebody else's newer destination edit. The
+          // rollback snapshot is safe to use only while the destination still contains exactly
+          // what this move wrote.
+          if (!destinationStillOurs) {
+            delta.exact = false;
+            throw error;
+          }
+          try {
+            if (overwrittenMoveContent === null) {
+              await remove(destination, { recursive: false, force: true });
+            } else {
+              await writeFile(destination, overwrittenMoveContent);
+            }
+            delta.changes.splice(destinationChangeIndex, 1);
+          } catch {
+            delta.exact = false;
+          }
+        }
         throw error;
       }
       delta.changes[destinationChangeIndex] = {

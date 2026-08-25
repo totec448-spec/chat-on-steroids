@@ -10,6 +10,8 @@
  */
 
 import type { ConnectionStatus, SurfaceStatus, TunnelSettings } from '../shared/types.js';
+import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
+import { prewarmComputerHelper } from './computer/index.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { logError, logInfo, logWarn } from './logger.js';
 import { lastRequestAt, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from './mcp/server.js';
@@ -212,12 +214,10 @@ async function connectImpl(): Promise<void> {
 
   const config = getConfig();
   const caps = effectiveCapabilities(config);
-  // Connecting with nothing switched on would publish a connector that can do
-  // nothing. A folder is the usual answer; desktop access is the other one — and that
-  // includes the clipboard, which `surfaceIsUseful` already counts as enough to make the
-  // Desktop connector worth publishing. The two gates disagreeing meant a user who
-  // granted only the clipboard was told to add a folder for tools that never touch one.
-  if (config.roots.length === 0 && !surfaceIsUseful('desktop', caps)) {
+  // A root is required by the capabilities that actually cross the filesystem boundary,
+  // not by the mere presence or absence of Desktop. Otherwise enabling screen/clipboard
+  // could accidentally waive the root needed by Core's file or command semantics.
+  if (config.roots.length === 0 && requiresApprovedFilesystemRoot(config)) {
     setStatus({ state: 'disconnected', detail: 'Add a folder before connecting.' });
     return;
   }
@@ -234,6 +234,7 @@ async function connectImpl(): Promise<void> {
       };
     });
     setStatus({ localUrl: endpoint.url, surfaces: describeSurfaces() });
+    if (caps.screen || caps.control) void prewarmComputerHelper();
     updateSurface('core', { state: 'starting', detail: 'Connecting…' });
 
     const apiKey = await getSecret('openaiApiKey');
@@ -366,6 +367,7 @@ async function applySettingsImpl(): Promise<void> {
   }
   const caps = effectiveCapabilities(config);
   const available = surfaceIsUseful('desktop', caps);
+  if (caps.screen || caps.control) void prewarmComputerHelper();
   // Rebuild the cards first: permissions may have changed which tools each surface would
   // advertise, and on a whole-origin transport that is all there is to do.
   setStatus({ surfaces: describeSurfaces() });
@@ -396,7 +398,7 @@ export function applySettings(): Promise<void> {
   return enqueueLifecycle(applySettingsImpl);
 }
 
-async function disconnectImpl(): Promise<void> {
+async function disconnectImpl(endpointForceAfterMs?: number): Promise<void> {
   // Invalidate callbacks first; stopping a child can itself cause exit/health events.
   connectionGeneration += 1;
   // Stop local admission first and let accepted MCP calls finish recording before any
@@ -406,7 +408,8 @@ async function disconnectImpl(): Promise<void> {
   if (endpoint) {
     const stopping = endpoint;
     endpoint = null;
-    await stopping.stop().catch(() => {});
+    if (endpointForceAfterMs === undefined) await stopping.stop().catch(() => {});
+    else await stopping.stop({ forceAfterMs: endpointForceAfterMs }).catch(() => {});
   }
   if (desktopTunnel) {
     await desktopTunnel.stop().catch(() => {});
@@ -436,6 +439,15 @@ export function connect(): Promise<void> {
 
 export function disconnect(): Promise<void> {
   return enqueueLifecycle(disconnectImpl);
+}
+
+/**
+ * Final app shutdown may bound the HTTP drain because the process itself is about to exit.
+ * User disconnects and settings reconnects deliberately do not use this path: they keep
+ * running afterward, so dropping a committed response there could make ChatGPT retry it.
+ */
+export function shutdownConnection(): Promise<void> {
+  return enqueueLifecycle(() => disconnectImpl(30_000));
 }
 
 /** The running tunnel's own local health address, for the self-test. Null if none. */

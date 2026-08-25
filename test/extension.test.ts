@@ -38,8 +38,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(7);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 7;');
+    expect(BRIDGE_PROTOCOL).toBe(8);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 8;');
   });
 
   /**
@@ -411,10 +411,14 @@ interface WorkerHarness {
   installed(reason?: string): Promise<void>;
   /** Registers the browser document that owns subsequent tab-scoped messages. */
   registerTab(tabId: number, documentId?: string): Promise<any>;
+  /** Fires Chrome's tab-created lifecycle event, the way opening a link in a new tab does. */
+  createTab(tab: { id: number; url?: string; pendingUrl?: string }): Promise<void>;
   tabsCreate: ReturnType<typeof vi.fn>;
   tabsQuery: ReturnType<typeof vi.fn>;
   tabsUpdate: ReturnType<typeof vi.fn>;
   tabsSendMessage: ReturnType<typeof vi.fn>;
+  tabsRemove: ReturnType<typeof vi.fn>;
+  windowsUpdate: ReturnType<typeof vi.fn>;
   scriptingExecuteScript: ReturnType<typeof vi.fn>;
   scriptingInsertCSS: ReturnType<typeof vi.fn>;
   alarmCreate: ReturnType<typeof vi.fn>;
@@ -443,12 +447,14 @@ function loadWorker(options: {
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
+  const tabCreatedListeners: Array<(tab: { id?: number; url?: string; pendingUrl?: string }) => void> = [];
   const tabUpdatedListeners: Array<(tabId: number, changeInfo: { url?: string; status?: string }) => void> = [];
   const installedListeners: Array<(details: { reason: string }) => void> = [];
   const tabsCreate = vi.fn(async () => ({ id: 99 }));
   const tabsQuery = vi.fn(async () => [] as Array<{ id?: number }>);
   const tabsUpdate = vi.fn(async (id: number) => ({ id, windowId: 7 }));
   const tabsSendMessage = vi.fn(async () => ({ ok: true }));
+  const tabsRemove = vi.fn(async () => undefined);
   const scriptingExecuteScript = vi.fn(async () => []);
   const scriptingInsertCSS = vi.fn(async () => undefined);
   const alarmCreate = vi.fn(() => undefined);
@@ -499,6 +505,12 @@ function loadWorker(options: {
         throw new Error('tab state unavailable in this harness');
       }),
       sendMessage: tabsSendMessage,
+      remove: tabsRemove,
+      onCreated: {
+        addListener(fn: (tab: { id?: number; url?: string; pendingUrl?: string }) => void) {
+          tabCreatedListeners.push(fn);
+        }
+      },
       onRemoved: {
         addListener(fn: (tabId: number) => void) {
           tabRemovedListeners.push(fn);
@@ -529,6 +541,8 @@ function loadWorker(options: {
     tabsQuery,
     tabsUpdate,
     tabsSendMessage,
+    tabsRemove,
+    windowsUpdate,
     scriptingExecuteScript,
     scriptingInsertCSS,
     alarmCreate,
@@ -537,6 +551,10 @@ function loadWorker(options: {
       for (const fn of installedListeners) fn({ reason });
       await new Promise((resolve) => setTimeout(resolve, 0));
       await new Promise((resolve) => setTimeout(resolve, 0));
+    },
+    async createTab(tab: { id: number; url?: string; pendingUrl?: string }) {
+      for (const fn of tabCreatedListeners) fn(tab);
+      for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     },
     async closeTab(tabId: number) {
       for (const fn of tabRemovedListeners) fn(tabId);
@@ -829,6 +847,212 @@ describe('extension command delivery', () => {
     expect(result.ok).toBe(true);
     expect(tokens).toEqual(['Bearer stale-token', 'Bearer second-token']);
     expect(local.data.token).toBe('second-token');
+  });
+});
+
+/**
+ * Waking a worker happens in the chat that worker already has.
+ *
+ * The app cannot reach into the browser, so it opens `/c/<id>?clf=<command>` and lets the
+ * page redeem the marker. That is right when the chat is closed and wrong when it is not:
+ * ChatGPT is a single-page app, and a second tab on the same conversation is exactly the
+ * duplicate this whole feature exists to avoid. The service worker sees the tab being
+ * created, notices the conversation is already open somewhere, and hands the job over to
+ * that document instead.
+ */
+describe('extension revival delivery', () => {
+  const paired = { port: 8765, token: 'paired-token' };
+  const CHAT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const REVIVAL_URL = `https://chatgpt.com/c/${CHAT}?clf=cmd-wake#clf=cmd-wake`;
+
+  const quiet = () =>
+    vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      return response(404, {});
+    });
+
+  it('gives the revival to the tab that chat is already open in, and closes the duplicate only after claim', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    worker.tabsQuery.mockResolvedValue([
+      { id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` },
+      { id: 5, windowId: 7, url: 'https://chatgpt.com/c/99999999-1111-4222-8333-444444444444' }
+    ]);
+    const order: string[] = [];
+    worker.tabsRemove.mockImplementation(async (id: number) => {
+      order.push(`remove:${id}`);
+    });
+    worker.tabsSendMessage.mockImplementation(async (id: number, message: { type: string }) => {
+      order.push(`${message.type}:${id}`);
+      return message.type === 'clf-recorder-ping'
+        ? { ok: true, recorderVersion: 9 }
+        : { ok: true, claimed: true };
+    });
+
+    await worker.createTab({ id: 12, pendingUrl: REVIVAL_URL });
+
+    // Handed to the open document, with the conversation named so it can refuse anything
+    // that is not the chat the command is for.
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, {
+      type: 'clf-run-command',
+      id: 'cmd-wake',
+      conversationId: CHAT
+    });
+    // The existing page must own the durable lease before the fallback disappears. While both
+    // documents exist the bridge's single-owner lease prevents duplicate delivery; closing the
+    // fallback before this claim is the race that used to destroy the actual winning owner.
+    expect(order).toEqual(['clf-recorder-ping:4', 'clf-run-command:4', 'remove:12']);
+    expect(worker.tabsUpdate).toHaveBeenCalledWith(4, { active: true });
+    expect(worker.windowsUpdate).toHaveBeenCalledWith(7, { focused: true });
+  });
+
+  it('does not close a fresh revival tab that already won the durable command lease', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` }]);
+    worker.tabsSendMessage.mockImplementation(async (_id: number, message: { type: string }) => {
+      if (message.type === 'clf-recorder-ping') return { ok: true, recorderVersion: 9 };
+      // The app-opened fallback loaded faster and redeemed while background was pinging this
+      // existing tab. The existing document truthfully reports that it did not get the lease.
+      return { ok: true, claimed: false };
+    });
+
+    await worker.createTab({ id: 12, pendingUrl: REVIVAL_URL });
+
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, {
+      type: 'clf-run-command',
+      id: 'cmd-wake',
+      conversationId: CHAT
+    });
+    // The fresh tab is the winning owner. Killing it here strands the wake until the bridge
+    // deadline even though a viable document already owns the command.
+    expect(worker.tabsRemove).not.toHaveBeenCalledWith(12);
+  });
+
+  it('lets the app open the chat when it is not on screen anywhere', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    // Another worker's chat and a fresh tab are not this conversation. A closed chat is
+    // reopened by the URL the app already opened, which is the exact `/c/<id>` of it.
+    worker.tabsQuery.mockResolvedValue([
+      { id: 4, windowId: 7, url: 'https://chatgpt.com/c/99999999-1111-4222-8333-444444444444' },
+      { id: 6, windowId: 7, url: 'https://chatgpt.com/' }
+    ]);
+
+    await worker.createTab({ id: 12, pendingUrl: REVIVAL_URL });
+
+    expect(worker.tabsRemove).not.toHaveBeenCalled();
+    expect(worker.tabsSendMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps the opened tab when the chat that is open cannot answer for itself', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` }]);
+    // A ChatGPT tab left open from before this extension was installed or updated has no
+    // live content script. Closing the app's tab in favour of it would strand the command.
+    worker.tabsSendMessage.mockRejectedValue(new Error('Could not establish connection'));
+
+    await worker.createTab({ id: 12, pendingUrl: REVIVAL_URL });
+
+    expect(worker.tabsRemove).not.toHaveBeenCalled();
+    expect(worker.tabsSendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the fresh revival tab when the existing chat has a stale recorder version', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` }]);
+    worker.tabsSendMessage.mockResolvedValue({ ok: true, recorderVersion: 8 });
+
+    await worker.createTab({ id: 12, pendingUrl: REVIVAL_URL });
+
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, { type: 'clf-recorder-ping' });
+    expect(worker.tabsRemove).not.toHaveBeenCalled();
+    expect(
+      worker.tabsSendMessage.mock.calls.filter(([, message]) => (message as { type?: string })?.type === 'clf-run-command')
+    ).toEqual([]);
+  });
+
+  it('skips a dead first copy of the worker chat and reuses a healthy second copy', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    worker.tabsQuery.mockResolvedValue([
+      { id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` },
+      { id: 5, windowId: 8, url: `https://chatgpt.com/c/${CHAT}` }
+    ]);
+    worker.tabsSendMessage.mockImplementation(async (id: number, message: { type: string }) => {
+      if (id === 4) throw new Error('stale recorder');
+      return message.type === 'clf-recorder-ping'
+        ? { ok: true, recorderVersion: 9 }
+        : { ok: true, claimed: true };
+    });
+
+    await worker.createTab({ id: 12, pendingUrl: REVIVAL_URL });
+
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(5, { type: 'clf-recorder-ping' });
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(5, {
+      type: 'clf-run-command',
+      id: 'cmd-wake',
+      conversationId: CHAT
+    });
+    expect(worker.tabsRemove).toHaveBeenCalledWith(12);
+    expect(worker.tabsUpdate).toHaveBeenCalledWith(5, { active: true });
+  });
+
+  it('reuses a supported legacy chat.openai.com worker tab', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chat.openai.com/c/${CHAT}` }]);
+    worker.tabsSendMessage.mockImplementation(async (_id: number, message: { type: string }) =>
+      message.type === 'clf-recorder-ping'
+        ? { ok: true, recorderVersion: 9 }
+        : { ok: true, claimed: true }
+    );
+
+    await worker.createTab({ id: 12, pendingUrl: REVIVAL_URL });
+
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, {
+      type: 'clf-run-command',
+      id: 'cmd-wake',
+      conversationId: CHAT
+    });
+    expect(worker.tabsRemove).toHaveBeenCalledWith(12);
+  });
+
+  it('reuses the existing worker chat when Chrome publishes the revival URL only onUpdated', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` }]);
+    worker.tabsSendMessage.mockImplementation(async (_id: number, message: { type: string }) =>
+      message.type === 'clf-recorder-ping'
+        ? { ok: true, recorderVersion: 9 }
+        : { ok: true, claimed: true }
+    );
+
+    // Chrome documents that onCreated may arrive before url/pendingUrl is populated. The URL
+    // then appears on onUpdated. Missing that second chance leaks one duplicate worker tab per
+    // wake even though the original chat was already open.
+    await worker.createTab({ id: 12 });
+    expect(worker.tabsRemove).not.toHaveBeenCalled();
+    await worker.startTabNavigation(12, REVIVAL_URL);
+
+    expect(worker.tabsRemove).toHaveBeenCalledWith(12);
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, {
+      type: 'clf-run-command',
+      id: 'cmd-wake',
+      conversationId: CHAT
+    });
+  });
+
+  it('ignores tabs that are not a marked revival at all', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
+    worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` }]);
+
+    // A chat opened by hand carries no command, and the two chat-opening commands name no
+    // conversation. Neither may be handed to an existing document.
+    await worker.createTab({ id: 12, pendingUrl: `https://chatgpt.com/c/${CHAT}` });
+    await worker.createTab({ id: 13, pendingUrl: 'https://chatgpt.com/?clf=cmd-fresh#clf=cmd-fresh' });
+    await worker.createTab({ id: 14, pendingUrl: 'https://example.com/c/whatever?clf=cmd-wake' });
+
+    const handovers = worker.tabsSendMessage.mock.calls.filter(
+      ([, message]) => (message as { type?: string })?.type === 'clf-run-command'
+    );
+    expect(handovers).toEqual([]);
+    expect(worker.tabsRemove).not.toHaveBeenCalled();
   });
 });
 
@@ -1649,6 +1873,50 @@ describe('extension observation journal', () => {
     expect(journal.some((entry) => entry.gap === true && /progress line\(s\).*dropped/.test(entry.event.text))).toBe(true);
   });
 
+  it('keeps queue-pressure gap evidence scoped to every affected chat and provisional route', async () => {
+    const local = new FakeStorageArea();
+    const session = new FakeStorageArea();
+    const worker = loadWorker({ local, session });
+    const chatA = 'aaaaaaaa-1111-2222-3333-444444444444';
+    const chatB = 'bbbbbbbb-1111-2222-3333-444444444444';
+    const tabId = 42;
+    const provisional = `tab-${tabId}:document-${tabId}-0`;
+    const entries = Array.from({ length: 4200 }, (_, index) => ({
+      conversationId: index % 3 === 0 ? chatA : index % 3 === 1 ? chatB : null,
+      event: { kind: 'progress', time: Date.now(), text: `progress ${index}` }
+    }));
+
+    await worker.send({ type: 'events', entries }, tabId);
+    let journal = journalOf(session);
+    const gaps = journal.filter((entry) => entry.gap === true);
+    expect(gaps.some((entry) => entry.conversationId === chatA && /progress line\(s\).*dropped/.test(entry.event.text))).toBe(true);
+    expect(gaps.some((entry) => entry.conversationId === chatB && /progress line\(s\).*dropped/.test(entry.event.text))).toBe(true);
+    expect(gaps.some((entry) => entry.conversationId === null && entry.provisional === provisional)).toBe(true);
+
+    const freshChat = 'cccccccc-1111-2222-3333-444444444444';
+    await worker.send({ type: 'bind', conversationId: freshChat }, tabId);
+    journal = journalOf(session);
+    expect(journal.some((entry) => entry.gap === true && entry.conversationId === freshChat && entry.provisional === null)).toBe(true);
+    expect(journal.some((entry) => entry.gap === true && entry.conversationId === null && entry.provisional === provisional)).toBe(false);
+  });
+
+  it('keeps essential-loss markers scoped to each affected conversation', async () => {
+    const local = new FakeStorageArea();
+    const session = new FakeStorageArea();
+    const worker = loadWorker({ local, session });
+    const chatA = 'dddddddd-1111-2222-3333-444444444444';
+    const chatB = 'eeeeeeee-1111-2222-3333-444444444444';
+    const entries = Array.from({ length: 4200 }, (_, index) => ({
+      conversationId: index % 2 === 0 ? chatA : chatB,
+      event: { kind: 'user_message', time: Date.now(), text: `essential ${index}` }
+    }));
+
+    await worker.send({ type: 'events', entries });
+    const gaps = journalOf(session).filter((entry) => entry.gap === true && entry.event.kind === 'chat_error');
+    expect(gaps.some((entry) => entry.conversationId === chatA && /observation\(s\).*lost/.test(entry.event.text))).toBe(true);
+    expect(gaps.some((entry) => entry.conversationId === chatB && /observation\(s\).*lost/.test(entry.event.text))).toBe(true);
+  });
+
   it('stays inside the journal byte budget under large observations', async () => {
     const local = new FakeStorageArea();
     const session = new FakeStorageArea();
@@ -1858,6 +2126,63 @@ describe('extension connection', () => {
     expect(server.tokens).toBe(1);
   });
 
+  it('does not silently re-pair after the app explicitly disconnects this browser', async () => {
+    let pairCalls = 0;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/pair') {
+        pairCalls++;
+        return response(200, { token: 'should-never-be-minted' });
+      }
+      if (url.pathname === '/activity') return response(401, { error: 'browser_disconnected' });
+      return response(404, {});
+    });
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+
+    const activity = await worker.send({
+      type: 'activity',
+      conversationId: 'abababab-cdcd-efef-1212-343434343434',
+      since: 0
+    });
+
+    expect(activity).toMatchObject({ ok: false, status: 401, error: 'disconnected' });
+    expect(local.data.token).toBeNull();
+    expect(local.data.disconnected).toBe(true);
+    expect(pairCalls).toBe(0);
+
+    // Opening the popup after the failed poll is observation, not reconnect intent.
+    expect(await worker.send({ type: 'status' })).toMatchObject({ paired: false, disconnected: true });
+    expect(pairCalls).toBe(0);
+  });
+
+  it('mirrors an app-side disconnect from hello before the popup can report a stale pair', async () => {
+    let pairCalls = 0;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') {
+        return response(200, { app: 'chat-on-steroids', paired: false, disconnected: true });
+      }
+      if (url.pathname === '/pair') {
+        pairCalls++;
+        return response(200, { token: 'must-not-auto-pair' });
+      }
+      return response(404, {});
+    });
+    const local = new FakeStorageArea({ port: 8765, token: 'old-token' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+
+    expect(await worker.send({ type: 'status' })).toMatchObject({
+      connected: true,
+      paired: false,
+      disconnected: true
+    });
+    expect(local.data.token).toBeNull();
+    expect(local.data.disconnected).toBe(true);
+    expect(pairCalls).toBe(0);
+  });
+
   it('does not let an older in-flight connect undo a later Disconnect', async () => {
     let releasePair!: () => void;
     let pairStarted!: () => void;
@@ -1908,9 +2233,14 @@ describe('extension connection', () => {
   });
 
   it('connects again when the user asks it to, and only then', async () => {
+    const pairBodies: unknown[] = [];
     const server = app();
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      if (input.endsWith('/pair')) pairBodies.push(JSON.parse(String(init.body ?? '{}')));
+      return server.fetch(input, init);
+    });
     const local = new FakeStorageArea();
-    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch: server.fetch });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
     await worker.send({ type: 'status' });
     await worker.send({ type: 'unpair' });
 
@@ -1919,6 +2249,7 @@ describe('extension connection', () => {
     expect(status.paired).toBe(true);
     expect(status.disconnected).toBe(false);
     expect(local.data.disconnected).toBe(false);
+    expect(pairBodies).toEqual([{}, { reconnect: true }]);
   });
 
   it('forces an immediate overwrite in known and newly discovered ChatGPT tabs', async () => {

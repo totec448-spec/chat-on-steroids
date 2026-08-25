@@ -420,9 +420,39 @@ export type AgentRole = 'prime' | 'worker';
  * arriving here, correlated to the same conversation by the same request id. Treating the
  * closed tab as the end of the worker was reading the browser's lifecycle as if it were the
  * turn's. A detached worker is still working, still holds its slot, still has an inbox, and
- * can still finish; it only ends once it has also gone quiet.
+ * can still report; it only sleeps once it has also gone quiet.
+ *
+ * `sleeping` is the state that makes a worker reusable rather than disposable.
+ *
+ * A worker used to be a one-shot job: it reported, its slot was a tombstone, and the only
+ * way to get more work done was another `spawn` — another ChatGPT conversation, thrown away
+ * again a few minutes later. That is both what ChatGPT itself pushes back on and a waste of
+ * everything the worker had already learned about the task. So the end of a worker's *turn*
+ * is no longer the end of the worker: it goes to sleep in the chat it already has, keeping
+ * its conversation, its transcript, its workspace and its inbox. The prime wakes it by
+ * messaging it, and the app reopens that exact chat and types the message into it.
+ *
+ * A sleeping worker holds no slot — that is the whole point of the state — so a run can
+ * accumulate more sleeping workers than `maxWorkers` while never having more than
+ * `maxWorkers` of them awake at once.
+ *
+ * `waking` is the short window between the prime's message being accepted and the app
+ * proving it typed that message into the worker's chat. It holds the slot the revival
+ * reserved, so two revivals cannot claim the same one; a revival that fails puts the worker
+ * back to sleep and gives the slot back.
+ *
+ * `finished` and `failed` remain the two terminal states, and a worker only reaches
+ * `finished` once its own chat has grown past the context ceiling: past that point there is
+ * nothing left to reuse, so the next time it stops working it stops for good.
  */
-export type AgentState = 'invited' | 'active' | 'detached' | 'finished' | 'failed';
+export type AgentState =
+  | 'invited'
+  | 'active'
+  | 'detached'
+  | 'waking'
+  | 'sleeping'
+  | 'finished'
+  | 'failed';
 
 export interface AgentInfo {
   id: string;
@@ -473,13 +503,37 @@ export interface AgentInfo {
    */
   lastSeenAt: number | null;
   /**
-   * Whether a proven call from this agent's conversation may bring it back.
+   * Whether this agent can be brought back — by the prime, or by its own next call.
    *
-   * True only while an agent ended for a reason that says nothing about the turn itself —
-   * its chat was closed, or it went quiet after that. A worker that reported with `finish`,
-   * whose tab never opened, or that a person cleared, is over for good.
+   * True for every sleeping worker under the context ceiling, and for one that ended for a
+   * reason that says nothing about the turn itself (its chat was closed, or it went quiet
+   * after that). False for a worker whose tab never opened, one a person cleared, and one
+   * whose chat crossed the ceiling, which is what makes that crossing terminal.
    */
   revivable: boolean;
+  /**
+   * Bridge command id of the most recent revival whose user message ChatGPT accepted.
+   *
+   * This is crash-recovery evidence for the narrow window where the worker snapshot was
+   * fsynced but the bridge command receipt was not. It is never used to decide whether a worker
+   * may be revived; it only makes a retry of that exact browser ACK idempotent.
+   */
+  lastRevivalCommandId?: string | null;
+  /**
+   * When this agent last stopped working without ending, or null.
+   *
+   * Distinct from `finishedAt`, which is only ever set by a terminal state. A worker that
+   * has slept three times and been woken twice has a `sleptAt` and no `finishedAt` at all.
+   */
+  sleptAt: number | null;
+  /**
+   * This chat's own estimated context, as the local session store measures it.
+   *
+   * Never a number a model reported: it is the same estimate the composer meter fills
+   * against, read off the durable session that records this exact conversation. It is what
+   * decides whether a worker is still worth reviving — see {@link revivable}.
+   */
+  contextTokens: number;
 }
 
 /**
@@ -521,6 +575,17 @@ export interface AgentMessage {
    * tool call — the kind an agent makes because it went back to work — retires it.
    */
   offeredOnFinish: boolean;
+  /**
+   * This row was delivered by the browser as a real user message while reviving a sleeping
+   * worker, rather than merely being copied into an MCP result.
+   *
+   * That distinction is durable and stronger than an ordinary offer. Once ChatGPT accepted
+   * the injected user message, replaying the same row through the worker's next tool result
+   * would duplicate the prime's instruction inside one turn. A later authenticated worker call
+   * may acknowledge the row, but the broker must never *offer* it again, including after an app
+   * restart where ordinary result offers deliberately become uncertain and are reset.
+   */
+  offeredViaRevival: boolean;
   /** Set once the recipient has demonstrably received it. */
   ackedAt: number | null;
 }
