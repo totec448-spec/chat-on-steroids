@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - release-dispatch-v2.0.2-final-20260826
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
