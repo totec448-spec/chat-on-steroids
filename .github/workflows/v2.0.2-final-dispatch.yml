@@ -1,0 +1,39 @@
+name: v2.0.2 final release dispatcher
+
+on:
+  push:
+    branches:
+      - release-dispatch-v2.0.2-final-20260826
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify exact candidate and dispatch non-publishing proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FINAL_BRANCH: release/v2.0.2-final-20260826
+          EXPECTED_COMMIT: ac1e212fe96d8170ecbd2c326389a59c3ad369bf
+          EXPECTED_TREE: 8d58a9d74a993d2530e10bef47cfd35b51ea0ffd
+          EXPECTED_MAIN: bd2d6fde6c5687e0b5abb0abe1ff327555d33538
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/main --jq .object.sha)" = "$EXPECTED_MAIN"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/ref/heads/$FINAL_BRANCH --jq .object.sha)" = "$EXPECTED_COMMIT"
+          test "$(gh api repos/${GITHUB_REPOSITORY}/git/commits/$EXPECTED_COMMIT --jq .tree.sha)" = "$EXPECTED_TREE"
+          gh workflow run release.yml --ref "$FINAL_BRANCH"
+          for attempt in $(seq 1 30); do
+            row="$(gh run list --workflow release.yml --branch "$FINAL_BRANCH" --event workflow_dispatch --limit 1 --json databaseId,headSha,status --jq '.[0] | [.databaseId,.headSha,.status] | @tsv' 2>/dev/null || true)"
+            if [ -n "$row" ]; then
+              echo "release_proof_run=$row"
+              test "$(printf '%s' "$row" | cut -f2)" = "$EXPECTED_COMMIT"
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
