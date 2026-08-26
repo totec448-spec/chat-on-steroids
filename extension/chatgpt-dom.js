@@ -1092,6 +1092,27 @@ var CLF_DOM = (() => {
     return safe(() => document.querySelector('#prompt-textarea'), null);
   }
 
+  /**
+   * Whether ChatGPT's editing host is presently safe to receive a new user message.
+   *
+   * This deliberately says nothing about whether *our* recorder still considers the previous
+   * turn open; content.js owns that stronger lifecycle state. It is the page-native half of the
+   * same proof: a connected/editable composer, no Stop/generation control, and no user draft.
+   * Keeping the emptiness check here also makes it impossible for a revival waiter to "reserve"
+   * the composer by inserting its text before the page is actually ready.
+   */
+  function composerSubmitReady() {
+    return safe(() => {
+      const box = composer();
+      if (!box || !box.isConnected) return false;
+      if (generating() || stopButton()) return false;
+      if ((box.textContent || '').trim() !== '') return false;
+      if (box.getAttribute('aria-disabled') === 'true') return false;
+      if (box.getAttribute('contenteditable') === 'false') return false;
+      return true;
+    }, false);
+  }
+
   /** The composer as a whole, used as the root to watch for React replacing it. */
   function composerBox() {
     return safe(() => {
@@ -1272,10 +1293,13 @@ var CLF_DOM = (() => {
    * Makes one assistant turn an app-owned surface without deleting any React-owned DOM.
    *
    * The recorder still needs ChatGPT's native subtree to exist so it can observe final
-   * prose, progress and lifecycle changes. Visually, however, Overwrite means exactly what
-   * it says: every native child is hidden and the Chat On Steroids stream is the only visible
-   * child of the first section. Turning Overwrite off only removes the marker; React never
-   * has to reconstruct anything we destroyed.
+   * prose, progress and lifecycle changes. The visible stream deliberately lives *beside*
+   * ChatGPT's turn sections, not inside one of them. React transiently moves/reuses assistant
+   * sections while mounting the next user turn; keeping our stream inside such a section made
+   * the already-correct assistant answer jump across the new user message for one paint before
+   * reconciliation put it back. A connected sibling stream therefore never follows a native
+   * section that React moves. Turning Overwrite off only removes markers/the sibling; React
+   * never has to reconstruct anything we destroyed.
    */
   function replaceTurn(turn, root, replaced) {
     return safe(() => {
@@ -1285,7 +1309,11 @@ var CLF_DOM = (() => {
         if (replaced) section.setAttribute('data-clf-turn-replaced', '1');
         else section.removeAttribute('data-clf-turn-replaced');
       }
-      if (replaced && root && root.parentElement !== sections[0]) sections[0].append(root);
+      const embedded = Boolean(root && sections.some((section) => root.parentElement === section));
+      if (replaced && root && (!root.isConnected || embedded)) {
+        const last = sections[sections.length - 1];
+        if (last && last.parentElement) last.parentElement.insertBefore(root, last.nextSibling);
+      }
       return true;
     }, false);
   }
@@ -1414,6 +1442,7 @@ var CLF_DOM = (() => {
     toolLabel,
     errors,
     composer,
+    composerSubmitReady,
     composerBox,
     pageTheme,
     composerActions,

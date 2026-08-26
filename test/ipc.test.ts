@@ -19,10 +19,12 @@ vi.mock('electron', () => ({
   clipboard: { readText: () => '', writeText: () => undefined },
   dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
   shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => '') },
+  nativeTheme: { themeSource: 'system' },
   safeStorage: {
-    isEncryptionAvailable: () => true,
-    encryptString: (value: string) => Buffer.from(value, 'utf8'),
-    decryptString: (buffer: Buffer) => buffer.toString('utf8')
+    isAsyncEncryptionAvailable: vi.fn(async () => true),
+    getSelectedStorageBackend: vi.fn(() => 'gnome_libsecret'),
+    encryptStringAsync: vi.fn(async (value: string) => Buffer.from(value, 'utf8')),
+    decryptStringAsync: vi.fn(async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false }))
   },
   app: { getPath: () => '', getVersion: vi.fn(() => '0.0.0'), getAppPath: () => process.cwd(), isPackaged: false }
 }));
@@ -31,7 +33,7 @@ vi.mock('electron', () => ({
 vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd() }));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
-const { initSecretsPath } = await import('../src/main/secrets.js');
+const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
 const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, stopBridge } = await import(
@@ -39,23 +41,35 @@ const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, sto
 );
 const {
   bindConversation,
+  finishAgent,
   onRetiredWorkersPersist,
   onRetiredWorkersPersistNow,
   onSwarmPersist,
   onSwarmPersistNow,
+  pauseSwarmForDisable,
   persistAgentAuthorityNow,
+  pendingWorkerRevivals,
+  releaseQuiescentRun,
   resetSwarm,
+  restoreSwarm,
+  sendMessage,
   snapshotRetiredWorkers,
   snapshotSwarm,
-  spawn
+  spawn,
+  swarmStateForCaller
 } = await import('../src/main/agents.js');
 const { registerIpc } = await import('../src/main/ipc.js');
-const { app, shell } = await import('electron');
+const { app, nativeTheme, safeStorage, shell } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
 let dir: string;
+let currentWindow: {
+  setBackgroundColor: ReturnType<typeof vi.fn>;
+  isDestroyed: () => boolean;
+  webContents: { send: ReturnType<typeof vi.fn> };
+} | null = null;
 
 const save = (patch: unknown, base: unknown = getConfig()): Promise<any> =>
   handlers.get('settings:save')!(null, { patch, base }) as Promise<any>;
@@ -89,7 +103,7 @@ beforeAll(async () => {
   onSwarmPersistNow((snapshot) => writeDurableNow('ipc-swarm', snapshot));
   onRetiredWorkersPersist(() => writeDurableSoon('ipc-retired-workers', snapshotRetiredWorkers()));
   onRetiredWorkersPersistNow((snapshot) => writeDurableNow('ipc-retired-workers', snapshot));
-  registerIpc(() => null);
+  registerIpc(() => currentWindow as any);
 });
 
 afterAll(async () => {
@@ -104,6 +118,9 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  currentWindow = null;
+  nativeTheme.themeSource = 'system';
+  vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockResolvedValue(true);
   vi.mocked(shell.openPath).mockReset().mockResolvedValue('');
   vi.mocked(shell.openExternal).mockReset().mockResolvedValue(undefined);
   vi.mocked(app.getVersion).mockReset().mockReturnValue('0.0.0');
@@ -120,14 +137,24 @@ beforeEach(async () => {
   });
 });
 
+describe('startup state without secure storage', () => {
+  it('still returns a usable app/bridge state instead of crashing state discovery', async () => {
+    resetSecretsCacheForTests();
+    vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockResolvedValue(false);
+
+    const reply = (await handlers.get('state:get')!(null, undefined)) as any;
+    expect(reply.ok).toBe(true);
+    expect(reply.data.secureStorage.available).toBe(false);
+    expect(reply.data.hasApiKey).toBe(false);
+    expect(reply.data.hasGoalKey).toBe(false);
+    expect(reply.data.bridge.paired).toBe(false);
+  });
+});
+
 describe('turning multi-agent mode off', () => {
   /**
-   * Ending the run is how its queued worker chats are stopped, and the bridge does that
-   * through the swarm-end listener it registers when it starts and drops when it stops.
-   * Stopping the bridge first therefore lost the cancellation outright: the listener was
-   * already gone, the commands stayed queued, and the next time the bridge came up it
-   * restored them and opened worker tabs for a run that no longer existed. The run has to
-   * end while the bridge is still there to act on it.
+   * Pausing execution must withdraw queued browser work before the bridge goes away. The
+   * durable worker history itself survives; only the pending transport is cancelled.
    */
   it('cancels the run’s queued worker chats before the bridge goes away', async () => {
     await startBridge();
@@ -143,7 +170,7 @@ describe('turning multi-agent mode off', () => {
     expect(pendingCommands(), 'a worker chat was left queued for a run that has ended').toEqual([]);
   });
 
-  it('does not acknowledge the toggle until the ended run and worker fence are durable', async () => {
+  it('does not acknowledge the toggle until the parked retained history is durable', async () => {
     const prime = '11111111-2222-4333-8444-555555555555';
     const worker = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     spawn({ workers: [{ task: 'must stay fenced after disable' }], caller: { conversationId: prime } });
@@ -153,9 +180,124 @@ describe('turning multi-agent mode off', () => {
 
     const reply = await save(settings({ record: false, multiAgent: false }));
     expect(reply.ok, reply.error).toBe(true);
+    expect(await readDurable<any>('ipc-swarm')).toMatchObject({
+      version: 5,
+      runId: null,
+      primeConversationId: null,
+      agents: [],
+      dormantRuns: [
+        expect.objectContaining({
+          primeConversationId: prime,
+          agents: expect.arrayContaining([
+            expect.objectContaining({
+              info: expect.objectContaining({
+                id: 'worker-1',
+                conversationId: worker,
+                state: 'sleeping',
+                revivable: true
+              })
+            })
+          ])
+        })
+      ]
+    });
+    expect(await readDurable<any>('ipc-retired-workers')).toMatchObject({ workers: [] });
+  });
+
+  it('survives a disabled restart and re-enable with the exact old worker chat still revivable', async () => {
+    const prime = '22222222-3333-4444-8555-666666666666';
+    const worker = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+    spawn({ workers: [{ task: 'remember this exact worker' }], caller: { conversationId: prime } });
+    expect(bindConversation('worker-1', worker)).toBe(true);
+    expect(await persistAgentAuthorityNow()).toBe(true);
+
+    const disabled = await save(settings({ record: false, multiAgent: false }));
+    expect(disabled.ok, disabled.error).toBe(true);
+    const saved = await readDurable<any>('ipc-swarm');
+    expect(saved).not.toBeNull();
+
+    // The startup path restores authority even while the feature is off, then canonicalizes
+    // any leftover active incarnation into parked history. Reproduce that process boundary here.
+    restoreSwarm(saved);
+    pauseSwarmForDisable('multi-agent mode is disabled');
+    expect(snapshotSwarm()).toMatchObject({
+      runId: null,
+      dormantRuns: [expect.objectContaining({ primeConversationId: prime })]
+    });
+
+    const enabled = await save(settings({ record: false, multiAgent: true }));
+    expect(enabled.ok, enabled.error).toBe(true);
+    expect(swarmStateForCaller({ conversationId: prime }).agents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'worker-1',
+          conversationId: worker,
+          state: 'sleeping',
+          revivable: true
+        })
+      ])
+    );
+
+    sendMessage({ conversationId: prime }, 'worker-1', 'continue in the exact worker chat');
+    expect(pendingWorkerRevivals()).toEqual([
+      expect.objectContaining({ id: 'worker-1', conversationId: worker })
+    ]);
+  });
+
+  it('preserves every parked owner when disabling a different prime that is still active', async () => {
+    const primeA = '33333333-4444-4555-8666-777777777777';
+    const workerA = 'cccccccc-dddd-4eee-8fff-000000000001';
+    spawn({ workers: [{ task: 'A retained history' }], caller: { conversationId: primeA } });
+    expect(bindConversation('worker-1', workerA)).toBe(true);
+    finishAgent({ conversationId: workerA }, 'A is parked already');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const primeB = '44444444-5555-4666-8777-888888888888';
+    const workerB = 'dddddddd-eeee-4fff-8000-000000000002';
+    spawn({ workers: [{ task: 'B is live when disabled' }], caller: { conversationId: primeB } });
+    expect(bindConversation('worker-1', workerB)).toBe(true);
+
+    const disabled = await save(settings({ record: false, multiAgent: false }));
+    expect(disabled.ok, disabled.error).toBe(true);
+    const saved = await readDurable<any>('ipc-swarm');
+    expect(saved?.runId).toBeNull();
+    expect(saved?.dormantRuns).toHaveLength(2);
+    expect(saved?.dormantRuns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ primeConversationId: primeA }),
+        expect.objectContaining({ primeConversationId: primeB })
+      ])
+    );
+
+    restoreSwarm(saved);
+    pauseSwarmForDisable('multi-agent mode is disabled');
+    const enabled = await save(settings({ record: false, multiAgent: true }));
+    expect(enabled.ok, enabled.error).toBe(true);
+    expect(swarmStateForCaller({ conversationId: primeA }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      conversationId: workerA
+    });
+    expect(swarmStateForCaller({ conversationId: primeB }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      conversationId: workerB
+    });
+  });
+
+  it('keeps disabled history until the explicit Clear swarm IPC destroys it', async () => {
+    const prime = '55555555-6666-4777-8888-999999999999';
+    const worker = 'eeeeeeee-ffff-4000-8111-000000000003';
+    spawn({ workers: [{ task: 'survive disable until explicit clear' }], caller: { conversationId: prime } });
+    expect(bindConversation('worker-1', worker)).toBe(true);
+
+    const disabled = await save(settings({ record: false, multiAgent: false }));
+    expect(disabled.ok, disabled.error).toBe(true);
+    expect((await readDurable<any>('ipc-swarm'))?.dormantRuns).toHaveLength(1);
+
+    const cleared = await handlers.get('swarm:reset')!(null, undefined) as any;
+    expect(cleared.ok, cleared.error).toBe(true);
     expect(await readDurable('ipc-swarm')).toBeNull();
     expect(await readDurable<any>('ipc-retired-workers')).toMatchObject({
-      workers: [expect.objectContaining({ id: 'worker-1', conversationId: worker })]
+      workers: expect.arrayContaining([expect.objectContaining({ id: 'worker-1', conversationId: worker })])
     });
   });
 });
@@ -193,6 +335,11 @@ describe('bounded IPC identities and OS launch results', () => {
 
 describe('settings writes from more than one UI', () => {
   it('does not let a stale renderer snapshot undo a newer extension setting', async () => {
+    currentWindow = {
+      setBackgroundColor: vi.fn(),
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() }
+    };
     const original = defaultConfig();
     const base = {
       ...original,
@@ -209,6 +356,8 @@ describe('settings writes from more than one UI', () => {
 
     expect(reply.ok, reply.error).toBe(true);
     expect(getConfig().ui.theme).toBe('dark');
+    expect(nativeTheme.themeSource).toBe('dark');
+    expect(currentWindow.setBackgroundColor).toHaveBeenCalledWith('#0e0e11');
     expect(getConfig().goal.enabled).toBe(false);
   });
 });
@@ -360,6 +509,24 @@ describe('the editable goal system prompt', () => {
     expect((await save({ ...base, goal: { ...base.goal, prompt: '   ' } })).ok).toBe(false);
     expect((await save({ ...base, goal: { ...base.goal, prompt: 'x'.repeat(20_001) } })).ok).toBe(false);
   });
+
+  /**
+   * The driver prompt crosses the same boundary as the gate, so it needs the same guards.
+   * It used to be a source constant no renderer could reach; now that it is editable, a
+   * blank or unbounded value has to be refused here rather than reaching the goal loop.
+   */
+  it('stores the goal driver prompt and holds it to the same bounds', async () => {
+    const objectivePrompt = 'Drive to the goal. NO_REPLY once it is reached.';
+    const base = settings({ record: false, multiAgent: false });
+    const reply = await save({ ...base, goal: { ...base.goal, objectivePrompt } });
+    expect(reply.ok, reply.error).toBe(true);
+    expect(getConfig().goal.objectivePrompt).toBe(objectivePrompt);
+
+    expect((await save({ ...base, goal: { ...base.goal, objectivePrompt: '   ' } })).ok).toBe(false);
+    expect(
+      (await save({ ...base, goal: { ...base.goal, objectivePrompt: 'x'.repeat(20_001) } })).ok
+    ).toBe(false);
+  });
 });
 
 describe('session IPC contracts', () => {
@@ -391,5 +558,28 @@ describe('session IPC contracts', () => {
     expect(new Set(reply.data.pressure.map((entry: { id: string }) => entry.id))).toEqual(
       new Set(reply.data.sessions.map((entry: { id: string }) => entry.id))
     );
+  });
+});
+
+describe('renderer pushes after the window is gone', () => {
+  it('does not touch a destroyed BrowserWindow, whose members all throw', async () => {
+    // Electron keeps the object after the window is destroyed, so the existing `?.` on
+    // `getWindow()` never fires: the reference is truthy and reading `.webContents` throws.
+    // The log push is the one that matters, because `onLog` listeners run synchronously on
+    // the writer's stack — during a quit that turned every teardown log line into a throw
+    // inside the teardown step that wrote it.
+    const { logInfo } = await import('../src/main/logger.js');
+    let touchedWebContents = false;
+    const destroyed = {
+      isDestroyed: () => true,
+      get webContents() {
+        touchedWebContents = true;
+        throw new Error('Object has been destroyed');
+      }
+    } as unknown as import('electron').BrowserWindow;
+
+    registerIpc(() => destroyed);
+    expect(() => logInfo('teardown progress written after the window went away')).not.toThrow();
+    expect(touchedWebContents).toBe(false);
   });
 });

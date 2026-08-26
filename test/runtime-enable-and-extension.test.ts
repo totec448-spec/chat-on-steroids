@@ -5,14 +5,24 @@ import { describe, expect, it } from 'vitest';
 const repo = process.cwd();
 
 describe('runtime multi-agent enable regression', () => {
-  it('wires the immediate swarm persistence sink before the multi-agent restore gate', async () => {
+  it('wires persistence before unconditional restore and preserves history while disabled', async () => {
     const source = await readFile(path.join(repo, 'src/main/index.ts'), 'utf8');
     const persistSink = source.indexOf('onSwarmPersistNow((snapshot) => writeDurableNow(SWARM_STATE, snapshot))');
-    const restoreGate = source.indexOf('if (getConfig().multiAgent.enabled) {');
+    const restoreRead = source.indexOf('const savedSwarm = await readDurable<SwarmSnapshot>(SWARM_STATE)');
+    const shutdownFence = source.indexOf('if (windowActivation.isDisabled()) return;', restoreRead);
+    const restore = source.indexOf('restoreSwarm(savedSwarm)', restoreRead);
+    const disabledPause = source.indexOf("pauseSwarmForDisable('multi-agent mode is disabled')");
 
     expect(persistSink).toBeGreaterThanOrEqual(0);
-    expect(restoreGate).toBeGreaterThanOrEqual(0);
-    expect(persistSink).toBeLessThan(restoreGate);
+    expect(restoreRead).toBeGreaterThanOrEqual(0);
+    expect(shutdownFence).toBeGreaterThanOrEqual(0);
+    expect(restore).toBeGreaterThanOrEqual(0);
+    expect(disabledPause).toBeGreaterThanOrEqual(0);
+    expect(persistSink).toBeLessThan(restoreRead);
+    expect(restoreRead).toBeLessThan(shutdownFence);
+    expect(shutdownFence).toBeLessThan(restore);
+    expect(restore).toBeLessThan(disabledPause);
+    expect(source).not.toContain('await writeDurableNow(SWARM_STATE, null)');
   });
 });
 

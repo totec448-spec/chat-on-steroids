@@ -98,19 +98,17 @@ import { locateRipgrep } from '../ripgrep.js';
 import { ensureDevToolchain } from '../toolchain.js';
 import {
   agentForCaller,
-  currentRunId,
-  freeWorkerSlots,
-  identify,
   noteAgentContextTokens,
   persistCriticalSwarmNow,
   PRIME_ID,
   requestWorkerBootstraps,
   requestWorkerRevivals,
+  statusForCaller,
   stageFinishAgent,
   stageMessages,
   stageSpawn,
   swarmRunning,
-  swarmState,
+  swarmStateForCaller,
   type Caller
 } from '../agents.js';
 import { repairPrimeFromResumeShadow } from '../session/continuation.js';
@@ -245,7 +243,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               .min(1)
               .max(20)
               .describe(
-                'Paths inside approved roots. Use virtual paths such as /project/src/main.ts or paste native Windows paths such as C:\\work\\project\\src\\main.ts; native paths are normalized to the same virtual sandbox. Globs are supported in either spelling.'
+                'Paths inside approved roots. Use virtual paths such as /project/src/main.ts, or paste an absolute native path from command output that is inside an approved root; native paths are normalized to the same virtual sandbox. Globs are supported in either spelling.'
               ),
             start_line: lineNumberArg
               .optional()
@@ -445,7 +443,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               .describe('Text to look for'),
             path: pathArg
               .optional()
-              .describe('File or folder to search. Virtual and native Windows paths inside approved roots are accepted. Defaults to every approved root.'),
+              .describe('File or folder to search. Virtual paths and absolute native paths inside approved roots are accepted. Defaults to every approved root.'),
             mode: z.enum(['name', 'content']).optional().describe('Default name.'),
             include: z.string().max(200).optional().describe('Glob filter such as **/*.ts'),
             exclude: z
@@ -638,7 +636,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             if (virtualCommandPath) {
               return fail(
                 `INVALID_COMMAND_PATH${isBatch ? ` in command ${index + 1}` : ''}: ${virtualCommandPath} is an app virtual path, but shell commands do not understand virtual paths. ` +
-                  `Use workdir plus a relative path, or use the approved folder's native Windows path. No command was run.`
+                  `Use workdir plus a relative path, or use the approved folder's native filesystem path. No command was run.`
               );
             }
           }
@@ -678,14 +676,14 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             return bindBundledRipgrep(
               normalized.cmd,
               shell.shellType,
-              shell.shellType === 'powershell' ? locateRipgrep() : null
+              shell.shellType === 'cmd' ? null : locateRipgrep()
             );
           });
-          // PowerShell resolves profile functions/aliases before applications on PATH. The app
-          // deliberately ships ripgrep, parses rg's flags against that exact version, and puts
-          // it first on child PATH, so a profile-defined `rg` is not a harmless customization:
-          // it breaks the assumptions of the normalizer and makes exit-code attribution
-          // unknowable. Bind ordinary bare rg/ripgrep invocations to the shipped executable.
+          // Shell functions/aliases can resolve before applications on PATH. The app deliberately
+          // ships ripgrep, parses rg's flags against that exact version, and puts it first on child
+          // PATH, so a shadowing `rg` is not a harmless customization: it breaks the normalizer's
+          // assumptions and makes exit-code attribution unknowable. Bind ordinary bare rg/ripgrep
+          // invocations to the shipped executable on PowerShell and POSIX shells.
           const boundCommand = isBatch ? composeCommandBatch(boundCommands, shell.shellType) : boundCommands[0]!;
           const commandDetail = isBatch
             ? `[batch ${rawCommands.length}] ${rawCommands.join(' ; ')}`
@@ -813,11 +811,12 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               ...(benign
                 ? isBatch
                   ? nonZeroSections.map(
-                      (section) => `Command ${section.index}: ${benignExitNote(boundCommands[section.index - 1] ?? '')}`
+                      (section) =>
+                        `Command ${section.index}: ${benignExitNote(boundCommands[section.index - 1] ?? '', shell.shellType)}`
                     )
-                  : [benignExitNote(boundCommand)]
+                  : [benignExitNote(boundCommand, shell.shellType)]
                 : []),
-              ...execRecoveryHints(rawCommands.join('\n'), responseText)
+              ...execRecoveryHints(rawCommands.join('\n'), responseText, shell.shellType)
             ];
             return {
               content: [{ type: 'text' as const, text: withExecNotes(responseText, notes) }],
@@ -937,11 +936,24 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
  * can wake a worker, is what makes the ceiling survive a crash rather than a restart quietly
  * handing back a worker the prime was already told was finished.
  */
-async function measureSleepingWorkers(): Promise<void> {
-  for (const info of swarmState().agents) {
+async function measureSleepingWorkers(caller: Caller): Promise<void> {
+  for (const info of swarmStateForCaller(caller).agents) {
     if (info.role !== 'worker' || info.state !== 'sleeping' || !info.conversationId) continue;
     const summary = await findSessionByConversation(info.conversationId, { requireUnique: true }).catch(() => null);
     if (summary) noteAgentContextTokens(info.conversationId, summary.contextTokens);
+  }
+  // Measurement is usually telemetry, but crossing the worker ceiling revokes durable revival
+  // authority and can terminalize a parked worker. `status` also calls this helper, so there is
+  // no later message/spawn acceptance barrier we can rely on: make every critical revision seen
+  // through the end of measurement durable before publishing the resulting state to the model.
+  try {
+    if (!(await persistCriticalSwarmNow())) {
+      throw new Error('the broker has no immediate durable persistence sink');
+    }
+  } catch (error) {
+    throw new Error(
+      `Worker context/revival state could not cross its durable barrier. Retry the agents call. (${error instanceof Error ? error.message : String(error)})`
+    );
   }
 }
 
@@ -951,9 +963,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
     {
       title: 'Multi-agent run',
       description:
-        'Run ChatGPT workers. spawn creates the run; use it once, then prefer message to wake sleeping workers in their existing chats. ' +
-        'message: prime→worker or worker→prime; a sleeping worker wakes only when a slot is free. Replies arrive on later tool results, so never poll. ' +
-        'status shows the run. finish reports a worker result and puts it to sleep; it stays reusable until its chat reaches the context ceiling.',
+        'Run ChatGPT workers. spawn always creates fresh worker chats for new parallel work; sleeping/terminal workers stay in this prime conversation’s durable history. ' +
+        'message: prime→worker or worker→prime; messaging a sleeping worker revives that exact existing chat when a slot is free. Replies arrive on later tool results, so never poll. ' +
+        'status shows this prime’s full worker history, including sleeping/revivable and terminal/non-revivable workers, even while no run is active. finish reports a worker result and normally puts it to sleep.',
       inputSchema: z.object({
         action: z.enum(['spawn', 'message', 'status', 'finish']).describe('What to do.'),
         context: z
@@ -980,7 +992,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(8)
           .optional()
           .describe(
-            'spawn: workers to create. Later, reuse sleeping workers with message.'
+            'spawn: fresh workers to create. Existing sleeping workers are never silently reused; revive one explicitly with message.'
           ),
         messages: z
           .array(
@@ -1124,7 +1136,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // Before any slot is reserved: a sleeping worker whose chat has since crossed the
           // context ceiling is not revivable, and this is the call that would otherwise wake it.
           const caller = await callerNow(startedAt);
-          await measureSleepingWorkers();
+          await measureSleepingWorkers(caller);
           // One call, one identity resolution, one all-or-nothing delivery: a prime
           // redirecting its whole run cannot end up with two of its three messages sent.
           const staged = stageMessages(caller, items);
@@ -1230,9 +1242,11 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         // and `identify` is what decides whether this caller is one of them. An unrelated
         // chat is told AGENTS_BUSY and nothing else — not who the prime is, not how many
         // workers there are, not what any of them are doing.
-        const me = identify(await callerNow(startedAt));
-        await measureSleepingWorkers();
-        const state = swarmState();
+        const caller = await callerNow(startedAt);
+        await measureSleepingWorkers(caller);
+        const status = statusForCaller(caller);
+        const me = status.self;
+        const state = status.state;
         const failed = state.agents.filter((info) => info.state === 'failed');
         // The word the model reads here is the whole answer to "may I use this worker again".
         // A sleeping worker is not a spent one, and calling it finished in this table is what
@@ -1247,7 +1261,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               ? 'waking (your message is being delivered to its chat)'
               : info.state;
         const asleep = state.agents.filter((info) => info.state === 'sleeping' && info.revivable);
-        const slots = freeWorkerSlots();
+        const slots = status.freeWorkerSlots;
         return {
           content: [
             {
@@ -1282,7 +1296,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           ],
           structuredContent: {
             action: 'status',
-            run_id: currentRunId(),
+            run_id: status.runId,
             self: me.id,
             free_worker_slots: slots,
             agents: state.agents.map((info) => ({
@@ -1816,7 +1830,7 @@ async function expandGlob(
   roots: Parameters<typeof resolvePath>[0],
   pattern: string
 ): Promise<{ matches: string[]; truncated: 'matches' | 'scan' | null }> {
-  const normalised = pattern.replace(/\\/g, '/');
+  const normalised = process.platform === 'win32' ? pattern.replace(/\\/g, '/') : pattern;
   const segments = normalised.split('/');
   const baseSegments: string[] = [];
   for (const segment of segments) {

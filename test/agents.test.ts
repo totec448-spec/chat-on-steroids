@@ -14,9 +14,10 @@ import type { Caller } from '../src/main/agents.js';
 
 vi.mock('electron', () => ({
   safeStorage: {
-    isEncryptionAvailable: () => true,
-    encryptString: (value: string) => Buffer.from(value, 'utf8'),
-    decryptString: (buffer: Buffer) => buffer.toString('utf8')
+    isAsyncEncryptionAvailable: async () => true,
+    getSelectedStorageBackend: () => 'gnome_libsecret',
+    encryptStringAsync: async (value: string) => Buffer.from(value, 'utf8'),
+    decryptStringAsync: async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false })
   },
   clipboard: { readText: () => '', writeText: () => undefined },
   shell: { openExternal: async () => undefined }
@@ -27,21 +28,25 @@ const {
   AgentError,
   PRIME_ID,
   acknowledgeOffers,
+  acknowledgeOffersForConversation,
   bindConversation,
   clearAgent,
   claimWorkerRevival,
   currentRunId,
+  dormantWorkerNotice,
   failAgent,
   finishAgent,
   finishWorkerConversation,
   identify,
   offerMessages,
+  offerMessagesForConversation,
   onSpawnRequest,
   onSwarmEnd,
   onSwarmPersist,
   onSwarmPersistNow,
   pendingCount,
   pendingWorkerSpawns,
+  pauseSwarmForDisable,
   DETACHED_SILENCE_MS,
   endedWorkerNotice,
   sleepSilentDetachedWorkers,
@@ -57,9 +62,11 @@ const {
   releaseQuiescentRun,
   repairPrimeConversationAfterRecovery,
   retiredWorkerForConversation,
+  restoreRetiredWorkers,
   rollbackWorkerRevivalClaim,
   persistCriticalSwarmNow,
   resetAgentsForTests,
+  resetSwarm,
   restoreSwarm,
   sendMessage,
   stageQueuedWorkerRevivals,
@@ -71,13 +78,17 @@ const {
   spawn,
   swarmRunning,
   swarmState,
+  swarmStateForCaller,
+  statusForCaller,
   workerConversationGone,
   workerRevivalClaimed
 } = await import('../src/main/agents.js');
 const { startMcpServer } = await import('../src/main/mcp/server.js');
 const { runningToolCalls } = await import('../src/main/mcp/call-context.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
-const { initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
+const { findSessionByConversation, initSessionStore, readRecentEvents, resetSessionStoreForTests } = await import(
+  '../src/main/session/store.js'
+);
 const { recordChatObservations, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceForChat } = await import('../src/main/workspace.js');
 const { DEFAULT_CAPABILITIES } = await import('../src/shared/types.js');
@@ -213,18 +224,41 @@ describe('spawning a run', () => {
     expect(swarmState().agents.map((agent) => agent.id)).toContain('worker-2');
   });
 
-  it('does not duplicate an identical worker if the lost spawn result is retried after that worker fell asleep', () => {
+  it('creates a fresh worker on spawn even when an identical old worker is sleeping', () => {
     startSwarm(1);
     const worker = startWorker('worker-1');
-    finishAgent(worker.caller, 'the first task finished before the prime saw its spawn result');
+    finishAgent(worker.caller, 'the first task finished');
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
 
-    const retried = spawn({ workers: [{ label: 'Worker 1', task: 'task 1' }], caller: prime });
+    const fresh = spawn({ workers: [{ label: 'Worker 1', task: 'task 1' }], caller: prime });
 
-    expect(retried.created.map((agent) => agent.id)).toEqual(['worker-1']);
-    expect(retried.created[0]?.state).toBe('sleeping');
-    expect(swarmState().agents.filter((agent) => agent.role === 'worker').map((agent) => agent.id)).toEqual(['worker-1']);
-    expect(pendingWorkerSpawns()).toEqual([]);
+    expect(fresh.created.map((agent) => agent.id)).toEqual(['worker-2']);
+    expect(fresh.created[0]?.state).toBe('invited');
+    expect(swarmRunning()).toBe(true);
+    expect(swarmStateForCaller(prime).agents.filter((agent) => agent.role === 'worker').map((agent) => agent.id)).toEqual([
+      'worker-1',
+      'worker-2'
+    ]);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      revivable: true
+    });
+    expect(pendingWorkerSpawns().map((entry) => entry.id)).toEqual(['worker-2']);
+  });
+
+  it('keeps the sleeping worker separately revivable after a fresh same-brief spawn', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'old identical task finished');
+    spawn({ workers: [{ label: 'Worker 1', task: 'task 1' }], caller: prime });
+    expect(bindConversation('worker-2', 'c-worker-2')).toBe(true);
+    finishAgent({ conversationId: 'c-worker-2' }, 'fresh worker done too');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const staged = stageMessages(prime, [{ to: 'worker-1', text: 'come back to the older chat' }]);
+    expect(staged.waking).toEqual(['worker-1']);
+    staged.commit();
+    expect(pendingWorkerRevivals()[0]).toMatchObject({ id: 'worker-1', conversationId: 'c-worker-1' });
   });
 });
 
@@ -342,7 +376,7 @@ describe('at-least-once delivery', () => {
     expect(pendingCount(PRIME_ID)).toBe(2);
   });
 
-  it('releases the global run only after the prime has acknowledged every terminal worker report', () => {
+  it('releases the global run as soon as the last worker stops while preserving the prime report', () => {
     const ended: string[] = [];
     onSwarmEnd((reason) => ended.push(reason));
     startSwarm(1);
@@ -352,24 +386,20 @@ describe('at-least-once delivery', () => {
     fillContext('c-worker-1');
     finishAgent(worker.caller, 'finished safely');
 
-    // Terminal worker is not enough: the prime still has an unseen final report.
+    // The report belongs to the prime history, not to the scarce global execution claim.
     expect(pendingCount(PRIME_ID)).toBe(1);
-    expect(releaseQuiescentRun()).toBe(false);
-    expect(swarmRunning()).toBe(true);
-
-    // Merely putting the report in one result is still not proof that ChatGPT received it.
-    expect(offerMessages(PRIME_ID)).toHaveLength(1);
-    expect(releaseQuiescentRun()).toBe(false);
-    expect(swarmRunning()).toBe(true);
-
-    // The prime's next authenticated call proves the previous result arrived. Now no work or
-    // report remains, so the single global swarm claim can disappear immediately.
-    expect(acknowledgeOffers(PRIME_ID)).toHaveLength(1);
-    expect(pendingCount(PRIME_ID)).toBe(0);
     expect(releaseQuiescentRun()).toBe(true);
     expect(swarmRunning()).toBe(false);
-    expect(ended).toHaveLength(1);
-    expect(ended[0]).toMatch(/terminal|delivered/i);
+    // Parking is not destructive teardown and therefore must not fire the end listener that
+    // cancels browser work / installs retired-worker leases.
+    expect(ended).toEqual([]);
+
+    const dormant = statusForCaller(prime);
+    expect(dormant.state.running).toBe(false);
+    expect(dormant.state.agents.find((agent) => agent.id === PRIME_ID)?.pending).toBe(1);
+    expect(offerMessagesForConversation(PRIME_CHAT)?.messages).toHaveLength(1);
+    expect(acknowledgeOffersForConversation(PRIME_CHAT)?.messages).toHaveLength(1);
+    expect(statusForCaller(prime).state.agents.find((agent) => agent.id === PRIME_ID)?.pending).toBe(0);
   });
 
   it('keeps the prime on the project it moved to during the swarm after the run ends', () => {
@@ -393,23 +423,20 @@ describe('at-least-once delivery', () => {
     expect(workspaceForChat(PRIME_CHAT)?.virtual).toBe('/root/project-b');
   });
 
-  it('keeps a retired lease for a finished worker after its final report releases the run', () => {
+  it('keeps a finished worker as a durable dormant identity rather than retiring its history', () => {
     startSwarm(1);
     const worker = startWorker('worker-1');
     fillContext('c-worker-1');
     finishAgent(worker.caller, 'finished safely');
 
-    // Drive the ordinary at-least-once report lifecycle all the way through release. The
-    // active-run tombstone is what stops this worker chat using local tools after finish; once
-    // the run disappears, the kernel can enforce that same boundary only through the retired
-    // conversation lease.
-    expect(offerMessages(PRIME_ID)).toHaveLength(1);
-    expect(acknowledgeOffers(PRIME_ID)).toHaveLength(1);
+    // Normal parking is ownership preservation, not destructive retirement.
     expect(releaseQuiescentRun()).toBe(true);
     expect(swarmRunning()).toBe(false);
-
-    expect(retiredWorkerForConversation('c-worker-1')).toMatchObject({
-      id: 'worker-1',
+    expect(retiredWorkerForConversation('c-worker-1')).toBeNull();
+    expect(dormantWorkerNotice('c-worker-1')).toMatch(/WORKER_ENDED.*worker-1/i);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'finished',
+      revivable: false,
       conversationId: 'c-worker-1'
     });
   });
@@ -440,10 +467,9 @@ describe('at-least-once delivery', () => {
 
     staged.commit();
     expect(pendingCount(PRIME_ID)).toBe(1);
-    expect(releaseQuiescentRun()).toBe(false);
-    expect(offerMessages(PRIME_ID)).toHaveLength(1);
-    expect(acknowledgeOffers(PRIME_ID)).toHaveLength(1);
     expect(releaseQuiescentRun()).toBe(true);
+    expect(offerMessagesForConversation(PRIME_CHAT)?.messages).toHaveLength(1);
+    expect(acknowledgeOffersForConversation(PRIME_CHAT)?.messages).toHaveLength(1);
   });
 });
 
@@ -640,6 +666,28 @@ describe('clearing one agent from the app', () => {
     expect(swarmRunning()).toBe(false);
   });
 
+  it('clears only the active prime row and preserves another prime dormant history', () => {
+    startSwarm(1);
+    const workerA = startWorker('worker-1', 'c-worker-a-row-clear');
+    finishAgent(workerA.caller, 'A parked first');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const primeB: Caller = { conversationId: 'c-prime-b-row-clear' };
+    spawn({ workers: [{ task: 'B active work' }], caller: primeB });
+    startWorker('worker-1', 'c-worker-b-row-clear');
+
+    expect(clearAgent(PRIME_ID).cleared).toBe('run');
+    expect(swarmRunning()).toBe(false);
+    expect(retiredWorkerForConversation('c-worker-b-row-clear')).toMatchObject({
+      id: 'worker-1',
+      conversationId: 'c-worker-b-row-clear'
+    });
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      conversationId: 'c-worker-a-row-clear'
+    });
+  });
+
   it('does nothing, and says so, for an agent that has already ended or never existed', () => {
     startSwarm(2);
     const worker = startWorker('worker-1');
@@ -731,6 +779,101 @@ describe('a worker that is sleeping', () => {
     expect(pendingCount('worker-1')).toBe(0);
   });
 
+  it('does not type a browser-delivered revival row again after disable, re-enable and a later wake', async () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'first piece done');
+    stageMessages(prime, [{ to: 'worker-1', text: 'already delivered before disable' }]).commit();
+    const firstRevival = pendingWorkerRevivals()[0]!;
+    expect(claimWorkerRevival('worker-1', 'c-worker-1')).toBe(true);
+    expect(noteWorkerRevived('worker-1', 'c-worker-1', firstRevival.messageIds)).toBe(true);
+
+    // Turning the feature off is an authoritative pause, not an acknowledgement from the
+    // worker. Keep the delivered row for at-least-once receipt accounting, but park the exact
+    // worker conversation without ever making that row eligible for browser injection again.
+    await setEnabled(false);
+    expect(pauseSwarmForDisable()).toBe(true);
+    expect(swarmRunning()).toBe(false);
+
+    await setEnabled(true);
+    const staged = stageMessages(prime, [{ to: 'worker-1', text: 'new work after re-enable' }]);
+    expect(staged.waking).toEqual(['worker-1']);
+    staged.commit();
+    const secondRevival = pendingWorkerRevivals()[0]!;
+    expect(secondRevival.conversationId).toBe('c-worker-1');
+    expect(secondRevival.text).toContain('new work after re-enable');
+    expect(secondRevival.text).not.toContain('already delivered before disable');
+    expect(secondRevival.messageIds).toHaveLength(1);
+  });
+
+  it('keeps a staged finish result and prime report when disable parks the owner before commit', async () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    const staged = stageFinishAgent(worker.caller, 'finish result racing the feature toggle');
+
+    await setEnabled(false);
+    expect(pauseSwarmForDisable()).toBe(true);
+    expect(swarmRunning()).toBe(false);
+
+    // Ordinary/debounced state must not publish the finish before its acceptance barrier. The
+    // disable placeholder is sleeping, but the worker's actual result/report are still staged.
+    const ordinary = snapshotSwarm()!;
+    const ordinaryWorker = ordinary.dormantRuns?.[0]?.agents.find((entry) => entry.info.id === 'worker-1');
+    expect(ordinaryWorker?.info.result).not.toBe('finish result racing the feature toggle');
+
+    const durable: Array<ReturnType<typeof snapshotSwarm>> = [];
+    onSwarmPersistNow(async (snapshot) => {
+      durable.push(snapshot);
+    });
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    const durableHistory = durable.at(-1)?.dormantRuns?.[0]?.agents ?? [];
+    expect(durableHistory.find((entry) => entry.info.id === 'worker-1')?.info).toMatchObject({
+      state: 'sleeping',
+      result: 'finish result racing the feature toggle',
+      revivable: true
+    });
+    expect(durableHistory.find((entry) => entry.info.id === PRIME_ID)?.queue).toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('finish result racing the feature toggle') })])
+    );
+
+    staged.commit();
+    await setEnabled(true);
+    const liveHistory = swarmStateForCaller(prime).agents;
+    expect(liveHistory.find((entry) => entry.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      result: 'finish result racing the feature toggle',
+      revivable: true
+    });
+    expect(liveHistory.find((entry) => entry.id === PRIME_ID)?.pending).toBe(1);
+  });
+
+  it('keeps an in-flight staged message unpublished normally but durable through a disable acceptance barrier', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+    const staged = stageMessages(prime, [{ to: 'worker-1', text: 'message accepted while disable races' }]);
+
+    await setEnabled(false);
+    expect(pauseSwarmForDisable()).toBe(true);
+    expect(snapshotSwarm()!.dormantRuns?.[0]?.agents.find((entry) => entry.info.id === 'worker-1')?.queue).toEqual([]);
+
+    const durable: Array<ReturnType<typeof snapshotSwarm>> = [];
+    onSwarmPersistNow(async (snapshot) => {
+      durable.push(snapshot);
+    });
+    expect(await persistCriticalSwarmNow()).toBe(true);
+    expect(durable.at(-1)?.dormantRuns?.[0]?.agents.find((entry) => entry.info.id === 'worker-1')?.queue).toEqual([
+      expect.objectContaining({ text: 'message accepted while disable races' })
+    ]);
+
+    staged.commit();
+    await setEnabled(true);
+    expect(swarmStateForCaller(prime).agents.find((entry) => entry.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      pending: 1,
+      conversationId: 'c-worker-1'
+    });
+  });
+
   it('retires already-offered inbox rows transactionally when the browser observes the worker final', async () => {
     const persisted: Array<ReturnType<typeof snapshotSwarm>> = [];
     onSwarmPersistNow(async (snapshot) => {
@@ -789,6 +932,102 @@ describe('a worker that is sleeping', () => {
     expect(owed[0]?.conversationId).toBe('c-worker-1');
     expect(owed[0]?.text).toContain('now do the second half');
     expect(owed[0]?.messageIds).toHaveLength(1);
+  });
+
+  it('keeps same-named workers isolated across prime histories and revives the original exact chat later', async () => {
+    await setEnabled(true, 1);
+    startSwarm(1);
+    const first = startWorker('worker-1', 'c-worker-a-1');
+    finishAgent(first.caller, 'prime A first piece done');
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(swarmRunning()).toBe(false);
+
+    const primeB: Caller = { conversationId: 'c-prime-b' };
+    spawn({ workers: [{ task: 'prime B work' }], caller: primeB });
+    const second = startWorker('worker-1', 'c-worker-b-1');
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.conversationId).toBe('c-worker-b-1');
+
+    // A can inspect its history while B owns execution, but cannot wake into B's capacity or
+    // enqueue work that would be stranded behind somebody else's active incarnation.
+    expect(() => stageMessages(prime, [{ to: 'worker-1', text: 'too early for A' }])).toThrow(/AGENTS_BUSY/i);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      pending: 0,
+      conversationId: 'c-worker-a-1'
+    });
+
+    finishAgent(second.caller, 'prime B done');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    // Both histories keep their own worker-1 without collision after the active claim is gone.
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.conversationId).toBe('c-worker-a-1');
+    expect(swarmStateForCaller(primeB).agents.find((agent) => agent.id === 'worker-1')?.conversationId).toBe('c-worker-b-1');
+
+    // Explicit owner work reclaims A's history and reserves the one configured slot for A's
+    // exact old chat, never B's same-named worker conversation.
+    const staged = stageMessages(prime, [{ to: 'worker-1', text: 'resume A in the original chat' }]);
+    expect(staged.waking).toEqual(['worker-1']);
+    staged.commit();
+    expect(freeWorkerSlots()).toBe(0);
+    expect(pendingWorkerRevivals()).toHaveLength(1);
+    expect(pendingWorkerRevivals()[0]).toMatchObject({ id: 'worker-1', conversationId: 'c-worker-a-1' });
+    expect(pendingWorkerRevivals()[0]?.text).toContain('resume A in the original chat');
+    expect(swarmStateForCaller(primeB).agents.find((agent) => agent.id === 'worker-1')?.conversationId).toBe('c-worker-b-1');
+
+    await setEnabled(true);
+  });
+
+  it('restores multiple parked prime histories from one durable snapshot without merging same-named workers', async () => {
+    await setEnabled(true, 1);
+    const primeB: Caller = { conversationId: 'c-prime-b' };
+
+    startSwarm(1);
+    const workerA = startWorker('worker-1', 'c-worker-a-restore');
+    finishAgent(workerA.caller, 'A parked');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    spawn({ workers: [{ label: 'B worker', task: 'B history' }], caller: primeB });
+    const workerB = startWorker('worker-1', 'c-worker-b-restore');
+    finishAgent(workerB.caller, 'B parked');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const saved = snapshotSwarm()!;
+    expect(saved.version).toBe(5);
+    expect(saved.runId).toBeNull();
+    expect(saved.dormantRuns).toHaveLength(2);
+
+    resetAgentsForTests();
+    restoreSwarm(saved);
+
+    expect(swarmRunning()).toBe(false);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      conversationId: 'c-worker-a-restore'
+    });
+    expect(swarmStateForCaller(primeB).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      conversationId: 'c-worker-b-restore'
+    });
+
+    await setEnabled(true);
+  });
+
+  it('explicit Clear swarm destroys parked histories and leaves their worker conversations fenced', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1', 'c-worker-clear-dormant');
+    finishAgent(worker.caller, 'park before explicit clear');
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toBeTruthy();
+    expect(swarmState()).toMatchObject({ running: false, retainedHistory: true, agents: [] });
+
+    resetSwarm();
+
+    expect(swarmState()).toMatchObject({ running: false, retainedHistory: false, agents: [] });
+    expect(() => swarmStateForCaller(prime)).toThrow(/No sub-agent history/i);
+    expect(retiredWorkerForConversation('c-worker-clear-dormant')).toMatchObject({
+      id: 'worker-1',
+      conversationId: 'c-worker-clear-dormant'
+    });
   });
 
   it('counts only working workers against the limit, so a third runs and the first is woken after', () => {
@@ -976,6 +1215,20 @@ describe('a worker that is sleeping', () => {
     expect(swarmRunning()).toBe(false);
   });
 
+  it('keeps a worker revivable when it stops one token below the 400k ceiling', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    noteAgentContextTokens('c-worker-1', WORKER_CONTEXT_CEILING_TOKENS - 1);
+
+    const done = finishAgent(worker.caller, 'still reusable');
+    expect(done.info).toMatchObject({
+      state: 'sleeping',
+      revivable: true,
+      contextTokens: WORKER_CONTEXT_CEILING_TOKENS - 1
+    });
+    expect(() => sendMessage(prime, 'worker-1', 'wake below the ceiling')).not.toThrow();
+  });
+
   it('keeps working after it crosses the context ceiling, and only then ends for good', () => {
     startSwarm(1);
     const worker = startWorker('worker-1');
@@ -986,6 +1239,10 @@ describe('a worker that is sleeping', () => {
     const during = swarmState().agents.find((agent) => agent.id === 'worker-1');
     expect(during?.state).toBe('active');
     expect(during?.revivable).toBe(false);
+    // The ceiling revokes the *next wake*, not live messaging. Prime redirects sent while this
+    // exact worker is still active must remain deliverable through its normal inbox.
+    expect(() => sendMessage(prime, 'worker-1', 'include the last parser edge case')).not.toThrow();
+    expect(offerMessages('worker-1').at(-1)?.text).toBe('include the last parser edge case');
     expect(() => sendMessage(worker.caller, PRIME_ID, 'still going')).not.toThrow();
 
     const done = finishAgent(worker.caller, 'the last thing it will ever do');
@@ -1135,6 +1392,61 @@ describe('a worker that is sleeping', () => {
 });
 
 describe('restart', () => {
+  it('restores every still-live retired worker fence after histories grow beyond the old 64-worker ceiling', () => {
+    const now = Date.now();
+    restoreRetiredWorkers({
+      version: 1,
+      savedAt: now,
+      workers: Array.from({ length: 65 }, (_, index) => ({
+        id: `worker-${index + 1}`,
+        conversationId: `c-retired-${index + 1}`,
+        reason: 'explicit clear of a long-lived worker history',
+        retiredAt: now
+      }))
+    });
+
+    expect(retiredWorkerForConversation('c-retired-1')).toMatchObject({ id: 'worker-1' });
+    expect(retiredWorkerForConversation('c-retired-65')).toMatchObject({ id: 'worker-65' });
+  });
+
+  it('restores an active prime beside another prime full sleeping and terminal dormant history', () => {
+    const primeB: Caller = { conversationId: 'c-prime-b-active-restore' };
+    startSwarm(2);
+    const sleeper = startWorker('worker-1', 'c-worker-a-sleeper-restore');
+    const terminal = startWorker('worker-2', 'c-worker-a-terminal-restore');
+    finishAgent(sleeper.caller, 'keep this exact chat reusable');
+    fillContext('c-worker-a-terminal-restore');
+    finishAgent(terminal.caller, 'this exact chat is full');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    spawn({ workers: [{ task: 'B stays active across restart' }], caller: primeB });
+    startWorker('worker-1', 'c-worker-b-active-restore');
+    const saved = snapshotSwarm()!;
+    expect(saved.runId).not.toBeNull();
+    expect(saved.dormantRuns).toHaveLength(1);
+
+    resetAgentsForTests();
+    restoreSwarm(saved);
+
+    expect(swarmRunning()).toBe(true);
+    expect(swarmStateForCaller(primeB).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'active',
+      conversationId: 'c-worker-b-active-restore'
+    });
+    const aHistory = swarmStateForCaller(prime).agents;
+    expect(aHistory.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'sleeping',
+      revivable: true,
+      conversationId: 'c-worker-a-sleeper-restore'
+    });
+    expect(aHistory.find((agent) => agent.id === 'worker-2')).toMatchObject({
+      state: 'finished',
+      revivable: false,
+      conversationId: 'c-worker-a-terminal-restore'
+    });
+    expect(statusForCaller(prime)).toMatchObject({ runId: null, freeWorkerSlots: 0 });
+  });
+
   it('persists worker binding and activation as one state transition', () => {
     startSwarm(1);
     const persisted: Array<ReturnType<typeof snapshotSwarm>> = [];
@@ -1178,9 +1490,9 @@ describe('restart', () => {
     resetAgentsForTests();
     restoreSwarm(snapshot);
 
-    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.revivable).toBe(false);
-    expect(noteAgentAlive('c-worker-1')?.revived).toBe(false);
-    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('finished');
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.revivable).toBe(false);
+    expect(noteAgentAlive('c-worker-1')).toBeNull();
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.state).toBe('finished');
   });
 
   it('re-keys a pre-UUID version-4 snapshot instead of restoring its 32-bit run incarnation', () => {
@@ -1502,6 +1814,15 @@ describe('through the MCP endpoint', () => {
       { 'x-request-id': `${requestId}/relay` }
     );
 
+  const ordinaryWithRequestId = (requestId: string, name: string, args: Record<string, unknown>): Promise<any> =>
+    post(
+      { jsonrpc: '2.0', id: nextId++, method: 'tools/call', params: { name, arguments: args } },
+      { 'x-request-id': `${requestId}/relay` }
+    );
+
+  const textOfReply = (reply: any): string =>
+    ((reply.result?.content ?? []) as Array<{ text?: string }>).map((part) => part.text ?? '').join('\n');
+
   /** The evidence dance of asChat, kept, but reading the machine half of the result. */
   const structuredAsChat = async (
     conversationId: string,
@@ -1662,6 +1983,150 @@ describe('through the MCP endpoint', () => {
     expect(text).not.toContain(PRIME_CHAT);
   });
 
+  it('shows a parked prime only its own history while another prime owns the active run', async () => {
+    spawn({ workers: [{ label: 'A history worker', task: 'A private task' }], caller: prime });
+    expect(bindConversation('worker-1', 'c-worker-a')).toBe(true);
+    finishAgent({ conversationId: 'c-worker-a' }, 'A done for now');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    spawn({
+      workers: [{ label: 'B live worker', task: 'B private task' }],
+      caller: { conversationId: 'c-prime-b' }
+    });
+    const structured = await structuredAsChat(PRIME_CHAT, 'status');
+    expect(structured.self).toBe(PRIME_ID);
+    expect(structured.run_id).toBeNull();
+    // A owns history but cannot consume the one global execution claim while B is active.
+    expect(structured.free_worker_slots).toBe(0);
+    expect(structured.agents).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: 'worker-1', label: 'A history worker', state: 'sleeping' })])
+    );
+    expect(JSON.stringify(structured)).not.toContain('B live worker');
+    expect(JSON.stringify(structured)).not.toContain('B private task');
+  });
+
+  it('fences an exact dormant worker tool call while another prime owns the active run', async () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'first prime work done');
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(swarmRunning()).toBe(false);
+
+    // Another prime is now entitled to the one active execution claim and may reuse the same
+    // friendly worker ids. The old exact worker conversation remains worker-owned history, not
+    // an ordinary chat that can keep using local tools.
+    spawn({ workers: [{ task: 'second prime work' }], caller: { conversationId: 'c-prime-b' } });
+
+    const requestId = 'wfr_dormant_worker_exact';
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now(), turnId: 't-dormant-exact' },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId: 't-dormant-exact',
+        calls: [{ messageId: 'm-dormant-exact', tool: 'read', order: 0, answered: false, requestId }]
+      }
+    ]);
+    const reply = await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] });
+    const text = textOfReply(reply);
+    expect(text).toContain('WORKER_SLEEPING');
+    expect(text).toContain('Nothing was run');
+    expect(text).not.toMatch(/unknown root|not found/i);
+    expect(identify({ conversationId: 'c-prime-b' }).id).toBe(PRIME_ID);
+  });
+
+  it('waits for late exact identity while dormant worker histories exist, then fences that worker', async () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'sleep before late evidence');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const requestId = 'wfr_dormant_worker_late';
+    const pending = ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] });
+    // Initial cheap correlation has already had a chance to miss. Deliver the exact page mate
+    // while the kernel is in its dormant-worker evidence window.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now(), turnId: 't-dormant-late' },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId: 't-dormant-late',
+        calls: [{ messageId: 'm-dormant-late', tool: 'read', order: 0, answered: false, requestId }]
+      }
+    ]);
+    expect(textOfReply(await pending)).toContain('WORKER_SLEEPING');
+  });
+
+  it('delivers and acknowledges a parked prime inbox by exact conversation without adopting another history', async () => {
+    startSwarm(1);
+    startWorker('worker-1');
+
+    const finished = await asChat('c-worker-1', 'finish', { result: 'parked-prime-report' });
+    expect(finished).toMatch(/reported and is now asleep/i);
+    expect(swarmRunning()).toBe(false);
+
+    // The final worker report lives in A's dormant prime queue. There is no live agent:prime
+    // identity to address here, so delivery must resolve from the exact prime conversation.
+    const first = await asChat(PRIME_CHAT, 'status');
+    expect(first).toContain('--- 1 message(s) for prime ---');
+    expect(first).toContain('parked-prime-report');
+    expect(swarmRunning()).toBe(false);
+
+    // Make another prime active with the same friendly `prime`/`worker-1` ids before A proves
+    // receipt. Friendly-id recording would now resolve `prime` to B, which is exactly the leak
+    // this regression guards against.
+    spawn({ workers: [{ task: 'B is the active owner now' }], caller: { conversationId: 'c-prime-b' } });
+    await recordChatObservations('c-prime-b', [{ kind: 'turn_start', time: Date.now(), turnId: 'b-active-turn' }]);
+
+    // This authenticated follow-up proves the preceding result arrived and retires that offer.
+    // The historical worker/result can still appear in the status table, but the inbox row must
+    // not be pushed a second time.
+    const second = await asChat(PRIME_CHAT, 'status');
+    expect(second).not.toContain('--- 1 message(s) for prime ---');
+    expect(swarmRunning()).toBe(true);
+
+    const aSession = await findSessionByConversation(PRIME_CHAT, { requireUnique: true });
+    const bSession = await findSessionByConversation('c-prime-b', { requireUnique: true });
+    expect(aSession).toBeTruthy();
+    expect(bSession).toBeTruthy();
+    const aDelivered = (await readRecentEvents(aSession!.id, 50, { kinds: ['agent_message'] })).filter(
+      (event) => event.kind === 'agent_message' && event.delivery === 'delivered' && event.message.text.includes('parked-prime-report')
+    );
+    const bDelivered = (await readRecentEvents(bSession!.id, 50, { kinds: ['agent_message'] })).filter(
+      (event) => event.kind === 'agent_message' && event.delivery === 'delivered' && event.message.text.includes('parked-prime-report')
+    );
+    expect(aDelivered).toHaveLength(1);
+    expect(bDelivered).toHaveLength(0);
+  });
+
+  it('makes a pending context-ceiling authority change durable before status publishes it', async () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'sleep before the late context measurement');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    // Simulate the exact authority edge measureSleepingWorkers can discover from the durable
+    // worker session: the parked chat is now over 400k and therefore no longer revivable. Leave
+    // that critical revision pending, then prove the read-only status path itself drains it.
+    noteAgentContextTokens('c-worker-1', WORKER_CONTEXT_CEILING_TOKENS);
+    let written: ReturnType<typeof snapshotSwarm> | undefined;
+    onSwarmPersistNow(async (snapshot) => {
+      written = snapshot;
+    });
+
+    const text = await asChat(PRIME_CHAT, 'status');
+    expect(text).toMatch(/worker-1.*finished/s);
+    const persistedWorker = written?.dormantRuns
+      ?.flatMap((history) => history.agents)
+      .find((entry) => entry.info.id === 'worker-1' && entry.info.conversationId === 'c-worker-1');
+    expect(persistedWorker?.info).toMatchObject({
+      state: 'finished',
+      revivable: false,
+      contextTokens: WORKER_CONTEXT_CEILING_TOKENS
+    });
+  });
+
   it('refuses a control call it cannot place at all, and says where to look', async () => {
     startSwarm(1);
     // No page evidence: this call could have come from anywhere, so it is not treated as a
@@ -1742,16 +2207,27 @@ describe('through the MCP endpoint', () => {
     });
 
     const failed = await asChat(PRIME_CHAT, 'message', { to: 'worker-1', text: 'check the parser' });
-    expect(failed).toMatch(/durable acceptance barrier|nothing was queued/i);
+    expect(failed).toMatch(/durable (?:acceptance )?barrier|nothing was queued/i);
     // The staged queue entry was never visible to the worker while the write was in flight,
     // and rollback removed it before the failed call returned.
     expect(pendingCount('worker-1')).toBe(0);
     expect(offerMessages('worker-1')).toEqual([]);
-    expect(snapshotSwarm()?.agents.find((entry) => entry.info.id === 'worker-1')?.queue).toEqual([]);
+    expect(swarmRunning()).toBe(true);
+    expect(swarmState().agents.find((entry) => entry.id === 'worker-1')).toMatchObject({ pending: 0 });
+    const afterFailure = snapshotSwarm();
+    expect(afterFailure).not.toBeNull();
+    expect(afterFailure?.agents.find((entry) => entry.info.id === 'worker-1')?.queue ?? []).toEqual([]);
     // rollback is itself a critical mutation and therefore emits a newer safe snapshot. This
     // supersedes durable.ts's retained failed generation instead of letting it resurrect the
     // rejected message later.
-    expect(snapshots.at(-1)?.agents.find((entry) => entry.info.id === 'worker-1')?.queue).toEqual([]);
+    // The injected failure can now be consumed by the earlier context/revival measurement
+    // barrier, before message staging exists at all. In that case no rollback snapshot is
+    // necessary. If any debounced snapshots were published, none may contain the rejected row.
+    expect(
+      snapshots.every(
+        (snapshot) => snapshot?.agents.find((entry) => entry.info.id === 'worker-1')?.queue.length !== 1
+      )
+    ).toBe(true);
 
     const retried = await asChat(PRIME_CHAT, 'message', { to: 'worker-1', text: 'check the parser' });
     expect(retried).toContain('Queued for worker-1');
@@ -1781,9 +2257,10 @@ describe('through the MCP endpoint', () => {
 
     const retried = await asChat('c-worker-1', 'finish', { result: 'finished the audit' });
     expect(retried).toMatch(/reported and is now asleep/i);
-    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
-    expect(pendingCount(PRIME_ID)).toBe(1);
-    expect(offerMessages(PRIME_ID)).toHaveLength(1);
+    expect(swarmRunning()).toBe(false);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === PRIME_ID)?.pending).toBe(1);
+    expect(offerMessagesForConversation(PRIME_CHAT)?.messages).toHaveLength(1);
   });
 
   it('carries a worker through message and finish on its conversation alone', async () => {
@@ -1798,7 +2275,8 @@ describe('through the MCP endpoint', () => {
 
     const finished = await asChat('c-worker-1', 'finish', { result: 'fixed the parser' });
     expect(finished).toMatch(/reported and is now asleep/i);
-    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
+    expect(swarmRunning()).toBe(false);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
   });
 
   it('does not tell the prime a worker missed a message that the finish call itself confirms', async () => {
@@ -1816,8 +2294,10 @@ describe('through the MCP endpoint', () => {
     // old finish planner still saw the offered row as unacked and wrote a false warning into the
     // final report, even though this exact call immediately marks that same row delivered.
     await asChat('c-worker-1', 'finish', { result: 'parser edge case included' });
-    expect(pendingCount('worker-1')).toBe(0);
-    const report = offerMessages(PRIME_ID).find((message) => message.text.includes('[worker-1 reported]'));
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.pending).toBe(0);
+    const report = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
+      message.text.includes('[worker-1 reported]')
+    );
     expect(report?.text).toContain('parser edge case included');
     expect(report?.text).not.toContain('ended without ever confirming');
   });
@@ -1833,7 +2313,9 @@ describe('through the MCP endpoint', () => {
     bindConversation('worker-2', 'c-worker-2');
 
     await asChat('c-worker-1', 'finish', { result: 'first half done' });
-    const report = offerMessages(PRIME_ID).find((message) => message.text.includes('[worker-1 reported]'));
+    const report = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
+      message.text.includes('[worker-1 reported]')
+    );
     // worker-2 is still live against a limit of 3, so two slots are free — not three.
     expect(report?.text).toContain('2 of 3 worker slots are free');
     expect(report?.text).toContain('is sleeping, not gone');
@@ -1842,7 +2324,9 @@ describe('through the MCP endpoint', () => {
 
     // With the last worker asleep the whole limit is free, and the singular reads correctly.
     await asChat('c-worker-2', 'finish', { result: 'second half done' });
-    const last = offerMessages(PRIME_ID).find((message) => message.text.includes('[worker-2 reported]'));
+    const last = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
+      message.text.includes('[worker-2 reported]')
+    );
     expect(last?.text).toContain('3 of 3 worker slots are free');
   });
 
@@ -1852,10 +2336,12 @@ describe('through the MCP endpoint', () => {
     fillContext('c-worker-1');
 
     await asChat('c-worker-1', 'finish', { result: 'all of it done' });
-    const report = offerMessages(PRIME_ID).find((message) => message.text.includes('[worker-1 finished]'));
+    const report = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
+      message.text.includes('[worker-1 finished]')
+    );
     expect(report?.text).toContain('context limit');
     expect(report?.text).toContain('Spawn a new worker');
-    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.revivable).toBe(false);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.revivable).toBe(false);
   });
 
   it('cannot be spoofed by naming an agent in the arguments', async () => {
@@ -1914,7 +2400,14 @@ describe('through the MCP endpoint', () => {
     ]);
 
     const started = Date.now();
-    const shell = `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    const shell =
+      process.platform === 'win32'
+        ? `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+        : '/bin/sh';
+    const heldCommand =
+      process.platform === 'win32'
+        ? "Start-Sleep -Milliseconds 750; Write-Output 'held-call-done'"
+        : "sleep 1; printf '%s\\n' held-call-done";
     const pending = post(
       {
         jsonrpc: '2.0',
@@ -1923,7 +2416,7 @@ describe('through the MCP endpoint', () => {
         params: {
           name: 'exec_command',
           arguments: {
-            cmd: "Start-Sleep -Milliseconds 750; Write-Output 'held-call-done'",
+            cmd: heldCommand,
             workdir: dir,
             shell,
             yield_time_ms: 30_000
@@ -1967,12 +2460,12 @@ describe('through the MCP endpoint', () => {
     // finish call is not evidence that the worker saw it and must not ACK it.
     const first = await asChat('c-worker-1', 'finish', { result: 'done' });
     expect(first).toContain('check the parser before you stop');
-    expect(pendingCount('worker-1')).toBe(1);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.pending).toBe(1);
 
     const retry = await asChat('c-worker-1', 'finish', { result: 'done, retry after lost result' });
     expect(retry).toMatch(/already finished|already.*done/i);
     expect(retry).toContain('check the parser before you stop');
-    expect(pendingCount('worker-1')).toBe(1);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')?.pending).toBe(1);
 
     // The tombstone is not general membership. The same terminal chat still cannot use the
     // ordinary agents surface after it has finished.
@@ -1984,7 +2477,21 @@ describe('through the MCP endpoint', () => {
     startSwarm(2);
     bindConversation('worker-1', 'c-worker-1');
     bindConversation('worker-2', 'c-worker-2');
-    const refused = await asChat('c-worker-1', 'message', { to: 'worker-2', text: 'psst' });
+    // This regression is about the worker-to-worker policy, not the separate late page-evidence
+    // window exercised by asChat(). Give the request its exact browser mate before HTTP so a slow
+    // hosted runner cannot turn an unrelated correlation race into WORKER_IDENTITY_LOST.
+    const seq = ++evidenceSeq;
+    const requestId = `wfr_agents_worker_policy_${seq}`;
+    await recordChatObservations('c-worker-1', [
+      { kind: 'turn_start', time: Date.now(), turnId: `t-${seq}` },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId: `t-${seq}`,
+        calls: [{ messageId: `m-${seq}`, tool: 'agents', order: 0, answered: false, requestId }]
+      }
+    ]);
+    const refused = await agentsWithRequestId(requestId, 'message', { to: 'worker-2', text: 'psst' });
     expect(refused).toMatch(/prime/i);
     expect(pendingCount('worker-2')).toBe(0);
   });

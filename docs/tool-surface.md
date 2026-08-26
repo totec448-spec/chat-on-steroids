@@ -6,19 +6,22 @@ authoritative; `src/main/mcp/surfaces.ts`, `src/main/mcp/tools-core.ts`,
 
 ## Connectors
 
-Chat On Steroids publishes two independent MCP connectors. They are separate discovery and
-permission boundaries and use separate secret tokenized local paths.
+Chat On Steroids publishes Core on Windows, macOS and Linux. Windows additionally publishes the
+optional Desktop connector. They are separate discovery and permission boundaries and use
+separate secret tokenized local paths.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
 | **Chat On Steroids Core** | Approved files, patches, terminal, recorded-session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` |
-| **Chat On Steroids Desktop** | Screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
+| **Chat On Steroids Desktop** | **Windows only:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
 
-The Desktop connector is optional. Core is the main connector.
+The Desktop connector is optional and Windows-only. Core is the main connector everywhere.
 
-On a fresh current config, all tool permissions, session recording and multi-agent mode are
-enabled, while read-only mode is off. Existing configs keep explicit choices during upgrades;
-missing legacy permissions are not silently widened.
+On a fresh current config, all Core tool permissions, session recording and multi-agent mode are
+enabled, while read-only mode is off. Windows also enables Desktop permissions. macOS/Linux mask
+Desktop permissions off at runtime while preserving stored choices for a config later reopened on
+Windows. Existing configs keep explicit choices during upgrades; missing legacy permissions are
+not silently widened.
 
 With the fresh all-on capability snapshot, Core advertises seven schemas:
 `read`, `view_image`, `apply_patch`, `exec_command`, `write_stdin`, `session`, and `agents`.
@@ -56,8 +59,9 @@ Directory deletion and arbitrary binary writes are deliberately not hidden patch
 
 ### `exec_command`
 
-Runs a command in a real Windows shell. This permission is **not** confined to approved
-folders. Long-running commands return an opaque `session_id` that `write_stdin` can continue.
+Runs a command in the host's real shell: PowerShell/cmd on Windows and the user's normal POSIX
+shell on macOS/Linux. This permission is **not** confined to approved folders. Long-running
+commands return an opaque `session_id` that `write_stdin` can continue.
 
 It takes exactly one of `cmd` (a single command) or `cmds` (up to 20 commands run sequentially
 in one shell session). A batch shares one process, so variables, environment changes and the
@@ -114,12 +118,17 @@ are actually working. Waking one needs a free slot, reopens or refocuses that wo
 and types the prime's message into it as an ordinary user message. A worker becomes permanently
 finished only when its chat reaches the context ceiling (400,000 tokens by the app's own session
 accounting); crossing it never interrupts work in flight, it only makes the next stop the last one.
+Workers never run Compact & Resume, automatically or manually: their conversation is their durable
+agent identity, so the 400,000-token boundary changes only later revive eligibility and never opens
+a replacement worker chat.
 
 There is no model-supplied agent credential or `agent_key`. Worker/prime identity is bound to
 the ChatGPT conversation using extension evidence; control calls fail closed when that identity
 cannot be proven.
 
 ## Desktop tools
+
+This section exists only on Windows. macOS/Linux do not advertise or execute these schemas.
 
 ### `observe`
 

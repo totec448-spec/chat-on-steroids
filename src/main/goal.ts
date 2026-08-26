@@ -1,10 +1,11 @@
 /**
  * The goal loop — a second model, standing in for the user, that keeps a chat moving.
  *
- * ChatGPT finishes a long turn. Somebody has to decide whether a requested item is explicitly
- * still missing, and for an unattended run that somebody is an OpenRouter model given the same
- * conversation and a strict continuation-gate instruction. Completion is the default: it writes
- * `NO_REPLY` and nothing is typed. Only a concrete unfinished requirement becomes a message.
+ * ChatGPT finishes a long turn. Somebody has to decide whether all concrete work/questions the
+ * user actually requested were clearly completed, and for an unattended run that somebody is an
+ * OpenRouter model given the same conversation and a strict continuation-gate instruction. The
+ * stock policy keeps going while a requested item is not clearly resolved, but still treats an
+ * explicit whole-job completion claim as authoritative and never invents extra work.
  * OpenRouter is asked for a strict `{ action, reply }` decision and the app validates it before
  * anything reaches the browser; provider reasoning, tokenizer markers and malformed protocol
  * output are never user messages. That is the whole feature, and the two halves live in different
@@ -26,10 +27,11 @@
  *
  * ## What is sent
  *
- * Every user message and every final ChatGPT answer of this session, in order, and nothing
- * else. No tool calls, no arguments, no results, no file contents. The goal model is deciding
- * whether the user's request has been satisfied, and the conversation is the only evidence it
- * needs for that; the rest is this machine's business and does not leave it.
+ * Every authored user message and every final ChatGPT answer of this session, in order, plus
+ * the Compact & Resume bootstrap that the replacement chat actually received. No tool calls,
+ * no arguments, no results, no file contents. The goal model is deciding whether the user's
+ * request has been satisfied, and the conversation is the only evidence it needs for that;
+ * the rest is this machine's business and does not leave it.
  *
  * ## One draft per chat
  *
@@ -41,12 +43,15 @@
 
 import { createHash } from 'node:crypto';
 import { getConfig } from './config.js';
+import { writeDurableNow, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
-import { readEvents, readRecentEvents } from './session/store.js';
+import { getSession, readEvents, readHandoff, readRecentEvents } from './session/store.js';
+import { resumeBootstrapMatches, resumeBootstrapText } from './session/handoff.js';
 import {
   GOAL_OBJECTIVE_OPENING_TURN,
-  GOAL_OBJECTIVE_SYSTEM_PROMPT,
+  GOAL_OBJECTIVE_TRAILER,
+  GOAL_SYSTEM_TRAILER,
   MAX_GOAL_OBJECTIVE_CHARS,
   goalObjectiveMessage
 } from '../shared/goal.js';
@@ -122,7 +127,8 @@ const GOAL_RESPONSE_FORMAT = {
         action: {
           type: 'string',
           enum: ['stop', 'continue'],
-          description: 'stop when the requested work is complete; continue only for explicit unfinished requested work'
+          description:
+            'stop only when the whole requested job is clearly complete; continue while concrete requested work or questions are not yet clearly completed or answered'
         },
         reply: {
           type: 'string',
@@ -138,6 +144,11 @@ const GOAL_RESPONSE_FORMAT = {
 /** The persisted instruction used for the next draft. Exported for focused contract tests. */
 export function goalSystemPrompt(): string {
   return getConfig().goal.prompt;
+}
+
+/** The persisted driver instruction, used instead of the gate once a chat carries a goal. */
+export function goalObjectivePrompt(): string {
+  return getConfig().goal.objectivePrompt;
 }
 
 /** How a draft is going, in the order it goes. */
@@ -171,6 +182,8 @@ interface GoalDraft extends GoalDraftView {
   sessionId: string;
   /** Frozen with the draft, just like its model, so one request never mixes two settings saves. */
   systemPrompt: string;
+  /** The driver instruction, frozen for the same reason. Used only when `objective` is set. */
+  objectiveSystemPrompt: string;
   /**
    * This chat's specific goal, frozen with the draft. Empty for an ordinary Goal Mode run.
    *
@@ -191,21 +204,53 @@ interface GoalDraft extends GoalDraftView {
 /** At most one draft per conversation. A new turn replaces the old chat's finished draft. */
 const drafts = new Map<string, GoalDraft>();
 
+/** Durable state file for per-chat Goal objectives. */
+export const GOAL_OBJECTIVES_STATE = 'goal-objectives';
+
+export interface GoalObjectivesSnapshot {
+  version: 1;
+  savedAt: number;
+  objectives: Array<{ conversationId: string; objective: string }>;
+}
+
 /**
  * The specific goal a chat is being driven towards, keyed by conversation.
  *
- * Held here rather than in the config file for the same reason the drafts are: it belongs to
- * one conversation, not to the app, and writing a growing list of chat-scoped strings into
- * the settings the user edits by hand would be putting session state somewhere it does not
- * belong. It does not survive an app restart, and that is the honest behaviour — a loop that
- * silently resumed typing into somebody's chat after a crash is worse than one that stops.
+ * This is deliberately not app configuration: it is chat/session state. It does survive an
+ * app restart so reopening the same chat restores the field, but restoration alone never asks
+ * OpenRouter for a draft. The page still owns the only trigger, a newly observed turn ending;
+ * a stale finished chat therefore displays its goal without silently starting work.
  *
- * Bounded, because a tab that lives all day moves between chats. Oldest goes first, and a
- * re-set moves an entry back to the newest end.
+ * Compact & Resume explicitly moves this entry from chat A to chat B as part of the same live
+ * projection as the session/workspace move. Continuation recovery repeats that move after a
+ * crash, so an unattended chain of resumptions keeps pursuing one objective without making the
+ * user type it again.
  */
 const goalObjectives = new Map<string, string>();
-/** Enough for every chat anybody has open at once, several times over. */
-const MAX_OBJECTIVES = 64;
+
+export function snapshotGoalObjectives(): GoalObjectivesSnapshot {
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    objectives: [...goalObjectives.entries()].map(([conversationId, objective]) => ({ conversationId, objective }))
+  };
+}
+
+function persistGoalObjectives(): void {
+  writeDurableSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
+}
+
+export function restoreGoalObjectives(snapshot: GoalObjectivesSnapshot | null): void {
+  goalObjectives.clear();
+  if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.objectives)) return;
+  for (const raw of snapshot.objectives) {
+    if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
+    if (typeof raw.objective !== 'string') continue;
+    const objective = raw.objective.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+    if (!objective) continue;
+    goalObjectives.set(raw.conversationId, objective);
+  }
+}
 
 /** This chat's specific goal, or '' when it has none. */
 export function goalObjectiveFor(conversationId: string): string {
@@ -221,18 +266,50 @@ export function goalObjectiveFor(conversationId: string): string {
 export function setGoalObjective(conversationId: string, text: string): string {
   const goal = text.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
   goalObjectives.delete(conversationId);
-  if (!goal) return '';
-  goalObjectives.set(conversationId, goal);
-  while (goalObjectives.size > MAX_OBJECTIVES) {
-    const oldest = goalObjectives.keys().next().value as string | undefined;
-    if (oldest === undefined) break;
-    goalObjectives.delete(oldest);
-  }
+  if (goal) goalObjectives.set(conversationId, goal);
+  persistGoalObjectives();
   return goal;
 }
 
-export function clearGoalObjective(conversationId: string): void {
+/**
+ * Durable acceptance boundary for a user-visible Goal save/clear.
+ *
+ * `/goal/objective` tells the page the value was saved, so returning before the ordinary
+ * 300 ms durable debounce leaves a real crash window where a successfully acknowledged goal
+ * disappears on restart. Stage the in-memory value, make that exact snapshot durable, and only
+ * then let the bridge publish success. If the write fails, restore the previous live value and
+ * supersede durable.ts's retained failed generation with the still-authoritative snapshot.
+ */
+export async function setGoalObjectiveNow(conversationId: string, text: string): Promise<string> {
+  const before = goalObjectives.get(conversationId);
+  const goal = text.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
   goalObjectives.delete(conversationId);
+  if (goal) goalObjectives.set(conversationId, goal);
+  try {
+    await writeDurableNow(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
+    return goal;
+  } catch (error) {
+    goalObjectives.delete(conversationId);
+    if (before) goalObjectives.set(conversationId, before);
+    writeDurableSoon(GOAL_OBJECTIVES_STATE, snapshotGoalObjectives());
+    throw error;
+  }
+}
+
+export function clearGoalObjective(conversationId: string): void {
+  if (goalObjectives.delete(conversationId)) persistGoalObjectives();
+}
+
+/** Moves one chat-owned objective to the replacement conversation used by Compact & Resume. */
+export function moveGoalObjective(fromConversationId: string, toConversationId: string): boolean {
+  if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return false;
+  const objective = goalObjectives.get(fromConversationId);
+  if (!objective) return false;
+  goalObjectives.delete(fromConversationId);
+  goalObjectives.delete(toConversationId);
+  goalObjectives.set(toConversationId, objective);
+  persistGoalObjectives();
+  return true;
 }
 
 export function goalSettings(): { enabled: boolean; model: string; reasoning: string } {
@@ -350,6 +427,7 @@ export function resetGoalStateForTests(): void {
   drafts.clear();
   goalObjectives.clear();
   firstUserCache.clear();
+  legacyCommittedResumeCache.clear();
   modelCache = null;
 }
 
@@ -395,6 +473,7 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     conversationId: input.conversationId,
     sessionId: input.sessionId,
     systemPrompt: settings.prompt,
+    objectiveSystemPrompt: settings.objectivePrompt,
     objective: goalObjectiveFor(input.conversationId),
     clientId,
     turnId: input.turnId,
@@ -440,6 +519,15 @@ interface GoalRequest {
   /** In order, ahead of the conversation. The wire protocol is appended here, not by callers. */
   system: string[];
   messages: ChatMessage[];
+  /**
+   * The closing reminder, placed after the transcript rather than before it.
+   *
+   * Everything in `system` is read before a conversation that can run to hundreds of messages,
+   * and a long transcript is exactly the case where an instruction that far up stops steering
+   * the answer. This is the same policy restated where the model saw it last. It is app-owned
+   * placement, not app-owned policy: the text comes from whichever editable prompt is driving.
+   */
+  trailer: string;
   signal: AbortSignal;
   /** Called as legacy SSE text arrives, so a streaming panel can show it being written. */
   publish?: (text: string) => void;
@@ -455,7 +543,8 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     messages: [
       ...request.system.map((content) => ({ role: 'system', content })),
       { role: 'system', content: GOAL_OUTPUT_PROTOCOL },
-      ...request.messages
+      ...request.messages,
+      { role: 'system', content: request.trailer }
     ],
     response_format: GOAL_RESPONSE_FORMAT,
     plugins: [{ id: 'response-healing' }],
@@ -511,9 +600,10 @@ async function run(draft: GoalDraft): Promise<void> {
       key,
       model: draft.model,
       system: draft.objective
-        ? [GOAL_OBJECTIVE_SYSTEM_PROMPT, goalObjectiveMessage(draft.objective)]
+        ? [draft.objectiveSystemPrompt, goalObjectiveMessage(draft.objective)]
         : [draft.systemPrompt],
       messages: messages.length > 0 ? messages : [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
+      trailer: draft.objective ? GOAL_OBJECTIVE_TRAILER : GOAL_SYSTEM_TRAILER,
       signal: abort.signal,
       publish: (text) => {
         draft.stage = 'answering';
@@ -525,10 +615,10 @@ async function run(draft: GoalDraft): Promise<void> {
     if (decision.action === 'invalid') return settle(draft, 'failed', decision.error);
     if (decision.action === 'stop') {
       logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent`);
-      // A specific goal has exactly one ending, and this is it. Leaving it set would put the
-      // chat straight back into the loop on its next turn, against a finish line it has
-      // already crossed — the user asked for a goal, not for a chat that never ends.
-      if (draft.objective) clearGoalObjective(draft.conversationId);
+      // Reaching the goal ends this Goal run, not the user's saved objective. Keeping the text
+      // lets a reopened chat show what it was pursuing and lets a later manual correction such
+      // as "that did not work" continue against the same objective. Nothing auto-restarts here:
+      // the browser still needs a genuinely new turn ending before it can request another draft.
       draft.reply = '';
       return settle(draft, 'no-reply');
     }
@@ -578,8 +668,9 @@ export async function draftOpeningMessage(
     const decision = await requestGoalDecision({
       key,
       model,
-      system: [GOAL_OBJECTIVE_SYSTEM_PROMPT, goalObjectiveMessage(goal)],
+      system: [getConfig().goal.objectivePrompt, goalObjectiveMessage(goal)],
       messages: [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
+      trailer: GOAL_OBJECTIVE_TRAILER,
       signal: abort.signal
     });
     if (decision.action === 'http') return { error: decision.error };
@@ -876,6 +967,8 @@ interface ChatMessage {
  * successful lookups because a missing first user may simply mean recording is not there yet.
  */
 const firstUserCache = new Map<string, ChatMessage>();
+/** Positive-only compatibility proof for sessions resumed before committed provenance existed. */
+const legacyCommittedResumeCache = new Map<string, string>();
 
 async function firstUserMessage(sessionId: string): Promise<ChatMessage | null> {
   const cached = firstUserCache.get(sessionId);
@@ -892,6 +985,52 @@ async function firstUserMessage(sessionId: string): Promise<ChatMessage | null> 
     firstUserCache.delete(oldest);
   }
   return message;
+}
+
+/**
+ * Which handoff is proven to have become a replacement chat's user bootstrap.
+ *
+ * Current sessions get this from the atomic continuation rebind metadata. For sessions created
+ * by an older build, infer conservatively only when the exact browser bootstrap is itself present
+ * somewhere in durable authored user-message history and the session lineage spans more than one
+ * ChatGPT chat. A published handoff event alone is never proof: capture precedes commit and an
+ * aborted continuation deliberately leaves that event behind.
+ */
+async function committedResumeHandoffId(
+  sessionId: string,
+  summary: Awaited<ReturnType<typeof getSession>>
+): Promise<string | null> {
+  if (!summary) return null;
+  if (summary.lastCommittedResumeHandoffId) return summary.lastCommittedResumeHandoffId;
+  if (summary.chatIds.length <= 1) return null;
+  const cached = legacyCommittedResumeCache.get(sessionId);
+  if (cached) return cached;
+
+  const [users, handoffEvents] = await Promise.all([
+    readEvents(sessionId, { kinds: ['user_message'] }),
+    readEvents(sessionId, { kinds: ['handoff'] })
+  ]);
+  const authored: string[] = [];
+  for (const event of users) {
+    if (event.kind !== 'user_message' || event.message.truncated || !event.message.text) continue;
+    authored.push(event.message.text);
+  }
+  for (let at = handoffEvents.length - 1; at >= 0; at--) {
+    const event = handoffEvents[at];
+    if (!event || event.kind !== 'handoff') continue;
+    const handoff = await readHandoff(sessionId, event.handoffId);
+    if (!handoff) continue;
+    if (authored.some((text) => resumeBootstrapMatches(text, handoff.text))) {
+      legacyCommittedResumeCache.set(sessionId, handoff.id);
+      while (legacyCommittedResumeCache.size > 128) {
+        const oldest = legacyCommittedResumeCache.keys().next().value as string | undefined;
+        if (!oldest) break;
+        legacyCommittedResumeCache.delete(oldest);
+      }
+      return handoff.id;
+    }
+  }
+  return null;
 }
 
 /**
@@ -950,25 +1089,63 @@ export async function conversationMessages(sessionId: string): Promise<ChatMessa
     }
   }
 
+  const summary = await getSession(sessionId);
+  const committedHandoffId = await committedResumeHandoffId(sessionId, summary);
+  const committedHandoff = committedHandoffId ? await readHandoff(sessionId, committedHandoffId) : null;
+  const committedHandoffMessage = committedHandoff
+    ? ({ role: 'user', content: clip(resumeBootstrapText(committedHandoff.text)) } as ChatMessage)
+    : null;
+  let committedHandoffAt = -1;
+  if (committedHandoffMessage?.content && committedHandoff) {
+    for (let at = ordered.length - 1; at >= 0; at--) {
+      if (ordered[at]?.role === 'user' && resumeBootstrapMatches(ordered[at]!.content, committedHandoff.text)) {
+        committedHandoffAt = at;
+        break;
+      }
+    }
+  }
+
   // If the whole bounded read fits and contains the true first-user anchor, preserve it exactly.
   // Otherwise Goal Mode needs two anchors at once: the newest work tells it what just happened,
   // while the first user message tells it what the work was for.
   const totalChars = ordered.reduce((sum, message) => sum + message.content.length, 0);
-  if (firstUserAt >= 0 && ordered.length <= MAX_CONTEXT_MESSAGES && totalChars <= MAX_CONTEXT_CHARS) return ordered;
+  if (
+    firstUserAt >= 0 &&
+    (!committedHandoffMessage || committedHandoffAt >= 0) &&
+    ordered.length <= MAX_CONTEXT_MESSAGES &&
+    totalChars <= MAX_CONTEXT_CHARS
+  ) {
+    return ordered;
+  }
 
-  const kept: ChatMessage[] = [];
-  let chars = firstUser?.content.length ?? 0;
-  const tailSlots = MAX_CONTEXT_MESSAGES - (firstUser ? 1 : 0);
-  for (let at = ordered.length - 1; at >= 0 && kept.length < tailSlots; at--) {
-    if (at === firstUserAt) continue;
+  // Preserve anchors without disturbing chronology. An anchor still present in `ordered` keeps
+  // its real index. One recovered from outside the tail sorts before every recent row but after
+  // an original user request which itself came from outside the tail.
+  const anchors: Array<{ at: number; message: ChatMessage }> = [];
+  if (firstUser) anchors.push({ at: firstUserAt >= 0 ? firstUserAt : -2, message: firstUser });
+  if (committedHandoffMessage?.content) {
+    const duplicateFirst = firstUser?.role === 'user' && firstUser.content === committedHandoffMessage.content;
+    if (!duplicateFirst) {
+      anchors.push({
+        at: committedHandoffAt >= 0 ? committedHandoffAt : -1,
+        message: committedHandoffMessage
+      });
+    }
+  }
+  const anchorIndexes = new Set(anchors.filter((anchor) => anchor.at >= 0).map((anchor) => anchor.at));
+  let chars = anchors.reduce((sum, anchor) => sum + anchor.message.content.length, 0);
+  const tailSlots = Math.max(0, MAX_CONTEXT_MESSAGES - anchors.length);
+  const selected: Array<{ at: number; message: ChatMessage }> = [];
+  for (let at = ordered.length - 1; at >= 0 && selected.length < tailSlots; at--) {
+    if (anchorIndexes.has(at)) continue;
     const message = ordered[at]!;
     if (chars + message.content.length > MAX_CONTEXT_CHARS) break;
     chars += message.content.length;
-    kept.push(message);
+    selected.push({ at, message });
   }
-  kept.reverse();
-  if (firstUser) kept.unshift(firstUser);
-  return kept;
+  return [...anchors, ...selected]
+    .sort((left, right) => left.at - right.at)
+    .map((entry) => entry.message);
 }
 
 /*

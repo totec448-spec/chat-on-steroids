@@ -28,18 +28,29 @@ export const INTERRUPT = String.fromCharCode(3);
  * `codex-rs/core/src/unified_exec/process_manager.rs`. It exists to make command output
  * deterministic and pager-free rather than to sandbox anything.
  */
-export const UNIFIED_EXEC_ENV: ReadonlyArray<readonly [string, string]> = [
+export function unifiedExecEnvForPlatform(
+  platform: NodeJS.Platform = process.platform
+): ReadonlyArray<readonly [string, string]> {
+  // Ubuntu provides C.UTF-8 and Codex uses it, but macOS' standard UTF-8 locale is
+  // en_US.UTF-8. Forcing a locale name the host does not provide makes shells/native tools
+  // emit setlocale warnings before the command's own output. Keep the deterministic UTF-8
+  // contract while spelling it in the host's normal dialect.
+  const utf8Locale = platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8';
+  return [
   ['NO_COLOR', '1'],
   ['TERM', 'dumb'],
-  ['LANG', 'C.UTF-8'],
-  ['LC_CTYPE', 'C.UTF-8'],
-  ['LC_ALL', 'C.UTF-8'],
+  ['LANG', utf8Locale],
+  ['LC_CTYPE', utf8Locale],
+  ['LC_ALL', utf8Locale],
   ['COLORTERM', ''],
   ['PAGER', 'cat'],
   ['GIT_PAGER', 'cat'],
   ['GH_PAGER', 'cat'],
   ['CODEX_CI', '1']
-];
+  ];
+}
+
+export const UNIFIED_EXEC_ENV = unifiedExecEnvForPlatform();
 
 /** portable_pty's `TerminalSize::default()`. */
 export const DEFAULT_TERMINAL_ROWS = 24;

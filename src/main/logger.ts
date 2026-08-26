@@ -47,7 +47,19 @@ export function log(level: LogEntry['level'], message: string): void {
   entries.push(entry);
   if (entries.length > MAX_ENTRIES) entries.shift();
   if (ECHO_TO_CONSOLE) process.stderr.write(`[${level}] ${entry.message}\n`);
-  for (const listener of listeners) listener(entry);
+  for (const listener of listeners) {
+    try {
+      listener(entry);
+    } catch {
+      // Writing a log line must never be able to break the code that wrote it. Listeners run
+      // synchronously on the caller's stack, and the one that matters here reaches the
+      // renderer — which can already be gone while teardown is still logging its own progress.
+      // A throw from there used to propagate into the shutdown step doing the logging and kill
+      // it outright; that is how a force-close timer stopped forcing anything and left the app
+      // draining a half-closed socket forever. There is nowhere useful to report this: the log
+      // is the reporting channel.
+    }
+  }
 }
 
 export const logInfo = (message: string): void => log('info', message);

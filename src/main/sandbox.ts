@@ -2,7 +2,7 @@
  * Path sandbox. Every filesystem tool goes through here.
  *
  * Model-facing filesystem results use virtual paths like "/project/src/main.ts". This module
- * maps them onto real Windows paths and also accepts native Windows input copied from command
+ * maps them onto real filesystem paths and also accepts native absolute input copied from command
  * output when it names the same approved tree. Anything outside an approved root is refused.
  * Containment is decided by canonicalising with fs.realpath and then
  * comparing against the canonicalised root, which is what defeats symlinks, NTFS
@@ -75,9 +75,8 @@ export function uniqueRootName(folderPath: string, existing: readonly Root[]): s
 }
 
 /**
- * Validates one path segment. Rejects traversal, drive/UNC syntax, NTFS alternate
- * data streams, reserved device names and the trailing dot/space forms that Windows
- * silently strips (which would otherwise let "foo." address "foo").
+ * Validates one path segment. Traversal/control constraints apply everywhere; Windows also
+ * rejects drive/ADS syntax, reserved device names and names Win32 silently aliases.
  */
 function checkSegment(segment: string): void {
   if (segment === '' || segment === '.') {
@@ -89,30 +88,32 @@ function checkSegment(segment: string): void {
   if (segment.includes('\0')) {
     throw new SandboxError('Path contains a null byte');
   }
-  // ":" would open an alternate data stream or a drive-relative path.
-  if (segment.includes(':')) {
-    throw new SandboxError('Path contains ":", which is not allowed');
-  }
-  if (/[<>"|?*]/.test(segment)) {
-    throw new SandboxError('Path contains a character Windows does not allow');
-  }
   // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f]/.test(segment)) {
     throw new SandboxError('Path contains a control character');
   }
-  if (/[. ]$/.test(segment)) {
-    throw new SandboxError('Path segment ends with a dot or space');
-  }
-  const stem = segment.split('.')[0]!.toLowerCase();
-  if (RESERVED_NAMES.has(stem)) {
-    throw new SandboxError(`"${segment}" is a reserved Windows device name`);
+  if (IS_WINDOWS) {
+    // ":" would open an alternate data stream or a drive-relative path.
+    if (segment.includes(':')) {
+      throw new SandboxError('Path contains ":", which is not allowed');
+    }
+    if (/[<>"|?*]/.test(segment)) {
+      throw new SandboxError('Path contains a character Windows does not allow');
+    }
+    if (/[. ]$/.test(segment)) {
+      throw new SandboxError('Path segment ends with a dot or space');
+    }
+    const stem = segment.split('.')[0]!.toLowerCase();
+    if (RESERVED_NAMES.has(stem)) {
+      throw new SandboxError(`"${segment}" is a reserved Windows device name`);
+    }
   }
   if (segment.length > 255) {
     throw new SandboxError('Path segment is too long');
   }
 }
 
-/** Splits a virtual path into validated segments. Accepts both / and \ as separators. */
+/** Splits a virtual path into validated segments. Windows accepts both native separators. */
 export function splitVirtualPath(input: string): string[] {
   if (typeof input !== 'string') {
     throw new SandboxError('Path must be a string');
@@ -123,7 +124,7 @@ export function splitVirtualPath(input: string): string[] {
   if (input.length > 4096) {
     throw new SandboxError('Path is too long');
   }
-  const segments = input.split(/[/\\]+/).filter((s) => s.length > 0);
+  const segments = (IS_WINDOWS ? input.split(/[/\\]+/) : input.split(/\/+/)).filter((s) => s.length > 0);
   if (segments.length === 0) {
     throw new SandboxError('Path is empty. Use /<root> — call list_roots to see the roots.');
   }
@@ -203,7 +204,9 @@ export interface ResolveOptions {
 
 /** True for a path that names its root, rather than starting from somewhere already known. */
 export function isAbsoluteVirtualPath(input: string): boolean {
-  return typeof input === 'string' && /^[/\\]/.test(input.trim());
+  if (typeof input !== 'string') return false;
+  const trimmed = input.trim();
+  return IS_WINDOWS ? /^[/\\]/.test(trimmed) : trimmed.startsWith('/');
 }
 
 /** A drive-letter path or a UNC share — what Windows itself prints and the model copies. */
@@ -215,7 +218,20 @@ export function isNativeWindowsPath(input: unknown): input is string {
 }
 
 /**
- * Converts a native Windows path inside an approved root to the virtual spelling used by
+ * POSIX absolute paths and virtual paths both begin with `/`. The virtual namespace wins when
+ * the first segment is an approved root name; every other absolute spelling is treated as a
+ * native path copied from shell output and must prove containment before it is translated.
+ */
+function isNativePosixPath(roots: readonly Root[], input: unknown): input is string {
+  if (IS_WINDOWS || typeof input !== 'string') return false;
+  const trimmed = input.trim();
+  if (!path.posix.isAbsolute(trimmed)) return false;
+  const first = trimmed.split('/').find((part) => part.length > 0)?.toLowerCase();
+  return first !== undefined && !roots.some((root) => root.name.toLowerCase() === first);
+}
+
+/**
+ * Converts a native absolute path inside an approved root to the virtual spelling used by
  * the rest of the sandbox. Native paths outside the approved roots are still refused.
  *
  * Paths here are virtual on purpose: `/root/...` names an approved folder and nothing else
@@ -230,19 +246,24 @@ export function isNativeWindowsPath(input: unknown): input is string {
  * symlink/junction and allowMissing checks as an originally-virtual path.
  */
 async function normaliseNativePath(roots: readonly Root[], input: string): Promise<string | null> {
-  if (!isNativeWindowsPath(input)) return null;
+  const nativeWindows = isNativeWindowsPath(input);
+  const nativePosix = isNativePosixPath(roots, input);
+  if (!nativeWindows && !nativePosix) return null;
   const trimmed = input.trim();
   // Preserve the same lexical invariant virtual paths get. `path.resolve()` erases `..`
   // (and `.`) before `splitVirtualPath()` can see it, which meant a native spelling copied
   // from command output could take a different validation path from the equivalent virtual
   // spelling. Strip only the native root prefix, then validate the user-supplied segments
   // before any normalization happens.
-  const withoutNativeRoot = trimmed.replace(/^[A-Za-z]:[\\/]+/, '').replace(/^\\\\[^\\/]+[\\/]+[^\\/]+[\\/]*/, '');
-  for (const segment of withoutNativeRoot.split(/[/\\]+/).filter((part) => part.length > 0)) checkSegment(segment);
+  const withoutNativeRoot = nativeWindows
+    ? trimmed.replace(/^[A-Za-z]:[\\/]+/, '').replace(/^\\\\[^\\/]+[\\/]+[^\\/]+[\\/]*/, '')
+    : trimmed.replace(/^\/+/, '');
+  const nativeSegments = nativeWindows ? withoutNativeRoot.split(/[/\\]+/) : withoutNativeRoot.split(/\/+/);
+  for (const segment of nativeSegments.filter((part) => part.length > 0)) checkSegment(segment);
   // Approved roots categorically reject UNC paths. Do not ask Windows to resolve a network
   // share merely to discover that it cannot belong to any root: an unreachable host can turn
   // an immediate sandbox refusal into seconds of blocking DNS/SMB work.
-  if (trimmed.startsWith('\\\\')) {
+  if (nativeWindows && trimmed.startsWith('\\\\')) {
     const names = roots.map((r) => `/${r.name}`).join(', ') || '(none approved)';
     throw new SandboxError(
       `Native path "${trimmed}" is not inside an approved folder. ` +
@@ -301,7 +322,9 @@ export async function resolvePath(
   const requested =
     isAbsoluteVirtualPath(suppliedPath) || !options.base
       ? suppliedPath
-      : `${options.base.replace(/[/\\]+$/, '')}/${String(suppliedPath).replace(/^[/\\]+/, '')}`;
+      : IS_WINDOWS
+        ? `${options.base.replace(/[/\\]+$/, '')}/${String(suppliedPath).replace(/^[/\\]+/, '')}`
+        : `${options.base.replace(/\/+$/, '')}/${String(suppliedPath).replace(/^\/+/, '')}`;
   if (typeof requested === 'string' && requested.trim() !== '' && !isAbsoluteVirtualPath(requested)) {
     // Not "Unknown root src": the caller was using shorthand, and being told their first
     // folder is not a root explains nothing about what to do instead.
@@ -378,7 +401,7 @@ export async function validateNewRoot(folderPath: string, existing: readonly Roo
   }
   // UNC paths bring credential-delegation and latency surprises we do not want to
   // reason about; a mapped drive letter works and is explicit.
-  if (folderPath.startsWith('\\\\')) {
+  if (IS_WINDOWS && folderPath.startsWith('\\\\')) {
     throw new SandboxError('Network (UNC) paths are not supported. Map it to a drive letter first.');
   }
   const real = await canonicalRealpath(folderPath);
@@ -387,8 +410,13 @@ export async function validateNewRoot(folderPath: string, existing: readonly Roo
     throw new SandboxError('That is not a folder');
   }
   const parsed = path.parse(real);
-  if (parsed.root.toLowerCase() === real.toLowerCase()) {
-    throw new SandboxError('Approving an entire drive is not allowed. Pick a folder inside it.');
+  const sameRoot = IS_WINDOWS ? parsed.root.toLowerCase() === real.toLowerCase() : parsed.root === real;
+  if (sameRoot) {
+    throw new SandboxError(
+      IS_WINDOWS
+        ? 'Approving an entire drive is not allowed. Pick a folder inside it.'
+        : 'Approving the entire filesystem root is not allowed. Pick a folder inside it.'
+    );
   }
   for (const other of existing) {
     let otherReal: string;

@@ -16,9 +16,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 vi.mock('electron', () => ({
   safeStorage: {
-    isEncryptionAvailable: () => true,
-    encryptString: (value: string) => Buffer.from(value, 'utf8'),
-    decryptString: (buffer: Buffer) => buffer.toString('utf8')
+    isAsyncEncryptionAvailable: async () => true,
+    getSelectedStorageBackend: () => 'gnome_libsecret',
+    encryptStringAsync: async (value: string) => Buffer.from(value, 'utf8'),
+    decryptStringAsync: async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false })
   },
   clipboard: { readText: () => '', writeText: () => undefined },
   shell: { openExternal: async () => undefined }

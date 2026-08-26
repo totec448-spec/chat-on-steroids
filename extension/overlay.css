@@ -685,7 +685,8 @@
 
 /* Overwrite is whole-turn ownership, not a selective relabel pass. ChatGPT's native
    assistant subtree remains mounted for observation/React state, but every direct child is
-   visually removed except the app-owned stream we append as a sibling. */
+   visually removed. The app-owned stream is a sibling of the turn section so React cannot
+   drag it across the next user message when it transiently reorders/reuses native sections. */
 [data-clf-turn-replaced='1'] > :not(.clf-stream) {
   display: none !important;
 }

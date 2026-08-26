@@ -21,17 +21,17 @@ body:
       required: true
 
   - type: input
-    id: windows
+    id: operating_system
     attributes:
-      label: Windows version
-      placeholder: "Windows 11 Pro 24H2"
+      label: Operating system and version
+      placeholder: "Windows 11 24H2, macOS 15.6, Ubuntu 24.04, …"
     validations:
       required: true
 
   - type: dropdown
     id: architecture
     attributes:
-      label: Windows architecture
+      label: Architecture
       options:
         - "x64 (Intel/AMD)"
         - "ARM64"

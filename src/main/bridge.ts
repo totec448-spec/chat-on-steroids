@@ -25,7 +25,7 @@ import http from 'node:http';
 import type { BridgeStatus } from '../shared/types.js';
 import type { SessionOrigin } from '../shared/session.js';
 import { getConfig, updateConfig } from './config.js';
-import { getSecret, setSecret } from './secrets.js';
+import { getSecret, secureStorageStatus, setSecret } from './secrets.js';
 import {
   ackGoalDraft,
   draftOpeningMessage,
@@ -34,7 +34,7 @@ import {
   goalViewFor,
   retireGoalDrafts,
   retireGoalDraftsFor,
-  setGoalObjective,
+  setGoalObjectiveNow,
   startGoalDraft
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
@@ -58,10 +58,12 @@ import {
 } from './session/store.js';
 import { inFlightMcpRequests, runningToolCalls, settlingToolCalls } from './mcp/call-context.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
-import { briefShortfall } from './session/handoff.js';
+import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
 import {
   PRIME_ID,
   agentForConversation,
+  agentInfoForOwnedConversation,
+  agentForOwnedConversation,
   bindConversation,
   claimWorkerRevival,
   currentRunId,
@@ -102,12 +104,14 @@ import {
   continuationByToken,
   continuationForSession,
   openContinuationNow,
+  repairPrimeFromResumeShadow,
   resetContinuationsForTests
 } from './session/continuation.js';
 import { noteResumeOpening } from './session/resume-gate.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
 import { requestCorrelation } from './session/correlation.js';
+import { bindAgentWorkspace } from './workspace.js';
 import { MAX_GOAL_OBJECTIVE_CHARS } from '../shared/goal.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
@@ -152,7 +156,11 @@ const RATE_LIMIT = 900;
  * after everybody had stopped expecting them.
  */
 const COMMAND_DEADLINE_MS = 90_000;
-/** Past this age a bootstrap restored from a previous run is stale, not pending. */
+/**
+ * Past this age an ordinary bootstrap/restored command is stale, not pending. An exact-chat
+ * revival that already opened its target and is still waiting for page submit-readiness is the
+ * deliberate exception: broker `waking` + run identity, rather than elapsed wall time, cancels it.
+ */
 const COMMAND_TTL_MS = 30 * 60_000;
 const MAX_COMMANDS = 20;
 const MAX_COMMAND_RECEIPTS = 64;
@@ -329,6 +337,16 @@ interface DurableCommandSnapshot {
 export interface BridgeCommand {
   id: string;
   kind: 'open-chat';
+  /**
+   * Why this chat is being opened.
+   *
+   * The content script needs this after a successful fresh-chat ACK: only a Compact & Resume
+   * replacement is allowed to arm the one-turn hidden-tab Goal recovery provenance. A worker
+   * bootstrap must never do that, while a revival already names an existing chat. Keep the
+   * command kind explicit on the wire rather than asking the browser to infer authority from
+   * nullable agent/conversation fields.
+   */
+  type: CommandSpec['type'];
   /** Text to type into the conversation. Short by design. */
   text: string;
   /** Agent this tab will be, when the command comes from multi-agent mode. */
@@ -349,6 +367,16 @@ let lastSeenAt: number | null = null;
 let browserPresenceTimer: NodeJS.Timeout | null = null;
 let commands: Command[] = [];
 let commandReceipts: CommandReceipt[] = [];
+/**
+ * Worker/revival transports already removed from live delivery but still kept in durable
+ * snapshots until the broker-side failed/sleeping transition has crossed its own fsync.
+ *
+ * The bridge queue and swarm are separate files. Without this fence a timeout/overflow can
+ * persist "command gone" first, crash, then restore the older `invited`/`waking` broker row
+ * with nothing left to explain or settle it. Keeping the old transport on disk is the safe
+ * crash side: restart can retry/reconcile it; only after broker durability may it disappear.
+ */
+const commandRetirementsAwaitingBroker = new Map<string, Command>();
 const commandLeaseWrites = new Map<string, Promise<boolean>>();
 /** Serializes the broker-claim + browser-lease half of one revival redeem. */
 const commandRedeems = new Map<string, Promise<void>>();
@@ -758,13 +786,18 @@ function conversationId(value: unknown): string | null {
  * instead, and reports back work nobody ordered. Worse, every worker in a run would be
  * spending OpenRouter credit in parallel on drafts the prime is about to override anyway.
  *
- * So: on for the prime, on for an ordinary solo chat that is not part of a run at all, and
- * off for every worker, whatever the global switch says. `agentForConversation` returns null
- * when there is no run or the chat belongs to none of it — that is the solo case.
+ * So: on for the prime, on for an ordinary solo chat that has never been a worker, and off for
+ * every active, dormant or explicitly retired worker, whatever the global switch says. Worker
+ * identity outlives the scarce active-run claim, so this check uses durable ownership/fences
+ * rather than treating `run === null` as proof that a chat is solo.
  */
 function goalWorkerChat(id: string): boolean {
-  const agent = agentForConversation(id);
-  return agent !== null && agent !== PRIME_ID;
+  const agent = agentForOwnedConversation(id);
+  // Active membership is not the whole worker-identity boundary anymore. Once the last worker
+  // stops, its owner history parks and the exact worker chat nevertheless remains a worker
+  // forever (until explicit clear). Goal must not start authoring user turns in it merely because
+  // its run is dormant.
+  return (agent !== null && agent !== PRIME_ID) || retiredWorkerForConversation(id) !== null;
 }
 
 function goalEnabledFor(id: string): boolean {
@@ -866,6 +899,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if ((await browserDisconnected()) && !reconnect) {
       return json(res, 409, { error: 'browser_disconnected' }, origin);
     }
+    const storage = await secureStorageStatus();
+    if (!storage.available) {
+      return json(
+        res,
+        503,
+        { error: 'secure_storage_unavailable', message: storage.detail ?? 'Secure credential storage is unavailable.' },
+        origin
+      );
+    }
     // Silent provisioning on loopback.
     //
     // There used to be a six-digit code here, so the user had to be looking at the app
@@ -949,7 +991,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       : [];
     // Even an already-confirmed mapping must ensure/reuse the chat session, matching /events'
     // first-observation semantics and making this one atomic operation from the page's view.
-    const result = await recordChatObservations(id, observations, agentForConversation(id));
+    const result = await recordChatObservations(id, observations, agentForOwnedConversation(id));
     const confirmed = requestIds.filter((requestId) => requestCorrelation(requestId)?.conversationId === id);
     return json(res, 200, {
       ok: true,
@@ -1000,17 +1042,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const observations = parseObservations(body['events']);
     observationWritesInFlight += 1;
     try {
-      const agent = agentForConversation(id);
+      const agent = agentForOwnedConversation(id);
       // The command acknowledgement normally supplies this origin before the worker's first
       // observation. Its pending copy lives in recorder memory until a session exists, though,
       // so an app restart in that narrow gap used to create an origin-less worker session even
       // though the broker had durably restored the exact worker binding and task. Reconstitute
       // the same origin from that authoritative binding before the recorder creates the session.
       if (agent && agent !== 'prime') {
-        const worker = swarmState().agents.find(
-          (entry) => entry.id === agent && entry.role === 'worker' && entry.conversationId === id
-        );
-        if (worker) {
+        const worker = agentInfoForOwnedConversation(id);
+        if (worker?.role === 'worker') {
           await noteChatOrigin(id, {
             kind: 'worker',
             fromSessionId: null,
@@ -1067,6 +1107,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           staged.commit();
           await recordAgentMessage(staged.report, 'sent');
           await wakeQueuedStoppedWorkers([workerAgent]);
+          // Browser-owned completion has no later MCP call whose dispatcher can run the
+          // ordinary quiescent-release hook. If this was the last slot-holder, release/park the
+          // active incarnation here; wakeQueuedStoppedWorkers() runs first so already-accepted
+          // unread work keeps the worker `waking` and therefore keeps the run active.
+          releaseQuiescentRun();
         }
       }
       return json(res, 200, { sessionId: result.sessionId, stored: result.stored }, origin);
@@ -1125,6 +1170,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       live = liveConversations().find((entry) => entry.conversationId === id);
     }
     if (!live) {
+      const workerBlocked = goalWorkerChat(id);
       return json(res, 200, {
         sessionId: null,
         entries: [],
@@ -1132,10 +1178,42 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         userAnchors: [],
         nextSince: Number.isFinite(since) ? Math.max(0, since) : 0,
         job: null,
+        ...(workerBlocked
+          ? {
+              // Worker conversations are never Compact & Resume sources. Keep the page's
+              // own auto-compaction switch projection off even when this worker has no live
+              // recorder attachment yet, so a reload cannot briefly inherit the global
+              // auto=true setting and manufacture a worker compaction attempt.
+              context: contextView(false),
+              autoCompactReady: false,
+              goal: {
+                enabled: false,
+                hasKey: await goalKeyPresent(),
+                model: getConfig().goal.model,
+                objective: '',
+                blocked: 'worker',
+                draft: null
+              }
+            }
+          : {}),
         ...(retiredWorker ? { retiredWorker } : {})
       }, origin);
     }
+    // Old builds could let the recorder create replacement chat B before the resume ACK moved
+    // A's durable projections. Merely opening/polling B (or a later B→C descendant) must be
+    // enough to heal Goal; requiring another agents MCP call leaves Goal visibly on but inert.
+    // The repair itself requires exact resume provenance and refuses worker-owned targets.
+    if (!goalWorkerChat(id) && !goalObjectiveFor(id)) {
+      try {
+        await repairPrimeFromResumeShadow(id);
+      } catch (err) {
+        // Presentation polling must stay available when a historical repair cannot be read.
+        // Nothing is moved unless the repair proves the exact source/target pair first.
+        logWarn(`bridge: resume-shadow repair for ${id} failed — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
     const summary = await getSession(live.sessionId);
+    const workerBlocked = goalWorkerChat(id);
     const requestedSince = Number.isFinite(since) ? Math.max(0, since) : 0;
     // A page reload begins at cursor zero. Never turn that into a full JSONL parse/response:
     // large audited sessions used to freeze the Electron main process here for tens of
@@ -1275,13 +1353,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // while the broker still authorises A. Workers stay in their chat until the 400k reuse
         // ceiling makes their next stop terminal.
         autoCompactReady:
-          !goalWorkerChat(id) && autoCompactionReady(summary) && chatIsWorking(live.conversationId),
+          !workerBlocked && autoCompactionReady(summary) && chatIsWorking(live.conversationId),
         // What the composer's meter fills against, and what its automatic trigger fires
         // on. Sent from here rather than worked out in the page so that the bar someone
         // is watching and the threshold that acts are the same number: a meter that
         // filled against a figure of its own would show a full bar and do nothing, or
         // compact a conversation that still looked half empty.
-        context: contextView(),
+        // Automatic compaction is a prime/solo-chat policy only. A worker keeps the same
+        // conversation until it stops; crossing 400k changes future revive eligibility, not
+        // its conversation identity. Reporting auto=false here prevents the content script
+        // from ever arming its automatic compaction path for a worker in the first place.
+        context: contextView(!workerBlocked),
         // This chat was opened by the app, so its first user message is not the user's —
         // it is the handoff brief or the worker bootstrap this app typed. The page uses
         // it to fold that message away. Read off the session record rather than remembered
@@ -1305,10 +1387,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           model: getConfig().goal.model,
           // This chat's own goal, and never a worker's: the loop is off there whatever is
           // stored, and reporting one would let the page offer to drive a chat the prime owns.
-          objective: goalWorkerChat(id) ? '' : goalObjectiveFor(id),
+          objective: workerBlocked ? '' : goalObjectiveFor(id),
           // Why the switch is drawn off when the user did not turn it off. Without this the
           // menu says "Goal off" in a worker chat and looks like a setting that failed to save.
-          blocked: goalWorkerChat(id) ? 'worker' : '',
+          blocked: workerBlocked ? 'worker' : '',
           draft: goalViewFor(id, goalClient)
         },
         // Local calls still executing for *this chat*. ChatGPT-native compaction waits for
@@ -1661,8 +1743,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   /**
    * The specific goal one chat is being driven towards.
    *
-   * Set from the composer's settings sheet and held for as long as the app runs. Empty text
-   * clears it, which is also what reaching the goal does — see the stop branch in goal.ts.
+   * Set from the composer's settings sheet and persisted per conversation. Empty text clears
+   * it. Reaching the goal stops that run but intentionally leaves the objective in place until
+   * the user clears/replaces it, so reopening the chat still shows the finish line.
    *
    * Whatever is in flight for this chat is retired on the way through, because a draft is
    * frozen with the goal it was started under: without this, saving a new goal would still
@@ -1684,7 +1767,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (goalWorkerChat(id)) return json(res, 409, { error: 'goal_worker_chat' }, origin);
     const text = typeof body['text'] === 'string' ? body['text'] : '';
     if (text.length > MAX_GOAL_OBJECTIVE_CHARS * 2) return tooLarge(res, origin);
-    const objective = setGoalObjective(id, text);
+    const objective = await setGoalObjectiveNow(id, text);
     retireGoalDraftsFor(id);
     logInfo(objective ? `bridge: chat ${id} was given a specific goal` : `bridge: the specific goal for chat ${id} was cleared`);
     return json(res, 200, { objective }, origin);
@@ -1759,7 +1842,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const auto = typeof body['autoCompact'] === 'boolean' ? (body['autoCompact'] as boolean) : null;
     const goal = typeof body['goal'] === 'boolean' ? (body['goal'] as boolean) : null;
+    const settingsConversation = conversationId(body['conversationId']);
     if (auto === null && goal === null) return json(res, 400, { error: 'nothing_to_change' }, origin);
+    if (auto !== null && settingsConversation && goalWorkerChat(settingsConversation)) {
+      return json(
+        res,
+        409,
+        {
+          error: 'worker_compaction_disabled',
+          message: 'Worker chats never auto-compact and cannot change Compact & Resume from their composer.'
+        },
+        origin
+      );
+    }
     const next = await updateConfig((config) => ({
       ...config,
       compaction: auto === null ? config.compaction : { ...config.compaction, auto },
@@ -2103,7 +2198,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         } else {
         // This is where a worker starts. Do it only after the post-await command ownership
         // revalidation above; a page cancelled while noteChatOrigin ran must never bind a slot.
-        if (agent && /^[a-z0-9-]{1,40}$/i.test(agent)) bindConversation(agent, conversation);
+        if (agent && /^[a-z0-9-]{1,40}$/i.test(agent)) {
+          const boundNow = bindConversation(agent, conversation);
+          // The worker inherited a workspace before its chat existed, under the reusable
+          // friendly id `agent:worker-N`. The browser binding is the first authoritative moment
+          // that exact ChatGPT conversation is known, so migrate the staging key now even if the
+          // worker never makes a local tool call before it finishes/sleeps.
+          if (boundNow) bindAgentWorkspace(agent, conversation);
+        }
         const bound = agent ? !pendingWorkerSpawns().some((worker) => worker.id === agent) : false;
         if (!bound) {
           const why = 'the chat this app opened for the worker could not be bound to that slot';
@@ -2219,6 +2321,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // completion.
       return json(res, 503, { error: 'command_receipt_not_durable', retryable: true }, origin);
     }
+    // A failed bootstrap/revival can be the transition that frees the final worker slot, and
+    // unlike an MCP call there is no dispatcher epilogue after this ACK. Settle the durable
+    // command first, then release/park the quiescent active incarnation if no slot is occupied.
+    releaseQuiescentRun();
     logInfo(`bridge: ${specKey(command.spec)} completed with ${receipt.outcome}`);
     void deliver();
     return json(res, 200, receiptReply(receipt), origin);
@@ -2373,15 +2479,18 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   if (currentRunId() !== runId || swarmTransferActive() || inFlightMcpRequests() > 0 || observationWritesInFlight > 0) return false;
   state = swarmState();
   const workers = state.agents.filter((agent) => agent.role === 'worker');
+  // New lifecycle: an active run is capacity currently being consumed, not ownership of every
+  // reusable worker chat. The broker decides whether all slot-holders are gone and, when so,
+  // parks the owner state while releasing the global active claim. Ask it before the legacy
+  // orphan fallback below; under older/terminal-only semantics this simply returns false for a
+  // sleeping worker and leaves the existing checks unchanged.
+  if (releaseQuiescentRun()) return true;
   // A sleeping worker is not a finished one, and a run that owns one is not abandoned: its
   // chats are the thing the prime comes back to. Only a run whose every worker has genuinely
   // ended — finished, failed, or past the context ceiling — can be released from here at all;
   // anything else waits for the person to clear it in the app.
   if (workers.length === 0 || workers.some((agent) => !agent.revivable && agent.state !== 'finished' && agent.state !== 'failed')) return false;
   if (workers.some((agent) => agent.revivable)) return false;
-
-  // Normal safe release: every final report has already been acknowledged.
-  if (releaseQuiescentRun()) return true;
 
   // Orphan fallback may discard still-pending final reports only after the prime and every
   // bound terminal worker are themselves durably quiescent for the full grace period.
@@ -2407,7 +2516,29 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
 let dropSwarmEndListener: (() => void) | null = null;
 let staleSwarmTimer: NodeJS.Timeout | null = null;
 let staleSweepInFlight: Promise<boolean> | null = null;
-let bridgeStarting: Promise<number | null> | null = null;
+/**
+ * Serializes bridge start/stop transitions while a generation marks the latest desired state.
+ *
+ * A stop must invalidate an in-progress start immediately so recovery cannot publish/deliver
+ * browser work during shutdown. But stop -> immediate start is equally real (rapid settings
+ * toggles): that later start must make the queued stop stale rather than joining the cancelled
+ * promise or letting the older stop close the newer server. Desired state + epoch gives both
+ * directions one arbitration rule; the queue ensures their destructive socket work never races.
+ */
+let bridgeLifecycleEpoch = 0;
+let bridgeDesiredRunning = false;
+let bridgeLifecycleQueue: Promise<void> = Promise.resolve();
+let bridgeStartRequest: Promise<number | null> | null = null;
+let bridgeStopRequest: Promise<void> | null = null;
+/**
+ * Final app shutdown is terminal; ordinary settings-driven stop/start is not.
+ *
+ * A renderer IPC handler can already be in flight when Electron enters `will-quit`. If that
+ * handler finishes saving settings after shutdown called stopBridge(), its later startBridge()
+ * must not become the newest desired state and resurrect the loopback listener during teardown.
+ * Keep that one-way process-lifetime fence separate from the reversible desired-state epoch.
+ */
+let bridgeShutdownRequested = false;
 /**
  * True while a bound socket is still reconstructing durable command state.
  *
@@ -2428,18 +2559,48 @@ function runStaleSwarmSweep(): Promise<boolean> {
   return staleSweepInFlight;
 }
 
-export async function startBridge(): Promise<number | null> {
-  if (bridgeStarting) return bridgeStarting;
-  if (server) return port;
-  bridgeStarting = startBridgeOnce();
-  try {
-    return await bridgeStarting;
-  } finally {
-    bridgeStarting = null;
-  }
+function enqueueBridgeLifecycle<T>(operation: () => Promise<T>): Promise<T> {
+  const run = bridgeLifecycleQueue.then(operation, operation);
+  bridgeLifecycleQueue = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run;
 }
 
-async function startBridgeOnce(): Promise<number | null> {
+export function startBridge(): Promise<number | null> {
+  if (bridgeShutdownRequested) return Promise.resolve(null);
+  if (bridgeDesiredRunning) {
+    if (bridgeStartRequest) return bridgeStartRequest;
+    if (server) return Promise.resolve(port);
+  }
+
+  bridgeDesiredRunning = true;
+  const epoch = ++bridgeLifecycleEpoch;
+  const request = enqueueBridgeLifecycle(async () => {
+    if (!bridgeDesiredRunning || epoch !== bridgeLifecycleEpoch) return null;
+    if (server) return port;
+    return startBridgeOnce(epoch);
+  });
+  bridgeStartRequest = request;
+  const clearStartRequest = (): void => {
+    if (bridgeStartRequest === request) bridgeStartRequest = null;
+  };
+  void request.then(clearStartRequest, clearStartRequest);
+  return request;
+}
+
+async function closeCancelledBridgeStart(instance: http.Server, actual: number | null = null): Promise<null> {
+  if (server === instance) server = null;
+  if (actual !== null && port === actual) port = null;
+  bridgeRecovering = false;
+  if (instance.listening) {
+    await new Promise<void>((resolve) => instance.close(() => resolve()));
+  }
+  return null;
+}
+
+async function startBridgeOnce(epoch: number): Promise<number | null> {
   bridgeRecovering = true;
   const instance = http.createServer((req, res) => {
     if (bridgeRecovering) {
@@ -2467,6 +2628,7 @@ async function startBridgeOnce(): Promise<number | null> {
       // Port 0 means the OS picked one; the socket knows which.
       const address = instance.address();
       const actual = typeof address === 'object' && address ? address.port : candidate;
+      if (epoch !== bridgeLifecycleEpoch) return closeCancelledBridgeStart(instance, actual);
       server = instance;
       port = actual;
       instance.on('error', (err) => logWarn(`bridge server error: ${err.message}`));
@@ -2491,6 +2653,10 @@ async function startBridgeOnce(): Promise<number | null> {
         logWarn(`bridge startup recovery failed: ${err instanceof Error ? err.message : String(err)}`);
         return null;
       }
+      // A stop can arrive while durable command recovery awaits disk/broker state. Recovery may
+      // finish for consistency, but it must not cross the publication boundary afterwards: no
+      // replay listeners, no timers, and especially no browser delivery belong to a stopped app.
+      if (epoch !== bridgeLifecycleEpoch) return closeCancelledBridgeStart(instance, actual);
       // A settings-driven stop/start is not a process restart: the in-memory commands survive,
       // so restoreCommands() quite correctly skips their durable duplicates. stopBridge(),
       // however, cleared their memory-only deadline timers. Re-arm those retained leases from
@@ -2547,51 +2713,80 @@ async function startBridgeOnce(): Promise<number | null> {
 }
 
 export async function stopBridge(): Promise<void> {
-  // A settings save can race start and stop. Waiting here prevents stop from observing
-  // `server === null`, returning, and then having an in-progress start publish a listener
-  // after the app already considers the bridge down.
-  if (bridgeStarting) await bridgeStarting.catch(() => null);
-  const instance = server;
-  if (!instance) return;
-  if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
-  browserPresenceTimer = null;
-  server = null;
-  port = null;
-  // A stopped listener cannot currently see the extension. Require one fresh authenticated
-  // request after the next start rather than carrying a recent sighting across bridge lifetimes.
-  lastSeenAt = null;
-  for (const command of commands) {
-    if (command.timer) clearTimeout(command.timer);
-    command.timer = null;
-  }
-  dropSwarmEndListener?.();
-  dropSwarmEndListener = null;
-  dropSpawnRequestListener?.();
-  dropSpawnRequestListener = null;
-  dropReviveRequestListener?.();
-  dropReviveRequestListener = null;
-  if (staleSwarmTimer) clearInterval(staleSwarmTimer);
-  staleSwarmTimer = null;
-  await new Promise<void>((resolve) => {
-    // Stop admission and drain accepted extension writes. Abruptly destroying sockets here
-    // could lose an /events or /closed item after Chrome had already handed it to the app.
-    // Keep shutdown bounded because a wedged localhost client must not pin Electron forever.
-    let settled = false;
-    const force = setTimeout(() => {
-      if (settled) return;
-      logWarn('bridge drain timed out after 15s; forcing remaining connections closed');
-      instance.closeAllConnections();
-    }, 15_000);
-    force.unref?.();
-    instance.closeIdleConnections?.();
-    instance.close(() => {
-      settled = true;
-      clearTimeout(force);
-      resolve();
+  if (!bridgeDesiredRunning && bridgeStopRequest) return bridgeStopRequest;
+  if (!bridgeDesiredRunning && !server && !bridgeStartRequest) return;
+
+  // Invalidate first, before waiting in the lifecycle queue. The currently executing start sees
+  // this epoch change at its next await boundary and closes itself before replay/delivery.
+  bridgeDesiredRunning = false;
+  const epoch = ++bridgeLifecycleEpoch;
+  const request = enqueueBridgeLifecycle(async () => {
+    // A newer start is the latest user/runtime intent. Do not let this older queued stop close the
+    // server that request is keeping (or is about to bring) up.
+    if (bridgeDesiredRunning || epoch !== bridgeLifecycleEpoch) return;
+    const instance = server;
+    if (!instance) return;
+    if (browserPresenceTimer) clearTimeout(browserPresenceTimer);
+    browserPresenceTimer = null;
+    server = null;
+    port = null;
+    // A stopped listener cannot currently see the extension. Require one fresh authenticated
+    // request after the next start rather than carrying a recent sighting across bridge lifetimes.
+    lastSeenAt = null;
+    for (const command of commands) {
+      if (command.timer) clearTimeout(command.timer);
+      command.timer = null;
+    }
+    dropSwarmEndListener?.();
+    dropSwarmEndListener = null;
+    dropSpawnRequestListener?.();
+    dropSpawnRequestListener = null;
+    dropReviveRequestListener?.();
+    dropReviveRequestListener = null;
+    if (staleSwarmTimer) clearInterval(staleSwarmTimer);
+    staleSwarmTimer = null;
+    await new Promise<void>((resolve) => {
+      // Stop admission and drain accepted extension writes. Abruptly destroying sockets here
+      // could lose an /events or /closed item after Chrome had already handed it to the app.
+      // Keep shutdown bounded because a wedged localhost client must not pin Electron forever.
+      let settled = false;
+      const force = setTimeout(() => {
+        if (settled) return;
+        // Force first, report second: what breaks the deadlock must not sit behind a call that
+        // can throw. See the same ordering, and the same reason, in mcp/server.ts.
+        instance.closeAllConnections();
+        logWarn('bridge drain timed out after 15s; forcing remaining connections closed');
+      }, 15_000);
+      force.unref?.();
+      // One sweep is not enough. Chrome holds its keep-alive socket open between polls, so a
+      // connection that is merely *between* requests when stop is called is idle a millisecond
+      // later and would otherwise sit here until the 15s force. Sweeping repeatedly retires each
+      // socket the moment its in-flight request finishes, which is the drain that was intended.
+      const sweep = setInterval(() => instance.closeIdleConnections?.(), 100);
+      sweep.unref?.();
+      instance.closeIdleConnections?.();
+      instance.close(() => {
+        settled = true;
+        clearInterval(sweep);
+        clearTimeout(force);
+        resolve();
+      });
     });
+    logInfo('bridge stopped');
+    changed();
   });
-  logInfo('bridge stopped');
-  changed();
+  bridgeStopRequest = request;
+  try {
+    await request;
+  } finally {
+    if (bridgeStopRequest === request) bridgeStopRequest = null;
+  }
+}
+
+/** Final app teardown: stop the bridge and permanently reject later starts in this process. */
+export function shutdownBridge(): Promise<void> {
+  bridgeShutdownRequested = true;
+  return stopBridge();
 }
 
 // ------------------------------------------------------------------ commands
@@ -2639,7 +2834,13 @@ function commandSnapshot(options: {
   addReceipt?: CommandReceipt;
 } = {}): DurableCommandSnapshot {
   const { commandOverride, removeCommandId, addReceipt } = options;
-  const records = commands
+  const snapshotCommands = [
+    ...commands,
+    ...[...commandRetirementsAwaitingBroker.values()].filter(
+      (held) => !commands.some((command) => command.id === held.id)
+    )
+  ];
+  const records = snapshotCommands
     .filter((command) => command.id !== removeCommandId)
     .map((command) =>
       commandOverride?.command === command ? commandOverride.record : durableCommand(command)
@@ -2970,10 +3171,10 @@ export function resumeJobFor(sessionId: string): ResumeJobView | null {
  * one the user set for automatic compaction, and it only means anything while `auto` is
  * on. The page decides which to show, but it is not allowed to invent any of them.
  */
-function contextView(): { auto: boolean; threshold: number; warn: number; limit: number } {
+function contextView(autoAllowed = true): { auto: boolean; threshold: number; warn: number; limit: number } {
   const config = getConfig();
   return {
-    auto: config.compaction.auto,
+    auto: autoAllowed && config.compaction.auto,
     threshold: config.compaction.autoTokens,
     warn: config.sessions.advisoryTokens,
     limit: config.sessions.limitTokens
@@ -3208,8 +3409,34 @@ async function deliverOne(): Promise<void> {
  * the app (or a test run) open, and disarmed by `retire()` on every path that finishes a
  * command — so a command that succeeds costs one cleared timer and nothing else.
  */
-function armDeadline(command: Command, delay = COMMAND_DEADLINE_MS): void {
+function waitingForRevivalReadiness(command: Command): boolean {
+  return command.spec.type === 'revive' && command.claimedAt !== null && command.owner === null;
+}
+
+function commandDeadlineDelay(command: Command, now = Date.now()): number | null {
+  // A revival's first lease belongs to the *browser-open attempt*, not yet to a document. The
+  // exact worker chat may still be rendering the assistant message that contains agents.finish,
+  // so the content script deliberately refuses to redeem until that page is submit-ready. That
+  // wait must survive a tab reload/browser restart without turning ordinary ChatGPT busyness into
+  // a failed broker revival. Once a document actually redeems (`owner !== null`), the ordinary
+  // short acknowledgement deadline applies again: text may be about to cross the irreversible
+  // send boundary and a dead document must not own it indefinitely.
+  if (waitingForRevivalReadiness(command)) return null;
+  const claimedAt = command.claimedAt ?? now;
+  return claimedAt + COMMAND_DEADLINE_MS - now;
+}
+
+function armDeadline(command: Command, delay = commandDeadlineDelay(command)): void {
   if (command.timer) clearTimeout(command.timer);
+  if (delay === null) {
+    // An exact-chat revival waiting for submit-readiness has no wall-clock failure. Its broker
+    // `waking` reservation and run/conversation identity are the cancellation authority instead:
+    // tidyCommands/onSwarmEnd retire it as soon as any of those facts changes. This is what lets
+    // a browser stay closed or a ChatGPT turn stay busy for arbitrarily long without converting
+    // page availability into a false worker failure.
+    command.timer = null;
+    return;
+  }
   command.timer = setTimeout(() => {
     command.timer = null;
     expire(command);
@@ -3223,7 +3450,8 @@ function rearmRetainedCommandDeadlines(): void {
   const expired: Command[] = [];
   for (const command of commands) {
     if (command.claimedAt === null || command.timer) continue;
-    const remaining = command.claimedAt + COMMAND_DEADLINE_MS - now;
+    const remaining = commandDeadlineDelay(command, now);
+    if (remaining === null) continue;
     if (remaining > 0) armDeadline(command, remaining);
     else expired.push(command);
   }
@@ -3332,11 +3560,7 @@ function bootstrapText(spec: CommandSpec, summary: string): string {
       'ultrathink)'
     );
   }
-  return (
-    'Continuing a Chat On Steroids session that was compacted. This is the brief the previous chat wrote about ' +
-    'its own work; carry on from it rather than starting again.\n\n' +
-    summary
-  );
+  return resumeBootstrapText(summary);
 }
 
 /** The broker's current plan for waking one worker, or null once it is no longer waking. */
@@ -3365,6 +3589,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
   return {
     id: command.id,
     kind: 'open-chat',
+    type: spec.type,
     text,
     agent: spec.type === 'resume' ? null : spec.agent,
     // The fence the page enforces before it types. Only a revival has one: the other two
@@ -3375,6 +3600,8 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
 
 function drop(command: Command, why: string): boolean {
   if (!commands.includes(command)) return false;
+  const needsBrokerFence = command.spec.type === 'worker' || command.spec.type === 'revive';
+  if (needsBrokerFence) commandRetirementsAwaitingBroker.set(command.id, command);
   // A resume whose replacement chat never opened has to end its transaction too, or the
   // session sits "opening" forever with nothing coming. Aborting leaves the session
   // attached to the chat it is already in, which is the safe side of this failure.
@@ -3403,6 +3630,28 @@ function drop(command: Command, why: string): boolean {
   logWarn(`bridge: gave up on ${specKey(command.spec)} — ${why}`);
   changed();
   persistCommands();
+  // A timeout is another last-slot transition with no future MCP epilogue guaranteed. Once the
+  // command is no longer deliverable, let the broker release/park the active incarnation if
+  // every worker is now stopped. Any sibling bootstrap/revival still in flight occupies a slot
+  // and makes this a no-op.
+  releaseQuiescentRun();
+  if (needsBrokerFence) {
+    void persistCriticalSwarmNow()
+      .then((durable) => {
+        if (!durable) {
+          logWarn(
+            `bridge: kept retired ${specKey(command.spec)} durable because its broker transition had no immediate persistence sink`
+          );
+          return;
+        }
+        if (commandRetirementsAwaitingBroker.delete(command.id)) persistCommands();
+      })
+      .catch((err) => {
+        logWarn(
+          `bridge: kept retired ${specKey(command.spec)} durable because its broker transition could not be persisted — ${err instanceof Error ? err.message : String(err)}`
+        );
+      });
+  }
   // Deliberately no deliver() here: a drop is always either inside a deliver() already or
   // immediately followed by one (queue() overflow, whose two callers both deliver on the
   // next line), and the next command — usually the worker that was queued behind this one
@@ -3441,7 +3690,7 @@ function tidyCommands(): void {
       retire(command, 'its worker is bound and running');
       continue;
     }
-    if (now - command.createdAt > COMMAND_TTL_MS) {
+    if (now - command.createdAt > COMMAND_TTL_MS && !waitingForRevivalReadiness(command)) {
       drop(command, 'it has been waiting too long to still be what the user expects');
     }
   }
@@ -3450,6 +3699,7 @@ function tidyCommands(): void {
 /** Whether a page is already working on this command, with time still on its deadline. */
 const isLeased = (command: Command): boolean => {
   if (command.claimedAt === null) return false;
+  if (waitingForRevivalReadiness(command)) return true;
   if (Date.now() - command.claimedAt < COMMAND_DEADLINE_MS) return true;
   if (command.spec.type !== 'resume') return false;
   const state = continuationByToken(command.spec.token)?.state;
@@ -3465,8 +3715,13 @@ const isLeased = (command: Command): boolean => {
  * about the wrong tab.
  */
 function nextDeliverable(): Command | null {
-  if (commandLeaseWrites.size > 0 || commands.some(isLeased)) return null;
-  return commands[0] ?? null;
+  if (commandLeaseWrites.size > 0) return null;
+  // A revival whose exact target page is still finishing its prior turn already had its browser
+  // open attempt. It must stay durable without monopolising the global browser-delivery slot:
+  // unrelated workers/resumes can still open their own marker-addressed pages while this one
+  // waits. A document-owned lease remains exclusive and still blocks the next irreversible send.
+  if (commands.some((command) => isLeased(command) && !waitingForRevivalReadiness(command))) return null;
+  return commands.find((command) => !waitingForRevivalReadiness(command)) ?? null;
 }
 
 /**
@@ -3588,6 +3843,13 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
   ) {
     const worker = raw as Extract<CommandSpec, { type: 'worker' }>;
     if (worker.runId !== currentRunId()) return null;
+    // A retained transport may deliberately outlive its live queue entry while broker failure
+    // is being fsynced. If restart sees the *newer* broker side first, a terminal/sleeping row is
+    // proof this old bootstrap must not be resurrected merely because its run id still matches a
+    // sibling's active incarnation. `active` remains valid for the lost-ACK case: the binding may
+    // already be durable while the leased browser command is still waiting for its retry.
+    const workerState = swarmState().agents.find((entry) => entry.id === worker.agent && entry.role === 'worker')?.state;
+    if (workerState !== 'invited' && workerState !== 'active') return null;
     return { type: 'worker', agent: worker.agent, task: worker.task.slice(0, 512 * 1024), runId: worker.runId };
   }
   if (
@@ -3600,6 +3862,8 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
   ) {
     const revive = raw as Extract<CommandSpec, { type: 'revive' }>;
     if (revive.runId !== currentRunId()) return null;
+    const revivalState = swarmState().agents.find((entry) => entry.id === revive.agent && entry.role === 'worker')?.state;
+    if (revivalState !== 'waking' && revivalState !== 'active') return null;
     return { type: 'revive', agent: revive.agent, conversationId: revive.conversationId, runId: revive.runId };
   }
   if (
@@ -3693,7 +3957,10 @@ function planCommandRestore(
 
   for (const { raw, spec, createdAt } of durableCandidates.values()) {
     if (spec.type === 'resume') resumeTokens.push({ sessionId: spec.sessionId, token: spec.token });
-    if (now - createdAt > COMMAND_TTL_MS) {
+    const persistedLeased = version !== 1 && raw.phase === 'leased';
+    const persistedWaitingRevival =
+      spec.type === 'revive' && persistedLeased && (raw.owner === null || raw.owner === undefined);
+    if (now - createdAt > COMMAND_TTL_MS && !persistedWaitingRevival) {
       if (spec.type === 'revive') expiredRevivals.push({ id: raw.id!, spec });
       continue;
     }
@@ -3702,7 +3969,6 @@ function planCommandRestore(
     const legacyAlreadyClaimed =
       version === 1 && continuation !== null &&
       (continuation.state === 'claimed' || continuation.state === 'committing' || continuation.state === 'committed');
-    const persistedLeased = version !== 1 && raw.phase === 'leased';
     const leased = persistedLeased || legacyAlreadyClaimed;
     let claimedAt = leased && typeof raw.claimedAt === 'number' && Number.isFinite(raw.claimedAt) ? raw.claimedAt : null;
     if (leased && claimedAt === null) claimedAt = now;
@@ -3719,14 +3985,19 @@ function planCommandRestore(
     restored += 1;
   }
 
-  // Retained commands normally win over disk, but TTL still applies to the retained transport
-  // itself. For revivals that expiry has a separately durable broker half, so select that exact
-  // command id for reconciliation and omit only that incarnation from the publish plan. A newer
-  // retained revival is not touched by an older expired disk row because disk candidates for its
-  // key were discarded above before expiry was considered.
+  // Retained commands normally win over disk, but TTL still applies to transports that have not
+  // crossed the revival readiness boundary. An owner-null leased revival is different: its exact
+  // chat was opened and is intentionally waiting on page submit-readiness, so the broker's durable
+  // `waking` reservation/run identity, not wall time, owns cancellation. A newer retained revival
+  // is not touched by an older expired disk row because disk candidates for its key were discarded
+  // above before expiry was considered.
   const expiredRetainedRevivalIds = new Set<string>();
   for (const command of plannedCommands) {
-    if (command.spec.type !== 'revive' || now - command.createdAt <= COMMAND_TTL_MS) continue;
+    if (
+      command.spec.type !== 'revive' ||
+      waitingForRevivalReadiness(command) ||
+      now - command.createdAt <= COMMAND_TTL_MS
+    ) continue;
     expiredRevivals.push({ id: command.id, spec: command.spec });
     expiredRetainedRevivalIds.add(command.id);
   }
@@ -3746,12 +4017,13 @@ function planCommandRestore(
 /**
  * Reloads commands left over from a previous run.
  *
- * Anything older than the TTL is discarded rather than acted on: reopening the app the
- * next morning must not spray yesterday's chats across the browser. Version 2 persists the
- * queued/leased phase and document owner: a leased command belongs to the browser attempt
- * that already exists and therefore waits for its ACK after restart instead of opening a
- * second tab. Version 1 is migrated conservatively, including resume commands that older
- * builds incorrectly discarded even though their continuation WAL already survived.
+ * Ordinary commands older than the TTL are discarded rather than acted on: reopening the app
+ * the next morning must not spray yesterday's chats across the browser. The exception is a
+ * persisted owner-null revival lease: that exact worker chat has already been opened and the
+ * broker still owns a durable `waking` reservation for it, so browser/page busyness may wait as
+ * long as necessary without manufacturing a failed wake. Run turnover or loss of that broker
+ * reservation retires it instead. Version 2 persists the queued/leased phase and document owner;
+ * version 1 is migrated conservatively, including resume commands whose continuation WAL survived.
  */
 export async function restoreCommands(): Promise<void> {
   const saved = await readDurable<{ version?: number; commands?: unknown; receipts?: unknown }>(COMMANDS_STATE);
@@ -3822,6 +4094,10 @@ export async function restoreCommands(): Promise<void> {
     changed();
   }
   if (rewriteDurable) persistCommands();
+  // Recovery may have just turned the last expired `waking` worker back into a stopped worker.
+  // Do not resurrect the old global active claim merely because no request exists yet to run
+  // the usual dispatcher/stale-sweep release hook.
+  releaseQuiescentRun();
 }
 
 /** Test seam. */
@@ -3831,9 +4107,11 @@ export function resetBridgeForTests(): void {
   browserPresenceTimer = null;
   commands = [];
   commandReceipts = [];
+  commandRetirementsAwaitingBroker.clear();
   commandLeaseWrites.clear();
   commandRedeems.clear();
   bridgeRecovering = false;
+  bridgeShutdownRequested = false;
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;

@@ -386,6 +386,16 @@ export interface SessionSummary {
   /** Id of the newest stored handoff, or null when the session was never compacted. */
   lastHandoffId: string | null;
   lastHandoffAt: number | null;
+  /**
+   * Handoff that positively became the opening user message of the currently attached resumed
+   * chat, or null when no successful Compact & Resume has been durably proven.
+   *
+   * Distinct from `lastHandoffId`: a handoff is published as soon as capture is durable, before
+   * the replacement-chat rebind commits. A later aborted compaction may therefore advance
+   * `lastHandoffId` without ever becoming ChatGPT context. This field moves only with the same
+   * atomic metadata write that moves `conversationId` to the replacement chat.
+   */
+  lastCommittedResumeHandoffId?: string | null;
   /** Outcome of the most recent finished turn. */
   lastTurnOutcome: TurnOutcome | null;
   /** Durable open-turn projection. Undefined only on pre-1.8.8 metadata. */
@@ -594,6 +604,11 @@ export interface SwarmState {
   enabled: boolean;
   /** True while at least one worker is invited or active. */
   running: boolean;
+  /**
+   * Local-app presentation hint: worker histories exist but are parked outside the active run.
+   * Caller/model status remains scoped separately and never uses this to reveal another owner.
+   */
+  retainedHistory?: boolean;
   agents: AgentInfo[];
 }
 

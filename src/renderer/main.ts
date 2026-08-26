@@ -20,6 +20,7 @@ import {
   CAPABILITY_DETAILS,
   CAPABILITY_LABELS,
   CAPABILITY_TOOLS,
+  DESKTOP_CAPABILITIES,
   WRITE_CAPABILITIES
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
@@ -268,9 +269,16 @@ function capInput(cap: Capability): HTMLInputElement {
 function paintGroups(): void {
   if (!state) return;
   const { readOnly } = state.config;
+  const desktopSupported = state.platform?.desktopAutomation ?? true;
 
   for (const group of GROUPS) {
     const root = document.querySelector<HTMLElement>(`[data-group="${group.id}"]`)!;
+    const supported = group.id !== 'desktop' || desktopSupported;
+    root.hidden = !supported;
+    if (!supported) {
+      for (const cap of group.caps) capInput(cap).disabled = true;
+      continue;
+    }
     root.classList.toggle('is-open', openGroup === group.id);
 
     const usable = group.caps.filter((cap) => !(readOnly && WRITE_CAPABILITIES.includes(cap)));
@@ -343,7 +351,13 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
     : state.config;
   const capabilities = { ...previous.capabilities };
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
-    capabilities[input.dataset.cap as Capability] = input.checked;
+    const capability = input.dataset.cap as Capability;
+    // The macOS/Linux port deliberately hides Desktop automation while preserving any
+    // Windows choices stored in this config. A hidden disabled checkbox is presentation,
+    // not a user edit: copying its forced-false value into every unrelated settings save
+    // would erase those choices merely because the config was opened on another OS.
+    if (!(state.platform?.desktopAutomation ?? true) && DESKTOP_CAPABILITIES.includes(capability)) continue;
+    capabilities[capability] = input.checked;
   }
   const readOnly = over.readOnly ?? previous.readOnly;
   const chatPatch = chatSettingsPatch(previous);
@@ -425,7 +439,7 @@ const STATUS_TEXT: Record<AppState['status']['state'], string> = {
 
 const METHOD_HINT: Record<string, string> = {
   openai:
-    'ChatGPT reaches this PC through an OpenAI tunnel. Nothing is exposed to the open internet.',
+    'ChatGPT reaches this computer through an OpenAI tunnel. Nothing is exposed to the open internet.',
   cloudflared:
     'Creates a temporary public https address with Cloudflare. The address changes on every restart.',
   manual: 'This app only listens on localhost. You are responsible for exposing it.'
@@ -464,11 +478,14 @@ function missingStep(next: AppState): { step: string; text: string } | null {
     if (!TUNNEL_ID_PATTERN.test(config.tunnel.tunnelId)) {
       return { step: 'tunnel', text: 'Create a tunnel and paste its ID — step 2.' };
     }
+    if (!(next.secureStorage?.available ?? true) && !next.hasApiKey) {
+      return { step: 'key', text: next.secureStorage?.detail ?? 'Secure credential storage is unavailable.' };
+    }
     if (!next.hasApiKey) {
       return { step: 'key', text: 'Add a restricted API key — step 3.' };
     }
   } else if (!next.resolvedBinary && config.tunnel.kind === 'cloudflared') {
-    return { step: 'connect', text: 'cloudflared was not found on this PC.' };
+    return { step: 'connect', text: 'cloudflared was not found on this computer.' };
   }
   return null;
 }
@@ -684,7 +701,8 @@ function apply(next: AppState): void {
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const cap = input.dataset.cap as Capability;
-    applyChecked(input, config.capabilities[cap], previousState?.config.capabilities[cap]);
+    const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap);
+    applyChecked(input, supported && config.capabilities[cap], previousState?.config.capabilities[cap]);
   }
   applyChecked(
     $<HTMLInputElement>('homeMaEnabled'),
@@ -732,6 +750,16 @@ function apply(next: AppState): void {
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
   );
+  $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true);
+  if (next.platform?.family === 'macos') {
+    $('backgroundRunningCopy').textContent =
+      'Leave it running while you use the connector. It stays available from the menu bar and Dock when you close the window.';
+    $('minimizeToTrayCopy').textContent = 'Hide the window to the menu bar when closed';
+  } else {
+    $('backgroundRunningCopy').textContent =
+      'Leave it running while you use the connector. It stays in the tray when you close the window.';
+    $('minimizeToTrayCopy').textContent = 'Keep running in the tray when closed';
+  }
 
   const openai = config.tunnel.kind === 'openai';
   const browserRequired = browserExtensionRequired(config);
@@ -745,11 +773,17 @@ function apply(next: AppState): void {
 
   $('wizFolders').textContent =
     config.roots.length === 0 ? 'None yet' : config.roots.map((r) => `/${r.name}`).join('  ');
-  $<HTMLInputElement>('apiKey').placeholder = next.hasApiKey ? '•••••••• stored' : 'sk-…';
-  $('apiKeyState').textContent = next.hasApiKey
-    ? 'A key is stored, encrypted by Windows. Type a new one to replace it, or use Remove stored API key.'
-    : 'Stored encrypted by Windows. It is never shown again and never leaves this app.';
-  $<HTMLButtonElement>('removeApiKey').disabled = !next.hasApiKey;
+  const secureStorageAvailable = next.secureStorage?.available ?? true;
+  const apiKey = $<HTMLInputElement>('apiKey');
+  apiKey.placeholder = next.hasApiKey ? '•••••••• stored' : 'sk-…';
+  apiKey.disabled = !secureStorageAvailable;
+  $('apiKeyState').textContent = !secureStorageAvailable
+    ? (next.secureStorage?.detail ?? 'Secure credential storage is unavailable.')
+    : next.hasApiKey
+      ? 'A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.'
+      : 'Stored with secure OS credential storage. It is never shown again and never leaves this app.';
+  $('apiKeyState').classList.toggle('is-warn', !secureStorageAvailable);
+  $<HTMLButtonElement>('removeApiKey').disabled = !next.hasApiKey || !secureStorageAvailable;
 
   const wizConnect = $<HTMLButtonElement>('wizConnect');
   wizConnect.textContent = running ? 'Disconnect' : 'Connect';
@@ -885,7 +919,9 @@ function copyRow(label: string, value: string, what: string): HTMLElement {
  */
 function connectorCards(next: AppState): HTMLElement[] {
   const { status, config } = next;
-  return status.surfaces.map((surface) => {
+  return status.surfaces
+    .filter((surface) => surface.id !== 'desktop' || (next.platform?.desktopAutomation ?? true))
+    .map((surface) => {
     const card = el('div', `connector is-${surface.state}`);
 
     const head = el('div', 'connector-head');
@@ -948,7 +984,7 @@ function connectorCards(next: AppState): HTMLElement[] {
       card.append(el('p', 'hint', `Tools: ${surface.tools.join(', ')}`));
     }
     return card;
-  });
+    });
 }
 
 /**

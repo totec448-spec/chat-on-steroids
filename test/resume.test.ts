@@ -20,9 +20,10 @@ import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 
 vi.mock('electron', () => ({
   safeStorage: {
-    isEncryptionAvailable: () => true,
-    encryptString: (value: string) => Buffer.from(value, 'utf8'),
-    decryptString: (buffer: Buffer) => buffer.toString('utf8')
+    isAsyncEncryptionAvailable: async () => true,
+    getSelectedStorageBackend: () => 'gnome_libsecret',
+    encryptStringAsync: async (value: string) => Buffer.from(value, 'utf8'),
+    decryptStringAsync: async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false })
   },
   clipboard: {},
   shell: {}

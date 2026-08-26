@@ -2,7 +2,9 @@
  * Generates every icon the project ships, with no image dependencies.
  *
  *   build/icon.ico            the Windows app icon (6 sizes in one file)
+ *   build/icon.png            1024px source for macOS/Linux packaging (Retina-ready ICNS input)
  *   build/icon-preview.png    256px preview, for looking at what changed
+ *   build/runtime-icon.png    256px Linux BrowserWindow icon, packaged as a real resource
  *   extension/icons/*.png     16/32/48/128 for the Chrome extension
  *
  *   artwork/app-icon-source.png  selected ImageGen concept (the one source image)
@@ -312,8 +314,12 @@ const pngFor = (size) => {
 mkdirSync(path.join(root, 'build'), { recursive: true });
 const icoImages = ICO_SIZES.map((size) => ({ size, png: pngFor(size) }));
 writeFileSync(path.join(root, 'build', 'icon.ico'), encodeIco(icoImages));
+writeFileSync(path.join(root, 'build', 'icon.png'), pngFor(1024));
 writeFileSync(path.join(root, 'build', 'icon-preview.png'), pngFor(256));
-console.log(`Wrote build/icon.ico (${ICO_SIZES.join(', ')}) and build/icon-preview.png`);
+writeFileSync(path.join(root, 'build', 'runtime-icon.png'), pngFor(256));
+console.log(
+  `Wrote build/icon.ico (${ICO_SIZES.join(', ')}), build/icon.png, build/icon-preview.png and build/runtime-icon.png`
+);
 
 const iconsDir = path.join(root, 'extension', 'icons');
 mkdirSync(iconsDir, { recursive: true });

@@ -24,6 +24,37 @@ export interface PrepareHandoffInput {
 }
 
 /**
+ * The exact ordinary user message typed into the replacement ChatGPT conversation.
+ *
+ * Keep this beside the stored handoff rather than in bridge.ts: Compact & Resume has two
+ * consumers of the same semantic message. The browser command types it into chat B, and Goal
+ * reconstructs that chat-facing conversation from the durable session after the local session
+ * has been rebound. Sharing one formatter prevents those two model contexts from drifting.
+ */
+export function resumeBootstrapText(summary: string): string {
+  return (
+    'Continuing a Chat On Steroids session that was compacted. This is the brief the previous chat wrote about ' +
+    'its own work; carry on from it rather than starting again.\n\n' +
+    summary
+  );
+}
+
+/**
+ * Whether a recorded user row is the exact Compact & Resume bootstrap for one stored handoff.
+ *
+ * ChatGPT's rendered text has historically changed ordinary indentation spaces into NBSP. One
+ * Windows/DOM path then surfaced those bytes as the literal mojibake pair `Â ` (U+00C2 U+00A0)
+ * in the recorder. That is presentation damage, not authored-content drift. Canonicalise only
+ * those known space artifacts plus line endings; deliberately do not trim/collapse
+ * ordinary whitespace or normalize arbitrary Unicode, because this comparison is provenance.
+ */
+export function resumeBootstrapMatches(recorded: string, summary: string): boolean {
+  const canonical = (value: string): string =>
+    value.replace(/\u00c2\u00a0/g, ' ').replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n');
+  return canonical(recorded) === canonical(resumeBootstrapText(summary));
+}
+
+/**
  * The shortest a brief may be before it is refused, for any session at all.
  *
  * Far below what the brief rules ask for — they target 10,000-30,000 tokens — because this

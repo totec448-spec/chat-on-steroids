@@ -38,6 +38,14 @@ export const CAPABILITIES = [
 
 export type Capability = (typeof CAPABILITIES)[number];
 
+/** Model-facing Desktop permissions. The macOS/Linux port intentionally leaves these out. */
+export const DESKTOP_CAPABILITIES: readonly Capability[] = [
+  'screen',
+  'control',
+  'clipboardRead',
+  'clipboardWrite'
+];
+
 /**
  * Capabilities that change something outside this app — files on disk, code that
  * runs, or the desktop itself. Blocked outright by read-only mode.
@@ -57,10 +65,28 @@ export const WRITE_CAPABILITIES: readonly Capability[] = [
 
 export type Capabilities = Record<Capability, boolean>;
 
+/** Host family reported to the renderer. Desktop automation is intentionally Windows-only. */
+export type PlatformFamily = 'windows' | 'macos' | 'linux' | 'other';
+
+export interface PlatformInfo {
+  family: PlatformFamily;
+  /** Friendly operating-system name for setup/help copy. */
+  name: string;
+  /** Whether the model-facing Desktop connector can be used on this host. */
+  desktopAutomation: boolean;
+}
+
+/** Whether this host can protect the credentials/tokens the app persists. */
+export interface SecureStorageInfo {
+  available: boolean;
+  /** Actionable explanation when unavailable; null when the backend is safe to use. */
+  detail: string | null;
+}
+
 export interface Root {
   /** Virtual name exposed to the model, e.g. "project" for /project. */
   name: string;
-  /** Absolute Windows path. Never sent to the model. */
+  /** Absolute host path. Never sent to the model. */
   path: string;
 }
 
@@ -85,7 +111,7 @@ export interface TunnelSettings {
    * and the API (`docs/tool-surface.md` §6.5). One id per connector is what actually works.
    */
   desktopTunnelId: string;
-  /** Optional explicit path to tunnel-client.exe / cloudflared.exe. */
+  /** Optional explicit path to tunnel-client / cloudflared. */
   binaryPath: string;
 }
 
@@ -94,7 +120,7 @@ export interface UiPrefs {
   autoConnect: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
-  /** Explicit choice, never inherited from Windows: the window looks how you left it. */
+  /** Explicit choice, never inherited from the OS: the window looks how you left it. */
   theme: 'light' | 'dark';
 }
 
@@ -166,6 +192,15 @@ export interface GoalSettings {
   reasoning: GoalReasoning;
   /** Editable continuation-gate instruction sent as the OpenRouter system message. */
   prompt: string;
+  /**
+   * Editable driver instruction used instead of `prompt` once a chat carries its own goal.
+   *
+   * Two prompts rather than one switch, because the two jobs disagree about where the finish
+   * line comes from: the gate infers it from the conversation, the driver is handed it. Both
+   * are editable for the same reason the gate always was — the shipped wording is a starting
+   * point, and the person whose chat gets typed into is the one who should own it.
+   */
+  objectivePrompt: string;
 }
 
 /**
@@ -349,6 +384,8 @@ export function browserExtensionRequired(config: Pick<Config, 'sessions' | 'mult
 export interface AppState {
   config: Config;
   status: ConnectionStatus;
+  platform: PlatformInfo;
+  secureStorage: SecureStorageInfo;
   /** True when an OpenAI control-plane API key is stored. The key itself never leaves the main process. */
   hasApiKey: boolean;
   /** True when an OpenRouter key is stored, which is what the goal loop spends. Same rule: the key stays here. */

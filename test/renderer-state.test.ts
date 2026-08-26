@@ -385,6 +385,41 @@ async function mountChat(
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+it('preserves Windows-only Desktop permissions when saving unrelated settings on Linux', async () => {
+  const mounted = await mountChat({
+    platform: { family: 'linux', name: 'Linux', desktopAutomation: false }
+  });
+  const w = mounted.window;
+
+  const desktopGroup = w.document.querySelector<HTMLElement>('[data-group="desktop"]')!;
+  expect(desktopGroup.hidden).toBe(true);
+
+  const autoConnect = w.document.getElementById('autoConnect') as HTMLInputElement;
+  autoConnect.checked = true;
+  autoConnect.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+
+  expect(mounted.calls).toHaveLength(1);
+  expect(mounted.calls[0].ui.autoConnect).toBe(true);
+  expect(mounted.calls[0].capabilities).toMatchObject({
+    screen: true,
+    control: true,
+    clipboardRead: true,
+    clipboardWrite: true
+  });
+});
+
+it('uses native menu-bar/Dock wording on macOS instead of Windows tray copy', async () => {
+  const mounted = await mountChat({
+    platform: { family: 'macos', name: 'macOS', desktopAutomation: false }
+  });
+  const doc = mounted.window.document;
+
+  expect(doc.getElementById('backgroundRunningCopy')!.textContent).toContain('menu bar and Dock');
+  expect(doc.getElementById('backgroundRunningCopy')!.textContent).not.toContain('tray');
+  expect(doc.getElementById('minimizeToTrayCopy')!.textContent).toBe('Hide the window to the menu bar when closed');
+});
+
 it('surfaces the existing root rename API in the folder row', async () => {
   const renames: Array<[string, string]> = [];
   const mounted = await mountChat({}, [], {

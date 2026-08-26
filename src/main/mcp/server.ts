@@ -461,8 +461,12 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
             ? null
             : setTimeout(() => {
                 if (settled) return;
-                logWarn(`server drain timed out after ${forceAfterMs}ms during final shutdown; forcing remaining connections closed`);
+                // Force first, report second. This timer is the only thing between a wedged
+                // peer and a shutdown that never ends, so nothing it depends on may sit behind
+                // a call that could throw — and logging reaches the renderer, which by this
+                // point in a quit is already gone.
                 server.closeAllConnections();
+                logWarn(`server drain timed out after ${forceAfterMs}ms during final shutdown; forcing remaining connections closed`);
               }, Math.max(0, forceAfterMs));
         force?.unref?.();
         server.closeIdleConnections?.();

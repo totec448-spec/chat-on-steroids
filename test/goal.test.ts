@@ -16,9 +16,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 vi.mock('electron', () => ({
   app: { getPath: () => '', getVersion: () => '0.0.0' },
   safeStorage: {
-    isEncryptionAvailable: () => true,
-    encryptString: (value: string) => Buffer.from(value, 'utf8'),
-    decryptString: (buffer: Buffer) => buffer.toString('utf8')
+    isAsyncEncryptionAvailable: async () => true,
+    getSelectedStorageBackend: () => 'gnome_libsecret',
+    encryptStringAsync: async (value: string) => Buffer.from(value, 'utf8'),
+    decryptStringAsync: async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false })
   }
 }));
 
@@ -96,15 +97,63 @@ describe('the instruction the goal model is given', () => {
    * conversation — "the assistant should now implement X" — which reads as a review the
    * moment it lands in somebody's composer.
    */
-  it('stops on a completion claim and continues only explicit requested remainders', () => {
+  it('keeps going until the whole request and its questions are explicitly reported complete', () => {
     const prompt = goal.goalSystemPrompt();
-    expect(prompt).toContain('Your default action is to stop.');
-    expect(prompt).toContain('If ChatGPT says "done", it is time to stop.');
-    expect(prompt).toContain('Treat that completion claim as authoritative.');
-    expect(prompt).toContain('Continue only when the latest assistant message explicitly says');
-    expect(prompt).toContain('Never create a new requirement.');
+    // The situation, stated before anything else: whose seat this is and where the goal
+    // comes from when nobody supplied one.
+    expect(prompt).toContain('Your job is to prompt ChatGPT');
+    expect(prompt).toContain('Nobody handed you a separate goal');
+    // The two moves, and the stop sentinel the app-owned output protocol maps onto.
+    expect(prompt).toContain('You have exactly two moves');
     expect(prompt).toContain('NO_REPLY');
-    expect(prompt).toContain('When in doubt, output NO_REPLY.');
+    // The named failure modes.
+    expect(prompt).toContain('never invent a task the person never asked for');
+    expect(prompt).toContain('never grade or summarize what it produced');
+  });
+
+  /**
+   * The five worked examples are the part that fixes a small model reading the role wrong,
+   * so their presence is a contract rather than decoration. Both prompts carry five, and
+   * both cover the two decisions that actually go wrong: stopping when the job is done, and
+   * refusing to invent work that was never requested.
+   */
+  it('teaches both jobs by example, including when not to speak', () => {
+    for (const prompt of [goal.goalSystemPrompt(), goal.goalObjectivePrompt()]) {
+      expect(prompt).toContain('Five examples.');
+      for (const n of [1, 2, 3, 4, 5]) expect(prompt).toContain(`\n${n}. `);
+      // At least one example must end in silence, or the model only ever learns to talk.
+      expect(prompt).toContain('You answer: NO_REPLY');
+    }
+  });
+
+  /**
+   * The examples are monolingual on purpose, and the prompt has to say why.
+   *
+   * Few-shot examples bias the *language* of the output as strongly as its shape. An earlier
+   * draft wrote them in the mix of English and German this app is used in, which teaches a
+   * cheap model to answer an English chat in German. The rule replaces the demonstration:
+   * examples in one language, plus an explicit line that the language comes from the user.
+   */
+  it('does not let the examples decide which language the reply is written in', () => {
+    for (const prompt of [goal.goalSystemPrompt(), goal.goalObjectivePrompt()]) {
+      expect(prompt).toContain("the language you actually write in is the user's");
+      expect(prompt).toMatch(/written in English only/);
+    }
+    expect(goal.goalSystemPrompt()).toContain("Write in the person's own language and register");
+    expect(goal.goalObjectivePrompt()).toContain("Write in the user's own language and register");
+  });
+
+  /**
+   * The driver is the other half of the same feature and is now editable too, so it needs
+   * the same contract test the gate has always had.
+   */
+  it('points the driver at the stated goal, and caps it there', () => {
+    const prompt = goal.goalObjectivePrompt();
+    expect(prompt).toContain('Your job is to prompt ChatGPT');
+    expect(prompt).toContain('they have handed you the wheel');
+    expect(prompt).toContain('it is also your ceiling');
+    expect(prompt).toContain('Never widen it');
+    expect(prompt).toContain('NO_REPLY');
   });
 });
 
@@ -243,16 +292,26 @@ describe('what leaves this machine', () => {
     expect(sent.body.messages[0].content).toBe(customPrompt);
     expect(sent.body.messages[1]).toMatchObject({ role: 'system' });
     expect(sent.body.messages[1].content).toContain('response schema');
-    expect(sent.body.messages.slice(2)).toEqual([
+    expect(sent.body.messages.slice(2, -1)).toEqual([
       { role: 'user', content: 'build the parser' },
       { role: 'assistant', content: 'parser written, tests pending' }
     ]);
+    // The closing reminder sits after the transcript, not with the instruction: a long chat
+    // pushes everything above it out of the model's effective attention, and what it read
+    // last is what it obeys. Placement is app-owned; the policy it restates is not.
+    const trailer = sent.body.messages.at(-1);
+    expect(trailer.role).toBe('system');
+    expect(trailer.content).toContain('That was the conversation.');
+    expect(trailer.content).toContain('NO_REPLY');
     expect(sent.body.stream).toBe(false);
     expect(sent.body.reasoning).toEqual({ exclude: true });
     expect(sent.body.response_format).toMatchObject({
       type: 'json_schema',
       json_schema: { name: 'goal_decision', strict: true }
     });
+    expect(sent.body.response_format.json_schema.schema.properties.action.description).toContain(
+      'continue while concrete requested work or questions are not yet clearly completed or answered'
+    );
     expect(sent.body.plugins).toEqual([{ id: 'response-healing' }]);
     expect(sent.body.provider).toEqual({ require_parameters: true });
   });
@@ -996,8 +1055,13 @@ describe('the model catalogue', () => {
     vi.useFakeTimers();
     try {
       const opened: { signal: AbortSignal | null } = { signal: null };
+      let markFetchStarted: () => void = () => {};
+      const fetchStarted = new Promise<void>((resolve) => {
+        markFetchStarted = resolve;
+      });
       globalThis.fetch = (async (_url: string, init?: RequestInit) => {
         opened.signal = init?.signal ?? null;
+        markFetchStarted();
         return await new Promise<Response>((_resolve, reject) => {
           opened.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
         });
@@ -1009,8 +1073,10 @@ describe('the model catalogue', () => {
         () => null,
         (error: Error) => error
       );
-      await Promise.resolve();
-      await Promise.resolve();
+      // Secret lookup now initializes Electron's non-blocking async safeStorage provider before
+      // the network request. Wait for the observable fetch boundary instead of assuming an exact
+      // number of internal promise turns between the API call and provider I/O.
+      await fetchStarted;
       expect(opened.signal).not.toBeNull();
       await vi.advanceTimersByTimeAsync(31_000);
       const failure = await pending;
@@ -1178,12 +1244,17 @@ describe('a chat driven towards a specific goal', () => {
 
     expect(view.stage).toBe('ready');
     const system = box.seen.filter((message) => message.role === 'system').map((message) => message.content);
-    expect(system[0]).toContain('keep prompting ChatGPT until the goal stated below is reached');
+    expect(system[0]).toContain('they have handed you the wheel');
     expect(system[1]).toContain('port the whole module to typescript and make the suite green');
     // The standing instruction is the *other* mode's, and sending both would give the model
-    // one prompt telling it to default to stopping and another telling it to default to going.
-    expect(system.join('\n')).not.toContain('Your default action is to stop.');
-    expect(box.seen.at(-1)).toEqual({ role: 'user', content: 'start on the port' });
+    // one prompt telling it where to read the goal from and another telling it there is none.
+    expect(system.join('\n')).not.toContain('Nobody handed you a separate goal');
+    // The conversation is still last among the non-system messages, with the goal-flavoured
+    // closing reminder after it rather than the gate's.
+    expect(box.seen.filter((message) => message.role !== 'system')).toEqual([
+      { role: 'user', content: 'start on the port' }
+    ]);
+    expect(box.seen.at(-1)!.content).toContain('name the parts of the goal that are still not done');
   });
 
   /**
@@ -1202,10 +1273,9 @@ describe('a chat driven towards a specific goal', () => {
 
     expect(view.stage).toBe('ready');
     expect(view.error).toBeNull();
-    expect(box.seen.at(-1)).toEqual({
-      role: 'user',
-      content: 'The conversation has not started yet. Write its opening message.'
-    });
+    expect(box.seen.filter((message) => message.role !== 'system')).toEqual([
+      { role: 'user', content: 'The conversation has not started yet. Write its opening message.' }
+    ]);
   });
 
   it('refuses the same empty conversation when there is no goal to supply the request', async () => {
@@ -1219,11 +1289,7 @@ describe('a chat driven towards a specific goal', () => {
     expect(view.error).toBe('no_conversation');
   });
 
-  /**
-   * A goal has exactly one ending. Left in place it would put the chat straight back into
-   * the loop on its next turn, against a finish line it has already crossed.
-   */
-  it('clears the goal once the model says it is reached', async () => {
+  it('keeps the saved objective when one Goal run says it is reached', async () => {
     const session = await createSession({ title: 'goal', conversationId: 'c-obj-done' });
     await appendEvent(session.id, {
       time: 1_000,
@@ -1238,7 +1304,26 @@ describe('a chat driven towards a specific goal', () => {
     const view = await settled('c-obj-done');
 
     expect(view.stage).toBe('no-reply');
-    expect(goal.goalObjectiveFor('c-obj-done')).toBe('');
+    expect(goal.goalObjectiveFor('c-obj-done')).toBe('get the release out');
+  });
+
+  it('restores chat-specific objectives after restart without creating a draft', () => {
+    goal.setGoalObjective('c-obj-restored', 'keep the overnight build green');
+    const saved = goal.snapshotGoalObjectives();
+    goal.resetGoalStateForTests();
+
+    goal.restoreGoalObjectives(saved);
+
+    expect(goal.goalObjectiveFor('c-obj-restored')).toBe('keep the overnight build green');
+    expect(goal.goalViewFor('c-obj-restored')).toBeNull();
+  });
+
+  it('moves the same objective to the replacement chat on resume', () => {
+    goal.setGoalObjective('c-obj-parent', 'finish the release unattended');
+
+    expect(goal.moveGoalObjective('c-obj-parent', 'c-obj-child')).toBe(true);
+    expect(goal.goalObjectiveFor('c-obj-parent')).toBe('');
+    expect(goal.goalObjectiveFor('c-obj-child')).toBe('finish the release unattended');
   });
 
   it('trims and bounds what it stores, and reports back what it stored', () => {
@@ -1295,14 +1380,16 @@ describe('opening a chat on a goal', () => {
       reply: goal.humanReply('rewrite the parser in rust — start with the lexer'),
       model: 'deepseek/deepseek-v4-flash'
     });
-    expect(seen[0]!.content).toContain('keep prompting ChatGPT until the goal stated below is reached');
+    expect(seen[0]!.content).toContain('they have handed you the wheel');
     expect(seen[1]!.content).toContain('rewrite the parser in rust');
     // Trimmed on the way in, so stray whitespace is not part of the goal it prompts against.
     expect(seen[1]!.content).not.toContain('  rewrite');
-    expect(seen.at(-1)).toEqual({
-      role: 'user',
-      content: 'The conversation has not started yet. Write its opening message.'
-    });
+    expect(seen.filter((message) => message.role !== 'system')).toEqual([
+      { role: 'user', content: 'The conversation has not started yet. Write its opening message.' }
+    ]);
+    // The opening message runs outside the draft map but through the same assembly, closing
+    // reminder included — that sameness is the point of sharing one request builder.
+    expect(seen.at(-1)!.content).toContain('That was the conversation.');
   });
 
   /**

@@ -22,9 +22,12 @@ import {
 import { resolveIn } from '../src/main/mcp/kernel.js';
 import { SandboxError, resolvePath } from '../src/main/sandbox.js';
 import {
+  activateAgentWorkspace,
+  bindAgentWorkspace,
   currentWorkspace,
   inheritWorkspace,
   moveChatWorkspace,
+  parkAgentWorkspace,
   primeWorkspace,
   projectFolderOf,
   resetWorkspaces,
@@ -54,6 +57,15 @@ function asAgent(agent: string | null): CallContext {
 }
 
 const run = <T>(agent: string | null, fn: () => T): T => runInCallContext(asAgent(agent), fn);
+
+function asConversation(agent: string | null, conversationId: string): CallContext {
+  const context = asAgent(agent);
+  context.caller.conversationId = conversationId;
+  return context;
+}
+
+const runAsConversation = <T>(agent: string | null, conversationId: string, fn: () => T): T =>
+  runInCallContext(asConversation(agent, conversationId), fn);
 
 beforeAll(async () => {
   base = await makeTempDir('clf-workspace-');
@@ -244,6 +256,11 @@ describe('a worker starting where the prime left off', () => {
     expect(workspaceEntries()).toEqual([]);
   });
 
+  it('prefers the exact conversation over a reusable friendly agent id', () => {
+    expect(runAsConversation('worker-1', 'worker-chat-a', workspaceKey)).toBe('chat:worker-chat-a');
+    expect(runAsConversation('prime', 'prime-chat-a', workspaceKey)).toBe('chat:prime-chat-a');
+  });
+
   it('clears a reused worker id when a new run has no prime workspace yet', () => {
     // Worker ids are friendly slot names, not run incarnations. A previous worker-1 may have
     // learned a completely different project and the next run is allowed to reuse that id.
@@ -252,6 +269,62 @@ describe('a worker starting where the prime left off', () => {
     expect(inheritWorkspace('worker-1', 'conv-new-prime')).toBe(false);
     expect(workspaceEntries().filter((entry) => entry.key === 'agent:worker-1')).toEqual([]);
     expect(run('worker-1', currentWorkspace)).toBeNull();
+  });
+});
+
+describe('reusable worker workspace isolation across run turnover', () => {
+  it('parks a friendly worker id under its exact conversation before another run reuses that id', () => {
+    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+
+    expect(parkAgentWorkspace('worker-1', 'worker-chat-a')).toBe(true);
+    expect(workspaceForChat('worker-chat-a')?.virtual).toBe('/workspace/project');
+    expect(run('worker-1', currentWorkspace)).toBeNull();
+
+    // A different run is now free to reuse the friendly slot without seeing A's cwd.
+    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/other', real: path.join(approved, 'other') });
+    expect(run('worker-1', currentWorkspace)?.virtual).toBe('/workspace/other');
+    expect(workspaceForChat('worker-chat-a')?.virtual).toBe('/workspace/project');
+  });
+
+  it('restores the exact dormant worker workspace and never leaves the previous run in the friendly key', () => {
+    setWorkspaceFor('chat:worker-chat-a', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/other', real: path.join(approved, 'other') });
+
+    expect(activateAgentWorkspace('worker-1', 'worker-chat-a')).toBe(true);
+    expect(run('worker-1', currentWorkspace)?.virtual).toBe('/workspace/project');
+
+    // A dormant worker with no learned cwd must clear a recycled friendly id rather than
+    // inheriting the other prime's project.
+    expect(activateAgentWorkspace('worker-1', 'worker-chat-with-no-workspace')).toBe(false);
+    expect(run('worker-1', currentWorkspace)).toBeNull();
+  });
+
+  it('migrates inherited bootstrap workspace to the exact worker chat on first attributed use', () => {
+    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+
+    expect(runAsConversation('worker-1', 'worker-chat-a', currentWorkspace)?.virtual).toBe('/workspace/project');
+    expect(workspaceForChat('worker-chat-a')?.virtual).toBe('/workspace/project');
+    expect(run('worker-1', currentWorkspace)).toBeNull();
+  });
+
+  it('can finalize bootstrap inheritance at browser bind before the worker ever calls a tool', () => {
+    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+
+    expect(bindAgentWorkspace('worker-1', 'bound-worker-chat')).toBe(true);
+    expect(workspaceForChat('bound-worker-chat')?.virtual).toBe('/workspace/project');
+    expect(run('worker-1', currentWorkspace)).toBeNull();
+  });
+
+  it('does not fall back from a missing exact chat to a recycled friendly worker id', () => {
+    // Simulate another active run already owning the friendly slot. Exact dormant conversation
+    // A has no workspace, so its call must see no cwd rather than B's project.
+    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/other', real: path.join(approved, 'other') });
+    setWorkspaceFor('chat:someone-else', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+
+    // The lazy migration is intentionally only safe for the newly bound worker that currently
+    // owns the friendly key. A dormant/non-active caller must never be assigned agent=worker-1 by
+    // the kernel while another run owns that slot; the kernel fencing regression covers that.
+    expect(runAsConversation(null, 'dormant-worker-chat', currentWorkspace)).toBeNull();
   });
 });
 

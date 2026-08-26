@@ -8,7 +8,7 @@
  * key but can never read it back.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { z } from 'zod';
 import { CAPABILITIES, GOAL_REASONING_LEVELS, type AppState, type Config } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
@@ -19,7 +19,7 @@ import { forgetExposedSurface } from './mcp/server.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError } from './sandbox.js';
-import { hasSecret, isEncryptionAvailable, setSecret } from './secrets.js';
+import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
 import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
 import {
@@ -44,12 +44,14 @@ import { activeSessionId, forgetSession, onSessionChange } from './session/recor
 import {
   clearAgent,
   onSwarmChange,
+  pauseSwarmForDisable,
   persistAgentAuthorityNow,
   resetSwarm,
   swarmState
 } from './agents.js';
 import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
+import { hostPlatformInfo } from './platform.js';
 
 /** The only URLs the renderer may ask the OS to open. */
 const ALLOWED_LINKS = new Set([
@@ -130,7 +132,8 @@ const settingsPatch = z.object({
         'Expected an OpenRouter model id like vendor/model'
       ),
     reasoning: z.enum(GOAL_REASONING_LEVELS),
-    prompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
+    prompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS),
+    objectivePrompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
   })
 });
 
@@ -199,7 +202,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       enabled: pick(current.goal.enabled, base.goal.enabled, wanted.goal.enabled),
       model: pick(current.goal.model, base.goal.model, wanted.goal.model),
       reasoning: pick(current.goal.reasoning, base.goal.reasoning, wanted.goal.reasoning),
-      prompt: pick(current.goal.prompt, base.goal.prompt, wanted.goal.prompt)
+      prompt: pick(current.goal.prompt, base.goal.prompt, wanted.goal.prompt),
+      objectivePrompt: pick(
+        current.goal.objectivePrompt,
+        base.goal.objectivePrompt,
+        wanted.goal.objectivePrompt
+      )
     }
   };
 }
@@ -227,6 +235,8 @@ async function buildState(): Promise<AppState> {
   return {
     config,
     status: getStatus(),
+    platform: hostPlatformInfo(),
+    secureStorage: await secureStorageStatus(),
     hasApiKey: await hasSecret('openaiApiKey'),
     hasGoalKey: await hasSecret('openRouterApiKey'),
     resolvedBinary: resolvedBinary(config),
@@ -255,18 +265,35 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null): void {
-  handle('state:get', async () => buildState());
+  handle('state:get', async () => {
+    const state = await buildState();
+    // Native package smoke uses this as the end-to-end renderer readiness barrier. Unlike
+    // `did-finish-load`, it can only happen after the renderer's first IPC request has completed
+    // secure-storage availability/decryption probes and the rest of the initial state snapshot.
+    logInfo('renderer state ready');
+    return state;
+  });
 
   handle('settings:save', async (payload) => {
     const request = settingsSave.parse(payload);
     const before = getConfig();
     const wasMultiAgent = before.multiAgent.enabled;
     const next = await updateConfig((config) => ({ ...config, ...mergeSettings(config, request.base, request.patch) }));
+    // Renderer palette changes are immediate, so keep OS/Electron-owned chrome in lock-step too.
+    // Without this, selecting Dark on macOS left the title bar, menus and file picker in the
+    // system theme until restart (and startup still defaulted to system before index.ts applies it).
+    nativeTheme.themeSource = next.ui.theme;
+    // BrowserWindow's native backing color is fixed at construction unless updated explicitly.
+    // Keep it in lock-step too: the default macOS application menu exposes Reload, and after a
+    // live theme switch an old opposite background otherwise flashes behind the renderer while it
+    // paints again. This is also the color Electron shows during any later renderer reload/failure.
+    getWindow()?.setBackgroundColor(next.ui.theme === 'dark' ? '#0e0e11' : '#ffffff');
     if (
       before.goal.enabled !== next.goal.enabled ||
       before.goal.model !== next.goal.model ||
       before.goal.reasoning !== next.goal.reasoning ||
-      before.goal.prompt !== next.goal.prompt
+      before.goal.prompt !== next.goal.prompt ||
+      before.goal.objectivePrompt !== next.goal.objectivePrompt
     ) {
       retireGoalDrafts();
     }
@@ -276,14 +303,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     // deliberately — and the settings screen tells them to reconnect the connector, which
     // is what makes ChatGPT read the clean schemas.
     if (wasMultiAgent && !next.multiAgent.enabled) forgetExposedSurface();
-    // Order matters, and it used to be wrong. Ending the run is what tells the still-open
-    // worker chats to stop, and it does that by queueing commands the bridge delivers — so
-    // stopping the bridge first meant those notices were queued into a server that was
-    // already gone, the tabs kept generating, and the commands sat in the queue until some
-    // later restart opened them. The run ends while the bridge can still act on it.
+    // Order matters, and it used to be wrong. Pausing the run and withdrawing worker browser
+    // commands has to happen while the bridge can still cancel those transports; stopping the
+    // bridge first left queued worker/revival commands behind for a later restart to deliver.
     let authorityPersistError: Error | null = null;
     if (!next.multiAgent.enabled) {
-      resetSwarm();
+      // Off pauses execution; it is not the destructive Clear swarm action. Preserve every
+      // prime-owned worker history so re-enable/restart can still show and revive exact chats.
+      pauseSwarmForDisable();
+      cancelWorkerCommands('multi-agent mode was turned off');
       try {
         if (!(await persistAgentAuthorityNow())) {
           throw new Error('Multi-agent teardown has no immediate durable persistence sink.');
@@ -305,9 +333,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     await applySettings();
     logInfo('settings updated');
     // The config and runtime side effects above still complete so the app does not stay half-on,
-    // but the UI must not be told the teardown was safely accepted when its authority snapshot
-    // failed to cross disk. Startup with the feature off also clears stale swarm state as a
-    // recovery net for this exact failure class.
+    // but the UI must not be told the pause was safely accepted when its retained authority
+    // snapshot failed to cross disk. Startup with the feature off restores and canonicalizes
+    // that same history instead of deleting it.
     if (authorityPersistError) throw authorityPersistError;
     return buildState();
   });
@@ -376,8 +404,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     const { value, key } = z
       .object({ value: z.string().max(500), key: z.enum(['openaiApiKey', 'openRouterApiKey']).default('openaiApiKey') })
       .parse(payload);
-    if (!isEncryptionAvailable()) {
-      throw new Error('Windows credential encryption is unavailable, so the key cannot be stored safely.');
+    if (!(await isEncryptionAvailable())) {
+      throw new Error('Secure OS credential storage is unavailable, so the key cannot be stored safely.');
     }
     await setSecret(key, value);
     if (key === 'openRouterApiKey') retireGoalDrafts();
@@ -404,7 +432,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     const result = await dialog.showOpenDialog(window, {
       title: 'Select the tunnel executable',
       properties: ['openFile'],
-      filters: [{ name: 'Programs', extensions: ['exe'] }]
+      ...(process.platform === 'win32' ? { filters: [{ name: 'Programs', extensions: ['exe'] }] } : {})
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
     await updateConfig((config) => ({
@@ -601,17 +629,35 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   // Push updates so the UI reflects tunnel progress without polling. buildState() crosses
   // async secret/bridge reads, so an older snapshot can otherwise resolve after a newer one and
   // repaint stale config/status. Latest-request-wins makes the push stream monotonic.
+  /**
+   * Sends to the renderer, if there still is one.
+   *
+   * A null window was always handled; a *destroyed* one was not. Electron keeps the object
+   * alive after the window is gone, so `getWindow()` stays truthy and merely reading
+   * `.webContents` off it throws. That is not just a missed repaint: `onLog` runs inside
+   * `log()`, synchronously, on the caller's own stack — so once the window was destroyed,
+   * every log line written during teardown threw into whatever was writing it. The MCP drain's
+   * force-close timer died on its own `logWarn` before it could force anything, and the app
+   * sat draining a half-closed tunnel socket forever, with no window, no tray, and the
+   * single-instance lock still held.
+   */
+  const push = (channel: string, ...args: unknown[]): void => {
+    const target = getWindow();
+    if (!target || target.isDestroyed()) return;
+    target.webContents.send(channel, ...args);
+  };
+
   let statePushGeneration = 0;
   const pushState = (): void => {
     const generation = ++statePushGeneration;
     void buildState().then((state) => {
       if (generation !== statePushGeneration) return;
-      getWindow()?.webContents.send('state:changed', state);
+      push('state:changed', state);
     });
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
-  onLog((entry) => getWindow()?.webContents.send('log:entry', entry));
-  onSessionChange(() => getWindow()?.webContents.send('session:changed'));
-  onSwarmChange(() => getWindow()?.webContents.send('swarm:changed', swarmState()));
+  onLog((entry) => push('log:entry', entry));
+  onSessionChange(() => push('session:changed'));
+  onSwarmChange(() => push('swarm:changed', swarmState()));
 }

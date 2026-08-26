@@ -258,8 +258,19 @@ export async function terminateProcessTree(
     }
     return;
   }
+  // POSIX has a first-class process-group primitive. Every child this module owns is
+  // started as its own group leader below, so signalling -pid reaches descendants too.
+  // Fall back to the leader itself for a process that predates that launch contract or
+  // has already changed session/group state.
+  const signal = force ? 'SIGKILL' : 'SIGTERM';
   try {
-    process.kill(pid, force ? 'SIGKILL' : 'SIGTERM');
+    process.kill(-pid, signal);
+    return;
+  } catch {
+    /* group is gone or was not created */
+  }
+  try {
+    process.kill(pid, signal);
   } catch {
     /* already gone */
   }
@@ -285,6 +296,9 @@ function run(opts: RunOptions): Promise<ExecResult> {
       env: opts.env ?? childEnv(),
       windowsHide: true,
       shell: false,
+      // A POSIX process group is the only race-free way to make a timeout own all
+      // descendants. Windows keeps its existing taskkill /T tree semantics instead.
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe']
     });
 
@@ -526,7 +540,7 @@ export function prepareCommand(
   };
 }
 
-/** Starts an executable and returns as soon as Windows accepts the spawn. */
+/** Starts an executable and returns as soon as the operating system accepts the spawn. */
 export async function launchCommand(
   command: string,
   args: readonly string[],
@@ -541,8 +555,9 @@ export async function launchCommand(
       shell: false,
       // On Windows, detached:true can report a successful spawn yet cause
       // powershell.exe to exit 0 without executing its -File payload. Electron itself
-      // is long-lived, so unref() is sufficient here and preserves literal argv.
-      detached: false,
+      // is long-lived, so unref() is sufficient there and preserves literal argv. POSIX
+      // launchers get their own process group so callers can later terminate their tree.
+      detached: process.platform !== 'win32',
       stdio: 'ignore'
     });
     child.once('error', (error) => reject(new ExecError(`Failed to start: ${error.message}`)));

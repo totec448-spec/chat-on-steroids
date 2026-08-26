@@ -452,6 +452,9 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         ...(discoveryHeaders ? { MCP_DISCOVERY_EXTRA_HEADERS: discoveryHeaders } : {})
       }),
       windowsHide: true,
+      // Own a POSIX process group so stopTree terminates any helpers the client starts.
+      // Windows uses taskkill /T and keeps its existing launch semantics.
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe']
     });
     child = proc;
@@ -630,6 +633,7 @@ async function startCloudflared(opts: TunnelStartOptions): Promise<TunnelHandle>
 
   const child = spawn(binary, args, {
     windowsHide: true,
+    detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
     // Tunnel providers need the ordinary OS environment, never credentials inherited
     // from a terminal that happened to launch Electron.

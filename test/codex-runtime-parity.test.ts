@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,7 +16,14 @@ import {
   MIN_YIELD_TIME_MS,
   clampYieldTime
 } from '../src/main/codex/unified-exec-constants.js';
-import { defaultUserShell, deriveExecArgs, getShell, getShellByModelProvidedPath, shlexJoin } from '../src/main/codex/shell.js';
+import {
+  defaultUserShell,
+  deriveExecArgs,
+  getShell,
+  getShellByModelProvidedPath,
+  posixShellPreference,
+  shlexJoin
+} from '../src/main/codex/shell.js';
 import { terminateProcessTree } from '../src/main/exec.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../src/main/codex/command-batch.js';
 
@@ -114,11 +121,23 @@ describe('Codex unified exec runtime parity', () => {
     await mkdir(tools, { recursive: true });
     const shellFile = path.join(tools, process.platform === 'win32' ? 'powershell.exe' : 'bash');
     await writeFile(shellFile, 'placeholder', 'utf8');
+    if (process.platform !== 'win32') await chmod(shellFile, 0o755);
 
     const relative = process.platform === 'win32' ? '.\\tools\\powershell.exe' : './tools/bash';
     const resolved = getShellByModelProvidedPath(relative, root);
     expect(resolved).not.toBeNull();
     expect(path.normalize(resolved!.shellPath)).toBe(path.normalize(shellFile));
+  });
+
+  it.runIf(process.platform !== 'win32')('requires the POSIX executable bit for an explicit shell', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'clf-shell-executable-'));
+    tempRoots.push(root);
+    const shellFile = path.join(root, 'bash');
+    await writeFile(shellFile, '#!/bin/sh\n', { encoding: 'utf8', mode: 0o644 });
+    expect(getShellByModelProvidedPath(shellFile)).toBeNull();
+
+    await chmod(shellFile, 0o755);
+    expect(getShellByModelProvidedPath(shellFile)).toMatchObject({ shellType: 'bash', shellPath: shellFile });
   });
 
   it('classifies a launch failure as CreateProcess, matching Codex', async () => {
@@ -185,6 +204,29 @@ describe('Codex unified exec runtime parity', () => {
 
   it('keeps default shell resolution stable while its environment inputs are unchanged', () => {
     expect(defaultUserShell()).toBe(defaultUserShell());
+  });
+
+  it('uses Codex login-shell argv semantics for POSIX shells', () => {
+    const bash = { shellType: 'bash' as const, shellPath: '/bin/bash' };
+    expect(deriveExecArgs(bash, "printf '%s\\n' x", true)).toEqual([
+      '/bin/bash',
+      '-lc',
+      "printf '%s\\n' x"
+    ]);
+    expect(deriveExecArgs(bash, "printf '%s\\n' x", false)).toEqual([
+      '/bin/bash',
+      '-c',
+      "printf '%s\\n' x"
+    ]);
+  });
+
+  it('models macOS/Linux shell fallback policy without inventing a Windows shell', () => {
+    expect(posixShellPreference('darwin', null)).toEqual(['zsh', 'bash']);
+    expect(posixShellPreference('linux', null)).toEqual(['bash', 'zsh']);
+    expect(posixShellPreference('darwin', 'bash')).toEqual(['bash', 'zsh']);
+    expect(posixShellPreference('linux', 'zsh')).toEqual(['zsh', 'bash']);
+    expect(posixShellPreference('darwin', null)).not.toContain('powershell');
+    expect(posixShellPreference('linux', null)).not.toContain('cmd');
   });
 
   it('does not let batch command output impersonate wrapper exit markers', () => {
@@ -364,6 +406,93 @@ describe('Codex unified exec runtime parity', () => {
         truncationPolicy
       });
       expect(interrupted.processId).toBeNull();
+      await expect(initial).resolves.toMatchObject({ processId: null });
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      await expect(access(survived)).rejects.toBeDefined();
+    } finally {
+      if (Number.isInteger(grandchildPid) && grandchildPid > 0) {
+        await terminateProcessTree(grandchildPid, true).catch(() => undefined);
+      }
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')('Ctrl-C on a POSIX pipe session terminates the whole process group', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'clf-posix-pipe-interrupt-parity-'));
+    tempRoots.push(root);
+    const ready = path.join(root, 'grandchild.pid');
+    const survived = path.join(root, 'grandchild-survived.txt');
+    const grandchildScript = `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(survived)}, 'survived'), 900); setInterval(() => {}, 1000);`;
+    const parentScript = `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(grandchildScript)}], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(ready)}, String(child.pid)); setInterval(() => {}, 1000);`;
+
+    const instance = manager();
+    managers.push(instance);
+    const processId = instance.allocateProcessId();
+    const initial = instance.execCommand({
+      command: [process.execPath, '-e', parentScript],
+      shellType: 'bash',
+      hookCommand: 'POSIX pipe process-group parity child',
+      processId,
+      yieldTimeMs: 30_000,
+      maxOutputTokens: undefined,
+      truncationPolicy,
+      cwd: root,
+      displayCwd: root,
+      env: applyUnifiedExecEnv(process.env),
+      tty: false
+    });
+
+    await waitForProcess(instance, processId);
+    await waitForFile(ready);
+    const grandchildPid = Number.parseInt(await readFile(ready, 'utf8'), 10);
+    try {
+      const interrupted = await instance.writeStdin({
+        processId,
+        input: String.fromCharCode(3),
+        yieldTimeMs: 250,
+        maxOutputTokens: undefined,
+        truncationPolicy
+      });
+      expect(interrupted.processId).toBeNull();
+      await expect(initial).resolves.toMatchObject({ processId: null });
+      await new Promise((resolve) => setTimeout(resolve, 1_200));
+      await expect(access(survived)).rejects.toBeDefined();
+    } finally {
+      if (Number.isInteger(grandchildPid) && grandchildPid > 0) {
+        await terminateProcessTree(grandchildPid, true).catch(() => undefined);
+      }
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')('terminating a POSIX PTY session kills descendants in its process group', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'clf-posix-pty-tree-parity-'));
+    tempRoots.push(root);
+    const ready = path.join(root, 'grandchild.pid');
+    const survived = path.join(root, 'grandchild-survived.txt');
+    const grandchildScript = `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(survived)}, 'survived'), 900); setInterval(() => {}, 1000);`;
+    const parentScript = `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(grandchildScript)}], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(ready)}, String(child.pid)); setInterval(() => {}, 1000);`;
+
+    const instance = manager();
+    managers.push(instance);
+    const processId = instance.allocateProcessId();
+    const initial = instance.execCommand({
+      command: [process.execPath, '-e', parentScript],
+      shellType: 'bash',
+      hookCommand: 'POSIX PTY process-group parity child',
+      processId,
+      yieldTimeMs: 250,
+      maxOutputTokens: undefined,
+      truncationPolicy,
+      cwd: root,
+      displayCwd: root,
+      env: applyUnifiedExecEnv(process.env),
+      tty: true
+    });
+
+    await waitForProcess(instance, processId);
+    await waitForFile(ready);
+    const grandchildPid = Number.parseInt(await readFile(ready, 'utf8'), 10);
+    try {
+      expect(await instance.terminateProcess(processId)).toBe(true);
       await expect(initial).resolves.toMatchObject({ processId: null });
       await new Promise((resolve) => setTimeout(resolve, 1_200));
       await expect(access(survived)).rejects.toBeDefined();
