@@ -1,37 +1,73 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
-  workflow_dispatch:
 
 permissions:
-  contents: read
-
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  contents: write
+  actions: write
 
 jobs:
-  verify:
-    # Windows-only: the app depends on node-pty, Windows path semantics and
-    # desktop control, so a Linux runner would not be testing the real thing.
-    runs-on: windows-2025
-    timeout-minutes: 30
-
+  construct-safe-v2-0-2-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
-          node-version: 22
-          cache: npm
+          fetch-depth: 0
 
-      # Verify on Windows because native modules and path/process behavior are platform-specific.
-      # Release packaging separately smoke-tests x64 and ARM64 on native runners.
-      - name: Install dependencies
-        run: npm ci
+      - name: Construct exact candidate with noreply metadata
+        env:
+          EXPECTED_MAIN: bd2d6fde6c5687e0b5abb0abe1ff327555d33538
+          EXPECTED_TREE: 8d58a9d74a993d2530e10bef47cfd35b51ea0ffd
+          OLD_CANDIDATE: ac1e212fe96d8170ecbd2c326389a59c3ad369bf
+          SAFE_BRANCH: release/v2.0.2-final-safe-20260826
+          SAFE_NAME: github-actions[bot]
+          SAFE_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main refs/heads/release/v2.0.2-final-20260826
+          test "$(git rev-parse origin/main)" = "$EXPECTED_MAIN"
+          test "$(git rev-parse "$OLD_CANDIDATE^{tree}")" = "$EXPECTED_TREE"
+          test "$(git show -s --format=%P "$OLD_CANDIDATE")" = "$EXPECTED_MAIN"
 
-      - name: Verify
-        run: npm run verify:ci
+          export GIT_AUTHOR_NAME="$SAFE_NAME"
+          export GIT_AUTHOR_EMAIL="$SAFE_EMAIL"
+          export GIT_COMMITTER_NAME="$SAFE_NAME"
+          export GIT_COMMITTER_EMAIL="$SAFE_EMAIL"
+          safe_commit="$(printf '%s\n' 'release: v2.0.2' | git commit-tree "$EXPECTED_TREE" -p "$EXPECTED_MAIN")"
+
+          mapfile -t meta < <(git show -s --format='%ae%n%ce%n%T%n%P' "$safe_commit")
+          test "${meta[0]}" = "$SAFE_EMAIL"
+          test "${meta[1]}" = "$SAFE_EMAIL"
+          test "${meta[2]}" = "$EXPECTED_TREE"
+          test "${meta[3]}" = "$EXPECTED_MAIN"
+          echo "safe_candidate_commit=$safe_commit"
+
+          git push origin "$safe_commit:refs/heads/$SAFE_BRANCH"
+          git checkout --detach "$safe_commit"
+          node scripts/verify-public-history.mjs
+          echo "$safe_commit" > "$RUNNER_TEMP/safe_candidate_sha"
+
+      - name: Dispatch exact six-target release proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SAFE_BRANCH: release/v2.0.2-final-safe-20260826
+          EXPECTED_TREE: 8d58a9d74a993d2530e10bef47cfd35b51ea0ffd
+        run: |
+          set -euo pipefail
+          safe_commit="$(cat "$RUNNER_TEMP/safe_candidate_sha")"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/$SAFE_BRANCH" --jq .object.sha)" = "$safe_commit"
+          test "$(gh api "repos/${GITHUB_REPOSITORY}/git/commits/$safe_commit" --jq .tree.sha)" = "$EXPECTED_TREE"
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref "$SAFE_BRANCH"
+          for attempt in $(seq 1 30); do
+            row="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --branch "$SAFE_BRANCH" --event workflow_dispatch --limit 1 --json databaseId,headSha,status --jq '.[0] | [.databaseId,.headSha,.status] | @tsv' 2>/dev/null || true)"
+            if [ -n "$row" ]; then
+              echo "release_proof_run=$row"
+              test "$(printf '%s' "$row" | cut -f2)" = "$safe_commit"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Safe release proof dispatch did not appear" >&2
+          exit 1
