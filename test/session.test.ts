@@ -47,6 +47,7 @@ import {
   renameSession,
   reopenSession,
   resetSessionStoreForTests,
+  rewriteUnattributedToolCalls,
   saveHandoff,
   sessionsRoot,
   unsetSessionRootForTests,
@@ -93,6 +94,58 @@ const evidence = (patch: Partial<ReturnType<typeof emptyEvidence>> = {}) => ({ .
 // ------------------------------------------------------------------- store
 
 describe('session store', () => {
+  it('preserves tool calls appended after an unattributed repair snapshot', async () => {
+    const summary = await createSession({ title: 'Unattributed activity', conversationId: null });
+    const call = (callId: string, time: number) => ({
+      time,
+      source: 'mcp' as const,
+      kind: 'tool_call' as const,
+      call: {
+        callId,
+        tool: 'read',
+        attribution: 'unattributed' as const,
+        requestId: null,
+        conversationId: null,
+        attributionMethod: 'unattributed' as const,
+        args: { text: '{}', truncated: false, chars: 2 },
+        result: { text: 'ok', truncated: false, chars: 2 },
+        outcome: 'ok' as const,
+        durationMs: 1,
+        summary: { title: callId, tone: 'neutral' as const, kind: 'read' as const }
+      }
+    });
+
+    await appendEvent(summary.id, call('keep-old-unknown', 1));
+    await appendEvent(summary.id, call('remove-old-repaired', 2));
+    const snapshot = await readEvents(summary.id);
+    const scannedThroughSeq = Math.max(...snapshot.map((event) => event.seq));
+    const keptFromSnapshot = snapshot.filter(
+      (event): event is Extract<SessionEvent, { kind: 'tool_call' }> =>
+        event.kind === 'tool_call' && event.call.callId === 'keep-old-unknown'
+    );
+
+    // This append lands after the repair decided its old keep/remove set, but before the rewrite
+    // is enqueued. It used to be silently discarded when the old snapshot replaced events.jsonl.
+    await appendEvent(summary.id, call('keep-concurrent-new', 3));
+    await rewriteUnattributedToolCalls(summary.id, keptFromSnapshot, scannedThroughSeq);
+
+    const callIds = (await readEvents(summary.id))
+      .filter((event): event is Extract<SessionEvent, { kind: 'tool_call' }> => event.kind === 'tool_call')
+      .map((event) => event.call.callId);
+    expect(callIds).toEqual(['keep-old-unknown', 'keep-concurrent-new']);
+
+    // The rewrite re-sequences its retained snapshot. A subsequent append must continue after it
+    // rather than reusing the concurrent row's sequence number.
+    await appendEvent(summary.id, call('keep-after-rewrite', 4));
+    const after = (await readEvents(summary.id)).filter((event) => event.kind === 'tool_call');
+    expect(after.map((event) => event.call.callId)).toEqual([
+      'keep-old-unknown',
+      'keep-concurrent-new',
+      'keep-after-rewrite'
+    ]);
+    expect(new Set(after.map((event) => event.seq)).size).toBe(3);
+  });
+
   it('synchronizes reads only with their target session instead of flushing every open session', async () => {
     const first = await createSession({ title: 'read target' });
     const other = await createSession({ title: 'unrelated writer' });

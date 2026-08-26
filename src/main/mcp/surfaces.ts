@@ -22,6 +22,7 @@
  */
 
 import type { Capabilities } from '../../shared/types.js';
+import { desktopAutomationSupported } from '../platform.js';
 
 export const SURFACE_IDS = ['core', 'desktop'] as const;
 export type SurfaceId = (typeof SURFACE_IDS)[number];
@@ -99,9 +100,9 @@ const CORE: SurfaceDefinition = {
   serverName: 'chat-on-steroids-core',
   connectorName: `${CONNECTOR_BRAND} Core`,
   description:
-    'Read and edit code and text files on this Windows PC, and run commands in a real terminal. ' +
+    'Read and edit code and text files on this computer, and run commands in a real terminal. ' +
     'Use for: opening and reading files, searching a repository, applying patches, creating, renaming and deleting files, ' +
-    'running builds, tests, linters, git, npm and PowerShell, and continuing long-running or interactive terminal sessions. ' +
+    'running builds, tests, linters, git, npm and shell commands, and continuing long-running or interactive terminal sessions. ' +
     'Also searches and reads local recordings of previous or concurrently running ChatGPT work, and — when the user has ' +
     'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations.',
   cardSummary: 'Files, patches and the terminal. Required — this is the coding connector.',
@@ -153,10 +154,16 @@ export function surfaceDefinition(id: SurfaceId): SurfaceDefinition {
  * Core remains the required surface even when its live tool list is temporarily empty. Keeping
  * that identity stable is what lets permissions be enabled again without changing connectors.
  */
-export function surfaceIsUseful(id: SurfaceId, caps: Capabilities): boolean {
+export function surfaceIsUseful(
+  id: SurfaceId,
+  caps: Capabilities,
+  platform: NodeJS.Platform = process.platform
+): boolean {
   // Clipboard counts: it is reached through `computer`, so granting only the clipboard
   // still gives this surface something real to advertise.
-  if (id === 'desktop') return caps.screen || caps.control || caps.clipboardRead || caps.clipboardWrite;
+  if (id === 'desktop') {
+    return desktopAutomationSupported(platform) && (caps.screen || caps.control || caps.clipboardRead || caps.clipboardWrite);
+  }
   return true;
 }
 

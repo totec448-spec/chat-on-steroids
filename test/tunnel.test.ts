@@ -5,6 +5,8 @@
  * turns those lines into a status the UI can show.
  */
 
+import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ago, parseClientStatus, parsePollHealth, readMetric } from '../src/main/tunnel/health.js';
 import {
@@ -15,6 +17,45 @@ import {
   outageRecovered
 } from '../src/main/tunnel/index.js';
 import { describeRoute } from '../src/main/diagnostics.js';
+import { commonBinaryDirsForPlatform, locateBinary, tunnelExecutableName } from '../src/main/tunnel/locate.js';
+import { makeTempDir, removeTempDir } from './helpers.js';
+
+describe('cross-platform tunnel executable discovery', () => {
+  it('uses the platform executable suffix', () => {
+    expect(tunnelExecutableName('tunnel-client', 'win32')).toBe('tunnel-client.exe');
+    expect(tunnelExecutableName('tunnel-client', 'darwin')).toBe('tunnel-client');
+    expect(tunnelExecutableName('cloudflared', 'linux')).toBe('cloudflared');
+  });
+
+  it('includes common macOS and Linux install locations', () => {
+    expect(commonBinaryDirsForPlatform('darwin', { HOME: '/Users/dev' }, '/Users/dev')).toEqual(
+      expect.arrayContaining(['/Users/dev/.local/bin', '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'])
+    );
+    expect(commonBinaryDirsForPlatform('linux', { HOME: '/home/dev' }, '/home/dev')).toEqual(
+      expect.arrayContaining(['/home/dev/.local/bin', '/usr/local/bin', '/usr/bin', '/snap/bin'])
+    );
+  });
+
+  it.runIf(process.platform !== 'win32')('requires the executable bit for an explicit tunnel binary', async () => {
+    const root = await makeTempDir('clf-tunnel-exec-');
+    try {
+      const blockedDir = path.join(root, 'blocked');
+      const allowedDir = path.join(root, 'allowed');
+      await mkdir(blockedDir, { recursive: true });
+      await mkdir(allowedDir, { recursive: true });
+      const blocked = path.join(blockedDir, 'tunnel-client');
+      const allowed = path.join(allowedDir, 'tunnel-client');
+      await writeFile(blocked, '#!/bin/sh\n', { mode: 0o644 });
+      await writeFile(allowed, '#!/bin/sh\n', { mode: 0o644 });
+      await chmod(allowed, 0o755);
+
+      expect(locateBinary('tunnel-client', blocked)).toBeNull();
+      expect(locateBinary('tunnel-client', allowed)).toBe(allowed);
+    } finally {
+      await removeTempDir(root);
+    }
+  });
+});
 
 /** Verbatim lines seen in the field, with the tunnel up and the WLAN off. */
 const REAL_OUTAGE_LINES = [

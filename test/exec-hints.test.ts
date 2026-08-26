@@ -178,7 +178,7 @@ describe('a non-zero exit that is a result rather than a failure', () => {
     expect(nonZeroExitIsBenign(`${BOUND_RG} foo`, 1, '')).toBe(true);
   });
 
-  it('binds bare PowerShell ripgrep to the bundled executable without touching explicit/dynamic forms', () => {
+  it('binds bare PowerShell and POSIX ripgrep to the bundled executable without touching explicit/dynamic forms', () => {
     const bundled = 'C:\\Program Files\\Chat On Steroids\\resources\\rg\\rg.exe';
     expect(bindBundledRipgrep('rg -n foo src', 'powershell', bundled)).toBe(
       "& 'C:\\Program Files\\Chat On Steroids\\resources\\rg\\rg.exe' -n foo src"
@@ -196,7 +196,16 @@ describe('a non-zero exit that is a result rather than a failure', () => {
     expect(bindBundledRipgrep('.\\tools\\rg.exe foo', 'powershell', bundled)).toBe('.\\tools\\rg.exe foo');
     expect(bindBundledRipgrep('& $search foo', 'powershell', bundled)).toBe('& $search foo');
     expect(bindBundledRipgrep('rg foo`; Write-Output x', 'powershell', bundled)).toBe('rg foo`; Write-Output x');
-    expect(bindBundledRipgrep('rg foo', 'bash', bundled)).toBe('rg foo');
+
+    const posix = '/Applications/Chat On Steroids/resources/rg/rg';
+    const boundPosix = "'/Applications/Chat On Steroids/resources/rg/rg' foo";
+    expect(bindBundledRipgrep('rg foo', 'bash', posix)).toBe(boundPosix);
+    expect(bindBundledRipgrep('ripgrep foo', 'zsh', posix)).toBe(boundPosix);
+    expect(bindBundledRipgrep('rg foo', 'sh', posix)).toBe(boundPosix);
+    expect(nonZeroExitIsBenign(boundPosix, 1, '')).toBe(true);
+    expect(bindBundledRipgrep('rg foo', 'bash', "/tmp/it's/rg")).toBe("'/tmp/it'\\''s/rg' foo");
+    expect(bindBundledRipgrep('/usr/bin/rg foo', 'bash', posix)).toBe('/usr/bin/rg foo');
+    expect(bindBundledRipgrep('rg foo', 'cmd', bundled)).toBe('rg foo');
   });
 
   it('hides a leading dot from a pattern without one, and only then', () => {
@@ -599,6 +608,42 @@ describe('saying what to do next', () => {
     expect(hints.join(' ')).toMatch(/PowerShell does not expand/);
   });
 
+  it('never gives a POSIX shell a PowerShell-only glob recovery command', () => {
+    const output = 'rg: src/*.ts: IO error for operation on src/*.ts: No such file or directory (os error 2)';
+    const hints = execRecoveryHints("rg -n x 'src/*.ts'", output, 'bash').join(' ');
+    expect(hints).not.toMatch(/PowerShell|Get-ChildItem|\$env:/);
+  });
+
+  it('uses shell-native path and toolchain recovery syntax on POSIX', () => {
+    const missingPath = execRecoveryHints(
+      'rg -n x src/missing.ts',
+      'rg: src/missing.ts: IO error for operation on src/missing.ts: No such file or directory (os error 2)',
+      'zsh'
+    ).join(' ');
+    expect(missingPath).toContain("ls -ld -- '<path>'");
+    expect(missingPath).not.toMatch(/Get-ChildItem|PowerShell/);
+
+    const java = execRecoveryHints('gradle test', 'ERROR: JAVA_HOME is not set', 'bash').join(' ');
+    expect(java).toContain('export JAVA_HOME=/path/to/jdk');
+    expect(java).toContain('$JAVA_HOME/bin:$PATH');
+    expect(java).not.toMatch(/\$env:|C:\\/);
+
+    const go = execRecoveryHints('go test ./...', 'go: cannot find GOROOT directory', 'sh').join(' ');
+    expect(go).toContain('bin/go');
+    expect(go).toContain('export GOROOT=/path/to/go');
+    expect(go).not.toContain('go.exe');
+  });
+
+  it('uses cmd-native toolchain recovery syntax when cmd was explicitly requested', () => {
+    const java = execRecoveryHints('gradlew test', 'ERROR: JAVA_HOME is not set', 'cmd').join(' ');
+    expect(java).toContain('set "JAVA_HOME=C:\\path\\to\\jdk"');
+    expect(java).not.toContain('$env:');
+
+    const go = execRecoveryHints('go test ./...', 'go: cannot find GOROOT directory', 'cmd').join(' ');
+    expect(go).toContain('set "GOROOT=C:\\path\\to\\go"');
+    expect(go).toContain('bin\\go.exe');
+  });
+
   it('hands over the guard form when PowerShell 5.1 refused && or ||', () => {
     const refusal = "The token '&&' is not a valid statement separator in this version.";
     const hints = execRecoveryHints('npm test && npm publish', refusal);
@@ -901,6 +946,12 @@ describe('saying that a benign exit was benign', () => {
     expect(note).toContain('no matches');
     expect(note).toContain('Select-Object -First');
     expect(withExecNotes('Process exited with code 1\nOutput:\n', [note])).toContain('Note: Exit code 1');
+  });
+
+  it('uses POSIX vocabulary for a POSIX no-match result', () => {
+    const note = benignExitNote('rg -n foo src', 'bash');
+    expect(note).toContain('no matches');
+    expect(note).not.toMatch(/Select-Object|PowerShell/);
   });
 });
 

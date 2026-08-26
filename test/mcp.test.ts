@@ -840,8 +840,13 @@ describe('2025-era clients', () => {
     const instructions: string = reply.body.result.instructions ?? '';
     expect(instructions).toContain('/workspace');
     expect(instructions).toContain('start_line/end_line range applies to every file the call reads');
-    // The Windows glob gap, taught once here because it is what most shell retries were for.
-    expect(instructions).toContain('PowerShell does not expand * or ? for native programs');
+    if (IS_WINDOWS) {
+      // The Windows glob gap, taught once here because it is what most shell retries were for.
+      expect(instructions).toContain('PowerShell does not expand * or ? for native programs');
+    } else {
+      expect(instructions).toContain('normal POSIX shell');
+      expect(instructions).not.toContain('PowerShell does not expand * or ? for native programs');
+    }
     // Progress guidance lives once at server level rather than bloating every tool description.
     expect(instructions).toContain('Keep the user visibly informed more than usual while you work');
     // The two round-trip levers the recorded sessions actually pay for. Both are instructions
@@ -863,7 +868,8 @@ describe('2025-era clients', () => {
       capabilities: {},
       clientInfo: { name: 'test-client', version: '1.0.0' }
     });
-    expect(coreReply.body.result.instructions).toContain(surfaceDefinition('desktop').connectorName);
+    if (IS_WINDOWS) expect(coreReply.body.result.instructions).toContain(surfaceDefinition('desktop').connectorName);
+    else expect(coreReply.body.result.instructions).not.toContain(surfaceDefinition('desktop').connectorName);
 
     const desktopReply = await desktop('initialize', {
       protocolVersion: '2025-06-18',
@@ -1309,10 +1315,13 @@ describe('capability gating', () => {
   });
 
   it('starts a fresh install with every capability effective', () => {
-    const config = defaultConfig();
+    // This assertion is about the product's fully-enabled fresh-install policy, not the
+    // host running Vitest. macOS/Linux deliberately mask the Windows-only Desktop group at
+    // runtime, so model the platform that actually owns every declared capability.
+    const config = defaultConfig('win32');
     expect(config.readOnly).toBe(false);
     expect(config.multiAgent.enabled).toBe(true);
-    expect(Object.values(effectiveCapabilities(config)).every(Boolean)).toBe(true);
+    expect(Object.values(effectiveCapabilities(config, 'win32')).every(Boolean)).toBe(true);
   });
 
   it('refuses to call a tool that is not registered', async () => {
@@ -1409,16 +1418,18 @@ describe('desktop capabilities', () => {
   // Seeing the screen changes nothing, so it survives read-only mode; driving the
   // mouse and keyboard can do anything the user can, so it must not.
   it('keeps seeing but not touching in read-only mode', async () => {
-    const config = { ...defaultConfig(), capabilities: withCaps({ screen: true, control: true }) };
+    // Desktop is intentionally Windows-only. Exercise the read-only capability split on the
+    // platform where this surface exists rather than making the result depend on the CI host.
+    const config = { ...defaultConfig('win32'), capabilities: withCaps({ screen: true, control: true }) };
 
     ctx.readOnly = true;
-    ctx.caps = effectiveCapabilities({ ...config, readOnly: true });
+    ctx.caps = effectiveCapabilities({ ...config, readOnly: true }, 'win32');
     expect(ctx.caps.screen).toBe(true);
     expect(ctx.caps.control).toBe(false);
     expect(toolNames(await desktop('tools/list'))).toEqual(['observe']);
 
     ctx.readOnly = false;
-    ctx.caps = effectiveCapabilities({ ...config, readOnly: false });
+    ctx.caps = effectiveCapabilities({ ...config, readOnly: false }, 'win32');
     expect(toolNames(await desktop('tools/list'))).toContain('computer');
   });
 
@@ -1591,7 +1602,7 @@ describe('sandbox enforcement through the tool layer', () => {
     }
   });
 
-  it.runIf(IS_WINDOWS)('accepts a native Windows path when it is inside an approved root', async () => {
+  it('accepts a native filesystem path when it is inside an approved root', async () => {
     const reply = await core('tools/call', {
       name: 'read',
       arguments: { paths: [path.join(approved, 'notes.txt')] }
@@ -1602,7 +1613,7 @@ describe('sandbox enforcement through the tool layer', () => {
     expect(textOf(reply)).not.toContain(approved);
   });
 
-  it.runIf(IS_WINDOWS)('accepts native Windows globs through read', async () => {
+  it('accepts native filesystem globs through read', async () => {
     const reply = await core('tools/call', {
       name: 'read',
       arguments: { paths: [path.join(approved, 'src', '**', '*.ts')] }
@@ -1613,7 +1624,7 @@ describe('sandbox enforcement through the tool layer', () => {
     expect(textOf(reply)).not.toContain(approved);
   });
 
-  it.runIf(IS_WINDOWS)('accepts a native Windows search scope through find', async () => {
+  it('accepts a native filesystem search scope through find', async () => {
     ctx.caps = withCaps({ search: true });
     const reply = await core('tools/call', {
       name: 'find',
@@ -1624,7 +1635,7 @@ describe('sandbox enforcement through the tool layer', () => {
     expect(textOf(reply)).not.toContain(approved);
   });
 
-  it.runIf(IS_WINDOWS)('accepts a native Windows image path through view_image', async () => {
+  it('accepts a native filesystem image path through view_image', async () => {
     ctx.caps = withCaps({ read: true });
     const reply = await core('tools/call', {
       name: 'view_image',
@@ -2413,7 +2424,7 @@ describe('apply_patch', () => {
     expect((imageReply.body.result?.content as Array<{ type: string }>).some((item) => item.type === 'image')).toBe(true);
   });
 
-  it.runIf(IS_WINDOWS)('accepts a native Windows file path inside apply_patch', async () => {
+  it('accepts a native filesystem path inside apply_patch', async () => {
     const target = path.join(approved, 'native-patch.txt');
     const patch = [
       '*** Begin Patch',
@@ -2428,7 +2439,7 @@ describe('apply_patch', () => {
     expect(textOf(reply)).not.toContain(approved);
   });
 
-  it.runIf(IS_WINDOWS)('normalizes native Windows update, move and delete paths inside apply_patch', async () => {
+  it('normalizes native filesystem update, move and delete paths inside apply_patch', async () => {
     const source = path.join(approved, 'native-patch-source.txt');
     const moved = path.join(approved, 'native-patch-moved.txt');
     await fs.writeFile(source, 'before\n', 'utf8');
@@ -2466,7 +2477,9 @@ describe('apply_patch', () => {
     ].join('\n');
     const reply = await core('tools/call', { name: 'apply_patch', arguments: { patch } });
     expect(reply.body.result?.isError).toBe(true);
-    expect(textOf(reply)).toContain('/workspace/notes.txt/child.txt');
+    // The host errno text differs here: Windows can retain the safe virtual spelling while
+    // POSIX reports ENOTDIR without a path. The invariant is that neither form leaks `approved`.
+    expect(textOf(reply)).toMatch(/\/workspace\/notes\.txt\/child\.txt|Filesystem error \(ENOTDIR\)/);
     expect(textOf(reply)).not.toContain(approved);
   });
 });
@@ -2486,7 +2499,7 @@ describe('exec_command and write_stdin', () => {
     expect(reply.body.result?.isError).toBe(true);
     expect(textOf(reply)).toContain('INVALID_COMMAND_PATH');
     expect(textOf(reply)).toContain('/workspace/notes.txt');
-    expect(textOf(reply)).toMatch(/relative path|native Windows path/i);
+    expect(textOf(reply)).toMatch(/relative path|native filesystem path/i);
     expect(textOf(reply)).toContain('No command was run');
   });
 
@@ -2573,16 +2586,20 @@ describe('exec_command and write_stdin', () => {
     await expect(fs.stat(missing)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it.runIf(IS_WINDOWS)('accepts a native Windows workdir inside an approved root', async () => {
+  it('accepts a native filesystem workdir inside an approved root', async () => {
     const reply = await core('tools/call', {
       name: 'exec_command',
-      arguments: { cmd: 'Write-Output native-workdir-ok', workdir: approved, yield_time_ms: 5_000 }
+      arguments: {
+        cmd: IS_WINDOWS ? 'Write-Output native-workdir-ok' : "printf '%s\\n' native-workdir-ok",
+        workdir: approved,
+        yield_time_ms: 5_000
+      }
     });
     expect(reply.body.result?.isError).not.toBe(true);
     expect(textOf(reply)).toContain('native-workdir-ok');
   });
 
-  it.runIf(IS_WINDOWS)('uses the shared scrubbed child environment and exposes bundled ripgrep', async () => {
+  it('uses the shared scrubbed child environment and exposes bundled ripgrep', async () => {
     // Unified exec used to construct a second, almost-identical environment instead of using
     // childEnv(). That copy missed the secret scrubber and the bundled-rg PATH prefix. Both are
     // contract properties, not implementation details: model-run commands must never inherit a
@@ -2593,7 +2610,9 @@ describe('exec_command and write_stdin', () => {
       const secret = await core('tools/call', {
         name: 'exec_command',
         arguments: {
-          cmd: "if ($env:OPENAI_API_KEY) { Write-Output 'LEAKED' } else { Write-Output 'SCRUBBED' }",
+          cmd: IS_WINDOWS
+            ? "if ($env:OPENAI_API_KEY) { Write-Output 'LEAKED' } else { Write-Output 'SCRUBBED' }"
+            : "if [ -n \"${OPENAI_API_KEY:-}\" ]; then printf '%s\\n' LEAKED; else printf '%s\\n' SCRUBBED; fi",
           workdir: '/workspace',
           yield_time_ms: 5_000
         }
@@ -2611,7 +2630,9 @@ describe('exec_command and write_stdin', () => {
     const rg = await core('tools/call', {
       name: 'exec_command',
       arguments: {
-        cmd: "Get-Command rg -CommandType Application | Select-Object -First 1 -ExpandProperty Source",
+        cmd: IS_WINDOWS
+          ? "Get-Command rg -CommandType Application | Select-Object -First 1 -ExpandProperty Source"
+          : 'command -v rg',
         workdir: '/workspace',
         yield_time_ms: 5_000
       }
@@ -2787,15 +2808,22 @@ describe('exec_command and write_stdin', () => {
     expect(stdin.outputSchema).toEqual(exec.outputSchema);
   });
 
-  it.runIf(IS_WINDOWS)('runs cmds sequentially in one shell with labeled per-command exit codes', async () => {
-    const reply = await core('tools/call', {
-      name: 'exec_command',
-      arguments: {
-        cmds: [
+  it('runs cmds sequentially in one shell with labeled per-command exit codes', async () => {
+    const commands = IS_WINDOWS
+      ? [
           "$measuredBatchValue='same-shell'",
           'Write-Output "value=$measuredBatchValue"; cmd /c exit 7',
           'Write-Output "after=$measuredBatchValue"'
-        ],
+        ]
+      : [
+          "measuredBatchValue='same-shell'",
+          "printf 'value=%s\\n' \"$measuredBatchValue\"; sh -c 'exit 7'",
+          "printf 'after=%s\\n' \"$measuredBatchValue\""
+        ];
+    const reply = await core('tools/call', {
+      name: 'exec_command',
+      arguments: {
+        cmds: commands,
         workdir: '/workspace',
         yield_time_ms: 5_000
       }
@@ -2810,14 +2838,14 @@ describe('exec_command and write_stdin', () => {
     expect(text).toContain('after=same-shell');
     expect(reply.body.result?.structuredContent).toMatchObject({ exit_code: 7 });
 
-    for (const arguments_ of [{}, { cmd: 'Write-Output one', cmds: ['Write-Output two'] }]) {
+    for (const arguments_ of [{}, { cmd: 'echo one', cmds: ['echo two'] }]) {
       const invalid = await core('tools/call', { name: 'exec_command', arguments: arguments_ });
       expect(failed(invalid), textOf(invalid)).toBe(true);
       expect(textOf(invalid)).toMatch(/exactly one of cmd or cmds/i);
     }
   });
 
-  it.runIf(IS_WINDOWS)('reads a batch exit per command, so one search finding nothing is not a failure', async () => {
+  it('reads a batch exit per command, so one search finding nothing is not a failure', async () => {
     // The batch that `cmds` exists for is several searches at once, and a search that finds
     // nothing exits 1. Handing the wrapper script to the single-command classifier would ask
     // whether a `for` loop is a search, so the batch used to report a plain failure and invite
@@ -2825,7 +2853,10 @@ describe('exec_command and write_stdin', () => {
     const searches = await core('tools/call', {
       name: 'exec_command',
       arguments: {
-        cmds: ['rg -n "second" notes.txt', 'rg -n "no-such-pattern-anywhere" notes.txt'],
+        // `notes.txt` is intentionally overwritten by an earlier apply_patch regression in
+        // this same end-to-end suite. Search an immutable fixture so the test does not depend
+        // on file-order side effects that happened to differ across hosts.
+        cmds: ['rg -n "export const name" src/app.ts', 'rg -n "no-such-pattern-anywhere" src/app.ts'],
         workdir: '/workspace',
         yield_time_ms: 8_000
       }
@@ -2840,7 +2871,7 @@ describe('exec_command and write_stdin', () => {
     const broken = await core('tools/call', {
       name: 'exec_command',
       arguments: {
-        cmds: ['Write-Output first', 'cmd /c exit 3'],
+        cmds: IS_WINDOWS ? ['Write-Output first', 'cmd /c exit 3'] : ["printf '%s\\n' first", "sh -c 'exit 3'"],
         workdir: '/workspace',
         yield_time_ms: 8_000
       }
@@ -2854,7 +2885,7 @@ describe('exec_command and write_stdin', () => {
     const quick = await core('tools/call', {
       name: 'exec_command',
       arguments: {
-        cmd: "Write-Output 'quick-ok'",
+        cmd: IS_WINDOWS ? "Write-Output 'quick-ok'" : "printf '%s\\n' quick-ok",
         workdir: '/workspace',
         yield_time_ms: 5_000
       }
@@ -2923,9 +2954,10 @@ describe('exec_command and write_stdin', () => {
   });
 
   it('runs in workdir and omits the old connector-specific cwd header', async () => {
+    const readApp = IS_WINDOWS ? "Get-Content 'src/app.ts'" : "cat 'src/app.ts'";
     const named = await core('tools/call', {
       name: 'exec_command',
-      arguments: { cmd: "Get-Content 'src/app.ts'", workdir: '/workspace', yield_time_ms: 5_000 }
+      arguments: { cmd: readApp, workdir: '/workspace', yield_time_ms: 5_000 }
     });
     expect(named.body.result?.isError).not.toBe(true);
     expect(textOf(named)).toContain('export const name = "app";');
@@ -2933,14 +2965,14 @@ describe('exec_command and write_stdin', () => {
 
     const defaulted = await core('tools/call', {
       name: 'exec_command',
-      arguments: { cmd: "Get-Content 'src/app.ts'", yield_time_ms: 5_000 }
+      arguments: { cmd: readApp, yield_time_ms: 5_000 }
     });
     expect(defaulted.body.result?.isError).not.toBe(true);
     expect(textOf(defaulted)).toContain('export const name = "app";');
     expect(textOf(defaulted)).not.toContain('default — no cwd was given');
   });
 
-  it('preserves Codex raw merged output instead of the retired connector CLIXML rewrite', async () => {
+  it.runIf(IS_WINDOWS)('preserves Codex raw merged output instead of the retired connector CLIXML rewrite', async () => {
     const payload =
       '#< CLIXML<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
       '<S S="Error">An empty pipe element is not allowed._x000D__x000A_</S></Objs>';

@@ -1,17 +1,18 @@
 /**
- * Bundle the pinned ripgrep Windows release for x64 + arm64.
+ * Bundle the pinned ripgrep release for one explicit packaging target.
  *
- * Version and archive hashes live in packaging-versions.mjs. Per-arch copies feed the
- * installer while resources/rg mirrors the host architecture for development.
+ * Windows uses the upstream zip; macOS and Linux use tar.gz releases. Linux intentionally
+ * uses musl builds so the bundled rg stays portable across glibc-based distributions too.
  */
 
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
-import { RIPGREP, WINDOWS_ARCHES } from './packaging-versions.mjs';
+import { RIPGREP } from './packaging-versions.mjs';
+import { parseTarget, PLATFORM_INFO } from './packaging-targets.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const stagingRoot = path.join(root, 'resources', 'packaging', 'rg');
@@ -26,52 +27,61 @@ async function download(url, target) {
   await writeFile(target, Buffer.from(await res.arrayBuffer()));
 }
 
-async function stageArchitecture(arch) {
-  const target = RIPGREP.targets[arch];
-  const tag = RIPGREP.version;
-  const assetName = `ripgrep-${tag}-${target.upstreamArch}-pc-windows-msvc.zip`;
-  const outDir = path.join(stagingRoot, arch);
-  const stamp = path.join(outDir, 'VERSION');
-
-  await mkdir(cacheDir, { recursive: true });
-  const zipPath = path.join(cacheDir, assetName);
-  const url = `https://github.com/BurntSushi/ripgrep/releases/download/${tag}/${assetName}`;
-  await download(url, zipPath);
-
-  const actual = createHash('sha256').update(await readFile(zipPath)).digest('hex');
-  if (actual !== target.sha256) {
-    await rm(zipPath, { force: true });
-    throw new Error(`Checksum mismatch for ${assetName}\n  expected ${target.sha256}\n  got      ${actual}`);
+function extractArchive(archivePath, extension, outDir) {
+  if (extension === 'zip') {
+    if (process.platform === 'win32') execFileSync('tar.exe', ['-xf', archivePath, '-C', outDir], { stdio: 'inherit' });
+    else execFileSync('unzip', ['-q', '-o', archivePath, '-d', outDir], { stdio: 'inherit' });
+    return;
   }
-  say(`ripgrep ${tag} checksum ok (${actual.slice(0, 16)}...)`);
+  execFileSync(process.platform === 'win32' ? 'tar.exe' : 'tar', ['-xzf', archivePath, '-C', outDir], { stdio: 'inherit' });
+}
 
-  // Recreate staging from the verified archive every time. Otherwise a matching VERSION
-  // file could hide a modified rg.exe and defeat the checksum pin.
-  await rm(outDir, { recursive: true, force: true });
-  await mkdir(outDir, { recursive: true });
-  execFileSync('tar.exe', ['-xf', zipPath, '-C', outDir], { stdio: 'inherit' });
-
+async function flattenSingleDirectory(outDir) {
   const entries = await readdir(outDir, { withFileTypes: true });
-  if (entries.length === 1 && entries[0].isDirectory()) {
-    const inner = path.join(outDir, entries[0].name);
-    for (const name of await readdir(inner)) {
-      await rename(path.join(inner, name), path.join(outDir, name));
-    }
-    await rm(inner, { recursive: true, force: true });
-  }
-
-  if (!existsSync(path.join(outDir, 'rg.exe'))) throw new Error('rg.exe was not in the release archive');
-  await writeFile(stamp, `${tag}\n`, 'utf8');
-  say(`ripgrep ${tag} ${arch} staged`);
+  if (entries.length !== 1 || !entries[0].isDirectory()) return;
+  const inner = path.join(outDir, entries[0].name);
+  for (const name of await readdir(inner)) await rename(path.join(inner, name), path.join(outDir, name));
+  await rm(inner, { recursive: true, force: true });
 }
 
 async function main() {
-  for (const arch of WINDOWS_ARCHES) await stageArchitecture(arch);
+  const { platform, arch } = parseTarget();
+  const target = RIPGREP.targets[platform]?.[arch];
+  if (!target) throw new Error(`No ripgrep pin for ${platform}-${arch}`);
 
-  const devArch = WINDOWS_ARCHES.includes(process.arch) ? process.arch : 'x64';
-  await rm(devOutDir, { recursive: true, force: true });
-  await cp(path.join(stagingRoot, devArch), devOutDir, { recursive: true });
-  say(`resources/rg mirrors ${devArch} for development`);
+  const version = RIPGREP.version;
+  const assetName = `ripgrep-${version}-${target.upstreamArch}-${target.triple}.${target.extension}`;
+  const outDir = path.join(stagingRoot, platform, arch);
+  const stamp = path.join(outDir, 'VERSION');
+
+  await mkdir(cacheDir, { recursive: true });
+  const archivePath = path.join(cacheDir, assetName);
+  const url = `https://github.com/BurntSushi/ripgrep/releases/download/${version}/${assetName}`;
+  await download(url, archivePath);
+
+  const actual = createHash('sha256').update(await readFile(archivePath)).digest('hex');
+  if (actual !== target.sha256) {
+    await rm(archivePath, { force: true });
+    throw new Error(`Checksum mismatch for ${assetName}\n  expected ${target.sha256}\n  got      ${actual}`);
+  }
+  say(`ripgrep ${version} ${platform}-${arch} checksum ok (${actual.slice(0, 16)}...)`);
+
+  await rm(outDir, { recursive: true, force: true });
+  await mkdir(outDir, { recursive: true });
+  extractArchive(archivePath, target.extension, outDir);
+  await flattenSingleDirectory(outDir);
+
+  const executable = path.join(outDir, `rg${PLATFORM_INFO[platform].executableSuffix}`);
+  if (!existsSync(executable)) throw new Error(`${path.basename(executable)} was not in ${assetName}`);
+  if (platform !== 'win32') await chmod(executable, 0o755);
+  await writeFile(stamp, `${version}\n`, 'utf8');
+  say(`ripgrep ${version} ${platform}-${arch} staged`);
+
+  if (platform === process.platform && arch === process.arch) {
+    await rm(devOutDir, { recursive: true, force: true });
+    await cp(outDir, devOutDir, { recursive: true });
+    say(`resources/rg mirrors ${platform}-${arch} for development`);
+  }
 }
 
 main().catch((error) => {

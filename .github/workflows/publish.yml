@@ -1,7 +1,7 @@
 name: Publish release
 
 # Dispatch this at the tag you want released:
-#   gh workflow run publish.yml --ref v2.0.0
+#   gh workflow run publish.yml --ref v2.0.2
 #
 # It builds the candidate itself rather than adopting one from an earlier run, so the
 # installers attached to a release are provably the ones produced from that tag by the
@@ -17,8 +17,99 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+
+    steps:
+      # Fail cheap before allocating the six native packaging runners. The final publish step
+      # repeats the release-exists check to close the race while the candidate is building.
+      - name: Refuse to publish from anything but a tag
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "publish.yml must be dispatched at a tag; got $GITHUB_REF_TYPE $TAG" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Verify tag matches package version
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "v$version" ]; then
+            echo "Tag $TAG does not match package version $version" >&2
+            exit 1
+          fi
+
+      - name: Verify release metadata agrees
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const pkg = require('./package.json');
+          const lock = require('./package-lock.json');
+          const manifest = require('./extension/manifest.json');
+          const versionSource = fs.readFileSync('src/main/version.ts', 'utf8');
+          const appVersion = versionSource.match(/APP_VERSION = '([^']+)'/)?.[1];
+          const versions = [pkg.version, lock.version, lock.packages?.['']?.version, manifest.version, appVersion];
+          if (versions.some((version) => version !== pkg.version)) {
+            throw new Error(`Release versions disagree: ${versions.join(', ')}`);
+          }
+
+          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+          const changelogVersion = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m)?.[1];
+          if (changelogVersion !== pkg.version) {
+            throw new Error(`Top changelog entry ${changelogVersion ?? '<missing>'} does not match ${pkg.version}`);
+          }
+
+          const notesPath = `docs/release-notes/v${pkg.version}.md`;
+          if (!fs.existsSync(notesPath)) throw new Error(`Missing ${notesPath}`);
+          const notes = fs.readFileSync(notesPath, 'utf8');
+          if (!notes.includes(`## ${pkg.version}`)) throw new Error(`${notesPath} has no matching version heading`);
+          if (!/unsigned/i.test(notes) || !/unnotarized/i.test(notes)) {
+            throw new Error(`${notesPath} must disclose unsigned and unnotarized macOS artifacts`);
+          }
+          for (const artifact of [
+            'Chat-On-Steroids-Setup-x64.exe',
+            'Chat-On-Steroids-Setup-arm64.exe',
+            'Chat-On-Steroids-macOS-x64.dmg',
+            'Chat-On-Steroids-macOS-x64.zip',
+            'Chat-On-Steroids-macOS-arm64.dmg',
+            'Chat-On-Steroids-macOS-arm64.zip',
+            'Chat-On-Steroids-Linux-x64.AppImage',
+            'Chat-On-Steroids-Linux-x64.deb',
+            'Chat-On-Steroids-Linux-arm64.AppImage',
+            'Chat-On-Steroids-Linux-arm64.deb',
+            'Chat-On-Steroids-Extension.zip',
+            'SHA256SUMS.txt'
+          ]) {
+            if (!notes.includes(`\`${artifact}\``)) throw new Error(`${notesPath} is missing ${artifact}`);
+          }
+          NODE
+
+      - name: Verify public-history privacy
+        run: node scripts/verify-public-history.mjs
+
+      - name: Require reviewed release notes for this tag
+        run: |
+          set -euo pipefail
+          notes="docs/release-notes/$TAG.md"
+          if [ ! -s "$notes" ]; then
+            echo "Missing $notes — write the release notes and tag again." >&2
+            exit 1
+          fi
+
+      - name: Refuse an existing release
+        run: node scripts/check-release-absent.mjs
+
   candidate:
     name: Build candidate
+    needs: preflight
     uses: ./.github/workflows/release.yml
 
   publish:
@@ -62,7 +153,7 @@ jobs:
       - name: Download the candidate
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: chat-on-steroids-${{ github.ref_name }}
+          name: chat-on-steroids-candidate-${{ github.run_id }}
           path: publish
 
       # The checksums were computed on the packaging runner. Re-checking them here proves
@@ -77,13 +168,18 @@ jobs:
       - name: Publish the release
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; refusing to overwrite it." >&2
-            exit 1
-          fi
+          node scripts/check-release-absent.mjs
           gh release create "$TAG" \
             publish/Chat-On-Steroids-Setup-x64.exe \
             publish/Chat-On-Steroids-Setup-arm64.exe \
+            publish/Chat-On-Steroids-macOS-x64.dmg \
+            publish/Chat-On-Steroids-macOS-x64.zip \
+            publish/Chat-On-Steroids-macOS-arm64.dmg \
+            publish/Chat-On-Steroids-macOS-arm64.zip \
+            publish/Chat-On-Steroids-Linux-x64.AppImage \
+            publish/Chat-On-Steroids-Linux-x64.deb \
+            publish/Chat-On-Steroids-Linux-arm64.AppImage \
+            publish/Chat-On-Steroids-Linux-arm64.deb \
             publish/Chat-On-Steroids-Extension.zip \
             publish/SHA256SUMS.txt \
             --title "Chat On Steroids ${TAG#v}" \

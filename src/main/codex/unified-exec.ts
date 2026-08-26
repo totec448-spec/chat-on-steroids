@@ -347,6 +347,10 @@ class UnifiedExecProcess {
         env: params.env,
         windowsHide: true,
         shell: false,
+        // Codex sessions must own descendants as well as the shell process. On POSIX a
+        // detached child is a process-group leader, which lets interrupt/terminate signal
+        // the whole session without changing Windows' existing taskkill semantics.
+        detached: process.platform !== 'win32',
         // `stdin_open: tty` in Codex: a pipe session has no stdin, which is what makes
         // write_stdin answer StdinClosed rather than pretending the write landed.
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -480,8 +484,9 @@ class UnifiedExecProcess {
     if (pid === undefined) throw UnifiedExecError.processFailed('the process is no longer running');
     try {
       // Windows cannot deliver a console control event to a child with no console, so
-      // Node's SIGINT is the closest available equivalent for a pipe session.
-      process.kill(pid, 'SIGINT');
+      // Node's SIGINT is the closest available equivalent for a pipe session. POSIX pipe
+      // sessions are process-group leaders, so Ctrl-C reaches their descendants too.
+      process.kill(process.platform === 'win32' ? pid : -pid, 'SIGINT');
     } catch (error) {
       // The managed session can outlive the OS process for the tiny window before Node's
       // ChildProcess `exit` event reaches us. Ctrl+C in that window used to turn a successful

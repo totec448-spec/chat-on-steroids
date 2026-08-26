@@ -24,7 +24,11 @@ import type {
 } from '../shared/session.js';
 import { ATTRIBUTION_LABELS, TURN_OUTCOME_LABELS, foldProgress } from '../shared/session.js';
 import { chronological } from '../shared/chronology.js';
-import { DEFAULT_GOAL_SYSTEM_PROMPT, MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
+import {
+  DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
+  DEFAULT_GOAL_SYSTEM_PROMPT,
+  MAX_GOAL_SYSTEM_PROMPT_CHARS
+} from '../shared/goal.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, el, icon, run, toast } from './dom.js';
 
@@ -916,7 +920,7 @@ async function showExtensionPath(): Promise<void> {
     node.classList.remove('is-warn');
   } else {
     node.textContent =
-      'The extension folder is missing from this installation. Reinstall the app, or use the extension\\ folder from a source checkout.';
+      'The extension folder is missing from this installation. Reinstall the app, or use the extension/ folder from a source checkout.';
     node.classList.add('is-warn');
     $<HTMLButtonElement>('bridgeFolder').disabled = true;
   }
@@ -927,7 +931,15 @@ function paintSwarm(state: SwarmState): void {
   paintStateLine();
   const list = $('swarmList');
   if (state.agents.length === 0) {
-    list.replaceChildren(el('p', 'hint', 'No agents. The prime agent creates workers with the agents tool’s spawn action.'));
+    list.replaceChildren(
+      el(
+        'p',
+        'hint',
+        state.retainedHistory
+          ? 'No workers are running. Reusable worker histories are parked and remain available to their prime chats; Clear swarm permanently removes them.'
+          : 'No agents. The prime agent creates workers with the agents tool’s spawn action.'
+      )
+    );
   } else {
     list.replaceChildren(
       ...state.agents.map((agent) => {
@@ -966,7 +978,7 @@ function paintSwarm(state: SwarmState): void {
   // Usable whenever there is a run to clear, not only while a worker is still going.
   // Gating on `running` left finished-but-present swarm state with no way out, which is
   // exactly the state a user wants to clear before starting the next run.
-  $<HTMLButtonElement>('swarmReset').disabled = state.agents.length === 0;
+  $<HTMLButtonElement>('swarmReset').disabled = state.agents.length === 0 && state.retainedHistory !== true;
 }
 
 /**
@@ -1022,7 +1034,10 @@ export function chatSettingsPatch(current: Config): {
       model: goalModel || current.goal.model,
       reasoning: $<HTMLSelectElement>('goalReasoning').value as Config['goal']['reasoning'],
       // Blank means "restore the safe default", not "send an unconstrained system message".
-      prompt: $<HTMLTextAreaElement>('goalPrompt').value.trim() || DEFAULT_GOAL_SYSTEM_PROMPT
+      prompt: $<HTMLTextAreaElement>('goalPrompt').value.trim() || DEFAULT_GOAL_SYSTEM_PROMPT,
+      objectivePrompt:
+        $<HTMLTextAreaElement>('goalObjectivePrompt').value.trim() ||
+        DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT
     }
   };
 }
@@ -1144,6 +1159,7 @@ function applyChatChecked(input: HTMLInputElement, value: boolean, previous: boo
 /** Writes the goal block from app state. Called from chatApply, so it never guesses. */
 function applyGoal(state: AppState, previous?: Config): void {
   const { config } = state;
+  const secureStorageAvailable = state.secureStorage?.available ?? true;
   goalModel = config.goal.model;
   const goalToggle = $<HTMLInputElement>('goalEnabled');
   applyChatChecked(goalToggle, config.goal.enabled, previous?.goal.enabled);
@@ -1152,6 +1168,11 @@ function applyGoal(state: AppState, previous?: Config): void {
   goalToggle.disabled = !config.sessions.record;
   applyChatValue($<HTMLSelectElement>('goalReasoning'), config.goal.reasoning, previous?.goal.reasoning);
   applyChatValue($<HTMLTextAreaElement>('goalPrompt'), config.goal.prompt, previous?.goal.prompt);
+  applyChatValue(
+    $<HTMLTextAreaElement>('goalObjectivePrompt'),
+    config.goal.objectivePrompt,
+    previous?.goal.objectivePrompt
+  );
   // The one sentence somebody switching this on needs, and the exact words the extension
   // shows under the same switch — two places saying the same thing differently is how a
   // missing key turns into a support question.
@@ -1164,11 +1185,16 @@ function applyGoal(state: AppState, previous?: Config): void {
         : 'Off — nothing is sent to OpenRouter and nothing is typed into your chats.';
   $('goalHint').classList.toggle('is-warn', !config.sessions.record || !state.hasGoalKey);
   $('goalModelName').textContent = config.goal.model;
-  $<HTMLInputElement>('goalKey').placeholder = state.hasGoalKey ? '•••••••• stored' : 'sk-or-v1-…';
-  $('goalKeyState').textContent = state.hasGoalKey
-    ? 'A key is stored, encrypted by Windows. Type a new one to replace it.'
-    : 'Stored encrypted by Windows. It never leaves this app, and the browser is only ever handed the reply.';
-  $<HTMLButtonElement>('goalKeyRemove').disabled = !state.hasGoalKey;
+  const goalKey = $<HTMLInputElement>('goalKey');
+  goalKey.placeholder = state.hasGoalKey ? '•••••••• stored' : 'sk-or-v1-…';
+  goalKey.disabled = !secureStorageAvailable;
+  $('goalKeyState').textContent = !secureStorageAvailable
+    ? (state.secureStorage?.detail ?? 'Secure credential storage is unavailable.')
+    : state.hasGoalKey
+      ? 'A key is stored with secure OS credential storage. Type a new one to replace it.'
+      : 'Stored with secure OS credential storage. It never leaves this app, and the browser is only ever handed the reply.';
+  $('goalKeyState').classList.toggle('is-warn', !secureStorageAvailable);
+  $<HTMLButtonElement>('goalKeyRemove').disabled = !state.hasGoalKey || !secureStorageAvailable;
   if (goalModels.length > 0) paintGoalModels();
 }
 
@@ -1184,6 +1210,18 @@ function wireGoal(save: () => Promise<void>): void {
     $<HTMLTextAreaElement>('goalPrompt').value = DEFAULT_GOAL_SYSTEM_PROMPT;
     await save();
     toast('Goal prompt restored to default');
+  });
+  $<HTMLTextAreaElement>('goalObjectivePrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
+  $('goalObjectivePromptEdit').addEventListener('click', () => {
+    const panel = $('goalObjectivePromptPanel');
+    panel.hidden = !panel.hidden;
+    $('goalObjectivePromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    if (!panel.hidden) $<HTMLTextAreaElement>('goalObjectivePrompt').focus();
+  });
+  $('goalObjectivePromptReset').addEventListener('click', async () => {
+    $<HTMLTextAreaElement>('goalObjectivePrompt').value = DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT;
+    await save();
+    toast('Goal driver prompt restored to default');
   });
   // The catalogue is fetched on the first press and kept afterwards: the picker closing is
   // not a reason to spend another round trip on a list that changes weekly.
@@ -1257,7 +1295,8 @@ const CHAT_INPUTS = [
   'maWorkers',
   'goalEnabled',
   'goalReasoning',
-  'goalPrompt'
+  'goalPrompt',
+  'goalObjectivePrompt'
 ];
 
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */
@@ -1283,8 +1322,11 @@ export function chatApply(state: AppState, previous?: Config): void {
   // Extension bridge. Connecting is automatic, so this reports rather than asks.
   const browserRequired = browserExtensionRequired(config);
   $<HTMLButtonElement>('bridgeUnpair').disabled = !bridge.paired;
+  const secureStorageAvailable = state.secureStorage?.available ?? true;
   $('bridgeState').textContent = !browserRequired
     ? 'Browser-backed features are off. The extension is not needed right now.'
+    : !secureStorageAvailable
+      ? (state.secureStorage?.detail ?? 'Secure credential storage is unavailable, so the extension cannot pair safely.')
     : !bridge.running
       ? 'The local bridge is off even though recording or multi-agent mode needs it.'
       : bridge.present
@@ -1294,7 +1336,7 @@ export function chatApply(state: AppState, previous?: Config): void {
               bridge.lastSeenAt === null ? 'It has not checked in since this app started.' : `Last seen ${ago(bridge.lastSeenAt)}.`
             }`
           : `Listening on 127.0.0.1:${bridge.port ?? '?'} · no browser is authorized or connected yet.`;
-  $('bridgeState').classList.toggle('is-warn', browserRequired && !bridge.present);
+  $('bridgeState').classList.toggle('is-warn', browserRequired && (!bridge.present || !secureStorageAvailable));
   void showExtensionPath();
 
   if (sessions.length > 0) paintSessions();

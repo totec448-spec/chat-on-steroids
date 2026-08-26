@@ -41,7 +41,7 @@
   //
   // So: publish a handle instead of a flag and let a replacement supersede a dead one. A
   // *healthy* incumbent still wins, so the ordinary static/recovery race is unchanged.
-  const RECORDER_VERSION = 9;
+  const RECORDER_VERSION = 10;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -259,6 +259,7 @@
   const queueGaps = new Map();
   const queueGapKeys = new WeakMap();
   let flushing = false;
+  let flushWork = null;
 
   /**
    * Which conversation this tab is on, counted rather than named.
@@ -545,6 +546,14 @@
   const bySeq = new Map();
   /** App-owned render events, including calls ChatGPT never gave a native row. */
   const streamBySeq = new Map();
+  /**
+   * Stable render key -> app-owned visible stream.
+   *
+   * The stream is a sibling of ChatGPT's React-owned assistant sections. Keeping this map is
+   * what lets a replacement/remounted section reclaim the exact same visible node without
+   * moving it merely because React transiently moved the native host across a user boundary.
+   */
+  const streamRootsByKey = new Map();
   /** Latest delivery seq for each canonical ChatGPT assistant message. */
   const streamMessageSeq = new Map();
   /** Stable user-message id → durable event position, used only to anchor page responses. */
@@ -876,9 +885,11 @@
    * renames them when bindConversation() reports the real id.
    */
   async function flush() {
-    if (commandJournalGate || flushing || queue.length === 0) return;
+    if (commandJournalGate) return false;
+    if (queue.length === 0) return true;
+    if (flushWork) return flushWork;
     flushing = true;
-    try {
+    const work = (async () => {
       const batch = queue.slice(0, 200);
       // Freeze overflow markers that enter this delivery attempt. New observations can
       // arrive while the service worker is answering. If they overflow too, they need a
@@ -909,10 +920,20 @@
         for (let index = queue.length - 1; index >= 0; index--) {
           if (sent.has(queue[index])) removeQueueEntry(index);
         }
+        return true;
       }
-    } finally {
+      return false;
+    })();
+    const tracked = work.finally(() => {
       flushing = false;
-    }
+      if (flushWork === tracked) flushWork = null;
+      // A revival durability fence may be waiting for exact queue entries to leave. Wake it on
+      // every flush completion; it inspects object identity and therefore cannot mistake an
+      // unsuccessful transport attempt for durable custody.
+      notifyCommandReadiness();
+    });
+    flushWork = tracked;
+    return tracked;
   }
 
   /**
@@ -973,6 +994,7 @@
     userStopped = false;
     stallReported = false;
     fiberTerminalMessageId = null;
+    bindResumeGoalTurn(open);
     return true;
   }
 
@@ -1067,6 +1089,10 @@
     bootstrap = null;
     bySeq.clear();
     streamBySeq.clear();
+    for (const root of streamRootsByKey.values()) {
+      if (root && root.remove) root.remove();
+    }
+    streamRootsByKey.clear();
     streamMessageSeq.clear();
     userAnchorByMessage.clear();
     entries = [];
@@ -1708,6 +1734,7 @@
       completionActionBaselineSections = new WeakSet(baselineCompletionSections);
       genCount++;
       turnId = `g-${RUN_ID}-${epoch}-${genCount}`;
+      bindResumeGoalTurn(turnId);
       genNode = null;
       // What was already there is what this generation must not adopt — as it stood at the
       // *previous* observation. Reading the DOM here instead is what the first version of
@@ -1925,6 +1952,12 @@
       ? baselineSections.filter((node) => Boolean(CLF_DOM.completionAction({ nodes: [node] })))
       : [];
     resumedFirstObservation = false;
+    maybeRecoverResumeGoalTurn();
+    // A revival can be waiting outside the command lease while this exact turn settles. Its
+    // readiness depends partly on recorder state (`generating`, pending tools/native work), not
+    // only DOM mutations, so wake those waiters whenever an observation publishes a new view of
+    // the lifecycle. They still re-check the exact conversation and every readiness predicate.
+    notifyCommandReadiness();
     void flush();
   }
 
@@ -3999,6 +4032,50 @@
     return kind === 'request' && entry.kind === 'tool_call' && entry.requestId === value;
   }
 
+  /** Stable turn-local website objects represented by one app-owned stream. */
+  function strongStreamIdentityKeys(entries) {
+    const keys = new Set();
+    for (const entry of entries || []) {
+      const key = entry && entry.kind === 'assistant_message'
+        ? websiteKey('message', entry.messageId)
+        : entry && entry.kind === 'page_tool'
+          ? websiteKey('activity', entry.messageId)
+          : null;
+      if (key) keys.add(key);
+    }
+    return keys;
+  }
+
+  /**
+   * Whether a reused native assistant section may keep pointing at its previous sibling root.
+   *
+   * React can move/reuse the same section across a newly-authored user row. The section keeps
+   * `data-clf-stream-key`, but that attribute is only presentation ownership, not response
+   * identity. If Fiber/canonical capture now names a disjoint stable website message/activity,
+   * inheriting the old key rewrites the already-correct sibling *above* the user with the later
+   * response. Request ids are deliberately excluded here because ChatGPT reuses them across
+   * retries/turns; only turn-local website objects can prove continuity.
+   */
+  function priorStreamRootCompatible(priorKey, rendered) {
+    if (!priorKey) return false;
+    const root = streamRootsByKey.get(priorKey) || null;
+    if (!root || !root.isConnected) return false;
+    const current = strongStreamIdentityKeys(rendered);
+    if (current.size === 0) return true;
+    let previous = [];
+    try {
+      const parsed = JSON.parse(root.dataset.clfStrongKeys || '[]');
+      if (Array.isArray(parsed)) previous = parsed.filter((value) => typeof value === 'string');
+    } catch {
+      previous = [];
+    }
+    // No stored stable identity means this root predates the guard or was tool-only. A current
+    // stable website object is stronger than that stale section attribute, so fail closed and
+    // let canonical identity mint/choose the correct sibling instead.
+    if (previous.length === 0) return false;
+    return previous.some((key) => current.has(key));
+  }
+
   /**
    * One render-pass index over the local stream.
    *
@@ -4464,11 +4541,17 @@
     const newest = assistantTurns[assistantTurns.length - 1] || null;
     // Which reconstructions have already been painted in this pass. See the dedupe below.
     const painted = new Set();
+    const seenStreamKeys = new Set();
     for (let turnIndex = 0; turnIndex < assistantTurns.length; turnIndex++) {
       const turn = assistantTurns[turnIndex];
       if (turn.role !== 'assistant') continue;
       const nodes = turn.nodes || (turn.node ? [turn.node] : []);
-      const existing = nodes.map((node) => node && node.querySelector ? node.querySelector('.clf-stream') : null).find(Boolean) || null;
+      const priorKeys = new Set(
+        nodes
+          .map((node) => node && node.dataset ? node.dataset.clfStreamKey : '')
+          .filter(Boolean)
+      );
+      const priorKey = priorKeys.size === 1 ? priorKeys.values().next().value : null;
       // Through the generation key, not the page's turn id. Everything this script reports
       // is now filed under a locally minted key, because ChatGPT reuses `data-turn-id` from
       // one turn to the next; comparing the DOM id against that key matches nothing, so the
@@ -4522,9 +4605,44 @@
       // id of its own still reconstructs a specific response, and that is the thing that
       // must not be painted twice.
       const groupKey = group ? group.id : localId || null;
+      // A reload/history reconstruction can be proven entirely by canonical ChatGPT message
+      // ids even when no local lifecycle group survived. Those ids are already the authority
+      // used by websiteRenderForTurn(); use them as the sibling-root key too so moving the
+      // stream out of the React section does not throw away that identity.
+      const renderedMessageIds = [...new Set(
+        rendered.map((entry) => entry && entry.messageId).filter(Boolean)
+      )];
+      const canonicalKey = renderedMessageIds.length > 0 ? `messages:${renderedMessageIds.join(',')}` : null;
+      // Once this exact native turn already points at a sibling stream, keep that render key.
+      // Reload-only canonical capture may discover another assistant message on a later scan;
+      // replacing `messages:a` with `messages:a,b` would manufacture a second visible sibling
+      // for the same response until the old root aged out. A real local lifecycle group is
+      // stronger and may replace the fallback key; otherwise prior ownership stays stable only
+      // while the current stable website objects still overlap the root that key names. A React
+      // section reused for the next response keeps its old data attribute, and letting that stale
+      // attribute outrank a disjoint canonical message is the presentation-order bug that painted
+      // a later transcription above the user's newest turn.
+      const compatiblePriorKey = priorStreamRootCompatible(priorKey, rendered) ? priorKey : null;
+      const streamKey = groupKey || compatiblePriorKey || canonicalKey;
+      if (streamKey) seenStreamKeys.add(streamKey);
+      let existing = streamKey ? streamRootsByKey.get(streamKey) || null : null;
+      if (existing && !existing.isConnected) {
+        streamRootsByKey.delete(streamKey);
+        existing = null;
+      }
+      // Migration/extension-reload compatibility: adopt a stream created by an older content
+      // script that still lives inside the native section, then the successful replacement
+      // below will move it into the stable sibling slot once it is detached/recreated.
+      if (!existing) {
+        existing = nodes
+          .map((node) => node && node.querySelector ? node.querySelector('.clf-stream') : null)
+          .find(Boolean) || null;
+      }
 
       if (!enabled) {
         if (existing) existing.remove();
+        if (streamKey) streamRootsByKey.delete(streamKey);
+        for (const node of nodes) if (node && node.dataset) delete node.dataset.clfStreamKey;
         CLF_DOM.replaceTurn(turn, null, false);
         CLF_DOM.hideProgress(turn, false);
         for (const block of CLF_DOM.toolBlocks(turn)) block.removeAttribute('data-clf-native-hidden');
@@ -4544,8 +4662,8 @@
       // they stay hidden behind it rather than repeating it, and specifically do not fall
       // back to native, which would put ChatGPT's copy of prose the stream above already
       // carries right back on the page.
-      if (groupKey && painted.has(groupKey)) {
-        if (existing) existing.remove();
+      if (streamKey && painted.has(streamKey)) {
+        for (const node of nodes) if (node && node.dataset) node.dataset.clfStreamKey = streamKey;
         CLF_DOM.hideProgress(turn, false);
         for (const block of CLF_DOM.toolBlocks(turn)) block.removeAttribute('data-clf-native-hidden');
         CLF_DOM.replaceTurn(turn, null, true);
@@ -4572,6 +4690,8 @@
           continue;
         }
         if (existing) existing.remove();
+        if (streamKey) streamRootsByKey.delete(streamKey);
+        for (const node of nodes) if (node && node.dataset) delete node.dataset.clfStreamKey;
         CLF_DOM.replaceTurn(turn, null, false);
         CLF_DOM.hideProgress(turn, false);
         for (const block of CLF_DOM.toolBlocks(turn)) block.removeAttribute('data-clf-native-hidden');
@@ -4580,6 +4700,11 @@
 
       const root = existing || document.createElement('div');
       root.className = 'clf-stream';
+      if (streamKey) {
+        root.dataset.clfKey = streamKey;
+        streamRootsByKey.set(streamKey, root);
+        for (const node of nodes) if (node && node.dataset) node.dataset.clfStreamKey = streamKey;
+      }
       root.dataset.clfCompleteAt = String(Date.now());
       root.dataset.clfTurn = turn.id || (group && group.id) || localId || 'anchored';
       // Commentary text is part of the signature: one caption grows in place under the same
@@ -4604,12 +4729,30 @@
         root.dataset.clfSignature = signature;
         root.replaceChildren(...rendered.map(streamRow));
       }
+      root.dataset.clfStrongKeys = JSON.stringify([...strongStreamIdentityKeys(rendered)]);
       // Clear the old selective-hiding state from pre-1.7.4 renderers. The section marker
       // below now owns visibility wholesale.
       CLF_DOM.hideProgress(turn, false);
       for (const block of CLF_DOM.toolBlocks(turn)) block.removeAttribute('data-clf-native-hidden');
       CLF_DOM.replaceTurn(turn, root, true);
-      if (groupKey) painted.add(groupKey);
+      if (streamKey) painted.add(streamKey);
+    }
+    // A virtualized historical turn can disappear from the DOM entirely while its sibling
+    // stream remains. Retain it only for the same grace used for transient incomplete scans;
+    // this is long enough for React's replace/reorder burst to settle, but does not defeat
+    // ChatGPT's long-term history virtualization or leak an unbounded set of visible roots.
+    const now = Date.now();
+    for (const [key, root] of streamRootsByKey) {
+      if (!root || !root.isConnected) {
+        streamRootsByKey.delete(key);
+        continue;
+      }
+      if (seenStreamKeys.has(key)) continue;
+      const lastComplete = Number(root.dataset && root.dataset.clfCompleteAt);
+      if (!Number.isFinite(lastComplete) || now - lastComplete >= REPLACEMENT_GRACE_MS) {
+        root.remove();
+        streamRootsByKey.delete(key);
+      }
     }
     restorePresentationViewport(viewportAnchor);
   }
@@ -4847,6 +4990,7 @@
     // Outside the guard, and last: startCompact runs for tens of seconds and polls this
     // same endpoint while it works, so firing it with `pulling` still set would deadlock
     // the run against the poll that started it.
+    if (current() && CLF_DOM.conversationId() === forId) maybeRecoverResumeGoalTurn();
     if (current() && CLF_DOM.conversationId() === forId) await maybeAutoCompact(forId, forEpoch);
     // Same reason, same place: this types into the composer and can wait on the page, and it
     // needs the draft this pull just delivered.
@@ -4962,14 +5106,18 @@
    */
   function settingsView(input) {
     const { context, goal, compact, editing } = input;
-    const auto = Boolean(context && context.auto);
+    // `context.auto` is the global preference. Worker chats are a role-level exception: their
+    // conversation id is the worker identity, so Compact & Resume is never available there.
+    // Keep the sheet truthful even if a generic /settings refresh races the worker-scoped
+    // /activity projection and briefly hands this page the global auto=true value.
+    const blocked = goal && typeof goal.blocked === 'string' ? goal.blocked : '';
+    const auto = Boolean(context && context.auto) && blocked !== 'worker';
     const threshold = context && context.threshold > 0 ? context.threshold : 0;
     const goalOn = Boolean(goal && goal.enabled);
     const hasKey = Boolean(goal && goal.hasKey);
     const objective = goal && typeof goal.objective === 'string' ? goal.objective : '';
     // The app's own reason, rather than this tab's guess. Today there is exactly one: a
     // worker chat, where the prime already writes the user's turns.
-    const blocked = goal && typeof goal.blocked === 'string' ? goal.blocked : '';
     const from = threshold > 0 ? `from ${roundK(threshold)} tokens` : '';
     // Either half is enough to make the loop run here, which is why the summary line says
     // "on" for a chat that has a goal even while the standing switch is off.
@@ -4993,9 +5141,15 @@
         {
           key: 'autoCompact',
           label: 'Auto-compaction',
-          note: auto ? from || 'threshold set in the app' : 'compact this chat by hand',
+          note:
+            blocked === 'worker'
+              ? 'off here: worker chats never auto-compact'
+              : auto
+                ? from || 'threshold set in the app'
+                : 'compact this chat by hand',
           on: auto,
-          warn: false
+          warn: false,
+          disabled: blocked === 'worker'
         },
         {
           key: 'goal',
@@ -5018,7 +5172,8 @@
                     ? `replies as you with ${modelLabel(goal.model)}`
                     : 'reply as you until the goal is met',
           on: goalOn,
-          warn: !hasKey || blocked === 'worker'
+          warn: !hasKey || blocked === 'worker',
+          disabled: blocked === 'worker'
         }
       ],
       /**
@@ -5047,9 +5202,17 @@
       // The button's old job, kept as a row rather than dropped: pressing the gear must not
       // have cost anybody the one thing it used to do.
       action: {
-        label: compact.action === 'cancel' ? 'Cancel compaction' : 'Compact & resume now',
-        hint: compact.hint,
-        action: compact.action
+        label:
+          blocked === 'worker'
+            ? 'Compact & resume unavailable'
+            : compact.action === 'cancel'
+              ? 'Cancel compaction'
+              : 'Compact & resume now',
+        hint:
+          blocked === 'worker'
+            ? 'Worker chats stay in their existing conversation and are never manually compacted or resumed.'
+            : compact.hint,
+        action: blocked === 'worker' ? 'none' : compact.action
       }
     };
   }
@@ -5243,6 +5406,10 @@
       epoch === expectedEpoch &&
       CLF_DOM.conversationId() === expectedConversation;
     if (!current()) return;
+    // Belt-and-suspenders with the bridge role gate. A worker must never emit even the
+    // auto-compaction *claim* command: its conversation is its durable agent identity and the
+    // 400k ceiling only changes whether the next stop can be revived.
+    if (goalConfig && goalConfig.blocked === 'worker') return;
     if (!conversationId || !context || !context.auto || !autoCompactReady) return;
     // Anything already running owns this chat, including a run started by hand.
     if (nativeBusy || pressedAt > 0) return;
@@ -5475,10 +5642,15 @@
    */
   async function setSetting(key, on) {
     if (menuBusy) return;
+    if (key === 'autoCompact' && goalConfig && goalConfig.blocked === 'worker') return;
     menuBusy = true;
     renderMenu();
     try {
-      const reply = await ask({ type: 'settings_set', [key]: on });
+      const reply = await ask({
+        type: 'settings_set',
+        ...(conversationId ? { conversationId } : {}),
+        [key]: on
+      });
       if (reply && reply.ok === true && reply.data) {
         context = readContext(reply.data.context) || context;
         if (reply.data.goal) goalConfig = { ...(goalConfig || {}), ...reply.data.goal };
@@ -5691,7 +5863,7 @@
       line.dataset.clfRow = row.key;
       line.setAttribute('role', 'switch');
       line.setAttribute('aria-checked', row.on ? 'true' : 'false');
-      line.disabled = menuBusy;
+      line.disabled = menuBusy || row.disabled === true;
 
       const label = document.createElement('span');
       label.className = 'clf-menu-label';
@@ -5707,11 +5879,13 @@
       const track = buildSwitch();
       track.dataset.clfOn = row.on ? '1' : '0';
       line.append(label, track);
-      line.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        void setSetting(row.key, !row.on);
-      });
+      if (!row.disabled) {
+        line.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void setSetting(row.key, !row.on);
+        });
+      }
       root.append(line);
       if (row.key === 'goal') root.append(buildObjective(view.objective));
     }
@@ -6346,6 +6520,15 @@
       epoch === forEpoch &&
       CLF_DOM.conversationId() === forId;
     if (!forId || !current()) return;
+    const workerCompactionBlocked = () =>
+      Boolean(agent) || bootstrap === 'worker' || Boolean(goalConfig && goalConfig.blocked === 'worker');
+    // A worker's conversation is its agent identity. Usually /activity has already projected
+    // blocked:'worker', and the original worker document also knows `agent` immediately after its
+    // bootstrap. A reloaded worker has a smaller race: checkStatus() can render the composer gear
+    // before the first scheduled /activity (2s), leaving no local role fact yet. Never enter the
+    // destructive stop-and-settle barrier on that uncertainty. Refresh the app's exact-chat role
+    // first; the bridge remains the final authority and still rejects every worker /compact call.
+    if (workerCompactionBlocked()) return;
     // One press, one run. The native path spends tens of seconds interrupting and typing,
     // and a second press inside that window would submit the instruction twice — which is
     // the one thing the app cannot fix afterwards, because the second prompt is a second
@@ -6357,6 +6540,38 @@
     nativeBusy = true;
     nativePhase = 'requested';
     renderControl();
+
+    const policy = await ask({ type: 'activity', conversationId: forId, since });
+    if (!current()) return;
+    const policyData = policy && policy.ok === true && policy.data ? policy.data : null;
+    if (!policyData) {
+      // Role authority is the prerequisite for the destructive barrier. If the app/service
+      // worker is unavailable, interrupting first and discovering later that this was a worker
+      // (or that no compaction could be accepted at all) is strictly worse than leaving the
+      // current ChatGPT turn untouched and letting the user retry once authority is reachable.
+      pressedAt = 0;
+      nativeBusy = false;
+      nativePhase = '';
+      localError = replyError(policy) || 'Could not verify whether this chat may be compacted.';
+      renderControl();
+      return;
+    }
+    if (
+      ((policyData.goal && policyData.goal.blocked === 'worker') || policyData.bootstrap === 'worker')
+    ) {
+      // Adopt just the role-bearing projection so the already-open menu/control becomes truthful
+      // immediately. The normal activity loop will consume stream/cursor data on its own poll.
+      if (policyData.goal && typeof policyData.goal === 'object') goalConfig = policyData.goal;
+      if (policyData.context) context = readContext(policyData.context) || context;
+      bootstrap = policyData.bootstrap === 'worker' ? 'worker' : bootstrap;
+      autoCompactReady = false;
+      pressedAt = 0;
+      nativeBusy = false;
+      nativePhase = '';
+      renderControl();
+      renderMenu();
+      return;
+    }
 
     // The barrier, before the request rather than after it.
     //
@@ -7108,7 +7323,81 @@
     if (goalBusy) return;
     goalTurnId = endedTurnId;
     goalError = '';
+    // Goal is now authoritative for this exact completed turn. Raising the sender tab is a
+    // courtesy after that decision, never an input to it: hidden tabs take this same path and a
+    // failed focus request must not stop the draft. Claim goalTurnId first so the visibility
+    // change caused by focusing cannot re-enter this turn and request/focus it twice.
+    void ask({ type: 'goal_focus', conversationId, turnId: endedTurnId }).catch(() => undefined);
     void watchGoalTurn(ended, endedTurnId);
+  }
+
+  /**
+   * Recovers exactly one resume-caused answer that the recorder never saw while it was live.
+   *
+   * Chrome may suspend/throttle a hidden replacement tab long enough for React to mount Stop,
+   * render the whole first answer and remove Stop before this isolated world runs another
+   * observation. There is then no local `turn_start`, so the ordinary `finishGeneration()` →
+   * `noteGoalTurn()` edge can never happen. The resume command itself is the missing provenance:
+   * this document sent the only user message in a fresh chat, and the app ACKed the continuation
+   * into that exact conversation. That lets us recover this one new answer without ever treating
+   * an arbitrary historical answer as fresh work.
+   *
+   * Goal policy is evaluated only after `/activity` has returned B's post-commit config. If Goal
+   * was not usable at that boundary, consume the hint just like an ordinarily observed turn
+   * would have been skipped; enabling it later must not replay history.
+   */
+  function maybeRecoverResumeGoalTurn() {
+    const pending = resumeGoalPending;
+    if (!pending || !conversationId) return;
+    if (pending.conversationId !== conversationId) {
+      // A concrete navigation away ends the one-tab provenance. Do not carry B's first answer
+      // recovery into whichever chat happens to be opened next.
+      if (CLF_DOM.conversationId() && CLF_DOM.conversationId() !== pending.conversationId) clearResumeGoalPending();
+      return;
+    }
+    // A normally observed generation already entered Goal, or a draft restored from the app
+    // proves another page-side trigger got there first. Either way the recovery hint is spent.
+    if (goalTurnId || goalDraft) return void clearResumeGoalPending();
+    // Null means B's post-commit policy has not arrived yet. That is the exact race this helper
+    // exists to bridge, so keep the hint rather than deciding from stale/default settings.
+    if (!goalConfig) return;
+    if (!goalUsable()) return void clearResumeGoalPending();
+    if (goalBusy || generating || CLF_DOM.generating() || compactCapture || nativeBusy || (job && job.busy)) return;
+
+    // The resume bootstrap is the only user turn we are entitled to reason from. If somebody
+    // manually continued before recovery ran, the conversation has moved on and the old first
+    // answer must not generate another user message behind theirs.
+    const users = CLF_DOM.messages().filter(
+      (message) => message && message.role === 'user' && !retiredMessages.has(message.id) && !isStale(message.node)
+    );
+    if (users.length > 1) return void clearResumeGoalPending();
+    if (users.length !== 1) return;
+
+    const turns = CLF_DOM.turns();
+    const ended = pending.turnId
+      ? [...turns].reverse().find((candidate) => localGenerationOf(candidate) === pending.turnId) || null
+      : currentAssistantTurn(turns);
+    if (!ended || !finalAnswerText(ended).trim()) return;
+    let result = endOutcome(ended);
+    if (result.outcome === 'unknown') {
+      // For a tracked turn refreshFiber() closes directly from endMessageId. This missed turn
+      // has no local generation to close, so read the same exact terminal fact here instead.
+      const fiber = fiberTurnFor(ended);
+      if (fiber?.endMessageId && !(fiber.calls || []).some((call) => !call || call.answered !== true)) {
+        result = { outcome: 'completed' };
+      }
+    }
+    if (result.outcome === 'unknown') return;
+    if (!GOAL_CONTINUABLE.has(result.outcome)) return void clearResumeGoalPending();
+
+    // Stable across a content-script reload, and deliberately a local generation-style id rather
+    // than a website message id. The app's /goal/draft idempotency therefore sees one turn even
+    // if the activity wake/foreground event is delivered twice.
+    const recoveredTurnId = pending.turnId || `g-resume-${pending.commandId}`.slice(0, 200);
+    noteGoalTurn(ended, result.outcome, recoveredTurnId);
+    // noteGoalTurn synchronously claims goalTurnId before its first await. Persist the spent
+    // provenance immediately so a reload cannot synthesize a second id/request for this answer.
+    if (goalTurnId === recoveredTurnId) clearResumeGoalPending();
   }
 
   /**
@@ -7464,9 +7753,219 @@
    *
    * A message this tab actually sent is reported as sent even if the conversation id never
    * turns up, because the alternative would be typing the same instruction twice.
-   */
+  */
   const commandsHandled = new Set();
-  let commandInFlight = false;
+  /**
+   * The current page-side command attempt, before or after the durable bridge ownership cut.
+   *
+   * A recovered deferred marker is intentionally weaker than a fresh app wake. It may wait here
+   * for a final answer, durable recorder flush, or an existing user draft without owning the
+   * bridge command yet. A later app wake for the same worker must be able to replace that inert
+   * waiter; once redeem starts, however, ownership may already be changing durably and no local
+   * preemption is safe.
+   */
+  let commandAttempt = null;
+  /**
+   * Existing-chat revivals must not race recorder recovery.
+   *
+   * On a reload the Stop control can be missing for one render even though the app still has
+   * this turn open. `resumeOpenTurn()` restores that durable fact before the first observation;
+   * only after that boot handshake is complete may a revival call the page idle.
+   */
+  let commandReadinessInitialized = false;
+  const commandReadinessWaiters = new Set();
+
+  function notifyCommandReadiness() {
+    for (const check of [...commandReadinessWaiters]) {
+      try {
+        check();
+      } catch {
+        // A readiness waiter is advisory until it owns the bridge lease. One broken listener
+        // must never disturb observation/recording of the turn whose completion it is waiting on.
+      }
+    }
+  }
+
+  /**
+   * The one first answer a Compact & Resume bootstrap can make before this hidden page ever
+   * observes a live generation.
+   *
+   * This is deliberately page provenance, not "the newest finished answer" recovery. Merely
+   * opening an old resumed conversation must never restart Goal from transcript history. The
+   * marker exists only after this document itself sent a resume bootstrap and the app ACKed the
+   * A→B continuation commit. sessionStorage keeps that proof across a content-script reload in
+   * the same tab without turning it into durable chat state that could fire days later.
+   */
+  const RESUME_GOAL_STORAGE = 'clf-resume-goal-v1';
+  let resumeGoalPending = null;
+  try {
+    const restored = JSON.parse(sessionStorage.getItem(RESUME_GOAL_STORAGE) || 'null');
+    if (
+      restored &&
+      typeof restored === 'object' &&
+      typeof restored.conversationId === 'string' &&
+      restored.conversationId.length > 0 &&
+      restored.conversationId.length <= 256 &&
+      typeof restored.commandId === 'string' &&
+      restored.commandId.length > 0 &&
+      restored.commandId.length <= 200
+    ) {
+      resumeGoalPending = {
+        conversationId: restored.conversationId,
+        commandId: restored.commandId,
+        turnId: typeof restored.turnId === 'string' && restored.turnId ? restored.turnId.slice(0, 200) : null
+      };
+    }
+  } catch {
+    // A corrupt/blocked entry loses only this one recovery hint. Ordinary observed turns still
+    // drive Goal exactly as before.
+  }
+
+  function clearResumeGoalPending() {
+    resumeGoalPending = null;
+    try {
+      sessionStorage.removeItem(RESUME_GOAL_STORAGE);
+    } catch {
+      // In-memory ownership is enough for the live document.
+    }
+  }
+
+  function persistResumeGoalPending() {
+    try {
+      sessionStorage.setItem(RESUME_GOAL_STORAGE, JSON.stringify(resumeGoalPending));
+    } catch {
+      // The live document can still recover the turn; reload recovery is best effort.
+    }
+  }
+
+  function rememberResumeGoalPending(conversation, commandId) {
+    resumeGoalPending = { conversationId: conversation, commandId, turnId: null };
+    persistResumeGoalPending();
+  }
+
+  function bindResumeGoalTurn(localTurnId) {
+    if (!resumeGoalPending || resumeGoalPending.conversationId !== conversationId || !localTurnId) return;
+    if (resumeGoalPending.turnId && resumeGoalPending.turnId !== localTurnId) {
+      // A second local generation means the conversation has already moved beyond the bootstrap
+      // answer this marker was allowed to recover.
+      clearResumeGoalPending();
+      return;
+    }
+    if (!resumeGoalPending.turnId) {
+      resumeGoalPending.turnId = localTurnId;
+      persistResumeGoalPending();
+    }
+  }
+
+  /**
+   * The exact existing worker chat is genuinely safe for another user message.
+   *
+   * Broker terminality is intentionally absent from this predicate. `agents finish` says the
+   * worker may be revived; it does not say ChatGPT has finished rendering the assistant turn
+   * that contains that tool call. The recorder's conservative generation state is the latter.
+   */
+  function revivalSubmitReady(target) {
+    if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return false;
+    if (generating || CLF_DOM.generating()) return false;
+    if (pendingTools > 0 || nativeBusy || goalBusy || compactCapture || (job && job.busy)) return false;
+    return Boolean(CLF_DOM.composerSubmitReady && CLF_DOM.composerSubmitReady());
+  }
+
+  /**
+   * Waits without redeeming the per-document bridge lease and without touching the composer.
+   *
+   * That ordering is the durability property: if this tab reloads, the service worker restarts,
+   * or the browser disappears while the final answer is still streaming, no dead RUN_ID owns the
+   * command and no half-inserted revival text exists to recover. A replacement document can make
+   * the same readiness proof and race for the one durable redeem later.
+   */
+  function waitForRevivalSubmitReady(target, attempt) {
+    if (!target || attempt?.cancelled || !alive || CLF_DOM.conversationId() !== target) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let observer = null;
+      let done = false;
+      let flushingReadyBoundary = false;
+      let boundaryEntries = null;
+      const finish = (value) => {
+        if (done) return;
+        done = true;
+        commandReadinessWaiters.delete(check);
+        if (observer) observer.disconnect();
+        resolve(value);
+      };
+      const check = () => {
+        if (attempt?.cancelled || !alive || CLF_DOM.conversationId() !== target) return finish(false);
+        if (!revivalSubmitReady(target) || flushingReadyBoundary) return;
+        // Snapshot exactly what this already-finished turn left in page custody. Later observations
+        // are allowed to exist independently; they must not turn this into an unbounded "queue must
+        // be globally empty" condition. Object identity is stable until the durable flush path
+        // removes an entry, so this is a precise custody fence rather than a queue-length guess.
+        if (!boundaryEntries) boundaryEntries = new Set(queue);
+        const pendingBoundary = () => [...boundaryEntries].some((entry) => queue.includes(entry));
+        if (!pendingBoundary()) return finish(true);
+        flushingReadyBoundary = true;
+        void (async () => {
+          // One flush is capped at 200 entries. Keep draining immediately only after a proven
+          // durable batch; on a non-durable/service-worker failure, leave the exact entries in
+          // place and wait for a later observer/lifecycle signal to retry instead of busy-polling.
+          while (
+            !attempt?.cancelled &&
+            alive &&
+            CLF_DOM.conversationId() === target &&
+            revivalSubmitReady(target) &&
+            pendingBoundary()
+          ) {
+            const durable = await flush();
+            if (!durable) break;
+          }
+        })()
+          .then(() => {
+            flushingReadyBoundary = false;
+            if (attempt?.cancelled || !alive || CLF_DOM.conversationId() !== target) return finish(false);
+            if (revivalSubmitReady(target) && !pendingBoundary()) finish(true);
+          })
+          .catch(() => {
+            // A service-worker/app outage is not evidence that the chat is unsafe forever. Keep
+            // the command outside the bridge lease; a later observation/lifecycle wake can retry.
+            flushingReadyBoundary = false;
+          });
+      };
+      commandReadinessWaiters.add(check);
+      try {
+        observer = new MutationObserver(check);
+        observer.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true
+        });
+      } catch {
+        // Recorder observations still call notifyCommandReadiness(), so MutationObserver is a
+        // latency optimization rather than the only path out of the wait.
+      }
+      check();
+    });
+  }
+
+  /**
+   * Establishes restart-safe browser custody of an inert revival marker before the page is
+   * allowed anywhere near the bridge redeem boundary.
+   *
+   * `defer_revival` persists only command id + exact conversation id in extension-local storage.
+   * A failed storage write is therefore a failed custody handoff, not permission to continue in
+   * the current document and hope it survives. Keep retrying while this exact page remains alive;
+   * no command text has been fetched and the composer is still untouched, so retry is safe.
+   */
+  async function waitForDeferredRevivalCustody(id, target, attempt) {
+    while (!attempt?.cancelled && alive && CLF_DOM.conversationId() === target) {
+      const reply = await ask({ type: 'defer_revival', id, conversationId: target });
+      if (attempt?.cancelled) return false;
+      if (reply && reply.ok === true && reply.deferred === true && reply.preferredElsewhere !== true) return true;
+      if (attempt?.cancelled || !alive || CLF_DOM.conversationId() !== target) return false;
+      await sleep(1000);
+    }
+    return false;
+  }
   /**
    * Fresh app-opened chats do not journal their first observations until the command ACK.
    *
@@ -7515,19 +8014,45 @@
     });
   }
 
-  async function runCommand(id = markerId(), fromUrl = true, onClaim = null) {
+  async function runCommand(id = markerId(), fromUrl = true, onClaim = null, options = {}) {
     // Once per command rather than once per document. A worker's tab is opened by a bootstrap
     // and then lives on, and the prime waking that worker later is a second command for the
     // same page: a document-wide latch would refuse every revival a worker ever gets.
-    if (!id || commandInFlight || commandsHandled.has(id)) {
+    const source = fromUrl ? 'url' : options.deferredRecovery === true ? 'recovery' : 'handoff';
+    const prior = commandAttempt;
+    const maySupersede =
+      Boolean(id) &&
+      prior &&
+      prior.id !== id &&
+      prior.source === 'recovery' &&
+      prior.phase === 'waiting' &&
+      source !== 'recovery';
+    if (maySupersede) {
+      // No bridge redeem has started yet, so this is only cancellation of a browser-side waiter.
+      // Wake its readiness observer immediately; its async finally block is identity-guarded and
+      // cannot clear the newer attempt that takes over below.
+      prior.cancelled = true;
+      notifyCommandReadiness();
+    }
+    if (!id || (commandAttempt && !maySupersede) || commandsHandled.has(id)) {
       if (typeof onClaim === 'function') onClaim(false);
       return;
     }
     commandsHandled.add(id);
-    commandInFlight = true;
-    // `runCommand()` is invoked immediately before the first `observe()` and runs
-    // synchronously up to its first await, so this closes the race before any event can flush.
-    commandJournalGate = true;
+    const attempt = {
+      id,
+      source,
+      phase: 'waiting',
+      cancelled: false
+    };
+    commandAttempt = attempt;
+    // Only a fresh worker/resume page needs the no-shadow-session journal gate: its first user
+    // message creates/binds a brand-new conversation. A revival stays in the existing worker
+    // session, and its *previous* assistant turn may still be finishing while this command waits.
+    // Gating that existing chat would suppress exactly the final /events we need to durably close
+    // the turn before the new user message is allowed through.
+    const gateJournal = fromUrl && !OPENED_CONVERSATION;
+    if (gateJournal) commandJournalGate = true;
     let claimReported = false;
     const reportClaim = (claimed) => {
       if (claimReported) return;
@@ -7535,16 +8060,16 @@
       if (typeof onClaim === 'function') onClaim(claimed === true);
     };
     try {
-      await deliverCommand(id, fromUrl, reportClaim);
+      await deliverCommand(id, fromUrl, reportClaim, attempt);
     } finally {
       reportClaim(false);
-      commandInFlight = false;
-      commandJournalGate = false;
+      if (commandAttempt === attempt) commandAttempt = null;
+      if (gateJournal) commandJournalGate = false;
       void flush();
     }
   }
 
-  async function deliverCommand(id, fromUrl = true, reportClaim = () => undefined) {
+  async function deliverCommand(id, fromUrl = true, reportClaim = () => undefined, attempt = null) {
     // Which conversation, if any, this delivery is entitled to type into.
     //
     // For a marker in this document's own URL it is the one the app opened the page at, read
@@ -7564,9 +8089,26 @@
     const openedConversation = fromUrl ? OPENED_CONVERSATION : CLF_DOM.conversationId();
     if (CLF_DOM.conversationId() && !openedConversation) return;
 
+    // A same-chat command is a revival. Do not cross the per-document redeem boundary merely
+    // because its composer exists: ChatGPT keeps that composer mounted while the worker's final
+    // assistant answer is still streaming. Busy is a waiting state, not a failed revival, and
+    // waiting must leave both the durable command and the user's composer untouched.
+    if (openedConversation) {
+      // Persist only the inert marker/conversation correlation before waiting. If this document,
+      // its MV3 service worker, or the whole browser disappears, the replacement browser process
+      // can put the same marker back in front of this exact chat. The prime's text stays solely in
+      // the app-side command until the later redeem succeeds.
+      if (!(await waitForDeferredRevivalCustody(id, openedConversation, attempt))) return;
+      if (!(await waitForRevivalSubmitReady(openedConversation, attempt))) return;
+    }
+    if (attempt?.cancelled) return;
+
     // RUN_ID names this document. It is what makes the command single-owner: a second tab
     // on the same marker is a different document and is refused, while this one's own
     // request is answered.
+    // From here onward a competing fresh wake must not supersede this attempt: the bridge may
+    // persist this document as owner before the response gets back to us.
+    if (attempt) attempt.phase = 'redeeming';
     const reply = await ask({
       type: 'redeem',
       id,
@@ -7583,6 +8125,7 @@
     if (!boot) {
       // Cancelled, superseded, taken by another page, or from a previous run of the app.
       // A stale marker types nothing.
+      if (openedConversation) void ask({ type: 'forget_revival', id, conversationId: openedConversation });
       reportClaim(false);
       return;
     }
@@ -7592,6 +8135,7 @@
     // a response here means this document owns the durable lease, not merely that an async
     // attempt was started. If the fallback got there first, `boot` is null and the false path
     // above leaves that winning tab alive.
+    if (attempt) attempt.phase = 'claimed';
     reportClaim(true);
 
     const fail = (why) => ask({ type: 'ack', id: boot.id, status: 'failed', error: why, client: RUN_ID });
@@ -7636,9 +8180,9 @@
     };
     if (await failIfRetargeted()) return;
 
-    // Nothing half-written is ever overwritten. This is a normal failure rather than a
-    // silent skip: the user may keep that draft indefinitely,
-    // and the app has to be told so it can re-offer the work somewhere else.
+    // Fresh worker/resume commands still have the old one-shot draft rule. A revival never gets
+    // this far with a draft: its pre-redeem readiness wait preserves the user's text and waits
+    // for the exact chat to become safe without consuming browser ownership.
     const existing = CLF_DOM.composer();
     if (existing && (existing.textContent || '').trim()) {
       return void (await fail('the composer already holds something the user was writing'));
@@ -7652,10 +8196,13 @@
     if (await failIfRetargeted()) return;
 
     if (!CLF_DOM.insertPrompt(boot.text)) return void (await fail('ChatGPT refused the inserted text'));
-    // One short guard catches the React-hydration replacement this code was originally
-    // defending against. If React did replace the editing host, reinsert into the new empty
-    // host once instead of making the user wait through an arbitrary stability window.
-    await sleep(100);
+    // Give synchronous React/input work one microtask turn to replace the editing host, then
+    // re-prove the exact draft before the irreversible send. This used to sleep for 100 ms.
+    // Long-hidden Chrome tabs throttle wall-clock timers, so that tiny "stability" delay became
+    // a foreground dependency: the wake could own the durable bridge lease and have its text in
+    // the exact worker composer, yet never reach Send until the user reopened the tab. A
+    // microtask preserves the hydration guard without putting delivery behind tab visibility.
+    await Promise.resolve();
     if (await failIfRetargeted()) return;
     let composer = CLF_DOM.composer();
     // Compared with whitespace squeezed out of both sides. The composer is a rich-text
@@ -7667,7 +8214,7 @@
     const expectedText = squeeze(boot.text);
     if (!composer || squeeze(composer.textContent) !== expectedText) {
       if (composer && !(composer.textContent || '').trim() && CLF_DOM.insertPrompt(boot.text)) {
-        await sleep(100);
+        await Promise.resolve();
         if (await failIfRetargeted()) return;
         composer = CLF_DOM.composer();
       }
@@ -7707,7 +8254,14 @@
       await sleep(500);
       const found = CLF_DOM.conversationId();
       if (found) {
-        await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
+        const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
+        // The ACK is the continuation commit. Only after it succeeds is B entitled to inherit
+        // A's Goal policy/objective, and only a resume bootstrap can create the missed-first-turn
+        // recovery described by maybeRecoverResumeGoalTurn(). Worker bootstraps are driven by
+        // their prime instead and must never arm Goal.
+        if (boot.type === 'resume' && acknowledged && acknowledged.ok === true) {
+          rememberResumeGoalPending(found, boot.id);
+        }
         return;
       }
     }
@@ -7891,13 +8445,9 @@
           sendResponse({ ok: false, error: 'wrong_conversation' });
           return false;
         }
-        if (commandInFlight || commandsHandled.has(wanted)) {
-          sendResponse({ ok: false, error: 'busy' });
-          return false;
-        }
         void runCommand(wanted, false, (claimed) => {
           sendResponse({ ok: true, claimed: claimed === true });
-        });
+        }, { deferredRecovery: message.deferredRecovery === true });
         return true;
       }
       if (message.type === 'clf-overwrite-now') {
@@ -7932,7 +8482,12 @@
   // On an ordinary existing chat there is no marker and this resolves immediately, after
   // which the established reload handshake remains unchanged: resumeOpenTurn() is still
   // awaited before the first observe() so a reloaded live turn cannot be duplicated.
-  const commandStartup = markerId() ? runCommand() : Promise.resolve();
+  const startupCommandId = markerId();
+  // Fresh worker/resume pages still deliver before status restoration: they own an empty New
+  // Chat and need no prior conversation lifecycle. A revival is the opposite. Let the recorder
+  // restore this existing chat's durable open turn first, otherwise a reload during a Stop-button
+  // flicker could call the page idle before it has learned that the previous turn is still open.
+  const commandStartup = startupCommandId && !OPENED_CONVERSATION ? runCommand(startupCommandId) : Promise.resolve();
   void commandStartup
     .catch(() => undefined)
     .then(loadRenderPreference)
@@ -7941,8 +8496,11 @@
     .then(() => restoreCapture().catch(() => undefined))
     .then(() => {
       observe();
+      commandReadinessInitialized = true;
+      notifyCommandReadiness();
       injectControl();
       injectStage();
+      if (startupCommandId && OPENED_CONVERSATION) void runCommand(startupCommandId);
     });
 
   syncTheme();

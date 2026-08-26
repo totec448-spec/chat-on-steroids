@@ -1,9 +1,5 @@
 name: Release candidate
 
-# A tag on its own no longer builds. Publishing builds, so the installers a release
-# carries are produced from the tag being published, inside the run that publishes it,
-# and never travel between runs. `workflow_dispatch` still produces an unpublished
-# candidate from any ref when you want the proof without the release.
 on:
   workflow_call:
   workflow_dispatch:
@@ -17,17 +13,63 @@ concurrency:
 
 jobs:
   package:
-    name: Package ${{ matrix.arch }}
+    name: Package ${{ matrix.name }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: x64
+          - name: Windows x64
+            platform: win32
+            arch: x64
             runner: windows-2025
-          - arch: arm64
+            script: dist:x64
+            artifact: package-windows-x64
+            files: release/Chat-On-Steroids-Setup-x64.exe
+          - name: Windows arm64
+            platform: win32
+            arch: arm64
             runner: windows-11-arm
+            script: dist:arm64
+            artifact: package-windows-arm64
+            files: release/Chat-On-Steroids-Setup-arm64.exe
+          - name: macOS x64
+            platform: darwin
+            arch: x64
+            runner: macos-15-intel
+            script: dist:mac:x64
+            artifact: package-macos-x64
+            files: |
+              release/Chat-On-Steroids-macOS-x64.dmg
+              release/Chat-On-Steroids-macOS-x64.zip
+          - name: macOS arm64
+            platform: darwin
+            arch: arm64
+            runner: macos-15
+            script: dist:mac:arm64
+            artifact: package-macos-arm64
+            files: |
+              release/Chat-On-Steroids-macOS-arm64.dmg
+              release/Chat-On-Steroids-macOS-arm64.zip
+          - name: Linux x64
+            platform: linux
+            arch: x64
+            runner: ubuntu-24.04
+            script: dist:linux:x64
+            artifact: package-linux-x64
+            files: |
+              release/Chat-On-Steroids-Linux-x64.AppImage
+              release/Chat-On-Steroids-Linux-x64.deb
+          - name: Linux arm64
+            platform: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+            script: dist:linux:arm64
+            artifact: package-linux-arm64
+            files: |
+              release/Chat-On-Steroids-Linux-arm64.AppImage
+              release/Chat-On-Steroids-Linux-arm64.deb
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 60
+    timeout-minutes: 75
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -35,6 +77,7 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 22
+          architecture: ${{ matrix.arch }}
           cache: npm
 
       - name: Install dependencies
@@ -42,133 +85,293 @@ jobs:
 
       - name: Verify tag matches package version
         if: github.ref_type == 'tag'
-        shell: pwsh
-        run: |
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match package version $version"
-          }
+        run: node -e "const v=require('./package.json').version;if(process.env.GITHUB_REF_NAME!=='v'+v)throw new Error('Tag '+process.env.GITHUB_REF_NAME+' does not match package version '+v)"
 
       - name: Verify
         run: npm run verify:ci
 
-      - name: Prove native runner architecture
-        shell: pwsh
-        run: |
-          $expected = '${{ matrix.arch }}'
-          $actual = node -p "process.arch"
-          if ($actual -ne $expected) { throw "Expected $expected runner, got $actual" }
+      - name: Prove native runner target
+        run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
 
-      - name: Package Windows installer
-        run: npm run dist:${{ matrix.arch }}
+      - name: Package
+        run: npm run ${{ matrix.script }}
 
       - name: Smoke packaged runtime natively
-        shell: pwsh
-        run: |
-          $roots = @(Get-ChildItem release -Directory | Where-Object Name -Like 'win*-unpacked')
-          if ($roots.Count -ne 1) {
-            throw "Expected one unpacked ${{ matrix.arch }} build, found $($roots.Count)"
-          }
-          node scripts/smoke-packaged-runtime.mjs $roots[0].FullName
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        run: node scripts/smoke-packaged-runtime.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
 
-      - name: Check installer name
-        shell: pwsh
-        run: |
-          $expected = "Chat-On-Steroids-Setup-${{ matrix.arch }}.exe"
-          if (-not (Test-Path -LiteralPath "release/$expected")) {
-            throw "Missing release/$expected"
-          }
+      - name: Audit packaged macOS bundle metadata and Mach-O payloads
+        if: matrix.platform == 'darwin'
+        run: node scripts/smoke-macos-bundle.mjs ${{ matrix.arch }}
 
-      - name: Upload ${{ matrix.arch }} installer
+      - name: Verify generated macOS archives
+        if: matrix.platform == 'darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="$PWD/release/Chat-On-Steroids-macOS-${{ matrix.arch }}.dmg"
+          zip="$PWD/release/Chat-On-Steroids-macOS-${{ matrix.arch }}.zip"
+          test -f "$dmg"
+          test -f "$zip"
+          hdiutil verify "$dmg"
+          # ZIP containers cannot be code-signed, but DMGs can. v2.0.2 explicitly promises a
+          # publisher-unsigned Mac distribution, so reject a signed outer disk image as well as
+          # the .app. Fail closed if codesign itself errors for any reason other than the expected
+          # unsigned-object result.
+          set +e
+          codesign --display --verbose=4 "$dmg" >dmg-codesign.log 2>&1
+          dmg_codesign_status=$?
+          set -e
+          if [ "$dmg_codesign_status" -eq 0 ]; then
+            cat dmg-codesign.log
+            echo "macOS DMG unexpectedly has a code signature; release metadata says publisher-unsigned" >&2
+            exit 1
+          fi
+          if [ "$dmg_codesign_status" -ne 1 ] || ! grep -Eqi 'code object is not signed( at all)?' dmg-codesign.log; then
+            cat dmg-codesign.log
+            echo "Could not prove the macOS DMG is unsigned (codesign status $dmg_codesign_status)" >&2
+            exit 1
+          fi
+          unzip -tq "$zip"
+          mount_dir="$(mktemp -d)"
+          zip_dir="$(mktemp -d)"
+          cleanup() {
+            hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true
+            rmdir "$mount_dir" >/dev/null 2>&1 || true
+            rm -rf "$zip_dir"
+          }
+          trap cleanup EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg" >/dev/null
+          test -d "$mount_dir/Chat On Steroids.app"
+          test -L "$mount_dir/Applications"
+          test "$(readlink "$mount_dir/Applications")" = /Applications
+          test -x "$mount_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
+          test -f "$mount_dir/Chat On Steroids.app/Contents/Info.plist"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat On Steroids.app"
+          # ditto is the macOS-native ZIP extractor and preserves executable modes/metadata.
+          ditto -x -k "$zip" "$zip_dir"
+          test -d "$zip_dir/Chat On Steroids.app"
+          test -x "$zip_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
+          test -f "$zip_dir/Chat On Steroids.app/Contents/Info.plist"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat On Steroids.app"
+
+      - name: Launch packaged macOS app normally
+        if: matrix.platform == 'darwin'
+        run: node scripts/smoke-macos-gui.mjs ${{ matrix.arch }}
+
+      - name: Install generated DEB on target distro
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb="$PWD/release/Chat-On-Steroids-Linux-${{ matrix.arch }}.deb"
+          test -f "$deb"
+          echo "Generated control metadata:"
+          dpkg-deb --field "$deb" Package Version Architecture Depends
+          test "$(dpkg-deb --field "$deb" Package)" = chat-on-steroids
+          test "$(dpkg-deb --field "$deb" Version)" = "$(node -p "require('./package.json').version")"
+          expected_deb_arch=arm64
+          if [ '${{ matrix.arch }}' = x64 ]; then expected_deb_arch=amd64; fi
+          test "$(dpkg-deb --field "$deb" Architecture)" = "$expected_deb_arch"
+          depends="$(dpkg-deb --field "$deb" Depends)"
+          printf '%s\n' "$depends" | grep -Eq 'libgtk-3-0[[:space:]]*\|[[:space:]]*libgtk-3-0t64|libgtk-3-0t64[[:space:]]*\|[[:space:]]*libgtk-3-0'
+          printf '%s\n' "$depends" | grep -Eq 'libatspi2\.0-0[[:space:]]*\|[[:space:]]*libatspi2\.0-0t64|libatspi2\.0-0t64[[:space:]]*\|[[:space:]]*libatspi2\.0-0'
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends "$deb"
+          sudo apt-get install -y --no-install-recommends xvfb xauth
+          dpkg-query -W -f='${Status}\n' chat-on-steroids | grep -Fxq 'install ok installed'
+          desktop=/usr/share/applications/com.chatonsteroids.app.desktop
+          test -f "$desktop"
+          grep -Fxq 'Name=Chat On Steroids' "$desktop"
+          grep -Fxq 'Icon=chat-on-steroids' "$desktop"
+          grep -Fxq 'StartupWMClass=com.chatonsteroids.app' "$desktop"
+          # electron-builder's DEB postinstall registers /usr/bin through update-alternatives.
+          # Prove package integration is present, then anchor the full runtime smoke at the
+          # package-owned resolved binary rather than assuming an /opt product-directory spelling.
+          test -L /usr/bin/chat-on-steroids
+          ELECTRON_RUN_AS_NODE=1 /usr/bin/chat-on-steroids -e "if(process.platform!=='linux'||process.arch!=='${{ matrix.arch }}')process.exit(9); console.log('deb-runtime-ok')" | grep -Fxq 'deb-runtime-ok'
+          installed_executable="$(readlink -f /usr/bin/chat-on-steroids)"
+          test -x "$installed_executable"
+          dpkg-query -S "$installed_executable" | grep -Eq '^chat-on-steroids:'
+          node scripts/smoke-packaged-runtime.mjs --platform linux --arch '${{ matrix.arch }}' --root "$(dirname "$installed_executable")"
+
+      - name: Launch installed DEB normally under Xvfb
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          deb_smoke_root="$(mktemp -d)"
+          trap 'rm -rf "$deb_smoke_root"' EXIT
+          mkdir -p \
+            "$deb_smoke_root/home" \
+            "$deb_smoke_root/config" \
+            "$deb_smoke_root/cache" \
+            "$deb_smoke_root/data" \
+            "$deb_smoke_root/state"
+          set +e
+          HOME="$deb_smoke_root/home" \
+          XDG_CONFIG_HOME="$deb_smoke_root/config" \
+          XDG_CACHE_HOME="$deb_smoke_root/cache" \
+          XDG_DATA_HOME="$deb_smoke_root/data" \
+          XDG_STATE_HOME="$deb_smoke_root/state" \
+          CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids >deb-gui.log 2>&1
+          status=$?
+          set -e
+          cat deb-gui.log
+          if [ "$status" -ne 124 ]; then
+            echo "Installed DEB GUI exited before the intentional timeout (status $status)" >&2
+            exit 1
+          fi
+          grep -Fq '[info] app started' deb-gui.log
+          grep -Fq '[info] window loaded' deb-gui.log
+          grep -Fq '[info] renderer state ready' deb-gui.log
+          if grep -Fq '[error] window failed to load' deb-gui.log || grep -Fq '[error] renderer:' deb-gui.log; then
+            echo "Installed DEB GUI reported a renderer startup failure" >&2
+            exit 1
+          fi
+
+      - name: Execute generated static-runtime AppImage
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage="$PWD/release/Chat-On-Steroids-Linux-${{ matrix.arch }}.AppImage"
+          test -x "$appimage"
+          # Exercise the actual static-runtime artifact through Chromium/Electron startup and
+          # require renderer-state proof rather than accepting a process that merely hangs.
+          # Do not use Electron's Node mode through AppRun here: when user namespaces are blocked,
+          # the 1.0.3 launcher can prepend --no-sandbox, which Node mode rejects as a bad option.
+          # The unpacked native-runtime probe above already validates every native dependency.
+          # First launch with the runner's real namespace/tool environment. Then force the
+          # launcher's namespace probe to fail in a second, independently isolated profile so CI
+          # covers both the ordinary host decision and the documented --no-sandbox fallback.
+          fake_bin="$(mktemp -d)"
+          normal_smoke_root="$(mktemp -d)"
+          fallback_smoke_root="$(mktemp -d)"
+          cleanup() {
+            rm -rf "$fake_bin" "$normal_smoke_root" "$fallback_smoke_root"
+          }
+          trap cleanup EXIT
+          printf '#!/bin/sh\nexit 1\n' > "$fake_bin/unshare"
+          chmod +x "$fake_bin/unshare"
+          run_appimage_smoke() {
+            label="$1"
+            smoke_root="$2"
+            launch_path="$3"
+            log="$4"
+            mkdir -p \
+              "$smoke_root/home" \
+              "$smoke_root/config" \
+              "$smoke_root/cache" \
+              "$smoke_root/data" \
+              "$smoke_root/state"
+            set +e
+            HOME="$smoke_root/home" \
+            XDG_CONFIG_HOME="$smoke_root/config" \
+            XDG_CACHE_HOME="$smoke_root/cache" \
+            XDG_DATA_HOME="$smoke_root/data" \
+            XDG_STATE_HOME="$smoke_root/state" \
+            PATH="$launch_path" \
+            CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a "$appimage" >"$log" 2>&1
+            status=$?
+            set -e
+            cat "$log"
+            if [ "$status" -ne 124 ]; then
+              echo "AppImage $label GUI exited before the intentional timeout (status $status)" >&2
+              exit 1
+            fi
+            grep -Fq '[info] app started' "$log"
+            grep -Fq '[info] window loaded' "$log"
+            grep -Fq '[info] renderer state ready' "$log"
+            if grep -Fq '[error] window failed to load' "$log" || grep -Fq '[error] renderer:' "$log"; then
+              echo "AppImage $label GUI reported a renderer startup failure" >&2
+              exit 1
+            fi
+          }
+          run_appimage_smoke normal "$normal_smoke_root" "$PATH" appimage-normal-gui.log
+          run_appimage_smoke forced-fallback "$fallback_smoke_root" "$fake_bin:$PATH" appimage-fallback-gui.log
+
+      - name: Upload package artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: installer-${{ matrix.arch }}
-          path: release/Chat-On-Steroids-Setup-${{ matrix.arch }}.exe
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
           if-no-files-found: error
           retention-days: 30
 
   assemble:
     name: Assemble release candidate
     needs: package
-    runs-on: windows-2025
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: Download installers
+      - name: Download packages
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          pattern: installer-*
+          pattern: package-*
           path: release
           merge-multiple: true
 
       - name: Package standalone extension
-        shell: pwsh
         run: |
-          Compress-Archive -Path extension\*, LICENSE -DestinationPath release\Chat-On-Steroids-Extension.zip -CompressionLevel Optimal
-          $manifest = Get-Content extension\manifest.json -Raw | ConvertFrom-Json
-          $package = Get-Content package.json -Raw | ConvertFrom-Json
-          if ($manifest.version -ne $package.version) {
-            throw "Extension $($manifest.version) does not match app $($package.version)"
-          }
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path release\Chat-On-Steroids-Extension.zip))
-          try {
-            $entries = @($archive.Entries | ForEach-Object { $_.FullName -replace '\\', '/' })
-            $requiredEntries = @(
-              'manifest.json',
-              'LICENSE',
-              'background.js',
-              'chatgpt-dom.js',
-              'content.js',
-              'fiber.js',
-              'overlay.css',
-              'popup.html',
-              'popup.css',
-              'popup.js',
-              'icons/icon16.png',
-              'icons/icon32.png',
-              'icons/icon48.png',
-              'icons/icon128.png'
-            )
-            foreach ($required in $requiredEntries) {
-              if ($entries -notcontains $required) { throw "Standalone extension zip is missing $required at its root" }
-            }
-          } finally {
-            $archive.Dispose()
-          }
+          set -euo pipefail
+          (cd extension && zip -qr ../release/Chat-On-Steroids-Extension.zip . -x '*.map')
+          zip -q release/Chat-On-Steroids-Extension.zip LICENSE
+          node -e "const m=require('./extension/manifest.json'),p=require('./package.json');if(m.version!==p.version)throw new Error('Extension '+m.version+' does not match app '+p.version)"
+          for required in manifest.json background.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
+            unzip -Z1 release/Chat-On-Steroids-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
+          done
 
       - name: Create SHA-256 checksums
-        shell: pwsh
         run: |
-          $files = @(
-            'release/Chat-On-Steroids-Setup-x64.exe',
-            'release/Chat-On-Steroids-Setup-arm64.exe',
-            'release/Chat-On-Steroids-Extension.zip'
+          set -euo pipefail
+          files=(
+            release/Chat-On-Steroids-Setup-x64.exe
+            release/Chat-On-Steroids-Setup-arm64.exe
+            release/Chat-On-Steroids-macOS-x64.dmg
+            release/Chat-On-Steroids-macOS-x64.zip
+            release/Chat-On-Steroids-macOS-arm64.dmg
+            release/Chat-On-Steroids-macOS-arm64.zip
+            release/Chat-On-Steroids-Linux-x64.AppImage
+            release/Chat-On-Steroids-Linux-x64.deb
+            release/Chat-On-Steroids-Linux-arm64.AppImage
+            release/Chat-On-Steroids-Linux-arm64.deb
+            release/Chat-On-Steroids-Extension.zip
           )
-          foreach ($file in $files) {
-            if (-not (Test-Path -LiteralPath $file)) { throw "Missing $file" }
-          }
-          $lines = foreach ($file in $files) {
-            $item = Get-Item -LiteralPath $file
-            $hash = (Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            "$hash  $($item.Name)"
-          }
-          Set-Content -LiteralPath release/SHA256SUMS.txt -Value $lines -Encoding utf8NoBOM
-          Get-Content release/SHA256SUMS.txt
+          for file in "${files[@]}"; do test -f "$file" || { echo "Missing $file" >&2; exit 1; }; done
+          (cd release && sha256sum \
+            Chat-On-Steroids-Setup-x64.exe \
+            Chat-On-Steroids-Setup-arm64.exe \
+            Chat-On-Steroids-macOS-x64.dmg \
+            Chat-On-Steroids-macOS-x64.zip \
+            Chat-On-Steroids-macOS-arm64.dmg \
+            Chat-On-Steroids-macOS-arm64.zip \
+            Chat-On-Steroids-Linux-x64.AppImage \
+            Chat-On-Steroids-Linux-x64.deb \
+            Chat-On-Steroids-Linux-arm64.AppImage \
+            Chat-On-Steroids-Linux-arm64.deb \
+            Chat-On-Steroids-Extension.zip > SHA256SUMS.txt)
+          cat release/SHA256SUMS.txt
 
-      # Publishing a GitHub Release stays a deliberate maintainer action: this workflow
-      # only produces a verified, checksummed candidate. publish.yml calls it and is the
-      # only thing that turns the result into a release.
       - name: Upload release candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: chat-on-steroids-${{ github.ref_name }}
+          # Artifact names reject `/`, so direct candidate runs from feature/foo refs must not
+          # fail after all six package jobs. A run id is filesystem-safe and caller-stable.
+          name: chat-on-steroids-candidate-${{ github.run_id }}
           path: |
             release/Chat-On-Steroids-Setup-x64.exe
             release/Chat-On-Steroids-Setup-arm64.exe
+            release/Chat-On-Steroids-macOS-x64.dmg
+            release/Chat-On-Steroids-macOS-x64.zip
+            release/Chat-On-Steroids-macOS-arm64.dmg
+            release/Chat-On-Steroids-macOS-arm64.zip
+            release/Chat-On-Steroids-Linux-x64.AppImage
+            release/Chat-On-Steroids-Linux-x64.deb
+            release/Chat-On-Steroids-Linux-arm64.AppImage
+            release/Chat-On-Steroids-Linux-arm64.deb
             release/Chat-On-Steroids-Extension.zip
             release/SHA256SUMS.txt
           if-no-files-found: error

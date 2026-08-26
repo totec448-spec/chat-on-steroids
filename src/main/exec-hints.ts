@@ -573,10 +573,10 @@ export function nonZeroExitIsBenign(
   if (!NO_MATCH_MEANS_EXIT_1.has(program)) return false;
   // A bare command name is not proof of which implementation ran. PowerShell profiles can
   // define functions/aliases named `rg` and even `rg.exe`; cmd.exe searches the current
-  // directory before PATH and can pick up a local rg.cmd; POSIX shells have aliases/functions
+  // directory before PATH and can pick up a local rg.cmd; POSIX shells have functions/aliases
   // of their own. Any of those may exit 1 with no diagnostic for a reason unrelated to search
   // results. A path-qualified token is the one representation the command text can actually
-  // prove. tools-core binds ordinary PowerShell `rg` calls to the bundled executable before
+  // prove. tools-core binds ordinary PowerShell/POSIX `rg` calls to the bundled executable before
   // they reach this classifier, preserving the common no-match case without trusting names.
   const pathQualified = token !== null && /[\\/]/.test(token.value);
   if (!pathQualified) return false;
@@ -584,20 +584,21 @@ export function nonZeroExitIsBenign(
 }
 
 /**
- * Binds a bare PowerShell `rg`/`ripgrep` invocation to the binary the app deliberately ships.
+ * Binds a bare PowerShell/POSIX `rg`/`ripgrep` invocation to the binary the app deliberately ships.
  *
  * This project already parses ripgrep arguments against the bundled version's option table and
- * prepends that binary's directory to child PATH. Leaving PowerShell command-name lookup in
- * front of it broke that contract: a profile function/alias named `rg` won before PATH and could
- * both receive rewrites intended for ripgrep 15.2.0 and have its exit 1 misfiled as "no matches".
+ * prepends that binary's directory to child PATH. Leaving shell command-name lookup in front of
+ * it broke that contract: a function/alias named `rg` can win before PATH and both receive
+ * rewrites intended for ripgrep 15.2.0 and make its exit status impossible to attribute safely.
  *
- * A quoted absolute path plus PowerShell's call operator makes the intended binary explicit.
+ * A shell-quoted absolute path (plus PowerShell's call operator where needed) makes the intended
+ * binary explicit.
  * Only a literal bare program token at a top-level statement/pipeline head is changed. Dynamic
  * invocations, already-qualified paths, quoted strings and commands containing backtick escapes
  * stay untouched; the latter cannot be split safely by this lightweight parser.
  */
 export function bindBundledRipgrep(command: string, shellType: ShellType, executable: string | null): string {
-  if (shellType !== 'powershell' || !executable || hasUnsupportedShellLexemes(command)) return command;
+  if (shellType === 'cmd' || !executable || hasUnsupportedShellLexemes(command)) return command;
   let changed = false;
   const bound = rebuild(command, [';', '&&', '||', '\n'], (statement) =>
     rebuild(statement, ['|'], (segment) => {
@@ -613,11 +614,18 @@ export function bindBundledRipgrep(command: string, shellType: ShellType, execut
       const at = body.indexOf(first.raw);
       if (at < 0) return segment;
       changed = true;
-      const replacement = `& ${quoteArgument(executable)}`;
+      const replacement = shellType === 'powershell'
+        ? `& ${quoteArgument(executable)}`
+        : quotePosixArgument(executable);
       return `${lead}${body.slice(0, at)}${replacement}${body.slice(at + first.raw.length)}${trail}`;
     })
   );
   return changed ? bound : command;
+}
+
+/** One literal POSIX-shell argument. Single quotes close/reopen around an embedded apostrophe. */
+function quotePosixArgument(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /** Where one double-quoted string sits in a command line, read under bash's escape rules. */
@@ -903,8 +911,8 @@ function isRipgrepPatternRegion(command: string, region: QuotedRegion): boolean 
  * conclusion — the measured consequence being re-runs of searches that had already answered.
  * Both benign shapes are named, because nothing in the exit code tells them apart.
  */
-export function benignExitNote(command: string): string {
-  if (cutPipelineGeneratorOnlyReports(command)) {
+export function benignExitNote(command: string, shellType: ShellType = 'powershell'): string {
+  if (shellType === 'powershell' && cutPipelineGeneratorOnlyReports(command)) {
     const program = programName(pipelineStopCandidate(command) ?? undefined);
     return (
       `Exit code 1 here is \`Select-Object -First\` stopping the pipeline, not a failure: it ` +
@@ -916,6 +924,12 @@ export function benignExitNote(command: string): string {
     );
   }
   const program = statusDeterminingProgram(command);
+  if (shellType !== 'powershell') {
+    return (
+      `Exit code 1 from \`${program}\` is a result, not a failure: this search program uses it ` +
+      'when it finds no matches. Nothing went wrong, and the command does not need to be run again.'
+    );
+  }
   return (
     `Exit code 1 from \`${program}\` is a result, not a failure: it is what a search reports ` +
     'when it finds no matches, and also what it reports when a later stage such as ' +
@@ -1261,8 +1275,14 @@ function rebuild(text: string, seps: readonly string[], map: (part: string) => s
  * Only patterns that name one specific, actionable cause belong here. A hint that fires on
  * a guess is worse than silence: it sends the model somewhere confidently wrong.
  */
-export function execRecoveryHints(command: string, outputText: string): string[] {
+export function execRecoveryHints(
+  command: string,
+  outputText: string,
+  shellType: ShellType = 'powershell'
+): string[] {
   const hints: string[] = [];
+  const powershell = shellType === 'powershell';
+  const cmd = shellType === 'cmd';
 
   if (/fatal: not a git repository/i.test(outputText)) {
     hints.push(
@@ -1272,7 +1292,11 @@ export function execRecoveryHints(command: string, outputText: string): string[]
     );
   }
 
-  if (/[?*]/.test(command) && (/os error 123/i.test(outputText) || /IO error for operation on .*[*?]/i.test(outputText))) {
+  if (
+    powershell &&
+    /[?*]/.test(command) &&
+    (/os error 123/i.test(outputText) || /IO error for operation on .*[*?]/i.test(outputText))
+  ) {
     hints.push(
       'PowerShell does not expand `*` or `?` for native programs, so the pattern reached the program literally. ' +
         'For ripgrep pass the filename pattern as `-g \'<glob>\'`; otherwise expand it first, e.g. ' +
@@ -1290,15 +1314,20 @@ export function execRecoveryHints(command: string, outputText: string): string[]
       outputText
     )
   ) {
+    const checkPath = powershell
+      ? '`Get-ChildItem -LiteralPath \'<path>\'`'
+      : cmd
+        ? '`dir "<path>"`'
+        : '`ls -ld -- \'<path>\'`';
     hints.push(
       'The search exited non-zero because a path it was given does not exist — the error line ' +
         'above names it, and the rest of the output is a complete answer for the paths that do. ' +
-        'Confirm the spelling with `Get-ChildItem` before re-running, and re-run only the ' +
+        `Confirm the spelling with ${checkPath} before re-running, and re-run only the ` +
         'missing path rather than the whole search.'
     );
   }
 
-  if (command.includes('\\"') && /The string (?:is missing the terminator|starting:)/i.test(outputText)) {
+  if (powershell && command.includes('\\"') && /The string (?:is missing the terminator|starting:)/i.test(outputText)) {
     hints.push(
       'PowerShell refused that line at a quote and ran none of it, including any earlier ' +
         'statement on the same line. A backslash is not an escape character in PowerShell, so ' +
@@ -1317,7 +1346,7 @@ export function execRecoveryHints(command: string, outputText: string): string[]
   // make. This fires on the shell's own refusal, so it can never misfire on PowerShell 7,
   // where the operators work and no such error exists.
   const invalidOperator = /The token '(&&|\|\|)' is not a valid statement separator/i.exec(outputText)?.[1];
-  if (invalidOperator && command.includes(invalidOperator)) {
+  if (powershell && invalidOperator && command.includes(invalidOperator)) {
     hints.push(
       'Windows PowerShell 5.1 has no `&&` or `||`, so it refused the whole line and ran nothing. ' +
         'These are not the same as `;`, which would run the second command even when the first failed: ' +
@@ -1332,7 +1361,7 @@ export function execRecoveryHints(command: string, outputText: string): string[]
     /FullyQualifiedErrorId\s*:\s*(?:TerminatorExpectedAtEndOfString|MissingArgument|MissingExpressionAfterToken|MissingFileSpecification|RedirectionNotSupported|UnexpectedToken|EmptyPipeElement)/i.test(
       outputText
     );
-  if (parserFailure && !invalidOperator && !bashQuoteFailure) {
+  if (powershell && parserFailure && !invalidOperator && !bashQuoteFailure) {
     const correction = /TerminatorExpectedAtEndOfString|missing the terminator/i.test(outputText)
       ? 'Balance the quoted argument; for literal regexes and paths, prefer one single-quoted PowerShell argument.'
       : /MissingArgument|missing an argument/i.test(outputText)
@@ -1346,16 +1375,24 @@ export function execRecoveryHints(command: string, outputText: string): string[]
   }
 
   if (/JAVA_HOME is not set/i.test(outputText)) {
-    hints.push(
-      'No Java could be found automatically. Point JAVA_HOME at a JDK for this command, e.g. ' +
-        "`$env:JAVA_HOME='C:\\Program Files\\Android\\Android Studio\\jbr'; $env:Path=\"$env:JAVA_HOME\\bin;$env:Path\"`."
-    );
+    const example = powershell
+      ? "`$env:JAVA_HOME='C:\\path\\to\\jdk'; $env:Path=\"$env:JAVA_HOME\\bin;$env:Path\"`"
+      : cmd
+        ? '`set "JAVA_HOME=C:\\path\\to\\jdk" && set "PATH=%JAVA_HOME%\\bin;%PATH%"`'
+        : '`export JAVA_HOME=/path/to/jdk; export PATH="$JAVA_HOME/bin:$PATH"`';
+    hints.push(`No Java could be found automatically. Point JAVA_HOME at a JDK for this command, e.g. ${example}.`);
   }
 
   if (/cannot find GOROOT/i.test(outputText)) {
+    const executable = powershell || cmd ? 'bin\\go.exe' : 'bin/go';
+    const example = powershell
+      ? "`$env:GOROOT='C:\\path\\to\\go'; $env:Path=\"$env:GOROOT\\bin;$env:Path\"`"
+      : cmd
+        ? '`set "GOROOT=C:\\path\\to\\go" && set "PATH=%GOROOT%\\bin;%PATH%"`'
+        : '`export GOROOT=/path/to/go; export PATH="$GOROOT/bin:$PATH"`';
     hints.push(
-      'The go binary was found but GOROOT was not set and could not be inferred. Set GOROOT to the ' +
-        'toolchain directory that contains that go.exe before invoking it.'
+      `The go binary was found but GOROOT was not set and could not be inferred. Set GOROOT to the ` +
+        `toolchain directory that contains ${executable} before invoking it, e.g. ${example}.`
     );
   }
 

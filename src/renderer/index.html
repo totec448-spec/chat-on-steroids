@@ -122,7 +122,7 @@
                 <div id="rootList"></div>
                 <p class="empty" id="rootsEmpty">
                   Nothing shared yet. ChatGPT sees short names like <code>/project</code> — your
-                  real Windows paths are never sent.
+                  real system paths are never sent.
                 </p>
               </div>
             </section>
@@ -295,9 +295,9 @@
                 </div>
                 <div class="step-body">
                   <h3>Start the tunnel</h3>
-                  <p>
-                    Leave it running while you use the connector. It stays in the tray when you
-                    close the window.
+                  <p id="backgroundRunningCopy">
+                    Leave it running while you use the connector. It stays available when you close
+                    the window.
                   </p>
                   <div class="step-actions">
                     <button class="btn btn-solid" id="wizConnect" type="button">Connect</button>
@@ -411,8 +411,8 @@
 
               <div class="field">
                 <label class="inline"><input type="checkbox" id="autoConnect" /> Connect automatically at startup</label>
-                <label class="inline"><input type="checkbox" id="minimizeToTray" /> Keep running in the tray when closed</label>
-                <label class="inline"><input type="checkbox" id="privacyScreenshots" /> Privacy screenshots: default to the active window instead of the whole monitor</label>
+                <label class="inline"><input type="checkbox" id="minimizeToTray" /> <span id="minimizeToTrayCopy">Keep running when closed</span></label>
+                <label class="inline" id="privacyScreenshotsSetting"><input type="checkbox" id="privacyScreenshots" /> Privacy screenshots: default to the active window instead of the whole monitor</label>
               </div>
             </details>
           </div>
@@ -606,7 +606,7 @@
                   <div class="setting">
                     <span class="setting-text">
                       <b>System prompt</b>
-                      <em>The continuation gate sent to the Goal model. The default stops on “done” and continues only explicit missing work.</em>
+                      <em>Used in chats with no goal of their own. The Goal model reads what you already asked for in the chat and keeps ChatGPT going until it is done.</em>
                     </span>
                     <button class="btn" id="goalPromptEdit" type="button">Edit prompt</button>
                   </div>
@@ -617,6 +617,23 @@
                     <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
                     <div class="step-actions">
                       <button class="btn" id="goalPromptReset" type="button">Restore default</button>
+                    </div>
+                  </div>
+
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Goal prompt</b>
+                      <em>Used instead of the above once a chat carries its own goal. Drives ChatGPT towards that goal and writes the opening message of a new chat.</em>
+                    </span>
+                    <button class="btn" id="goalObjectivePromptEdit" type="button">Edit prompt</button>
+                  </div>
+
+                  <div class="field goal-prompt" id="goalObjectivePromptPanel" hidden>
+                    <label for="goalObjectivePrompt">Goal driver prompt</label>
+                    <textarea id="goalObjectivePrompt" rows="14" spellcheck="false"></textarea>
+                    <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
+                    <div class="step-actions">
+                      <button class="btn" id="goalObjectivePromptReset" type="button">Restore default</button>
                     </div>
                   </div>
 

@@ -362,6 +362,8 @@ class FakeStorageArea {
   data: Record<string, unknown>;
   /** Optional quota used to make writes fail the way Chrome does. */
   maxBytes: number | null = null;
+  /** Deterministic transient write failure seam for durability/restart regressions. */
+  failNextSets = 0;
   /**
    * Optional read latency, in milliseconds.
    *
@@ -389,6 +391,10 @@ class FakeStorageArea {
   }
 
   async set(values: Record<string, unknown>): Promise<void> {
+    if (this.failNextSets > 0) {
+      this.failNextSets--;
+      throw new Error('synthetic storage write failure');
+    }
     const next = { ...this.data, ...structuredClone(values) };
     if (this.maxBytes !== null && Buffer.byteLength(JSON.stringify(next), 'utf8') > this.maxBytes) {
       throw new Error('QUOTA_BYTES exceeded');
@@ -444,6 +450,8 @@ function loadWorker(options: {
   session: FakeStorageArea;
   fetch?: (input: string, init?: Record<string, unknown>) => Promise<ReturnType<typeof response>>;
   tabsGet?: (tabId: number) => Promise<{ id?: number; url?: string; pendingUrl?: string; status?: string }>;
+  tabsQuery?: () => Promise<Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string }>>;
+  tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
@@ -451,9 +459,9 @@ function loadWorker(options: {
   const tabUpdatedListeners: Array<(tabId: number, changeInfo: { url?: string; status?: string }) => void> = [];
   const installedListeners: Array<(details: { reason: string }) => void> = [];
   const tabsCreate = vi.fn(async () => ({ id: 99 }));
-  const tabsQuery = vi.fn(async () => [] as Array<{ id?: number }>);
+  const tabsQuery = vi.fn(options.tabsQuery ?? (async () => []));
   const tabsUpdate = vi.fn(async (id: number) => ({ id, windowId: 7 }));
-  const tabsSendMessage = vi.fn(async () => ({ ok: true }));
+  const tabsSendMessage = vi.fn(options.tabsSendMessage ?? (async () => ({ ok: true })));
   const tabsRemove = vi.fn(async () => undefined);
   const scriptingExecuteScript = vi.fn(async () => []);
   const scriptingInsertCSS = vi.fn(async () => undefined);
@@ -628,6 +636,49 @@ function journalOf(session: FakeStorageArea): any[] {
   return Array.isArray(value) ? value : [];
 }
 
+describe('worker settings authority', () => {
+  const paired = { port: 8765, token: 'paired-token' };
+  const CHAT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+  it('forwards auto-compaction writes with the source tab conversation so the app can reject worker authority', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/settings' && init.method === 'POST') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(409, { error: 'worker_compaction_disabled' });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(42);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 42);
+
+    const reply = await worker.send({ type: 'settings_set', conversationId: CHAT, autoCompact: false }, 42);
+    expect(reply).toMatchObject({ ok: false, status: 409, data: { error: 'worker_compaction_disabled' } });
+    expect(posted).toEqual([{ autoCompact: false, conversationId: CHAT }]);
+  });
+
+  it('refuses a settings write that names a different conversation than the source tab owns', async () => {
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      return response(200, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(43);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 43);
+    const other = '11111111-2222-4333-8444-555555555555';
+
+    expect(await worker.send({ type: 'settings_set', conversationId: other, autoCompact: true }, 43)).toMatchObject({
+      ok: false,
+      error: 'stale_conversation'
+    });
+    expect(fetch.mock.calls.some(([input]) => new URL(String(input)).pathname === '/settings')).toBe(false);
+  });
+});
+
 // ------------------------------------------------------------ command delivery
 
 /**
@@ -751,7 +802,7 @@ describe('extension command delivery', () => {
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
     worker.tabsQuery.mockResolvedValueOnce([{ id: 41 }]);
-    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 9 });
+    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 10 });
 
     await worker.installed('update');
 
@@ -872,7 +923,7 @@ describe('extension revival delivery', () => {
       return response(404, {});
     });
 
-  it('gives the revival to the tab that chat is already open in, and closes the duplicate only after claim', async () => {
+  it('gives revival to the already-open worker without focusing it, and closes the duplicate only after claim', async () => {
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
     worker.tabsQuery.mockResolvedValue([
       { id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` },
@@ -885,7 +936,7 @@ describe('extension revival delivery', () => {
     worker.tabsSendMessage.mockImplementation(async (id: number, message: { type: string }) => {
       order.push(`${message.type}:${id}`);
       return message.type === 'clf-recorder-ping'
-        ? { ok: true, recorderVersion: 9 }
+        ? { ok: true, recorderVersion: 10 }
         : { ok: true, claimed: true };
     });
 
@@ -902,15 +953,15 @@ describe('extension revival delivery', () => {
     // documents exist the bridge's single-owner lease prevents duplicate delivery; closing the
     // fallback before this claim is the race that used to destroy the actual winning owner.
     expect(order).toEqual(['clf-recorder-ping:4', 'clf-run-command:4', 'remove:12']);
-    expect(worker.tabsUpdate).toHaveBeenCalledWith(4, { active: true });
-    expect(worker.windowsUpdate).toHaveBeenCalledWith(7, { focused: true });
+    expect(worker.tabsUpdate).not.toHaveBeenCalled();
+    expect(worker.windowsUpdate).not.toHaveBeenCalled();
   });
 
   it('does not close a fresh revival tab that already won the durable command lease', async () => {
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: quiet() });
     worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` }]);
     worker.tabsSendMessage.mockImplementation(async (_id: number, message: { type: string }) => {
-      if (message.type === 'clf-recorder-ping') return { ok: true, recorderVersion: 9 };
+      if (message.type === 'clf-recorder-ping') return { ok: true, recorderVersion: 10 };
       // The app-opened fallback loaded faster and redeemed while background was pinging this
       // existing tab. The existing document truthfully reports that it did not get the lease.
       return { ok: true, claimed: false };
@@ -979,7 +1030,7 @@ describe('extension revival delivery', () => {
     worker.tabsSendMessage.mockImplementation(async (id: number, message: { type: string }) => {
       if (id === 4) throw new Error('stale recorder');
       return message.type === 'clf-recorder-ping'
-        ? { ok: true, recorderVersion: 9 }
+        ? { ok: true, recorderVersion: 10 }
         : { ok: true, claimed: true };
     });
 
@@ -992,7 +1043,8 @@ describe('extension revival delivery', () => {
       conversationId: CHAT
     });
     expect(worker.tabsRemove).toHaveBeenCalledWith(12);
-    expect(worker.tabsUpdate).toHaveBeenCalledWith(5, { active: true });
+    expect(worker.tabsUpdate).not.toHaveBeenCalled();
+    expect(worker.windowsUpdate).not.toHaveBeenCalled();
   });
 
   it('reuses a supported legacy chat.openai.com worker tab', async () => {
@@ -1000,7 +1052,7 @@ describe('extension revival delivery', () => {
     worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chat.openai.com/c/${CHAT}` }]);
     worker.tabsSendMessage.mockImplementation(async (_id: number, message: { type: string }) =>
       message.type === 'clf-recorder-ping'
-        ? { ok: true, recorderVersion: 9 }
+        ? { ok: true, recorderVersion: 10 }
         : { ok: true, claimed: true }
     );
 
@@ -1019,7 +1071,7 @@ describe('extension revival delivery', () => {
     worker.tabsQuery.mockResolvedValue([{ id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` }]);
     worker.tabsSendMessage.mockImplementation(async (_id: number, message: { type: string }) =>
       message.type === 'clf-recorder-ping'
-        ? { ok: true, recorderVersion: 9 }
+        ? { ok: true, recorderVersion: 10 }
         : { ok: true, claimed: true }
     );
 
@@ -1036,6 +1088,273 @@ describe('extension revival delivery', () => {
       id: 'cmd-wake',
       conversationId: CHAT
     });
+  });
+
+  it('does not acknowledge deferred-revival custody until local persistence succeeds, then restores it after browser restart', async () => {
+    const local = new FakeStorageArea(paired);
+    const session = new FakeStorageArea();
+    const first = loadWorker({ local, session, fetch: quiet() });
+    await first.registerTab(4, 'document-4-live');
+
+    local.failNextSets = 1;
+    const failed = await first.send(
+      { type: 'defer_revival', id: 'cmd-persisted-wake', conversationId: CHAT },
+      4,
+      'document-4-live'
+    );
+    expect(failed).toMatchObject({ ok: false });
+    expect(local.data.deferredRevivals ?? []).toEqual([]);
+
+    const retried = await first.send(
+      { type: 'defer_revival', id: 'cmd-persisted-wake', conversationId: CHAT },
+      4,
+      'document-4-live'
+    );
+    expect(retried).toEqual({ ok: true, deferred: true });
+    expect(local.data.deferredRevivals).toMatchObject([
+      { id: 'cmd-persisted-wake', conversationId: CHAT }
+    ]);
+
+    // Full browser restart: storage.session is gone, but the small inert recovery marker is in
+    // storage.local. With no surviving ChatGPT tab, recovery recreates exactly the marked target.
+    const restarted = loadWorker({
+      local,
+      session: new FakeStorageArea(),
+      fetch: quiet(),
+      tabsQuery: async () => []
+    });
+    await vi.waitFor(() => expect(restarted.tabsCreate).toHaveBeenCalledTimes(1));
+    const created = String(restarted.tabsCreate.mock.calls[0]?.[0]?.url || '');
+    expect(created).toContain(`/c/${CHAT}`);
+    expect(created).toContain('clf=cmd-persisted-wake');
+  });
+
+  it('replaces an older deferred marker for the same worker chat when a newer wake reaches browser custody', async () => {
+    const oldId = 'cmd-old-deferred-worker-wake';
+    const currentId = 'cmd-new-worker-wake';
+    const local = new FakeStorageArea({
+      ...paired,
+      deferredRevivals: [{ id: oldId, conversationId: CHAT, queuedAt: 1 }]
+    });
+    const session = new FakeStorageArea({
+      revivalPreferences: {
+        [oldId]: { conversationId: CHAT, fallbackTabId: 12, preferredTabId: 4 }
+      }
+    });
+    const worker = loadWorker({ local, session });
+    await worker.registerTab(4, 'document-4-current');
+
+    const custody = await worker.send(
+      { type: 'defer_revival', id: currentId, conversationId: CHAT },
+      4,
+      'document-4-current'
+    );
+
+    expect(custody).toEqual({ ok: true, deferred: true });
+    expect(local.data.deferredRevivals).toMatchObject([{ id: currentId, conversationId: CHAT }]);
+    expect((local.data.deferredRevivals as Array<{ id: string }>).some((entry) => entry.id === oldId)).toBe(false);
+    expect((session.data.revivalPreferences as Record<string, unknown> | undefined)?.[oldId]).toBeUndefined();
+  });
+
+  it('treats a registered exact worker tab as present while its recorder is temporarily unready, then reuses it exactly once', async () => {
+    const local = new FakeStorageArea({
+      ...paired,
+      deferredRevivals: [{ id: 'cmd-recover-existing', conversationId: CHAT, queuedAt: Date.now() }]
+    });
+    const session = new FakeStorageArea({
+      tabConversations: { '4': CHAT },
+      tabDocuments: { '4': 'document-4-old' },
+      tabEpochs: { '4': 0 }
+    });
+    let recorderReady = false;
+    const worker = loadWorker({
+      local,
+      session,
+      fetch: quiet(),
+      // During ChatGPT reload/startup the concrete /c/<id> can temporarily collapse to root.
+      // The durable tab registry is the identity proof that must prevent a duplicate create.
+      tabsQuery: async () => [{ id: 4, windowId: 7, url: 'https://chatgpt.com/' }],
+      tabsSendMessage: async (_tabId, message) => {
+        if (message.type === 'clf-recorder-ping') {
+          if (!recorderReady) throw new Error('receiver not ready yet');
+          return { ok: true, recorderVersion: 10 };
+        }
+        if (message.type === 'clf-run-command') return { ok: true, claimed: true };
+        return { ok: true };
+      }
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(
+      worker.tabsSendMessage.mock.calls.filter(([, message]) => (message as { type?: string })?.type === 'clf-run-command')
+    ).toHaveLength(0);
+
+    recorderReady = true;
+    // The replacement document's registration is the natural retry signal. Recovery must target
+    // the same numeric tab, issue one command only after its current recorder answers, and never
+    // manufacture another worker tab.
+    await worker.registerTab(4, 'document-4-new');
+    await vi.waitFor(() =>
+      expect(
+        worker.tabsSendMessage.mock.calls.filter(([, message]) => (message as { type?: string })?.type === 'clf-run-command')
+      ).toHaveLength(1)
+    );
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, {
+      type: 'clf-run-command',
+      id: 'cmd-recover-existing',
+      conversationId: CHAT,
+      deferredRecovery: true
+    });
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it('fences the app-opened fallback while the original exact worker tab is temporarily unready, then claims on the original and removes the fallback', async () => {
+    const local = new FakeStorageArea(paired);
+    const session = new FakeStorageArea({
+      tabConversations: { '4': CHAT },
+      tabDocuments: { '4': 'document-4-old' },
+      tabEpochs: { '4': 0 }
+    });
+    let fallbackCreated = false;
+    let recorderReady = false;
+    const worker = loadWorker({
+      local,
+      session,
+      fetch: quiet(),
+      tabsQuery: async () => [
+        { id: 4, windowId: 7, url: 'https://chatgpt.com/' },
+        ...(fallbackCreated ? [{ id: 12, windowId: 7, url: REVIVAL_URL }] : [])
+      ],
+      tabsSendMessage: async (tabId, message) => {
+        if (message.type === 'clf-recorder-ping') {
+          if (tabId === 4 && !recorderReady) throw new Error('original recorder is still starting');
+          return { ok: true, recorderVersion: 10 };
+        }
+        if (message.type === 'clf-run-command') {
+          if (tabId !== 4) throw new Error('fallback must never receive the revival command');
+          return { ok: true, claimed: true };
+        }
+        return { ok: true };
+      }
+    });
+
+    fallbackCreated = true;
+    await worker.createTab({ id: 12, pendingUrl: REVIVAL_URL });
+    // onCreated saw the already-registered worker tab and persisted the preference before the
+    // recorder probe failed. The fallback remains visible only as a safe marker carrier.
+    expect(worker.tabsRemove).not.toHaveBeenCalledWith(12);
+    expect(local.data.deferredRevivals).toMatchObject([{ id: 'cmd-wake', conversationId: CHAT }]);
+    expect(
+      worker.tabsSendMessage.mock.calls.filter(([, message]) => (message as { type?: string })?.type === 'clf-run-command')
+    ).toHaveLength(0);
+
+    await worker.registerTab(12, 'document-12-fallback');
+    const fallbackCustody = await worker.send(
+      { type: 'defer_revival', id: 'cmd-wake', conversationId: CHAT },
+      12,
+      'document-12-fallback'
+    );
+    expect(fallbackCustody).toMatchObject({ ok: true, deferred: true, preferredElsewhere: true });
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(
+      worker.tabsSendMessage.mock.calls.filter(([, message]) => (message as { type?: string })?.type === 'clf-run-command')
+    ).toHaveLength(0);
+
+    recorderReady = true;
+    await worker.registerTab(4, 'document-4-new');
+    await vi.waitFor(() =>
+      expect(
+        worker.tabsSendMessage.mock.calls.filter(([, message]) => (message as { type?: string })?.type === 'clf-run-command')
+      ).toHaveLength(1)
+    );
+
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(4, {
+      type: 'clf-run-command',
+      id: 'cmd-wake',
+      conversationId: CHAT,
+      deferredRecovery: true
+    });
+    await vi.waitFor(() => expect(worker.tabsRemove).toHaveBeenCalledWith(12));
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not let a prior revival marker make the surviving exact worker tab impersonate the next fallback', async () => {
+    const local = new FakeStorageArea(paired);
+    const session = new FakeStorageArea({
+      tabConversations: { '4': CHAT },
+      tabDocuments: { '4': 'document-4-live' },
+      tabEpochs: { '4': 0 }
+    });
+    const firstCommand = 'cmd-prior-wake';
+    const secondCommand = 'cmd-current-wake';
+    const firstUrl = `https://chatgpt.com/c/${CHAT}?clf=${firstCommand}#clf=${firstCommand}`;
+    const secondUrl = `https://chatgpt.com/c/${CHAT}?clf=${secondCommand}#clf=${secondCommand}`;
+    let secondWake = false;
+    const worker = loadWorker({
+      local,
+      session,
+      fetch: quiet(),
+      tabsQuery: async () =>
+        secondWake
+          ? [
+              { id: 4, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` },
+              { id: 12, windowId: 7, url: secondUrl }
+            ]
+          : [],
+      tabsSendMessage: async (tabId, message) => {
+        if (message.type === 'clf-recorder-ping') {
+          if (tabId === 4) throw new Error('surviving worker recorder is remounting');
+          return { ok: true, recorderVersion: 10 };
+        }
+        if (message.type === 'clf-run-command') {
+          if (tabId !== 4) throw new Error('the current fallback must never steal this wake');
+          return { ok: true, claimed: true };
+        }
+        return { ok: true };
+      }
+    });
+
+    // This exact numeric tab was itself the app-opened revival tab on an earlier wake and then
+    // survived as the worker's ordinary open chat. That old routing fact must not say anything
+    // about which tab is the fallback for a later command.
+    await worker.createTab({ id: 4, pendingUrl: firstUrl });
+
+    secondWake = true;
+    await worker.createTab({ id: 12, pendingUrl: secondUrl });
+    expect(session.data.revivalPreferences).toMatchObject({
+      [secondCommand]: { conversationId: CHAT, fallbackTabId: 12, preferredTabId: 4 }
+    });
+
+    // The original exact document is alive but not submit-ready yet. Its custody request for the
+    // *new* command must be accepted locally. A stale prior-wake marker used to misclassify tab 4
+    // as this command's fallback, invert preference to 4 -> 12, and start the 1s two-tab custody
+    // ping-pong seen in the live LevelDB state.
+    const custody = await worker.send(
+      { type: 'defer_revival', id: secondCommand, conversationId: CHAT },
+      4,
+      'document-4-live'
+    );
+    expect(custody).toEqual({ ok: true, deferred: true });
+    expect(session.data.revivalPreferences).toMatchObject({
+      [secondCommand]: { conversationId: CHAT, fallbackTabId: 12, preferredTabId: 4 }
+    });
+
+    const fallbackCustody = await worker.send(
+      { type: 'defer_revival', id: secondCommand, conversationId: CHAT },
+      12,
+      'document-12-current'
+    );
+    expect(fallbackCustody).toMatchObject({ ok: true, deferred: true, preferredElsewhere: true });
+    expect(session.data.revivalPreferences).toMatchObject({
+      [secondCommand]: { conversationId: CHAT, fallbackTabId: 12, preferredTabId: 4 }
+    });
+    expect(
+      worker.tabsSendMessage.mock.calls.filter(
+        ([tabId, message]) => tabId === 12 && (message as { type?: string })?.type === 'clf-run-command'
+      )
+    ).toHaveLength(0);
   });
 
   it('ignores tabs that are not a marked revival at all', async () => {
@@ -1498,6 +1817,35 @@ describe('extension observation journal', () => {
       { route: '/goal/draft', client: '73' },
       { route: '/goal/ack', client: '73' }
     ]);
+  });
+
+  it('raises only the exact owned Goal tab and never opens a duplicate', async () => {
+    const conversationId = '22222222-3333-4444-5555-666666666666';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const worker = loadWorker({ local, session });
+
+    await worker.registerTab(73);
+    await worker.send({ type: 'bind', conversationId }, 73);
+
+    expect(await worker.send({ type: 'goal_focus', conversationId, turnId: 'generation-owned' }, 73)).toMatchObject({
+      ok: true,
+      focused: true
+    });
+    expect(worker.tabsUpdate).toHaveBeenCalledTimes(1);
+    expect(worker.tabsUpdate).toHaveBeenCalledWith(73, { active: true });
+    expect(worker.windowsUpdate).toHaveBeenCalledTimes(1);
+    expect(worker.windowsUpdate).toHaveBeenCalledWith(7, { focused: true });
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+
+    const other = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    expect(await worker.send({ type: 'goal_focus', conversationId: other, turnId: 'wrong-chat' }, 73)).toMatchObject({
+      ok: false,
+      error: 'stale_conversation'
+    });
+    expect(worker.tabsUpdate).toHaveBeenCalledTimes(1);
+    expect(worker.windowsUpdate).toHaveBeenCalledTimes(1);
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
   });
 
   it('refuses a Goal draft while the triggering transcript is still not deliverable', async () => {

@@ -20,11 +20,13 @@ never `reset`, `checkout`, `clean`, reformat, or overwrite work you did not do.*
 
 ## 1. The app in sixty seconds
 
-A **Windows Electron app** that hands ChatGPT a deliberately small set of local PC
-capabilities over MCP. It is a bridge and a permission layer — not a chat client, not a
-model host. It also ships a Chrome extension that watches ChatGPT itself, so the app can
+A **Windows/macOS/Linux Electron app** that hands ChatGPT a deliberately small set of local
+computer capabilities over MCP. It is a bridge and a permission layer — not a chat client,
+not a model host. It also ships a Chrome extension that watches ChatGPT itself, so the app can
 record conversations, prove which conversation issued which tool call, replace generic tool
 rows with what actually happened, compact a long chat into a fresh one, and run worker chats.
+Core is portable; the Desktop/computer-use surface is deliberately Windows-only and must be
+absent from live macOS/Linux capability/discovery state.
 
 Four runtime planes, only two of which are servers:
 
@@ -73,7 +75,7 @@ Almost nothing hard here is a local algorithm bug. The hard ones live on six bou
 | Boundary | The two things people confuse |
 | --- | --- |
 | Discovery vs. enforcement | a schema ChatGPT cached vs. a permission that is live *now* |
-| Path spelling | `/project/src/a.ts` vs. `C:\work\project\src\a.ts` — same decision required |
+| Path spelling | `/project/src/a.ts` vs. a native `C:\work\...` or `/home/...` path — same decision required |
 | Request vs. conversation | HTTP `x-request-id` vs. the ChatGPT conversation that owns it |
 | Process lifetime | content script (document) vs. service worker (suspends) vs. app (restarts) |
 | Durable vs. frontend identity | local session id vs. the ChatGPT conversation attached to it |
@@ -141,17 +143,20 @@ the state machine. Code and current tests still win when a comment has drifted.
 Release numbers are authoritative in `package.json`, `src/main/version.ts` and
 `extension/manifest.json`; the bridge protocol is `version.ts::BRIDGE_PROTOCOL`. Tests assert
 the app/extension versions stay in sync, so this architecture guide deliberately does not
-copy a release number that can drift. Windows-first; main process is TypeScript; extension is
-plain MV3 JavaScript with no build step; Vitest; `node-pty` is the one native dependency.
+copy a release number that can drift. Core is cross-platform; main process is TypeScript;
+extension is plain MV3 JavaScript with no build step; Vitest; `node-pty` is the main native
+terminal dependency. Desktop automation remains explicitly Windows-only.
 
-Fresh-install defaults from `config.ts` — **all tool permissions on**, **read-only off**,
+Fresh-install defaults from `config.ts` — **all Core tool permissions on**, **read-only off**,
 **recording on**, session advisory/limit **400k/533k** estimated tokens, **auto-compaction on
 at 400k and edge-triggered**, **multi-agent on** with `maxWorkers` 2 (hard max 8). The limit is
 derived, never typed: the Chat panel offers one threshold and writes `limit = threshold × 4/3`,
 so the defaults have to satisfy that relation or the first save in that panel moves the red
 line. Existing
 configs keep explicit user choices; conservative migration defaults do not widen omitted legacy
-permissions merely because the fresh-install defaults are broader.
+permissions merely because the fresh-install defaults are broader. Windows also enables the
+Desktop capability group; macOS/Linux mask that group off at runtime while preserving stored
+choices so a config moved back to Windows does not lose them.
 
 ### Stale-doc traps
 
@@ -174,7 +179,7 @@ Do not "restore" these from an older document:
 ```text
 ── shell / config ─────────────────────────────────────────────────────────
 src/main/index.ts             Electron startup, window/tray, shutdown, security shell
-src/main/shutdown.ts          ordered teardown phases, each individually bounded
+src/main/shutdown.ts          ordered teardown phases, each bounded, ending in the exit
 src/main/config.ts            validated settings, migrations, defaults, read-only caps
 src/main/connection.ts        MCP + tunnel lifecycle, per-surface publication & status
 src/main/ipc.ts               every renderer→main operation and main→renderer push
@@ -205,7 +210,7 @@ src/main/codex/tool-specs.ts  model-visible Codex contract text
 src/main/codex/unified-exec.ts        exec_command / write_stdin runtime
 src/main/codex/unified-exec-constants.ts  yield deadlines, buffer and token policy
 src/main/codex/exec-output.ts model-facing exec serialization
-src/main/codex/shell.ts       Windows shell selection, quoting, launch
+src/main/codex/shell.ts       host shell selection, quoting, launch
 src/main/codex/ownership.ts   terminal-session caller ownership
 src/main/codex/filesystem.ts  ported low-level Codex fs primitives (no policy)
 src/main/codex/read-backend.ts  connector read semantics over those primitives
@@ -241,11 +246,11 @@ src/main/computer/*           screenshots, UI Automation, SendInput/clipboard he
 src/main/tunnel/*             index.ts lifecycle · health.ts metrics · locate.ts binaries
 test/*.test.ts                49 suites, named for the subsystem they cover
 scripts/*                     build-time icon / tunnel-client / ripgrep fetchers
-electron-builder.yml          Windows package contents and NSIS policy
+electron-builder.yml          Windows/macOS/Linux package contents and target policy
 ```
 
-`exec.ts` remains as the shared low-level Windows process/environment primitive used by unified
-exec, the desktop helper and tunnels. The retired connector-native managed-process and patch
+`exec.ts` remains as the shared low-level process/environment primitive used by unified exec,
+the Windows desktop helper and tunnels. The retired connector-native managed-process and patch
 stacks were removed after production moved to `codex/unified-exec.ts` and `codex/apply-patch/*`;
 do not recreate parallel runtimes beside those live owners.
 
@@ -271,10 +276,15 @@ teardown covers tunnels, both listeners, process sessions, then flushes session 
 
 `will-quit` calls `preventDefault()` and owns the decision to quit from then on, and it
 destroys the tray before teardown starts. So teardown is not merely ordered, it is **bounded**:
-`shutdown.ts` gives each phase its own budget and always reaches `app.quit()`. A task that
-never settles would otherwise strand an invisible main process holding the single-instance
-lock, and every later launch of the app would silently do nothing. Per-task bounds are not a
-substitute for that — "each piece is bounded" is a different claim from "the sequence ends".
+`shutdown.ts` gives each phase its own budget and always ends the process. A task that never
+settles would otherwise strand an invisible main process holding the single-instance lock, and
+every later launch of the app would silently do nothing. Per-task bounds are not a substitute
+for that — "each piece is bounded" is a different claim from "the sequence ends".
+
+Ending it is `app.exit(0)`, never `app.quit()`, and that is not interchangeable. Electron drops
+a quit raised from the promise continuation that finishes teardown: on Windows the call returns
+without even emitting `before-quit`, while the same call one macrotask later quits normally.
+`shutdown.ts` therefore owns the exit itself rather than trusting its caller to remember.
 
 ## 6. MCP surfaces and discovery — `surfaces.ts`, `tools.ts`, `server.ts`
 
@@ -295,10 +305,10 @@ earn it today.
 | `session` | recording enabled | session subsystem |
 | `agents` | multi-agent enabled | `agents.ts` |
 
-**Desktop** (`chat-on-steroids-desktop`, optional): `observe` needs `screen`;
+**Desktop** (`chat-on-steroids-desktop`, optional, **Windows-only**): `observe` needs `screen`;
 `computer` registers on `control` **or** either clipboard permission, then re-checks each
 of its 13 actions at runtime. The surface is offered at all only when one of those four
-permissions exists — an empty connector is worse than no connector.
+permissions exists on Windows — an empty or impossible connector is worse than no connector.
 
 **Exposure is monotonic per endpoint lifetime.** ChatGPT caches schemas, and yanking one
 from under a cached snapshot surfaces as a transport-level UNKNOWN failure. So
@@ -348,19 +358,19 @@ attributed.
 ## 8. Filesystem containment — `sandbox.ts`
 
 The authority for every model-supplied path. Approved folders get virtual roots such as
-`/project`; native Windows absolute paths are also accepted when they resolve inside an
-approved root.
+`/project`; native absolute paths are also accepted when they resolve inside an approved root.
 
 **Must hold.**
 
 - Every model filesystem path converges on `Sandbox.resolve()` or an already-validated
   wrapper. "It is only a read" is not an exemption — reads are confidentiality-sensitive.
-- **Virtual and native spellings receive identical authorization.** Test both:
-  `/project/src/a.ts` and `C:\approved\project\src\a.ts`. Never "improve" native
+- **Virtual and native spellings receive identical authorization.** Test both the virtual
+  spelling and the host spelling (`C:\approved\project\src\a.ts` on Windows,
+  `/home/me/project/src/a.ts` or `/Users/me/project/src/a.ts` on POSIX). Never "improve" native
   normalization by letting it collapse traversal the virtual spelling rejects.
-- Containment covers root selection, Windows-invalid and path-trick rejection, canonical
-  checks on existing targets, deepest-existing-ancestor validation for missing targets,
-  reserved virtual root names, and reparse/symlink/junction handling.
+- Containment covers root selection, host-invalid/path-trick rejection, canonical checks on
+  existing targets, deepest-existing-ancestor validation for missing targets, reserved virtual
+  root names, and symlink/reparse/junction handling as applicable to that OS.
 - Authorization must remain valid at the point of filesystem use; avoid designs that rely
   only on an earlier pathname check when the underlying target can change.
 - Native filesystem error text must not leak hidden physical root paths back to the model.
@@ -480,7 +490,7 @@ Two independent producers, one durable timeline, neither replaceable by the othe
 The app knows *what the tool did*. The browser knows *which conversation and turn showed it*.
 
 ```text
-%APPDATA%\chat-on-steroids\sessions\<id>\
+userData/sessions/<id>/
   events.jsonl        append-oriented tool/turn/error/activity events
   messages/*.json     canonical user/assistant messages, one shard per logical id
   messages.json       legacy canonical map, read during lazy migration
@@ -591,7 +601,7 @@ already-large old chat must not re-fire merely because its level sits above the 
 ## 16. Multi-agent — `agents.ts`
 
 Experimental, enabled on fresh installs while existing configs preserve their stored choice,
-**one global run at a time**, star topology:
+**one global active execution run at a time**, star topology:
 `worker ← prime → worker`. Workers never message each other.
 
 **Identity.** The prime is the conversation that successfully called `agents action=spawn`
@@ -609,10 +619,24 @@ the model received it. Never delete a message merely because it was offered.
 
 **Workers sleep; they do not end.** `finish` reports a result and puts that worker to
 *sleep*: it keeps its conversation, keeps its history, and stays revivable. Sleeping frees
-its worker slot, so `maxWorkers` counts working workers only — a run can use a third worker
-and still wake the first one afterwards. The same sleep happens without the tool call, from
+its worker slot, so `maxWorkers` counts working workers only — a prime can create a new worker
+while an older one sleeps and still wake that older worker afterwards. The same sleep happens without the tool call, from
 durable evidence that the worker stopped: a settled final assistant turn, or quiescence
 proven by `activeTurnId`/live-generating state rather than by a page heartbeat.
+
+**Ownership outlives the active run.** When no worker occupies a slot, the active incarnation is
+parked immediately and the one global execution claim is released. Its complete agent map becomes
+a durable history keyed by the prime conversation: sleeping workers, terminal/non-revivable rows,
+their exact ChatGPT conversation bindings, queued prime reports and monotonically allocated
+`worker-N` history all remain. Another prime may now start its own active incarnation, including
+its own same-named `worker-1`, without seeing or mutating the first prime's history. Caller-scoped
+`status` always returns the history owned by that prime, even while somebody else owns the active
+execution slot. A dormant prime may spawn a fresh worker without reviving a sleeper; waking an old
+worker reactivates that owner's history only when the global execution slot is free. Explicit
+swarm clear is different from parking: it retires the worker conversation fences and discards the
+retained histories. Turning Multi-agent **off is not Clear**: it stops/withdraws live execution,
+parks the owner history, and keeps that history durable through disabled app restarts so re-enable
+can still show and revive the exact old worker conversations.
 
 **Waking is messaging.** `agents action=message` to a sleeping worker reserves a free slot
 inside the same durable barrier that queues the message, and only after that commit does the
@@ -627,15 +651,21 @@ the slot, leaves the message queued, and tells the prime.
 **The ceiling is the only ending.** A worker becomes terminally `finished` when its chat
 reaches `WORKER_CONTEXT_CEILING_TOKENS` (400k), measured from the app's own durable session
 summary — never from a model-carried counter. Crossing it does **not** interrupt work in
-flight; it makes the *next* stop permanent. Because workers outlive their tabs and their
+flight; it makes the *next* stop permanent. Workers **never Compact & Resume themselves**,
+automatically or manually: the worker conversation is the agent identity, so no threshold may
+open a replacement worker chat. Because workers outlive their tabs and their
 prime's tab, closing the prime chat pauses the run instead of ending it: the user comes back,
 the prime resumes, and the same workers are still there.
 
-**Finish and cleanup.** `finish` is idempotent; final worker output routes to prime; the run
-releases only when nothing revivable is left and final-report delivery makes it safe. Orphan cleanup uses
-durable quiescence plus the wider in-flight MCP/observation counters — not a heartbeat
-guess. Compact & Resume may move the prime conversation while preserving the run; session,
-workspace and prime binding move together or not at all.
+**Finish and cleanup.** `finish` is idempotent; final worker output routes to the exact prime
+conversation even if parking happens on that same finish. Once no worker holds a slot, the active
+incarnation releases immediately; pending reports remain in the dormant prime's inbox and retain
+the same at-least-once offer/ack semantics. Dormant worker conversations remain authority fences,
+including terminal rows, so stale tabs cannot fall through as ordinary unidentified chats while a
+different prime is active. Orphan cleanup uses durable quiescence plus the wider in-flight
+MCP/observation counters — not a heartbeat guess. Compact & Resume moves active **or dormant**
+prime ownership together with session/workspace state; normal commit and recovery repair transfer
+the same complete worker history to the child conversation or move nothing.
 
 **Tests.** `agents.test.ts`, `swarm.test.ts`; the revival's browser half is in
 `bridge.test.ts`, `extension.test.ts` and `content-script.test.ts`.
@@ -643,33 +673,46 @@ workspace and prime binding move together or not at all.
 ## 17. Renderer, IPC, connection and desktop
 
 **Goal.** `goal.ts` sends only authored user messages and final assistant answers to
-OpenRouter. Its persisted system prompt is editable under Chat → Settings and bounded by the
-same shared limit at config and IPC. The shipped prompt is a strict continuation gate: an
-assistant completion claim means `NO_REPLY`; a new user message is allowed only for a concrete
-requested item the final answer explicitly leaves unfinished. Prompt changes retire existing
-drafts so one draft never mixes old and new instructions. Terminal Goal cards persist for
+OpenRouter. **Two** persisted prompts are editable under Chat → Settings, both bounded by the
+same shared limit at config and IPC: `goal.prompt` is the gate used by a chat with no goal of
+its own, and `goal.objectivePrompt` is the driver used instead once a chat carries one. The
+driver was a source constant until it became editable; nothing else about which one applies
+changed. Both are written as meta-prompter instructions rather than as review policies — the
+model is told it sits in the user's seat, given the two moves it has (next user message, or
+exactly `NO_REPLY`), and taught by five worked examples each, at least one of which ends in
+silence. The failure they are written against is a small model that reviews the conversation
+or invents work nobody requested, because either one lands in a real composer.
+An untouched persisted copy of **any** previously shipped default migrates to the current
+prompt — `SUPERSEDED_GOAL_SYSTEM_PROMPTS` is walked, so an install that skipped a release is
+not stranded — while customized prompts are preserved exactly. A change to either prompt
+retires existing drafts so one draft never mixes old and new instructions. Terminal Goal cards persist for
 visibility but their × dismissal is keyed to the finished turn, so activity repaints cannot
 resurrect the card and the next Goal run still appears normally. They are presentation scoped
 to the exact conversation route: New Chat, a concrete chat switch, or the user's next authored
 message removes the old card immediately while async activity remains navigation-epoch guarded.
 The provider boundary is non-streaming strict JSON Schema with `require_parameters`, excluded
 reasoning and OpenRouter Response Healing. A fixed app-owned output protocol sits after the
-editable policy prompt. Local validation is still authoritative: mixed/wrapped `NO_REPLY` stops,
+editable policy prompt, and an app-owned **trailer** sits after the transcript — a long chat
+pushes the instruction out of effective attention, so the closing reminder restates the two
+moves where the model read last. Placement is app-owned; the policy it restates is not. Local validation is still authoritative: mixed/wrapped `NO_REPLY` stops,
 tokenizer wrappers are normalized away, and malformed schema, reasoning tags, or an empty cleaned
 reply fail closed before `humanReply()` or the browser can see a sendable payload.
 
 **A chat's own goal.** The same engine, pointed the other way. The composer control is now
 present in a New Chat as well (`injectControl`), because a goal written there is what writes
 that chat's first message; compaction stays unavailable there and says why. `/goal/objective` stores one goal
-per conversation in a bounded in-memory map — deliberately not config: it is per chat, per run,
-and lost on restart like a draft. A stored goal arms the loop for that chat even while the
+per conversation in durable Goal state, separate from global config. Reopening the same chat
+restores that text but does not itself manufacture a new Goal draft from an old finished turn. A
+stored goal arms the loop for that chat even while the
 standing switch is off (`goalActiveFor` in `bridge.ts`), because writing down a finish line is
 the stronger statement; the worker rule still overrides both, and `/goal/objective` refuses a
-worker chat outright rather than storing a goal nothing may act on. With a goal the continuation
-gate is replaced, not augmented — sending both would ship one prompt that defaults to stopping
-and another that defaults to going — and the empty-conversation refusal inverts: `no_conversation`
-becomes an opening message, since the goal *is* the request. Reaching the goal clears it, so the
-next turn is not measured against a finish line already crossed. `/goal/open` is the one goal
+worker chat outright rather than storing a goal nothing may act on. With a goal the standing
+continuation policy is replaced, not augmented — the explicit finish line is the sole driver —
+and the empty-conversation refusal inverts: `no_conversation`
+becomes an opening message, since the goal *is* the request. A model decision that the goal is
+reached stops that run but deliberately keeps the objective until the user clears/replaces it.
+Compact & Resume projects the objective A→B in the same continuation transaction, including the
+recovery repair path, so overnight resumptions keep the same finish line. `/goal/open` is the one goal
 message not keyed by conversation: a New Chat has no id until the message is sent, so that route
 holds nothing, streams nothing and is awaited by the page, which then binds the goal to the real
 id once ChatGPT issues one.
@@ -704,17 +747,19 @@ retry, not an outage — an outage is complaints that outlive a poll cycle with 
 poll. `diagnostics.ts` builds the UI self-test and must agree with that same grace period.
 Tests: `tunnel.test.ts`.
 
-**Desktop automation.** `tools-desktop.ts` + `computer/*` for screenshots, UI Automation and
-SendInput/clipboard. Registration-time permission is not enough: each action re-checks. The
+**Desktop automation (Windows only).** `tools-desktop.ts` + `computer/*` for screenshots, UI
+Automation and SendInput/clipboard. Registration-time permission is not enough: each action re-checks. The
 helper is prewarmed only when native Desktop capabilities are published; window observation is
 background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
 window geometry; semantic refs bind cached elements to bounded UIA snapshots. Physical input
 revalidates the target, batches report partial completion and route evidence, and compact local
 postconditions avoid model-driven wait/observe loops. Tests: `computer*.test.ts`.
 
-**On-disk state to inspect.** `%APPDATA%\chat-on-steroids\` — `config.json` (non-secret
-validated settings), `sessions\` (durable history), `state\` (small durable indexes, e.g.
-`request-correlations`, swarm), plus encrypted secret storage via `secrets.ts`. Extension
+**On-disk state to inspect.** Electron `userData` — `%APPDATA%\chat-on-steroids\` on Windows,
+`~/Library/Application Support/chat-on-steroids/` on macOS, `${XDG_CONFIG_HOME:-~/.config}/chat-on-steroids/`
+on Linux — contains `config.json` (non-secret validated settings), `sessions/` (durable history),
+`state/` (small durable indexes, e.g. `request-correlations`, swarm), and the stable packaged
+extension mirror used by Chrome. Credentials live through `secrets.ts`/OS safeStorage. Extension
 state is separate: `chrome.storage.local` for preferences/pairing, `chrome.storage.session`
 for the journal and live tab state. When a restart bug appears, **first name which process
 restarted** — app, service worker, content script, Fiber helper, document, tab, or browser.
@@ -806,16 +851,17 @@ IPC, MCP schema↔handler↔recorder summary, durable store↔restart restoratio
 
 ### Commands
 
-```powershell
+```sh
 npm install
 npm run dev                              # electron-vite dev
 npm run typecheck
 npm test -- --run test/<target>.test.ts
 npm run verify:privacy                   # public Git identity/session/path gate
-npm run verify                           # typecheck + full Vitest suite
+npm run verify                           # the exact CI gate: rg fetch, privacy, typecheck, full Vitest
 npm run build                            # electron-vite bundles
-npm run dist                             # icon+tunnel+rg fetch, build, NSIS installer → release/
-npm run dist:dir                         # unpacked package
+npm run dist                             # this host OS, x64 + arm64 artifacts → release/
+npm run dist:mac / dist:linux            # explicit platform families on matching hosts
+npm run dist:dir:<platform>:<arch>        # one unpacked package for smoke/debug
 ```
 
 Vitest uses real filesystem, real processes and real HTTP in many suites; default
@@ -855,7 +901,7 @@ and real HTTP in many of them.
 | `renderer-state` | unsolicited pushes must not clobber a focused dirty field |
 | `resume` | resume and handoff paths |
 | `sandbox` | path, root and containment policy — the security suite |
-| `shutdown` | bounded teardown phases; terminal sessions really dying |
+| `shutdown` | bounded teardown phases that always reach the exit; terminal sessions really dying |
 | `search` | glob translation and `find` behavior |
 | `secrets` | safeStorage-backed secret store |
 | `session` | recorder merge and durable store behavior |
@@ -890,23 +936,28 @@ or event sequence end to end. Keep any security-sensitive reproduction material 
 
 ## 20. Packaging and release — `electron-builder.yml`
 
-App id `com.chatonsteroids.app`, product `Chat On Steroids`, separate Windows x64 and
-ARM64 NSIS artifacts, per-user, `asInvoker`, no elevation.
+App id `com.chatonsteroids.app`, product `Chat On Steroids`. Releases build six native
+platform/architecture jobs: Windows x64/ARM64 NSIS, macOS x64/ARM64 DMG+ZIP, and Linux
+x64/ARM64 AppImage+DEB. Windows stays per-user-capable, `asInvoker`, no forced elevation.
 
 - Only `out/**` + `package.json` go into app files.
-- `resources/tunnel` ships outside asar — tunnel-client must execute as a real file.
+- Target-specific tunnel and ripgrep resources ship outside asar — they must execute as real files.
 - `extension/` ships outside asar — Chrome's "Load unpacked" needs a real folder.
-- `resources/rg` ships as a real extra resource.
-- `node-pty` is **not** rebuilt and is unpacked from asar, because ConPTY assets must be
-  real files on disk.
-- Uninstall deliberately preserves `%APPDATA%\chat-on-steroids`.
+- In packaged runtime `extension-path.ts` mirrors that bundled extension to stable `userData/extension`;
+  do not point Chrome directly at an AppImage's temporary mount.
+- `node-pty`, Sharp/libvips and tree-sitter native payloads are staged for the exact target
+  platform/arch; host-native build/prebuild leftovers must never override them.
+- Uninstall/package replacement deliberately preserves per-user app data.
 
 Before cutting a version, synchronize `package.json`, `src/main/version.ts` and
 `extension/manifest.json`, and run the full suite. After installing a local build, verify
-the **installed** app really contains the extension folder, tunnel binary, ripgrep resource
-and node-pty runtime — a successful installer build does not prove it.
+the **packaged** app really contains the target extension/tunnel/ripgrep/native runtime and can
+execute its PTY/parser/image stack — a successful installer/archive build does not prove it.
 
-Publishing runs through `.github/workflows/publish.yml`, dispatched at the tag itself
+`release.yml` is reusable and its matrix builds/smokes every target on a native runner, then one
+`assemble` job downloads all package artifacts, creates the standalone extension ZIP and
+`SHA256SUMS.txt`, and uploads one release candidate. Publishing runs through
+`.github/workflows/publish.yml`, dispatched at the tag itself
 (`gh workflow run publish.yml --ref vX.Y.Z`). It calls `release.yml` as a reusable workflow,
 so the installers a release carries are built from the tag being published inside the run
 that publishes them, and never travel between runs. A tag alone no longer builds anything.

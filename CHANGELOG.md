@@ -9,6 +9,51 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.0.2] — 2026-08-26
+
+2.0.2 is the native cross-platform release port. The already-published 2.0.1 release remains the
+historical Windows hardening release; this patch moves the unreleased tree forward so the new
+Windows/macOS/Linux build matrix can be published under a fresh tag instead of trying to replace it.
+
+### Added
+- **Native release jobs now cover six host/CPU combinations:** Windows x64 + ARM64, macOS Intel +
+  Apple silicon, and Linux x64 + ARM64. Every package job verifies it is running on the requested
+  native host before packaging and smoke-tests the packaged native runtime before upload.
+- **macOS ships DMG and ZIP artifacts for both architectures.** CI verifies each ZIP, verifies and
+  mounts each DMG, and checks the resulting `.app` bundle, executable and `Info.plist` before the
+  release candidate is assembled.
+- **Linux ships AppImage and DEB artifacts for both architectures.** The DEB is installed on the
+  exact Ubuntu 24.04 runner that built it. The AppImage is launched normally under Xvfb with an
+  isolated first-run profile, then launched again with the static launcher's user-namespace probe
+  forced to fail so the documented `--no-sandbox` fallback is covered independently. Both launches
+  must reach app, window and renderer-state readiness; native dependencies are executed separately
+  from the unpacked package before either artifact smoke.
+- **Target-native runtime payload staging now spans all release platforms.** Sharp/libvips,
+  node-pty, tree-sitter, tunnel-client and ripgrep are selected and validated for the target OS/CPU
+  instead of inheriting whatever native payload happened to be installed on the packaging host.
+
+### Changed
+- **Linux packaging is Noble-compatible and keeps stable public filenames.** DEB dependencies allow
+  Ubuntu 24.04's time64 GTK/AT-SPI package names, AppImage uses electron-builder's static 1.0.3
+  runtime rather than depending on legacy FUSE2, and public artifacts remain `x64`/`arm64` even
+  though individual Linux packaging formats use different native architecture aliases internally.
+- **Linux desktop identity is explicit.** `desktopName` and `StartupWMClass` now share the
+  `com.chatonsteroids.app` identity so installed launchers can associate the running Electron window
+  with the generated desktop entry.
+- **The app packaging icon is generated at 1024×1024** for Retina-quality macOS ICNS conversion;
+  the Chrome extension keeps its existing 16/32/48/128 icon set.
+- **Release publication fails cheap.** Tag/version mismatch, missing reviewed notes, public-history
+  privacy failure and an already-existing GitHub release are rejected before the six native package
+  runners are allocated. Candidate artifact names are run-id based so branch names containing `/`
+  cannot invalidate the final upload.
+
+### Known release caveat
+- **The macOS DMG/ZIP artifacts are currently publisher-unsigned (no Apple Developer ID) and
+  unnotarized.** Apple-silicon Mach-O executables can still carry ad-hoc platform signatures; those
+  do not identify a publisher or establish Gatekeeper trust. The native builds and archive/runtime
+  checks are covered by CI, but Apple Developer ID signing/notarization is not configured in the
+  release workflow yet, so Gatekeeper may warn when those artifacts are opened.
+
 ## [2.0.1] — 2026-08-25
 
 This is the post-2.0 hardening pass. It is unusually broad because it combines the reusable-worker
@@ -28,6 +73,19 @@ overhaul tranche, and an adversarial restart/race audit. The detailed engineerin
   conversation fence, durable lease, receipt replay, app-restart restoration and browser ACK
   recovery. Browser redemption is now the arbitration cut: once a page owns the durable wake,
   concurrent MCP liveness cannot steal or duplicate it.
+- **Worker ownership now survives the active run itself.** When the final slot-holding worker
+  sleeps, the global run is parked immediately so another prime chat can start workers, while the
+  original prime retains its complete worker history, exact conversation bindings and revival
+  authority. `agents status` is caller-scoped, fresh workers can be spawned without consuming old
+  sleepers, same-named workers from different primes stay isolated, and Compact & Resume transfers
+  the complete dormant/active history to the resumed child chat. Turning Multi-agent off now parks
+  live execution and withdraws worker browser commands without deleting those histories; disabled
+  restarts preserve them, and only explicit Clear swarm discards the retained ownership.
+- **Specific Goals are durable per-chat state.** Reopening a finished chat restores its goal text
+  without auto-firing stale work; Compact & Resume transfers the same objective to its child,
+  including crash-recovery repair, so an unattended chain of resumptions keeps pursuing one goal.
+  A Goal completion decision stops the current loop without silently deleting the user's saved
+  objective; it remains until explicitly cleared or replaced.
 - **`exec_command` accepts `cmds`** for up to 20 related commands in one shell session, preserving
   variables/cwd between items and returning labeled per-command exit codes. `max_output_tokens`
   controls the model-facing output budget, and `write_stdin` keeps the same bounded semantics.
@@ -71,13 +129,35 @@ overhaul tranche, and an adversarial restart/race audit. The detailed engineerin
   persisting a combination that cannot ever supply a transcript. A specific goal can still open a
   New Chat and become its first user message, but an unsent opening goal is never attached to an
   unrelated existing chat navigated to while the provider request is in flight.
+- **The stock Goal continuation prompt is slightly more persistent.** It now continues while a
+  concrete requested task or question remains unreported/unanswered and stops only when ChatGPT
+  clearly presents the whole requested job as complete. It still treats an explicit all-done claim
+  as authoritative and does not invent extra testing, polish or follow-up. Existing installs whose
+  saved prompt is byte-for-byte the old stock default migrate automatically; edited prompts do not.
 
 ### Fixed
-- **Quitting always quits.** Teardown runs the same ordered phases, but each phase now has its own
-  budget and the sequence always reaches `app.quit()`. Before this, a single task that never
-  settled left an invisible main process running — tray already destroyed, window already gone —
-  still holding the single-instance lock, so every later attempt to start Chat On Steroids did
-  nothing and the only way out was Task Manager.
+- **Quitting always quits.** Quit could hang forever: the app kept running with its window and
+  tray already gone, still holding the single-instance lock, so every later attempt to start Chat
+  On Steroids silently did nothing and the only way out was Task Manager. Two independent faults
+  produced it. The first was logging: Electron keeps a `BrowserWindow` object after destroying the
+  window, so the renderer push read `webContents` off a corpse and threw — and because log
+  listeners run synchronously on the writer's stack, every teardown log line threw into the
+  teardown step that wrote it. The MCP drain's force-close timer died on its own warning before it
+  could force anything, leaving the app draining a half-closed tunnel socket with no deadline left
+  to save it. The second was the quit itself. Teardown ended by calling `app.quit()` from the
+  promise continuation that finished it, and Electron drops a quit raised from there: measured on
+  Windows, that call returns without even emitting `before-quit`, while the identical call one
+  macrotask later quits normally — so a clean, fully drained teardown still ended in a process that
+  would not leave. Renderer pushes now check for a destroyed window, a failing log listener can no
+  longer break the code that logged, the two force-close paths act before they report, and teardown
+  is both bounded and terminal: each phase has its own budget, and the sequence always ends in
+  `app.exit(0)`, which has no such veto.
+- **Quit no longer pauses for fifteen seconds on the extension's own connection.** The bridge
+  swept for idle connections once when it stopped, which cannot see the request that is in flight
+  at that instant — and the extension polls constantly, so on a real quit there almost always was
+  one. That socket returned to keep-alive idle when its response finished and nothing looked
+  again, so every quit waited out the full 15s force timeout. The drain now keeps sweeping, and
+  retires the socket the moment its request is done.
 - **Terminal sessions no longer outlive the app on Windows.** node-pty's ConPTY backend reports a
   pid of `0` until its console pipe connects, well after the spawn path recorded it, so every tty
   session carried pid `0` for life: `list_processes` advertised a pid nobody could act on, and

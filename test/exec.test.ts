@@ -14,7 +14,8 @@ import {
   prepareCommand,
   prepareShellCommand,
   runCommand,
-  runPowerShell
+  runPowerShell,
+  terminateProcessTree
 } from '../src/main/exec.js';
 import { IS_WINDOWS, makeTempDir, removeTempDir } from './helpers.js';
 
@@ -77,6 +78,25 @@ describe('runCommand', () => {
     );
     expect(result.timedOut).toBe(true);
     expect(Date.now() - started).toBeLessThan(20_000);
+  });
+
+  it.runIf(!IS_WINDOWS)('kills the whole POSIX process group when a command times out', async () => {
+    const pidFile = path.join(cwd, 'timeout-grandchild.pid');
+    const survived = path.join(cwd, 'timeout-grandchild-survived.txt');
+    const grandchild = `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(survived)}, 'survived'), 1600); setInterval(() => {}, 1000);`;
+    const parent = `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(node)}, ['-e', ${JSON.stringify(grandchild)}], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`;
+
+    const result = await runCommand(node, ['-e', parent], cwd, 1000);
+    expect(result.timedOut).toBe(true);
+    const grandchildPid = Number.parseInt(await fs.readFile(pidFile, 'utf8'), 10);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await expect(fs.access(survived)).rejects.toBeDefined();
+    } finally {
+      if (Number.isInteger(grandchildPid) && grandchildPid > 0) {
+        await terminateProcessTree(grandchildPid, true).catch(() => undefined);
+      }
+    }
   });
 
   it('caps stdout and flags the truncation', async () => {

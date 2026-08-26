@@ -646,6 +646,20 @@ function startAttributionRepair(): void {
   );
 }
 
+/**
+ * Queues the startup repair on the same serialized chain as late request-evidence repairs.
+ * `flushRecorder()` waits this chain during shutdown, so maintenance can never escape the final
+ * recorder/session flush just because startup deliberately did not block the first window on it.
+ */
+export function queueDeterministicAttributionRepair(): void {
+  attributionRepairRequested = true;
+  if (attributionRepairTimer) {
+    clearTimeout(attributionRepairTimer);
+    attributionRepairTimer = null;
+  }
+  startAttributionRepair();
+}
+
 function scheduleAttributionRepair(): void {
   attributionRepairRequested = true;
   if (attributionRepairTimer) return;
@@ -771,6 +785,7 @@ export async function repairDeterministicAttribution(): Promise<{ sessions: numb
   for (const summary of await listAllSessions()) {
     if (summary.conversationId !== null || summary.title !== 'Unattributed activity') continue;
     const events = await readEvents(summary.id);
+    const scannedThroughSeq = events.reduce((highest, event) => Math.max(highest, event.seq), 0);
     const tools = events.filter(
       (event): event is Extract<SessionEvent, { kind: 'tool_call' }> => event.kind === 'tool_call'
     );
@@ -866,7 +881,7 @@ export async function repairDeterministicAttribution(): Promise<{ sessions: numb
       if (unattributedSessionId === summary.id) unattributedSessionId = null;
       if (lastActiveSessionId === summary.id) lastActiveSessionId = firstTargetSessionId;
     } else {
-      await rewriteUnattributedToolCalls(summary.id, unknown);
+      await rewriteUnattributedToolCalls(summary.id, unknown, scannedThroughSeq);
       if (unattributedSessionId === null) unattributedSessionId = summary.id;
     }
     repairedSessions += 1;
@@ -1605,11 +1620,19 @@ export async function recordNote(sessionId: string, text: string): Promise<void>
  * A message can be offered several times before it is acknowledged; only the single
  * acknowledgement produces a `delivered` record, so retries never duplicate history.
  */
-export async function recordAgentMessage(message: AgentMessage, delivery: 'sent' | 'delivered'): Promise<void> {
+export async function recordAgentMessage(
+  message: AgentMessage,
+  delivery: 'sent' | 'delivered',
+  ownerConversationId: string | null = null
+): Promise<void> {
   if (!recordingEnabled()) return;
   const owner = delivery === 'sent' ? message.from : message.to;
   try {
-    const conversationId = agentConversation(owner);
+    // A friendly agent id is unique only inside one active incarnation. Dormant histories are
+    // intentionally allowed to each own their own `prime`/`worker-1`, so an acknowledged message
+    // from an exact MCP caller must carry that conversation through instead of resolving the
+    // same friendly id against whichever other prime happens to be active now.
+    const conversationId = ownerConversationId ?? agentConversation(owner);
     const sessionId = conversationId ? await sessionForConversation(conversationId) : await ensureUnattributedSession();
     if (!sessionId) return;
     await appendEvent(sessionId, {

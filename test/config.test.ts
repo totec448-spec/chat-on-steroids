@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { defaultConfig, initConfigPath, loadConfig, saveConfig, updateConfig } from '../src/main/config.js';
+import { DESKTOP_CAPABILITIES, type Capability } from '../src/shared/types.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let dir: string;
@@ -297,25 +298,35 @@ describe('settings migration', () => {
 
 /** Fresh-install defaults, while migrations above prove existing choices stay narrow. */
 describe('shipped defaults', () => {
+  const expectedFreshCapability = (capability: Capability, platform: NodeJS.Platform): boolean =>
+    platform === 'win32' || !DESKTOP_CAPABILITIES.includes(capability);
+
   it('records sessions from first launch', () => {
     expect(defaultConfig().sessions.record).toBe(true);
   });
 
-  it('loads a genuinely missing config as a fully-enabled first launch', async () => {
+  it('loads a genuinely missing config with every portable Core capability enabled', async () => {
     await fs.rm(path.join(dir, 'config.json'), { force: true });
     const loaded = await loadConfig();
     expect(loaded.readOnly).toBe(false);
-    expect(Object.values(loaded.capabilities).every(Boolean)).toBe(true);
+    for (const [capability, enabled] of Object.entries(loaded.capabilities) as Array<[Capability, boolean]>) {
+      expect(enabled, capability).toBe(expectedFreshCapability(capability, process.platform));
+    }
     expect(loaded.multiAgent.enabled).toBe(true);
   });
 
-  it('starts every tool permission and the agents surface on, with read-only mode off', () => {
-    const config = defaultConfig();
-    expect(config.readOnly).toBe(false);
-    expect(Object.values(config.capabilities).every(Boolean)).toBe(true);
-    expect(config.multiAgent.enabled).toBe(true);
-    expect(config.multiAgent.maxWorkers).toBe(2);
-  });
+  it.each(['win32', 'darwin', 'linux'] as const)(
+    'starts portable permissions on and only offers Desktop automation where supported on %s',
+    (platform) => {
+      const config = defaultConfig(platform);
+      expect(config.readOnly).toBe(false);
+      for (const [capability, enabled] of Object.entries(config.capabilities) as Array<[Capability, boolean]>) {
+        expect(enabled, `${platform}:${capability}`).toBe(expectedFreshCapability(capability, platform));
+      }
+      expect(config.multiAgent.enabled).toBe(true);
+      expect(config.multiAgent.maxWorkers).toBe(2);
+    }
+  );
 
   it('does not widen omitted permissions or agents exposure in an existing legacy config', async () => {
     const legacy = {
@@ -374,12 +385,17 @@ describe('the goal loop settings', () => {
     expect(config.goal.enabled).toBe(false);
     expect(config.goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
     expect(config.goal.reasoning).toBe('default');
-    expect(config.goal.prompt).toContain('Your default action is to stop.');
-    expect(config.goal.prompt).toContain('If ChatGPT says "done", it is time to stop.');
+    expect(config.goal.prompt).toContain('Your job is to prompt ChatGPT');
+    expect(config.goal.prompt).toContain('Nobody handed you a separate goal');
+    // The driver ships beside the gate rather than staying hardcoded, so a fresh install has
+    // both editable instructions on disk and the settings screen has something to paint.
+    expect(config.goal.objectivePrompt).toContain('Your job is to prompt ChatGPT');
+    expect(config.goal.objectivePrompt).toContain('they have handed you the wheel');
   });
 
   it('keeps the model, reasoning level and system prompt that were chosen', async () => {
     const prompt = 'Custom continuation gate. Reply NO_REPLY when finished.';
+    const objectivePrompt = 'Custom goal driver. Reply NO_REPLY once the goal is reached.';
     await saveConfig({
       ...defaultConfig(),
       goal: {
@@ -387,15 +403,66 @@ describe('the goal loop settings', () => {
         enabled: true,
         model: 'openai/gpt-5.2-mini:nitro',
         reasoning: 'high',
-        prompt
+        prompt,
+        objectivePrompt
       }
     });
     expect((await loadConfig()).goal).toEqual({
       enabled: true,
       model: 'openai/gpt-5.2-mini:nitro',
       reasoning: 'high',
-      prompt
+      prompt,
+      objectivePrompt
     });
+  });
+
+  it('upgrades only the exact previous shipped prompt and preserves customized prompts', async () => {
+    const { PREVIOUS_DEFAULT_GOAL_SYSTEM_PROMPT } = await import('../src/shared/goal.js');
+    const config = defaultConfig();
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, goal: { ...config.goal, prompt: PREVIOUS_DEFAULT_GOAL_SYSTEM_PROMPT } }),
+      'utf8'
+    );
+    expect((await loadConfig()).goal.prompt).toBe(defaultConfig().goal.prompt);
+
+    const customized = `${PREVIOUS_DEFAULT_GOAL_SYSTEM_PROMPT}\ncustom sentence`;
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, goal: { ...config.goal, prompt: customized } }),
+      'utf8'
+    );
+    expect((await loadConfig()).goal.prompt).toBe(customized);
+  });
+
+  /**
+   * Migration compares against every default ever shipped, not just the one before this.
+   *
+   * The single-predecessor check this replaced stranded anyone who had skipped a release:
+   * their untouched prompt matched neither the current default nor its immediate predecessor,
+   * so it was mistaken for a customization and kept forever.
+   */
+  it('upgrades an untouched default from any earlier version, not just the last one', async () => {
+    const { SUPERSEDED_GOAL_SYSTEM_PROMPTS } = await import('../src/shared/goal.js');
+    const config = defaultConfig();
+    for (const superseded of SUPERSEDED_GOAL_SYSTEM_PROMPTS) {
+      await fs.writeFile(
+        path.join(dir, 'config.json'),
+        JSON.stringify({ ...config, goal: { ...config.goal, prompt: superseded } }),
+        'utf8'
+      );
+      expect((await loadConfig()).goal.prompt).toBe(defaultConfig().goal.prompt);
+    }
+  });
+
+  it('repairs a blank goal driver prompt to its shipped default', async () => {
+    const config = defaultConfig();
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, goal: { ...config.goal, objectivePrompt: '   ' } }),
+      'utf8'
+    );
+    expect((await loadConfig()).goal.objectivePrompt).toBe(defaultConfig().goal.objectivePrompt);
   });
 
   /**
@@ -425,7 +492,8 @@ describe('the goal loop settings', () => {
       enabled: false,
       model: '~deepseek/deepseek-v4-flash-latest',
       reasoning: 'default',
-      prompt: defaultConfig().goal.prompt
+      prompt: defaultConfig().goal.prompt,
+      objectivePrompt: defaultConfig().goal.objectivePrompt
     });
   });
 

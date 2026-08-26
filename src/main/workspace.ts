@@ -66,8 +66,12 @@ const workspaces = new Map<string, Workspace>();
  */
 export function workspaceKey(): string | null {
   const call = currentCall();
-  if (call?.agent) return `agent:${call.agent}`;
+  // Conversation is the durable identity. Friendly agent ids are reused across prime histories
+  // (`prime`, `worker-1`, ...), so once an exact ChatGPT conversation is known it must win over
+  // the transient slot name. The agent key remains only as a bootstrap/inheritance staging key
+  // before a newly opened worker has reported which conversation it became.
   if (call?.caller.conversationId) return `chat:${call.caller.conversationId}`;
+  if (call?.agent) return `agent:${call.agent}`;
   return null;
 }
 
@@ -93,7 +97,21 @@ export function currentWorkspace(): Workspace | null {
   const key = workspaceKey();
   if (!key) return null;
   prune();
-  const held = workspaces.get(key) ?? null;
+  let held = workspaces.get(key) ?? null;
+  // A worker inherits under `agent:worker-N` before its browser bootstrap has a conversation id.
+  // On its first exact attributed call, atomically migrate that staging value to the durable
+  // conversation key. Never do the reverse: a missing chat workspace must not pick up a friendly
+  // id from some other prime history after run turnover.
+  const call = currentCall();
+  if (!held && key.startsWith('chat:') && call?.agent) {
+    const stagedKey = `agent:${call.agent}`;
+    const staged = workspaces.get(stagedKey);
+    if (staged) {
+      held = { virtual: staged.virtual, real: staged.real, at: Date.now() };
+      workspaces.set(key, held);
+      workspaces.delete(stagedKey);
+    }
+  }
   if (held) held.at = Date.now();
   return held;
 }
@@ -189,6 +207,57 @@ export function releasePrimeWorkspace(primeConversationId: string | null): boole
   return true;
 }
 
+/**
+ * Parks one live agent workspace under the exact ChatGPT conversation that owns it.
+ *
+ * Friendly agent ids are intentionally reused by later runs (`prime`, `worker-1`, ...), so a
+ * reusable worker cannot leave its cwd under `agent:worker-1` after its run releases the global
+ * execution claim. Another prime may immediately create its own worker-1 and would otherwise
+ * inherit or overwrite the first worker's cwd. Conversation ids are the durable identity, so
+ * parking copies the live value there and always clears the friendly key.
+ */
+export function parkAgentWorkspace(agentId: string, conversationId: string | null): boolean {
+  if (!agentId) return false;
+  prune();
+  const key = `agent:${agentId}`;
+  const held = workspaces.get(key);
+  if (held && conversationId) {
+    setWorkspaceFor(`chat:${conversationId}`, { virtual: held.virtual, real: held.real });
+  }
+  workspaces.delete(key);
+  return Boolean(held);
+}
+
+/**
+ * Finalizes a newly opened worker's temporary inherited workspace under its exact chat id.
+ * This is the same map transition as parking, but happens immediately at browser binding so a
+ * worker that never calls a local tool still cannot leave `agent:worker-N` behind for another
+ * prime's later run to inherit.
+ */
+export function bindAgentWorkspace(agentId: string, conversationId: string): boolean {
+  if (!conversationId) return false;
+  return parkAgentWorkspace(agentId, conversationId);
+}
+
+/**
+ * Rehydrates a parked conversation workspace into the friendly agent id of a new incarnation.
+ *
+ * Absence is meaningful: the same friendly id may have belonged to another run moments ago, so
+ * failing to find a conversation-scoped workspace must actively clear that stale agent key.
+ */
+export function activateAgentWorkspace(agentId: string, conversationId: string | null): boolean {
+  if (!agentId) return false;
+  prune();
+  const key = `agent:${agentId}`;
+  const held = conversationId ? workspaces.get(`chat:${conversationId}`) : undefined;
+  if (!held) {
+    workspaces.delete(key);
+    return false;
+  }
+  setWorkspaceFor(key, { virtual: held.virtual, real: held.real });
+  return true;
+}
+
 /** The workspace a named conversation has learned, for code running outside its calls. */
 export function workspaceForChat(conversationId: string | null): Workspace | null {
   if (!conversationId) return null;
@@ -216,6 +285,12 @@ export function moveChatWorkspace(fromConversationId: string, toConversationId: 
   workspaces.set(`chat:${toConversationId}`, { virtual: held.virtual, real: held.real, at: Date.now() });
   workspaces.delete(`chat:${fromConversationId}`);
   return true;
+}
+
+/** Drops one conversation-scoped workspace without touching any agent-scoped mirror. */
+export function clearChatWorkspace(conversationId: string | null): boolean {
+  if (!conversationId) return false;
+  return workspaces.delete(`chat:${conversationId}`);
 }
 
 /** Forgets everything. Tests, and a full disconnect. */

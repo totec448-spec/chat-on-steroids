@@ -244,6 +244,7 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     autoCompactTriggeredAt: null,
     lastHandoffId: null,
     lastHandoffAt: null,
+    lastCommittedResumeHandoffId: null,
     lastTurnOutcome: null,
     activeTurnId: null,
     agents: [],
@@ -1220,13 +1221,38 @@ export async function readRecentEvents(
  */
 export async function rewriteUnattributedToolCalls(
   sessionId: string,
-  calls: readonly Extract<SessionEvent, { kind: 'tool_call' }>[]
+  calls: readonly Extract<SessionEvent, { kind: 'tool_call' }>[],
+  scannedThroughSeq: number
 ): Promise<void> {
   assertSessionId(sessionId);
   const entry = await ensureOpen(sessionId);
   const rewrite = entry.queue.then(async () => {
     if (entry.summary.conversationId !== null || entry.summary.title !== 'Unattributed activity') {
       throw new Error(`Session ${sessionId} is not an Unattributed activity bucket`);
+    }
+
+    // `calls` is the repairer's snapshot of rows that were still unattributed. New MCP calls can
+    // append to this same holding bucket while the repair is pre-copying assets/destinations. The
+    // session queue orders those appends before this rewrite, but blindly writing only the old
+    // snapshot would then erase them. Read the now-serialized journal and retain every tool call
+    // that appeared after the snapshot's high-water seq. Appends that arrive after this operation
+    // has been queued naturally run after the rewrite and receive fresh sequence numbers.
+    const concurrentCalls: Extract<SessionEvent, { kind: 'tool_call' }>[] = [];
+    try {
+      const raw = await fs.readFile(path.join(sessionDir(sessionId), 'events.jsonl'), 'utf8');
+      for (const line of raw.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line) as SessionEvent;
+          if (event.kind === 'tool_call' && event.seq > scannedThroughSeq) concurrentCalls.push(event);
+        } catch {
+          // Legacy damaged rows were already excluded by the deterministic repair snapshot. The
+          // general reader reports those separately; do not make this narrowly-scoped migration
+          // fail after all destination copies succeeded because of an unrelated torn legacy line.
+        }
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
 
     const start: SessionEvent = {
@@ -1237,7 +1263,8 @@ export async function rewriteUnattributedToolCalls(
       conversationId: null,
       title: entry.summary.title
     };
-    const kept: SessionEvent[] = [start, ...calls.map((event, index) => ({ ...event, seq: index + 2 }))];
+    const retainedCalls = [...calls, ...concurrentCalls].sort((left, right) => left.seq - right.seq);
+    const kept: SessionEvent[] = [start, ...retainedCalls.map((event, index) => ({ ...event, seq: index + 2 }))];
 
     const target = path.join(sessionDir(sessionId), 'events.jsonl');
     const tmp = `${target}.repair-${process.pid}-${Date.now()}.tmp`;
@@ -1255,6 +1282,7 @@ export async function rewriteUnattributedToolCalls(
       contextTokens: 0,
       lastHandoffId: null,
       lastHandoffAt: null,
+      lastCommittedResumeHandoffId: null,
       lastTurnOutcome: null,
       agents: []
     };
@@ -1303,7 +1331,14 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         contextTokens:
           typeof publicSummary.contextTokens === 'number' ? publicSummary.contextTokens : publicSummary.estimatedTokens,
         autoCompactTriggeredAt:
-          typeof publicSummary.autoCompactTriggeredAt === 'number' ? publicSummary.autoCompactTriggeredAt : null
+          typeof publicSummary.autoCompactTriggeredAt === 'number' ? publicSummary.autoCompactTriggeredAt : null,
+        // Older summaries predate successful-resume provenance. Missing means unknown, never
+        // "use lastHandoffId": capture publication happens before the continuation rebind.
+        lastCommittedResumeHandoffId:
+          typeof publicSummary.lastCommittedResumeHandoffId === 'string' &&
+          /^[0-9a-z-]{8,64}$/i.test(publicSummary.lastCommittedResumeHandoffId)
+            ? publicSummary.lastCommittedResumeHandoffId
+            : null
       }
     };
   } catch {
@@ -1792,9 +1827,11 @@ export async function setSessionOrigin(id: string, origin: SessionOrigin, title:
 export async function rebindSession(
   id: string,
   fromConversationId: string,
-  toConversationId: string
+  toConversationId: string,
+  committedResumeHandoffId?: string
 ): Promise<boolean> {
   if (!toConversationId || fromConversationId === toConversationId) return false;
+  if (committedResumeHandoffId !== undefined && !/^[0-9a-z-]{8,64}$/i.test(committedResumeHandoffId)) return false;
   // Same rule as createSession: once a mutation may attach B, no pre-existing cached miss for
   // B is authoritative. Clearing it early is safe even if the move later refuses or fails.
   missingCurrentConversations.delete(toConversationId);
@@ -1820,6 +1857,9 @@ export async function rebindSession(
       contextTokens: 0,
       autoCompactTriggeredAt: null,
       activeTurnId: null,
+      ...(committedResumeHandoffId !== undefined
+        ? { lastCommittedResumeHandoffId: committedResumeHandoffId }
+        : {}),
       updatedAt: Date.now(),
       // A session whose chat was closed during the handover is live again the moment its new
       // chat is attached; leaving `endedAt` set would draw a visibly growing session as over.
@@ -1839,6 +1879,39 @@ export async function rebindSession(
     missingCurrentConversations.delete(toConversationId);
     publishAttachmentSummary(entry.summary);
     logInfo(`session ${id} moved from ChatGPT conversation ${fromConversationId} to ${toConversationId}`);
+    return true;
+  });
+}
+
+/**
+ * Repairs successful-resume provenance after recovery proves the A→B session move already landed.
+ *
+ * Normal continuation commit writes this id atomically inside {@link rebindSession}. A crash can
+ * leave the continuation WAL in `committing` after that metadata write, and older builds could
+ * move the session before this field existed. In either case, the durable continuation's handoff
+ * id plus the session already being attached to B authorises this one-field repair. Any other
+ * current attachment is refused rather than inferred.
+ */
+export async function ensureCommittedResumeHandoff(
+  id: string,
+  conversationId: string,
+  handoffId: string
+): Promise<boolean> {
+  if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(handoffId)) return false;
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'committed resume provenance repair', async () => {
+    if (entry.summary.conversationId !== conversationId) return false;
+    if (entry.summary.lastCommittedResumeHandoffId === handoffId) return true;
+    const staged: SessionSummary = {
+      ...entry.summary,
+      // This is recovery of an already-landed semantic move, not new user/session activity.
+      // Preserve the original recency rather than making an app restart reorder old sessions.
+      lastCommittedResumeHandoffId: handoffId
+    };
+    await writeSummary(staged, entry.historySeq);
+    Object.assign(entry.summary, staged);
+    entry.metaDirty = false;
+    publishCachedSummary(entry.summary, false);
     return true;
   });
 }

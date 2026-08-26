@@ -22,9 +22,15 @@ import {
   type Root,
   type SessionSettings
 } from '../shared/types.js';
-import { DEFAULT_GOAL_SYSTEM_PROMPT, MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
+import {
+  DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
+  DEFAULT_GOAL_SYSTEM_PROMPT,
+  MAX_GOAL_SYSTEM_PROMPT_CHARS,
+  SUPERSEDED_GOAL_SYSTEM_PROMPTS
+} from '../shared/goal.js';
 import { logError } from './logger.js';
 import { RESERVED_ROOT_NAMES } from './sandbox.js';
+import { capabilitiesForPlatform } from './platform.js';
 
 /**
  * Defaults for the newer sections, in one place so the schema and defaultConfig()
@@ -121,13 +127,14 @@ const DEFAULT_GOAL: GoalSettings = {
   enabled: false,
   model: DEFAULT_GOAL_MODEL,
   reasoning: 'default',
-  prompt: DEFAULT_GOAL_SYSTEM_PROMPT
+  prompt: DEFAULT_GOAL_SYSTEM_PROMPT,
+  objectivePrompt: DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT
 };
 // Two workers, not three: three concurrent workers reproducibly trips ChatGPT's rate limit
 // ("too many requests"), which strands the run rather than making it faster.
 const DEFAULT_MULTI_AGENT: MultiAgentSettings = { enabled: false, maxWorkers: 2 };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
-const FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
+const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
   CAPABILITIES.map((capability) => [capability, true])
 ) as Capabilities;
 const FIRST_LAUNCH_MULTI_AGENT: MultiAgentSettings = { enabled: true, maxWorkers: DEFAULT_MULTI_AGENT.maxWorkers };
@@ -295,16 +302,31 @@ const configSchema = z.object({
         .optional()
         .default(DEFAULT_GOAL.prompt)
         .transform((prompt) => (prompt.trim() === '' ? DEFAULT_GOAL.prompt : prompt.trim()))
-        .catch(DEFAULT_GOAL.prompt)
+        .catch(DEFAULT_GOAL.prompt),
+      // Repaired exactly like `prompt` above, and for the same reason: a config predating the
+      // second editor, or hand-edited to blank, must not leave the goal driver running with no
+      // instruction at all. Both fall back to the shipped default rather than to emptiness.
+      objectivePrompt: z
+        .string()
+        .max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
+        .optional()
+        .default(DEFAULT_GOAL.objectivePrompt)
+        .transform((prompt) =>
+          prompt.trim() === '' ? DEFAULT_GOAL.objectivePrompt : prompt.trim()
+        )
+        .catch(DEFAULT_GOAL.objectivePrompt)
     })
     .optional()
     .default({ ...DEFAULT_GOAL })
 });
 
-export function defaultConfig(): Config {
+export function defaultConfig(platform: NodeJS.Platform = process.platform): Config {
   return {
     roots: [],
-    capabilities: { ...FIRST_LAUNCH_CAPABILITIES },
+    // Computer use is intentionally not part of the macOS/Linux port. Fresh installs on those
+    // hosts should therefore never present Windows-only permissions as granted, even though the
+    // stored schema remains cross-platform so one config can still be moved between machines.
+    capabilities: capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform),
     readOnly: false,
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'dark' },
@@ -349,6 +371,20 @@ function enforceFeatureDependencies(config: Config): Config {
   return { ...config, goal: { ...config.goal, enabled: false } };
 }
 
+/**
+ * Moves any exactly-as-shipped Goal prompt, from any past version, onto the current default.
+ *
+ * The prompt is editable and persisted, so changing the source constant alone would leave an
+ * existing untouched install on the old behaviour forever. Exact equality is the fence: any
+ * user customization, even a one-character change, is preserved verbatim. The list is walked
+ * rather than compared against one predecessor, so an install that skipped a release still
+ * migrates instead of being stranded on a default two generations old.
+ */
+function adoptCurrentGoalPrompt(config: Config): Config {
+  if (!SUPERSEDED_GOAL_SYSTEM_PROMPTS.includes(config.goal.prompt)) return config;
+  return { ...config, goal: { ...config.goal, prompt: DEFAULT_GOAL_SYSTEM_PROMPT } };
+}
+
 let configPath = '';
 let current: Config = defaultConfig();
 // Every UI mutation ultimately lands in the same tiny JSON file. Keep those
@@ -368,7 +404,9 @@ export async function loadConfig(): Promise<Config> {
       logError('Settings file was invalid and has been reset to defaults');
       current = conservativeRecoveryConfig();
     } else {
-      current = enforceFeatureDependencies(adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data))));
+      current = enforceFeatureDependencies(
+        adoptCurrentGoalPrompt(adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data))))
+      );
       // Duplicate root names would make a virtual path ambiguous.
       const seen = new Set<string>();
       current.roots = current.roots.filter((r) => {
@@ -462,11 +500,12 @@ export function getConfig(): Config {
  * Read-only mode is enforced here as well as at the tool layer, so the effective
  * capability set can never disagree with what the UI shows.
  */
-export function effectiveCapabilities(config: Config): Capabilities {
-  if (!config.readOnly) return config.capabilities;
+export function effectiveCapabilities(config: Config, platform: NodeJS.Platform = process.platform): Capabilities {
+  const live = capabilitiesForPlatform(config.capabilities, platform);
+  if (!config.readOnly) return live;
   // Derived from WRITE_CAPABILITIES rather than listed again here, so adding a new
   // writing capability cannot accidentally leave it enabled in read-only mode.
-  const capped = { ...config.capabilities };
+  const capped = { ...live };
   for (const capability of WRITE_CAPABILITIES) capped[capability] = false;
   return capped;
 }

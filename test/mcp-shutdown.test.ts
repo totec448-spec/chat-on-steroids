@@ -51,9 +51,15 @@ it('drains an accepted MCP mutation before closing its response socket', async (
     params: {
       name: 'exec_command',
       arguments: {
-        cmd: "Set-Content -LiteralPath 'started.txt' -Value 'started' -NoNewline; Start-Sleep -Milliseconds 500; Set-Content -LiteralPath 'after-stop.txt' -Value 'after' -NoNewline",
+        cmd:
+          process.platform === 'win32'
+            ? "Set-Content -LiteralPath 'started.txt' -Value 'started' -NoNewline; Start-Sleep -Milliseconds 500; Set-Content -LiteralPath 'after-stop.txt' -Value 'after' -NoNewline"
+            : "printf '%s' started > started.txt; sleep 1; printf '%s' after > after-stop.txt",
         workdir: '/probe',
-        shell: path.join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+        shell:
+          process.platform === 'win32'
+            ? path.join(process.env.SystemRoot ?? 'C:\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+            : '/bin/sh',
         yield_time_ms: 5_000
       }
     }
@@ -65,9 +71,9 @@ it('drains an accepted MCP mutation before closing its response socket', async (
   }).then(async (response) => ({ ok: true, status: response.status, text: await response.text() }));
 
   // Synchronise on a side effect from the accepted command before asking the server to stop.
-  // Keep the helper inside the already-running PowerShell process: spawning a second `node`
+  // Keep the helper inside the already-running shell process: spawning a second `node`
   // process made this shutdown test depend on hosted-runner process startup rather than drain
-  // semantics, and on a Windows CI runner that cold spawn outran the whole 15s budget below.
+  // semantics, and on a loaded CI runner that cold spawn can outrun the whole 15s budget below.
   const startedAt = Date.now();
   while (Date.now() - startedAt < 15_000) {
     try {

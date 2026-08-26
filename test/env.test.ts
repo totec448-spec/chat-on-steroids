@@ -38,7 +38,7 @@ const windowsEnv = (): Record<string, string> => ({
 const pathKeys = (env: Record<string, string | undefined>): string[] =>
   Object.keys(env).filter((key) => key.toLowerCase() === 'path');
 
-describe('the child environment', () => {
+describe.runIf(process.platform === 'win32')('the Windows child environment', () => {
   it('reads the inherited path whatever Windows spelled it', () => {
     expect(envValue(windowsEnv(), 'PATH')).toBe('C:\\Windows\\System32;C:\\Program Files\\nodejs');
     expect(envValue({ PATH: '/usr/bin' }, 'Path')).toBe('/usr/bin');
@@ -104,6 +104,37 @@ describe('the child environment', () => {
   it('drops variables the parent had unset instead of writing them as "undefined"', () => {
     const env = normalizeEnvironment({ Path: 'C:\\Windows\\System32', GONE: undefined });
     expect('GONE' in env).toBe(false);
+  });
+});
+
+describe.runIf(process.platform !== 'win32')('the POSIX child environment', () => {
+  it('keeps environment variable names case-sensitive', () => {
+    const env = normalizeEnvironment({ PATH: '/usr/bin', Path: '/custom/bin', GONE: undefined });
+    expect(envValue(env, 'PATH')).toBe('/usr/bin');
+    expect(envValue(env, 'Path')).toBe('/custom/bin');
+    expect(envValue(env, 'path')).toBeUndefined();
+    expect('GONE' in env).toBe(false);
+  });
+
+  it('updates and deletes only the exact requested spelling', () => {
+    const env = normalizeEnvironment({ PATH: '/usr/bin', Path: '/custom/bin' });
+    setEnvValue(env, 'PATH', '/bin');
+    expect(env).toMatchObject({ PATH: '/bin', Path: '/custom/bin' });
+    deleteEnvValue(env, 'PATH');
+    expect(envValue(env, 'PATH')).toBeUndefined();
+    expect(envValue(env, 'Path')).toBe('/custom/bin');
+  });
+
+  it('deduplicates PATH entries case-sensitively', () => {
+    const env = normalizeEnvironment({ PATH: '/opt/Foo:/opt/foo:/usr/bin' });
+    prependPath(env, '/opt/Foo');
+    expect(pathEntries(env)).toEqual(['/opt/Foo', '/opt/foo', '/usr/bin']);
+  });
+
+  it('applies overrides without changing a differently-cased variable', () => {
+    const env = normalizeEnvironment({ PATH: '/usr/bin', Path: '/custom/bin' });
+    applyEnvOverrides(env, { PATH: '/bin' });
+    expect(env).toMatchObject({ PATH: '/bin', Path: '/custom/bin' });
   });
 });
 

@@ -40,13 +40,17 @@ import { getConfig } from '../config.js';
 import {
   AgentError,
   acknowledgeOffers,
+  acknowledgeOffersForConversation,
+  dormantWorkerNotice,
   endedWorkerNotice,
+  hasDormantWorkerLeases,
   sleepSilentDetachedWorkers,
   noteAgentAlive,
   agentForCaller,
   agentForFinishCaller,
   hasRetiredWorkerLeases,
   offerMessages,
+  offerMessagesForConversation,
   persistCriticalSwarmNow,
   requestWorkerRevivals,
   releaseQuiescentRun,
@@ -128,7 +132,7 @@ export function friendlyError(err: unknown): string {
   if (err instanceof SandboxError || err instanceof ComputerError) return err.message;
   const code = (err as NodeJS.ErrnoException).code;
   if (code === 'ENOENT') return 'Not found';
-  if (code === 'EACCES' || code === 'EPERM') return 'Access denied by Windows';
+  if (code === 'EACCES' || code === 'EPERM') return 'Access denied by the operating system';
   if (code === 'EBUSY') return 'The file is in use by another program';
   if (code === 'ENOTEMPTY') return 'Directory is not empty';
   if (code === 'EEXIST') return 'Already exists';
@@ -310,9 +314,20 @@ function noteTransportIdentity(transportKey: string | null): void {
  * Messages are *offered* here, not retired. They are retired when this agent calls
  * again, because that is the first real evidence this result reached ChatGPT.
  */
-function withInbox(agent: string | null, result: ToolResult, onFinish = false): ToolResult {
-  if (!agent) return result;
-  const messages = offerMessages(agent, onFinish);
+function withInbox(
+  conversationId: string | null | undefined,
+  agent: string | null,
+  result: ToolResult,
+  onFinish = false
+): ToolResult {
+  // Conversation ownership is the durable authority. This matters most for a parked prime:
+  // there is deliberately no live `agent:prime` while another history may be active, but its
+  // exact conversation still owns final worker reports queued before parking. The finish flag
+  // also preserves the one dormant-worker exception: retrying a lost finish result may re-offer
+  // rows that rode on that finish, without re-authorising ordinary worker activity.
+  const scoped = offerMessagesForConversation(conversationId, onFinish, onFinish);
+  const recipient = scoped?.agentId ?? agent;
+  const messages = scoped?.messages ?? (agent ? offerMessages(agent, onFinish) : []);
   if (messages.length === 0) return result;
   const lines = messages
     .map(
@@ -324,7 +339,7 @@ function withInbox(agent: string | null, result: ToolResult, onFinish = false): 
     ...result,
     content: [
       ...result.content,
-      { type: 'text', text: `\n--- ${messages.length} message(s) for ${agent} ---\n${lines}` }
+      { type: 'text', text: `\n--- ${messages.length} message(s) for ${recipient ?? 'this conversation'} ---\n${lines}` }
     ]
   };
 }
@@ -405,6 +420,14 @@ async function dispatchTracked(
   if (!context.caller.conversationId && hasRetiredWorkerLeases() && requestId) {
     context.caller.conversationId = await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId });
   }
+  // Dormant histories are long-lived identity fences, not active slot claims. An old worker tab
+  // may still issue a stale server-side call after its run parked, and without exact request-id
+  // attribution an absolute read/exec would otherwise look like an unrelated ordinary chat and
+  // run successfully. Resolve the exact mate for every call while such worker conversations
+  // exist, just as we do for short-lived retired worker leases.
+  if (!context.caller.conversationId && hasDormantWorkerLeases() && requestId) {
+    context.caller.conversationId = await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId });
+  }
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.
   //
@@ -445,6 +468,12 @@ async function dispatchTracked(
   }
   context.agent = isFinish ? agentForFinishCaller(context.caller) : agentForCaller(context.caller);
   const retiredWorker = retiredWorkerForConversation(context.caller.conversationId);
+  // Parking a run releases its global execution claim without retiring its worker chats. Those
+  // exact conversations remain workers, though: a stale sleeping/terminal worker tab must not
+  // turn into an ordinary unidentified chat and keep running local tools merely because another
+  // prime currently owns the active run (or because no run is active at all). Only the owning
+  // prime's explicit agents message may wake a sleeping worker.
+  const dormantWorker = isFinish ? null : dormantWorkerNotice(context.caller.conversationId);
   // A worker that really is over learns so on its own next call. Without this its calls
   // resolved to nobody and ran anyway, so a chat the user had ended went on writing files
   // in the name of no agent at all.
@@ -454,12 +483,15 @@ async function dispatchTracked(
   // by endedWorkerNotice as before.
   const endedWorker = isFinish ? null : endedWorkerNotice(context.caller.conversationId);
   const retiredLeaseAmbiguous = hasRetiredWorkerLeases() && !context.caller.conversationId;
+  const dormantLeaseAmbiguous = hasDormantWorkerLeases() && !context.caller.conversationId;
   // In a swarm, a relative/defaulted filesystem operation is not safe to execute after the
   // exact caller lookup timed out: its workspace is part of the requested operation. Falling
   // back to the first approved root turns an attribution outage into wrong-project mutation.
   // Refuse and let the model retry once page evidence is healthy instead.
   const result = await runInCallContext(context, () =>
-      retiredWorker
+      dormantWorker
+        ? Promise.resolve(fail(dormantWorker))
+        : retiredWorker
         ? Promise.resolve(
             fail(
               `WORKER_RETIRED: ${retiredWorker.id} was retired because ${retiredWorker.reason}. This chat can no longer use local tools. Stop working and return to the prime chat.`
@@ -471,6 +503,12 @@ async function dispatchTracked(
         ? Promise.resolve(
             fail(
               'CALLER_IDENTITY_REQUIRED: a recently retired worker tab may still be open, and the connector could not prove this call belongs to a different chat. No local tool was run. Reload the extension evidence path or wait for the retired lease to expire.'
+            )
+          )
+        : dormantLeaseAmbiguous
+        ? Promise.resolve(
+            fail(
+              'CALLER_IDENTITY_REQUIRED: a dormant worker chat still belongs to its prime history, and the connector could not prove this call belongs to a different conversation. No local tool was run. Restore the browser-extension identity path and retry.'
             )
           )
         : swarmRunning() && identitySensitive && !context.caller.conversationId
@@ -501,10 +539,20 @@ async function dispatchTracked(
   // retry after a lost result. The SDK exposes the JSON-RPC id, but a model-issued retry is
   // a new MCP request with a new id, so that id cannot prove the previous finish result was
   // seen. The broker therefore re-offers rather than assuming; see acknowledgeOffers.
-  if (context.agent) {
-    for (const message of acknowledgeOffers(context.agent, isFinish, startedAt)) {
-      await recordAgentMessage(message, 'delivered');
-    }
+  const acknowledgedForConversation = acknowledgeOffersForConversation(
+    context.caller.conversationId,
+    isFinish,
+    startedAt,
+    isFinish
+  );
+  const acknowledged =
+    acknowledgedForConversation?.messages ??
+    (context.agent ? acknowledgeOffers(context.agent, isFinish, startedAt) : []);
+  for (const message of acknowledged) {
+    // The exact caller conversation is stronger than the friendly recipient id and remains
+    // unique after a run parks. Without this override, a parked Prime A acknowledging its report
+    // while Prime B is active could file the delivery into B's `prime` session (or Unattributed).
+    await recordAgentMessage(message, 'delivered', context.caller.conversationId);
   }
   // This is the MCP call's wall-clock latency. A managed child can outlive the call, and
   // its own lifetime is process evidence; letting that number overwrite ToolCallRecord's
@@ -513,7 +561,7 @@ async function dispatchTracked(
   // Inbox messages are part of the MCP result ChatGPT actually receives. Build the delivered
   // result before recording so session(action=read, tool_call=T…) is genuine wire forensics rather than a
   // subtly earlier internal value that omits the worker report most likely to matter later.
-  const delivered = withInbox(context.agent, result, isFinish);
+  const delivered = withInbox(context.caller.conversationId, context.agent, result, isFinish);
   const recorderStartedAt = Date.now();
   const recording = recordToolCall({
     tool: name,

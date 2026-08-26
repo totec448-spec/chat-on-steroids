@@ -10,7 +10,7 @@
  * `default_user_shell_from_path` goes straight to PowerShell regardless.
  */
 
-import { existsSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import nodePath from 'node:path';
 
 export type ShellType = 'zsh' | 'bash' | 'powershell' | 'sh' | 'cmd';
@@ -52,7 +52,9 @@ export function detectShellType(shellPath: string): ShellType | null {
 
 function fileExists(candidate: string): string | null {
   try {
-    return statSync(candidate).isFile() ? candidate : null;
+    if (!statSync(candidate).isFile()) return null;
+    if (process.platform !== 'win32') accessSync(candidate, constants.X_OK);
+    return candidate;
   } catch {
     return null;
   }
@@ -60,7 +62,10 @@ function fileExists(candidate: string): string | null {
 
 /** Stand-in for the `which` crate: PATH plus PATHEXT on Windows. */
 function which(binaryName: string): string | null {
-  const rawPath = process.env['PATH'] ?? process.env['Path'] ?? '';
+  const rawPath =
+    process.platform === 'win32'
+      ? (process.env['PATH'] ?? process.env['Path'] ?? '')
+      : (process.env['PATH'] ?? '');
   const separator = process.platform === 'win32' ? ';' : ':';
   const extensions =
     process.platform === 'win32'
@@ -113,7 +118,11 @@ const ZSH_FALLBACK_PATHS = ['/bin/zsh'];
 const BASH_FALLBACK_PATHS = ['/bin/bash', '/usr/bin/bash'];
 const SH_FALLBACK_PATHS = ['/bin/sh'];
 const PWSH_FALLBACK_PATHS =
-  process.platform === 'win32' ? ['C:\\Program Files\\PowerShell\\7\\pwsh.exe'] : ['/usr/local/bin/pwsh'];
+  process.platform === 'win32'
+    ? ['C:\\Program Files\\PowerShell\\7\\pwsh.exe']
+    : process.platform === 'darwin'
+      ? ['/opt/homebrew/bin/pwsh', '/usr/local/bin/pwsh']
+      : ['/usr/local/bin/pwsh'];
 const POWERSHELL_FALLBACK_PATHS =
   process.platform === 'win32' ? ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'] : [];
 
@@ -192,10 +201,24 @@ export function getShellByModelProvidedPath(shellPath: string, cwd: string = pro
 
 let cachedDefaultShell: { key: string; shell: DetectedShell } | null = null;
 
+/**
+ * POSIX default-shell preference, kept pure so every CI host can assert both macOS and Linux
+ * policy. A configured supported login shell wins; only the fallback differs by convention.
+ * PowerShell/cmd are never invented here, though an explicitly configured supported shell is
+ * still respected just as Codex respects the user's selected shell.
+ */
+export function posixShellPreference(platform: NodeJS.Platform, configured: ShellType | null): ShellType[] {
+  const order: ShellType[] = [
+    ...(configured === null ? [] : [configured]),
+    ...(platform === 'darwin' ? (['zsh', 'bash'] as const) : (['bash', 'zsh'] as const))
+  ];
+  return [...new Set(order)];
+}
+
 function defaultShellCacheKey(): string {
   return [
     process.platform,
-    process.env['PATH'] ?? process.env['Path'] ?? '',
+    process.platform === 'win32' ? (process.env['PATH'] ?? process.env['Path'] ?? '') : (process.env['PATH'] ?? ''),
     process.env['PATHEXT'] ?? '',
     process.env['SHELL'] ?? ''
   ].join('\u0000');
@@ -210,12 +233,10 @@ export function defaultUserShell(): DetectedShell {
   } else {
     const configured = userShellPath();
     const detected = configured ? detectShellType(configured) : null;
-    const userDefault = detected ? getShell(detected) : null;
-    const withFallback =
-      process.platform === 'darwin'
-        ? (userDefault ?? getShell('zsh') ?? getShell('bash'))
-        : (userDefault ?? getShell('bash') ?? getShell('zsh'));
-    shell = withFallback ?? ultimateFallbackShell();
+    shell =
+      posixShellPreference(process.platform, detected)
+        .map((shellType) => getShell(shellType))
+        .find((candidate): candidate is DetectedShell => candidate !== null) ?? ultimateFallbackShell();
   }
   cachedDefaultShell = { key, shell };
   return shell;

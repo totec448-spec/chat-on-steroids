@@ -54,18 +54,28 @@ import { randomBytes } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
 import { logInfo, logWarn } from '../logger.js';
 import {
+  PRIME_ID,
+  agentForOwnedConversation,
   beginPrimeTransfer,
   cancelPrimeTransfer,
   commitPrimeTransfer,
   freezePrimeTransfer,
   thawPrimeTransfer
 } from '../agents.js';
-import { moveChatWorkspace } from '../workspace.js';
+import { clearChatWorkspace, moveChatWorkspace, workspaceForChat } from '../workspace.js';
+import { clearGoalObjective, goalObjectiveFor, moveGoalObjective } from '../goal.js';
 import { writeDurableNow, writeDurableSoon } from '../durable.js';
-import { prepareHandoff } from './handoff.js';
+import { prepareHandoff, resumeBootstrapMatches } from './handoff.js';
 import { ensureHandoffRecorded, recordHandoff, rebindConversation } from './recorder.js';
 import { endResumeClaim, noteResumeClaim, resetResumeGate } from './resume-gate.js';
-import { findSessionByConversation, getSession, readHandoff, rebindSession } from './store.js';
+import {
+  ensureCommittedResumeHandoff,
+  findSessionByConversation,
+  getSession,
+  readEvents,
+  readHandoff,
+  rebindSession
+} from './store.js';
 
 /**
  * How long a continuation may stay open.
@@ -328,14 +338,20 @@ export function continuationByToken(token: string): ContinuationView | null {
  * from B gets AGENTS_BUSY.
  *
  * This is intentionally much narrower than a takeover API. The durable recorder must prove
- * that B was app-opened as a resume of source session S, S must still be attached to the exact
- * conversation A named by the failed continuation, and that continuation must have terminated
- * for this one historical collision. Only then may the broker's recovery hook move A→B. The
- * shadow session remains B's recorder history; this repairs agent ownership without deleting
- * any observations the user made after landing here.
+ * that B was app-opened as a resume of source session S, S must still own A, and B's authored
+ * history must contain the exact browser bootstrap generated from S's handoff. A retained
+ * collision WAL additionally identifies that handoff; after the WAL ages out, only S's newest
+ * still-uncommitted handoff is eligible. Only then may the missing post-commit projections move
+ * A→B and the broker's recovery hook repair prime ownership. The shadow session remains B's
+ * recorder history; this deliberately does not steal/delete that session or any observations
+ * the user made after landing here.
  */
 export async function repairPrimeFromResumeShadow(conversationId: string): Promise<boolean> {
   if (!conversationId) return false;
+  // A resume shadow is prime/solo history. Even otherwise convincing old provenance must never
+  // move Goal/workspace into a conversation the broker knows belongs to a worker.
+  const targetOwner = agentForOwnedConversation(conversationId);
+  if (targetOwner && targetOwner !== PRIME_ID) return false;
   let target;
   try {
     target = await findSessionByConversation(conversationId, { requireUnique: true });
@@ -350,6 +366,14 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
 
   const source = await getSession(sourceSessionId).catch(() => null);
   if (!source?.conversationId) return false;
+  const sourceOwner = agentForOwnedConversation(source.conversationId);
+  if (sourceOwner && sourceOwner !== PRIME_ID) return false;
+  // PRIME on both sides proves two separately retained/active owner records. In particular,
+  // an old A run may have parked before the exact shadow/descendant C later started a fresh run
+  // of its own. Do not merge A's history/projections into that independent C. When a prior
+  // recovery already moved the *same* run A→C, only C remains owned and this idempotent
+  // projection repair is still allowed — that is the live 2.0.1 damage pattern this exists for.
+  if (targetOwner === PRIME_ID && sourceOwner === PRIME_ID) return false;
   const failed = [...byToken.values()].find(
     (entry) =>
       entry.sessionId === sourceSessionId &&
@@ -357,15 +381,57 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
       entry.error === RESUME_SHADOW_COLLISION &&
       entry.from === source.conversationId
   );
-  if (!failed) return false;
+  const handoffId = failed?.handoffId ?? source.lastHandoffId;
+  if (!handoffId) return false;
+  if (!failed) {
+    // Terminal continuation rows are intentionally swept after 2×TTL, but an installed build can
+    // leave its broken replacement tab open far longer than that. Keep a positive-only legacy
+    // proof for those already-stranded chats: the target must durably say this app opened it as a
+    // resume from S, S must still own A, S's newest handoff must *not* be marked committed, and B
+    // must have durably recorded the exact bootstrap text generated from that handoff. This is the
+    // same authored-text equality used by Goal's legacy provenance migration, but stricter here
+    // because the target session origin also names the exact source session.
+    if (handoffId === source.lastCommittedResumeHandoffId) return false;
+  }
+  const handoff = await readHandoff(source.id, handoffId).catch(() => null);
+  if (!handoff) return false;
+  const targetUsers = await readEvents(target.id, { kinds: ['user_message'] }).catch(() => []);
+  const exactBootstrap = targetUsers.some(
+    (event) => event.kind === 'user_message' && !event.message.truncated && resumeBootstrapMatches(event.message.text, handoff.text)
+  );
+  if (!exactBootstrap) return false;
+  const proof = failed ? `collision WAL + exact handoff ${handoffId}` : `exact handoff ${handoffId}`;
 
-  const repaired = recoveryHooks.repairPrimeTransfer?.(failed.from, conversationId) ?? false;
-  if (repaired) {
+  // The durable session rebind never landed in this legacy race, so normal
+  // publishCommittedProjection() never ran either. Once the exact app-created resume shadow +
+  // positive proof above identifies which A→B attempt this is, repair only projections that are
+  // still missing on the descendant. A descendant can have accumulated newer Goal/workspace
+  // state before an upgraded build gets its first chance to heal the old collision; that newer
+  // target state wins. The stale A projection is still removed so opening A later cannot keep
+  // using authority that belongs to the continued chat.
+  const fromConversationId = source.conversationId;
+  let workspaceChanged = false;
+  if (workspaceForChat(conversationId)) {
+    workspaceChanged = clearChatWorkspace(fromConversationId);
+  } else {
+    workspaceChanged = moveChatWorkspace(fromConversationId, conversationId);
+  }
+  let goalChanged = false;
+  if (goalObjectiveFor(conversationId)) {
+    if (goalObjectiveFor(fromConversationId)) {
+      clearGoalObjective(fromConversationId);
+      goalChanged = true;
+    }
+  } else {
+    goalChanged = moveGoalObjective(fromConversationId, conversationId);
+  }
+  const repaired = recoveryHooks.repairPrimeTransfer?.(fromConversationId, conversationId) ?? false;
+  if (repaired || workspaceChanged || goalChanged) {
     logWarn(
-      `continuation ${failed.token.slice(0, 8)} repaired prime ownership in resume shadow chat ${conversationId}`
+      `resume-shadow repair (${proof}) moved missing projections into chat ${conversationId}`
     );
   }
-  return repaired;
+  return repaired || workspaceChanged || goalChanged;
 }
 
 /**
@@ -608,6 +674,7 @@ function publishCommittedProjection(
 ): void {
   rebindConversation(entry.sessionId, entry.from, toConversationId);
   moveChatWorkspace(entry.from, toConversationId);
+  moveGoalObjective(entry.from, toConversationId);
   if (swarm === 'frozen') {
     if (!commitPrimeTransfer(entry.from, toConversationId)) {
       // The frozen handover cannot expire. A miss here means the run ended outright while
@@ -673,6 +740,18 @@ async function reconcileCommitting(entry: Continuation, toConversationId: string
   if (!session) return { status: 'rejected', reason: 'the local session no longer exists' };
 
   if (session.conversationId === toConversationId) {
+    if (entry.handoffId) {
+      try {
+        if (!(await ensureCommittedResumeHandoff(entry.sessionId, toConversationId, entry.handoffId))) {
+          return { status: 'retryable', reason: 'the committed resume handoff provenance could not be repaired' };
+        }
+      } catch (err) {
+        return {
+          status: 'retryable',
+          reason: `the committed resume handoff provenance could not be repaired: ${err instanceof Error ? err.message : String(err)}`
+        };
+      }
+    }
     publishCommittedProjection(entry, toConversationId, 'recovery');
     await finishCommittedRecord(entry, toConversationId);
     return { status: 'already-committed', conversationId: toConversationId };
@@ -715,7 +794,7 @@ async function reconcileCommitting(entry: Continuation, toConversationId: string
 
   let moved = false;
   try {
-    moved = await rebindSession(entry.sessionId, entry.from, toConversationId);
+    moved = await rebindSession(entry.sessionId, entry.from, toConversationId, entry.handoffId ?? undefined);
   } catch (err) {
     logWarn(`continuation ${entry.token.slice(0, 8)} rebind threw: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -727,6 +806,18 @@ async function reconcileCommitting(entry: Continuation, toConversationId: string
       // The result stays retryable below; the frozen handover is released first.
     }
     if (after?.conversationId === toConversationId) {
+      if (entry.handoffId) {
+        try {
+          if (!(await ensureCommittedResumeHandoff(entry.sessionId, toConversationId, entry.handoffId))) {
+            return { status: 'retryable', reason: 'the committed resume handoff provenance could not be repaired' };
+          }
+        } catch (err) {
+          return {
+            status: 'retryable',
+            reason: `the committed resume handoff provenance could not be repaired: ${err instanceof Error ? err.message : String(err)}`
+          };
+        }
+      }
       publishCommittedProjection(entry, toConversationId, swarm === 'frozen' ? 'frozen' : 'absent');
       await finishCommittedRecord(entry, toConversationId);
       return { status: 'committed', conversationId: toConversationId };
@@ -773,7 +864,20 @@ async function commitContinuationUnlocked(
     if (entry.to && entry.to !== toConversationId) {
       return { status: 'rejected', reason: 'the continuation already committed to a different chat' };
     }
-    return { status: 'already-committed', conversationId: entry.to ?? toConversationId };
+    const committedTo = entry.to ?? toConversationId;
+    if (entry.handoffId) {
+      try {
+        if (!(await ensureCommittedResumeHandoff(entry.sessionId, committedTo, entry.handoffId))) {
+          return { status: 'retryable', reason: 'the committed resume handoff provenance could not be repaired' };
+        }
+      } catch (err) {
+        return {
+          status: 'retryable',
+          reason: `the committed resume handoff provenance could not be repaired: ${err instanceof Error ? err.message : String(err)}`
+        };
+      }
+    }
+    return { status: 'already-committed', conversationId: committedTo };
   }
   if (entry.state === 'committing') {
     if (entry.to !== toConversationId) {
@@ -948,8 +1052,20 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
         logWarn(`continuation ${entry.token.slice(0, 8)} session recovery failed: ${err instanceof Error ? err.message : String(err)}`);
       }
       if (session && entry.to && session.conversationId === entry.to) {
+        if (entry.handoffId) {
+          try {
+            await ensureCommittedResumeHandoff(entry.sessionId, entry.to, entry.handoffId);
+          } catch (err) {
+            // The continuation/session already prove the move. Keep the durable WAL record so
+            // the next startup retries this metadata-only repair rather than inventing a rollback.
+            logWarn(
+              `continuation ${entry.token.slice(0, 8)} could not repair committed resume provenance — ${err instanceof Error ? err.message : String(err)}`
+            );
+          }
+        }
         rebindConversation(entry.sessionId, entry.from, entry.to);
         moveChatWorkspace(entry.from, entry.to);
+        moveGoalObjective(entry.from, entry.to);
         const repaired = recoveryHooks.repairPrimeTransfer?.(entry.from, entry.to) ?? false;
         if (!repaired) commitPrimeTransfer(entry.from, entry.to);
         entry.state = 'committed';

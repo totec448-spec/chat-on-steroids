@@ -80,7 +80,7 @@ describe('resolvePath — happy path', () => {
     expect(resolved.virtual).toBe('/project');
   });
 
-  it('accepts backslashes as separators', async () => {
+  it.runIf(IS_WINDOWS)('accepts backslashes as separators', async () => {
     const resolved = await resolvePath(roots, '\\project\\sub\\nested.txt');
     expect(resolved.real).toBe(path.join(approved, 'sub', 'nested.txt'));
     expect(resolved.virtual).toBe('/project/sub/nested.txt');
@@ -119,7 +119,7 @@ describe('resolvePath — traversal', () => {
     await expectRefused('/project/sub/deep/../../../outside/secret.txt');
   });
 
-  it('rejects ".." written with backslashes', async () => {
+  it.runIf(IS_WINDOWS)('rejects ".." written with backslashes', async () => {
     await expectRefused('\\project\\..\\outside\\secret.txt');
   });
 
@@ -137,7 +137,7 @@ describe('resolvePath — traversal', () => {
   });
 });
 
-describe('resolvePath — Windows path tricks', () => {
+describe.runIf(IS_WINDOWS)('resolvePath — Windows path tricks', () => {
   it('rejects an absolute Windows path', async () => {
     await expectRefused('C:\\Windows\\System32\\drivers\\etc\\hosts');
   });
@@ -175,21 +175,21 @@ describe('resolvePath — Windows path tricks', () => {
     }
   });
 
-  it('rejects a null byte', async () => {
-    const err = await expectRefused('/project/file.txt\0.png');
-    expect(err.message).toMatch(/null byte/);
-  });
-
-  it('rejects a control character', async () => {
-    await expectRefused('/project/fi\x07le.txt');
-  });
-
   it('rejects a UNC path', async () => {
     await expectRefused('\\\\server\\share\\secret.txt');
   });
 });
 
 describe('resolvePath — roots', () => {
+  it('rejects a null byte on every platform', async () => {
+    const err = await expectRefused('/project/file.txt\0.png');
+    expect(err.message).toMatch(/null byte/);
+  });
+
+  it('rejects a control character on every platform', async () => {
+    await expectRefused('/project/fi\x07le.txt');
+  });
+
   it('rejects an unknown root and names the approved ones', async () => {
     const err = await expectRefused('/nope/file.txt');
     expect(err.message).toContain('/project');
@@ -249,7 +249,7 @@ describe('resolvePath — links and reparse points', () => {
     await expectRefused('/project/escape/planted.txt', true);
   });
 
-  it.runIf(IS_WINDOWS)('still rejects an escaping junction when the caller used a native path', async () => {
+  it('still rejects an escaping link when the caller used a native path', async () => {
     const err = await expectRefused(path.join(escapeLink, 'secret.txt'));
     expect(err.message).toMatch(/escapes its approved folder/);
   });
@@ -261,7 +261,7 @@ describe('resolvePath — links and reparse points', () => {
     expect(resolved.virtual).toBe('/project/sub/nested.txt');
   });
 
-  it.runIf(IS_WINDOWS)('canonicalizes an internal junction reached through a native path', async () => {
+  it('canonicalizes an internal link reached through a native path', async () => {
     const resolved = await resolvePath(roots, path.join(innerLink, 'nested.txt'));
     expect(resolved.real).toBe(path.join(approved, 'sub', 'nested.txt'));
     expect(resolved.virtual).toBe('/project/sub/nested.txt');
@@ -348,11 +348,11 @@ describe('root names', () => {
 
   it('avoids collisions', () => {
     const existing: Root[] = [
-      { name: 'src', path: 'C:\\a' },
-      { name: 'src-2', path: 'C:\\b' }
+      { name: 'src', path: path.join(path.parse(process.cwd()).root, 'a') },
+      { name: 'src-2', path: path.join(path.parse(process.cwd()).root, 'b') }
     ];
-    expect(uniqueRootName('C:\\x\\src', existing)).toBe('src-3');
-    expect(uniqueRootName('C:\\x\\other', existing)).toBe('other');
+    expect(uniqueRootName(path.join(path.parse(process.cwd()).root, 'x', 'src'), existing)).toBe('src-3');
+    expect(uniqueRootName(path.join(path.parse(process.cwd()).root, 'x', 'other'), existing)).toBe('other');
   });
 });
 
@@ -362,15 +362,19 @@ describe('validateNewRoot', () => {
   });
 
   it('rejects a relative path', async () => {
-    await expect(validateNewRoot('relative\\path', [])).rejects.toBeInstanceOf(SandboxError);
+    await expect(validateNewRoot(path.join('relative', 'path'), [])).rejects.toBeInstanceOf(SandboxError);
   });
 
-  it('rejects a UNC path', async () => {
+  it.runIf(IS_WINDOWS)('rejects a UNC path', async () => {
     await expect(validateNewRoot('\\\\server\\share', [])).rejects.toThrow(/UNC/);
   });
 
   it.runIf(IS_WINDOWS)('rejects a whole drive', async () => {
     await expect(validateNewRoot(path.parse(base).root, [])).rejects.toThrow(/entire drive/);
+  });
+
+  it.runIf(!IS_WINDOWS)('rejects the whole filesystem root', async () => {
+    await expect(validateNewRoot(path.parse(base).root, [])).rejects.toThrow(/entire filesystem root/);
   });
 
   it('rejects a file', async () => {
@@ -391,6 +395,56 @@ describe('validateNewRoot', () => {
 
   it('accepts a sibling folder', async () => {
     expect(await validateNewRoot(outside, [{ name: 'project', path: approved }])).toBe(outside);
+  });
+});
+
+describe.runIf(!IS_WINDOWS)('a native POSIX path', () => {
+  it('resolves an absolute shell path inside an approved root', async () => {
+    const resolved = await resolvePath(roots, path.join(approved, 'sub', 'nested.txt'));
+    expect(resolved.real).toBe(path.join(approved, 'sub', 'nested.txt'));
+    expect(resolved.virtual).toBe('/project/sub/nested.txt');
+  });
+
+  it('resolves the approved root itself', async () => {
+    const resolved = await resolvePath(roots, approved);
+    expect(resolved.real).toBe(approved);
+    expect(resolved.virtual).toBe('/project');
+  });
+
+  it('rejects native dot-dot before normalization can erase it', async () => {
+    const error = await expectRefused(`${approved}/sub/../file.txt`);
+    expect(error.message).toMatch(/traversal/i);
+  });
+
+  it('refuses an absolute path outside every approved root', async () => {
+    const error = await expectRefused(path.join(outside, 'secret.txt'));
+    expect(error.message).toContain('not inside an approved folder');
+    expect(error.message).toContain('/project');
+  });
+
+  it('allows POSIX filenames that Windows reserves', async () => {
+    for (const name of ['CON', 'name:with-colon', 'trailing.']) {
+      await fs.writeFile(path.join(approved, name), name);
+      const resolved = await resolvePath(roots, `/project/${name}`);
+      expect(resolved.real).toBe(path.join(approved, name));
+    }
+  });
+
+  it('treats a backslash as a filename character rather than a separator', async () => {
+    const name = 'back\\slash.txt';
+    await fs.writeFile(path.join(approved, name), 'backslash');
+    const resolved = await resolvePath(roots, `/project/${name}`);
+    expect(resolved.real).toBe(path.join(approved, name));
+    expect(resolved.virtual).toBe(`/project/${name}`);
+
+    const relative = await resolvePath(roots, name, { base: '/project' });
+    expect(relative.real).toBe(path.join(approved, name));
+    expect(relative.virtual).toBe(`/project/${name}`);
+  });
+
+  it('keeps an approved virtual root unambiguous with native / paths', async () => {
+    const resolved = await resolvePath(roots, '/project/sub/nested.txt');
+    expect(resolved.virtual).toBe('/project/sub/nested.txt');
   });
 });
 

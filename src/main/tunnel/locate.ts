@@ -8,42 +8,74 @@
  * PATH/common locations remain a fallback for development or a damaged/missing bundle.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, readFileSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { pathEntries } from '../env.js';
 
 export type BinaryName = 'tunnel-client' | 'cloudflared';
 
 const locateCache = new Map<string, string | null>();
 const bundledVersionCache = new Map<string, string | null>();
 
-function exeName(name: BinaryName): string {
-  return process.platform === 'win32' ? `${name}.exe` : name;
+function isExecutableFile(candidate: string): boolean {
+  try {
+    if (!existsSync(candidate) || !statSync(candidate).isFile()) return false;
+    if (process.platform !== 'win32') accessSync(candidate, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function tunnelExecutableName(name: BinaryName, platform: NodeJS.Platform = process.platform): string {
+  return platform === 'win32' ? `${name}.exe` : name;
 }
 
 /** Walks PATH by hand rather than shelling out to `where`. */
 function searchPath(fileName: string): string | null {
-  const raw = process.env.PATH ?? process.env.Path ?? '';
-  for (const dir of raw.split(path.delimiter)) {
+  for (const dir of pathEntries()) {
     if (!dir) continue;
     const candidate = path.join(dir.replace(/^"|"$/g, ''), fileName);
-    if (existsSync(candidate)) return candidate;
+    if (isExecutableFile(candidate)) return candidate;
   }
   return null;
 }
 
-function commonDirs(): string[] {
-  const home = process.env.USERPROFILE ?? '';
-  const localAppData = process.env.LOCALAPPDATA ?? '';
-  const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
-  return [
-    localAppData && path.join(localAppData, 'Programs', 'tunnel-client'),
-    localAppData && path.join(localAppData, 'tunnel-client'),
-    home && path.join(home, '.tunnel-client'),
-    home && path.join(home, 'bin'),
-    home && path.join(home, 'Downloads', 'tunnel-client'),
-    path.join(programFiles, 'tunnel-client'),
-    path.join(programFiles, 'cloudflared')
-  ].filter((d): d is string => d.length > 0);
+export function commonBinaryDirsForPlatform(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv = process.env,
+  homeDirectory = env.HOME ?? env.USERPROFILE ?? os.homedir()
+): string[] {
+  const platformPath = platform === 'win32' ? path.win32 : path.posix;
+  if (platform === 'win32') {
+    const home = env.USERPROFILE ?? homeDirectory;
+    const localAppData = env.LOCALAPPDATA ?? '';
+    const programFiles = env.ProgramFiles ?? 'C:\\Program Files';
+    return [
+      localAppData && platformPath.join(localAppData, 'Programs', 'tunnel-client'),
+      localAppData && platformPath.join(localAppData, 'tunnel-client'),
+      home && platformPath.join(home, '.tunnel-client'),
+      home && platformPath.join(home, 'bin'),
+      home && platformPath.join(home, 'Downloads', 'tunnel-client'),
+      platformPath.join(programFiles, 'tunnel-client'),
+      platformPath.join(programFiles, 'cloudflared')
+    ].filter((d): d is string => d.length > 0);
+  }
+
+  const homeDirs = homeDirectory
+    ? [
+        platformPath.join(homeDirectory, '.tunnel-client'),
+        platformPath.join(homeDirectory, '.local', 'bin'),
+        platformPath.join(homeDirectory, 'bin'),
+        platformPath.join(homeDirectory, 'Downloads', 'tunnel-client')
+      ]
+    : [];
+  const systemDirs =
+    platform === 'darwin'
+      ? ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']
+      : ['/home/linuxbrew/.linuxbrew/bin', '/usr/local/bin', '/usr/bin', '/snap/bin'];
+  return [...homeDirs, ...systemDirs];
 }
 
 /**
@@ -58,30 +90,31 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
     process.resourcesPath ?? '',
     process.env.PATH ?? process.env.Path ?? '',
     process.env.USERPROFILE ?? '',
+    process.env.HOME ?? '',
     process.env.LOCALAPPDATA ?? '',
     process.env.ProgramFiles ?? ''
   ].join('\u0000');
   if (locateCache.has(key)) return locateCache.get(key) ?? null;
 
-  const fileName = exeName(name);
+  const fileName = tunnelExecutableName(name);
 
   if (hint && hint.trim() !== '') {
     const trimmed = hint.trim();
     if (existsSync(trimmed)) {
       // Accept a folder as well as the exe itself, since users paste both.
       const asDir = path.join(trimmed, fileName);
-      if (existsSync(asDir)) {
+      if (isExecutableFile(asDir)) {
         locateCache.set(key, asDir);
         return asDir;
       }
-      if (path.basename(trimmed).toLowerCase() === fileName.toLowerCase()) {
+      if (path.basename(trimmed).toLowerCase() === fileName.toLowerCase() && isExecutableFile(trimmed)) {
         locateCache.set(key, trimmed);
         return trimmed;
       }
     }
     // cloudflared normally sits beside tunnel-client in the release archive.
     const sibling = path.join(path.dirname(trimmed), fileName);
-    if (existsSync(sibling)) {
+    if (isExecutableFile(sibling)) {
       locateCache.set(key, sibling);
       return sibling;
     }
@@ -90,7 +123,7 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
   const bundled = bundledDir();
   if (bundled) {
     const candidate = path.join(bundled, fileName);
-    if (existsSync(candidate)) {
+    if (isExecutableFile(candidate)) {
       locateCache.set(key, candidate);
       return candidate;
     }
@@ -102,9 +135,9 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
     return onPath;
   }
 
-  for (const dir of commonDirs()) {
+  for (const dir of commonBinaryDirsForPlatform(process.platform)) {
     const candidate = path.join(dir, fileName);
-    if (existsSync(candidate)) {
+    if (isExecutableFile(candidate)) {
       locateCache.set(key, candidate);
       return candidate;
     }

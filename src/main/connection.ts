@@ -19,6 +19,7 @@ import { lastToolCallAt } from './mcp/tools.js';
 import { SURFACE_LIST, surfaceIsUseful, type SurfaceId } from './mcp/surfaces.js';
 import { getSecret } from './secrets.js';
 import { startTunnel, TunnelError, type TunnelHandle } from './tunnel/index.js';
+import { desktopAutomationSupported } from './platform.js';
 
 let endpoint: McpEndpoint | null = null;
 /** The Core tunnel. Also the only tunnel on the cloudflared and manual paths. */
@@ -48,6 +49,15 @@ const listeners = new Set<(status: ConnectionStatus) => void>();
 let lifecycleQueue: Promise<void> = Promise.resolve();
 /** Invalidates late async reports from a tunnel that has already been replaced/stopped. */
 let connectionGeneration = 0;
+/**
+ * Final app shutdown is a terminal lifecycle boundary, unlike an ordinary Disconnect.
+ *
+ * Merely enqueueing shutdown behind an in-flight connect let that connect finish publishing an
+ * MCP endpoint/tunnel first. Cmd+Q can arrive while startMcpServer/startTunnel/Keychain awaits;
+ * mark shutdown synchronously so each resumed await tears down what it just created instead of
+ * briefly bringing a connector online while the app is already leaving.
+ */
+let shutdownRequested = false;
 
 function enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
   const run = lifecycleQueue.then(operation, operation);
@@ -121,6 +131,9 @@ function describeSurfaces(): SurfaceStatus[] {
 }
 
 function desktopUnavailableDetail(id: SurfaceId): string {
+  if (id === 'desktop' && !desktopAutomationSupported()) {
+    return 'Desktop automation is Windows-only. Core files, terminal, sessions and sub-agents remain available.';
+  }
   return id === 'desktop'
     ? 'Turn on "See the screen", "Control mouse and keyboard" or a clipboard permission to use this connector.'
     : '';
@@ -200,6 +213,7 @@ function siblingPublicUrl(publicUrl: string | null, localUrl: string | null): st
 }
 
 async function connectImpl(): Promise<void> {
+  if (shutdownRequested) return;
   // Offline counts as running: the tunnel is alive and retrying on its own.
   if (
     status.state === 'connected' ||
@@ -210,6 +224,10 @@ async function connectImpl(): Promise<void> {
     return;
   }
   await disconnectImpl();
+  // disconnectImpl can itself await a live endpoint/tunnel. Final shutdown may be requested
+  // while that stop is in progress; never mint a fresh generation afterwards and thereby undo
+  // the synchronous invalidation performed by shutdownConnection().
+  if (shutdownRequested) return;
   const generation = ++connectionGeneration;
 
   const config = getConfig();
@@ -224,7 +242,7 @@ async function connectImpl(): Promise<void> {
 
   try {
     setStatus({ state: 'starting-server', detail: 'Starting the local server…', publicUrl: null });
-    endpoint = await startMcpServer(() => {
+    const startedEndpoint = await startMcpServer(() => {
       const live = getConfig();
       return {
         roots: live.roots,
@@ -233,13 +251,22 @@ async function connectImpl(): Promise<void> {
         privacyScreenshots: live.ui.privacyScreenshots
       };
     });
+    if (shutdownRequested || generation !== connectionGeneration) {
+      await startedEndpoint.stop({ forceAfterMs: 30_000 }).catch(() => {});
+      return;
+    }
+    endpoint = startedEndpoint;
     setStatus({ localUrl: endpoint.url, surfaces: describeSurfaces() });
-    if (caps.screen || caps.control) void prewarmComputerHelper();
+    if (desktopAutomationSupported() && (caps.screen || caps.control)) void prewarmComputerHelper();
     updateSurface('core', { state: 'starting', detail: 'Connecting…' });
 
     const apiKey = await getSecret('openaiApiKey');
+    if (shutdownRequested || generation !== connectionGeneration) {
+      await disconnectImpl(30_000);
+      return;
+    }
     activeCoreTransport = coreTransport(config.tunnel);
-    tunnel = await startTunnel({
+    const startedTunnel = await startTunnel({
       localUrl: endpoint.url,
       settings: config.tunnel,
       apiKey,
@@ -274,9 +301,19 @@ async function connectImpl(): Promise<void> {
         }
       }
     });
+    if (shutdownRequested || generation !== connectionGeneration) {
+      await startedTunnel.stop().catch(() => {});
+      await disconnectImpl(30_000);
+      return;
+    }
+    tunnel = startedTunnel;
 
     await startDesktopTunnel(generation, config.tunnel, apiKey);
   } catch (err) {
+    if (shutdownRequested || generation !== connectionGeneration) {
+      await disconnectImpl(30_000);
+      return;
+    }
     const message = err instanceof TunnelError ? err.message : (err as Error).message;
     logError(`connect failed: ${message}`);
     await disconnectImpl();
@@ -313,7 +350,7 @@ async function startDesktopTunnel(
   updateSurface('desktop', { state: 'starting', detail: 'Connecting…' });
   try {
     desktopTunnelId = settings.desktopTunnelId;
-    desktopTunnel = await startTunnel({
+    const startedDesktopTunnel = await startTunnel({
       localUrl: endpoint.urls.desktop,
       settings: { ...settings, tunnelId: settings.desktopTunnelId },
       apiKey,
@@ -328,7 +365,17 @@ async function startDesktopTunnel(
         });
       }
     });
+    if (shutdownRequested || generation !== connectionGeneration) {
+      await startedDesktopTunnel.stop().catch(() => {});
+      desktopTunnelId = null;
+      return;
+    }
+    desktopTunnel = startedDesktopTunnel;
   } catch (err) {
+    if (shutdownRequested || generation !== connectionGeneration) {
+      desktopTunnelId = null;
+      return;
+    }
     const message = err instanceof TunnelError ? err.message : (err as Error).message;
     logWarn(`desktop connector not published: ${message}`);
     desktopTunnelId = null;
@@ -356,6 +403,7 @@ async function stopDesktopTunnel(detail: string): Promise<void> {
  * serialized lifecycle here; unrelated settings saves do not.
  */
 async function applySettingsImpl(): Promise<void> {
+  if (shutdownRequested) return;
   if (!endpoint) return;
   const config = getConfig();
   const desiredCoreTransport = coreTransport(config.tunnel);
@@ -367,7 +415,7 @@ async function applySettingsImpl(): Promise<void> {
   }
   const caps = effectiveCapabilities(config);
   const available = surfaceIsUseful('desktop', caps);
-  if (caps.screen || caps.control) void prewarmComputerHelper();
+  if (desktopAutomationSupported() && (caps.screen || caps.control)) void prewarmComputerHelper();
   // Rebuild the cards first: permissions may have changed which tools each surface would
   // advertise, and on a whole-origin transport that is all there is to do.
   setStatus({ surfaces: describeSurfaces() });
@@ -434,6 +482,7 @@ async function disconnectImpl(endpointForceAfterMs?: number): Promise<void> {
 }
 
 export function connect(): Promise<void> {
+  if (shutdownRequested) return Promise.resolve();
   return enqueueLifecycle(connectImpl);
 }
 
@@ -447,6 +496,10 @@ export function disconnect(): Promise<void> {
  * running afterward, so dropping a committed response there could make ChatGPT retry it.
  */
 export function shutdownConnection(): Promise<void> {
+  // Invalidate reports/publication immediately rather than after the lifecycle queue catches up.
+  // Ordinary disconnect does not set this flag, so Settings can still disconnect/reconnect.
+  shutdownRequested = true;
+  connectionGeneration += 1;
   return enqueueLifecycle(() => disconnectImpl(30_000));
 }
 

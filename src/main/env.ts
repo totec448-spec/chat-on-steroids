@@ -22,11 +22,15 @@
 
 /** The separator between path entries: `;` on Windows, `:` everywhere else. */
 export const PATH_SEPARATOR = process.platform === 'win32' ? ';' : ':';
+const CASE_INSENSITIVE_ENVIRONMENT = process.platform === 'win32';
 
 export type MutableEnvironment = Record<string, string | undefined>;
 
-/** The spelling this environment actually uses for `name`, or null if it has none. */
+/** The spelling this environment actually uses for `name`, respecting OS name semantics. */
 export function envKey(env: MutableEnvironment, name: string): string | null {
+  if (!CASE_INSENSITIVE_ENVIRONMENT) {
+    return Object.prototype.hasOwnProperty.call(env, name) ? name : null;
+  }
   const wanted = name.toLowerCase();
   for (const key of Object.keys(env)) {
     if (key.toLowerCase() === wanted) return key;
@@ -40,12 +44,17 @@ export function envValue(env: MutableEnvironment, name: string): string | undefi
 }
 
 /**
- * Sets a variable under whatever spelling the environment already uses for it.
+ * Sets a variable under whatever spelling the environment already uses for it on Windows.
+ * POSIX names are case-sensitive, so only the exact requested key is updated there.
  *
  * Every other spelling is removed, so the result can never contain two keys that Windows
  * would consider the same variable.
  */
 export function setEnvValue(env: MutableEnvironment, name: string, value: string): void {
+  if (!CASE_INSENSITIVE_ENVIRONMENT) {
+    env[name] = value;
+    return;
+  }
   const wanted = name.toLowerCase();
   let target: string | null = null;
   for (const key of Object.keys(env)) {
@@ -57,6 +66,10 @@ export function setEnvValue(env: MutableEnvironment, name: string, value: string
 }
 
 export function deleteEnvValue(env: MutableEnvironment, name: string): void {
+  if (!CASE_INSENSITIVE_ENVIRONMENT) {
+    delete env[name];
+    return;
+  }
   const wanted = name.toLowerCase();
   for (const key of Object.keys(env)) {
     if (key.toLowerCase() === wanted) delete env[key];
@@ -64,14 +77,21 @@ export function deleteEnvValue(env: MutableEnvironment, name: string): void {
 }
 
 /**
- * A plain object copy of an environment with case-duplicate names collapsed.
+ * A plain object copy of an environment using the host OS's variable-name semantics.
  *
  * A real Windows environment block cannot contain two spellings of one name, but an object
  * assembled in JavaScript can, and this is the last point at which that is still cheap to
  * repair. The first spelling seen keeps the name; a later duplicate only supplies the value
- * if the first one had nothing to say.
+ * if the first one had nothing to say. POSIX keeps differently-cased names distinct.
  */
 export function normalizeEnvironment(source: NodeJS.ProcessEnv = process.env): MutableEnvironment {
+  if (!CASE_INSENSITIVE_ENVIRONMENT) {
+    const env: MutableEnvironment = {};
+    for (const [key, value] of Object.entries(source)) {
+      if (value !== undefined) env[key] = value;
+    }
+    return env;
+  }
   const env: MutableEnvironment = {};
   const byLower = new Map<string, string>();
   for (const [key, value] of Object.entries(source)) {
@@ -103,8 +123,11 @@ export function pathEntries(env: MutableEnvironment = process.env): string[] {
  */
 export function prependPath(env: MutableEnvironment, dir: string): void {
   const held = pathEntries(env);
-  const already = held.some((entry) => entry.toLowerCase() === dir.toLowerCase());
-  const kept = already ? held.filter((entry) => entry.toLowerCase() !== dir.toLowerCase()) : held;
+  const samePathEntry = CASE_INSENSITIVE_ENVIRONMENT
+    ? (entry: string): boolean => entry.toLowerCase() === dir.toLowerCase()
+    : (entry: string): boolean => entry === dir;
+  const already = held.some(samePathEntry);
+  const kept = already ? held.filter((entry) => !samePathEntry(entry)) : held;
   setEnvValue(env, 'PATH', [dir, ...kept].join(PATH_SEPARATOR));
 }
 

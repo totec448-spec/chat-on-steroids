@@ -230,9 +230,14 @@ function paintHeader(status) {
 function paintAlert(status, info) {
   const page = info && info.page;
   const incompatible = status && status.connected === true && status.compatible === false;
+  const pairError = status && status.pairError;
   const error = page && page.lastError;
   const text = incompatible
     ? 'The app and this extension speak different bridge protocols.'
+    : pairError && pairError.message
+      ? pairError.message
+      : pairError && pairError.error === 'secure_storage_unavailable'
+        ? 'Secure credential storage is unavailable. Open Chat On Steroids for setup instructions.'
     : error && Date.now() - error.at < 10 * 60 * 1000
       ? error.text
       : '';
