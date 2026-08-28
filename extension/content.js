@@ -2629,7 +2629,7 @@
     return found;
   }
 
-  function confirmLiveRequestOwners(calls, ownerConversation) {
+  async function confirmLiveRequestOwners(calls, ownerConversation) {
     if (!Array.isArray(calls) || calls.length === 0 || !ownerConversation) return;
     const byRequest = new Map();
     for (const call of calls) {
@@ -2642,11 +2642,12 @@
     }
     const batch = [...byRequest.values()];
     if (batch.length === 0) return;
-    void ask({
-      type: 'correlate',
-      conversationId: ownerConversation,
-      calls: batch
-    }).then((reply) => {
+    try {
+      const reply = await ask({
+        type: 'correlate',
+        conversationId: ownerConversation,
+        calls: batch
+      });
       const data = reply && reply.ok === true && reply.data && typeof reply.data === 'object' ? reply.data : null;
       const confirmed = new Set(data && Array.isArray(data.confirmed) ? data.confirmed : []);
       for (const call of batch) {
@@ -2667,11 +2668,11 @@
         traceStage(call.requestId, 'sent');
         traceStage(call.requestId, 'app', 'request_id');
       }
-    }).catch(() => {
+    } catch {
       for (const call of batch) backOffRequestOwner(`${ownerConversation}\u0000${call.requestId}`);
-    }).finally(() => {
+    } finally {
       for (const call of batch) requestOwnersPending.delete(`${ownerConversation}\u0000${call.requestId}`);
-    });
+    }
   }
   async function refreshFiber(settled = null) {
     // A bound chat can briefly lose its /c/<id> route during React/router churn, and a real
@@ -2841,7 +2842,22 @@
           }
         }
       }
-      confirmLiveRequestOwners(ownerCalls, askedConversation);
+      const ownerConfirmation = confirmLiveRequestOwners(ownerCalls, askedConversation);
+      // `ownedPageTurn` has one deliberately narrow exception to the ordinary conversation
+      // filter: on a fresh chat, the real /c/<id> can exist while that live turn's React branch
+      // still carries a provisional client thread id. The explicit /correlations handshake is
+      // what distinguishes that harmless race from a stale Fiber object belonging to another
+      // chat. Do not let the ordinary fire-and-forget tool_evidence path race ahead of that
+      // verdict: it would re-assert the URL conversation, bypass a rejected handshake and turn
+      // an already-proven request owner into a sticky conflict.
+      const ownedPageConversation = ownedPageTurn ? concreteConversation(ownedPageTurn.conversationId) : null;
+      if (ownedPageTurn && ownedPageConversation && ownedPageConversation !== askedConversation) {
+        await ownerConfirmation;
+        // The ownership read-back added a new async boundary to this scan. Re-prove the same
+        // document/route before any observation from the pre-await Fiber frame can be emitted.
+        if (epoch !== askedEpoch || conversationId !== askedConversation) return;
+        if (CLF_DOM.conversationId() !== askedConversation) return;
+      }
     }
     // A terminal message can finish the local turn before ChatGPT removes a stale Stop
     // control. While that latch is active, observe() keeps Fiber probing the newest visible
@@ -2855,7 +2871,22 @@
     }
     for (let index = 0; index < answer.turns.length; index++) {
       const turn = answer.turns[index];
+      const pageConversation = concreteConversation(turn.conversationId);
+      const provisionalOwnedTurn = Boolean(
+        turn === ownedPageTurn &&
+        askedConversation &&
+        pageConversation &&
+        pageConversation !== askedConversation
+      );
       const fresh = turn.calls.filter((call) => {
+        // A mismatched owned turn is admissible only as a provisional-first-turn candidate.
+        // Its request id must have survived the app's explicit owner read-back before the
+        // transcript channel may repeat that evidence. A rejected/stale id is simply omitted;
+        // the already-proven owner remains authoritative and no sticky conflict is manufactured.
+        if (
+          provisionalOwnedTurn &&
+          (!call.requestId || requestOwnersConfirmed.get(call.requestId) !== askedConversation)
+        ) return false;
         const owner = index === activeTurnIndex ? activeLocalTurnId || '' : '';
         const signature = `${call.tool}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
         if (callsReported.get(call.messageId) === signature) return false;
