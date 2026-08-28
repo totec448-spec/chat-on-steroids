@@ -59,6 +59,7 @@ import {
   awaitRequestCorrelation,
   observeRequestCorrelations,
   requestCorrelation,
+  requestCorrelationConflicted,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
 import { resumeOpeningChat } from './resume-gate.js';
@@ -711,6 +712,16 @@ function noteCallEvidence(
   }
   const observedAt = Math.min(at, Date.now());
   const evidencedCalls = calls.filter((call): call is PageCallEvidence & { requestId: string } => !!call.requestId);
+  // One ChatGPT workflow request id can legitimately cover dozens of connector calls. Capture
+  // the pre-batch state once so a single cross-conversation contradiction produces one useful
+  // transition warning, rather than one identical line per call. A later at-least-once replay
+  // of an already-conflicted id contains no new diagnostic fact and stays silent.
+  const alreadyConflicted = new Set(
+    evidencedCalls.map((call) => call.requestId).filter((requestId) => requestCorrelationConflicted(requestId))
+  );
+  const priorOwners = new Map(
+    evidencedCalls.map((call) => [call.requestId, requestCorrelation(call.requestId)?.conversationId ?? null] as const)
+  );
   const results = observeRequestCorrelations(
     evidencedCalls.map((call) => ({
       requestId: call.requestId,
@@ -721,10 +732,19 @@ function noteCallEvidence(
       observedAt
     }))
   );
+  const warnedConflicts = new Set<string>();
   for (const [index, call] of evidencedCalls.entries()) {
     const result = results[index]!;
     if (result === 'conflict') {
-      logWarn(`request attribution conflict for ${call.requestId}; ownership will remain unattributed`);
+      if (!alreadyConflicted.has(call.requestId) && !warnedConflicts.has(call.requestId)) {
+        warnedConflicts.add(call.requestId);
+        const prior = priorOwners.get(call.requestId);
+        logWarn(
+          `request attribution conflict for ${call.requestId}` +
+            (prior ? `: conversation ${prior} vs ${conversationId}` : '') +
+            '; ownership will remain unattributed'
+        );
+      }
     } else if (result === 'stored') {
       logInfo(`request attribution: ${call.requestId} -> conversation ${conversationId}`);
       if (unattributedSessionId) scheduleAttributionRepair();

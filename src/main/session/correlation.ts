@@ -37,17 +37,19 @@ interface HeldCorrelation {
 const MAX_CORRELATIONS = 50_000;
 const CORRELATIONS_STATE = 'request-correlations';
 /**
- * 3 drops the conflicts version 2 wrote.
+ * 4 drops only the sticky conflicts version 3 wrote while preserving its proven owners.
  *
- * Until this version a page whose URL and React tree disagreed for one tick marked every
- * request id in that sighting contradictory, and a contradiction is permanent — nothing
- * republishes it and the repair pass skips it. Those verdicts are on disk in every profile
- * that ran an earlier build, holding otherwise provable calls in Unattributed activity for
- * good. Reading them back as *absent* rather than as contradictory lets the evidence decide
- * again; a real contradiction is two conversations claiming one id, and merge() makes that
- * one sticky again the moment it recurs.
+ * Version 3 correctly stopped treating a URL/Fiber mismatch itself as a contradiction, but a
+ * second path remained: the content script deliberately retained the currently-owned Fiber
+ * turn across the fresh-chat provisional-client-thread race, asked `/correlations` whether its
+ * request ids really belonged to the new URL, then emitted ordinary `tool_evidence` before that
+ * acknowledged verdict. A stale retained turn could therefore be rejected by the safe handshake
+ * and still immediately poison the registry through the transcript channel. Those v3 conflict
+ * rows cannot be distinguished on disk from a real contradiction. Drop them once and let exact
+ * evidence/history decide again, while retaining all non-conflicted v3 owners so migration does
+ * not throw away the durable index merely to repair two bad rows.
  */
-const CORRELATIONS_STATE_VERSION = 3;
+const CORRELATIONS_STATE_VERSION = 4;
 
 const byRequest = new Map<string, HeldCorrelation>();
 const waiters = new Map<string, Set<() => void>>();
@@ -176,13 +178,15 @@ async function restoreRequestCorrelationsOnce(): Promise<void> {
 
   const saved = await readDurable<PersistedCorrelations>(CORRELATIONS_STATE);
   let loaded = false;
-  if (saved?.version === CORRELATIONS_STATE_VERSION && Array.isArray(saved.entries)) {
+  const migrateV3 = saved?.version === 3 && Array.isArray(saved.entries);
+  if ((saved?.version === CORRELATIONS_STATE_VERSION || migrateV3) && Array.isArray(saved.entries)) {
     for (const raw of saved.entries.slice(-MAX_CORRELATIONS)) {
       if (!raw || typeof raw !== 'object' || typeof raw.requestId !== 'string') continue;
       if (raw.conflicted === true) {
-        // Kept, and still permanent: this snapshot is version 3, so every conflict in it was
-        // written by merge() — two conversations claiming one request id — rather than by a
-        // page caught mid-navigation.
+        // v3 cannot tell a real contradiction from the provisional-owned-turn bypass fixed in
+        // v4. Forget only that verdict; recent attributed history below can immediately restore
+        // the legitimate first owner. Conflicts created by v4's corrected protocol remain sticky.
+        if (migrateV3) continue;
         byRequest.set(raw.requestId, { value: null, conflicted: true });
         loaded = true;
         continue;
@@ -232,7 +236,7 @@ async function restoreRequestCorrelationsOnce(): Promise<void> {
       });
     }
   }
-  if (byRequest.size > 0 || loaded) persist();
+  if (byRequest.size > 0 || loaded || migrateV3) persist();
 }
 
 /**

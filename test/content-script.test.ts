@@ -5461,6 +5461,64 @@ describe('evidence from the page context', () => {
     expect(live.sent.filter((message) => message.type === 'correlate')).toHaveLength(1);
   });
 
+  it('does not let a stale owned Fiber turn bypass a rejected live ownership handshake', async () => {
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const staleConversation = '11111111-2222-3333-4444-555555555555';
+    const requestId = 'wfr_already_owned_by_stale_chat';
+    live.reply.set('correlate', () => ({
+      ok: true,
+      status: 200,
+      data: {
+        ok: true,
+        conversationId,
+        requestIds: [requestId],
+        confirmed: [],
+        conflicts: [requestId],
+        complete: false
+      }
+    }));
+
+    // This is the dangerous ambiguity behind the live restart repro. The DOM section is the
+    // generation this document owns, so the provisional-first-turn exception keeps its Fiber
+    // descriptor even though that branch names another concrete conversation. The explicit
+    // /correlations handshake can distinguish a harmless provisional client thread from stale
+    // history: here it says the request id already belongs elsewhere. Ordinary tool_evidence
+    // must not get a second chance to assert the URL conversation after that rejection.
+    startGenerating(live.document);
+    assistantTurn(live.document, 'stale-owned-turn', []);
+    live.hook.observe();
+    await settle();
+
+    await replyFiber([], [{
+      turnId: 'stale-owned-turn',
+      conversationId: staleConversation,
+      calls: [{
+        messageId: 'stale-owned-request',
+        tool: 'exec_command',
+        order: 0,
+        answered: true,
+        requestId,
+        createTime: 1_700_000_001
+      }],
+      messages: []
+    }]);
+    await settle();
+    await live.hook.flush();
+
+    expect(live.sent.filter((message) => message.type === 'correlate')).toEqual([
+      expect.objectContaining({
+        conversationId,
+        calls: [expect.objectContaining({ requestId, messageId: 'stale-owned-request' })]
+      })
+    ]);
+    expect(
+      emitted(live.sent, 'tool_evidence').filter((entry) =>
+        (entry.event.calls || []).some((call: any) => call.requestId === requestId)
+      )
+    ).toHaveLength(0);
+  });
+
   it('confirms a live request when the virtualized renderer published no data-turn-id', async () => {
     live = await harness();
     const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
