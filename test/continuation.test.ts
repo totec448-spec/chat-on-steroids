@@ -1056,6 +1056,10 @@ describe('the window in which a replacement chat is expected', () => {
     expect(goalObjectiveFor(to)).toBe('finish the release from the replacement chat');
     expect(workspaceEntries().filter((held) => held.key.startsWith('chat:')).map((held) => held.key)).toEqual([`chat:${to}`]);
 
+    // The broker hook itself intentionally treats an already-satisfied replay as success. The
+    // resume-shadow wrapper reports actual projection changes, so a later browser poll is a no-op.
+    expect(await repairPrimeFromResumeShadow(to)).toBe(false);
+
     // Same-origin-looking data without the exact authored bootstrap is not takeover authority.
     const stranger = '84848484-1111-2222-3333-444444444444';
     await createSession({
@@ -1064,6 +1068,32 @@ describe('the window in which a replacement chat is expected', () => {
       origin: { kind: 'resume', fromSessionId: source.id, agentId: null, task: '' }
     });
     expect(await repairPrimeFromResumeShadow(stranger)).toBe(false);
+    expect(primeConversation()).toBe(to);
+  });
+
+  it('counts two concurrent exact-shadow repair attempts as one mutation', async () => {
+    const from = '81818181-aaaa-bbbb-cccc-444444444444';
+    const to = '82828282-aaaa-bbbb-cccc-444444444444';
+    const source = await createSession({ title: 'prime before concurrent shadow repair', conversationId: from });
+    spawn({ workers: [{ task: 'keep ownership alive during the concurrent repair' }], caller: { conversationId: from } });
+    const opened = await openContinuationNow(source.id, from);
+    const handoff = await attachSummary(opened.token, SAMPLE_BRIEF);
+    expect(handoff).not.toBeNull();
+    await claimContinuationNow(opened.token, 'concurrent-shadow-owner');
+    await createSession({
+      title: 'Resumed · prime before concurrent shadow repair',
+      conversationId: to,
+      origin: { kind: 'resume', fromSessionId: source.id, agentId: null, task: '' }
+    });
+    await recordChatObservations(to, [
+      { kind: 'user_message', time: Date.now(), text: resumeBootstrapText(handoff!.text), messageId: 'm-concurrent-shadow' }
+    ]);
+    expect(await commitContinuation(opened.token, to)).toBe(false);
+    abortContinuation(opened.token, 'the replacement chat already belongs to another local session');
+    setContinuationRecoveryHooks({ repairPrimeTransfer: repairPrimeConversationAfterRecovery });
+
+    const results = await Promise.all([repairPrimeFromResumeShadow(to), repairPrimeFromResumeShadow(to)]);
+    expect(results.filter(Boolean)).toHaveLength(1);
     expect(primeConversation()).toBe(to);
   });
 

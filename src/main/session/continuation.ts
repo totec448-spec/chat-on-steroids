@@ -366,7 +366,8 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
 
   const source = await getSession(sourceSessionId).catch(() => null);
   if (!source?.conversationId) return false;
-  const sourceOwner = agentForOwnedConversation(source.conversationId);
+  const fromConversationId = source.conversationId;
+  const sourceOwner = agentForOwnedConversation(fromConversationId);
   if (sourceOwner && sourceOwner !== PRIME_ID) return false;
   // PRIME on both sides proves two separately retained/active owner records. In particular,
   // an old A run may have parked before the exact shadow/descendant C later started a fresh run
@@ -374,12 +375,20 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
   // recovery already moved the *same* run A→C, only C remains owned and this idempotent
   // projection repair is still allowed — that is the live 2.0.1 damage pattern this exists for.
   if (targetOwner === PRIME_ID && sourceOwner === PRIME_ID) return false;
+  // Once the same run's prime ownership has already reached B and A has no remaining Goal or
+  // workspace projection, there is nothing left for this browser poll to repair. The broker
+  // recovery hook deliberately reports an already-satisfied A→B as success, so calling it again
+  // would otherwise turn every /activity poll into another "moved missing projections" warning
+  // (and another exact-handoff event scan) forever on resumed chats that have no Goal.
+  if (targetOwner === PRIME_ID && !workspaceForChat(fromConversationId) && !goalObjectiveFor(fromConversationId)) {
+    return false;
+  }
   const failed = [...byToken.values()].find(
     (entry) =>
       entry.sessionId === sourceSessionId &&
       entry.state === 'aborted' &&
       entry.error === RESUME_SHADOW_COLLISION &&
-      entry.from === source.conversationId
+      entry.from === fromConversationId
   );
   const handoffId = failed?.handoffId ?? source.lastHandoffId;
   if (!handoffId) return false;
@@ -402,6 +411,23 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
   if (!exactBootstrap) return false;
   const proof = failed ? `collision WAL + exact handoff ${handoffId}` : `exact handoff ${handoffId}`;
 
+  // The proof above crosses filesystem awaits. Another activity poll or agents call can finish
+  // the same repair while this one is reading it, so ownership captured before those awaits is
+  // no longer authoritative. Re-read both sides immediately before the synchronous projection
+  // mutations; no await follows until the decision has been made.
+  const currentTargetOwner = agentForOwnedConversation(conversationId);
+  const currentSourceOwner = agentForOwnedConversation(fromConversationId);
+  if (currentTargetOwner && currentTargetOwner !== PRIME_ID) return false;
+  if (currentSourceOwner && currentSourceOwner !== PRIME_ID) return false;
+  if (currentTargetOwner === PRIME_ID && currentSourceOwner === PRIME_ID) return false;
+  if (
+    currentTargetOwner === PRIME_ID &&
+    !workspaceForChat(fromConversationId) &&
+    !goalObjectiveFor(fromConversationId)
+  ) {
+    return false;
+  }
+
   // The durable session rebind never landed in this legacy race, so normal
   // publishCommittedProjection() never ran either. Once the exact app-created resume shadow +
   // positive proof above identifies which A→B attempt this is, repair only projections that are
@@ -409,7 +435,6 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
   // state before an upgraded build gets its first chance to heal the old collision; that newer
   // target state wins. The stale A projection is still removed so opening A later cannot keep
   // using authority that belongs to the continued chat.
-  const fromConversationId = source.conversationId;
   let workspaceChanged = false;
   if (workspaceForChat(conversationId)) {
     workspaceChanged = clearChatWorkspace(fromConversationId);
@@ -425,7 +450,14 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
   } else {
     goalChanged = moveGoalObjective(fromConversationId, conversationId);
   }
-  const repaired = recoveryHooks.repairPrimeTransfer?.(fromConversationId, conversationId) ?? false;
+  // The recovery hook uses success semantics: replaying an already-repaired target returns true
+  // by design. Here this boolean means "changed on this call" and drives a user-visible warning,
+  // so an already-owned target must not be counted as a fresh broker mutation. Missing Goal or
+  // workspace projections above are still repaired normally.
+  const repaired =
+    currentTargetOwner === PRIME_ID
+      ? false
+      : (recoveryHooks.repairPrimeTransfer?.(fromConversationId, conversationId) ?? false);
   if (repaired || workspaceChanged || goalChanged) {
     logWarn(
       `resume-shadow repair (${proof}) moved missing projections into chat ${conversationId}`

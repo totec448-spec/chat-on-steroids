@@ -106,6 +106,7 @@ const {
 );
 const { makeTempDir, removeTempDir, SAMPLE_BRIEF } = await import('./helpers.js');
 const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+const { getLog } = await import('../src/main/logger.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
 /** The chat that spawns the swarm in these tests: only a proven conversation can. */
@@ -3608,6 +3609,55 @@ describe('the goal loop over the bridge', () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+
+  it('does not report the same no-Goal resume-shadow repair on every activity poll', async () => {
+    await pair();
+    const from = 'cafe0041-0000-4000-8000-000000000041';
+    const to = 'cafe0042-0000-4000-8000-000000000042';
+    const source = await createSession({ title: 'prime before no-goal resume-shadow collision', conversationId: from });
+    spawn({ workers: [{ task: 'keep reusable ownership across the broken resume' }], caller: { conversationId: from } });
+
+    const openedContinuation = await openContinuationNow(source.id, from);
+    const handoff = await attachSummary(openedContinuation.token, SAMPLE_BRIEF);
+    expect(handoff).not.toBeNull();
+    await claimContinuationNow(openedContinuation.token, 'no-goal-shadow-owner');
+    await createSession({
+      title: 'Resumed · prime before no-goal resume-shadow collision',
+      conversationId: to,
+      origin: { kind: 'resume', fromSessionId: source.id, agentId: null, task: '' }
+    });
+    await recordChatObservations(to, [
+      {
+        kind: 'user_message',
+        time: Date.now(),
+        text: resumeBootstrapText(handoff!.text),
+        messageId: 'm-no-goal-shadow-resume'
+      }
+    ]);
+    expect(await commitContinuation(openedContinuation.token, to)).toBe(false);
+    abortContinuation(openedContinuation.token, 'the replacement chat already belongs to another local session');
+    setContinuationRecoveryHooks({ repairPrimeTransfer: repairPrimeConversationAfterRecovery });
+
+    const repairWarnings = (): number =>
+      getLog().filter(
+        (entry) =>
+          entry.level === 'warn' &&
+          entry.message.includes('resume-shadow repair (') &&
+          entry.message.endsWith(`moved missing projections into chat ${to}`)
+      ).length;
+    const warningsBefore = repairWarnings();
+
+    const first = await request('GET', `/activity?conversationId=${to}`);
+    expect(first.status).toBe(200);
+    expect(snapshotSwarm()?.primeConversationId).toBe(to);
+    expect(first.body.goal.objective).toBe('');
+    expect(repairWarnings()).toBe(warningsBefore + 1);
+
+    const second = await request('GET', `/activity?conversationId=${to}`);
+    expect(second.status).toBe(200);
+    expect(second.body.goal.objective).toBe('');
+    expect(repairWarnings()).toBe(warningsBefore + 1);
   });
 
   /** The page needs to know three things, and it gets them on the feed it already polls. */
