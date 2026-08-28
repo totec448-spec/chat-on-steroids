@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
   appendEvent,
   createSession,
@@ -167,6 +167,50 @@ describe('request correlation ownership', () => {
       expect(requestCorrelation(requestId)?.sessionId).toBe('session-durable');
     } finally {
       resetCorrelationRegistryForTests();
+      resetDurableForTests();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('migrates v3 proven owners but discards v3 sticky conflicts created by stale provisional evidence', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'clf-correlation-v3-conflict-'));
+    try {
+      resetDurableForTests();
+      resetSessionStoreForTests();
+      initDurableStore(dir);
+      initSessionStore(dir);
+      await writeDurableNow('request-correlations', {
+        version: 3,
+        entries: [
+          {
+            requestId: 'wfr_v3_proven_owner',
+            value: {
+              requestId: 'wfr_v3_proven_owner',
+              conversationId: 'conv-v3-proven',
+              sessionId: 'session-v3-proven',
+              messageId: 'message-v3-proven',
+              tool: 'read',
+              observedAt: 100
+            },
+            conflicted: false
+          },
+          {
+            requestId: 'wfr_v3_false_conflict',
+            value: null,
+            conflicted: true
+          }
+        ]
+      });
+
+      resetCorrelationRegistryForTests();
+      await restoreRequestCorrelations();
+      expect(requestCorrelation('wfr_v3_proven_owner')?.conversationId).toBe('conv-v3-proven');
+      expect(requestCorrelationConflicted('wfr_v3_false_conflict')).toBe(false);
+      expect(requestCorrelation('wfr_v3_false_conflict')).toBeNull();
+    } finally {
+      resetCorrelationRegistryForTests();
+      resetSessionStoreForTests();
+      unsetSessionRootForTests();
       resetDurableForTests();
       await rm(dir, { recursive: true, force: true });
     }

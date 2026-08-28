@@ -14,6 +14,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { lineDelta, formatDelta } from '../src/main/diffstat.js';
 import { chunkText } from '../src/main/mcp/tools.js';
 import { emptyEvidence } from '../src/main/mcp/call-context.js';
+import { getLog } from '../src/main/logger.js';
 import {
   closeConversation,
   liveConversations,
@@ -1664,6 +1665,51 @@ describe('canonical recorder 1.8', () => {
     const call = await tool('wfr_identity_conflict', now);
     expect(call?.attributionMethod).toBe('unattributed');
     expect(call?.conversationId).toBeNull();
+  });
+
+  it('logs one transition when a shared request id becomes conflicted, not one warning per call or replay', async () => {
+    const firstConversation = 'conv-conflict-log-first';
+    const secondConversation = 'conv-conflict-log-second';
+    const requestId = `wfr_conflict_log_${Date.now()}`;
+    const now = Date.now();
+    await sessionForConversation(firstConversation);
+    await sessionForConversation(secondConversation);
+    await recordChatObservations(firstConversation, [{
+      kind: 'tool_evidence',
+      time: now,
+      fiberConversationId: firstConversation,
+      calls: [{ messageId: 'first-proof', tool: 'read', order: 0, answered: true, requestId }]
+    }]);
+
+    const warnings = (): number => getLog().filter(
+      (entry) => entry.level === 'warn' && entry.message.includes(`request attribution conflict for ${requestId}`)
+    ).length;
+    const before = warnings();
+    const conflictingCalls = Array.from({ length: 35 }, (_, index) => ({
+      messageId: `conflicting-call-${index}`,
+      tool: index % 2 === 0 ? 'read' : 'exec_command',
+      order: index,
+      answered: true,
+      requestId
+    }));
+    await recordChatObservations(secondConversation, [{
+      kind: 'tool_evidence',
+      time: now + 1,
+      fiberConversationId: secondConversation,
+      calls: conflictingCalls
+    }]);
+    expect(warnings()).toBe(before + 1);
+
+    // Once the registry is already in the fail-closed state, another at-least-once browser
+    // replay contains no new diagnostic fact. It must not refill the Activity panel with the
+    // same warning again.
+    await recordChatObservations(secondConversation, [{
+      kind: 'tool_evidence',
+      time: now + 2,
+      fiberConversationId: secondConversation,
+      calls: conflictingCalls
+    }]);
+    expect(warnings()).toBe(before + 1);
   });
 
   /**
