@@ -1,5 +1,5 @@
 /**
- * The Desktop connector: seeing and driving Windows itself.
+ * The Desktop connector: seeing and driving the native desktop.
  *
  * Two tools, and they are deliberately not on Core. Desktop control is gated on permissions
  * most users leave off, its schemas are the largest this app publishes, and the majority of
@@ -87,7 +87,7 @@ const computerActionArg = z.discriminatedUnion('type', [
   z
     .object({ type: z.literal('keypress'), keys: z.array(z.string().max(20)).min(1).max(6) })
     .strict()
-    .describe('Press keys together, e.g. ["ctrl","s"].'),
+    .describe('Press keys together, e.g. ["ctrl","s"] on Windows or ["command","s"] on macOS.'),
   z.object({ type: z.literal('focus'), window: windowIdArg }).strict().describe('Bring a window to the front.'),
   z.object({ type: z.literal('wait'), ms: z.number().int().min(0).max(10_000).optional() }).strict().describe('Pause.'),
   z.object({ type: z.literal('read_clipboard') }).strict().describe('Return the clipboard text.'),
@@ -119,7 +119,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
       {
         title: 'Look at the desktop',
         description:
-          'Look at Windows without touching it. With no arguments, returns the foreground window, its picture and snapshot-scoped UI controls. ' +
+          'Look at the desktop without touching it. With no arguments, returns the foreground window, its picture and snapshot-scoped UI controls. ' +
           'what=windows lists windows; what=window inspects one; what=ui returns controls; wait_for waits for a title. ' +
           'Pass refs to computer click_ref/set_value and screenshot frameId with pixel coordinates. ' +
           'Window capture never focuses; a labeled visible-screen fallback may be occluded.',
@@ -254,7 +254,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               includeUi: true
             });
           } catch (err) {
-            // "There is no foreground window" is a real state of a Windows desktop — a
+            // "There is no foreground window" is a real native desktop state — a
             // locked screen, a shell restart, everything minimised — and it is not a reason
             // to refuse to look. Fall back to the monitor, which is the honest answer.
             if (
@@ -305,7 +305,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               lines.push(`${element.ref}  ${element.role} ${JSON.stringify(element.name)}${automation}${image}${flags}`);
             }
           } else {
-            lines.push('controls: none exposed by Windows UI Automation');
+            lines.push('controls: none exposed by the platform accessibility API');
           }
 
           const text = prefix(waited, lines.join('\n'));

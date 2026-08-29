@@ -352,8 +352,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
   const capabilities = { ...previous.capabilities };
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const capability = input.dataset.cap as Capability;
-    // The macOS/Linux port deliberately hides Desktop automation while preserving any
-    // Windows choices stored in this config. A hidden disabled checkbox is presentation,
+    // Unsupported hosts hide Desktop automation while preserving any choices stored in this
+    // config. A hidden disabled checkbox is presentation,
     // not a user edit: copying its forced-false value into every unrelated settings save
     // would erase those choices merely because the config was opened on another OS.
     if (!(state.platform?.desktopAutomation ?? true) && DESKTOP_CAPABILITIES.includes(capability)) continue;

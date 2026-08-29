@@ -117,6 +117,7 @@ if (targetPlatform === 'win32') {
   required(`app.asar.unpacked/node_modules/@img/sharp-libvips-${targetPlatform}-${targetArch}/versions.json`);
   required(`app.asar.unpacked/node_modules/node-pty/prebuilds/${nativeDir}/pty.node`);
   if (targetPlatform === 'darwin') required(`app.asar.unpacked/node_modules/node-pty/prebuilds/${nativeDir}/spawn-helper`);
+  if (targetPlatform === 'darwin') required('desktop/macos-desktop-helper');
 }
 
 const extensionManifest = JSON.parse(readFileSync(path.join(resourcesDir, 'extension', 'manifest.json'), 'utf8'));
@@ -156,8 +157,8 @@ for (const forbidden of [
   }
 }
 
-function runExecutable(executable, args, expectedText) {
-  const result = spawnSync(executable, args, { cwd: packageRoot, encoding: 'utf8', timeout: 15_000 });
+function runExecutable(executable, args, expectedText, input) {
+  const result = spawnSync(executable, args, { cwd: packageRoot, encoding: 'utf8', timeout: 15_000, input });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${executable} exited ${result.status}: ${result.stderr || result.stdout}`);
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
@@ -172,6 +173,9 @@ if (process.platform !== targetPlatform || process.arch !== targetArch) {
 runExecutable(path.join(resourcesDir, 'rg', `rg${suffix}`), ['--version'], RIPGREP.version);
 runExecutable(path.join(resourcesDir, 'tunnel', `tunnel-client${suffix}`), ['--version'], TUNNEL_CLIENT.version.replace(/^v/, ''));
 runExecutable(path.join(resourcesDir, 'tunnel', `cloudflared${suffix}`), ['--version']);
+if (targetPlatform === 'darwin') {
+  runExecutable(path.join(resourcesDir, 'desktop', 'macos-desktop-helper'), [], '"ready":true', '{"op":"warm"}\n');
+}
 
 const probe = String.raw`
 (async () => {

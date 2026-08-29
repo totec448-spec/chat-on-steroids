@@ -132,7 +132,7 @@ function describeSurfaces(): SurfaceStatus[] {
 
 function desktopUnavailableDetail(id: SurfaceId): string {
   if (id === 'desktop' && !desktopAutomationSupported()) {
-    return 'Desktop automation is Windows-only. Core files, terminal, sessions and sub-agents remain available.';
+    return 'Desktop automation is not available on this operating system. Core files, terminal, sessions and sub-agents remain available.';
   }
   return id === 'desktop'
     ? 'Turn on "See the screen", "Control mouse and keyboard" or a clipboard permission to use this connector.'

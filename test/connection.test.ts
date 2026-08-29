@@ -259,10 +259,9 @@ describe('connection surface state', () => {
     mocks.caps.screen = true;
     const connection = await import('../src/main/connection.js');
     await connection.connect();
-    // The helper is a Windows-only native executable. On macOS/Linux the same stored Desktop
-    // preference is masked from the live surface, so a native cross-platform CI run must not
-    // expect a prewarm that production intentionally refuses there.
-    expect(mocks.prewarm).toHaveBeenCalledTimes(process.platform === 'win32' ? 1 : 0);
+    // Windows and macOS have native helpers. Linux masks the same stored preference from the
+    // live surface, so it intentionally does not prewarm anything.
+    expect(mocks.prewarm).toHaveBeenCalledTimes(process.platform === 'win32' || process.platform === 'darwin' ? 1 : 0);
   });
 
   it('does not let a Desktop permission hide a missing root required by Core capabilities', async () => {

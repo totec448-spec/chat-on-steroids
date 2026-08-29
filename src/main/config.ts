@@ -323,9 +323,8 @@ const configSchema = z.object({
 export function defaultConfig(platform: NodeJS.Platform = process.platform): Config {
   return {
     roots: [],
-    // Computer use is intentionally not part of the macOS/Linux port. Fresh installs on those
-    // hosts should therefore never present Windows-only permissions as granted, even though the
-    // stored schema remains cross-platform so one config can still be moved between machines.
+    // Desktop permissions start usable on hosts with a native backend. Unsupported hosts mask
+    // them at the platform boundary while preserving stored choices for a moved config.
     capabilities: capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform),
     readOnly: false,
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },

@@ -9,6 +9,22 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## Unreleased
+
+### Added
+- **macOS now publishes the optional Desktop connector.** A thin architecture-specific Swift
+  helper implements window/display capture through ScreenCaptureKit, snapshot-scoped semantic
+  controls through AXUIElement, and physical mouse/keyboard input through CGEvent while preserving
+  the existing `observe` / `computer` schemas, frame identity and partial-batch contract.
+- **macOS packaging and smoke checks include the Desktop helper and screen-capture purpose string.**
+  The helper is compiled natively for each x64/arm64 package, kept outside asar, audited as a thin
+  executable and exercised over its real newline-delimited JSON protocol.
+
+### Security
+- macOS Screen Recording and Accessibility remain independent OS grants. The helper requests no
+  privilege at startup, reports a typed error when a live operation lacks consent, and permission
+  revocation remains effective without changing the connector schema cached by ChatGPT.
+
 ## [2.0.2] — 2026-08-26
 
 2.0.2 is the native cross-platform release port. The already-published 2.0.1 release remains the

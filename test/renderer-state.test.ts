@@ -385,7 +385,7 @@ async function mountChat(
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-it('preserves Windows-only Desktop permissions when saving unrelated settings on Linux', async () => {
+it('preserves native Desktop permissions when saving unrelated settings on Linux', async () => {
   const mounted = await mountChat({
     platform: { family: 'linux', name: 'Linux', desktopAutomation: false }
   });
@@ -411,7 +411,7 @@ it('preserves Windows-only Desktop permissions when saving unrelated settings on
 
 it('uses native menu-bar/Dock wording on macOS instead of Windows tray copy', async () => {
   const mounted = await mountChat({
-    platform: { family: 'macos', name: 'macOS', desktopAutomation: false }
+    platform: { family: 'macos', name: 'macOS', desktopAutomation: true }
   });
   const doc = mounted.window.document;
 
