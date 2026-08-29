@@ -53,6 +53,31 @@ private func rect(_ value: Any?) -> CGRect? {
     return CGRect(x: x, y: y, width: width, height: height)
 }
 
+private let maxDecodedScreenshotPixels = 8_000_000
+
+private func approximatelyEqual(_ left: CGRect, _ right: CGRect, tolerance: CGFloat = 2) -> Bool {
+    abs(left.minX - right.minX) <= tolerance &&
+        abs(left.minY - right.minY) <= tolerance &&
+        abs(left.maxX - right.maxX) <= tolerance &&
+        abs(left.maxY - right.maxY) <= tolerance
+}
+
+private func convincinglyMatchesWindow(_ candidate: CGRect, _ expected: CGRect) -> Bool {
+    guard !candidate.isNull, !candidate.isEmpty else { return false }
+    let intersection = candidate.intersection(expected)
+    guard !intersection.isNull, !intersection.isEmpty else { return false }
+    let intersectionArea = intersection.width * intersection.height
+    let unionArea = candidate.width * candidate.height + expected.width * expected.height - intersectionArea
+    guard unionArea > 0, intersectionArea / unionArea >= 0.8 else { return false }
+    let maximumEdgeDelta = max(
+        abs(candidate.minX - expected.minX),
+        abs(candidate.minY - expected.minY),
+        abs(candidate.maxX - expected.maxX),
+        abs(candidate.maxY - expected.maxY)
+    )
+    return maximumEdgeDelta <= 64
+}
+
 private func virtualScreenRect() throws -> CGRect {
     var count: UInt32 = 0
     guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else {
@@ -88,11 +113,28 @@ private struct WindowRow {
     }
 }
 
-private func allWindowRows() -> [WindowRow] {
+private func minimizedWindowIDs(in rows: [WindowRow]) -> Set<CGWindowID> {
+    // CGWindowIsOnscreen is also false for hidden apps and windows on another Space.
+    // Only AXMinimized plus the exact CG window number is strong enough to label a
+    // row "minimized" without flooding discovery with unrelated offscreen windows.
+    guard AXIsProcessTrusted() else { return [] }
+    let candidatePids = Set(rows.lazy.filter { !$0.onScreen }.map(\.pid)).prefix(64)
+    var ids = Set<CGWindowID>()
+    for pid in candidatePids {
+        let app = AXUIElementCreateApplication(pid)
+        let windows = axAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
+        for window in windows.prefix(64) where axBool(window, kAXMinimizedAttribute as CFString, default: false) {
+            if let id = axWindowNumber(window) { ids.insert(id) }
+        }
+    }
+    return ids
+}
+
+private func allWindowRows(includeMinimized: Bool = true) -> [WindowRow] {
     guard let raw = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
         as? [JSONObject] else { return [] }
     let ownPid = getpid()
-    return raw.compactMap { item in
+    let rows: [WindowRow] = raw.compactMap { item -> WindowRow? in
         guard
             let id = number(item[kCGWindowNumber as String])?.uint32Value,
             let pid = number(item[kCGWindowOwnerPID as String])?.int32Value,
@@ -105,7 +147,7 @@ private func allWindowRows() -> [WindowRow] {
         let layer = int(item[kCGWindowLayer as String])
         let onScreen = bool(item[kCGWindowIsOnscreen as String])
         let alpha = number(item[kCGWindowAlpha as String])?.doubleValue ?? 1
-        guard layer == 0, onScreen, alpha > 0 else { return nil }
+        guard layer == 0, alpha > 0 else { return nil }
         let process = string(item[kCGWindowOwnerName as String], default: "Process \(pid)")
         let title = string(item[kCGWindowName as String]).trimmingCharacters(in: .whitespacesAndNewlines)
         let displayTitle = title.isEmpty ? "\(process) window" : title
@@ -119,6 +161,10 @@ private func allWindowRows() -> [WindowRow] {
             layer: layer
         )
     }
+    let visible = rows.filter { $0.onScreen }
+    guard includeMinimized else { return visible }
+    let minimized = minimizedWindowIDs(in: rows)
+    return rows.filter { $0.onScreen || minimized.contains($0.id) }
 }
 
 private func windowRow(_ id: CGWindowID) -> WindowRow? {
@@ -127,7 +173,7 @@ private func windowRow(_ id: CGWindowID) -> WindowRow? {
 
 private func foregroundWindowID() -> CGWindowID? {
     guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-    return allWindowRows().first { $0.pid == app.processIdentifier && $0.onScreen }?.id
+    return allWindowRows(includeMinimized: false).first { $0.pid == app.processIdentifier }?.id
 }
 
 private func requireAccessibility(prompt: Bool) throws {
@@ -209,35 +255,43 @@ private func axWindowNumber(_ element: AXUIElement) -> CGWindowID? {
     (axAttribute(element, "AXWindowNumber" as CFString) as? NSNumber)?.uint32Value
 }
 
-private func matchingAXWindow(_ row: WindowRow) throws -> AXUIElement {
-    try requireAccessibility(prompt: true)
+private func matchingAXWindow(_ row: WindowRow, prompt: Bool = true) throws -> AXUIElement {
+    try requireAccessibility(prompt: prompt)
     let app = AXUIElementCreateApplication(row.pid)
     let windows = axAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
     if let exact = windows.first(where: { axWindowNumber($0) == row.id }) { return exact }
-    let byGeometry = windows.min { left, right in
-        let leftBounds = axBounds(left) ?? .null
-        let rightBounds = axBounds(right) ?? .null
-        func distance(_ candidate: CGRect) -> CGFloat {
-            abs(candidate.minX - row.bounds.minX) + abs(candidate.minY - row.bounds.minY) +
-                abs(candidate.width - row.bounds.width) + abs(candidate.height - row.bounds.height)
-        }
-        return distance(leftBounds) < distance(rightBounds)
+    let geometryCandidates = windows.compactMap { window -> (element: AXUIElement, distance: CGFloat)? in
+        guard let bounds = axBounds(window), convincinglyMatchesWindow(bounds, row.bounds) else { return nil }
+        let distance = abs(bounds.minX - row.bounds.minX) + abs(bounds.minY - row.bounds.minY) +
+            abs(bounds.width - row.bounds.width) + abs(bounds.height - row.bounds.height)
+        return (window, distance)
+    }.sorted { $0.distance < $1.distance }
+    guard let winner = geometryCandidates.first else {
+        throw fail("UIA_FAILED", "no accessibility window convincingly matches window \(row.id)")
     }
-    guard let byGeometry else {
-        throw fail("UIA_FAILED", "no accessible window matches window \(row.id)")
+    if geometryCandidates.count > 1, geometryCandidates[1].distance - winner.distance < 32 {
+        throw fail("UIA_FAILED", "multiple accessibility windows ambiguously match window \(row.id)")
     }
-    return byGeometry
+    return winner.element
 }
 
 private func focusWindow(_ id: CGWindowID) throws -> Bool {
     guard let row = windowRow(id) else { return false }
     try requireAccessibility(prompt: true)
     guard let app = NSRunningApplication(processIdentifier: row.pid) else { return false }
-    _ = app.activate(options: [.activateIgnoringOtherApps])
     let window = try matchingAXWindow(row)
+    var minimizedSettable = DarwinBoolean(false)
+    if AXUIElementIsAttributeSettable(window, kAXMinimizedAttribute as CFString, &minimizedSettable) == .success,
+       minimizedSettable.boolValue {
+        _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+    }
+    _ = app.activate(options: [.activateIgnoringOtherApps])
     _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-    usleep(40_000)
-    return foregroundWindowID() == id || NSWorkspace.shared.frontmostApplication?.processIdentifier == row.pid
+    for _ in 0..<50 {
+        if foregroundWindowID() == id { return true }
+        usleep(20_000)
+    }
+    return false
 }
 
 private final class UISnapshot {
@@ -266,7 +320,11 @@ private func rememberSnapshot(window: CGWindowID, elements: [String: AXUIElement
     return id
 }
 
-private func findUI(_ request: JSONObject, suppliedWindow: WindowRow? = nil) throws -> JSONObject {
+private func findUI(
+    _ request: JSONObject,
+    suppliedWindow: WindowRow? = nil,
+    promptForAccessibility: Bool = true
+) throws -> JSONObject {
     let row: WindowRow
     if let suppliedWindow {
         row = suppliedWindow
@@ -277,7 +335,7 @@ private func findUI(_ request: JSONObject, suppliedWindow: WindowRow? = nil) thr
     } else {
         throw fail("WINDOW_NOT_FOUND", "no matching visible window is available")
     }
-    let root = try matchingAXWindow(row)
+    let root = try matchingAXWindow(row, prompt: promptForAccessibility)
     let query = string(request["query"]).lowercased()
     let roleFilter = string(request["role"]).lowercased()
     let maxResults = min(100, max(1, int(request["maxResults"], default: 30)))
@@ -458,8 +516,16 @@ private func actUI(_ request: JSONObject) throws -> JSONObject {
         }
     } else if action == "click" {
         if AXUIElementPerformAction(element, kAXPressAction as CFString) != .success {
+            guard try focusWindow(snapshot.window) else {
+                throw fail("FOCUS_FAILED", "snapshot window \(snapshot.window) could not be activated")
+            }
             guard let bounds = axBounds(element), !bounds.isEmpty else {
                 throw fail("UI_ACTION_FAILED", "the control exposes neither AXPress nor usable bounds")
+            }
+            guard let row = windowRow(snapshot.window),
+                  row.onScreen,
+                  row.bounds.insetBy(dx: -24, dy: -24).contains(CGPoint(x: bounds.midX, y: bounds.midY)) else {
+                throw fail("STALE_UI_SNAPSHOT", "the control is no longer inside snapshot window \(snapshot.window)")
             }
             try click(CGPoint(x: bounds.midX, y: bounds.midY), button: .left, count: 1)
             route = "sendinput"
@@ -591,8 +657,14 @@ private func writePNG(_ image: CGImage, path: String) throws {
 private func scaledDimensions(region: CGRect, maxWidth: Int, nativeWidth: Int? = nil) -> (Int, Int) {
     let ceiling = max(1, maxWidth)
     let available = max(1, nativeWidth ?? Int((region.width * 2).rounded()))
-    let width = min(ceiling, available)
-    let height = max(1, Int((Double(width) * region.height / region.width).rounded()))
+    var width = min(ceiling, available)
+    var height = max(1, Int((Double(width) * region.height / region.width).rounded()))
+    let pixels = Double(width) * Double(height)
+    if pixels > Double(maxDecodedScreenshotPixels) {
+        let reduction = sqrt(Double(maxDecodedScreenshotPixels) / pixels)
+        width = max(1, Int((Double(width) * reduction).rounded(.down)))
+        height = max(1, Int((Double(height) * reduction).rounded(.down)))
+    }
     return (width, height)
 }
 
@@ -614,13 +686,23 @@ private func resizedImage(_ image: CGImage, width: Int, height: Int) throws -> C
     return scaled
 }
 
-private func captureWindow(_ windowID: CGWindowID, maxWidth: Int, content: SCShareableContent) throws -> (CGImage, CGRect) {
+private func captureWindow(
+    _ windowID: CGWindowID,
+    maxWidth: Int,
+    content: SCShareableContent,
+    expectedGeometry: CGRect
+) throws -> (CGImage, CGRect) {
     guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
         throw fail("WINDOW_NOT_FOUND", "no window with id \(windowID) is available for capture")
     }
     let region = window.frame
+    guard approximatelyEqual(region, expectedGeometry) else {
+        throw fail("STALE_FRAME", "window \(windowID) changed geometry before capture")
+    }
     let (width, height) = scaledDimensions(region: region, maxWidth: maxWidth)
     let configuration = SCStreamConfiguration()
+    // The current SDK marks these setters macOS 13+. On 12.3-12.6 the stream
+    // captures at its native dimensions and we resize the returned frame below.
     if #available(macOS 13.0, *) {
         configuration.width = width
         configuration.height = height
@@ -647,8 +729,7 @@ private func captureDisplay(_ display: SCDisplay, maxWidth: Int) throws -> (CGIm
 }
 
 private func captureComposite(region target: CGRect, maxWidth: Int, displays: [SCDisplay]) throws -> CGImage {
-    let outputWidth = max(1, min(maxWidth, Int((target.width * 2).rounded())))
-    let outputHeight = max(1, Int((Double(outputWidth) * target.height / target.width).rounded()))
+    let (outputWidth, outputHeight) = scaledDimensions(region: target, maxWidth: maxWidth)
     let scale = CGFloat(outputWidth) / target.width
     let colorSpace = CGColorSpaceCreateDeviceRGB()
     guard let context = CGContext(
@@ -700,9 +781,30 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
     let image: CGImage
     let region: CGRect
     let captureMode: String
+    var capturedWindowGeometry: CGRect?
     if let requestedWindow {
-        (image, region) = try captureWindow(requestedWindow, maxWidth: maxWidth, content: content)
-        captureMode = "window"
+        guard let row = windowRow(requestedWindow) else {
+            throw fail("WINDOW_NOT_FOUND", "no window with id \(requestedWindow) is available")
+        }
+        capturedWindowGeometry = row.bounds
+        do {
+            (image, region) = try captureWindow(
+                requestedWindow,
+                maxWidth: maxWidth,
+                content: content,
+                expectedGeometry: row.bounds
+            )
+            captureMode = "window"
+        } catch let error as HelperFailure {
+            let canUseVisibleFallback = row.onScreen && ["WINDOW_NOT_FOUND", "CAPTURE_FAILED", "CAPTURE_TIMEOUT"].contains(error.code)
+            guard canUseVisibleFallback else { throw error }
+            region = row.bounds
+            image = try captureComposite(region: region, maxWidth: maxWidth, displays: content.displays)
+            captureMode = "screen_fallback"
+        }
+        guard let fresh = windowRow(requestedWindow), approximatelyEqual(fresh.bounds, row.bounds) else {
+            throw fail("STALE_FRAME", "window \(requestedWindow) moved or resized while it was captured")
+        }
     } else if let requestedRegion = rect(request["region"]) {
         region = requestedRegion
         image = try captureComposite(region: region, maxWidth: maxWidth, displays: content.displays)
@@ -726,8 +828,8 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
         "focused": requestedWindow == nil ? NSNull() : foregroundWindowID() == requestedWindow,
         "captureMode": captureMode
     ]
-    if let requestedWindow, let row = windowRow(requestedWindow) {
-        response["windowGeometry"] = rectObject(row.bounds)
+    if let capturedWindowGeometry {
+        response["windowGeometry"] = rectObject(capturedWindowGeometry)
     }
     return response
 }
@@ -771,9 +873,13 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
             result.merge(try capture(request, forcedWindow: id)) { _, new in new }
         }
         if bool(request["includeUi"]) {
-            let ui = try findUI(request, suppliedWindow: row)
-            for key in ["snapshotId", "elements", "visited", "truncated"] {
-                result[key] = ui[key]
+            do {
+                let ui = try findUI(request, suppliedWindow: row, promptForAccessibility: false)
+                for key in ["snapshotId", "elements", "visited", "truncated"] {
+                    result[key] = ui[key]
+                }
+            } catch let error as HelperFailure where error.code == "ACCESSIBILITY_PERMISSION_REQUIRED" {
+                result["uiUnavailable"] = ["code": error.code, "message": error.message]
             }
         }
     case "act":

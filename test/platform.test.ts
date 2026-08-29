@@ -29,10 +29,10 @@ const allCapabilities = (): Capabilities => ({
 
 describe('cross-platform product surface', () => {
   it('keeps Core and native Desktop fully usable on macOS', () => {
-    const config = defaultConfig('darwin');
+    const config = defaultConfig('darwin', '21.4.0');
     expect(config.capabilities).toEqual(allCapabilities());
     expect(surfaceIsUseful('core', config.capabilities, 'darwin')).toBe(true);
-    expect(surfaceIsUseful('desktop', config.capabilities, 'darwin')).toBe(true);
+    expect(surfaceIsUseful('desktop', config.capabilities, 'darwin', '21.4.0')).toBe(true);
   });
 
   it('keeps Core fully usable while omitting Desktop on Linux', () => {
@@ -72,7 +72,11 @@ describe('cross-platform product surface', () => {
 
   it('reports the host family and Desktop support explicitly', () => {
     expect(hostPlatformInfo('win32')).toEqual({ family: 'windows', name: 'Windows', desktopAutomation: true });
-    expect(hostPlatformInfo('darwin')).toEqual({ family: 'macos', name: 'macOS', desktopAutomation: true });
+    expect(hostPlatformInfo('darwin', '21.4.0')).toEqual({
+      family: 'macos',
+      name: 'macOS',
+      desktopAutomation: true
+    });
     expect(hostPlatformInfo('linux')).toEqual({ family: 'linux', name: 'Linux', desktopAutomation: false });
     expect(desktopAutomationSupported('freebsd')).toBe(false);
     expect(capabilitiesForPlatform(allCapabilities(), 'win32')).toEqual(allCapabilities());
@@ -84,6 +88,7 @@ describe('cross-platform product surface', () => {
     expect(macOSDesktopAutomationSupported('22.0.0')).toBe(true);
     expect(desktopAutomationSupported('darwin', '21.3.0')).toBe(false);
     expect(hostPlatformInfo('darwin', '21.3.0').desktopAutomation).toBe(false);
+    expect(defaultConfig('darwin', '21.3.0').capabilities.screen).toBe(false);
   });
 
   it.each(['darwin', 'linux'] as const)('teaches POSIX shell semantics instead of Windows guidance on %s', (platform) => {

@@ -304,6 +304,8 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               const flags = `${element.enabled ? '' : ' disabled'}${element.offscreen ? ' offscreen' : ''}`;
               lines.push(`${element.ref}  ${element.role} ${JSON.stringify(element.name)}${automation}${image}${flags}`);
             }
+          } else if (state.uiUnavailable) {
+            lines.push(`controls: unavailable (${state.uiUnavailable.code}) — ${state.uiUnavailable.message}`);
           } else {
             lines.push('controls: none exposed by the platform accessibility API');
           }

@@ -157,12 +157,16 @@ export function surfaceDefinition(id: SurfaceId): SurfaceDefinition {
 export function surfaceIsUseful(
   id: SurfaceId,
   caps: Capabilities,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  release?: string
 ): boolean {
   // Clipboard counts: it is reached through `computer`, so granting only the clipboard
   // still gives this surface something real to advertise.
   if (id === 'desktop') {
-    return desktopAutomationSupported(platform) && (caps.screen || caps.control || caps.clipboardRead || caps.clipboardWrite);
+    return (
+      desktopAutomationSupported(platform, release) &&
+      (caps.screen || caps.control || caps.clipboardRead || caps.clipboardWrite)
+    );
   }
   return true;
 }

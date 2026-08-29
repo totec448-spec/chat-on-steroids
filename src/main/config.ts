@@ -320,12 +320,12 @@ const configSchema = z.object({
     .default({ ...DEFAULT_GOAL })
 });
 
-export function defaultConfig(platform: NodeJS.Platform = process.platform): Config {
+export function defaultConfig(platform: NodeJS.Platform = process.platform, release?: string): Config {
   return {
     roots: [],
     // Desktop permissions start usable on hosts with a native backend. Unsupported hosts mask
     // them at the platform boundary while preserving stored choices for a moved config.
-    capabilities: capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform),
+    capabilities: capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform, release),
     readOnly: false,
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'dark' },
@@ -499,8 +499,12 @@ export function getConfig(): Config {
  * Read-only mode is enforced here as well as at the tool layer, so the effective
  * capability set can never disagree with what the UI shows.
  */
-export function effectiveCapabilities(config: Config, platform: NodeJS.Platform = process.platform): Capabilities {
-  const live = capabilitiesForPlatform(config.capabilities, platform);
+export function effectiveCapabilities(
+  config: Config,
+  platform: NodeJS.Platform = process.platform,
+  release?: string
+): Capabilities {
+  const live = capabilitiesForPlatform(config.capabilities, platform, release);
   if (!config.readOnly) return live;
   // Derived from WRITE_CAPABILITIES rather than listed again here, so adding a new
   // writing capability cannot accidentally leave it enabled in read-only mode.
