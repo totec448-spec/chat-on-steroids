@@ -39,7 +39,25 @@ const fake = vi.hoisted(() => {
         callback(null);
         const request = JSON.parse(line) as { op: string };
         const reply =
-          request.op === 'find_ui'
+          request.op === 'snapshot'
+            ? {
+                ok: true,
+                window: {
+                  id: 77,
+                  title: 'Window without AX consent',
+                  process: 'Example',
+                  x: 0,
+                  y: 0,
+                  width: 100,
+                  height: 100,
+                  state: 'foreground'
+                },
+                uiUnavailable: {
+                  code: 'ACCESSIBILITY_PERMISSION_REQUIRED',
+                  message: 'enable Accessibility, then retry'
+                }
+              }
+            : request.op === 'find_ui'
             ? {
                 ok: true,
                 window: 77,
@@ -83,9 +101,23 @@ vi.mock('../src/main/exec.js', () => ({
 }));
 vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 
-import { act, findUi } from '../src/main/computer/index.js';
+// The child process is mocked, but Darwin still resolves the native host before spawn.
+vi.stubEnv('COS_MACOS_DESKTOP_HELPER', process.execPath);
+
+import { act, findUi, getWindowState } from '../src/main/computer/index.js';
 
 describe('semantic desktop ref lifetime', () => {
+  it('keeps a screenshot-only window state usable when UI controls are unavailable', async () => {
+    const state = await getWindowState({ window: 77, includeScreenshot: false, includeUi: true });
+    expect(state.window.id).toBe(77);
+    expect(state.snapshotId).toBeNull();
+    expect(state.elements).toEqual([]);
+    expect(state.uiUnavailable).toEqual({
+      code: 'ACCESSIBILITY_PERMISSION_REQUIRED',
+      message: 'enable Accessibility, then retry'
+    });
+  });
+
   it('invalidates refs as soon as their helper dies, before a replacement starts', async () => {
     const found = await findUi({ window: 77, maxResults: 5 });
     const ref = found.elements[0]!.ref;

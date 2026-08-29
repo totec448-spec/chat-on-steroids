@@ -178,7 +178,13 @@ function helperTimeoutMs(request: Record<string, unknown>): number {
       return 8_000;
     case 'capture':
     case 'snapshot':
-      return process.platform === 'darwin' ? 20_000 : 10_000;
+      // macOS may spend 12s enumerating ScreenCaptureKit content, then up to 10s
+      // starting a pre-14 stream and 15s waiting for its first frame. Snapshot can
+      // additionally traverse the AX tree, so the parent must outlive those native
+      // budgets instead of retiring a helper that is still within its own deadline.
+      // A visible-screen fallback may then capture more than one intersecting display
+      // sequentially, so retain enough headroom for a normal multi-monitor host too.
+      return process.platform === 'darwin' ? 120_000 : 10_000;
     case 'warm':
       return 10_000;
     case 'act':
@@ -664,7 +670,13 @@ export async function getWindowState(opts: {
   maxElements?: number;
   includeScreenshot?: boolean;
   includeUi?: boolean;
-}): Promise<{ window: WindowInfo; snapshotId: number | null; screenshot: Screenshot | null; elements: UiElementInfo[] }> {
+}): Promise<{
+  window: WindowInfo;
+  snapshotId: number | null;
+  screenshot: Screenshot | null;
+  elements: UiElementInfo[];
+  uiUnavailable: { code: string; message: string } | null;
+}> {
   return exclusive(async () => {
     const includeScreenshot = opts.includeScreenshot !== false;
     const includeUi = opts.includeUi !== false;
@@ -689,14 +701,23 @@ export async function getWindowState(opts: {
       if (!window) throw new ComputerError('WINDOW_NOT_FOUND: no matching visible window is available');
       const shot = file ? await screenshotFromReply(reply, file, window.id) : null;
       const frame = shot ? frameById(shot.frameId) : null;
-      const found = includeUi
+      const unavailableValue = reply['uiUnavailable'];
+      const uiUnavailable =
+        unavailableValue && typeof unavailableValue === 'object'
+          ? {
+              code: String((unavailableValue as Record<string, unknown>)['code'] ?? 'UI_UNAVAILABLE'),
+              message: String((unavailableValue as Record<string, unknown>)['message'] ?? 'UI controls are unavailable')
+            }
+          : null;
+      const found = includeUi && uiUnavailable === null
         ? await findUiLocked({ window: window.id, maxResults: opts.maxElements ?? 60 }, frame, reply)
         : { window: window.id, snapshotId: null, elements: [] as UiElementInfo[] };
       return {
         window,
         snapshotId: found.snapshotId,
         screenshot: shot,
-        elements: found.elements
+        elements: found.elements,
+        uiUnavailable
       };
     } finally {
       if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});

@@ -322,7 +322,7 @@ function paintGroups(): void {
 }
 
 /**
- * How many MCP tools ChatGPT can currently discover, across both connectors.
+ * How many MCP tools this app can expose in total, across both connectors.
  *
  * Taken from the surfaces the main process reports rather than recomputed from the
  * checkboxes, so this number cannot drift away from what the servers actually register.
@@ -1029,8 +1029,8 @@ function facts(next: AppState): HTMLElement[] {
   }
 
   rows.push([
-    'Tools ChatGPT can see',
-    `${toolsOn(next)} available · ${config.roots.length} folder${config.roots.length === 1 ? '' : 's'}`
+    'Tools across Core + Desktop',
+    `${toolsOn(next)} total · ${config.roots.length} folder${config.roots.length === 1 ? '' : 's'}`
   ]);
 
   return rows.map(([label, value, bad]) => {

@@ -1318,12 +1318,13 @@ describe('capability gating', () => {
   });
 
   it('starts a fresh install with every capability effective', () => {
-    // This assertion is about the product's fully-enabled fresh-install policy on either
-    // host that owns a native Desktop backend. Linux still masks the Desktop group.
-    const config = defaultConfig('darwin');
+    // This assertion is about the product's fully-enabled fresh-install policy, not the
+    // host running Vitest. Windows has no OS-version floor, so it is the deterministic
+    // representative for a host with every declared capability.
+    const config = defaultConfig('win32');
     expect(config.readOnly).toBe(false);
     expect(config.multiAgent.enabled).toBe(true);
-    expect(Object.values(effectiveCapabilities(config, 'darwin')).every(Boolean)).toBe(true);
+    expect(Object.values(effectiveCapabilities(config, 'win32')).every(Boolean)).toBe(true);
   });
 
   it('refuses to call a tool that is not registered', async () => {

@@ -30,7 +30,7 @@ describe.runIf(LIVE)('live macOS Desktop backend', () => {
   });
 
   it('returns snapshot-scoped AX controls for a visible window', async (context) => {
-    const target = (await listWindows()).windows[0];
+    const target = (await listWindows()).windows.find((window) => window.state !== 'minimized');
     if (!target) return context.skip('No visible macOS window is available.');
     const found = await findUi({ window: target.id, maxResults: 8 });
     expect(found.window).toBe(target.id);

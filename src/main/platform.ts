@@ -39,9 +39,10 @@ export function hostPlatformInfo(
  */
 export function capabilitiesForPlatform(
   capabilities: Capabilities,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  release?: string
 ): Capabilities {
-  if (desktopAutomationSupported(platform)) return capabilities;
+  if (desktopAutomationSupported(platform, release)) return capabilities;
   const next = { ...capabilities };
   for (const capability of DESKTOP_CAPABILITIES) next[capability] = false;
   return next;

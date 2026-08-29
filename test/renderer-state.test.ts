@@ -131,7 +131,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
     }
   ];
   stateListener(withTools);
-  expect(w.document.getElementById('facts')!.textContent).toContain('3 available');
+  expect(w.document.getElementById('facts')!.textContent).toContain('Tools across Core + Desktop3 total');
   expect(w.document.getElementById('facts')!.textContent).not.toContain('of 9');
 });
 
