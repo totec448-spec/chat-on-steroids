@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { defaultConfig, effectiveCapabilities } from '../src/main/config.js';
-import { capabilitiesForPlatform, desktopAutomationSupported, hostPlatformInfo } from '../src/main/platform.js';
+import {
+  capabilitiesForPlatform,
+  desktopAutomationSupported,
+  hostPlatformInfo,
+  macOSDesktopAutomationSupported
+} from '../src/main/platform.js';
 import { surfaceIsUseful } from '../src/main/mcp/surfaces.js';
 import { serverInstructions } from '../src/main/mcp/instructions.js';
 import { unifiedExecEnvForPlatform } from '../src/main/codex/unified-exec-constants.js';
@@ -23,8 +28,15 @@ const allCapabilities = (): Capabilities => ({
 });
 
 describe('cross-platform product surface', () => {
-  it.each(['darwin', 'linux'] as const)('keeps Core fully usable while omitting Desktop on %s', (platform) => {
-    const config = defaultConfig(platform);
+  it('keeps Core and native Desktop fully usable on macOS', () => {
+    const config = defaultConfig('darwin');
+    expect(config.capabilities).toEqual(allCapabilities());
+    expect(surfaceIsUseful('core', config.capabilities, 'darwin')).toBe(true);
+    expect(surfaceIsUseful('desktop', config.capabilities, 'darwin')).toBe(true);
+  });
+
+  it('keeps Core fully usable while omitting Desktop on Linux', () => {
+    const config = defaultConfig('linux');
     expect(config.capabilities).toMatchObject({
       browse: true,
       search: true,
@@ -40,8 +52,8 @@ describe('cross-platform product surface', () => {
       clipboardRead: false,
       clipboardWrite: false
     });
-    expect(surfaceIsUseful('core', config.capabilities, platform)).toBe(true);
-    expect(surfaceIsUseful('desktop', allCapabilities(), platform)).toBe(false);
+    expect(surfaceIsUseful('core', config.capabilities, 'linux')).toBe(true);
+    expect(surfaceIsUseful('desktop', allCapabilities(), 'linux')).toBe(false);
   });
 
   it('masks stored Windows Desktop grants at runtime without deleting the stored choices', () => {
@@ -60,10 +72,18 @@ describe('cross-platform product surface', () => {
 
   it('reports the host family and Desktop support explicitly', () => {
     expect(hostPlatformInfo('win32')).toEqual({ family: 'windows', name: 'Windows', desktopAutomation: true });
-    expect(hostPlatformInfo('darwin')).toEqual({ family: 'macos', name: 'macOS', desktopAutomation: false });
+    expect(hostPlatformInfo('darwin')).toEqual({ family: 'macos', name: 'macOS', desktopAutomation: true });
     expect(hostPlatformInfo('linux')).toEqual({ family: 'linux', name: 'Linux', desktopAutomation: false });
     expect(desktopAutomationSupported('freebsd')).toBe(false);
     expect(capabilitiesForPlatform(allCapabilities(), 'win32')).toEqual(allCapabilities());
+  });
+
+  it('keeps the macOS 12.3 native-helper floor separate from the Core app floor', () => {
+    expect(macOSDesktopAutomationSupported('21.3.0')).toBe(false);
+    expect(macOSDesktopAutomationSupported('21.4.0')).toBe(true);
+    expect(macOSDesktopAutomationSupported('22.0.0')).toBe(true);
+    expect(desktopAutomationSupported('darwin', '21.3.0')).toBe(false);
+    expect(hostPlatformInfo('darwin', '21.3.0').desktopAutomation).toBe(false);
   });
 
   it.each(['darwin', 'linux'] as const)('teaches POSIX shell semantics instead of Windows guidance on %s', (platform) => {
@@ -82,7 +102,7 @@ describe('cross-platform product surface', () => {
     expect(instructions).toContain(platform === 'darwin' ? 'Local macOS coding bridge' : 'Local Linux coding bridge');
     expect(instructions).toContain('normal POSIX shell');
     expect(instructions).not.toMatch(/PowerShell|Get-ChildItem|Windows desktop|Native Windows paths/);
-    expect(instructions).not.toContain('Chat On Steroids Desktop');
+    expect(instructions.includes('Chat On Steroids Desktop')).toBe(platform === 'darwin');
   });
 
   it('retains the Windows-specific shell guidance on Windows', () => {

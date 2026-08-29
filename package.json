@@ -1,7 +1,7 @@
 {
   "name": "chat-on-steroids",
   "version": "2.0.2",
-  "description": "Local coding bridge for ChatGPT over MCP, with Windows-only desktop control and approved-folder capability limits.",
+  "description": "Local coding bridge for ChatGPT over MCP, with native desktop control and approved-folder capability limits.",
   "license": "MIT",
   "author": "Chat On Steroids",
   "homepage": "https://github.com/totec448-spec/chat-on-steroids",
@@ -21,6 +21,7 @@
     "tunnel": "node scripts/fetch-tunnel-client.mjs",
     "rg": "node scripts/fetch-ripgrep.mjs",
     "packaging:prepare": "node scripts/prepare-packaging-native.mjs",
+    "desktop:mac": "node scripts/prepare-macos-desktop-helper.mjs --platform darwin",
     "dist": "node scripts/package.mjs --arch x64,arm64",
     "dist:win": "node scripts/package.mjs --platform win32 --arch x64,arm64",
     "dist:x64": "node scripts/package.mjs --platform win32 --arch x64",

@@ -111,7 +111,7 @@ const CORE: SurfaceDefinition = {
 };
 
 /**
- * Desktop — seeing and driving Windows itself.
+ * Desktop — seeing and driving the native desktop.
  *
  * This one earns its boundary twice over. It is gated on permissions the user grants
  * separately and can switch off independently; its two schemas are the largest we publish, since
@@ -125,9 +125,9 @@ const DESKTOP: SurfaceDefinition = {
   serverName: 'chat-on-steroids-desktop',
   connectorName: `${CONNECTOR_BRAND} Desktop`,
   description:
-    'See and control this Windows desktop, including its clipboard. ' +
+    'See and control this computer desktop, including its clipboard. ' +
     'Use for: taking a screenshot, reading what is on screen, listing and finding windows, inspecting buttons, fields and other UI controls, ' +
-    'clicking, typing, pressing keys, scrolling and dragging in any Windows application, ' +
+    'clicking, typing, pressing keys, scrolling and dragging in native applications, ' +
     'and reading the clipboard or copying and pasting text between programs.',
   cardSummary:
     'Screenshots, windows, mouse/keyboard control and the clipboard. Optional — connect it only if you want desktop automation.',

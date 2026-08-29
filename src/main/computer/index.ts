@@ -5,17 +5,16 @@
  * the machine. The action vocabulary mirrors OpenAI's computer-use tool — click,
  * double_click, scroll, type, keypress, drag, move, wait, screenshot — so a model
  * that already knows how to drive a computer does not have to learn a private
- * dialect, plus the two things Windows needs and a browser viewport does not:
+ * dialect, plus the two things a native desktop needs and a browser viewport does not:
  * listing windows and bringing one to the front.
  *
- * Coordinates are always in *screenshot pixels*. The helper runs without per-monitor
- * DPI awareness, so capture and input share one coordinate space and agree with each
- * other; the scale between that space and the returned image is applied here, and
- * every screenshot states the size it was returned at.
+ * Coordinates are always in *screenshot pixels*. Each helper keeps capture and input in
+ * one native screen coordinate space; the scale between that space and the returned
+ * image is applied here, and every screenshot states the size it was returned at.
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ensureUsablePath, normalizeEnvironment, setEnvValue } from '../env.js';
@@ -140,12 +139,11 @@ export type Action =
   | { type: 'write_clipboard'; text: string };
 
 /**
- * One long-lived PowerShell helper process.
+ * One long-lived native helper process.
  *
- * Add-Type compiles the Win32 C# bridge and used to run on every screenshot/click,
- * which made each desktop MCP call pay a fresh PowerShell startup + C# compilation.
- * The helper now stays alive and speaks newline-delimited JSON over stdin/stdout. Only
- * the fixed bootstrap is executable PowerShell; model-supplied request data is JSON.
+ * Windows launches the fixed PowerShell/Win32 bridge; macOS launches the packaged Swift
+ * helper. Both speak the same newline-delimited JSON protocol, so frame identity, stale
+ * refs, batching and model-facing semantics remain platform-neutral in this file.
  */
 interface PendingHelperRequest {
   resolve: (value: Record<string, any>) => void;
@@ -180,6 +178,7 @@ function helperTimeoutMs(request: Record<string, unknown>): number {
       return 8_000;
     case 'capture':
     case 'snapshot':
+      return process.platform === 'darwin' ? 20_000 : 10_000;
     case 'warm':
       return 10_000;
     case 'act':
@@ -231,19 +230,22 @@ async function startHelper(): Promise<HelperRuntime> {
   if (helperStarting) return helperStarting;
 
   helperStarting = new Promise<HelperRuntime>((resolve, reject) => {
-    const bootstrap = Buffer.from('Invoke-Expression $env:CLF_HELPER', 'utf16le').toString('base64');
-    // `powershell.exe` is found through the environment handed to the child, so that
-    // environment has to be sound before the spawn rather than after it: a bare
-    // `{ ...process.env }` is what turned a missing System32 entry into an unexplained
-    // `spawn powershell.exe ENOENT` with no helper and no diagnosis.
     const env = normalizeEnvironment(process.env);
-    setEnvValue(env, 'CLF_HELPER', HELPER_SCRIPT);
     ensureUsablePath(env);
-    // By absolute path, so starting the helper does not depend on the very thing it is
-    // often asked to diagnose. The repaired environment above is the second line of
-    // defence, not the first.
-    const host = findWindowsPowerShell() ?? 'powershell.exe';
-    const child = spawn(host, ['-NoProfile', '-NonInteractive', '-NoLogo', '-EncodedCommand', bootstrap], {
+    let host: string;
+    let args: string[];
+    if (process.platform === 'darwin') {
+      host = locateMacOSDesktopHelper();
+      args = [];
+    } else {
+      const bootstrap = Buffer.from('Invoke-Expression $env:CLF_HELPER', 'utf16le').toString('base64');
+      // `powershell.exe` is found through the environment handed to the child, so that
+      // environment has to be sound before the spawn rather than after it.
+      setEnvValue(env, 'CLF_HELPER', HELPER_SCRIPT);
+      host = findWindowsPowerShell() ?? 'powershell.exe';
+      args = ['-NoProfile', '-NonInteractive', '-NoLogo', '-EncodedCommand', bootstrap];
+    }
+    const child = spawn(host, args, {
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: env as NodeJS.ProcessEnv
@@ -326,7 +328,7 @@ async function startHelper(): Promise<HelperRuntime> {
     child.once('error', (error) => {
       if (helperRuntime === runtime) helperRuntime = null;
       if (!started) {
-        reject(new ComputerError(`Could not start PowerShell: ${error.message}`));
+        reject(new ComputerError(`Could not start the desktop helper: ${error.message}`));
         return;
       }
       const pending = runtime.pending;
@@ -356,8 +358,30 @@ async function startHelper(): Promise<HelperRuntime> {
   return helperStarting;
 }
 
+function locateMacOSDesktopHelper(): string {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const candidates = [
+    process.env['COS_MACOS_DESKTOP_HELPER'],
+    resourcesPath ? path.join(resourcesPath, 'desktop', 'macos-desktop-helper') : null,
+    path.resolve(
+      process.cwd(),
+      'resources',
+      'packaging',
+      'desktop',
+      'darwin',
+      process.arch,
+      'macos-desktop-helper'
+    )
+  ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);
+  const helper = candidates.find((candidate) => existsSync(candidate));
+  if (helper) return helper;
+  throw new ComputerError(
+    `The macOS desktop helper is missing for ${process.arch}. Run npm run desktop:mac before development, or rebuild the macOS package.`
+  );
+}
+
 /**
- * Stops the long-lived PowerShell/Win32 helper and waits for its process tree to exit.
+ * Stops the long-lived native desktop helper and waits for its process tree to exit.
  *
  * The helper is an app-owned process, not an implementation detail of one request: a
  * timeout or Electron shutdown must therefore retire the whole tree before the process
@@ -491,7 +515,7 @@ const uiRefs = new Map<
 >();
 
 /**
- * Refs carry the helper generation that minted them. A UI Automation runtime id only
+ * Refs carry the helper generation that minted them. A native accessibility identity only
  * means anything to the helper process that issued it, so once the helper restarts every
  * outstanding ref is meaningless — and acting on one would click whatever now happens to
  * hold that id. Stamping the generation makes that detectable instead of silent.
@@ -766,6 +790,7 @@ async function screenshotFromReply(
   const captureMode: Screenshot['captureMode'] =
     rawMode === 'window' || rawMode === 'screen_fallback' ? rawMode : 'screen';
   const scale = size.width / region.width;
+  const replyWindowGeometry = reply['windowGeometry'] as Rect | undefined;
   const frame: Frame = {
     id: nextFrameId++,
     region,
@@ -777,7 +802,7 @@ async function screenshotFromReply(
       inheritedWindowGeometry === undefined
         ? requestedWindow === null
           ? null
-          : { ...region }
+          : replyWindowGeometry ?? { ...region }
         : inheritedWindowGeometry,
     captureMode
   };
@@ -1273,7 +1298,7 @@ async function actLocked(
     batch.push(mapOne(action));
     batchIndices.push(index);
   }
-  // A pure clipboard/wait batch must not depend on PowerShell/UI Automation at all. This is
+  // A pure clipboard/wait batch must not depend on a native accessibility helper at all. This is
   // what makes the connector genuinely useful when the user granted only clipboard access or
   // when the desktop helper is unavailable. Mixed desktop batches still take one final cursor
   // sample after any trailing local wait/clipboard work so the pointer report remains current.
@@ -1356,7 +1381,13 @@ export async function checkAvailable(): Promise<string | null> {
  */
 export async function prewarmComputerHelper(): Promise<void> {
   try {
-    await runHelper({ op: 'warm' });
+    const reply = await runHelper({ op: 'warm' });
+    if (process.platform === 'darwin') {
+      logInfo(
+        `desktop macos permissions screen=${reply['screenPermission'] === true ? 'granted' : 'missing'} ` +
+          `accessibility=${reply['accessibilityPermission'] === true ? 'granted' : 'missing'}`
+      );
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logWarn(`computer use prewarm failed: ${message}`);

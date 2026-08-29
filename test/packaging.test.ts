@@ -391,6 +391,8 @@ describe('cross-platform packaging targets', () => {
       'CFBundleVersion: packageVersion',
       "LSApplicationCategoryType: 'public.app-category.developer-tools'",
       "LSMinimumSystemVersion: '12.0'",
+      'NSScreenCaptureUsageDescription:',
+      "path.join(resources, 'desktop', 'macos-desktop-helper')",
       "path.join(ptyDir, 'spawn-helper')",
       "path.join(nodeModules, 'tree-sitter', 'prebuilds'",
       "path.join(nodeModules, 'tree-sitter-bash', 'prebuilds'",
@@ -400,7 +402,7 @@ describe('cross-platform packaging targets', () => {
       'walkFiles(contents)',
       "normalized.includes('.app/Contents/MacOS/')",
       "path.basename(file) === 'chrome_crashpad_handler'",
-      'requireThinMachO(file, launched)',
+      "requireThinMachO(file, launched, file === desktopHelper ? '12.3'",
       'launchedMachOCount < 6',
       "run('plutil', ['-extract', key, 'raw', plist])",
       "run('codesign', ['--display', '--verbose=4', app]",
@@ -413,6 +415,7 @@ describe('cross-platform packaging targets', () => {
     const packagedRuntime = readFileSync(path.join(root, 'scripts', 'smoke-packaged-runtime.mjs'), 'utf8');
     expect(packagedRuntime).toContain("for (const dependency of ['node-pty', 'tree-sitter', 'tree-sitter-bash'])");
     expect(packagedRuntime).toContain('directories.length !== 1 || directories[0] !== nativeDir');
+    expect(packagedRuntime).toContain("required('desktop/macos-desktop-helper')");
 
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
     const notes = readFileSync(path.join(root, 'docs', 'release-notes', 'v2.0.2.md'), 'utf8');

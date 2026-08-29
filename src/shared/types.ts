@@ -38,7 +38,7 @@ export const CAPABILITIES = [
 
 export type Capability = (typeof CAPABILITIES)[number];
 
-/** Model-facing Desktop permissions. The macOS/Linux port intentionally leaves these out. */
+/** Model-facing Desktop permissions, enabled only on hosts with a native backend. */
 export const DESKTOP_CAPABILITIES: readonly Capability[] = [
   'screen',
   'control',
@@ -65,7 +65,7 @@ export const WRITE_CAPABILITIES: readonly Capability[] = [
 
 export type Capabilities = Record<Capability, boolean>;
 
-/** Host family reported to the renderer. Desktop automation is intentionally Windows-only. */
+/** Host family reported to the renderer. */
 export type PlatformFamily = 'windows' | 'macos' | 'linux' | 'other';
 
 export interface PlatformInfo {
