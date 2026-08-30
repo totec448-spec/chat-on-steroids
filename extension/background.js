@@ -1577,7 +1577,7 @@ async function maintain() {
   // Quoted back exactly as it arrived. It names the handout being answered, so that a receipt
   // this pass sends late cannot close a repair the app has since raised for a different turn.
   const token = repair && typeof repair.token === 'string' ? repair.token : '';
-  if (!conversationId || !token) return;
+  if (!conversationId || !token) return clearRetryIfIdle();
   let candidates = [];
   try {
     const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
@@ -1682,7 +1682,6 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
   if (current && (!wanted || current === wanted)) {
     delete tabConversations[key];
     await persistLive();
-    clearRetryIfIdle();
   }
   if (!stillOwned()) return { ok: true, closed: false };
   const conversationId = wanted || current;
@@ -1694,6 +1693,8 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
   if (!stillOwned() || conversationStillOpen(conversationId)) return { ok: true, closed: false };
   await enqueueClose(conversationId);
   const delivered = await drainCloses();
+  // Collect `/closed`'s exact no-tab repair before an old async alarm clear can erase its fallback.
+  if (delivered.pending === 0) await maintain();
   return { ok: true, closed: delivered.pending === 0, pendingClose: delivered.pending };
 }
 

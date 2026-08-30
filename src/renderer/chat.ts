@@ -130,7 +130,7 @@ interface Badge {
 /** Live word per worker state, in the user's vocabulary rather than the protocol's. */
 const AGENT_BADGE: Record<AgentState, Badge> = {
   invited: { text: 'opening', tone: 'is-active' },
-  active: { text: 'joined', tone: 'is-active' },
+  active: { text: 'active', tone: 'is-active' },
   // Still working, as far as this app knows — only its browser tab is gone. Said as
   // "no tab" rather than "detached" because that is the part a user can act on.
   detached: { text: 'no tab', tone: 'is-active' },
@@ -165,7 +165,7 @@ function sessionBadges(summary: SessionSummary): Badge[] {
 
   // Agent ids are reused across runs (`worker-1`, `worker-2`, ...). Matching only by that
   // short id made old worker sessions inherit the *current* run's live badge, so a worker
-  // chat from 20 minutes ago suddenly said "joined" again when a new worker-2 started.
+  // chat from 20 minutes ago suddenly said "active" again when a new worker-2 started.
   // Conversation id is the durable identity of the actual ChatGPT tab, so only that exact
   // worker session may borrow the live swarm state.
   const agent = origin?.agentId
