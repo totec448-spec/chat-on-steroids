@@ -993,7 +993,7 @@ main {
   color: var(--red);
 }
 
-/* Live macOS TCC state from the same helper that will capture/control the desktop. */
+/* Live macOS TCC state from the in-process backend that will capture/control the desktop. */
 .desktop-access {
   margin: 8px 10px 10px;
   padding: 10px;
@@ -1012,15 +1012,6 @@ main {
   margin: 4px 0 8px;
   color: var(--soft);
   line-height: 1.4;
-}
-
-.desktop-access.is-note {
-  border-color: var(--line);
-  background: var(--wash);
-}
-
-.desktop-access.is-note strong {
-  color: var(--ink);
 }
 
 /* ---------------------------------------------------------------- activity

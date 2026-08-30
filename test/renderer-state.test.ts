@@ -141,11 +141,6 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   withMissingMacAccess.desktopAccess = {
     screen: 'granted',
     accessibility: 'missing',
-    parentPermissions: { screen: 'granted', accessibility: 'missing' },
-    backendPermissions: { screen: 'granted', accessibility: 'missing' },
-    parent: { executable: 'Chat On Steroids', identifier: 'Electron', teamIdentifier: null, signingMode: 'adhoc', cdhash: 'aaaaaaaaaaaaaaaa' },
-    backend: { executable: 'macos-desktop-addon.node', identifier: 'macos-desktop-addon', teamIdentifier: null, signingMode: 'adhoc', cdhash: 'bbbbbbbbbbbbbbbb' },
-    rebuildMayInvalidateAuthorization: true,
     checkedAt: 1,
     error: null
   };
@@ -153,10 +148,9 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   const accessWarning = w.document.getElementById('desktopAccess')!;
   expect(accessWarning.hidden).toBe(false);
   expect(accessWarning.textContent).toContain('Accessibility: missing');
-  expect(accessWarning.textContent).toContain('stale enabled row after rebuilding');
-  expect(accessWarning.textContent).toContain('same TCC subject');
-  expect(accessWarning.textContent).toContain('Electron/adhoc#aaaaaaaaaa');
-  expect((w.document.getElementById('openDesktopPrivacy') as HTMLButtonElement).hidden).toBe(false);
+  expect(accessWarning.textContent).toContain('live verdicts from the native backend');
+  expect((w.document.getElementById('openDesktopScreen') as HTMLButtonElement).hidden).toBe(true);
+  expect((w.document.getElementById('openDesktopAccessibility') as HTMLButtonElement).hidden).toBe(false);
 });
 
 it('serializes settings intent so rapid toggles and later UI changes cannot undo each other', async () => {

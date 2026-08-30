@@ -336,29 +336,17 @@ function paintDesktopAccess(next: AppState): void {
   if (needsAccessibility && access.accessibility !== 'granted') {
     missing.push(`Accessibility: ${access.accessibility}`);
   }
-  const unstable = access.rebuildMayInvalidateAuthorization;
-  box.hidden = missing.length === 0 && !unstable;
+  box.hidden = missing.length === 0;
   if (box.hidden) return;
 
-  const fingerprint = (value: typeof access.parent): string =>
-    `${value.identifier ?? value.executable}/${value.signingMode}${value.cdhash ? `#${value.cdhash.slice(0, 10)}` : ''}`;
-  const parent = fingerprint(access.parent);
-  const backend = fingerprint(access.backend);
-  const decisions =
-    ` Parent=${access.parentPermissions.screen}/${access.parentPermissions.accessibility};` +
-    ` backend=${access.backendPermissions.screen}/${access.backendPermissions.accessibility}.`;
-  box.classList.toggle('is-note', missing.length === 0);
-  $('desktopAccessTitle').textContent =
-    missing.length > 0 ? 'Desktop access needs attention' : 'Development build permission note';
+  $('desktopAccessTitle').textContent = 'Desktop access needs attention';
   $('desktopAccessDetail').textContent =
-    missing.length > 0
-      ? `${missing.join(' · ')}. macOS authorises the current code identity, not just the displayed app name. ${
-          unstable
-            ? 'This unsigned/ad-hoc build may leave a stale enabled row after rebuilding; remove and re-add the current Chat On Steroids.app, then fully restart. The native backend executes inside that same TCC subject.'
-            : 'Fully restart after changing the permission.'
-        }${decisions} Parent ${parent}; backend ${backend}.`
-      : `Screen Recording and Accessibility are granted now. This unsigned/ad-hoc development build may need reauthorisation after rebuilding.${decisions} Parent ${parent}; backend ${backend}.`;
-  $<HTMLButtonElement>('openDesktopPrivacy').hidden = missing.length === 0;
+    `${missing.join(' · ')}. These are live verdicts from the native backend executing inside Chat On Steroids. ` +
+    'Grant the missing macOS permission, then fully quit and reopen the app.';
+  $<HTMLButtonElement>('openDesktopScreen').hidden =
+    !needsScreen || access.screen === 'granted';
+  $<HTMLButtonElement>('openDesktopAccessibility').hidden =
+    !needsAccessibility || access.accessibility === 'granted';
   $<HTMLButtonElement>('requestDesktopAccessibility').hidden =
     !needsAccessibility || access.accessibility === 'granted';
 }

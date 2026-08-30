@@ -64,11 +64,10 @@ describe('macOS desktop safety hardening', () => {
     expect(swift).toMatch(/if #available\(macOS 13\.0, \*\) \{\s*configuration\.width = width\s*configuration\.height = height/);
   });
 
-  it('names the actual TCC subject and stale ad-hoc rebuild failure in permission errors', () => {
+  it('keeps permission prompting in Electron and native execution fail-closed', () => {
     expect(swift).toContain('Swift code inside the Electron process on a Node Worker');
-    expect(swift).toContain('older unsigned/ad-hoc build does not authorize a rebuilt binary');
-    expect(swift).toContain('current Chat On Steroids build');
     expect(swift).toContain('Electron owns prompting through systemPreferences');
     expect(swift).not.toContain('AXIsProcessTrustedWithOptions');
+    expect(swift).not.toContain('older unsigned/ad-hoc build');
   });
 });

@@ -21,9 +21,8 @@ import { Worker } from 'node:worker_threads';
 import { ensureUsablePath, normalizeEnvironment, setEnvValue } from '../env.js';
 import { findWindowsPowerShell, terminateProcessTree } from '../exec.js';
 import { logInfo, logWarn } from '../logger.js';
-import type { MacOSDesktopAccessStatus, MacOSPermissionPair, MacOSPermissionState } from '../../shared/types.js';
+import type { MacOSDesktopAccessStatus, MacOSPermissionState } from '../../shared/types.js';
 import { HELPER_SCRIPT } from './helper.js';
-import { inspectMacOSDesktopAccess } from './macos-access.js';
 
 /** Width the screenshot is scaled down to, matching computer-use convention. */
 export const DEFAULT_SCREENSHOT_WIDTH = 1280;
@@ -1652,43 +1651,44 @@ export async function checkAvailable(): Promise<string | null> {
  * Connection owns when Desktop becomes publishable; shutdown remains owned by
  * `stopComputerHelper`. Clipboard-only configurations deliberately never call this.
  */
-function mediaPermission(value: string): MacOSPermissionState {
-  if (value === 'granted') return 'granted';
-  if (value === 'denied' || value === 'restricted' || value === 'not-determined') return 'missing';
-  return 'unknown';
+async function requestParentAccessibility(): Promise<void> {
+  try {
+    // The native backend executes inside this Electron process, so the parent owns the
+    // one user-facing prompt. Keep Electron lazy for protocol tests outside the app.
+    const electron = await import('electron');
+    electron.systemPreferences?.isTrustedAccessibilityClient(true);
+  } catch {
+    // The subsequent backend preflight remains authoritative and fail-closed.
+  }
 }
 
-async function parentMacOSDesktopAccess(promptAccessibility: boolean): Promise<MacOSPermissionPair> {
-  try {
-    // The Electron main process is tccd's responsible authorization subject for an
-    // app-launched helper. Keep the Electron dependency lazy so protocol/unit tests can
-    // import this module outside a running Electron main process.
-    const electron = await import('electron');
-    const preferences = electron.systemPreferences;
-    if (!preferences) return { screen: 'unknown', accessibility: 'unknown' };
-    return {
-      screen: mediaPermission(preferences.getMediaAccessStatus('screen')),
-      accessibility: preferences.isTrustedAccessibilityClient(promptAccessibility) ? 'granted' : 'missing'
-    };
-  } catch {
-    return { screen: 'unknown', accessibility: 'unknown' };
-  }
+function nativePermission(value: unknown): MacOSPermissionState {
+  return value === true ? 'granted' : value === false ? 'missing' : 'unknown';
 }
 
 export async function refreshMacOSDesktopAccess(
   options: { promptAccessibility?: boolean } = {}
 ): Promise<MacOSDesktopAccessStatus | null> {
   if (process.platform !== 'darwin') return null;
-  const helper = useMacOSDesktopAddon() ? locateMacOSDesktopAddon().addon : locateMacOSDesktopHelper();
-  const parentPermissions = await parentMacOSDesktopAccess(options.promptAccessibility === true);
+  if (options.promptAccessibility === true) await requestParentAccessibility();
   try {
     const reply = await runHelper({ op: 'warm' });
-    const status = await inspectMacOSDesktopAccess(helper, reply, parentPermissions);
+    const status: MacOSDesktopAccessStatus = {
+      screen: nativePermission(reply['screenPermission']),
+      accessibility: nativePermission(reply['accessibilityPermission']),
+      checkedAt: Date.now(),
+      error: null
+    };
     publishMacOSDesktopAccess(status);
     return status;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const status = await inspectMacOSDesktopAccess(helper, {}, parentPermissions, message);
+    const status: MacOSDesktopAccessStatus = {
+      screen: 'unknown',
+      accessibility: 'unknown',
+      checkedAt: Date.now(),
+      error: message
+    };
     publishMacOSDesktopAccess(status);
     return status;
   }
@@ -1710,13 +1710,7 @@ export async function prewarmComputerHelper(): Promise<void> {
     logWarn(`computer use prewarm failed: ${status.error}`);
     return;
   }
-  const identity = (value: MacOSDesktopAccessStatus['parent']): string =>
-    `${value.identifier ?? value.executable}/${value.signingMode}`;
   logInfo(
-    `desktop macos permissions screen=${status.screen} accessibility=${status.accessibility} ` +
-      `parent_permissions=${status.parentPermissions.screen}/${status.parentPermissions.accessibility} ` +
-      `backend_permissions=${status.backendPermissions.screen}/${status.backendPermissions.accessibility} ` +
-      `parent=${identity(status.parent)} backend=${identity(status.backend)} ` +
-      `rebuild_stale_risk=${status.rebuildMayInvalidateAuthorization ? 'yes' : 'no'}`
+    `desktop macos permissions screen=${status.screen} accessibility=${status.accessibility} execution=in-process`
   );
 }
