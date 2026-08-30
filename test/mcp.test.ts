@@ -572,7 +572,7 @@ describe('surface boundaries', () => {
     everything();
     const names = toolNames(await core('tools/list'));
     // find is absent because exec_command is present — they are mutually exclusive.
-    expect(names).toEqual(['agents', 'apply_patch', 'exec_command', 'read', 'session', 'view_image', 'write_stdin']);
+    expect(names).toEqual(['agents', 'apply_patch', 'exec_command', 'power', 'read', 'session', 'view_image', 'write_stdin']);
     for (const name of surfaceDefinition('desktop').tools) expect(names, name).not.toContain(name);
   });
 
@@ -749,9 +749,9 @@ describe('surface boundaries', () => {
     const coreTools = toolList(await core('tools/list'));
     const desktopTools = toolList(await desktop('tools/list'));
 
-    // Counts are the design: Core is capped at seven live schemas because find and the exec
-    // pair cannot both exist, and Desktop is two.
-    expect(coreTools).toHaveLength(7);
+    // Counts are the design: Core is capped at eight live schemas. find and the exec pair
+    // cannot both exist, and the command-gated Power Agent remains one composite schema. Desktop is two.
+    expect(coreTools).toHaveLength(8);
     expect(desktopTools).toHaveLength(2);
 
     // And the size, which is what a discovery pull actually costs the model on every
@@ -761,7 +761,7 @@ describe('surface boundaries', () => {
     // catches the regression it exists to catch.
     const coreBytes = Buffer.byteLength(JSON.stringify(coreTools), 'utf8');
     const desktopBytes = Buffer.byteLength(JSON.stringify(desktopTools), 'utf8');
-    expect(coreBytes, `core tools/list is ${coreBytes} bytes`).toBeLessThan(18_000);
+    expect(coreBytes, `core tools/list is ${coreBytes} bytes`).toBeLessThan(27_000);
     expect(desktopBytes, `desktop tools/list is ${desktopBytes} bytes`).toBeLessThan(8_500);
 
     // Per tool as well as per surface, so one schema cannot quietly eat the whole budget
@@ -784,7 +784,9 @@ describe('surface boundaries', () => {
               ? 3_400
               : tool.name === 'exec_command'
                 ? 3_500
-                : 3_000;
+                : tool.name === 'power'
+                  ? 9_000
+                  : 3_000;
       expect(bytes, `${tool.name} schema is ${bytes} bytes`).toBeLessThan(budget);
     }
   });
@@ -1004,11 +1006,13 @@ describe('capability gating', () => {
   it('keeps command execution off unless it is explicitly enabled', async () => {
     ctx.readOnly = false;
     expect(toolNames(await core('tools/list'))).not.toContain('exec_command');
+    expect(toolNames(await core('tools/list'))).not.toContain('power');
 
     ctx.caps = withCaps({ command: true });
     const names = toolNames(await core('tools/list'));
     expect(names).toContain('exec_command');
     expect(names).toContain('write_stdin');
+    expect(names).toContain('power');
   });
 
   it('drops find when exec_command can do the same job better', async () => {
@@ -1016,6 +1020,7 @@ describe('capability gating', () => {
     ctx.caps = withCaps({ command: true, search: true });
     const names = toolNames(await core('tools/list'));
     expect(names).toContain('exec_command');
+    expect(names).toContain('power');
     expect(names).not.toContain('find');
   });
 

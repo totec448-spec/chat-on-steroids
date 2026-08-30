@@ -2,7 +2,8 @@
 
 This is the current public reference for the tool surface. The implementation and tests are
 authoritative; `src/main/mcp/surfaces.ts`, `src/main/mcp/tools-core.ts`,
-`src/main/mcp/tools-desktop.ts` and `test/mcp.test.ts` should agree with this file.
+`src/main/mcp/tools-power.ts`, `src/main/mcp/tools-desktop.ts` and `test/mcp.test.ts` should agree
+with this file.
 
 ## Connectors
 
@@ -12,7 +13,7 @@ separate secret tokenized local paths.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
-| **Chat On Steroids Core** | Approved files, patches, terminal, recorded-session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` |
+| **Chat On Steroids Core** | Approved files, patches, terminal, Power Agent host operations, recorded-session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `power`, `session`, `agents` |
 | **Chat On Steroids Desktop** | **Windows only:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
 
 The Desktop connector is optional and Windows-only. Core is the main connector everywhere.
@@ -23,12 +24,13 @@ Desktop permissions off at runtime while preserving stored choices for a config 
 Windows. Existing configs keep explicit choices during upgrades; missing legacy permissions are
 not silently widened.
 
-With the fresh all-on capability snapshot, Core advertises seven schemas:
-`read`, `view_image`, `apply_patch`, `exec_command`, `write_stdin`, `session`, and `agents`.
+With the fresh all-on capability snapshot, Core advertises eight schemas:
+`read`, `view_image`, `apply_patch`, `exec_command`, `write_stdin`, `power`, `session`, and `agents`.
 `find` is the search fallback for a snapshot where search is enabled and command execution is
-unavailable. Tool exposure is monotonic within a running connector instance, so a permission
-changed mid-conversation can leave a previously exposed name listed; its handler still enforces
-the current permission.
+unavailable. `power` is exposed only when Run commands is exposed and is guarded by that same live
+permission on every call. Tool exposure is monotonic within a running connector instance, so a
+permission changed mid-conversation can leave a previously exposed name listed; its handler still
+enforces the current permission.
 
 ## Core tools
 
@@ -78,6 +80,34 @@ budget. A blank `chars` value is a poll rather than a separate process-status to
 poll returns as soon as the process produces output rather than holding the full yield window;
 anything that arrives afterwards stays buffered for the next poll. A non-empty write keeps
 Codex's collection-window behaviour so one interactive response is gathered whole.
+
+### `power`
+
+A single composite schema for the high-level host operations proposed in issue #2. It is present
+only when Run commands was exposed and every action re-checks that same live `command` capability.
+It does not create a second, broader permission tier: `exec_command` already has host-level command
+authority, including the ability to address paths outside approved roots.
+
+Actions are:
+
+- `system_info` returns bounded non-secret platform, architecture, memory, CPU-count and uptime facts.
+- `open_url` opens an HTTP(S) URL in the default browser or Chrome, Edge, Firefox or Brave.
+- `web_fetch` performs a bounded HTTP(S) fetch without browser cookies, authorization state or
+  stored browser credentials, follows at most five HTTP(S) redirects, and returns readable
+  Markdown/text instead of a browser DOM.
+- `launch_app` starts an application directly with an explicit argument vector rather than shell
+  interpolation.
+- `process_list` returns a bounded process snapshot; `process_kill` terminates by PID or exact
+  process name and refuses to kill Chat On Steroids itself or its direct parent.
+- `system_exec` runs a bounded one-shot PowerShell/CMD/sh script. Long-running and interactive
+  processes still belong on `exec_command` + `write_stdin`.
+- `fs_system_list`, `fs_system_read` and `fs_system_write` intentionally accept absolute native
+  host paths outside approved roots. Reads are text-only and size-bounded; writes are size-bounded
+  and require an explicit create/overwrite/append mode.
+
+The `fs_system_*` names are deliberately explicit about crossing the approved-root boundary. A
+user who wants the root sandbox without host-wide authority should leave Run commands disabled;
+then `power`, `exec_command` and `write_stdin` are absent together.
 
 ### `session`
 
@@ -161,7 +191,9 @@ can keep observation available while disabling state-changing desktop actions.
 - A connector token for one surface does not authorize the other surface.
 - Read-only mode removes effective file-write, command, control and clipboard-write permissions
   without pretending the underlying configuration was changed.
-- Approved filesystem roots do not sandbox command execution or desktop control.
+- Approved filesystem roots do not sandbox command execution or Desktop control. Power Agent's
+  `fs_system_*` actions also cross that root boundary, but only under the same Run commands
+  capability that already grants equivalent host authority.
 - Tool results and validation errors are bounded; large structured or binary payloads must not
   grow without an explicit cap.
 
@@ -175,8 +207,10 @@ bridge; there is no pairing code to enter.
 ## Tests that protect the surface
 
 `test/mcp.test.ts` checks exact surface membership, cross-surface rejection, discovery-size
-budgets, permission gating, retired names and schema shape. Native image parity has additional
-coverage in `test/codex-view-image-parity.test.ts`.
+budgets, permission gating, retired names and schema shape. `test/power.test.ts` covers the Power
+Agent permission boundary, bounded web fetch, readable-text extraction, system filesystem actions
+and one-shot system execution. Native image parity has additional coverage in
+`test/codex-view-image-parity.test.ts`.
 
 When changing the public tool surface, update the implementation, the surface declarations,
 the tests and this document together. Do not add a permanently exposed tool for a workflow

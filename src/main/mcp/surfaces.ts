@@ -80,8 +80,8 @@ export interface SurfaceDefinition {
 /**
  * Core — the coding loop.
  *
- * `session` and `agents` live here rather than on surfaces of their own, and that is a
- * decision with a concrete reason rather than a tidiness preference:
+ * `session`, `agents` and `power` live here rather than on surfaces of their own, and that is
+ * a decision with a concrete reason rather than a tidiness preference:
  *
  *  - `session` is how a chat discovers and reads local recordings of past or concurrently
  *    running work — including exact authored messages and the arguments/result of one call.
@@ -90,10 +90,13 @@ export interface SurfaceDefinition {
  *    Fresh installs enable it; an existing config that keeps it off still pays nothing for
  *    it here. A dedicated connector for one conditional schema is pure setup overhead with
  *    no discovery benefit.
+ *  - `power` is one composite schema behind Run commands. It packages common host/web/process
+ *    operations that command execution could already perform, so it adds no new permission
+ *    boundary and does not justify another connector.
  *
- * Core declares 8 possible tool names below, but at most 7 schemas are live at once. `find`
+ * Core declares 9 possible tool names below, but at most 8 schemas are live at once. `find`
  * and the exec pair are mutually exclusive — `find` exists only when command execution is
- * off — so no runtime tools/list reaches all 8 declarations.
+ * off — and `power` exists only with command execution, so no runtime tools/list reaches all 9.
  */
 const CORE: SurfaceDefinition = {
   id: 'core',
@@ -103,11 +106,12 @@ const CORE: SurfaceDefinition = {
     'Read and edit code and text files on this computer, and run commands in a real terminal. ' +
     'Use for: opening and reading files, searching a repository, applying patches, creating, renaming and deleting files, ' +
     'running builds, tests, linters, git, npm and shell commands, and continuing long-running or interactive terminal sessions. ' +
+    'With Run commands enabled, Power Agent can also fetch web pages, open URLs, launch apps, inspect or terminate processes, run one-shot system commands, and explicitly access absolute host filesystem paths outside approved roots. ' +
     'Also searches and reads local recordings of previous or concurrently running ChatGPT work, and — when the user has ' +
     'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations.',
-  cardSummary: 'Files, patches and the terminal. Required — this is the coding connector.',
+  cardSummary: 'Files, patches, terminal and optional Power Agent host operations. Required — this is the coding connector.',
   required: true,
-  tools: ['read', 'view_image', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'session', 'agents']
+  tools: ['read', 'view_image', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'power', 'session', 'agents']
 };
 
 /**
