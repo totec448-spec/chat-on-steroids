@@ -107,7 +107,8 @@ export interface FileChange {
   approximate: boolean;
 }
 
-export type ToolOutcome = 'ok' | 'error' | 'rejected';
+/** Only `tool_internal_error` is a connector defect. */
+export type ToolOutcome = 'ok' | 'process_exit_nonzero' | 'tool_rejected' | 'tool_internal_error';
 
 /**
  * How confident the recorder is that this call belongs to the session it landed in.
@@ -171,6 +172,29 @@ export interface ToolCallRecord {
 }
 
 export type MessageState = 'streaming' | 'final';
+
+/** Reads current outcomes and only self-proving legacy `error` rows; ambiguous legacy errors abstain. */
+export function normalizedToolOutcome(
+  call: Pick<ToolCallRecord, 'tool' | 'summary'> & { outcome: unknown }
+): ToolOutcome | null {
+  if (
+    call.outcome === 'ok' ||
+    call.outcome === 'process_exit_nonzero' ||
+    call.outcome === 'tool_rejected' ||
+    call.outcome === 'tool_internal_error'
+  ) {
+    return call.outcome;
+  }
+  if (call.outcome === 'rejected') return 'tool_rejected';
+  if (
+    call.outcome === 'error' &&
+    (call.tool === 'exec_command' || call.tool === 'write_stdin') &&
+    /^✕ exit -?\d+$/.test(call.summary.metric ?? '')
+  ) {
+    return 'process_exit_nonzero';
+  }
+  return null;
+}
 
 interface BaseEvent {
   /** 1-based, strictly increasing within a session. Ordering never relies on time. */
@@ -359,6 +383,11 @@ export interface SessionSummary {
   events: number;
   userMessages: number;
   toolCalls: number;
+  processExitNonzero: number;
+  toolRejected: number;
+  /** Connector/tool implementation failures; the tool reliability numerator. */
+  toolInternalErrors: number;
+  /** Chat errors plus `toolInternalErrors`. */
   errors: number;
   /** Rough local estimate for the whole session — never ChatGPT's private counter. */
   estimatedTokens: number;

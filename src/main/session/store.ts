@@ -33,7 +33,7 @@ import type {
   SessionSummary,
   StoredText
 } from '../../shared/session.js';
-import { eventTokens } from '../../shared/session.js';
+import { eventTokens, normalizedToolOutcome } from '../../shared/session.js';
 import { chronological } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
@@ -206,6 +206,8 @@ interface MetaCheckpoint {
   summary: SessionSummary;
   /** Null means metadata written by a version that did not yet persist a history watermark. */
   historySeq: number | null;
+  /** Derived migration signal; never persisted. */
+  outcomeCountersMissing: boolean;
 }
 
 function messageKey(event: Pick<MessageEvent, 'kind' | 'messageId'>): string | null {
@@ -238,6 +240,9 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     events: 0,
     userMessages: 0,
     toolCalls: 0,
+    processExitNonzero: 0,
+    toolRejected: 0,
+    toolInternalErrors: 0,
     errors: 0,
     estimatedTokens: 0,
     contextTokens: 0,
@@ -617,6 +622,9 @@ async function rebuildSummaryFromHistory(
         events: rebuilt.events,
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
+        processExitNonzero: rebuilt.processExitNonzero,
+        toolRejected: rebuilt.toolRejected,
+        toolInternalErrors: rebuilt.toolInternalErrors,
         errors: rebuilt.errors,
         estimatedTokens: rebuilt.estimatedTokens,
         // `contextTokens` may have been reset by a durable rebind, which is metadata-only and
@@ -657,13 +665,17 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     const historySeq = Math.max(journalSeq, messageSeq);
     const checkpoint = await readMetaCheckpoint(id);
 
-    if (checkpoint?.historySeq === historySeq) {
+    // A pre-taxonomy checkpoint can have a current watermark but stale outcome classification.
+    if (checkpoint?.historySeq === historySeq && !checkpoint.outcomeCountersMissing) {
       return { summary: checkpoint.summary, messages, historySeq, reconciled: false };
     }
-    if (checkpoint && checkpoint.historySeq === null && historySeq === 0) {
-      // Legacy empty session: there is no history to replay, only a missing watermark.
-      await writeSummary(checkpoint.summary, 0);
-      return { summary: checkpoint.summary, messages, historySeq: 0, reconciled: true };
+    if (checkpoint && historySeq === 0) {
+      // Nothing to replay: stamp the empty legacy projection in place.
+      const summary = checkpoint.outcomeCountersMissing
+        ? { ...checkpoint.summary, errors: 0 }
+        : checkpoint.summary;
+      await writeSummary(summary, 0);
+      return { summary, messages, historySeq: 0, reconciled: true };
     }
     if (!checkpoint && historySeq === 0) return null;
 
@@ -742,7 +754,13 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'user_message') summary.userMessages += 1;
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
-    if (event.call.outcome === 'error') summary.errors += 1;
+    const outcome = normalizedToolOutcome(event.call);
+    if (outcome === 'process_exit_nonzero') summary.processExitNonzero += 1;
+    if (outcome === 'tool_rejected') summary.toolRejected += 1;
+    if (outcome === 'tool_internal_error') {
+      summary.toolInternalErrors += 1;
+      summary.errors += 1;
+    }
   }
   if (event.kind === 'chat_error') summary.errors += 1;
   if (event.kind === 'turn_end') summary.lastTurnOutcome = event.outcome;
@@ -1244,6 +1262,9 @@ export async function rewriteUnattributedToolCalls(
       events: 0,
       userMessages: 0,
       toolCalls: 0,
+      processExitNonzero: 0,
+      toolRejected: 0,
+      toolInternalErrors: 0,
       errors: 0,
       estimatedTokens: 0,
       contextTokens: 0,
@@ -1284,10 +1305,19 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
     // has no such field. A session recorded before the lineage was a single chat by
     // definition, and everything it holds was in that chat's context, so both defaults are
     // the truth rather than a placeholder.
+    const outcomeCountersMissing =
+      typeof publicSummary.processExitNonzero !== 'number' ||
+      typeof publicSummary.toolRejected !== 'number' ||
+      typeof publicSummary.toolInternalErrors !== 'number';
     return {
       historySeq,
+      outcomeCountersMissing,
       summary: {
         ...publicSummary,
+        // Keep in-place increments numeric until the forced rebuild supplies the real values.
+        processExitNonzero: publicSummary.processExitNonzero ?? 0,
+        toolRejected: publicSummary.toolRejected ?? 0,
+        toolInternalErrors: publicSummary.toolInternalErrors ?? 0,
         agents: Array.isArray(publicSummary.agents) ? publicSummary.agents : [],
         origin: publicSummary.origin ?? null,
         chatIds: Array.isArray(publicSummary.chatIds)

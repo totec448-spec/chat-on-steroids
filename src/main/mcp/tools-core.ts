@@ -896,6 +896,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               running: output.processId !== null,
               exitCode: output.exitCode,
               timedOut: false,
+              // No `benignExit` here on purpose: a status this drains belongs to the child, is
+              // recorded as `process_exit_nonzero`, and is already outside the reliability
+              // numerator. Exempting it would relabel a failed test run `ok`.
               durationMs: output.wallTimeMs
             });
             logInfo(`tool write_stdin ${input.session_id} (${(input.chars ?? '').length} chars)`);

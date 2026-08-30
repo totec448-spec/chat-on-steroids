@@ -35,6 +35,7 @@ import {
 } from '../src/main/session/store.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 import { DEFAULT_CAPABILITIES, type Capabilities, type Root } from '../src/shared/types.js';
+import type { ToolOutcome } from '../src/shared/session.js';
 import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import { execOwner, noteExecOwner, resetExecOwnershipForTests } from '../src/main/codex/ownership.js';
@@ -3177,13 +3178,58 @@ describe('exec sessions belong to the chat that opened them', () => {
       resetExecOwnershipForTests();
     }
   });
+
+  it('re-offers an exited unread result on later owner calls without draining it or leaking it', async () => {
+    expect(prove('wfr_background_owner', 'conv-background-owner')).toBe('stored');
+    expect(prove('wfr_background_other', 'conv-background-other')).toBe('stored');
+    const started = await asChat('wfr_background_owner', 'exec_command', {
+      cmd: IS_WINDOWS
+        ? "Start-Sleep -Milliseconds 650; Write-Output 'background-e2e-once'; exit 7"
+        : "sleep 0.65; printf '%s\\n' background-e2e-once; exit 7",
+      workdir: '/workspace',
+      yield_time_ms: 250
+    });
+    expect(failed(started), textOf(started)).toBe(false);
+    const sessionId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+    expect(Number.isInteger(sessionId)).toBe(true);
+
+    const owned = new Set([sessionId]);
+    await vi.waitFor(() => expect(unifiedExecManager.exitedUnread(owned)).toHaveLength(1), {
+      timeout: 5_000,
+      interval: 20
+    });
+    const exitCode = unifiedExecManager.exitedUnread(owned)[0]!.exitCode;
+    expect(exitCode).toBe(7);
+    expect(unifiedExecManager.exitedUnread(new Set())).toEqual([]);
+
+    const stranger = await asChat('wfr_background_other', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(stranger)).not.toContain(`Background session ${sessionId}`);
+
+    const later = await asChat('wfr_background_owner', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(later)).toContain(
+      `Background session ${sessionId} finished with exit code ${exitCode} and has unread output`
+    );
+    expect(textOf(later)).toContain(`write_stdin(session_id=${sessionId}, chars="")`);
+    expect(textOf(later)).not.toContain('background-e2e-once');
+
+    const drained = await asChat('wfr_background_owner', 'write_stdin', {
+      session_id: sessionId,
+      chars: ''
+    });
+    expect(textOf(drained)).toContain('background-e2e-once');
+    expect(textOf(drained)).toContain(`Process exited with code ${exitCode}`);
+    expect(textOf(drained)).not.toContain('Background command recovery');
+
+    const after = await asChat('wfr_background_owner', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(after)).not.toContain(`Background session ${sessionId}`);
+  });
 });
 
 describe('the outcome a shell command is recorded with', () => {
   /** Runs `noteExec` the way a tool does, and reports what the recorder would store. */
   const outcomeOf = (
     result: { exitCode: number | null; timedOut?: boolean },
-    preset: 'ok' | 'error' | 'rejected' | null = null
+    preset: ToolOutcome | null = null
   ) => {
     const context: CallContext = {
       startedAt: Date.now(),
@@ -3199,9 +3245,9 @@ describe('the outcome a shell command is recorded with', () => {
     return context.outcome ?? 'ok';
   };
 
-  it('calls a completed non-zero exit an error, not a success', () => {
-    expect(outcomeOf({ exitCode: 1 })).toBe('error');
-    expect(outcomeOf({ exitCode: 3 })).toBe('error');
+  it('calls a completed non-zero exit the child’s own failure, not a success', () => {
+    expect(outcomeOf({ exitCode: 1 })).toBe('process_exit_nonzero');
+    expect(outcomeOf({ exitCode: 3 })).toBe('process_exit_nonzero');
   });
 
   it('leaves a clean exit and a still-running process alone', () => {
@@ -3211,12 +3257,13 @@ describe('the outcome a shell command is recorded with', () => {
     expect(outcomeOf({ exitCode: null })).toBe('ok');
   });
 
-  it('calls a timeout an error even when no exit code arrived', () => {
-    expect(outcomeOf({ exitCode: null, timedOut: true })).toBe('error');
+  it('blames this connector for a timeout, not the child', () => {
+    expect(outcomeOf({ exitCode: null, timedOut: true })).toBe('tool_internal_error');
+    expect(outcomeOf({ exitCode: 1, timedOut: true })).toBe('tool_internal_error');
   });
 
   it('never overwrites an outcome the tool layer set deliberately', () => {
-    expect(outcomeOf({ exitCode: 1 }, 'rejected')).toBe('rejected');
+    expect(outcomeOf({ exitCode: 1 }, 'tool_rejected')).toBe('tool_rejected');
   });
 
   it('does not let the guard downgrade a command error back to ok', () => {
@@ -3234,6 +3281,6 @@ describe('the outcome a shell command is recorded with', () => {
       // the child exited non-zero. The more specific process outcome must survive it.
       noteOutcome('ok');
     });
-    expect(context.outcome).toBe('error');
+    expect(context.outcome).toBe('process_exit_nonzero');
   });
 });

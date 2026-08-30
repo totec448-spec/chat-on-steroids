@@ -952,7 +952,7 @@ describe('activity feed', () => {
       content: [{ type: 'text', text: 'could not read secret.ts' }],
       // Failed summaries may copy the first result line into summary.detail, so this
       // exercises the leak path that an otherwise-successful call would not touch.
-      outcome: 'error',
+      outcome: 'tool_internal_error',
       durationMs: 2,
       startedAt: Date.now(),
       requestId: 'wfr_bridge_secret',

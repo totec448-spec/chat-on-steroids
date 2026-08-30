@@ -14,9 +14,16 @@
  */
 
 import { requestCorrelation } from '../session/correlation.js';
+import { unifiedExecManager } from './manager.js';
 
 /** Owners, keyed by the process id `exec_command` handed back as `session_id`. */
 const owners = new Map<number, string | null>();
+
+function processIdsOwnedBy(conversationId: string): Set<number> {
+  const processIds = new Set<number>();
+  for (const [processId, owner] of owners) if (owner === conversationId) processIds.add(processId);
+  return processIds;
+}
 
 /**
  * The conversation behind an in-flight MCP request, when it is already proven.
@@ -45,6 +52,24 @@ export function forgetExecOwner(processId: number | null): void {
 /** The conversation that opened this session, or null when it was never proven. */
 export function execOwner(processId: number): string | null {
   return owners.get(processId) ?? null;
+}
+
+/** Same-conversation reminders for exited sessions that have not been polled yet. */
+export function backgroundExecRecoveryNotices(conversationId: string | null | undefined): string[] {
+  if (!conversationId) return [];
+  const exited = unifiedExecManager.exitedUnread(processIdsOwnedBy(conversationId));
+  if (exited.length === 0) return [];
+  const notices = exited
+    .slice(0, 3)
+    .map(
+      (session) =>
+        `Background session ${session.processId} finished with exit code ${session.exitCode ?? 'unknown'} and has unread output. ` +
+        `Poll it with write_stdin(session_id=${session.processId}, chars="").`
+    );
+  if (exited.length > notices.length) {
+    notices.push(`${exited.length - notices.length} more background session result(s) are waiting to be polled.`);
+  }
+  return notices;
 }
 
 /**
