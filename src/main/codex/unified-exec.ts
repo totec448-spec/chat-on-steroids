@@ -870,6 +870,18 @@ export class UnifiedExecProcessManager {
       }));
   }
 
+  /** Exited rows not handled by the starting exec; polling releases these rows. */
+  exitedUnread(processIds: ReadonlySet<number>): Array<{ processId: number; exitCode: number | null }> {
+    const sessions: Array<{ processId: number; exitCode: number | null }> = [];
+    for (const entry of this.processes.values()) {
+      if (entry.initialExecCommandActive) continue;
+      if (!processIds.has(entry.processId)) continue;
+      if (!entry.process.hasExited()) continue;
+      sessions.push({ processId: entry.processId, exitCode: entry.process.exitCode() });
+    }
+    return sessions.sort((left, right) => left.processId - right.processId);
+  }
+
   async terminateProcess(processId: number): Promise<boolean> {
     const entry = this.processes.get(processId);
     if (!entry) return false;

@@ -531,7 +531,8 @@ function pipelineStopCandidate(command: string): Token | null {
  */
 function cutPipelineGeneratorOnlyReports(command: string): boolean {
   const token = pipelineStopCandidate(command);
-  if (token === null || programName(token) !== 'git') return false;
+  if (token === null) return false;
+  if (programName(token) !== 'git') return cutPipelineGeneratorIsProvenSearch(token);
   const statements = splitTopLevel(command, [';', '\n']);
   const last = statements[statements.length - 1] as string;
   const generator = splitTopLevel(last, ['|'])[0] as string;
@@ -543,7 +544,26 @@ function cutPipelineGeneratorOnlyReports(command: string): boolean {
   return !tokens.some((argument) => GIT_FLAGS_THAT_MAKE_THE_EXIT_MEAN_SOMETHING.test(argument.value));
 }
 
+/** A path-proven search generator whose own failures are visible in its output. */
+function cutPipelineGeneratorIsProvenSearch(token: Token): boolean {
+  if (!NO_MATCH_MEANS_EXIT_1.has(programName(token))) return false;
+  return /[\\/]/.test(token.value);
+}
+
+/** Observed PowerShell native-pipeline cut statuses, including unsigned -1. */
+const CUT_PIPELINE_EXIT_CODES = new Set([1, -1, 0xff_ff_ff_ff]);
+
+/** A diagnostic line a search program printed about itself, rather than a match. */
 const SEARCH_DIAGNOSTIC = /^\s*(rg|ripgrep|grep|egrep|fgrep|findstr):/im;
+
+/** Command output with single-command response framing removed when present. */
+function commandOutputBody(outputText: string): string[] {
+  const lines = outputText.split('\n').map((line) => line.replace(/\r$/, ''));
+  const start = lines.indexOf('Output:');
+  return (start < 0 ? lines : lines.slice(start + 1)).filter(
+    (line) => line.trim() !== '' && !line.startsWith('---') && !line.startsWith('Warning: truncated output')
+  );
+}
 
 /** A path-proven search answered for at least one path while naming another path it could not read. */
 function searchAnsweredDespiteBadPath(command: string, outputText: string): boolean {
@@ -551,12 +571,7 @@ function searchAnsweredDespiteBadPath(command: string, outputText: string): bool
   const token = statusDeterminingToken(command);
   if (token === null || !/[\\/]/.test(token.value) || !NO_MATCH_MEANS_EXIT_1.has(programName(token))) return false;
   if (!SEARCH_DIAGNOSTIC.test(outputText)) return false;
-  const lines = outputText.split('\n').map((line) => line.replace(/\r$/, ''));
-  const outputAt = lines.indexOf('Output:');
-  const body = outputAt < 0 ? lines : lines.slice(outputAt + 1);
-  return body.some(
-    (line) => line.trim() !== '' && !SEARCH_DIAGNOSTIC.test(line) && !line.startsWith('Warning: truncated output')
-  );
+  return commandOutputBody(outputText).some((line) => !SEARCH_DIAGNOSTIC.test(line));
 }
 
 /**
@@ -573,27 +588,20 @@ export function nonZeroExitIsBenign(
   outputText: string
 ): boolean {
   if (exitCode === null) return false;
-  // A shell that refused the command never reached the search at all, so reading the exit
-  // code as the search's answer is a fabrication. `Write-Output hi && rg foo` is the case
-  // that matters: Windows PowerShell 5.1 rejects `&&` outright, exits 1 without running a
-  // thing, and this function would otherwise call it ripgrep finding no matches.
+  // A shell refusal means the status cannot be interpreted as the child's result.
   if (SHELL_REFUSED.test(outputText)) return false;
-  if (exitCode === 2) return searchAnsweredDespiteBadPath(command, outputText);
-  if (exitCode !== 1) return false;
-  // A reporting git command that was cut short by `Select-Object -First`. Three things have to
-  // hold together before this is provable, and each one alone withholds it: the pipeline has a
-  // truncating stage and nothing that could have set the status itself, the generator is a git
-  // subcommand with no flag that spends the exit code on an answer, and the run printed
-  // something without printing a `fatal:`. Rule out the cut and there is no way left for `git
-  // diff` to have exited 1 with a diff on stdout — which is exactly the shape a worker hit while
-  // capping the output of a four-file diff, then re-ran because the status looked like a failure.
+  // A proven reporting generator cut by `Select-Object -First` can leave a native non-zero status.
   if (
+    CUT_PIPELINE_EXIT_CODES.has(exitCode) &&
     cutPipelineGeneratorOnlyReports(command) &&
-    outputText.trim() !== '' &&
-    !/^\s*(?:fatal|error):/im.test(outputText)
+    commandOutputBody(outputText).length > 0 &&
+    !/^\s*(?:fatal|error):/im.test(outputText) &&
+    !SEARCH_DIAGNOSTIC.test(outputText)
   ) {
     return true;
   }
+  if (exitCode === 2) return searchAnsweredDespiteBadPath(command, outputText);
+  if (exitCode !== 1) return false;
   const token = statusDeterminingToken(command);
   const program = programName(token ?? undefined);
   if (!NO_MATCH_MEANS_EXIT_1.has(program)) return false;
@@ -940,20 +948,38 @@ function isRipgrepPatternRegion(command: string, region: QuotedRegion): boolean 
 export function benignExitNote(
   command: string,
   shellType: ShellType = 'powershell',
-  exitCode: number | null = 1,
-  outputText = ''
+  exitCode?: number | null,
+  outputText?: string
 ): string {
-  if (exitCode === 2 && searchAnsweredDespiteBadPath(command, outputText)) {
+  if (exitCode === 2 && outputText !== undefined && searchAnsweredDespiteBadPath(command, outputText)) {
+    const program = statusDeterminingProgram(command);
+    const missing = outputText
+      .split('\n')
+      .filter((line) => SEARCH_DIAGNOSTIC.test(line))
+      .slice(0, 3)
+      .map((line) => line.trim())
+      .join(' ');
     return (
-      'Exit code 2 here means one search path could not be read, not that the whole search failed: ' +
-      'the matches above are complete for the paths that do exist. Re-check only the path named by ripgrep.'
+      `Exit code 2 from \`${program}\` here is one path it could not read, not a failed search: ` +
+      'the matches above are a complete answer for every path that does exist. ' +
+      `${missing} Re-check that path's spelling and search it on its own — re-running the whole ` +
+      'search would return the same matches again.'
     );
   }
-  if (shellType === 'powershell' && cutPipelineGeneratorOnlyReports(command)) {
-    const program = programName(pipelineStopCandidate(command) ?? undefined);
+  // A search cut is only the better explanation once it actually printed matches.
+  const cutGenerator =
+    shellType === 'powershell' && cutPipelineGeneratorOnlyReports(command)
+      ? pipelineStopCandidate(command)
+      : null;
+  const cutIsTheBetterStory =
+    cutGenerator !== null &&
+    (!cutPipelineGeneratorIsProvenSearch(cutGenerator) ||
+      (outputText !== undefined && commandOutputBody(outputText).length > 0));
+  if (cutGenerator !== null && cutIsTheBetterStory) {
+    const program = programName(cutGenerator);
     return (
-      `Exit code 1 here is \`Select-Object -First\` stopping the pipeline, not a failure: it ` +
-      `closes the pipe while \`${program}\` is still writing, and \`${program}\` has no other ` +
+      `Exit code ${exitCode ?? 1} here is \`Select-Object -First\` stopping the pipeline, not a ` +
+      `failure: it closes the pipe while \`${program}\` is still writing, and \`${program}\` has no other ` +
       'way to exit non-zero once it has printed. The output above is the first N objects and is ' +
       'complete for that window, so the command does not need to be run again. Add `-Wait` to ' +
       'the same stage to keep the exit code meaningful, at the cost of letting the command run ' +

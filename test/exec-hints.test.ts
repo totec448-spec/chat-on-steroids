@@ -122,7 +122,9 @@ describe('a non-zero exit that is a result rather than a failure', () => {
     ].join('\n');
     const command = `${BOUND_RG} -n found src/missing.ts src/main.ts`;
     expect(nonZeroExitIsBenign(command, 2, output)).toBe(true);
-    expect(benignExitNote(command, 'powershell', 2, output)).toContain('matches above are complete');
+    const note = benignExitNote(command, 'powershell', 2, output);
+    expect(note).toMatch(/not a failed search/);
+    expect(note).toContain('src/missing.ts');
   });
 
   it('keeps diagnostic-only, multi-statement, and bare ripgrep exit 2 as failures', () => {
@@ -1057,6 +1059,36 @@ describe('a pipeline stopped early by Select-Object -First', () => {
     expect(note).toContain('-Wait');
     // The no-match wording belongs to the search shape and would be a lie about git.
     expect(note).not.toContain('no matches');
+  });
+
+  it('explains the status the cut actually left behind', () => {
+    const note = benignExitNote(WORKER_1_DIFF_CUT, 'powershell', -1, DIFF_OUTPUT);
+    expect(note).toContain('Exit code -1');
+    expect(note).not.toContain('Exit code 1 ');
+  });
+
+  it('recognises the cut whichever status Windows left behind', () => {
+    const output = 'Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n';
+    const cut = `${BOUND_RG} -n "max" src | Select-Object -First 40`;
+    for (const exitCode of [1, -1, 4_294_967_295]) {
+      expect(nonZeroExitIsBenign(cut, exitCode, output)).toBe(true);
+    }
+    expect(nonZeroExitIsBenign(cut, 3, output)).toBe(false);
+  });
+
+  it('does not read a cut pipeline over a search that printed a diagnostic', () => {
+    const output =
+      'Process exited with code 1\nOutput:\nsrc/main.ts:12:  const max = 20\n' +
+      'rg: src/typo.ts: No such file or directory (os error 2)\n';
+    const cut = `${BOUND_RG} -n "max" src src/typo.ts | Select-Object -First 40`;
+    expect(nonZeroExitIsBenign(cut, 1, output)).toBe(false);
+  });
+
+  it('calls an empty search result no matches even when a cut could also explain it', () => {
+    const empty = 'Wall time: 0.0100 seconds\nProcess exited with code 1\nOutput:\n';
+    const note = benignExitNote(`${BOUND_RG} -n foo src | Select-Object -First 200`, 'powershell', 1, empty);
+    expect(note).toContain('no matches');
+    expect(note).not.toContain('-Wait');
   });
 
   // Every negative below is the direction this must fail towards: a real failure recorded as a

@@ -63,7 +63,8 @@ import {
   originTitle,
   tokenPressure,
   type SessionEvent,
-  type SessionOrigin
+  type SessionOrigin,
+  type ToolOutcome
 } from '../src/shared/session.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -913,6 +914,68 @@ describe('session store', () => {
       userMessages: 1,
       lastHandoffId: handoffId
     });
+  });
+
+  const toolCall = (callId: string, tool: string, outcome: string, metric: string | undefined, seq: number) => ({
+    time: 100 + seq,
+    source: 'app' as const,
+    kind: 'tool_call' as const,
+    call: {
+      callId,
+      tool,
+      attribution: 'unattributed' as const,
+      requestId: null,
+      conversationId: null,
+      attributionMethod: 'unattributed' as const,
+      args: { text: '{}', truncated: false, chars: 2 },
+      result: { text: 'ok', truncated: false, chars: 2 },
+      outcome: outcome as ToolOutcome,
+      durationMs: 1,
+      summary: { title: callId, tone: 'neutral' as const, kind: 'run' as const, ...(metric ? { metric } : {}) }
+    }
+  });
+
+  it('charges the reliability count for a defect here and for nothing else', async () => {
+    const summary = await createSession({ title: 'reliability numerator' });
+    await appendEvent(summary.id, toolCall('clean', 'exec_command', 'ok', undefined, 1));
+    await appendEvent(summary.id, toolCall('failing-build', 'exec_command', 'process_exit_nonzero', undefined, 2));
+    await appendEvent(summary.id, toolCall('refused', 'apply_patch', 'tool_rejected', undefined, 3));
+    expect(await getSession(summary.id)).toMatchObject({ toolCalls: 3, errors: 0 });
+
+    await appendEvent(summary.id, toolCall('broken', 'exec_command', 'tool_internal_error', undefined, 4));
+    expect(await getSession(summary.id)).toMatchObject({
+      toolCalls: 4,
+      processExitNonzero: 1,
+      toolRejected: 1,
+      toolInternalErrors: 1,
+      errors: 1
+    });
+  });
+
+  it('re-derives outcome counters for a session recorded before the taxonomy existed', async () => {
+    const summary = await createSession({ title: 'legacy outcome projection' });
+    await appendEvent(summary.id, toolCall('legacy-exit', 'exec_command', 'error', '✕ exit 7', 1));
+    await appendEvent(summary.id, toolCall('legacy-refusal', 'apply_patch', 'rejected', 'refused', 2));
+    await appendEvent(summary.id, toolCall('legacy-ambiguous', 'read', 'error', undefined, 3));
+    await flushSessions();
+
+    const metaPath = path.join(sessionsRoot(), summary.id, 'meta.json');
+    const stored = JSON.parse(await fs.readFile(metaPath, 'utf8')) as Record<string, unknown>;
+    delete stored.processExitNonzero;
+    delete stored.toolRejected;
+    delete stored.toolInternalErrors;
+    stored.errors = 3;
+    await fs.writeFile(metaPath, JSON.stringify(stored, null, 2), 'utf8');
+
+    resetSessionStoreForTests();
+    const expected = { processExitNonzero: 1, toolRejected: 1, toolInternalErrors: 0, errors: 0 };
+    expect(await getSession(summary.id)).toMatchObject({ toolCalls: 3, ...expected });
+    expect(JSON.parse(await fs.readFile(metaPath, 'utf8'))).toMatchObject(expected);
+
+    const outcomes = (await readEvents(summary.id))
+      .filter((event): event is Extract<SessionEvent, { kind: 'tool_call' }> => event.kind === 'tool_call')
+      .map((event) => event.call.outcome);
+    expect(outcomes).toEqual(['error', 'rejected', 'error']);
   });
 
   it('reconciles a canonical message revision newer than the metadata checkpoint', async () => {
@@ -2004,7 +2067,7 @@ describe('naming the chats this app opened', () => {
 // --------------------------------------------------------------- summaries
 
 describe('tool summaries', () => {
-  const summarize = (tool: string, args: unknown, patch: Partial<ReturnType<typeof emptyEvidence>> = {}, outcome: 'ok' | 'error' | 'rejected' = 'ok', durationMs = 10) =>
+  const summarize = (tool: string, args: unknown, patch: Partial<ReturnType<typeof emptyEvidence>> = {}, outcome: ToolOutcome = 'ok', durationMs = 10) =>
     summarizeToolCall({ tool, args, evidence: evidence(patch), outcome, durationMs, resultHead: 'head line' });
 
   /** The patch text a summary reads its intent off. */
@@ -2113,14 +2176,14 @@ describe('tool summaries', () => {
   it('keeps the subject but not the claim when a call fails or is refused', () => {
     const refused = summarize('apply_patch', { patch: patch('Delete File', '/p/x.ts') }, {
       changes: [{ path: '/p/x.ts', added: 0, removed: 3, approximate: false }]
-    }, 'rejected');
+    }, 'tool_rejected');
     expect(refused.title).toBe('Refused to delete x.ts');
     expect(refused.metric).toBe('refused');
     expect(refused.tone).toBe('warn');
 
     const errored = summarize('apply_patch', { patch: patch('Update File', '/p/x.ts') }, {
       changes: [{ path: '/p/x.ts', added: 1, removed: 1, approximate: false }]
-    }, 'error');
+    }, 'tool_internal_error');
     expect(errored.title).toBe('Could not edit x.ts');
     expect(errored.metric).toBe('✕ failed');
     expect(errored.detail).toBe('head line');
@@ -2144,7 +2207,7 @@ describe('tool summaries', () => {
       ['some_future_tool', {}, 'Could not run some_future_tool']
     ];
     for (const [tool, args, title] of cases) {
-      const summary = summarize(tool, args, {}, 'error');
+      const summary = summarize(tool, args, {}, 'tool_internal_error');
       expect(summary.title, tool).toBe(title);
       // Nothing may still read as an accomplished action.
       expect(summary.title, tool).not.toMatch(/^(Read|Applied|Created|Searched|Ran|Messaged|Reported|Looked) /);
