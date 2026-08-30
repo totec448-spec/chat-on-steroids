@@ -1177,6 +1177,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (id) {
+      // Preserve the page's last exact turn verdict before closeConversation removes its live
+      // recorder entry. Agent ownership outlives a tab; an open turn is the narrower fact that
+      // authorises reopening it.
+      const closedMidTurn = liveConversations().some(
+        (entry) => entry.conversationId === id && (entry.generating || Boolean(entry.activeTurnId))
+      );
       await closeConversation(id);
       // A browser tab closing is not evidence that the server-side ChatGPT turn has stopped.
       // In particular, after a swarm ends the retired-worker lease is the only authority fence
@@ -1193,7 +1199,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       else if (workerConversationGone(id)) {
         logInfo(`bridge: worker chat ${id} closed — its slot is detached, not ended, until it also goes quiet`);
       }
-      queueMissingAgentTab(id);
+      queueMissingAgentTab(id, closedMidTurn);
     }
     return json(res, 200, { ok: true }, origin);
   }
@@ -3551,7 +3557,7 @@ function browserRecoveryMonitoring(): boolean {
   return swarmState().agents.some(
     (agent) =>
       Boolean(agent.conversationId) &&
-      (agent.state === 'active' || agent.state === 'detached' || agent.state === 'waking')
+      (agent.state === 'active' || agent.state === 'waking')
   );
 }
 
@@ -3579,9 +3585,9 @@ function queueInactiveAgentRecoveries(now = Date.now()): void {
   }
 }
 
-/** A final-tab close is one no-tab episode; the browser still scans before it opens anything. */
-function queueMissingAgentTab(conversationId: string, now = Date.now()): void {
-  if (!getConfig().multiAgent.recoverAgentTabs) return;
+/** A final-tab close during one exact open turn is one no-tab recovery episode. */
+function queueMissingAgentTab(conversationId: string, closedMidTurn: boolean, now = Date.now()): void {
+  if (!closedMidTurn || !getConfig().multiAgent.recoverAgentTabs) return;
   const agent = recoveryAgent(conversationId);
   if (!agent || agent.state !== 'detached') return;
   const detachedAt = agent.detachedAt ?? now;
@@ -3591,31 +3597,16 @@ function queueMissingAgentTab(conversationId: string, now = Date.now()): void {
 }
 
 /**
- * Every chat this app can presently prove is mid-turn, and whether it still has a document.
+ * Every live chat this app can presently prove is mid-turn.
  *
- * Two exact populations, and nothing else qualifies: a conversation whose own page reports it
- * is generating, and a worker whose page went away mid-turn (`detached`). An idle chat, a chat
- * that finished, and one the user stopped all fail `generating` and never appear here — which
- * is why this needs no turn-outcome lookup of its own.
- *
- * `detached` is the difference between the two repairs, and it is the one thing this app knows
- * first-hand: that worker's tab reported itself closed, so there is nothing to reload and
- * opening the chat cannot duplicate a tab. For every other candidate the browser is the only
- * authority on whether a tab exists — see the repair handed out by `/status`.
+ * A conversation whose own page reports it is generating qualifies. A tab that went away
+ * mid-turn already filed its exact no-tab repair at `/closed`; treating every durable `detached`
+ * agent as still mid-turn made completed Prime chats reopen merely because they owned a run.
  */
-function repairCandidates(): Array<{ conversationId: string; detached: boolean; endedTurns: number }> {
-  const live = liveConversations();
-  const candidates = live
+function repairCandidates(): Array<{ conversationId: string; endedTurns: number }> {
+  return liveConversations()
     .filter((entry) => entry.generating)
-    .map((entry) => ({ conversationId: entry.conversationId, detached: false, endedTurns: entry.endedTurns }));
-  for (const agent of swarmState().agents) {
-    if (agent.state !== 'detached' || !agent.conversationId) continue;
-    if (candidates.some((entry) => entry.conversationId === agent.conversationId)) continue;
-    // Nothing is counted: a detached worker's chat is closed, and reopening it files nothing
-    // that would need retiring. Its own replacement page reporting is what ends the repair.
-    candidates.push({ conversationId: agent.conversationId, detached: true, endedTurns: 0 });
-  }
-  return candidates;
+    .map((entry) => ({ conversationId: entry.conversationId, endedTurns: entry.endedTurns }));
 }
 
 /**
@@ -3716,7 +3707,7 @@ function repairUnattributedChat(): void {
     )
   ) {
     logInfo(
-      `bridge: unattributed activity — asking the browser to ${target.detached ? 'open or reload' : 'reload'} ${target.conversationId}`
+      `bridge: unattributed activity — asking the browser to reload ${target.conversationId}`
     );
   }
 }
