@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -32,7 +31,6 @@ const {
 } = packagingTargets;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const requireFromTest = createRequire(import.meta.url);
 
 function yamlFile(relative: string): any {
   return loadYaml(readFileSync(path.join(root, ...relative.split('/')), 'utf8'));
@@ -353,22 +351,20 @@ describe('cross-platform packaging targets', () => {
   });
 
   it('keeps the static AppImage sandbox fallback conditional and duplicate-safe', () => {
-    const { generateAppRunScript } = requireFromTest(
-      path.join(root, 'node_modules', 'app-builder-lib', 'out', 'targets', 'appimage', 'appImageUtil.js')
-    ) as { generateAppRunScript: (config: Record<string, string>) => string };
-    const script = generateAppRunScript({
-      ExecutableName: 'chat-on-steroids',
-      DesktopFileName: 'com.chatonsteroids.app.desktop',
-      ProductFilename: 'Chat On Steroids',
-      ProductName: 'Chat On Steroids',
-      ResourceName: 'appimagekit-chat-on-steroids'
-    });
+    // Read the shipped template rather than requiring app-builder-lib to render it. The
+    // assertions below are on the template's own text, so loading that dependency graph buys
+    // no coverage and is the reason this case could hit the global 30s timeout under full-suite
+    // contention while passing in about 1.5s alone.
+    const source = readFileSync(
+      path.join(root, 'node_modules', 'app-builder-lib', 'out', 'targets', 'appimage', 'appImageUtil.js'),
+      'utf8'
+    );
 
-    expect(script).toContain('HAVE_NO_SANDBOX=0');
-    expect(script).toContain('if [ "$arg" = --no-sandbox ] ; then');
-    expect(script).toContain('if [ $HAVE_NO_SANDBOX -eq 0 ] && ! unshare -Ur true 2>/dev/null ; then');
-    expect(script).toContain('NO_SANDBOX=(--no-sandbox)');
-    expect(script).toContain('exec "$BIN" "${NO_SANDBOX[@]}" "${args[@]}"');
+    expect(source).toContain('HAVE_NO_SANDBOX=0');
+    expect(source).toContain('if [ "$arg" = --no-sandbox ] ; then');
+    expect(source).toContain('if [ $HAVE_NO_SANDBOX -eq 0 ] && ! unshare -Ur true 2>/dev/null ; then');
+    expect(source).toContain('NO_SANDBOX=(--no-sandbox)');
+    expect(source).toContain('exec "$BIN" "\\${NO_SANDBOX[@]}" "\\${args[@]}"');
   });
 
   it('pins the current macOS release to unsigned thin native bundles with explicit metadata checks', () => {
