@@ -135,7 +135,7 @@ beforeEach(async () => {
   await saveConfig({
     ...defaultConfig(),
     sessions: { ...defaultConfig().sessions, record: true },
-    multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false }
+    multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false, recoverAgentTabs: true }
   });
 });
 
@@ -377,6 +377,22 @@ describe('settings writes from more than one UI', () => {
     expect(reply.ok, reply.error).toBe(true);
     expect(getConfig().ui.minimizeToTray).toBe(!base.ui.minimizeToTray);
     expect(getConfig().multiAgent.allowUnattributedCalls).toBe(true);
+  });
+
+  it('preserves a newer agent-tab recovery choice across an unrelated stale renderer save', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    await saveConfig({
+      ...base,
+      multiAgent: { ...base.multiAgent, recoverAgentTabs: false }
+    });
+
+    const wanted = { ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } };
+    const reply = await save(wanted, base);
+
+    expect(reply.ok, reply.error).toBe(true);
+    expect(getConfig().ui.minimizeToTray).toBe(!base.ui.minimizeToTray);
+    expect(getConfig().multiAgent.recoverAgentTabs).toBe(false);
   });
 });
 

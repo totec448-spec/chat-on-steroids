@@ -4370,26 +4370,34 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(ends).toHaveLength(1);
     expect(ends[0]!.outcome).toBe('failed');
     expect(ends[0]!.detail).toBe('Message delivery timed out. Please try again.');
+    expect(emitted(live.sent, 'chat_error').map((entry) => entry.event)).toContainEqual(
+      expect.objectContaining({
+        text: 'Message delivery timed out. Please try again.',
+        recoverable: false
+      })
+    );
   });
 
-  it('requests one owned-tab reload for ChatGPT’s exact interrupted-connection terminal notice', async () => {
-    live = await harness(undefined, {
-      reload_owned_chat: () => ({ ok: true })
-    });
-    userTurn(live.document, 'turn-reload-user', 'continue the work');
-    alertBanner(live.document, 'Connection interrupted. Waiting for the complete answer');
+  it('marks ChatGPT’s exact assistant-turn interruption as recoverable without reloading from the page', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'turn-interrupted-assistant', []);
+    const notice = live.document.createElement('div');
+    notice.className = 'markdown';
+    notice.textContent = 'Connection interrupted. Waiting for the complete answer';
+    section.append(notice);
 
     live.hook.observe();
     await settle();
-    live.hook.observe();
-    await settle();
 
-    const reloads = live.sent.filter((message) => message.type === 'reload_owned_chat');
-    expect(reloads).toHaveLength(1);
-    expect(reloads[0]).toMatchObject({
-      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      messageKey: expect.stringContaining('turn-reload-user')
-    });
+    expect(live.sent.some((message) => message.type === 'reload_owned_chat')).toBe(false);
+    const errors = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    expect(errors).toContainEqual(
+      expect.objectContaining({
+        text: 'Connection interrupted. Waiting for the complete answer',
+        turnId: 'turn-interrupted-assistant',
+        recoverable: true
+      })
+    );
   });
 
   /**
@@ -4398,8 +4406,8 @@ describe('a stop button that goes missing while the turn is still running', () =
    * it, so nothing here can wait for a notice - the absence of change *is* the signal, and the
    * page has to be fetched again for the turn to have any chance of finishing.
    */
-  it('reloads a turn that is still marked generating and has produced nothing for ten minutes', async () => {
-    live = await harness(undefined, { reload_owned_chat: () => ({ ok: true }) });
+  it('reports a stalled live turn but leaves recovery authority with the app', async () => {
+    live = await harness();
     userTurn(live.document, 'turn-stalled-user', 'do the long thing');
     startGenerating(live.document);
     assistantTurn(live.document, 'turn-stalled', []);
@@ -4411,22 +4419,17 @@ describe('a stop button that goes missing while the turn is still running', () =
     live.hook.observe();
     await settle();
 
-    const reloads = live.sent.filter((message) => message.type === 'reload_owned_chat');
-    expect(reloads).toHaveLength(1);
-    expect(reloads[0]).toMatchObject({
-      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
-      messageKey: expect.stringContaining('turn-stalled-user')
-    });
+    expect(live.sent.some((message) => message.type === 'reload_owned_chat')).toBe(false);
+    expect(emitted(live.sent, 'chat_error').map((entry) => entry.event.text)).toContain(
+      'No visible progress for ten minutes. The turn is still marked as generating.'
+    );
 
-    // Still stalled on every later tick, and still exactly one reload: the page that comes
-    // back reads the same key out of sessionStorage, and a reload storm would be worse than
-    // the stall.
     for (let tick = 0; tick < 3; tick++) {
       live.advance(live.hook.STALL_MS + 1);
       live.hook.observe();
       await settle();
     }
-    expect(live.sent.filter((message) => message.type === 'reload_owned_chat')).toHaveLength(1);
+    expect(live.sent.some((message) => message.type === 'reload_owned_chat')).toBe(false);
   });
 
   /**
@@ -4438,39 +4441,6 @@ describe('a stop button that goes missing while the turn is still running', () =
    * the tab. That strands exactly the frozen turn the reload exists to heal, which is the same
    * mistake as calling a repair done because it was handed out.
    */
-  it('asks again when the worker could not carry the reload out, and stops once one lands', async () => {
-    let outcome: { ok: boolean; error?: string } = { ok: false, error: 'reload_failed' };
-    live = await harness(undefined, { reload_owned_chat: () => outcome });
-    userTurn(live.document, 'turn-retry-user', 'do the long thing');
-    startGenerating(live.document);
-    assistantTurn(live.document, 'turn-retry', []);
-    live.hook.observe();
-    await settle();
-
-    const reloads = () => live!.sent.filter((message) => message.type === 'reload_owned_chat');
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      live.advance(live.hook.STALL_MS + 1);
-      live.hook.observe();
-      await settle();
-      expect(reloads(), 'a refused reload leaves the turn eligible').toHaveLength(attempt);
-    }
-
-    // Then one lands. The page is on its way out, so the claim stands and the same broken turn
-    // is never reloaded twice however long this document lives on.
-    outcome = { ok: true };
-    live.advance(live.hook.STALL_MS + 1);
-    live.hook.observe();
-    await settle();
-    expect(reloads()).toHaveLength(4);
-
-    for (let tick = 0; tick < 3; tick++) {
-      live.advance(live.hook.STALL_MS + 1);
-      live.hook.observe();
-      await settle();
-    }
-    expect(reloads()).toHaveLength(4);
-  });
-
   /** A turn the user stopped is finished, however long the page then sits there. */
   it('never reloads a stalled turn the user stopped', async () => {
     live = await harness(undefined, { reload_owned_chat: () => ({ ok: true }) });
@@ -6510,6 +6480,29 @@ describe('the Compact & resume control', () => {
       action: 'none',
       hint: 'Nothing to compact yet — send a message, or set a goal and it writes one.'
     });
+  });
+
+  it('reattaches after New Chat replaces send with the live Start dictation / Start Voice controls', async () => {
+    live = await harness();
+    live.hook.injectControl();
+    live.document.querySelector('[data-testid="composer-trailing-actions"]')!.remove();
+    const form = live.document.querySelector('form')!;
+    for (const label of ['Start dictation', 'Start Voice']) {
+      const button = live.document.createElement('button');
+      button.type = 'button';
+      button.setAttribute('aria-label', label);
+      form.append(button);
+    }
+    live.window.history.pushState({}, '', '/');
+
+    live.hook.injectControl();
+
+    const control = live.document.querySelector('.clf-composer') as HTMLElement;
+    expect(control).not.toBeNull();
+    expect(control.parentElement).toBe(form);
+    expect([...form.children].indexOf(control)).toBeLessThan(
+      [...form.children].findIndex((node) => node.getAttribute('aria-label') === 'Start dictation')
+    );
   });
 
   it('sits in the composer, before the send button once the chat exists', async () => {
@@ -10347,9 +10340,10 @@ describe('the goal loop', () => {
       at: 0
     });
 
-    // A compaction is one long wait with no named parts, so it draws no bar rather than an
-    // empty track implying stages nobody is being shown.
-    expect(hook.stageView({ job: { stage: 'opening', busy: true }, goal: null })).toMatchObject({ steps: [] });
+    expect(hook.stageView({ job: { stage: 'opening', busy: true }, goal: null, phase: 'delivering' })).toMatchObject({
+      steps: ['Preparing', 'Writing the handoff', 'Saving it', 'Opening the new chat'],
+      at: 3
+    });
   });
 
   it('draws the bar above the composer, lit up to the stage it is on', async () => {

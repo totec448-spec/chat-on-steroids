@@ -119,7 +119,8 @@ const settingsPatch = z.object({
   multiAgent: z.object({
     enabled: z.boolean(),
     maxWorkers: z.number().int().min(1).max(8),
-    allowUnattributedCalls: z.boolean()
+    allowUnattributedCalls: z.boolean(),
+    recoverAgentTabs: z.boolean()
   }),
   goal: z.object({
     enabled: z.boolean(),
@@ -207,6 +208,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.multiAgent.allowUnattributedCalls,
         base.multiAgent.allowUnattributedCalls,
         wanted.multiAgent.allowUnattributedCalls
+      ),
+      recoverAgentTabs: pick(
+        current.multiAgent.recoverAgentTabs,
+        base.multiAgent.recoverAgentTabs,
+        wanted.multiAgent.recoverAgentTabs
       )
     },
     goal: {

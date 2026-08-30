@@ -333,6 +333,7 @@ describe('shipped defaults', () => {
       expect(config.multiAgent.enabled).toBe(true);
       expect(config.multiAgent.maxWorkers).toBe(2);
       expect(config.multiAgent.allowUnattributedCalls).toBe(false);
+      expect(config.multiAgent.recoverAgentTabs).toBe(true);
     }
   );
 
@@ -350,6 +351,7 @@ describe('shipped defaults', () => {
     expect(loaded.capabilities.control).toBe(false);
     expect(loaded.multiAgent.enabled).toBe(false);
     expect(loaded.multiAgent.allowUnattributedCalls).toBe(false);
+    expect(loaded.multiAgent.recoverAgentTabs).toBe(true);
     expect(loaded.readOnly).toBe(true);
   });
 

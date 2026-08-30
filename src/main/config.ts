@@ -130,7 +130,12 @@ const DEFAULT_GOAL: GoalSettings = {
 };
 // Two workers, not three: three concurrent workers reproducibly trips ChatGPT's rate limit
 // ("too many requests"), which strands the run rather than making it faster.
-const DEFAULT_MULTI_AGENT: MultiAgentSettings = { enabled: false, maxWorkers: 2, allowUnattributedCalls: false };
+const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
+  enabled: false,
+  maxWorkers: 2,
+  allowUnattributedCalls: false,
+  recoverAgentTabs: true
+};
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
   CAPABILITIES.map((capability) => [capability, true])
@@ -267,7 +272,8 @@ const configSchema = z.object({
     .object({
       enabled: z.boolean().optional().default(DEFAULT_MULTI_AGENT.enabled),
       maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
-      allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls)
+      allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls),
+      recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs)
     })
     .optional()
     .default({ ...DEFAULT_MULTI_AGENT }),

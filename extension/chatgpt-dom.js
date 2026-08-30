@@ -56,7 +56,8 @@ var CLF_DOM = (() => {
     '[grid-area="trailing"]';
   const SPEECH =
     'button[data-testid="composer-speech-button"], button[data-testid="composer-dictate-button"], ' +
-    'button[aria-label^="Dictate" i], button[aria-label^="Voice" i]';
+    'button[aria-label^="Dictate" i], button[aria-label^="Voice" i], ' +
+    'button[aria-label="Start dictation" i], button[aria-label="Start Voice" i]';
   /**
    * A control ChatGPT mounts for a completed assistant message, scoped to that turn.
    *
@@ -254,7 +255,7 @@ var CLF_DOM = (() => {
 
   function transportFailure(value) {
     const line = String(value || '').replace(/\s+/g, ' ').trim();
-    return /(?:message delivery timed out|unknown error occurred|there was an error generating (?:a|the) response|error in message stream|network error|something went wrong)/i.test(line);
+    return /(?:message delivery timed out|connection interrupted\.? waiting for the complete answer|unknown error occurred|there was an error generating (?:a|the) response|error in message stream|network error|something went wrong)/i.test(line);
   }
 
   /** The conversation this tab is on, or null for a chat that has not been sent yet. */
@@ -1070,7 +1071,9 @@ var CLF_DOM = (() => {
         if (!displayed(node)) continue;
         const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
         if (value.length <= 2 || value.length >= 500) continue;
-        out.push({ text: value, node, turnId: null });
+        // Toasts and user-row errors are recorded, but never authorize recovery. Only a
+        // recognised failure rendered inside an assistant turn proves which response broke.
+        out.push({ text: value, node, turnId: null, recoverable: false });
         texts.add(value);
       }
       for (const turn of turns()) {
@@ -1080,7 +1083,7 @@ var CLF_DOM = (() => {
             const value = text(markdown, 500).replace(/\s+/g, ' ').trim();
             if (!value || !transportFailure(value) || texts.has(value)) continue;
             texts.add(value);
-            out.push({ text: value, node: markdown, turnId: turn.id, turn });
+            out.push({ text: value, node: markdown, turnId: turn.id, turn, recoverable: true });
           }
         }
       }

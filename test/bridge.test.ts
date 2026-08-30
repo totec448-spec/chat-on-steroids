@@ -42,6 +42,9 @@ const {
   setBrowserOpener,
   shutdownBridge,
   STALE_SWARM_MS,
+  AGENT_INACTIVITY_RECOVERY_MS,
+  AGENT_INACTIVITY_SLEEP_MS,
+  BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   startBridge,
   stopBridge,
@@ -3619,6 +3622,7 @@ describe('unattributed activity recovery', () => {
       expect(await maintenance((await maintenance())!.token)).toBeNull();
 
       // That turn ends without ever making an attributable call, and the next one breaks too.
+      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
       await events(PRIME, [endTurn('turn-first', 'completed'), openTurn('turn-second')]);
       await unattributed();
       await vi.advanceTimersByTimeAsync(20_000);
@@ -3660,6 +3664,7 @@ describe('unattributed activity recovery', () => {
       // A call that attributes is the proof the join is back, and the only thing that makes the
       // chat repairable again. The next break in it is a different failure and gets its reload.
       await attributed(PRIME);
+      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
       await unattributed();
       await vi.advanceTimersByTimeAsync(20_000);
       expect(chatOf(await maintenance())).toBe(PRIME);
@@ -3813,14 +3818,7 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  /**
-   * The one repair the app performs itself, and the one whose success it cannot see.
-   *
-   * `openInBrowser` resolving says a browser accepted a url. Whether ChatGPT then loaded that
-   * conversation is a separate fact, and the only honest source for it is the replacement page
-   * reporting - which is exactly what clears `detached`.
-   */
-  it('reopens the chat of a worker whose page went away, and again until a page reports', async () => {
+  it('hands a missing worker tab to the browser until an action receipt or that page returns', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -3829,86 +3827,37 @@ describe('unattributed activity recovery', () => {
       await request('POST', '/commands/ack', {
         body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
       });
-      // The worker chat worked, then its tab went away mid-turn. That is `detached`, not over,
-      // and there is no document left to reload - only the chat itself to reopen.
-      await events(WORKER, [openTurn('turn-worker')]);
+      await events(WORKER, [openTurn('turn-worker-missing-retry')]);
       await request('POST', '/closed', { body: { conversationId: WORKER } });
       expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('detached');
-      await unattributed();
 
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(reopened(WORKER)).toEqual([`https://chatgpt.com/c/${WORKER}`]);
-
-      // The opener resolved, and that proves only that a browser accepted a url. No page has
-      // reported for this chat, so nothing was actually repaired and the next incident is
-      // entitled to try again. Treating the open as the repair is how a worker whose
-      // replacement page never loaded would sit detached for the rest of the run: it makes no
-      // attributed call - that is what is broken - and a chat that never reports has no live
-      // record to retire anything either.
-      await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(reopened(WORKER)).toHaveLength(2);
-
-      // Then the replacement page arrives and reports for that exact conversation. That is the
-      // page observation which takes the worker out of `detached`, and a worker that is not
-      // detached is not a candidate - so this is the thing, and the only thing, that stops it
-      // being reopened again.
-      await events(WORKER, [openTurn('turn-worker-back')]);
-      await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(reopened(WORKER)).toHaveLength(2);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  /**
-   * The reopen is the app's own action, so the app sees it fail - and a chat that was never
-   * reopened has not been repaired. Recording it as one would spend the only attempt this
-   * worker gets.
-   */
-  it('tries a detached worker again after an open that failed', async () => {
-    vi.useFakeTimers();
-    try {
-      let refuse = true;
-      setBrowserOpener(async (url) => {
-        // Only the repair open fails. The worker's marked bootstrap open is a different thing.
-        if (refuse && url === `https://chatgpt.com/c/${WORKER}`) throw new Error('no browser');
-        opened.push(url);
-      });
-      await pair();
-      spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
-      const bootstrap = await redeem();
-      await request('POST', '/commands/ack', {
-        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
-      });
-      await events(WORKER, [openTurn('turn-worker')]);
-      await request('POST', '/closed', { body: { conversationId: WORKER } });
-      await unattributed();
-
-      await vi.advanceTimersByTimeAsync(20_000);
+      const first = await maintenance();
+      expect(chatOf(first)).toBe(WORKER);
+      const retry = await maintenance();
+      expect(chatOf(retry)).toBe(WORKER);
+      expect(retry!.token).not.toBe(first!.token);
+      // The app itself never opens recovery tabs. The extension scans Chrome immediately
+      // before acting, which is the only place that can choose reload vs open without a race.
       expect(reopened(WORKER)).toEqual([]);
 
-      refuse = false;
-      await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(reopened(WORKER)).toEqual([`https://chatgpt.com/c/${WORKER}`]);
+      await events(WORKER, [openTurn('turn-worker-back')]);
+      expect(await maintenance()).toBeNull();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  /**
-   * A repair is spent when the turn it answered is over, and "over" has to mean not
-   * generating rather than merely a different turn id.
-   *
-   * This worker's repair was pinned to no turn at all - its conversation was closed, so there
-   * was none to name - and a chat that has since gone quiet reports no turn either. Comparing
-   * ids alone reads those two as the same turn still running, and this worker would never be
-   * repairable again for as long as the app runs. It never makes an attributed call here, so
-   * nothing else would ever clear it.
-   */
-  it('reopens a worker chat again after the one it reopened came back and went away', async () => {
+  it('gives a detached prime the same exact missing-tab recovery as a worker', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'keep this run resumable' }], caller: { conversationId: PRIME } });
+    await events(PRIME, [openTurn('turn-prime-before-close')]);
+    await request('POST', '/closed', { body: { conversationId: PRIME } });
+
+    expect(swarmState().agents.find((agent) => agent.role === 'prime')?.state).toBe('detached');
+    expect(chatOf(await maintenance())).toBe(PRIME);
+  });
+
+  it('spends one action per missing-tab episode and applies one cooldown across the next episode', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -3917,22 +3866,134 @@ describe('unattributed activity recovery', () => {
       await request('POST', '/commands/ack', {
         body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
       });
-      await events(WORKER, [openTurn('turn-worker')]);
+      await events(WORKER, [openTurn('turn-worker-cooldown')]);
       await request('POST', '/closed', { body: { conversationId: WORKER } });
-      await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(reopened(WORKER)).toHaveLength(1);
-
-      // The reopened chat is there and idle: it finished, and said nothing about any call.
-      await events(WORKER, [endTurn('turn-worker', 'completed')]);
+      const first = await maintenance();
+      expect(chatOf(first)).toBe(WORKER);
+      expect(await maintenance(first!.token)).toBeNull();
+      // Repeated close reporting with no intervening page activity is still the same episode.
+      await request('POST', '/closed', { body: { conversationId: WORKER } });
       expect(await maintenance()).toBeNull();
 
-      // Then it detaches again, mid-turn, with its join still broken.
+      // The exact page comes back and later disappears again. That is a new episode, but the
+      // per-chat floor still prevents two browser actions from landing back to back.
+      await events(WORKER, [openTurn('turn-worker-back')]);
       await events(WORKER, [openTurn('turn-worker-2')]);
       await request('POST', '/closed', { body: { conversationId: WORKER } });
-      await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(reopened(WORKER)).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - 1);
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(chatOf(await maintenance())).toBe(WORKER);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('accepts only assistant-owned transport errors as reload authority', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'hold the run open' }], caller: { conversationId: PRIME } });
+    await events(PRIME, [openTurn('turn-prime')]);
+
+    // A top-level alert or an error rendered below the user's own message is useful session
+    // evidence, but it has no assistant turn identity and must never cause a reload.
+    await events(PRIME, [{
+      kind: 'chat_error',
+      time: Date.now(),
+      text: 'Message delivery timed out. Please try again.',
+      turnId: null,
+      recoverable: false
+    }]);
+    expect(await maintenance()).toBeNull();
+
+    await events(PRIME, [{
+      kind: 'chat_error',
+      time: Date.now(),
+      text: 'Connection interrupted. Waiting for the complete answer',
+      turnId: 'turn-prime',
+      recoverable: true
+    }]);
+    expect(chatOf(await maintenance())).toBe(PRIME);
+  });
+
+  it('can disable missing-tab and inactivity recovery without changing agent lifecycle', async () => {
+    const previous = getConfig();
+    expect(previous.multiAgent.recoverAgentTabs).toBe(true);
+    await saveConfig({
+      ...previous,
+      multiAgent: { ...previous.multiAgent, recoverAgentTabs: false }
+    });
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [openTurn('turn-worker-recovery-disabled')]);
+      await request('POST', '/closed', { body: { conversationId: WORKER } });
+      expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('detached');
+      expect(await maintenance()).toBeNull();
+    } finally {
+      const latest = getConfig();
+      await saveConfig({
+        ...latest,
+        multiAgent: { ...latest.multiAgent, recoverAgentTabs: true }
+      });
+      expect(getConfig().multiAgent.recoverAgentTabs).toBe(true);
+    }
+  });
+
+  it('checks one silent joined-turn episode at two minutes, then sleeps it at four', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [openTurn('turn-worker-silent')]);
+      expect(getConfig().multiAgent.recoverAgentTabs).toBe(true);
+      expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+      expect(liveConversations().find((entry) => entry.conversationId === WORKER)).toMatchObject({ generating: true });
+
+      await vi.advanceTimersByTimeAsync(AGENT_INACTIVITY_RECOVERY_MS);
+      const check = await maintenance();
+      expect(chatOf(check)).toBe(WORKER);
+      expect(await maintenance(check!.token)).toBeNull();
+
+      // Still the same inactivity episode: no repeating action at minute three.
+      await vi.advanceTimersByTimeAsync(AGENT_INACTIVITY_SLEEP_MS - AGENT_INACTIVITY_RECOVERY_MS - 1);
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'sleeping',
+        revivable: true
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('finishes a four-minute silent joined worker that already crossed the context ceiling', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit at the ceiling' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [openTurn('turn-worker-ceiling')]);
+      noteAgentContextTokens(WORKER, WORKER_CONTEXT_CEILING_TOKENS);
+
+      await vi.advanceTimersByTimeAsync(AGENT_INACTIVITY_SLEEP_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'finished',
+        revivable: false
+      });
     } finally {
       vi.useRealTimers();
     }

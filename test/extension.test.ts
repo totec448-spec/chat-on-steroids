@@ -462,8 +462,12 @@ function loadWorker(options: {
   const tabUpdatedListeners: Array<(tabId: number, changeInfo: { url?: string; status?: string }) => void> = [];
   const installedListeners: Array<(details: { reason: string }) => void> = [];
   const alarmListeners: Array<(alarm: { name: string }) => void> = [];
-  const tabsCreate = vi.fn(async () => ({ id: 99 }));
-  const tabsQuery = vi.fn(options.tabsQuery ?? (async () => []));
+  const knownTabs = new Map<number, { id: number; windowId: number; url?: string; pendingUrl?: string }>();
+  const tabsCreate = vi.fn(async ({ url }: { url?: string } = {}) => {
+    knownTabs.set(99, { id: 99, windowId: 7, ...(url ? { url } : {}) });
+    return { id: 99 };
+  });
+  const tabsQuery = vi.fn(options.tabsQuery ?? (async () => [...knownTabs.values()]));
   const tabsUpdate = vi.fn(async (id: number) => ({ id, windowId: 7 }));
   const tabsSendMessage = vi.fn(options.tabsSendMessage ?? (async () => ({ ok: true })));
   const tabsRemove = vi.fn(async () => undefined);
@@ -576,10 +580,17 @@ function loadWorker(options: {
       await new Promise((resolve) => setTimeout(resolve, 0));
     },
     async createTab(tab: { id: number; url?: string; pendingUrl?: string }) {
+      knownTabs.set(tab.id, {
+        id: tab.id,
+        windowId: 7,
+        ...(tab.url ? { url: tab.url } : {}),
+        ...(tab.pendingUrl ? { pendingUrl: tab.pendingUrl } : {})
+      });
       for (const fn of tabCreatedListeners) fn(tab);
       for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
     },
     async closeTab(tabId: number) {
+      knownTabs.delete(tabId);
       for (const fn of tabRemovedListeners) fn(tabId);
       await new Promise((resolve) => setTimeout(resolve, 0));
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -604,6 +615,7 @@ function loadWorker(options: {
       });
     },
     async navigateTab(tabId: number, url: string) {
+      knownTabs.set(tabId, { id: tabId, windowId: 7, url });
       const chatGpt = /^https:\/\/(?:chatgpt\.com|chat\.openai\.com)(?:\/|$)/i.test(url);
       for (const fn of tabUpdatedListeners) fn(tabId, { url, ...(chatGpt ? { status: 'loading' } : {}) });
       let newDocument: string | null = null;
@@ -634,6 +646,9 @@ function loadWorker(options: {
       }
     },
     send(message, tabId = 1, documentId = documentFor(tabId)) {
+      if (message.type === 'bind' && typeof message.conversationId === 'string') {
+        knownTabs.set(tabId, { id: tabId, windowId: 7, url: `https://chatgpt.com/c/${message.conversationId}` });
+      }
       return new Promise((resolve, reject) => {
         try {
           const keep = listener!(message, { tab: { id: tabId }, documentId, frameId: 0 }, resolve);
@@ -651,44 +666,8 @@ function journalOf(session: FakeStorageArea): any[] {
   return Array.isArray(value) ? value : [];
 }
 
-describe('interrupted ChatGPT response recovery', () => {
-  it('reloads only the exact tab and currently owned document that requested repair', async () => {
-    const worker = loadWorker({ local: new FakeStorageArea(), session: new FakeStorageArea() });
-    const tabId = 17;
-    const documentId = 'document-interrupted-response';
-    await worker.registerTab(tabId, documentId);
-
-    expect(
-      await worker.send(
-        {
-          type: 'reload_owned_chat',
-          conversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-          messageKey: 'user-message-exact'
-        },
-        tabId,
-        documentId
-      )
-    ).toEqual({ ok: true });
-    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
-    expect(worker.tabsReload).toHaveBeenCalledWith(tabId);
-
-    expect(
-      await worker.send(
-        {
-          type: 'reload_owned_chat',
-          conversationId: 'ffffffff-1111-4222-8333-444444444444',
-          messageKey: 'wrong-chat-message'
-        },
-        tabId,
-        documentId
-      )
-    ).toEqual({ ok: false, error: 'stale_conversation' });
-    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
-  });
-});
-
 /**
- * The unattributed-chat repair, from the browser's side.
+ * Exact chat recovery, from the browser's side.
  *
  * The app can prove one chat's tool calls stopped being attributable to it, and can name that
  * chat — but it cannot reach it. The page it would instruct is the page that stopped listening,
@@ -696,7 +675,7 @@ describe('interrupted ChatGPT response recovery', () => {
  * failure this whole path exists to avoid. The tab registry lives here, so the decision does
  * too: this worker asks on the maintenance alarm it already runs, and reloads the exact tab.
  */
-describe('unattributed chat repair from the tab registry', () => {
+describe('exact chat recovery from a fresh Chrome tab scan', () => {
   const paired = { port: 8765, token: 'paired-token' };
   const CHAT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const OTHER = '11111111-2222-4333-8444-555555555555';
@@ -791,8 +770,8 @@ describe('unattributed chat repair from the tab registry', () => {
     expect(asked).toEqual(['status', 'status', `repaired:${CHAT}`]);
   });
 
-  /** No tab of it here, and none is opened: this browser has nothing to repair, and says so. */
-  it('opens nothing for a chat this browser is not holding', async () => {
+  /** A missing exact chat is opened once after the same fresh scan that prevents duplicates. */
+  it('opens the exact chat when the scan proves this browser is not holding it', async () => {
     const { fetch, asked } = appWith(OTHER);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
     await worker.registerTab(41);
@@ -800,8 +779,8 @@ describe('unattributed chat repair from the tab registry', () => {
 
     await worker.fireAlarm();
     expect(worker.tabsReload).not.toHaveBeenCalled();
-    expect(worker.tabsCreate).not.toHaveBeenCalled();
-    expect(asked).toEqual(['status']);
+    expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${OTHER}` });
+    expect(asked).toEqual(['status', `repaired:${OTHER}`]);
   });
 
   /**
