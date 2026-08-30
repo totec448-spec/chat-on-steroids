@@ -105,7 +105,20 @@
                   </button>
                 </span>
               </h2>
-              <div class="scroll" id="groups"></div>
+              <div class="scroll">
+                <div id="groups"></div>
+                <div class="desktop-access" id="desktopAccess" hidden>
+                  <strong id="desktopAccessTitle">Desktop access needs attention</strong>
+                  <p id="desktopAccessDetail"></p>
+                  <button class="btn btn-solid" id="requestDesktopAccessibility" type="button">Request Accessibility</button>
+                  <button
+                    class="btn"
+                    id="openDesktopPrivacy"
+                    type="button"
+                    data-link="x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+                  >Open Accessibility settings</button>
+                </div>
+              </div>
             </section>
 
             <!-- ----------------------------------------------------- folders -->

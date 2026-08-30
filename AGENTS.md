@@ -25,7 +25,7 @@ computer capabilities over MCP. It is a bridge and a permission layer — not a 
 not a model host. It also ships a Chrome extension that watches ChatGPT itself, so the app can
 record conversations, prove which conversation issued which tool call, replace generic tool
 rows with what actually happened, compact a long chat into a fresh one, and run worker chats.
-Core is portable; the Desktop/computer-use surface has native Windows and macOS helpers behind
+Core is portable; the Desktop/computer-use surface has native Windows and macOS backends behind
 one protocol and must be absent from live Linux capability/discovery state.
 
 Four runtime planes, only two of which are servers:
@@ -145,7 +145,7 @@ Release numbers are authoritative in `package.json`, `src/main/version.ts` and
 the app/extension versions stay in sync, so this architecture guide deliberately does not
 copy a release number that can drift. Core is cross-platform; main process is TypeScript;
 extension is plain MV3 JavaScript with no build step; Vitest; `node-pty` is the main native
-terminal dependency. Desktop automation is available through native Windows and macOS helpers.
+terminal dependency. Desktop automation is available through native Windows and macOS backends.
 
 Fresh-install defaults from `config.ts` — **all Core tool permissions on**, **read-only off**,
 **recording on**, session advisory/limit **400k/533k** estimated tokens, **auto-compaction on
@@ -243,7 +243,8 @@ extension/popup.*             status/reconnect UI
 src/renderer/main.ts          setup/settings/connection/activity UI
 src/renderer/chat.ts          session timeline, handoff, swarm UI
 src/main/computer/*           shared frames/batches + Windows PowerShell helper protocol client
-native/macos-desktop-helper/* ScreenCaptureKit, AXUIElement and CGEvent helper source
+native/macos-desktop-helper/* shared ScreenCaptureKit, AXUIElement and CGEvent Swift source
+native/macos-desktop-addon/* N-API bridge that runs that Swift backend in the Electron process
 src/main/tunnel/*             index.ts lifecycle · health.ts metrics · locate.ts binaries
 test/*.test.ts                49 suites, named for the subsystem they cover
 scripts/*                     build-time icon / tunnel-client / ripgrep fetchers
@@ -251,7 +252,7 @@ electron-builder.yml          Windows/macOS/Linux package contents and target po
 ```
 
 `exec.ts` remains as the shared low-level process/environment primitive used by unified exec,
-the Windows desktop helper and tunnels. The retired connector-native managed-process and patch
+the Windows desktop helper, macOS in-process worker and tunnels. The retired connector-native managed-process and patch
 stacks were removed after production moved to `codex/unified-exec.ts` and `codex/apply-patch/*`;
 do not recreate parallel runtimes beside those live owners.
 
@@ -750,8 +751,10 @@ Tests: `tunnel.test.ts`.
 
 **Desktop automation (Windows/macOS).** `tools-desktop.ts` + `computer/*` own the shared model
 contract, frame/ref lifetime, batching and helper protocol. Windows implements that protocol with
-PowerShell, Win32 UI Automation and SendInput; macOS packages a thin Swift helper using
-ScreenCaptureKit, AXUIElement and CGEvent. Registration-time permission is not enough: each action
+PowerShell, Win32 UI Automation and SendInput; macOS loads a thin Swift library through an N-API
+addon on a Node Worker thread inside the Electron main process. That in-process boundary is
+load-bearing: tccd authorises the responsible Electron app, while a raw spawned child can be
+reduced to a different path-based subject even when the parent is allowed. Registration-time permission is not enough: each action
 re-checks, and macOS Screen Recording/Accessibility consent remains an independent OS boundary.
 The helper is prewarmed only when native Desktop capabilities are published; window observation is
 background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
@@ -952,9 +955,11 @@ x64/ARM64 AppImage+DEB. Windows stays per-user-capable, `asInvoker`, no forced e
   do not point Chrome directly at an AppImage's temporary mount.
 - `node-pty`, Sharp/libvips and tree-sitter native payloads are staged for the exact target
   platform/arch; host-native build/prebuild leftovers must never override them.
-- macOS packages compile and stage one thin `macos-desktop-helper` for the target architecture;
-  it must remain outside asar, executable, covered by the app signature, and tested through the
-  installed app because TCC attribution cannot be proved by invoking the source-tree binary.
+- macOS packages compile and stage one thin Swift dylib plus an architecture-matched N-API addon;
+  both remain outside asar and are loaded on a Node Worker thread in the Electron main process.
+  The standalone CLI build is a development protocol probe only and must never become the packaged
+  TCC subject again. Test through the installed app because TCC attribution cannot be proved by
+  invoking the source-tree binary.
 - Uninstall/package replacement deliberately preserves per-user app data.
 
 Before cutting a version, synchronize `package.json`, `src/main/version.ts` and

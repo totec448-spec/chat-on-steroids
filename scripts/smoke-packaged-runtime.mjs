@@ -117,7 +117,10 @@ if (targetPlatform === 'win32') {
   required(`app.asar.unpacked/node_modules/@img/sharp-libvips-${targetPlatform}-${targetArch}/versions.json`);
   required(`app.asar.unpacked/node_modules/node-pty/prebuilds/${nativeDir}/pty.node`);
   if (targetPlatform === 'darwin') required(`app.asar.unpacked/node_modules/node-pty/prebuilds/${nativeDir}/spawn-helper`);
-  if (targetPlatform === 'darwin') required('desktop/macos-desktop-helper');
+  if (targetPlatform === 'darwin') {
+    required('desktop/macos-desktop-addon.node');
+    required('desktop/libcos-desktop.dylib');
+  }
 }
 
 const extensionManifest = JSON.parse(readFileSync(path.join(resourcesDir, 'extension', 'manifest.json'), 'utf8'));
@@ -173,10 +176,6 @@ if (process.platform !== targetPlatform || process.arch !== targetArch) {
 runExecutable(path.join(resourcesDir, 'rg', `rg${suffix}`), ['--version'], RIPGREP.version);
 runExecutable(path.join(resourcesDir, 'tunnel', `tunnel-client${suffix}`), ['--version'], TUNNEL_CLIENT.version.replace(/^v/, ''));
 runExecutable(path.join(resourcesDir, 'tunnel', `cloudflared${suffix}`), ['--version']);
-if (targetPlatform === 'darwin') {
-  runExecutable(path.join(resourcesDir, 'desktop', 'macos-desktop-helper'), [], '"ready":true', '{"op":"warm"}\n');
-}
-
 const probe = String.raw`
 (async () => {
   const base = process.env.COS_RESOURCES_DIR;
@@ -189,6 +188,12 @@ const probe = String.raw`
   const parser = new Parser();
   parser.setLanguage(Bash);
   const tree = parser.parse('echo packaged-tree-sitter');
+  let desktop = null;
+  if (process.platform === 'darwin') {
+    const addon = require(base + '/desktop/macos-desktop-addon.node');
+    addon.initialize(base + '/desktop/libcos-desktop.dylib');
+    desktop = JSON.parse(addon.handle('{"op":"warm"}')).ready === true;
+  }
   const win = process.platform === 'win32';
   const terminal = pty.spawn(win ? (process.env.ComSpec || 'cmd.exe') : '/bin/sh', win ? ['/d', '/s', '/c', 'echo packaged-pty'] : ['-lc', 'printf packaged-pty'], {
     cols: 80, rows: 24, cwd: process.cwd(), env: process.env
@@ -199,7 +204,7 @@ const probe = String.raw`
     terminal.onData((data) => { output += data; });
     terminal.onExit(({ exitCode }) => { clearTimeout(timer); exitCode === 0 ? resolve() : reject(new Error('node-pty child exited ' + exitCode)); });
   });
-  process.stdout.write(JSON.stringify({ version: manifest.version, electron: process.versions.electron, sharp: sharp.versions.sharp, vips: sharp.versions.vips, png: png.length, pty: output.includes('packaged-pty'), tree: tree.rootNode.type }) + '\n');
+  process.stdout.write(JSON.stringify({ version: manifest.version, electron: process.versions.electron, sharp: sharp.versions.sharp, vips: sharp.versions.vips, png: png.length, pty: output.includes('packaged-pty'), tree: tree.rootNode.type, desktop }) + '\n');
   process.exit(0);
 })().catch((error) => process.stderr.write(String(error?.stack || error) + '\n', () => process.exit(1)));`;
 
@@ -214,7 +219,7 @@ if (result.stdout) process.stdout.write(result.stdout);
 if (result.stderr) process.stderr.write(result.stderr);
 if (result.status !== 0) process.exit(result.status ?? 1);
 const runtime = JSON.parse(result.stdout.trim().split(/\r?\n/).at(-1));
-if (runtime.version !== expectedVersion || runtime.electron !== expectedElectronVersion || !runtime.sharp || !runtime.vips || runtime.png <= 0 || !runtime.pty || runtime.tree !== 'program') {
+if (runtime.version !== expectedVersion || runtime.electron !== expectedElectronVersion || !runtime.sharp || !runtime.vips || runtime.png <= 0 || !runtime.pty || runtime.tree !== 'program' || (targetPlatform === 'darwin' && runtime.desktop !== true)) {
   throw new Error(`Packaged native runtime probe failed: ${JSON.stringify(runtime)}`);
 }
 process.stdout.write(`Packaged ${targetPlatform}-${targetArch} resources and native runtimes verified for ${expectedVersion}.\n`);

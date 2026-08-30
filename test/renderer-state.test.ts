@@ -133,6 +133,30 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   stateListener(withTools);
   expect(w.document.getElementById('facts')!.textContent).toContain('Tools across Core + Desktop3 total');
   expect(w.document.getElementById('facts')!.textContent).not.toContain('of 9');
+
+  const withMissingMacAccess = structuredClone(withTools) as any;
+  withMissingMacAccess.platform = { family: 'macos', name: 'macOS', desktopAutomation: true };
+  withMissingMacAccess.config.capabilities.screen = true;
+  withMissingMacAccess.config.capabilities.control = true;
+  withMissingMacAccess.desktopAccess = {
+    screen: 'granted',
+    accessibility: 'missing',
+    parentPermissions: { screen: 'granted', accessibility: 'missing' },
+    backendPermissions: { screen: 'granted', accessibility: 'missing' },
+    parent: { executable: 'Chat On Steroids', identifier: 'Electron', teamIdentifier: null, signingMode: 'adhoc', cdhash: 'aaaaaaaaaaaaaaaa' },
+    backend: { executable: 'macos-desktop-addon.node', identifier: 'macos-desktop-addon', teamIdentifier: null, signingMode: 'adhoc', cdhash: 'bbbbbbbbbbbbbbbb' },
+    rebuildMayInvalidateAuthorization: true,
+    checkedAt: 1,
+    error: null
+  };
+  stateListener(withMissingMacAccess);
+  const accessWarning = w.document.getElementById('desktopAccess')!;
+  expect(accessWarning.hidden).toBe(false);
+  expect(accessWarning.textContent).toContain('Accessibility: missing');
+  expect(accessWarning.textContent).toContain('stale enabled row after rebuilding');
+  expect(accessWarning.textContent).toContain('same TCC subject');
+  expect(accessWarning.textContent).toContain('Electron/adhoc#aaaaaaaaaa');
+  expect((w.document.getElementById('openDesktopPrivacy') as HTMLButtonElement).hidden).toBe(false);
 });
 
 it('serializes settings intent so rapid toggles and later UI changes cannot undo each other', async () => {

@@ -75,6 +75,7 @@ const api = {
   connect: () => call<AppState>('connection:connect'),
   disconnect: () => call<AppState>('connection:disconnect'),
   runDiagnostics: () => call<Diagnosis>('diagnostics:run'),
+  requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
   getLog: () => call<LogEntry[]>('log:get'),
   getLogText: () => call<string>('log:text'),
   getLogJson: () => call<string>('log:json'),

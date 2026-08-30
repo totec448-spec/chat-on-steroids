@@ -16,6 +16,7 @@ function value(name, fallback) {
 const platform = normalizePlatform(value('platform', process.platform));
 const arches = value('arch', process.arch).split(',').map((item) => normalizeArch(item.trim()));
 const dirOnly = args.includes('--dir');
+const macSigningIdentity = process.env['COS_MACOS_SIGNING_IDENTITY']?.trim() || null;
 
 function run(command, commandArgs, env = process.env) {
   const result = spawnSync(command, commandArgs, { cwd: root, stdio: 'inherit', env });
@@ -41,6 +42,14 @@ for (const arch of arches) {
     '--publish',
     'never'
   ];
+  // Releases deliberately remain deterministic and unsigned while electron-builder.yml says
+  // identity:null.  A developer who owns a long-lived local certificate can opt this one build
+  // into stable signing without changing release policy or committing machine-specific names.
+  // electron-builder signs nested Mach-O helpers before the outer app, so parent/helper TCC
+  // requirements survive ordinary rebuilds when the same identity is reused.
+  if (platform === 'darwin' && macSigningIdentity) {
+    builderArgs.push(`--config.mac.identity=${macSigningIdentity}`);
+  }
   if (dirOnly) builderArgs.push('--dir');
   run(node, builderArgs, { ...process.env, COS_PACKAGE_ARCH: arch });
 }

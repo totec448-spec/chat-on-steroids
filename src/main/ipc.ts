@@ -52,6 +52,11 @@ import {
 import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
+import {
+  getMacOSDesktopAccess,
+  onMacOSDesktopAccessChange,
+  refreshMacOSDesktopAccess
+} from './computer/index.js';
 
 /** The only URLs the renderer may ask the OS to open. */
 const ALLOWED_LINKS = new Set([
@@ -63,6 +68,10 @@ const ALLOWED_LINKS = new Set([
   'https://github.com/openai/tunnel-client/releases',
   'https://developers.openai.com/api/docs/guides/secure-mcp-tunnels',
   'https://developers.openai.com/api/docs/guides/developer-mode',
+  // Fixed System Settings destinations used by the macOS Desktop permission warning.
+  // The renderer still cannot ask the OS to open an arbitrary custom scheme.
+  'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+  'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
   // Where the key for the goal loop comes from. The button beside the key field is useless
   // without this: `link:open` refuses anything not named here, so it threw where nobody
   // was looking and the button did nothing at all.
@@ -241,7 +250,8 @@ async function buildState(): Promise<AppState> {
     hasGoalKey: await hasSecret('openRouterApiKey'),
     resolvedBinary: resolvedBinary(config),
     bundledTunnelVersion: bundledVersion(),
-    bridge: await bridgeStatus()
+    bridge: await bridgeStatus(),
+    desktopAccess: getMacOSDesktopAccess()
   };
 }
 
@@ -457,6 +467,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   });
 
   handle('diagnostics:run', async () => runDiagnostics());
+  handle('desktop:requestAccessibility', async () => {
+    await refreshMacOSDesktopAccess({ promptAccessibility: true });
+    return buildState();
+  });
 
   handle('log:get', async () => getLog());
   handle('log:text', async () => formatLogForClipboard());
@@ -657,6 +671,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
+  onMacOSDesktopAccessChange(pushState);
   onLog((entry) => push('log:entry', entry));
   onSessionChange(() => push('session:changed'));
   onSwarmChange(() => push('swarm:changed', swarmState()));

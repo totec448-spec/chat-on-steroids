@@ -7,6 +7,7 @@ import CoreMedia
 import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
+import Darwin
 
 private typealias JSONObject = [String: Any]
 
@@ -204,7 +205,21 @@ private func frontmostPID() -> pid_t? {
 
 private func windowServerFrontWindowID(rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
     let rows = suppliedRows ?? allWindowRows(includeMinimized: false)
-    return rows.first(where: { $0.onScreen })?.id
+    let eligible = Set(rows.lazy.filter(\.onScreen).map(\.id))
+    guard let ordered = CGWindowListCopyWindowInfo(
+        [.optionOnScreenOnly, .excludeDesktopElements],
+        kCGNullWindowID
+    ) as? [JSONObject] else { return nil }
+    // CGWindowListCopyWindowInfo documents the on-screen list in front-to-back order.
+    // allWindowRows uses optionAll so it can also recover genuinely minimised windows; its
+    // filtered array must not be reused as z-order evidence. Intersect the authoritative
+    // ordered list with rows that already passed our layer/alpha/geometry policy instead.
+    for item in ordered {
+        guard let id = number(item[kCGWindowNumber as String])?.uint32Value,
+              eligible.contains(id) else { continue }
+        return id
+    }
+    return nil
 }
 
 private func foregroundWindowID() -> CGWindowID? {
@@ -222,12 +237,14 @@ private func foregroundWindowID() -> CGWindowID? {
     return front.id
 }
 
-private func requireAccessibility(prompt: Bool) throws {
-    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
-    guard AXIsProcessTrustedWithOptions(options) else {
+private func requireAccessibility() throws {
+    // Packaged builds execute this Swift code inside the Electron process on a Node Worker.
+    // Electron owns prompting through systemPreferences; native execution only performs this
+    // fail-closed mutation-boundary preflight. The standalone CLI is a development probe.
+    guard AXIsProcessTrusted() else {
         throw fail(
             "ACCESSIBILITY_PERMISSION_REQUIRED",
-            "enable Accessibility for Chat On Steroids in System Settings > Privacy & Security > Accessibility, then retry"
+            "enable Accessibility for the current Chat On Steroids.app (Device Control on newer macOS), then fully quit and reopen it. An enabled row from an older unsigned/ad-hoc build does not authorize a rebuilt binary"
         )
     }
 }
@@ -237,7 +254,7 @@ private func requireScreenCapture() throws {
         _ = CGRequestScreenCaptureAccess()
         throw fail(
             "SCREEN_PERMISSION_REQUIRED",
-            "enable Screen Recording for Chat On Steroids in System Settings > Privacy & Security > Screen & System Audio Recording, then retry"
+            "enable Screen Recording for the current Chat On Steroids build, then fully quit and reopen it. An enabled entry from an older unsigned/ad-hoc build may not authorize a rebuilt binary"
         )
     }
 }
@@ -374,8 +391,8 @@ private func setAXBooleanIfPossible(_ element: AXUIElement, _ attribute: CFStrin
     setAXValueIfPossible(element, attribute, value ? kCFBooleanTrue : kCFBooleanFalse)
 }
 
-private func matchingAXWindow(_ row: WindowRow, prompt: Bool = true) throws -> AXUIElement {
-    try requireAccessibility(prompt: prompt)
+private func matchingAXWindow(_ row: WindowRow) throws -> AXUIElement {
+    try requireAccessibility()
     let app = AXUIElementCreateApplication(row.pid)
     let windows = axAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
     if let exact = windows.first(where: { axWindowNumber($0) == row.id }) { return exact }
@@ -396,7 +413,7 @@ private func matchingAXWindow(_ row: WindowRow, prompt: Bool = true) throws -> A
 
 private func focusWindow(_ id: CGWindowID) throws -> Bool {
     guard let row = windowRow(id) else { return false }
-    try requireAccessibility(prompt: true)
+    try requireAccessibility()
     if inputTargetMatches(row) { return true }
     guard let app = NSRunningApplication(processIdentifier: row.pid) else { return false }
     let window = try matchingAXWindow(row)
@@ -450,8 +467,7 @@ private func rememberSnapshot(window: CGWindowID, windowBounds: CGRect, elements
 
 private func findUI(
     _ request: JSONObject,
-    suppliedWindow: WindowRow? = nil,
-    promptForAccessibility: Bool = true
+    suppliedWindow: WindowRow? = nil
 ) throws -> JSONObject {
     let row: WindowRow
     if let suppliedWindow {
@@ -463,7 +479,7 @@ private func findUI(
     } else {
         throw fail("WINDOW_NOT_FOUND", "no matching visible window is available")
     }
-    let root = try matchingAXWindow(row, prompt: promptForAccessibility)
+    let root = try matchingAXWindow(row)
     let query = string(request["query"]).lowercased()
     let roleFilter = string(request["role"]).lowercased()
     let maxResults = min(100, max(1, int(request["maxResults"], default: 30)))
@@ -793,11 +809,21 @@ private func cursorObject() -> JSONObject {
 }
 
 private func actUI(_ request: JSONObject) throws -> JSONObject {
-    try requireAccessibility(prompt: true)
+    try requireAccessibility()
     let snapshotID = int(request["snapshotId"])
     let runtimeKey = string(request["runtimeKey"])
-    guard let snapshot = snapshots[snapshotID], snapshot.window == number(request["id"])?.uint32Value else {
-        throw fail("STALE_UI_SNAPSHOT", "the UI snapshot is no longer available")
+    guard let snapshot = snapshots[snapshotID] else {
+        throw fail(
+            "STALE_UI_SNAPSHOT",
+            "UI snapshot \(snapshotID) is no longer retained; retained snapshots: \(snapshotOrder.map(String.init).joined(separator: ","))"
+        )
+    }
+    let requestedWindow = number(request["id"])?.uint32Value
+    guard snapshot.window == requestedWindow else {
+        throw fail(
+            "STALE_UI_SNAPSHOT",
+            "UI snapshot \(snapshotID) belongs to window \(snapshot.window), but the action requested window \(requestedWindow.map(String.init) ?? "missing")"
+        )
     }
     guard let element = snapshot.elements[runtimeKey] else {
         throw fail("UNKNOWN_UI_REF", "the UI element no longer exists in snapshot \(snapshotID)")
@@ -1203,7 +1229,7 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
         }
         if bool(request["includeUi"]) {
             do {
-                let ui = try findUI(request, suppliedWindow: row, promptForAccessibility: false)
+                let ui = try findUI(request, suppliedWindow: row)
                 for key in ["snapshotId", "elements", "visited", "truncated"] {
                     result[key] = ui[key]
                 }
@@ -1212,7 +1238,7 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
             }
         }
     case "act":
-        try requireAccessibility(prompt: true)
+        try requireAccessibility()
         let frame = request["frame"] as? JSONObject
         if let frame { try validateFrame(frame) }
         let frameWindow = number(frame?["window"])?.uint32Value
@@ -1343,6 +1369,25 @@ private func writeResponse(_ response: JSONObject) {
     }
 }
 
+#if COS_DESKTOP_ADDON
+@_cdecl("cos_desktop_handle_json")
+public func cosDesktopHandleJSON(_ request: UnsafePointer<CChar>?) -> UnsafeMutablePointer<CChar>? {
+    guard let request else { return strdup("{\"ok\":false,\"error_code\":\"BAD_REQUEST\",\"message\":\"missing JSON request\"}") }
+    return autoreleasepool {
+        let object = response(for: String(cString: request))
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let json = String(data: data, encoding: .utf8) else {
+            return strdup("{\"ok\":false,\"error_code\":\"HELPER_ERROR\",\"message\":\"response serialization failed\"}")
+        }
+        return strdup(json)
+    }
+}
+
+@_cdecl("cos_desktop_free_json")
+public func cosDesktopFreeJSON(_ value: UnsafeMutablePointer<CChar>?) {
+    free(value)
+}
+#else
 @main
 private enum MacOSDesktopHelperMain {
     static func main() {
@@ -1354,3 +1399,4 @@ private enum MacOSDesktopHelperMain {
         }
     }
 }
+#endif
