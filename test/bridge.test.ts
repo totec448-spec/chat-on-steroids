@@ -3857,6 +3857,16 @@ describe('unattributed activity recovery', () => {
     expect(chatOf(await maintenance())).toBe(PRIME);
   });
 
+  it('keeps a completed prime detached without reopening its idle chat', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'keep this run resumable' }], caller: { conversationId: PRIME } });
+    await events(PRIME, [openTurn('turn-prime-completed'), endTurn('turn-prime-completed', 'completed')]);
+    await request('POST', '/closed', { body: { conversationId: PRIME } });
+
+    expect(swarmState().agents.find((agent) => agent.role === 'prime')?.state).toBe('detached');
+    expect(await maintenance(), 'run ownership is not an open Prime turn').toBeNull();
+  });
+
   it('spends one action per missing-tab episode and applies one cooldown across the next episode', async () => {
     vi.useFakeTimers();
     try {
