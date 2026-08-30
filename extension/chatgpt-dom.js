@@ -257,12 +257,28 @@ var CLF_DOM = (() => {
     return /(?:message delivery timed out|unknown error occurred|there was an error generating (?:a|the) response|error in message stream|network error|something went wrong)/i.test(line);
   }
 
-  /** The conversation this tab is on, or null for a chat that has not been sent yet. */
-  function conversationId() {
+  /**
+   * The conversation a ChatGPT path names, or null when it names none.
+   *
+   * A conversation inside a Project is routed as `/g/<project>/c/<id>`, so anchoring at
+   * `/c/` recognised only chats at the site root. Everything downstream — the app session,
+   * the ownership registry, caller attribution — is keyed on this id, so in a Project the
+   * page was never recognised as being on a conversation at all.
+   *
+   * Deliberately not a loose `/c/<id>` search anywhere in the path: `/share/c/<id>` is a
+   * public read-only snapshot of someone's conversation, not a conversation this document
+   * can own, record or bind. One optional `/g/<slug>` segment is the whole exception.
+   */
+  function conversationFromPath(pathname) {
     return safe(() => {
-      const match = /^\/c\/([0-9a-f-]{8,64})/i.exec(location.pathname);
+      const match = /^\/(?:g\/[^/]+\/)?c\/([0-9a-f-]{8,64})(?:\/|$)/i.exec(String(pathname || ''));
       return match ? match[1] : null;
     }, null);
+  }
+
+  /** The conversation this tab is on, or null for a chat that has not been sent yet. */
+  function conversationId() {
+    return safe(() => conversationFromPath(location.pathname), null);
   }
 
   /** Human ChatGPT title when one has actually been generated; never conversation identity. */
@@ -1419,6 +1435,7 @@ var CLF_DOM = (() => {
 
   return {
     conversationId,
+    conversationFromPath,
     conversationTitle,
     turns,
     presentationTurns,
