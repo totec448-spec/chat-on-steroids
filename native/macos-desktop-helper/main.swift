@@ -56,7 +56,22 @@ private func rect(_ value: Any?) -> CGRect? {
 }
 
 private let maxDecodedScreenshotPixels = 8_000_000
+private let maxEncodedScreenshotBytes = 6_242_304
 private let maxAXStringCharacters = 4_096
+private let maxAXTraversalSeconds = 6.0
+
+// The addon executes synchronously inside the Electron process. A Node Worker timeout cannot
+// pre-empt a blocked native accessibility message, so bound the AX transport itself and let
+// longer traversals enforce their own aggregate deadline between messages.
+private let axMessagingTimeoutConfigured: Void = {
+    let system = AXUIElementCreateSystemWide()
+    _ = AXUIElementSetMessagingTimeout(system, 1.0)
+}()
+
+private func axApplication(_ pid: pid_t) -> AXUIElement {
+    _ = axMessagingTimeoutConfigured
+    return AXUIElementCreateApplication(pid)
+}
 
 private func approximatelyEqual(_ left: CGRect, _ right: CGRect, tolerance: CGFloat = 2) -> Bool {
     abs(left.minX - right.minX) <= tolerance &&
@@ -104,6 +119,26 @@ private func activeDisplayRects() throws -> [CGRect] {
     return displays.prefix(Int(count)).map(CGDisplayBounds)
 }
 
+private func orderedDisplayRects(_ rects: [CGRect]) -> [CGRect] {
+    rects.map(\.integral).sorted {
+        ($0.minX, $0.minY, $0.width, $0.height) < ($1.minX, $1.minY, $1.width, $1.height)
+    }
+}
+
+private func displayTopologyObject(_ rects: [CGRect]) -> [JSONObject] {
+    orderedDisplayRects(rects).map(rectObject)
+}
+
+private func displayTopology(_ value: Any?) -> [CGRect]? {
+    guard let raw = value as? [Any] else { return nil }
+    let parsed = raw.compactMap(rect)
+    return parsed.count == raw.count && !parsed.isEmpty ? orderedDisplayRects(parsed) : nil
+}
+
+private func sameDisplayTopology(_ left: [CGRect], _ right: [CGRect]) -> Bool {
+    orderedDisplayRects(left) == orderedDisplayRects(right)
+}
+
 private func virtualScreenRect() throws -> CGRect {
     try activeDisplayRects().reduce(CGRect.null) { $0.union($1) }
 }
@@ -148,10 +183,13 @@ private func minimizedWindowIDs(in rows: [WindowRow]) -> Set<CGWindowID> {
     guard AXIsProcessTrusted() else { return [] }
     let candidatePids = Set(rows.lazy.filter { !$0.onScreen }.map(\.pid)).prefix(64)
     var ids = Set<CGWindowID>()
-    for pid in candidatePids {
-        let app = AXUIElementCreateApplication(pid)
+    let deadline = ProcessInfo.processInfo.systemUptime + 2.0
+    pidLoop: for pid in candidatePids {
+        if ProcessInfo.processInfo.systemUptime >= deadline { break }
+        let app = axApplication(pid)
         let windows = axAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
         for window in windows.prefix(64) where axBool(window, kAXMinimizedAttribute as CFString, default: false) {
+            if ProcessInfo.processInfo.systemUptime >= deadline { break pidLoop }
             if let id = axWindowNumber(window) { ids.insert(id) }
         }
     }
@@ -238,6 +276,7 @@ private func foregroundWindowID() -> CGWindowID? {
 }
 
 private func requireAccessibility() throws {
+    _ = axMessagingTimeoutConfigured
     // Packaged builds execute this Swift code inside the Electron process on a Node Worker.
     // Electron owns prompting through systemPreferences; native execution only performs this
     // fail-closed mutation-boundary preflight. The standalone CLI is a development probe.
@@ -282,6 +321,7 @@ private func axBool(_ element: AXUIElement, _ attribute: CFString, default fallb
 
 private func axPoint(_ element: AXUIElement, _ attribute: CFString) -> CGPoint? {
     guard let value = axAttribute(element, attribute) else { return nil }
+    guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
     let axValue = value as! AXValue
     guard AXValueGetType(axValue) == .cgPoint else { return nil }
     var point = CGPoint.zero
@@ -290,6 +330,7 @@ private func axPoint(_ element: AXUIElement, _ attribute: CFString) -> CGPoint? 
 
 private func axSize(_ element: AXUIElement, _ attribute: CFString) -> CGSize? {
     guard let value = axAttribute(element, attribute) else { return nil }
+    guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
     let axValue = value as! AXValue
     guard AXValueGetType(axValue) == .cgSize else { return nil }
     var size = CGSize.zero
@@ -304,8 +345,17 @@ private func axBounds(_ element: AXUIElement) -> CGRect? {
     return CGRect(origin: point, size: size)
 }
 
-private func axChildren(_ element: AXUIElement) -> [AXUIElement] {
-    axAttribute(element, kAXChildrenAttribute as CFString) as? [AXUIElement] ?? []
+private func axChildren(_ element: AXUIElement, limit: Int) -> [AXUIElement] {
+    guard limit > 0 else { return [] }
+    var values: CFArray?
+    guard AXUIElementCopyAttributeValues(
+        element,
+        kAXChildrenAttribute as CFString,
+        0,
+        limit,
+        &values
+    ) == .success else { return [] }
+    return values as? [AXUIElement] ?? []
 }
 
 private func axRole(_ element: AXUIElement) -> String {
@@ -325,39 +375,63 @@ private func axWindowNumber(_ element: AXUIElement) -> CGWindowID? {
     (axAttribute(element, "AXWindowNumber" as CFString) as? NSNumber)?.uint32Value
 }
 
-private func focusedAXWindowID(for pid: pid_t, rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
-    guard AXIsProcessTrusted() else { return nil }
-    let app = AXUIElementCreateApplication(pid)
-    guard let focused = axElementAttribute(app, kAXFocusedWindowAttribute as CFString) else { return nil }
-    if let exact = axWindowNumber(focused) { return exact }
-    guard let bounds = axBounds(focused) else { return nil }
-    let rows = suppliedRows ?? allWindowRows(includeMinimized: false)
-    return rows
-        .filter { $0.pid == pid && convincinglyMatchesWindow(bounds, $0.bounds) }
-        .min(by: { windowGeometryDistance(bounds, $0.bounds) < windowGeometryDistance(bounds, $1.bounds) })?.id
+private func axPID(_ element: AXUIElement) -> pid_t? {
+    var pid = pid_t()
+    return AXUIElementGetPid(element, &pid) == .success ? pid : nil
 }
 
-private func focusedAXElementWindowID(for pid: pid_t, rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
-    guard AXIsProcessTrusted() else { return nil }
-    let app = AXUIElementCreateApplication(pid)
-    guard let element = axElementAttribute(app, kAXFocusedUIElementAttribute as CFString) else { return nil }
+private func unambiguousWindowID(bounds: CGRect, pid: pid_t, rows: [WindowRow]) -> CGWindowID? {
+    let candidates = rows
+        .filter { $0.pid == pid && convincinglyMatchesWindow(bounds, $0.bounds) }
+        .map { (id: $0.id, distance: windowGeometryDistance(bounds, $0.bounds)) }
+        .sorted { $0.distance < $1.distance }
+    guard let winner = candidates.first else { return nil }
+    if candidates.count > 1, candidates[1].distance - winner.distance < 32 { return nil }
+    return winner.id
+}
+
+private func owningAXWindowID(
+    _ element: AXUIElement,
+    pid: pid_t,
+    rows suppliedRows: [WindowRow]? = nil
+) -> CGWindowID? {
     var current: AXUIElement? = element
-    for _ in 0..<10 {
+    let deadline = ProcessInfo.processInfo.systemUptime + 2.0
+    for _ in 0..<12 {
+        if ProcessInfo.processInfo.systemUptime >= deadline { return nil }
         guard let candidate = current else { return nil }
         let window = axElementAttribute(candidate, kAXWindowAttribute as CFString) ??
             (axRole(candidate) == "Window" ? candidate : nil)
         if let window {
             if let exact = axWindowNumber(window) { return exact }
             if let bounds = axBounds(window) {
-                let rows = suppliedRows ?? allWindowRows(includeMinimized: false)
-                return rows
-                    .filter { $0.pid == pid && convincinglyMatchesWindow(bounds, $0.bounds) }
-                    .min(by: { windowGeometryDistance(bounds, $0.bounds) < windowGeometryDistance(bounds, $1.bounds) })?.id
+                return unambiguousWindowID(
+                    bounds: bounds,
+                    pid: pid,
+                    rows: suppliedRows ?? allWindowRows(includeMinimized: false)
+                )
             }
         }
         current = axElementAttribute(candidate, kAXParentAttribute as CFString)
     }
     return nil
+}
+
+private func focusedAXWindowID(for pid: pid_t, rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
+    guard AXIsProcessTrusted() else { return nil }
+    let app = axApplication(pid)
+    guard let focused = axElementAttribute(app, kAXFocusedWindowAttribute as CFString) else { return nil }
+    if let exact = axWindowNumber(focused) { return exact }
+    guard let bounds = axBounds(focused) else { return nil }
+    let rows = suppliedRows ?? allWindowRows(includeMinimized: false)
+    return unambiguousWindowID(bounds: bounds, pid: pid, rows: rows)
+}
+
+private func focusedAXElementWindowID(for pid: pid_t, rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
+    guard AXIsProcessTrusted() else { return nil }
+    let app = axApplication(pid)
+    guard let element = axElementAttribute(app, kAXFocusedUIElementAttribute as CFString) else { return nil }
+    return owningAXWindowID(element, pid: pid, rows: suppliedRows)
 }
 
 private func inputTargetMatches(_ row: WindowRow) -> Bool {
@@ -393,15 +467,24 @@ private func setAXBooleanIfPossible(_ element: AXUIElement, _ attribute: CFStrin
 
 private func matchingAXWindow(_ row: WindowRow) throws -> AXUIElement {
     try requireAccessibility()
-    let app = AXUIElementCreateApplication(row.pid)
+    let app = axApplication(row.pid)
     let windows = axAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
-    if let exact = windows.first(where: { axWindowNumber($0) == row.id }) { return exact }
-    let geometryCandidates = windows.compactMap { window -> (element: AXUIElement, distance: CGFloat)? in
-        guard let bounds = axBounds(window), convincinglyMatchesWindow(bounds, row.bounds) else { return nil }
-        let distance = abs(bounds.minX - row.bounds.minX) + abs(bounds.minY - row.bounds.minY) +
-            abs(bounds.width - row.bounds.width) + abs(bounds.height - row.bounds.height)
-        return (window, distance)
-    }.sorted { $0.distance < $1.distance }
+    let deadline = ProcessInfo.processInfo.systemUptime + maxAXTraversalSeconds
+    for window in windows.prefix(64) {
+        guard ProcessInfo.processInfo.systemUptime < deadline else {
+            throw fail("UIA_TIMEOUT", "exact accessibility window matching exceeded its bounded native deadline")
+        }
+        if axWindowNumber(window) == row.id { return window }
+    }
+    var geometryCandidates: [(element: AXUIElement, distance: CGFloat)] = []
+    for window in windows.prefix(64) {
+        guard ProcessInfo.processInfo.systemUptime < deadline else {
+            throw fail("UIA_TIMEOUT", "accessibility window matching exceeded its bounded native deadline")
+        }
+        guard let bounds = axBounds(window), convincinglyMatchesWindow(bounds, row.bounds) else { continue }
+        geometryCandidates.append((window, windowGeometryDistance(bounds, row.bounds)))
+    }
+    geometryCandidates.sort { $0.distance < $1.distance }
     guard let winner = geometryCandidates.first else {
         throw fail("UIA_FAILED", "no accessibility window convincingly matches window \(row.id)")
     }
@@ -423,14 +506,15 @@ private func focusWindow(_ id: CGWindowID) throws -> Bool {
         _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
     }
     _ = app.activate(options: [.activateIgnoringOtherApps])
-    let appElement = AXUIElementCreateApplication(row.pid)
+    let appElement = axApplication(row.pid)
     setAXBooleanIfPossible(appElement, kAXFrontmostAttribute as CFString, true)
     setAXValueIfPossible(appElement, kAXMainWindowAttribute as CFString, window)
     setAXValueIfPossible(appElement, kAXFocusedWindowAttribute as CFString, window)
     setAXBooleanIfPossible(window, kAXMainAttribute as CFString, true)
     setAXBooleanIfPossible(window, kAXFocusedAttribute as CFString, true)
     _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-    for _ in 0..<50 {
+    let deadline = ProcessInfo.processInfo.systemUptime + 2.0
+    while ProcessInfo.processInfo.systemUptime < deadline {
         if inputTargetMatches(row) { return true }
         usleep(20_000)
     }
@@ -491,12 +575,19 @@ private func findUI(
     var visited = 0
     var returned: [JSONObject] = []
     var retained: [String: AXUIElement] = [:]
+    let deadline = ProcessInfo.processInfo.systemUptime + maxAXTraversalSeconds
 
     while cursor < queue.count && visited < maxVisited && returned.count < maxResults {
+        guard ProcessInfo.processInfo.systemUptime < deadline else {
+            throw fail("UIA_TIMEOUT", "accessibility traversal exceeded its bounded native deadline")
+        }
         let element = queue[cursor]
         cursor += 1
         visited += 1
-        queue.append(contentsOf: axChildren(element))
+        let remainingBudget = max(0, maxVisited - queue.count)
+        if remainingBudget > 0 {
+            queue.append(contentsOf: axChildren(element, limit: remainingBudget))
+        }
 
         let role = axRole(element)
         let name = axName(element)
@@ -645,6 +736,11 @@ private func normalizedKeyName(_ name: String) -> String {
 
 private func isSystemShortcut(_ names: [String]) -> Bool {
     let keys = Set(names)
+    if !keys.isDisjoint(with: ["volumeup", "volumedown", "mute"]) { return true }
+    if keys.contains(where: { name in
+        guard name.hasPrefix("f"), let value = Int(name.dropFirst()) else { return false }
+        return (1...20).contains(value)
+    }) { return true }
     if keys.contains("command") && (keys.contains("tab") || keys.contains("space")) { return true }
     if keys.contains("command") && keys.contains("option") && keys.contains("escape") { return true }
     if keys.contains("control") && !keys.isDisjoint(with: ["left", "right", "up", "down"]) { return true }
@@ -828,6 +924,14 @@ private func actUI(_ request: JSONObject) throws -> JSONObject {
     guard let element = snapshot.elements[runtimeKey] else {
         throw fail("UNKNOWN_UI_REF", "the UI element no longer exists in snapshot \(snapshotID)")
     }
+    guard let currentWindow = windowRow(snapshot.window),
+          axPID(element) == currentWindow.pid,
+          owningAXWindowID(element, pid: currentWindow.pid) == snapshot.window else {
+        throw fail(
+            "STALE_UI_SNAPSHOT",
+            "the referenced accessibility control no longer belongs to snapshot window \(snapshot.window)"
+        )
+    }
     guard axBool(element, kAXEnabledAttribute as CFString, default: true) else {
         throw fail("UI_ACTION_DISABLED", "the referenced accessibility control is disabled")
     }
@@ -887,7 +991,14 @@ private func validateFrame(_ frame: JSONObject) throws {
         }
         _ = try assertFrameTarget(frame)
     } else {
-        let screen = try virtualScreenRect()
+        guard let expectedDisplays = displayTopology(frame["displays"]) else {
+            throw fail("STALE_FRAME", "the screen frame has no exact display topology")
+        }
+        let currentDisplays = try activeDisplayRects()
+        guard sameDisplayTopology(expectedDisplays, currentDisplays) else {
+            throw fail("STALE_FRAME", "active display topology changed after the screenshot")
+        }
+        let screen = currentDisplays.reduce(CGRect.null) { $0.union($1) }
         guard screen.contains(region) else { throw fail("STALE_FRAME", "desktop geometry changed after the screenshot") }
     }
 }
@@ -906,7 +1017,14 @@ private func assertFrameTarget(_ frame: JSONObject) throws -> CGWindowID? {
         _ = try assertInputTarget(windowID)
         return windowID
     }
-    let screen = try virtualScreenRect()
+    guard let expectedDisplays = displayTopology(frame["displays"]) else {
+        throw fail("STALE_FRAME", "the screen frame has no exact display topology")
+    }
+    let currentDisplays = try activeDisplayRects()
+    guard sameDisplayTopology(expectedDisplays, currentDisplays) else {
+        throw fail("STALE_FRAME", "active display topology changed after the screenshot")
+    }
+    let screen = currentDisplays.reduce(CGRect.null) { $0.union($1) }
     guard screen.contains(region) else { throw fail("STALE_FRAME", "desktop geometry changed after the screenshot") }
     return nil
 }
@@ -1007,6 +1125,15 @@ private func writePNG(_ image: CGImage, path: String) throws {
     guard CGImageDestinationFinalize(destination) else {
         throw fail("CAPTURE_FAILED", "the PNG file could not be written")
     }
+    let attributes = try FileManager.default.attributesOfItem(atPath: path)
+    let bytes = (attributes[.size] as? NSNumber)?.intValue ?? Int.max
+    guard bytes <= maxEncodedScreenshotBytes else {
+        try? FileManager.default.removeItem(atPath: path)
+        throw fail(
+            "SCREENSHOT_TOO_LARGE",
+            "encoded PNG is \(bytes) bytes; limit \(maxEncodedScreenshotBytes) bytes"
+        )
+    }
 }
 
 private func scaledDimensions(region: CGRect, maxWidth: Int, nativeWidth: Int? = nil) -> (Int, Int) {
@@ -1047,6 +1174,12 @@ private func captureWindow(
     content: SCShareableContent,
     expectedGeometry: CGRect
 ) throws -> (CGImage, CGRect) {
+    guard #available(macOS 14.0, *) else {
+        // Pre-14 direct window capture cannot disable the window shadow. Returning that
+        // shadow-bearing bitmap against the shadow-free WindowServer frame would make every
+        // screenshot coordinate dishonest, so visible windows use the screen fallback.
+        throw fail("CAPTURE_GEOMETRY_UNSAFE", "shadow-free direct window capture requires macOS 14")
+    }
     guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
         throw fail("WINDOW_NOT_FOUND", "no window with id \(windowID) is available for capture")
     }
@@ -1056,14 +1189,10 @@ private func captureWindow(
     }
     let (width, height) = scaledDimensions(region: region, maxWidth: maxWidth)
     let configuration = SCStreamConfiguration()
-    // The current SDK marks these setters macOS 13+. On 12.3-12.6 the stream
-    // captures at its native dimensions and we resize the returned frame below.
-    if #available(macOS 13.0, *) {
-        configuration.width = width
-        configuration.height = height
-    }
+    configuration.width = width
+    configuration.height = height
     configuration.showsCursor = true
-    if #available(macOS 14.0, *) { configuration.ignoreShadowsSingleWindow = true }
+    configuration.ignoreShadowsSingleWindow = true
     let filter = SCContentFilter(desktopIndependentWindow: window)
     let image = try captureImage(filter: filter, configuration: configuration)
     return (try resizedImage(image, width: width, height: height), region)
@@ -1076,6 +1205,13 @@ private func captureDisplay(_ display: SCDisplay, maxWidth: Int) throws -> (CGIm
     if #available(macOS 13.0, *) {
         configuration.width = width
         configuration.height = height
+    } else {
+        // The 12.3 SDK surface cannot bound the decoded allocation before the first frame.
+        // Reject a native 5K/6K source rather than materialising it inside Electron and only
+        // discovering after the fact that it exceeded the advertised pixel ceiling.
+        guard Double(display.width) * Double(display.height) <= Double(maxDecodedScreenshotPixels) else {
+            throw fail("SCREEN_TOO_LARGE", "native display capture exceeds the decoded-pixel budget on macOS 12")
+        }
     }
     configuration.showsCursor = true
     let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
@@ -1129,7 +1265,8 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
     let file = string(request["file"])
     guard !file.isEmpty else { throw fail("BAD_REQUEST", "capture needs an output file") }
     let maxWidth = min(2_560, max(1, int(request["maxWidth"], default: 1_280)))
-    let screen = try virtualScreenRect()
+    let displayRects = try activeDisplayRects()
+    let screen = displayRects.reduce(CGRect.null) { $0.union($1) }
     let content = try shareableContent()
     let requestedWindow = forcedWindow ?? number(request["id"])?.uint32Value
 
@@ -1151,7 +1288,12 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
             )
             captureMode = "window"
         } catch let error as HelperFailure {
-            let canUseVisibleFallback = row.onScreen && ["WINDOW_NOT_FOUND", "CAPTURE_FAILED", "CAPTURE_TIMEOUT"].contains(error.code)
+            let canUseVisibleFallback = row.onScreen && [
+                "WINDOW_NOT_FOUND",
+                "CAPTURE_FAILED",
+                "CAPTURE_TIMEOUT",
+                "CAPTURE_GEOMETRY_UNSAFE"
+            ].contains(error.code)
             guard canUseVisibleFallback else { throw error }
             region = row.bounds
             image = try captureComposite(region: region, maxWidth: maxWidth, displays: content.displays)
@@ -1180,6 +1322,7 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
         "region": rectObject(region),
         "image": ["width": image.width, "height": image.height],
         "screen": rectObject(screen),
+        "displays": displayTopologyObject(displayRects),
         "focused": requestedWindow == nil ? NSNull() : foregroundWindowID() == requestedWindow,
         "captureMode": captureMode
     ]

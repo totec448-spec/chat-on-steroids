@@ -81,7 +81,7 @@ import { helperTimeoutMs, listWindows } from '../src/main/computer/index.js';
 describe('desktop helper protocol validation', () => {
   it('budgets a macOS act request for cumulative focus polling', () => {
     const actions = Array.from({ length: 20 }, (_, index) => ({ type: 'focus', window: index + 1 }));
-    expect(helperTimeoutMs({ op: 'act', actions }, 'darwin')).toBe(37_000);
+    expect(helperTimeoutMs({ op: 'act', actions }, 'darwin')).toBe(57_000);
     expect(helperTimeoutMs({ op: 'act', actions }, 'win32')).toBe(15_000);
   });
 

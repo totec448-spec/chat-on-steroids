@@ -760,7 +760,10 @@ The helper is prewarmed only when native Desktop capabilities are published; win
 background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
 window geometry; semantic refs bind cached elements to bounded native accessibility snapshots.
 Physical input revalidates the target, batches report partial completion and route evidence, and
-compact local postconditions avoid model-driven wait/observe loops. Tests: `computer*.test.ts` and
+screen frames additionally retain the exact active-display rectangles rather than only their union.
+The in-process Swift path sets a native AX messaging timeout and bounded traversal deadlines because a
+Node Worker timeout cannot pre-empt a synchronous accessibility call. Physical input batches report
+partial completion and route evidence, and compact local postconditions avoid model-driven wait/observe loops. Tests: `computer*.test.ts` and
 the opt-in `macos-computer-live.test.ts` packaged-host probe.
 
 **On-disk state to inspect.** Electron `userData` — `%APPDATA%\chat-on-steroids\` on Windows,

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const swift = readFileSync(path.join(process.cwd(), 'native/macos-desktop-helper/main.swift'), 'utf8');
 const preparation = readFileSync(path.join(process.cwd(), 'scripts/prepare-macos-desktop-helper.mjs'), 'utf8');
+const computer = readFileSync(path.join(process.cwd(), 'src/main/computer/index.ts'), 'utf8');
 
 describe('macOS desktop safety hardening', () => {
   it('requires exact Workspace, WindowServer and AX agreement for physical input', () => {
@@ -50,6 +51,8 @@ describe('macOS desktop safety hardening', () => {
     expect(swift).toContain('if globalShortcut { event.post(tap: .cghidEventTap) }');
     expect(swift).toContain('UI_ACTION_DISABLED');
     expect(swift).toContain('the referenced accessibility control is disabled');
+    expect(swift).toContain('["volumeup", "volumedown", "mute"]');
+    expect(swift).toContain('(1...20).contains(value)');
   });
 
   it('rejects physical points that fall between active displays', () => {
@@ -59,9 +62,44 @@ describe('macOS desktop safety hardening', () => {
     expect(swift).toContain('for point in points { try requirePointOnActiveDisplay(point, displays: displays) }');
   });
 
-  it('keeps the installed SDK availability guard on ScreenCaptureKit dimensions', () => {
-    expect(swift).toContain('The current SDK marks these setters macOS 13+');
+  it('keeps old ScreenCaptureKit allocations bounded and window geometry honest', () => {
     expect(swift).toMatch(/if #available\(macOS 13\.0, \*\) \{\s*configuration\.width = width\s*configuration\.height = height/);
+    expect(swift).toContain('CAPTURE_GEOMETRY_UNSAFE');
+    expect(swift).toContain('configuration.ignoreShadowsSingleWindow = true');
+    expect(swift).toContain('native display capture exceeds the decoded-pixel budget on macOS 12');
+    expect(swift).toContain('private let maxEncodedScreenshotBytes = 6_242_304');
+    expect(computer).toContain('export const MAX_SCREENSHOT_PNG_BYTES');
+    expect(computer).toContain('SCREENSHOT_TOO_LARGE: encoded PNG');
+  });
+
+  it('bounds native AX messaging, traversal breadth and aggregate traversal time', () => {
+    expect(swift).toContain('AXUIElementSetMessagingTimeout(system, 1.0)');
+    expect(swift).toContain('private let maxAXTraversalSeconds = 6.0');
+    expect(swift).toContain('accessibility traversal exceeded its bounded native deadline');
+    expect(swift).toContain('AXUIElementCopyAttributeValues');
+    expect(swift).toContain('axChildren(element, limit: remainingBudget)');
+  });
+
+  it('validates AX value types and the live owning window of every semantic ref', () => {
+    expect(swift).toMatch(/private func axPoint[\s\S]*CFGetTypeID\(value\) == AXValueGetTypeID\(\)/);
+    expect(swift).toMatch(/private func axSize[\s\S]*CFGetTypeID\(value\) == AXValueGetTypeID\(\)/);
+    expect(swift).toContain('private func unambiguousWindowID');
+    expect(swift).toContain('private func owningAXWindowID');
+    expect(swift).toContain('axPID(element) == currentWindow.pid');
+    expect(swift).toMatch(/private func actUI[\s\S]*owningAXWindowID\(element, pid: currentWindow\.pid\) == snapshot\.window/);
+  });
+
+  it('binds screen frames to the exact active-display topology', () => {
+    expect(swift).toContain('private func sameDisplayTopology');
+    expect(swift).toContain('"displays": displayTopologyObject(displayRects)');
+    expect(swift).toContain('active display topology changed after the screenshot');
+    expect(computer).toContain('displayTopology: Rect[] | null');
+    expect(computer).toContain('displays: frame.displayTopology');
+  });
+
+  it('publishes only the newest overlapping macOS permission refresh', () => {
+    expect(computer).toContain('macOSDesktopAccessRefreshGeneration');
+    expect(computer).toContain('generation === macOSDesktopAccessRefreshGeneration');
   });
 
   it('keeps permission prompting in Electron and native execution fail-closed', () => {
