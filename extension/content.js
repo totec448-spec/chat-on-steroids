@@ -2135,7 +2135,13 @@
     try {
       const path = location.pathname;
       if (path === seededPath) return true;
-      const named = /^\/c\//.test(path) && !/^\/c\//.test(seededPath || '');
+      // Through the canonical parser, not a second `/c/` test of its own. In a Project the
+      // route is `/g/<project>/c/<id>`, so the local test recognised no id there: a fresh
+      // Project chat being given its id looked like a navigation to a different chat, which
+      // banked the turn in flight as history and lost the evidence for the first call — the
+      // call that says who the chat is.
+      const named =
+        CLF_DOM.conversationFromPath(path) !== null && CLF_DOM.conversationFromPath(seededPath) === null;
       seededPath = path;
       return named;
     } catch {

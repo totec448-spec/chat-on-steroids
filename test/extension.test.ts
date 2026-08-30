@@ -202,6 +202,8 @@ function toolBlock(label = 'Called tool'): FakeNode {
 }
 
 interface DomApi {
+  conversationId(): string | null;
+  conversationFromPath(pathname: unknown): string | null;
   turns(): Array<{ node: FakeNode; nodes: FakeNode[]; id: string | null; role: string | null }>;
   messages(): Array<{ id: string; role: string; text: string; turnId: string | null }>;
   progressLine(turn: unknown): string | null;
@@ -212,12 +214,12 @@ interface DomApi {
   errors(): string[];
 }
 
-function loadDom(sections: FakeNode[]): DomApi {
+function loadDom(sections: FakeNode[], pathname = '/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'): DomApi {
   const document = {
     querySelectorAll: (selector: string) => (selector === TURN_SELECTOR ? sections : []),
     querySelector: () => null
   };
-  const context = vm.createContext({ document, location: { pathname: '/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' } });
+  const context = vm.createContext({ document, location: { pathname } });
   vm.runInContext(domSource, context, { filename: 'chatgpt-dom.js' });
   return (context as unknown as { CLF_DOM: DomApi }).CLF_DOM;
 }
@@ -227,6 +229,46 @@ function turn(role: 'user' | 'assistant', id: string): FakeNode {
 }
 
 describe('ChatGPT DOM adapter', () => {
+  const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+  /**
+   * Project conversations are routed under the project, and everything downstream — app
+   * session, ownership registry, caller attribution — is keyed on the id this returns.
+   * A shared snapshot is deliberately not a conversation this document can own.
+   */
+  it('recognises a conversation at the site root and inside a Project, and only those', () => {
+    const dom = loadDom([]);
+    for (const accepted of [
+      `/c/${CONVERSATION}`,
+      `/c/${CONVERSATION}/`,
+      `/g/g-p-68abcdef1234/c/${CONVERSATION}`,
+      `/g/g-p-68abcdef1234/c/${CONVERSATION}/`,
+      `/g/g-abcdef/c/${CONVERSATION}`
+    ]) {
+      expect(dom.conversationFromPath(accepted), accepted).toBe(CONVERSATION);
+    }
+
+    for (const rejected of [
+      '/',
+      '/c/short',
+      `/share/c/${CONVERSATION}`,
+      `/share/${CONVERSATION}`,
+      `/gpts/c/${CONVERSATION}`,
+      `/g/g-p-one/g/g-p-two/c/${CONVERSATION}`
+    ]) {
+      expect(dom.conversationFromPath(rejected), rejected).toBeNull();
+    }
+
+    expect(dom.conversationFromPath(null)).toBeNull();
+    expect(dom.conversationFromPath(undefined)).toBeNull();
+  });
+
+  it('reads the live route through that same parser', () => {
+    expect(loadDom([], `/g/g-p-68abcdef1234/c/${CONVERSATION}`).conversationId()).toBe(CONVERSATION);
+    expect(loadDom([], `/share/c/${CONVERSATION}`).conversationId()).toBeNull();
+    expect(loadDom([], '/').conversationId()).toBeNull();
+  });
+
   it('groups split assistant sections that share one data-turn-id before counting tool blocks', () => {
     const user = turn('user', 'user-1');
     const a1 = turn('assistant', 'request-1').with(TOOL_SELECTOR, [toolBlock(), toolBlock()]);
