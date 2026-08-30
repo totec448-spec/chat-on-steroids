@@ -2939,3 +2939,77 @@ describe('the overlay stylesheet', () => {
     expect([...used].filter((name) => !defined.has(name))).toEqual([]);
   });
 });
+
+/**
+ * The one request this worker makes that waits on a model rather than on the app.
+ *
+ * A goal written on a New Chat has no conversation to stream a draft onto, so `/goal/open`
+ * holds the connection open for a whole OpenRouter completion — which the app allows 180s
+ * for. This worker allowed every request ten seconds. A completion that took longer was
+ * therefore abandoned here while the app went on to finish it: the account was billed for an
+ * answer, the reply arrived with nobody left to receive it, and the page reported the
+ * platform's opaque "signal is aborted without reason" and stopped. That is the shape these
+ * tests pin — the deadline, and what a deadline is allowed to mean.
+ */
+describe('the goal opening, which waits on a model', () => {
+  const paired = { port: 8765, token: 'paired-token' };
+
+  /** A worker whose `/goal/open` never answers on its own, and the signal it was handed. */
+  function hangingApp() {
+    const seen: { signal: AbortSignal | null } = { signal: null };
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/goal/open') {
+        const signal = init.signal as AbortSignal;
+        seen.signal = signal;
+        return await new Promise<ReturnType<typeof response>>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      }
+      return response(404, {});
+    });
+    return { fetch, seen };
+  }
+
+  it('waits past the ordinary request deadline, because the app is still allowed to answer', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fetch, seen } = hangingApp();
+      const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+      await worker.registerTab(5);
+      const pending = worker.send({ type: 'goal_open', text: 'ship the release' }, 5);
+
+      // Comfortably past the ten seconds every other route gets, and still inside the 180s
+      // the app itself allows the model. Giving up here is the whole bug.
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(seen.signal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(120_000);
+      const reply = await pending;
+      // Past the app's own deadline it does end — but as a deadline, not as prose, and as
+      // something worth asking again rather than a verdict.
+      expect(reply).toMatchObject({ ok: false, status: 0, retryable: true });
+      expect(String(reply.error)).toContain('took too long');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The deadline this worker enforces has to stay above the one the app enforces, or the app's
+   * own error handling never gets to speak. Read from both files rather than restated, because
+   * the regression was precisely the two numbers drifting apart.
+   */
+  it('keeps its deadline above the app’s own model timeout', async () => {
+    const goalSource = await fs.readFile(path.join(process.cwd(), 'src', 'main', 'goal.ts'), 'utf8');
+    const appMs = Number(/const REQUEST_TIMEOUT_MS = ([\d_]+);/.exec(goalSource)?.[1]?.replace(/_/g, ''));
+    const workerMs = Number(
+      /const MODEL_REQUEST_TIMEOUT_MS = ([\d_]+);/.exec(backgroundSource)?.[1]?.replace(/_/g, '')
+    );
+    expect(Number.isFinite(appMs)).toBe(true);
+    expect(workerMs).toBeGreaterThan(appMs);
+    // And it is the goal opening that spends it. Nothing else here waits on a model.
+    expect(backgroundSource).toContain("await call('/goal/open', {\n      method: 'POST',\n      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,");
+  });
+});
