@@ -43,6 +43,8 @@ export async function prepareMacOSDesktopHelper({ platform, arch }) {
       '-framework',
       'ApplicationServices',
       '-framework',
+      'Carbon',
+      '-framework',
       'ScreenCaptureKit',
       '-framework',
       'CoreMedia',

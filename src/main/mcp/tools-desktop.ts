@@ -94,7 +94,7 @@ const computerActionArg = z.discriminatedUnion('type', [
   z
     .object({ type: z.literal('write_clipboard'), text: z.string().max(100_000) })
     .strict()
-    .describe('Replace the clipboard text; pair with keypress ctrl+v to paste.')
+    .describe('Replace the clipboard text; paste with command+v on macOS or ctrl+v on Windows/Linux.')
 ]);
 
 const verificationArg = z
