@@ -5925,6 +5925,11 @@
       typing && document.activeElement === typing
         ? { start: typing.selectionStart, end: typing.selectionEnd }
         : null;
+    // Where the box was scrolled to, kept whether or not it has the focus. A goal long enough
+    // to scroll is exactly the one somebody reads back before saving, and a rebuilt textarea
+    // starts at the top — so without this the sheet threw the reader back to the first line
+    // on every activity poll, once a second, whichever way they were scrolling.
+    const scrolled = typing ? typing.scrollTop : 0;
     root.textContent = '';
     root.dataset.clfBusy = menuBusy || objectiveBusy ? '1' : '0';
 
@@ -5980,9 +5985,9 @@
     root.hidden = false;
     control.button.setAttribute('aria-expanded', 'true');
     placeMenu(root, control.button);
-    if (caret) {
-      const box = root.querySelector('[data-clf-goal-input]');
-      if (box) {
+    const box = root.querySelector('[data-clf-goal-input]');
+    if (box) {
+      if (caret) {
         box.focus();
         try {
           box.setSelectionRange(caret.start, caret.end);
@@ -5991,6 +5996,9 @@
           // focus, which is the half that matters.
         }
       }
+      // After the selection, never before it: restoring a caret scrolls it into view, so the
+      // position taken above has to be the last word on where this box is looking.
+      if (scrolled > 0) box.scrollTop = scrolled;
     }
   }
 
