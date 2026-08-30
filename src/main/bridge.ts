@@ -101,6 +101,7 @@ import {
   attachSummary,
   claimContinuationNow,
   commitContinuationResult,
+  CONTINUATION_TTL_MS,
   continuationByToken,
   continuationForSession,
   openContinuationNow,
@@ -153,7 +154,8 @@ const RATE_LIMIT = 900;
  * A deadline, not a retry interval. One command is one delivery: the app opens the exact
  * chat, and this is how long that page has to redeem the marker, type the bootstrap and
  * report which conversation it landed in. Long enough for a tab to open, ChatGPT to finish
- * loading and the composer to accept text on a slow machine.
+ * loading and the composer to accept text on a slow machine. A redeemed resume may keep waiting
+ * only while its existing continuation is still alive; that continuation already has its own TTL.
  *
  * What happens when it runs out is `drop()`, which is an ending rather than another go:
  * the continuation is aborted and the session stays in the chat it is already in, or the
@@ -1984,6 +1986,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         const claimed = await claimContinuationNow(command.spec.token, `${command.id}:${client}`);
         if (!claimed) return json(res, 409, { error: 'continuation_not_claimable' }, origin);
         claimedSummary = claimed.summary;
+        // Replace the short page-open timer with the continuation's existing outer lifetime.
+        armDeadline(command);
       } catch (err) {
         logWarn(`bridge: could not durably claim ${specKey(command.spec)} — ${err instanceof Error ? err.message : String(err)}`);
         return json(res, 503, { error: 'continuation_claim_not_durable', retryable: true }, origin);
@@ -3864,6 +3868,10 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
   // Revival is one absolute waking attempt. Redeeming the marked page must not renew it and leave
   // a worker occupying `waking` indefinitely when the page never sends or reports valid activity.
   if (command.spec.type === 'revive') return command.createdAt + REVIVAL_DEADLINE_MS - now;
+  if (command.spec.type === 'resume' && command.owner !== null) {
+    const continuation = continuationByToken(command.spec.token);
+    if (continuation?.state === 'claimed') return continuation.openedAt + CONTINUATION_TTL_MS - now;
+  }
   const claimedAt = command.claimedAt ?? now;
   return claimedAt + COMMAND_DEADLINE_MS - now;
 }
