@@ -1557,8 +1557,9 @@ async function noteTabConversation(source, value) {
  * registry here is the authority on which tab that chat is in, so the app hands out the
  * conversation id and nothing else and this decides whether there is a tab to reload.
  *
- * Exactly one match reloads. None opens the exact conversation. More than one is genuinely
- * ambiguous, so it does nothing rather than reload one at random or add a third copy. The scan
+ * A match reloads, and never more than one tab of a chat exists afterwards: several copies are
+ * resolved to the one this registry binds, not left alone. None opens the exact conversation.
+ * The scan
  * happens immediately before the action; the content-script registry alone is too stale to
  * prevent duplicates. Only a browser action that actually happened is reported, because only
  * that is worth placing behind the app's per-chat cooldown.
@@ -1585,10 +1586,14 @@ async function maintain() {
   } catch {
     return;
   }
-  // Two copies are ambiguous. Never reload one at random and never add a third.
-  if (candidates.length > 1) return;
+  // One chat is one tab. Bailing out on two copies left the chat broken *and* left the duplicate
+  // sitting there, so the ambiguity is resolved instead: reload the copy this worker's registry
+  // already binds to the conversation, falling back to the lowest tab id so two passes never
+  // pick differently. A tab is only ever created when the chat has none.
+  const owned = candidates.filter((tab) => tabConversations[tab.id] === conversationId);
+  const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
   try {
-    if (candidates.length === 1) await chrome.tabs.reload(candidates[0].id);
+    if (target) await chrome.tabs.reload(target.id);
     else await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` });
   } catch {
     // A tab changed between the scan and action, or Chrome refused it. No receipt means the

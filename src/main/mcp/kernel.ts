@@ -77,6 +77,7 @@ import {
   recordToolCall
 } from '../session/recorder.js';
 import { backgroundExecRecoveryNotices } from '../codex/ownership.js';
+import { unattributedRepairEta } from '../bridge.js';
 import { readOverflowText } from '../session/store.js';
 import type { StoredText, ToolOutcome } from '../../shared/session.js';
 
@@ -316,6 +317,40 @@ function withBackgroundExecRecovery(
     content: [
       ...result.content,
       { type: 'text', text: `\n--- Background command recovery ---\n${notices.join('\n')}` }
+    ]
+  };
+}
+
+/**
+ * Tells a chat whose call could not be attributed what is about to happen to it.
+ *
+ * A broken request-id join is invisible from inside the conversation. The tools answer, the
+ * turn reads normally, and the model has no way to know the app cannot tell who is calling —
+ * and then the page reloads under it mid-answer. Saying so in the result is the difference
+ * between an unexplained interruption and a chat that knows to re-establish its identity
+ * first, which is the one thing that calls the reload off.
+ */
+function withUnattributedNotice(
+  conversationId: string | null | undefined,
+  result: ToolResult
+): ToolResult {
+  if (conversationId) return result;
+  const eta = unattributedRepairEta();
+  if (eta === null) return result;
+  return {
+    ...result,
+    content: [
+      ...result.content,
+      {
+        type: 'text',
+        text:
+          '\n--- Identity notice ---\n' +
+          'This app could not tell which ChatGPT conversation made this call, so it is filed as ' +
+          'Unattributed. Unless a call from this chat arrives with a request id the extension can ' +
+          `confirm, this chat will be reloaded in about ${eta}s to restore the identity path, ` +
+          'losing whatever this turn is still writing. Retrying a call now is worth more than ' +
+          'continuing: one attributed call is what proves the join is back.'
+      }
     ]
   };
 }
@@ -581,9 +616,12 @@ async function dispatchTracked(
   // Inbox messages are part of the MCP result ChatGPT actually receives. Build the delivered
   // result before recording so session(action=read, tool_call=T…) is genuine wire forensics rather than a
   // subtly earlier internal value that omits the worker report most likely to matter later.
-  const delivered = withBackgroundExecRecovery(
+  const delivered = withUnattributedNotice(
     context.caller.conversationId,
-    withInbox(context.caller.conversationId, context.agent, result, isFinish)
+    withBackgroundExecRecovery(
+      context.caller.conversationId,
+      withInbox(context.caller.conversationId, context.agent, result, isFinish)
+    )
   );
   const recorderStartedAt = Date.now();
   const recording = recordToolCall({

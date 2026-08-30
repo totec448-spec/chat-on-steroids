@@ -42,8 +42,7 @@ const {
   setBrowserOpener,
   shutdownBridge,
   STALE_SWARM_MS,
-  AGENT_INACTIVITY_RECOVERY_MS,
-  AGENT_INACTIVITY_SLEEP_MS,
+  CHAT_ACTIVE_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   startBridge,
@@ -3559,14 +3558,14 @@ describe('unattributed activity recovery', () => {
   const reopened = (conversationId: string): string[] =>
     opened.filter((url) => url === `https://chatgpt.com/c/${conversationId}`);
 
-  it('waits exactly twenty seconds, then hands the browser that one chat to reload', async () => {
+  it('waits exactly one minute, then hands the browser that one chat to reload', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       await events(PRIME, [openTurn('turn-live')]);
       await unattributed();
 
-      await vi.advanceTimersByTimeAsync(19_999);
+      await vi.advanceTimersByTimeAsync(59_999);
       expect(await maintenance()).toBeNull();
 
       await vi.advanceTimersByTimeAsync(1);
@@ -3597,7 +3596,7 @@ describe('unattributed activity recovery', () => {
       await pair();
       await events(PRIME, [openTurn('turn-live')]);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
 
       expect(chatOf(await maintenance())).toBe(PRIME);
       expect(chatOf(await maintenance())).toBe(PRIME);
@@ -3626,14 +3625,14 @@ describe('unattributed activity recovery', () => {
       await pair();
       await events(PRIME, [openTurn('turn-first')]);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(await maintenance((await maintenance())!.token)).toBeNull();
 
       // That turn ends without ever making an attributable call, and the next one breaks too.
       await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
       await events(PRIME, [endTurn('turn-first', 'completed'), openTurn('turn-second')]);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(chatOf(await maintenance())).toBe(PRIME);
     } finally {
       vi.useRealTimers();
@@ -3646,7 +3645,7 @@ describe('unattributed activity recovery', () => {
    * ChatGPT is sometimes broken in a way a fresh page does not mend, and the reload itself is
    * what used to hide that: the replacement document re-observes the same generation and names
    * it a new local turn, which looked exactly like the broken turn being over. So the repair was
-   * retired, the still-dead join produced the next unattributed call, and twenty seconds later
+   * retired, the still-dead join produced the next unattributed call, and a minute later
    * the same chat was reloaded again - for as long as the turn lasted, tearing down whatever
    * work the page was doing each time.
    */
@@ -3656,7 +3655,7 @@ describe('unattributed activity recovery', () => {
       await pair();
       await events(PRIME, [openTurn('turn-live')]);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
       const handout = await maintenance();
       expect(chatOf(handout)).toBe(PRIME);
       expect(await maintenance(handout!.token)).toBeNull();
@@ -3665,7 +3664,7 @@ describe('unattributed activity recovery', () => {
       // id, and its calls are still arriving with nothing to attribute them by.
       await events(PRIME, [openTurn('turn-after-reload')]);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(await maintenance()).toBeNull();
       expect(reopened(PRIME)).toEqual([]);
 
@@ -3673,8 +3672,9 @@ describe('unattributed activity recovery', () => {
       // chat repairable again. The next break in it is a different failure and gets its reload.
       await attributed(PRIME);
       await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
+      await events(PRIME, [openTurn('turn-later')]);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(chatOf(await maintenance())).toBe(PRIME);
     } finally {
       vi.useRealTimers();
@@ -3696,14 +3696,14 @@ describe('unattributed activity recovery', () => {
       await pair();
       await events(PRIME, [openTurn('turn-first')]);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
       const first = await maintenance();
       expect(chatOf(first)).toBe(PRIME);
 
       // That turn ends before the receipt for it arrives, and the next one breaks the same way.
       await events(PRIME, [endTurn('turn-first', 'completed'), openTurn('turn-second')]);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
       const second = await maintenance();
       expect(chatOf(second)).toBe(PRIME);
       expect(second!.token).not.toBe(first!.token);
@@ -3727,10 +3727,10 @@ describe('unattributed activity recovery', () => {
 
       await vi.advanceTimersByTimeAsync(10_000);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(9_999);
+      await vi.advanceTimersByTimeAsync(49_999);
       expect(await maintenance()).toBeNull();
 
-      // Twenty seconds after the *first* one, not thirty after it or twenty after the last.
+      // A minute after the *first* one, not seventy seconds after it or a minute after the last.
       await vi.advanceTimersByTimeAsync(1);
       expect(chatOf(await maintenance())).toBe(PRIME);
     } finally {
@@ -3748,7 +3748,7 @@ describe('unattributed activity recovery', () => {
       await vi.advanceTimersByTimeAsync(10_000);
       await attributed(PRIME);
 
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(50_000);
       expect(await maintenance()).toBeNull();
       expect(reopened(PRIME)).toEqual([]);
     } finally {
@@ -3772,14 +3772,14 @@ describe('unattributed activity recovery', () => {
         openTurn('turn-next')
       ]);
 
-      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.advanceTimersByTimeAsync(50_000);
       expect(chatOf(await maintenance())).toBe(PRIME);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('leaves every chat alone when more than one could be the broken one', async () => {
+  it('repairs every chat that could be the broken one, not only a lone candidate', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -3787,15 +3787,32 @@ describe('unattributed activity recovery', () => {
       await events(OTHER, [openTurn('turn-other')]);
       await unattributed();
 
-      // Two chats are generating and neither has proved its join. Reloading either would be a
-      // guess, and the cost of guessing wrong is somebody else's running turn.
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(await maintenance()).toBeNull();
+      // Two chats are generating and neither has proved its join, so both are broken until one
+      // of them shows otherwise. Standing down here is what left a whole swarm that lost the
+      // same evidence path at once with no repair at all.
+      await vi.advanceTimersByTimeAsync(60_000);
+      const handed = [chatOf(await maintenance()), chatOf(await maintenance())].sort();
+      expect(handed).toEqual([PRIME, OTHER].sort());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-      // The moment one of them proves itself, the other is the only candidate left.
+  it('leaves a chat that proved its join out of the repair', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(PRIME, [openTurn('turn-prime')]);
+      await events(OTHER, [openTurn('turn-other')]);
       await unattributed();
+
+      // An attributed call is the one fact that says this chat's join works. It is the whole
+      // difference between the chats that get reloaded and the chats that are simply busy.
       await attributed(OTHER);
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(chatOf(await maintenance())).toBe(PRIME);
+      // A handout the browser never confirmed comes back around; the chat that proved its join
+      // is simply never among them, however many passes go by.
       expect(chatOf(await maintenance())).toBe(PRIME);
     } finally {
       vi.useRealTimers();
@@ -3817,7 +3834,7 @@ describe('unattributed activity recovery', () => {
         await events(PRIME, [openTurn(`turn-${outcome}`), endTurn(`turn-${outcome}`, outcome)]);
         await unattributed();
 
-        await vi.advanceTimersByTimeAsync(20_000);
+        await vi.advanceTimersByTimeAsync(60_000);
         expect(await maintenance(), `${outcome} must not be reloaded`).toBeNull();
         expect(reopened(PRIME)).toEqual([]);
       } finally {
@@ -3961,7 +3978,7 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('checks one silent joined-turn episode at two minutes, then sleeps it at four', async () => {
+  it('sleeps a silent joined turn when its granted activity runs out, without commanding the browser', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -3975,13 +3992,11 @@ describe('unattributed activity recovery', () => {
       expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
       expect(liveConversations().find((entry) => entry.conversationId === WORKER)).toMatchObject({ generating: true });
 
-      await vi.advanceTimersByTimeAsync(AGENT_INACTIVITY_RECOVERY_MS);
-      const check = await maintenance();
-      expect(chatOf(check)).toBe(WORKER);
-      expect(await maintenance(check!.token)).toBeNull();
-
-      // Still the same inactivity episode: no repeating action at minute three.
-      await vi.advanceTimersByTimeAsync(AGENT_INACTIVITY_SLEEP_MS - AGENT_INACTIVITY_RECOVERY_MS - 1);
+      // Silence alone no longer commands a browser action. A turn that produces nothing may
+      // simply be a long answer, and reloading it destroys the answer to fix nothing; only
+      // unattributed activity says a chat is failing to be heard. So this worker is left to
+      // run and then released by the ordinary sleep, with no reload asked for at any point.
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS - 1);
       expect(await maintenance()).toBeNull();
       await vi.advanceTimersByTimeAsync(1);
       await sweepStaleSwarm(Date.now());
@@ -3994,7 +4009,7 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('finishes a four-minute silent joined worker that already crossed the context ceiling', async () => {
+  it('finishes a worker that outlived its activity grant and already crossed the context ceiling', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -4006,7 +4021,7 @@ describe('unattributed activity recovery', () => {
       await events(WORKER, [openTurn('turn-worker-ceiling')]);
       noteAgentContextTokens(WORKER, WORKER_CONTEXT_CEILING_TOKENS);
 
-      await vi.advanceTimersByTimeAsync(AGENT_INACTIVITY_SLEEP_MS);
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
       await sweepStaleSwarm(Date.now());
       expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
         state: 'finished',
@@ -4032,7 +4047,7 @@ describe('unattributed activity recovery', () => {
       finishAgent({ conversationId: WORKER }, 'audit done');
       await unattributed();
 
-      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.advanceTimersByTimeAsync(60_000);
       expect(reopened(WORKER)).toEqual([]);
       expect(chatOf(await maintenance())).toBe(PRIME);
     } finally {
