@@ -25,6 +25,7 @@ vi.mock('electron', () => ({
 
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
+const { initDurableStore } = await import('../src/main/durable.js');
 const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests } = await import(
   '../src/main/session/store.js'
 );
@@ -70,6 +71,7 @@ beforeAll(async () => {
   initConfigPath(dir);
   initSecretsPath(dir);
   initSessionStore(dir);
+  initDurableStore(dir);
 });
 
 afterAll(async () => {
@@ -1431,6 +1433,70 @@ describe('a chat driven towards a specific goal', () => {
 
     expect(goal.goalObjectiveFor('c-obj-restored')).toBe('keep the overnight build green');
     expect(goal.goalViewFor('c-obj-restored')).toBeNull();
+  });
+
+  it('deduplicates Goal obligations by stable assistant reply across reload turn ids', async () => {
+    await goal.acceptGoalReplyNow({
+      conversationId: 'c-reply-stable',
+      sessionId: 'session-reply-stable',
+      replyId: 'assistant-message-stable',
+      turnId: 'g-before-reload',
+      eventSeq: 12,
+      blocked: false
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId: 'c-reply-stable',
+      sessionId: 'session-reply-stable',
+      replyId: 'assistant-message-stable',
+      turnId: 'g-after-reload',
+      eventSeq: 99,
+      blocked: false
+    });
+
+    expect(goal.goalPendingReplyFor('c-reply-stable')).toEqual({
+      replyId: 'assistant-message-stable',
+      turnId: 'g-before-reload',
+      eventSeq: 12
+    });
+  });
+
+  it('restores an accepted pending reply after app restart', async () => {
+    await goal.acceptGoalReplyNow({
+      conversationId: 'c-reply-restored',
+      sessionId: 'session-reply-restored',
+      replyId: 'assistant-message-restored',
+      turnId: 'g-reply-restored',
+      eventSeq: 7,
+      blocked: false
+    });
+    const saved = goal.snapshotGoalReplies();
+    goal.resetGoalStateForTests();
+    goal.restoreGoalReplies(saved);
+
+    expect(goal.goalPendingReplyFor('c-reply-restored')).toMatchObject({
+      replyId: 'assistant-message-restored',
+      turnId: 'g-reply-restored'
+    });
+  });
+
+  it('stores a handled tombstone when Goal was off at terminal acceptance', async () => {
+    await saveConfig({
+      ...defaultConfig(),
+      goal: { ...defaultConfig().goal, enabled: false }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId: 'c-reply-disabled',
+      sessionId: 'session-reply-disabled',
+      replyId: 'assistant-message-disabled',
+      turnId: 'g-reply-disabled',
+      eventSeq: 4,
+      blocked: false
+    });
+
+    expect(goal.goalPendingReplyFor('c-reply-disabled')).toBeNull();
+    expect(goal.snapshotGoalReplies().replies).toContainEqual(
+      expect.objectContaining({ replyId: 'assistant-message-disabled', state: 'handled' })
+    );
   });
 
   it('moves the same objective to the replacement chat on resume', () => {

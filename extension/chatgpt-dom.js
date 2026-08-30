@@ -1337,6 +1337,20 @@ var CLF_DOM = (() => {
     }, false);
   }
 
+  /** Clears only app-owned text that still exactly matches the value it inserted. */
+  function clearPromptExact(value) {
+    return safe(() => {
+      const box = composer();
+      const compact = (text) => String(text || '').replace(/\s+/g, '');
+      if (!box || compact(box.textContent) !== compact(value)) return false;
+      box.focus();
+      document.execCommand('selectAll', false);
+      document.execCommand('delete', false);
+      box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+      return (box.textContent || '').trim() === '';
+    }, false);
+  }
+
   async function send() {
     try {
       const box = composer();
@@ -1455,6 +1469,7 @@ var CLF_DOM = (() => {
     hideProgress,
     replaceTurn,
     insertPrompt,
+    clearPromptExact,
     send
   };
 })();

@@ -1356,6 +1356,8 @@ export interface ChatObservation {
   fiberConversationId?: string;
   outcome?: TurnOutcome;
   detail?: string;
+  /** Browser terminal proof; app-owned Goal policy is applied only after this is durable. */
+  goalEligible?: boolean;
   /** chat_error only: a recognised transport failure inside an assistant turn. */
   recoverable?: boolean;
   /** tool_evidence only: the connector requests this turn's message model holds. */
@@ -1438,7 +1440,11 @@ export function recordChatObservations(
   conversationId: string,
   observations: readonly ChatObservation[],
   agent?: string | null
-): Promise<{ sessionId: string | null; stored: number }> {
+): Promise<{
+  sessionId: string | null;
+  stored: number;
+  goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
+}> {
   const prior = observationChains.get(conversationId) ?? Promise.resolve();
   const work = prior.then(() => recordChatObservationsNow(conversationId, observations, agent));
   const tracked = work.then(
@@ -1456,8 +1462,12 @@ async function recordChatObservationsNow(
   conversationId: string,
   observations: readonly ChatObservation[],
   agent?: string | null
-): Promise<{ sessionId: string | null; stored: number }> {
-  if (!recordingEnabled()) return { sessionId: null, stored: 0 };
+): Promise<{
+  sessionId: string | null;
+  stored: number;
+  goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
+}> {
+  if (!recordingEnabled()) return { sessionId: null, stored: 0, goalCandidates: [] };
   let firstUser: ChatObservation | undefined;
   let pageTitle: ChatObservation | undefined;
   const explicitEnds = new Set<string>();
@@ -1473,9 +1483,10 @@ async function recordChatObservationsNow(
     conversationId,
     pageTitle?.text?.trim() || (firstUser?.text ? firstUser.text.slice(0, 80) : undefined)
   );
-  if (!sessionId) return { sessionId: null, stored: 0 };
+  if (!sessionId) return { sessionId: null, stored: 0, goalCandidates: [] };
   const live = conversations.get(conversationId);
   let stored = 0;
+  const goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }> = [];
   // A cold/reloaded page can discover that a turn finished while the content script was
   // absent. There is then a new final assistant message but no live `generating -> false`
   // transition for content.js to report, and nothing would close the turn.
@@ -1541,8 +1552,22 @@ async function recordChatObservationsNow(
             : {}),
           messageId: item.messageId,
           state,
-          final: state === 'final'
+          final: state === 'final',
+          ...(item.goalEligible === true && state === 'final' ? { goalEligible: true } : {})
         }, { preferTime: item.authoredTime === true });
+        if (
+          item.goalEligible === true &&
+          state === 'final' &&
+          written.event.kind === 'assistant_message' &&
+          written.event.messageId &&
+          written.event.turnId
+        ) {
+          goalCandidates.push({
+            replyId: written.event.messageId,
+            turnId: written.event.turnId,
+            eventSeq: written.event.origin ?? written.event.seq
+          });
+        }
         if (!written.changed && item !== recoveredFinal) continue;
         if (item === recoveredFinal && item.turnId) {
           await appendEvent(sessionId, {
@@ -1640,7 +1665,7 @@ async function recordChatObservationsNow(
     stored++;
   }
   notifyChanged();
-  return { sessionId, stored };
+  return { sessionId, stored, goalCandidates };
 }
 
 /** Records something the app itself decided, e.g. a saved handoff. */

@@ -821,7 +821,12 @@
       wireBudget -= utf8Bytes(bounded.text);
     }
     if (typeof bounded.renderedHtml === 'string') {
-      bounded.renderedHtml = takeUtf8(bounded.renderedHtml, Math.max(0, wireBudget));
+      // Never a partial one: takeUtf8 cuts at a byte count and appends a plain-text notice,
+      // which inside markup lands mid-tag — often inside a code block, whose chrome is far
+      // larger than the code in it. The canonical text above is the message; this is only
+      // ChatGPT's presentation of it, and half a presentation is worth less than none.
+      const room = Math.max(0, wireBudget);
+      bounded.renderedHtml = utf8Bytes(bounded.renderedHtml) <= room ? bounded.renderedHtml : '';
     }
     const queued = {
       conversationId,
@@ -1126,9 +1131,6 @@
     pendingTools = 0;
     autoCompactReady = false;
     resumeIdentityPending = false;
-    // A native compaction belongs to the conversation it was started in. Navigating away
-    // abandons this tab's half of it; the app's request expires on its own.
-    if (compactCapture) releaseCapture();
     nativeBusy = false;
     nativePhase = '';
     pressedAt = 0;
@@ -1515,6 +1517,15 @@
       if (message.role === 'user') {
         const key = occurrenceKey(message.id, message.text);
         if (seenMessages.has(key)) continue;
+        // Presentation is not enough to commit a continuation, but it is enough to stop this
+        // exact marked message from escaping as ordinary session history while Fiber supplies
+        // the stable ChatGPT-authored identity. This is the reload path after the URL command
+        // marker has already disappeared.
+        const continuation = message.text.match(CONTINUATION_MARKER);
+        if (continuation && continuation[1] === 'RESUME') {
+          continuationJournalPending = true;
+          commandJournalGate = true;
+        }
         markSeen(key);
         newUserMessage = true;
         emit({
@@ -1596,13 +1607,6 @@
       });
     }
     if (endedTurnId) emit({ kind: 'turn_end', turnId: endedTurnId, ...result });
-    // The compaction turn settling is the moment the brief exists. Read here, from this
-    // generation's own section, while `ended` still names it — a tick later the page is just
-    // a transcript again and this answer is indistinguishable from any other.
-    if (endedTurnId && compactCapture && compactCapture.generation === endedTurnId && !compactCapture.settling) {
-      compactCapture.settling = true;
-      void settleBrief(ended, result.outcome);
-    }
     // Same moment, the other reader: the goal loop wants this turn's answer while `ended`
     // still names its section. It decides for itself whether the turn is one to answer —
     // and waits for it to hold still first. See noteGoalTurn.
@@ -1792,20 +1796,6 @@
       emit({ kind: 'turn_start', turnId });
 
       // The compaction binding is made here and only here: the first generation to open
-      // after the handoff prompt was submitted is the one that is answering it. Everything
-      // afterwards compares against this id, so a later turn — the user carrying on in this
-      // chat, a retry, anything at all — can never satisfy the continuation.
-      if (compactCapture && compactCapture.generation === null && compactCapture.conversationId === conversationId) {
-        compactCapture.generation = turnId;
-        rememberCapture();
-      }
-    }
-
-    // An arming that no generation ever claimed. ChatGPT accepted the message and then did
-    // not answer it; there is nothing to watch and nothing to wait for, so the transaction
-    // is withdrawn rather than left open for whatever the user types next.
-    if (compactCapture && compactCapture.generation === null && Date.now() - compactCapture.armedAt > COMPACT_ARM_MS) {
-      void abandonCapture('ChatGPT never started answering the compaction request. Nothing was compacted.');
     }
 
     // Which generation an error first came into view during, recorded before anything reads
@@ -1846,7 +1836,9 @@
       void bindConversation(conversationId);
     }
 
-    if (generating) {
+    if (continuationJournalPending) {
+      void refreshFiber();
+    } else if (generating) {
       void refreshFiber();
     } else if (fiberTerminalMessageId && nowGenerating) {
       const terminalTurn = currentAssistantTurn(observedTurns);
@@ -2420,7 +2412,9 @@
       const messageId = cap(entry.messageId, 200);
       if (!messageId) continue;
       const rawText = typeof entry.rawText === 'string' ? entry.rawText.slice(0, 256_000) : '';
-      const renderedHtml = typeof entry.renderedHtml === 'string' ? entry.renderedHtml.slice(0, 120_000) : '';
+      // Whole markup or none, for the same reason the wire bound above drops it.
+      const renderedHtml =
+        typeof entry.renderedHtml === 'string' && entry.renderedHtml.length <= 120_000 ? entry.renderedHtml : '';
       if (!rawText && !renderedHtml) continue;
       const message = {
         messageId,
@@ -2716,7 +2710,7 @@
     // evidence under the old id is how the first turn of chat B was durably filed into chat
     // A. A fresh, never-bound composer still scans normally because `conversationId` is null.
     const routeConversation = CLF_DOM.conversationId();
-    if (conversationId && routeConversation !== conversationId) return;
+    if (conversationId && routeConversation !== conversationId) return false;
     // The page-context round-trip can settle after ChatGPT navigates this tab. Capture the
     // logical chat before crossing that async boundary so an answer read from chat A can
     // never be emitted under chat B's conversation id.
@@ -2749,14 +2743,14 @@
           fiberTurns = new Map();
           fiberScanToken = null;
         }
-        return;
+        return false;
       }
     }
-    if (epoch !== askedEpoch || conversationId !== askedConversation) return;
+    if (epoch !== askedEpoch || conversationId !== askedConversation) return false;
     // The route can move before observe() has had a chance to update our local conversation
     // state. Epoch/conversation checks alone therefore are not enough: in that window they
     // still both say A while the Fiber tree already belongs to B.
-    if (askedConversation && CLF_DOM.conversationId() !== askedConversation) return;
+    if (askedConversation && CLF_DOM.conversationId() !== askedConversation) return false;
     const concreteConversation = (value) =>
       typeof value === 'string' && /^[0-9a-f-]{8,64}$/i.test(value) ? value : null;
     // Capture the one page turn this document owns before filtering by Fiber's own conversation
@@ -2834,6 +2828,9 @@
       else fiberTurns.set(turn.index, turn);
     }
     for (const [index, value] of fiberTurns) if (value === null) fiberTurns.delete(index);
+    const continuationReconciliation = reconcileContinuationMarkers();
+    if (continuationReconciliation) await continuationReconciliation;
+    if (epoch !== askedEpoch || conversationId !== askedConversation) return false;
     // Fiber names turns with ChatGPT's page `data-turn-id`, which the live page reuses. The
     // recorder, deliberately, names the live generation with our durable local `g-...` id.
     // Never write the recycled page id into recorder evidence as though it were that durable
@@ -3104,7 +3101,10 @@
           // has no local turn anchor, so it keeps authored create_time instead.
           ...(!liveAssistant && message.createTime ? { time: message.createTime, authoredTime: true } : {}),
           state,
-          final: state === 'final'
+          final: state === 'final',
+          ...(state === 'final' && localOwner && goalTerminalCandidate('completed', localOwner)
+            ? { goalEligible: true }
+            : {})
         });
       }
     }
@@ -3129,6 +3129,7 @@
     if (messagesReported.size > 4000) messagesReported.clear();
     if (pageToolsReported.size > 4000) pageToolsReported.clear();
     if (userAuthoredTimesReported.size > 4000) userAuthoredTimesReported.clear();
+    return true;
   }
 
   /** What the page says about this block, or null. */
@@ -5041,22 +5042,12 @@
     } finally {
       pulling = false;
     }
-    // A settled compaction brief is durable page state until the app acknowledges it. A
-    // successful activity round trip is also our recovery clock after a transient capture
-    // failure, so retry the same token/bytes here before starting any new automation.
-    if (
-      current() &&
-      CLF_DOM.conversationId() === forId &&
-      compactCapture &&
-      typeof compactCapture.summary === 'string' &&
-      compactCapture.summary.trim()
-    ) {
-      await deliverCapturedBrief();
-    }
     // Outside the guard, and last: startCompact runs for tens of seconds and polls this
     // same endpoint while it works, so firing it with `pulling` still set would deadlock
     // the run against the poll that started it.
+    if (current() && CLF_DOM.conversationId() === forId) await maybeResumePendingCompaction(forId, forEpoch);
     if (current() && CLF_DOM.conversationId() === forId) maybeRecoverResumeGoalTurn();
+    if (current() && CLF_DOM.conversationId() === forId) maybeRecoverDurableGoalTurn();
     if (current() && CLF_DOM.conversationId() === forId) await maybeAutoCompact(forId, forEpoch);
     // Same reason, same place: this types into the composer and can wait on the page, and it
     // needs the draft this pull just delivered.
@@ -5808,7 +5799,7 @@
       // happened to finish a turn of its own — which, in a chat nobody is typing into, is
       // never. The turn key is the save, so a second save writes a second message and a
       // retried one does not.
-      if (!generating && !CLF_DOM.generating() && !goalBusy && !compactCapture && !nativeBusy && !(job && job.busy)) {
+      if (!generating && !CLF_DOM.generating() && !goalBusy && !nativeBusy && !(job && job.busy)) {
         goalTurnId = `objective-${Date.now().toString(36)}`;
         setGoalPhase('');
         const forId = conversationId;
@@ -6678,16 +6669,38 @@
     // watching it; this one just reports what is already happening.
     if (!data.prompt) {
       nativeBusy = false;
-      nativePhase = compactCapture ? 'waiting' : '';
-      if (!compactCapture) {
-        pressedAt = 0;
-        localError = 'A compaction is already under way in this chat. Wait for it, or cancel it.';
-      }
+      nativePhase = data.sourceSend && data.sourceSend.state !== 'not-attempted' ? 'waiting' : '';
+      pressedAt = 0;
+      localError =
+        data.sourceSend && data.sourceSend.state === 'dispatched-unresolved'
+          ? 'The handoff instruction was already submitted here. It will finish on its own, or cancel it.'
+          : 'A compaction is already under way in this chat. Wait for it, or cancel it.';
       renderControl();
       void pullActivity();
       return;
     }
     await runNativeCompaction(String(data.prompt), String(data.token || ''), forId, forEpoch);
+  }
+
+  /**
+   * Resumes the reversible half of the source fence after a document or app restart.
+   *
+   * `not-attempted` and `attempted-unresolved` are both reversible for the same reason: both are
+   * written before the composer is submitted, so neither can have left a prompt with ChatGPT.
+   * `dispatched-unresolved` is the one that cannot be replayed — it is taken immediately before
+   * the click, and a document that died there may or may not have sent. That state ends at
+   * ChatGPT's own marker or at an explicit cancel, never at a second Send.
+   */
+  async function maybeResumePendingCompaction(forId = conversationId, forEpoch = epoch) {
+    const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
+    if (!source || nativeBusy) return;
+    if (source.state !== 'not-attempted' && source.state !== 'attempted-unresolved') return;
+    const current = () =>
+      alive && conversationId === forId && epoch === forEpoch && CLF_DOM.conversationId() === forId;
+    const reply = await ask({ type: 'compact', conversationId: forId, resume: true });
+    if (!current() || !reply || reply.ok !== true || !reply.data || !reply.data.prompt) return;
+    nativeBusy = true;
+    await runNativeCompaction(String(reply.data.prompt), String(reply.data.token || ''), forId, forEpoch);
   }
 
   /**
@@ -6761,36 +6774,21 @@
     return '';
   }
 
-  /**
-   * ChatGPT-native compaction, from the press to the point the app takes over.
-   *
-   * IDLE → REQUESTED → INTERRUPTING → SETTLING → PROMPTING → WAITING. The first four are
-   * startCompact's, because the two before the request are what makes the app's copy of
-   * the recording a still picture; this function is PROMPTING onward. Every exit that is
-   * not WAITING cancels the app-side request. That symmetry is the important part: a
-   * request left open would let a much later turn — the model finally getting round to an
-   * instruction it read minutes ago — hand over a brief and open a fresh chat for a
-   * compaction the user has long since given up on.
-   *
-   * Nothing here opens a chat. Submitting the instruction is the last thing this function
-   * does; what happens next is that the turn it started opens, is watched by generation id,
-   * and — when that exact generation settles — hands its own answer to the app as the brief.
-   * See `compactCapture`.
-   */
+  /** Submits the marked source prompt after the app durably grants this exact Send. */
   async function runNativeCompaction(prompt, token, forId = conversationId, forEpoch = epoch) {
     const current = () =>
       alive &&
       conversationId === forId &&
       epoch === forEpoch &&
       CLF_DOM.conversationId() === forId;
-    const abandon = async (why) => {
+    let attemptCrossed = false;
+    const abandonBeforeSend = async (why) => {
       if (!current()) return;
       nativeBusy = false;
       nativePhase = '';
       pressedAt = 0;
       localError = why;
       job = null;
-      // Withdraw the app-side request so nothing can complete behind our back.
       await ask({ type: 'compact', conversationId: forId, cancel: true }).catch(() => undefined);
       if (!current()) return;
       renderControl();
@@ -6798,59 +6796,79 @@
     };
 
     if (!current()) return;
-    if (!prompt) return void (await abandon('The app did not send the handoff instruction.'));
-    if (!token) return void (await abandon('The app did not send a compaction token, so nothing could be tracked.'));
+    if (!prompt) return void (await abandonBeforeSend('The app did not send the handoff instruction.'));
+    if (!token) return void (await abandonBeforeSend('The app did not send a compaction token, so nothing could be tracked.'));
 
     try {
-      // INTERRUPTING and SETTLING already happened, before the request that produced this
-      // prompt — see stopAndSettle, which both providers go through.
-
-      // PROMPTING — into this same conversation. `insertPrompt` refuses a composer that
-      // already holds text, so a draft the user was writing is never overwritten or sent.
       nativePhase = 'prompting';
       renderControl();
-      if (!CLF_DOM.insertPrompt(prompt)) {
-        return void (await abandon(
+      const squeeze = (value) => String(value || '').replace(/\s+/g, '');
+      const existing = CLF_DOM.composer();
+      if (squeeze(existing?.textContent) !== squeeze(prompt) && !CLF_DOM.insertPrompt(prompt)) {
+        return void (await abandonBeforeSend(
           'ChatGPT would not accept the handoff instruction — clear the message box and try again.'
         ));
       }
-      await sleep(400);
+      await Promise.resolve();
       if (!current()) return;
-      // The empty-composer check happened before insertion. During this settle React can
-      // remount/rewrite the editing host, or the user can type into it. Sending without proving
-      // it still contains exactly our prompt turns that unrelated draft into part of the
-      // compaction request. Preserve whatever is there and withdraw the transaction instead.
       const composer = CLF_DOM.composer();
-      const normalizePromptText = (value) => String(value || '').replace(/\s+/g, '');
-      if (!composer || normalizePromptText(composer.textContent) !== normalizePromptText(prompt)) {
-        return void (await abandon(
+      if (!composer || squeeze(composer.textContent) !== squeeze(prompt)) {
+        return void (await abandonBeforeSend(
           'The message box changed before the handoff instruction could be sent. Its draft was preserved; nothing was compacted.'
         ));
       }
-      // Armed before the send rather than after it, because the turn can open between the
-      // click and the next line of this function. An arming that is never claimed by a
-      // generation expires on its own — see the observe() branch that binds it.
-      compactCapture = {
-        token,
-        conversationId: forId,
-        epoch: forEpoch,
-        generation: null,
-        priorGeneration: turnId || null,
-        armedAt: Date.now(),
-        summary: null
-      };
-      rememberCapture();
-      if (!CLF_DOM.send()) {
-        releaseCapture();
-        return void (await abandon('ChatGPT would not send the handoff instruction. Nothing was compacted.'));
+      // Claiming the prompt. Nothing has been submitted under this state, and the app knows
+      // that because this write happens before the composer is submitted at all — so a
+      // document that dies between here and the next line leaves the prompt claimable again.
+      const permit = await ask({ type: 'compact', conversationId: forId, token, sourceAttempt: true });
+      if (!current()) return;
+      if (!permit || permit.ok !== true || !permit.data || permit.data.allowed !== true) {
+        CLF_DOM.clearPromptExact(prompt);
+        nativeBusy = false;
+        nativePhase = 'waiting';
+        pressedAt = 0;
+        localError = replyError(permit) || 'The durable handoff attempt is already owned; reconciling ChatGPT’s marked message.';
+        renderControl();
+        return;
       }
-
-      // WAITING — for one generation, the one this send starts, and for nothing else.
+      // The at-most-once cut, and the last thing before the click. Exactly one document takes
+      // this transition; past it the prompt may be with ChatGPT already — send() clicks first
+      // and only then watches for acceptance — so no page is ever offered it again.
+      const armed = await ask({ type: 'compact', conversationId: forId, token, sourceDispatch: true });
+      if (!current()) return;
+      if (!armed || armed.ok !== true || !armed.data || armed.data.armed !== true) {
+        CLF_DOM.clearPromptExact(prompt);
+        nativeBusy = false;
+        nativePhase = 'waiting';
+        pressedAt = 0;
+        // True of both answers this can get: a refusal because another page armed it first,
+        // and a lost reply. Neither one clicked anything here.
+        localError = 'Nothing was submitted: this handoff was not armed. Press it again.';
+        renderControl();
+        return;
+      }
+      attemptCrossed = true;
+      if (!(await CLF_DOM.send())) {
+        CLF_DOM.clearPromptExact(prompt);
+        nativeBusy = false;
+        nativePhase = 'waiting';
+        pressedAt = 0;
+        localError = 'The send result was ambiguous. Nothing will be sent twice; cancel explicitly if ChatGPT never accepted it.';
+        renderControl();
+        return;
+      }
       nativePhase = 'waiting';
       renderControl();
       void pullActivity();
     } catch (err) {
-      await abandon(`Could not ask ChatGPT for a handoff: ${(err && err.message) || 'unknown error'}`);
+      const why = `Could not ask ChatGPT for a handoff: ${(err && err.message) || 'unknown error'}`;
+      if (!attemptCrossed) await abandonBeforeSend(why);
+      else {
+        CLF_DOM.clearPromptExact(prompt);
+        nativePhase = 'waiting';
+        localError = `${why}. The durable attempt will not be sent twice.`;
+        renderControl();
+      }
     } finally {
       // The guard is released either way; `nativePhase` is cleared by the app's job
       // reaching a terminal stage, or by abandon() above.
@@ -6861,174 +6879,103 @@
     }
   }
 
-  /**
-   * The compaction turn this tab is watching, and the transaction it belongs to.
-   *
-   * `{ token, conversationId, generation }`, or null when nothing is being watched. This is
-   * the load-bearing part of Compact & Resume: the brief is whatever the model wrote as its
-   * answer, and this is what makes "its answer" a fact rather than a guess.
-   *
-   * The binding is to one *local* generation id — the ids this script mints when it sees a
-   * turn open, which are unique per page load and never reused. Not to "the newest assistant
-   * message", not to "the next thing that appears", not to the longest block on screen: a
-   * conversation that is being compacted is one the user has been talking to for hours, and
-   * every one of those rules can be satisfied by something the model wrote about something
-   * else. Only the generation that this tab started by submitting the handoff prompt may
-   * ever hand a brief to the app, and it may do so once.
-   *
-   * `generation` is null between submitting the prompt and seeing the turn open. That window
-   * is the only place the binding is made, it is bounded by COMPACT_ARM_MS, and the first
-   * generation to open in it is ours by construction: the turn was stopped and the machine
-   * settled before the prompt was submitted, so nothing else is starting one.
-   *
-   * `priorGeneration` is the generation this tab had open when it armed — normally none, and
-   * otherwise the turn that was just stopped to make room for the compaction. It exists for
-   * one case: a reload inside that same unbound window. See `restoreCapture`.
-   */
-  let compactCapture = null;
-  /** One token-idempotent brief POST at a time. */
-  let briefDeliveryBusy = false;
+  const CONTINUATION_MARKER = /^\s*\[\[CLF-(HANDOFF|RESUME):([A-Za-z0-9_-]{16,64})\]\](?:\s|$)/;
+  const continuationReconciliations = new Map();
+  const reconciledContinuations = new Set();
+  let continuationJournalPending = false;
 
-  /** Where the binding is kept so it survives a reload of this tab. */
-  const COMPACT_CAPTURE_KEY = 'clf-compact-capture';
-  /** How long to wait for the submitted prompt to actually open a turn. */
-  const COMPACT_ARM_MS = 60_000;
-
-  function rememberCapture() {
-    try {
-      if (compactCapture) sessionStorage.setItem(COMPACT_CAPTURE_KEY, JSON.stringify(compactCapture));
-      else sessionStorage.removeItem(COMPACT_CAPTURE_KEY);
-    } catch {
-      // A tab with no session storage simply loses the binding on reload, which the reload
-      // path already treats as "cannot prove it, so do not claim it".
-    }
-  }
-
-  /** Forgets a capture only after it was accepted or deliberately abandoned. */
-  function releaseCapture() {
-    const held = compactCapture;
-    compactCapture = null;
-    rememberCapture();
-    return held;
-  }
-
-  /**
-   * Restores the binding after a reload, or gives up on it honestly.
-   *
-   * Called after `resumeOpenTurn`, so `turnId` is already whatever the app says this
-   * conversation still has open. If that is the generation the binding names, the watch
-   * continues exactly as before — the reload cost nothing. If it is not, the compaction turn
-   * ended while this tab was not there to see which output was its own, and there is no
-   * honest way to recover that afterwards: the answer is on screen next to a dozen others
-   * and nothing distinguishes it but a guess. So the transaction is cancelled and the
-   * session stays in this chat, which is the failure the user can act on.
-   */
-  async function restoreCapture() {
-    let stored = null;
-    try {
-      stored = JSON.parse(sessionStorage.getItem(COMPACT_CAPTURE_KEY) || 'null');
-    } catch {
-      stored = null;
-    }
-    if (!stored || !stored.token || stored.conversationId !== conversationId) {
-      compactCapture = null;
-      rememberCapture();
-      return;
-    }
-    // Epochs are document-local. A full reload deliberately adopts the stored binding into
-    // this new document after proving the conversation id still matches; from here onward it
-    // must carry this document's epoch so an A -> B -> A SPA round trip cannot revive it.
-    stored.epoch = epoch;
-    compactCapture = stored;
-    // Once the exact generation settled, its brief is itself durable page state. The app's
-    // capture endpoint is idempotent by token, so a reload after a lost request/response can
-    // safely retry these exact bytes without re-identifying anything from the transcript.
-    if (typeof stored.summary === 'string' && stored.summary.trim()) {
-      nativeBusy = true;
-      nativePhase = 'delivering';
-      renderControl();
-      void deliverCapturedBrief();
-      return;
-    }
-    if (stored.generation) {
-      if (stored.generation === turnId && generating) {
-        nativePhase = 'waiting';
-        renderControl();
-        return;
+  /** Finds a unique ChatGPT-authored marked user message and the exact turn it opened. */
+  function markedContinuationTurns() {
+    const found = new Map();
+    for (const turn of fiberTurns.values()) {
+      for (const message of turn.messages || []) {
+        if (message.role !== 'user' || message.stable !== true) continue;
+        const match = String(message.rawText || '').match(CONTINUATION_MARKER);
+        if (!match) continue;
+        const key = `${match[1]}:${match[2]}`;
+        const marked = {
+          kind: match[1],
+          token: match[2],
+          turn,
+          messageId: message.rawMessageId || message.messageId
+        };
+        found.set(key, found.has(key) ? null : marked);
       }
-      return void (await abandonCapture(
-        'This tab reloaded while ChatGPT was writing the brief, so the app can no longer tell which answer was it. Nothing was compacted — press Compact & Resume again.'
-      ));
+    }
+    return [...found.entries()].filter(([, marked]) => marked && marked.messageId);
+  }
+
+  /**
+   * Advances one continuation solely from durable app state and ChatGPT's stable message ids.
+   * This runs before ordinary page journaling so a marked replacement commits its rebind before
+   * the recorder could create a shadow session for that same conversation.
+   */
+  async function reconcileContinuationMarker(key, marked) {
+    if (!conversationId || CLF_DOM.conversationId() !== conversationId) return false;
+    if (marked.kind === 'RESUME') {
+      continuationJournalPending = true;
+      const reply = await ask({
+        type: 'compact',
+        conversationId,
+        token: marked.token,
+        destinationMessageId: marked.messageId
+      });
+      if (!reply || reply.ok !== true) return false;
+      if (reply.data && typeof reply.data.commandId === 'string') {
+        rememberResumeGoalPending(conversationId, reply.data.commandId);
+      }
+      continuationJournalPending = false;
+      commandJournalGate = false;
+      void flush();
+      return true;
     }
 
-    // Reloaded between submitting the prompt and seeing the turn open, so the binding was
-    // never made in the old document. The app still holds the open turn for this
-    // conversation, and `resumeOpenTurn` has already adopted it — so the id is available,
-    // it is just not yet claimed.
-    //
-    // It may be claimed only when it is provably not the turn that was stopped to make room
-    // for the compaction: that one can still be the app's open turn, because stopping a turn
-    // and *closing* it are a settle window apart, and adopting it would make some earlier
-    // answer the brief. `priorGeneration` is exactly that id, recorded before the send, so
-    // an open turn that is not it is the one the prompt started.
-    if (generating && turnId && turnId !== stored.priorGeneration) {
-      compactCapture.generation = turnId;
-      rememberCapture();
-      nativePhase = 'waiting';
-      nativeBusy = true;
-      renderControl();
-      return;
-    }
-    await abandonCapture(
-      'This tab reloaded before ChatGPT started answering the compaction request, so the app cannot tell which answer would have been it. Nothing was compacted — press Compact & Resume again.'
+    const bound = await ask({
+      type: 'compact',
+      conversationId,
+      token: marked.token,
+      sourceMessageId: marked.messageId
+    });
+    if (!bound || bound.ok !== true) return false;
+    const terminalId = marked.turn.endMessageId;
+    if (!terminalId || (marked.turn.calls || []).some((call) => !call || call.answered !== true)) return false;
+    const terminal = (marked.turn.messages || []).find(
+      (message) =>
+        message.role === 'assistant' &&
+        message.stable === true &&
+        (message.rawMessageId === terminalId || message.messageId === terminalId)
     );
-  }
-
-  /**
-   * Gives up on the watched compaction and withdraws the app-side transaction.
-   *
-   * The session stays in this chat. That is the whole failure mode: every way this can go
-   * wrong ends with the user in the conversation they were already in, told why, with a
-   * button they can press again.
-   */
-  async function abandonCapture(why) {
-    const held = releaseCapture();
-    const current =
-      !held ||
-      (held.conversationId === conversationId &&
-        held.epoch === epoch &&
-        CLF_DOM.conversationId() === held.conversationId);
-    // Navigation already reset the new chat. Do not let an old asynchronous settle path
-    // repaint it or send a cancellation carrying the wrong conversation through the worker.
-    if (!current) return;
-    nativeBusy = false;
-    nativePhase = '';
-    pressedAt = 0;
-    job = null;
-    localError = why;
-    if (held) await ask({ type: 'compact', conversationId: held.conversationId, cancel: true }).catch(() => undefined);
-    if (
-      held &&
-      (held.conversationId !== conversationId || held.epoch !== epoch || CLF_DOM.conversationId() !== held.conversationId)
-    ) {
-      return;
-    }
+    const summary = String(terminal?.rawText || '').trim();
+    if (!summary) return false;
+    const pending = await peekPendingTools();
+    if (pending !== 0 || !conversationId || CLF_DOM.conversationId() !== conversationId) return false;
+    nativePhase = 'delivering';
     renderControl();
-    void pullActivity();
+    const delivered = await ask({ type: 'compact', conversationId, token: marked.token, summary });
+    if (!delivered || delivered.ok !== true) return false;
+    if (delivered.data && delivered.data.job) job = delivered.data.job;
+    nativePhase = '';
+    localError = '';
+    renderControl();
+    return true;
   }
 
-  /**
-   * How long everything about the turn has to stop changing before it is taken to be finished.
-   *
-   * Longer than TURN_SETTLE_MS by a wide margin, and deliberately so: the whole reason this
-   * exists is that four seconds of one signal was not evidence. A compaction turn that really
-   * did finish pays this once.
-   */
-  const BRIEF_STABLE_MS = 15_000;
-  /** How often a settling brief is re-read. */
-  const BRIEF_POLL_MS = 1_000;
-  /** The ceiling on watching one brief settle, after which it is given up on honestly. */
-  const BRIEF_WATCH_MS = 10 * 60_000;
+  function reconcileContinuationMarkers() {
+    const markedTurns = markedContinuationTurns();
+    if (markedTurns.length === 0) return null;
+    return (async () => {
+      for (const [key, marked] of markedTurns) {
+        if (reconciledContinuations.has(key) || continuationReconciliations.has(key)) continue;
+        const work = reconcileContinuationMarker(key, marked)
+          .then((done) => {
+            if (done) reconciledContinuations.add(key);
+          })
+          .finally(() => continuationReconciliations.delete(key));
+        continuationReconciliations.set(key, work);
+        await work;
+      }
+    })();
+  }
 
   /**
    * Everything this generation has written so far, re-read rather than remembered.
@@ -7078,246 +7025,19 @@
     return seen.join(',');
   }
 
-  /**
-   * Waits for the brief to stop being written before handing it over.
-   *
-   * `turn_end` is not proof that ChatGPT finished writing. The quiet heuristic that produces
-   * it reads exactly one thing — the stop control staying gone for TURN_SETTLE_MS — and a
-   * long agentic turn makes that control flicker between phases. On 2026-08-23 that closed a
-   * compaction turn 28 characters into its brief: the app stored `TASK`, a newline and
-   * `Continue implementing ` as a whole handoff for a session holding 455 events and 318,422
-   * tokens, opened the replacement chat with it, and the conversation it had just declared
-   * finished went on making tool calls for another seven minutes. The replacement chat could
-   * not tell that document from a complete one — no receiver can — and rebuilt the work from
-   * the filesystem instead.
-   *
-   * So the settled answer is where this starts, not what it delivers. Four signals have to
-   * agree, and hold agreeing for BRIEF_STABLE_MS, before the brief is taken to be the whole
-   * brief: the stop control absent, the answer text no longer growing, the turn's tool rail
-   * no longer moving, and the app reporting no local call still running.
-   *
-   * Every one of the first three can be fooled on its own, and the fourth is why it is here.
-   * The stop control flickers between phases. The text was frozen at 28 characters for seven
-   * minutes. A tool rail goes still in the gap between two calls — and stiller still *during*
-   * one: a build running for three minutes renders one block that does not change a
-   * character, so the whole page looks exactly like a finished turn. Only the app knows the
-   * connector is still holding that call open, and it is the one participant that cannot be
-   * fooled by what the page happens to be rendering.
-   *
-   * An unanswerable app is therefore not zero. `peekPendingTools` returns null when it could
-   * not ask, and reading that as "nothing is running" is precisely the inference that lost a
-   * session; it counts as busy and the watch keeps waiting. Nothing is lost by that: an app
-   * that cannot be asked is an app the brief could not have been delivered to either.
-   *
-   * The window only ever delays a handover; it cannot produce a brief that was not written.
-   * A turn that really did finish pays it once, in seconds, against a whole session.
-   */
-  async function settleBrief(ended, outcome) {
-    // Waiting cannot turn a turn that was cut short into one that finished, and what such a
-    // turn left on screen is not a brief. Refused on its outcome, exactly as before.
-    if (outcome === 'stopped' || outcome === 'interrupted' || outcome === 'failed') {
-      return void (await deliverBrief('', outcome));
-    }
-    const deadline = Date.now() + BRIEF_WATCH_MS;
-    let text = finalAnswerText(ended);
-    let activity = briefActivityMark(ended);
-    let stableSince = Date.now();
-    while (Date.now() < deadline) {
-      await sleep(BRIEF_POLL_MS);
-      // A navigation, a reload or the app withdrawing the transaction has already released
-      // the capture and told the user why. There is nothing left to deliver against.
-      if (
-        !alive ||
-        !sameChat() ||
-        !compactCapture ||
-        compactCapture.conversationId !== conversationId ||
-        compactCapture.epoch !== epoch ||
-        CLF_DOM.conversationId() !== compactCapture.conversationId
-      ) {
-        return;
-      }
-      const nextText = briefSoFar(ended, text);
-      const nextActivity = briefActivityMark(ended);
-      const pending = await peekPendingTools();
-      // Asking took a round trip, and the page may have moved on underneath it.
-      if (
-        !alive ||
-        !sameChat() ||
-        !compactCapture ||
-        compactCapture.conversationId !== conversationId ||
-        compactCapture.epoch !== epoch ||
-        CLF_DOM.conversationId() !== compactCapture.conversationId
-      ) {
-        return;
-      }
-      // Any of these on its own is enough. The stop control being back needs no
-      // corroborating — whatever `turn_end` concluded, the turn is demonstrably still
-      // running — and neither does a call the app says it is still holding open.
-      const busy = CLF_DOM.generating() || pending === null || pending > 0;
-      if (busy || nextText !== text || nextActivity !== activity) {
-        text = nextText;
-        activity = nextActivity;
-        stableSince = Date.now();
-        continue;
-      }
-      if (Date.now() - stableSince >= BRIEF_STABLE_MS) return void (await deliverBrief(text, outcome));
-    }
-    await abandonCapture(
-      'The compaction turn was still going long after it looked finished — still writing, still running ' +
-        'tools, or the app could not be reached to ask — so the app stopped waiting rather than hand over ' +
-        'half a brief. Nothing was compacted; this chat still has its session. Press Compact & Resume again.'
-    );
-  }
-
-  /** Whether a failed capture answer can become true after transport/app recovery. */
-  function retryableBriefReply(reply) {
-    if (!reply) return true;
-    if (reply.data && reply.data.retryable === true) return true;
-    const code = Number(reply.status);
-    // Browser/document ownership failures do not have an HTTP status. In particular a dying
-    // document can be fenced as `stale_document` after ChatGPT has already finished the brief;
-    // keep it in sessionStorage so the replacement document can retry rather than turning a
-    // correct navigation fence into data loss.
-    if (!Number.isFinite(code)) return true;
-    return code === 0 || code === 401 || code === 408 || code === 426 || code === 429 || code >= 500;
-  }
-
-  /**
-   * Retries the exact settled brief until the app accepts or terminally refuses its token.
-   *
-   * `/compact` capture is idempotent: a response can disappear after the app has already
-   * stored the handoff, and presenting the same token again simply returns that same handoff.
-   * Keeping the bytes here until an acknowledgement is therefore what makes the boundary
-   * atomic from the page's point of view. Dropping them before the POST made a transient
-   * worker/app failure strand an already-armed continuation in `awaiting-summary` forever.
-   */
-  async function deliverCapturedBrief() {
-    const held = compactCapture;
-    const brief = held && typeof held.summary === 'string' ? held.summary.trim() : '';
-    if (!held || !brief || briefDeliveryBusy) return;
-    const current = () =>
-      alive &&
-      compactCapture === held &&
-      held.conversationId === conversationId &&
-      held.epoch === epoch &&
-      CLF_DOM.conversationId() === held.conversationId;
-    if (!current()) return;
-
-    briefDeliveryBusy = true;
-    let reply = null;
-    try {
-      reply = await ask({ type: 'compact', conversationId: held.conversationId, token: held.token, summary: brief });
-    } finally {
-      briefDeliveryBusy = false;
-    }
-    // Cancellation/navigation can happen while the request is in flight. The late answer
-    // belongs to the capture object it started with and may not repaint or release a newer one.
-    if (!current()) return;
-
-    if (reply && reply.ok === true) {
-      releaseCapture();
-      nativeBusy = false;
-      nativePhase = '';
-      localError = '';
-      if (reply.data && reply.data.job) job = reply.data.job;
-      renderControl();
-      void pullActivity();
-      return;
-    }
-
-    if (retryableBriefReply(reply)) {
-      // Keep the exact generation-bound bytes in sessionStorage. The normal activity loop is
-      // the retry clock, so there is no second independent timer to race navigation/cancel.
-      nativeBusy = true;
-      nativePhase = 'delivering';
-      pressedAt = 0;
-      localError = replyError(reply) || 'The brief is finished, but the app has not stored it yet. Retrying…';
-      renderControl();
-      return;
-    }
-
-    // A semantic 4xx means this token cannot become valid by waiting. Retire the local copy
-    // rather than replaying a rejected capture forever.
-    releaseCapture();
-    nativeBusy = false;
-    nativePhase = '';
-    pressedAt = 0;
-    job = null;
-    localError = replyError(reply) || 'The app refused the brief, so nothing was moved.';
-    renderControl();
-    void pullActivity();
-  }
-
-  /**
-   * Hands the app the brief for the exact generation that was asked for it.
-   *
-   * The generation binding is released immediately only when there is intentionally no brief.
-   * A valid settled brief is first persisted beside its token, then retried idempotently until
-   * the app acknowledges it. That keeps duplicate observations harmless without making one
-   * dropped POST destroy the only copy that can finish the transaction.
-   */
-  async function deliverBrief(text, outcome) {
-    const held = compactCapture;
-    if (!held) return;
-    const current = () =>
-      alive &&
-      compactCapture === held &&
-      held.conversationId === conversationId &&
-      held.epoch === epoch &&
-      CLF_DOM.conversationId() === held.conversationId;
-    if (!current()) return;
-    const brief = String(text || '').trim();
-    // An interrupted or empty compaction is not a short brief — it is no brief. Half a
-    // handoff reads exactly like a whole one to the chat that receives it, which is why
-    // this is the one place the extension refuses to send something it has.
-    if (!brief || outcome === 'stopped' || outcome === 'interrupted' || outcome === 'failed') {
-      releaseCapture();
-      const why =
-        outcome === 'stopped'
-          ? 'The compaction turn was stopped, so nothing was compacted.'
-          : outcome === 'interrupted' || outcome === 'failed'
-            ? 'ChatGPT did not finish writing the brief, so nothing was compacted.'
-            : 'ChatGPT answered the compaction request with nothing, so nothing was compacted.';
-      nativeBusy = false;
-      nativePhase = '';
-      pressedAt = 0;
-      job = null;
-      localError = why;
-      await ask({ type: 'compact', conversationId: held.conversationId, cancel: true }).catch(() => undefined);
-      if (!alive || held.conversationId !== conversationId || held.epoch !== epoch || CLF_DOM.conversationId() !== held.conversationId) return;
-      renderControl();
-      void pullActivity();
-      return;
-    }
-
-    // First settled observer wins. If another observer runs while delivery is in flight it
-    // reuses these bytes rather than replacing the durable identity with a later DOM reading.
-    if (typeof held.summary !== 'string' || !held.summary.trim()) {
-      held.summary = brief;
-      rememberCapture();
-    }
-    nativeBusy = true;
-    nativePhase = 'delivering';
-    localError = '';
-    renderControl();
-    await deliverCapturedBrief();
-  }
-
   // ---------------------------------------------------------------- goal loop
 
   /**
    * How long everything about a finished turn has to stay still before the goal loop
    * believes it.
    *
-   * The same problem the compaction settle window exists for, and the same four signals —
-   * see settleBrief. The difference is what a mistake costs: a compaction that fires early
+   * The same four-signal settling rule the page uses elsewhere. A goal reply that fires early
    * hands over half a brief, and a goal reply that fires early types "what about the tests"
    * into a chat that is still in the middle of writing them, which the model then answers as
    * if it were a correction. A turn that really did finish pays this once.
    *
-   * Shorter than BRIEF_STABLE_MS on purpose. A brief is written once per session and is worth
-   * fifteen seconds of certainty; the goal loop runs after every turn, and the request it
-   * leads to takes far longer than this window anyway.
+   * Eight seconds is small beside the provider request it precedes, but long enough to reject
+   * the page's short Stop-button flickers.
    */
   const GOAL_STABLE_MS = 8_000;
   /** How often the settling turn is re-read. */
@@ -7342,6 +7062,20 @@
   // `end_turn` bit, `stopped` is the user's own decision, and interrupted/failed/stalled/unknown
   // are turns with no final answer to continue from — those belong to recovery, not to Goal.
   const GOAL_CONTINUABLE = new Set(['completed']);
+
+  /**
+   * Browser-local terminal shape only. Goal config/key intentionally do not participate:
+   * those are app authority and may arrive after a one-second answer has already ended.
+   */
+  function goalTerminalCandidate(outcome, localTurnId) {
+    return Boolean(
+      localTurnId &&
+        GOAL_CONTINUABLE.has(outcome) &&
+        !nativeBusy &&
+        !(job && job.busy) &&
+        bootstrap !== 'worker'
+    );
+  }
 
   /** How long a specific goal may be. Matches MAX_GOAL_OBJECTIVE_CHARS in src/shared/goal.ts. */
   const MAX_OBJECTIVE_CHARS = 4000;
@@ -7380,7 +7114,7 @@
     if (!GOAL_CONTINUABLE.has(outcome)) return;
     // A compaction owns this turn: its answer is the brief, not a message to reply to, and
     // the chat is about to be replaced anyway.
-    if (compactCapture || nativeBusy || (job && job.busy)) return;
+    if (nativeBusy || (job && job.busy)) return;
     // One draft per generation, and this is the near half of that rule; the app holds the
     // other half against a retried request. See /goal/draft.
     if (goalTurnId === endedTurnId) return;
@@ -7426,7 +7160,7 @@
     // exists to bridge, so keep the hint rather than deciding from stale/default settings.
     if (!goalConfig) return;
     if (!goalUsable()) return void clearResumeGoalPending();
-    if (goalBusy || generating || CLF_DOM.generating() || compactCapture || nativeBusy || (job && job.busy)) return;
+    if (goalBusy || generating || CLF_DOM.generating() || nativeBusy || (job && job.busy)) return;
 
     // The resume bootstrap is the only user turn we are entitled to reason from. If somebody
     // manually continued before recovery ran, the conversation has moved on and the old first
@@ -7465,10 +7199,36 @@
   }
 
   /**
+   * Reattaches Goal to the app's durable stable-reply cursor after refresh/config races.
+   *
+   * No transcript scan occurs here. The app has already accepted one exact final assistant
+   * message under the Goal policy that was live at that moment; this document only waits for
+   * ChatGPT's composer to be truly idle, then resumes that same turn id.
+   */
+  function maybeRecoverDurableGoalTurn() {
+    const pending = goalConfig && goalConfig.pending;
+    if (!pending || !pending.replyId || !pending.turnId || !conversationId) return;
+    if (!goalUsable() || goalBusy || goalDraft || generating || CLF_DOM.generating()) return;
+    if (nativeBusy || (job && job.busy)) return;
+    if (goalTurnId === pending.turnId) return;
+    goalTurnId = pending.turnId;
+    setGoalPhase('');
+    const forId = conversationId;
+    const forEpoch = epoch;
+    const forTurn = pending.turnId;
+    const current = () =>
+      alive &&
+      conversationId === forId &&
+      epoch === forEpoch &&
+      goalTurnId === forTurn;
+    void requestGoalDraft(forTurn, current, true);
+  }
+
+  /**
    * Waits for the finished turn to be finished, then asks the app for the next user message.
    *
-   * `turn_end` is where this starts, not what it acts on — for the same reason settleBrief
-   * exists. The stop control flickers between phases of one answer, prose stops growing while
+   * `turn_end` is where this starts, not what it acts on. The stop control flickers between
+   * phases of one answer, prose stops growing while
    * a three-minute build runs, and a tool rail goes still both between calls and during one.
    * So the answer text, the tool rail, the stop control and the app's own count of running
    * local calls all have to agree, and hold agreeing, before a word is typed into anybody's
@@ -7494,7 +7254,7 @@
         if (!current()) return;
         // Somebody — the user, or a turn ChatGPT started on its own — is talking again.
         if (generating) return void setGoalPhase('');
-        if (compactCapture || nativeBusy || (job && job.busy)) return void setGoalPhase('');
+        if (nativeBusy || (job && job.busy)) return void setGoalPhase('');
         if (!goalUsable()) return void setGoalPhase('');
         const nextText = briefSoFar(ended, text);
         const nextActivity = briefActivityMark(ended);
@@ -7561,7 +7321,7 @@
     if (goalBusy) return;
     // The conversation moved on while we waited: whatever this loop was going to write is
     // about a turn that is no longer the last one, which is an answer of its own.
-    if (generating || CLF_DOM.generating() || compactCapture || nativeBusy || (job && job.busy)) return void setGoalPhase('');
+    if (generating || CLF_DOM.generating() || nativeBusy || (job && job.busy)) return void setGoalPhase('');
     if (!goalUsable()) return void setGoalPhase('');
     goalBusy = true;
     try {
@@ -7574,10 +7334,15 @@
   }
 
   /** Asks the app to draft the next user message. The answer arrives on the activity feed. */
-  async function requestGoalDraft(forTurn, current) {
+  async function requestGoalDraft(forTurn, current, terminalRequired = false) {
     goalTypingSince = 0;
     setGoalPhase('requesting');
-    const reply = await ask({ type: 'goal_draft', conversationId, turnId: forTurn });
+    const reply = await ask({
+      type: 'goal_draft',
+      conversationId,
+      turnId: forTurn,
+      ...(terminalRequired ? { terminalRequired: true } : {})
+    });
     if (!current()) return;
     if (!reply || reply.ok !== true) {
       // The phase is kept rather than collapsed into `failed`: it names the step that
@@ -7649,7 +7414,7 @@
     if (draft.stage !== 'ready' || !draft.reply) return;
     // A turn started while the draft was being written — the user typed, or ChatGPT began
     // something of its own. The draft is about a conversation that has moved on.
-    if (generating || CLF_DOM.generating() || compactCapture || nativeBusy || (job && job.busy)) {
+    if (generating || CLF_DOM.generating() || nativeBusy || (job && job.busy)) {
       goalDraft = null;
       setGoalPhase('');
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
@@ -7704,7 +7469,7 @@
    * This browser-side deadline therefore must be comfortably larger than that grace or an
    * otherwise-finished call can deterministically turn a harmless attribution delay into a
    * refused compaction. Thirty seconds leaves the recorder its full window plus durable-write
-   * headroom without making a genuinely stuck local call wait anywhere near BRIEF_WATCH_MS.
+   * headroom without making a genuinely stuck local call wait indefinitely.
    */
   const TOOL_SETTLE_MS = 30_000;
   /** How many silent answers about pending calls to sit through before refusing. */
@@ -7751,17 +7516,8 @@
       epoch === forEpoch &&
       CLF_DOM.conversationId() === forId;
     if (!forId || !current()) return;
-    // Cancellation is one-way on the page too. The handoff turn may already be generating,
-    // but once the user cancels its answer must never be delivered as a brief afterwards.
-    // Release before the network await so a turn that settles during that await also sees
-    // no capture to redeem.
-    if (
-      compactCapture &&
-      compactCapture.conversationId === forId &&
-      compactCapture.epoch === forEpoch
-    ) {
-      releaseCapture();
-    }
+    // Cancellation is one-way in the durable continuation. A later marker observation cannot
+    // revive an aborted token.
     pressedAt = 0;
     nativeBusy = false;
     nativePhase = '';
@@ -7970,7 +7726,7 @@
   function revivalSubmitReady(target) {
     if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return false;
     if (generating || CLF_DOM.generating()) return false;
-    if (pendingTools > 0 || nativeBusy || goalBusy || compactCapture || (job && job.busy)) return false;
+    if (pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy)) return false;
     return Boolean(CLF_DOM.composerSubmitReady && CLF_DOM.composerSubmitReady());
   }
 
@@ -8070,15 +7826,14 @@
     return false;
   }
   /**
-   * Fresh app-opened chats do not journal their first observations until the command ACK.
+   * Fresh app-opened chats do not journal their first observations until identity commits.
    *
-   * For a resume, `/commands/ack` is the transaction commit that moves the durable local
-   * session A→B. `observe()` starts in parallel with `runCommand()`, so without this gate B
-   * could flush its pasted brief first, eagerly creating a second local session; the later
-   * rebind then left that three-event "Resumed …" shadow behind forever. Holding the tiny
-   * opening batch here makes the order exact: send bootstrap → learn B's chat id → ACK/commit
-   * → release observations into the already-moved session. Workers benefit too: their slot
-   * binding lands before their first recorded event.
+   * For a resume, ChatGPT's marked destination message is the transaction commit that moves
+   * durable session A→B. `observe()` starts in parallel with command delivery, so without this
+   * gate B could flush that user message first, eagerly creating a second local session; the
+   * later rebind then fails because B already has an owner. Hold the opening batch through the
+   * first Fiber scan, and keep holding it while a RESUME marker is unresolved. Workers benefit
+   * too: their slot binding lands before their first recorded event.
    */
   let commandJournalGate = false;
 
@@ -8167,7 +7922,7 @@
     } finally {
       reportClaim(false);
       if (commandAttempt === attempt) commandAttempt = null;
-      if (gateJournal) commandJournalGate = false;
+      if (gateJournal && !continuationJournalPending) commandJournalGate = false;
       void flush();
     }
   }
@@ -8333,9 +8088,41 @@
       return void (await fail('the composer changed before bootstrap send; the draft was preserved'));
     }
     if (await failIfRetargeted()) return;
-    if (!(await CLF_DOM.send())) return void (await fail('ChatGPT did not accept the bootstrap send'));
+    const resumeMarker = boot.type === 'resume' ? String(boot.text || '').match(CONTINUATION_MARKER) : null;
+    if (boot.type === 'resume') {
+      if (!resumeMarker || resumeMarker[1] !== 'RESUME') {
+        return void (await fail('the resume bootstrap had no valid continuation marker'));
+      }
+      continuationJournalPending = true;
+      const permit = await ask({ type: 'compact', token: resumeMarker[2], destinationAttempt: true });
+      if (!permit || permit.ok !== true || !permit.data || permit.data.allowed !== true) {
+        CLF_DOM.clearPromptExact(boot.text);
+        return;
+      }
+      // As on the source side: the claim above promises nothing was submitted, and this second
+      // write is the exclusive cut taken immediately before the click.
+      const armed = await ask({ type: 'compact', token: resumeMarker[2], destinationDispatch: true });
+      if (!armed || armed.ok !== true || !armed.data || armed.data.armed !== true) {
+        CLF_DOM.clearPromptExact(boot.text);
+        return;
+      }
+    }
+    if (!(await CLF_DOM.send())) {
+      CLF_DOM.clearPromptExact(boot.text);
+      if (boot.type === 'resume') return;
+      return void (await fail('ChatGPT did not accept the bootstrap send'));
+    }
     agent = boot.agent || null;
     agentCommandId = agent && typeof boot.id === 'string' ? boot.id : null;
+
+    // A resume is committed from its unique server-authored marker, not from this document's
+    // survival long enough to notice a route change. refreshFiber() performs that commit before
+    // ordinary journal events, which also prevents a shadow session from claiming chat B.
+    if (boot.type === 'resume') {
+      const found = CLF_DOM.conversationId();
+      if (found) rememberResumeGoalPending(found, boot.id);
+      return;
+    }
 
     // A revival already names and repeatedly proved the exact conversation before the send.
     // Once ChatGPT accepts that user message there is nothing left to discover, and waiting on
@@ -8357,14 +8144,7 @@
       await sleep(500);
       const found = CLF_DOM.conversationId();
       if (found) {
-        const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
-        // The ACK is the continuation commit. Only after it succeeds is B entitled to inherit
-        // A's Goal policy/objective, and only a resume bootstrap can create the missed-first-turn
-        // recovery described by maybeRecoverResumeGoalTurn(). Worker bootstraps are driven by
-        // their prime instead and must never arm Goal.
-        if (boot.type === 'resume' && acknowledged && acknowledged.ok === true) {
-          rememberResumeGoalPending(found, boot.id);
-        }
+        await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
         return;
       }
     }
@@ -8422,7 +8202,7 @@
         // The next scheduled pass retries after worker/app recovery.
       }
       const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-      const active = generating || nativeBusy || Boolean(compactCapture) || Boolean(job && job.busy) || pendingTools > 0;
+      const active = generating || nativeBusy || Boolean(job && job.busy) || pendingTools > 0;
       // A goal draft lives entirely on this feed — its streamed text is what the stage panel
       // shows, and the finished message only arrives here — so it polls at the live cadence
       // even in a hidden tab, which is exactly the tab this feature runs in.
@@ -8576,10 +8356,10 @@
   }
 
   // A marked page has exactly one job before ordinary page restoration: deliver the
-  // bootstrap it was opened for. Do it first. Putting runCommand() behind checkStatus(),
-  // resumeOpenTurn() and restoreCapture() made a fresh empty resume tab wait on completely
+  // bootstrap it was opened for. Do it first. Putting runCommand() behind ordinary restoration
+  // made a fresh empty resume tab wait on completely
   // unrelated startup traffic before the handoff was even inserted. The command journal
-  // gate stays closed until ACK/commit, so beginning normal observation afterwards also
+  // gate stays closed until marker/identity commit, so beginning normal observation afterwards also
   // preserves the no-shadow-session ordering documented above.
   //
   // On an ordinary existing chat there is no marker and this resolves immediately, after
@@ -8596,7 +8376,6 @@
     .then(loadRenderPreference)
     .then(checkStatus)
     .then(() => resumeOpenTurn().catch(() => undefined))
-    .then(() => restoreCapture().catch(() => undefined))
     .then(() => {
       observe();
       commandReadinessInitialized = true;

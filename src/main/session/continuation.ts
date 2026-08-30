@@ -98,6 +98,41 @@ export type ContinuationState =
   | 'committed'
   | 'aborted';
 
+/**
+ * The four durable positions of one prompt, in order.
+ *
+ * The pair in the middle is the whole point. `attempted-unresolved` is written *before* anything
+ * touches the composer's Send, so it is a proof that nothing was dispatched — a document that
+ * dies here left no request behind, and the claim can be handed on. `dispatched-unresolved` is
+ * written *before the click* and therefore means the opposite: this may or may not have reached
+ * ChatGPT, and nothing local can tell which, because the click happens first and the acceptance
+ * evidence arrives seconds later. That one is never replayed.
+ */
+export type ContinuationSendState =
+  | 'not-attempted'
+  | 'attempted-unresolved'
+  | 'dispatched-unresolved'
+  | 'sent';
+
+export interface ContinuationSendCheckpoint {
+  state: ContinuationSendState;
+  /** ChatGPT's stable server-authored user-message id, once the marked prompt is visible. */
+  messageId: string | null;
+}
+
+export interface ContinuationDestinationCheckpoint extends ContinuationSendCheckpoint {
+  /** Chat B, learned from the page that contains the marked bootstrap message. */
+  conversationId: string | null;
+}
+
+/**
+ * True while the fence still proves no prompt was submitted, so the prompt may be handed to
+ * another document. Both states it covers are written before a composer is submitted; every
+ * question of the form "may this text be typed again?" is this question.
+ */
+export const sendUnattempted = (checkpoint: ContinuationSendCheckpoint): boolean =>
+  checkpoint.state === 'not-attempted' || checkpoint.state === 'attempted-unresolved';
+
 interface Continuation {
   token: string;
   sessionId: string;
@@ -124,16 +159,8 @@ interface Continuation {
   claimedBy: string | null;
   /** Chat B while the durable commit is in flight; persisted for restart recovery. */
   to: string | null;
-  /**
-   * Whether the compaction instruction has already been handed out for this transaction.
-   *
-   * Handed out once, and once only. The instruction is not information — submitting it *is*
-   * the compaction — so a page asking again after a lost response, a reload, or a second
-   * press must not be given something it can send. Two submissions of one prompt are two
-   * generations both trying to be the brief, and only one of them can be, which is the
-   * ambiguity this whole transaction exists to remove.
-   */
-  armed: boolean;
+  sourceSend: ContinuationSendCheckpoint;
+  destinationSend: ContinuationDestinationCheckpoint;
   error: string | null;
 }
 
@@ -141,6 +168,7 @@ interface Continuation {
 const byToken = new Map<string, Continuation>();
 const openingBySession = new Map<string, Promise<ContinuationView>>();
 const commitLocks = new Map<string, { to: string; promise: Promise<ContinuationCommitResult> }>();
+const checkpointLocks = new Map<string, Promise<unknown>>();
 export const CONTINUATIONS_STATE = 'continuations';
 const RESUME_SHADOW_COLLISION = 'the replacement chat already belongs to another local session';
 
@@ -154,7 +182,11 @@ interface ContinuationRecord {
   summary: string;
   handoffId: string | null;
   claimedBy: string | null;
-  armed: boolean;
+  /** Legacy only: the pre-checkpoint arm flag, read when migrating an older record. */
+  armed?: boolean;
+  /** Absent only in a record written before the checkpoints existed. */
+  sourceSend?: ContinuationSendCheckpoint;
+  destinationSend?: ContinuationDestinationCheckpoint;
   error: string | null;
 }
 
@@ -175,7 +207,8 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     summary: entry.summary.slice(0, 512 * 1024),
     handoffId: entry.handoffId,
     claimedBy: entry.claimedBy,
-    armed: entry.armed,
+    sourceSend: { ...entry.sourceSend },
+    destinationSend: { ...entry.destinationSend },
     error: entry.error
   };
 }
@@ -219,7 +252,14 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   entry.summary = record.summary;
   entry.handoffId = record.handoffId;
   entry.claimedBy = record.claimedBy;
-  entry.armed = record.armed;
+  // A record written before the checkpoints existed has neither; restoreContinuations
+  // migrates those from the retired `armed` flag before any of them reach a transition.
+  entry.sourceSend = record.sourceSend
+    ? { ...record.sourceSend }
+    : { state: 'not-attempted', messageId: null };
+  entry.destinationSend = record.destinationSend
+    ? { ...record.destinationSend }
+    : { state: 'not-attempted', conversationId: null, messageId: null };
   entry.error = record.error;
 }
 
@@ -275,7 +315,8 @@ export interface ContinuationView {
   handoffId: string | null;
   error: string | null;
   openedAt: number;
-  armed: boolean;
+  sourceSend: ContinuationSendCheckpoint;
+  destinationSend: ContinuationDestinationCheckpoint;
 }
 
 const view = (entry: Continuation): ContinuationView => ({
@@ -287,7 +328,8 @@ const view = (entry: Continuation): ContinuationView => ({
   handoffId: entry.handoffId,
   error: entry.error,
   openedAt: entry.openedAt,
-  armed: entry.armed
+  sourceSend: { ...entry.sourceSend },
+  destinationSend: { ...entry.destinationSend }
 });
 
 const isOpen = (entry: Continuation): boolean =>
@@ -476,7 +518,6 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
 function makeContinuation(sessionId: string, fromConversationId: string): Continuation {
   return {
     token: randomBytes(16).toString('base64url'),
-    armed: false,
     sessionId,
     from: fromConversationId,
     openedAt: Date.now(),
@@ -487,6 +528,8 @@ function makeContinuation(sessionId: string, fromConversationId: string): Contin
     handoff: null,
     claimedBy: null,
     to: null,
+    sourceSend: { state: 'not-attempted', messageId: null },
+    destinationSend: { state: 'not-attempted', conversationId: null, messageId: null },
     error: null
   };
 }
@@ -527,20 +570,152 @@ export async function openContinuationNow(
   }
 }
 
+async function withCheckpointLock<T>(token: string, work: () => Promise<T>): Promise<T> {
+  const prior = checkpointLocks.get(token);
+  if (prior) await prior.catch(() => undefined);
+  const current = work();
+  checkpointLocks.set(token, current);
+  try {
+    return await current;
+  } finally {
+    if (checkpointLocks.get(token) === current) checkpointLocks.delete(token);
+  }
+}
+
 /**
- * Hands the compaction instruction out, once.
+ * Claims the source prompt: the durable step taken before the composer is submitted at all.
  *
- * True means the caller may submit it. False means somebody already has — a duplicate press,
- * a retried request whose answer was lost, a tab reloaded into the same button — and the
- * answer to that is the transaction that already exists, never a second turn writing a
- * second brief.
+ * Granted from `not-attempted`, and equally from `attempted-unresolved`, because that state is
+ * written before any click and is therefore proof that no prompt was ever dispatched. Handing
+ * the claim to a second document cannot produce two Sends even if the first one was not dead,
+ * only slow: the dispatch below is the transition that is exclusive, and only one document can
+ * take it.
+ *
+ * It is refused from `dispatched-unresolved` and `sent`: past that point ChatGPT may already
+ * hold the message, and the only honest ends are its own marker or an explicit cancel.
  */
-/** Durable arm used before the bridge returns the compaction prompt. */
-export async function armContinuationNow(token: string): Promise<boolean> {
-  const entry = byToken.get(token);
-  if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary' || entry.armed) return false;
-  await transitionNow(entry, (current) => ({ ...current, armed: true }));
-  return true;
+export async function beginContinuationSourceSendNow(
+  token: string
+): Promise<{ allowed: boolean; checkpoint: ContinuationSendCheckpoint } | null> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary') return null;
+    if (entry.sourceSend.state === 'attempted-unresolved') {
+      return { allowed: true, checkpoint: { ...entry.sourceSend } };
+    }
+    if (entry.sourceSend.state !== 'not-attempted') {
+      return { allowed: false, checkpoint: { ...entry.sourceSend } };
+    }
+    await transitionNow(entry, (current) => ({
+      ...current,
+      sourceSend: { state: 'attempted-unresolved', messageId: null }
+    }));
+    return { allowed: true, checkpoint: { ...entry.sourceSend } };
+  });
+}
+
+/**
+ * Arms the click, and is the exclusive step: exactly one caller moves the fence off
+ * `attempted-unresolved`, and only that one may submit. After it returns true the prompt may
+ * have reached ChatGPT — the click happens first and acceptance is observed seconds later — so
+ * this app never offers the prompt again. The transaction ends at ChatGPT's marker or a cancel.
+ */
+export async function dispatchContinuationSourceSendNow(token: string): Promise<boolean> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary') return false;
+    if (entry.sourceSend.state !== 'attempted-unresolved') return false;
+    await transitionNow(entry, (current) => ({
+      ...current,
+      sourceSend: { state: 'dispatched-unresolved', messageId: null }
+    }));
+    return true;
+  });
+}
+
+/** Binds the marked source prompt to ChatGPT's stable user-message identity. */
+export async function bindContinuationSourceMessageNow(token: string, messageId: string): Promise<boolean> {
+  if (!messageId || messageId.length > 200) return false;
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary') return false;
+    if (entry.sourceSend.state === 'sent') return entry.sourceSend.messageId === messageId;
+    if (entry.sourceSend.state !== 'dispatched-unresolved') return false;
+    await transitionNow(entry, (current) => ({
+      ...current,
+      sourceSend: { state: 'sent', messageId }
+    }));
+    return true;
+  });
+}
+
+/**
+ * Claims the replacement bootstrap, before its composer is submitted at all.
+ *
+ * The same two steps as the source half, for the same reason, and it matters more here: the
+ * replacement tab is opened by this app and is routinely reloaded or retargeted while it is
+ * still typing. `attempted-unresolved` is reclaimable because nothing was dispatched under it.
+ */
+export async function beginContinuationDestinationSendNow(
+  token: string
+): Promise<{ allowed: boolean; checkpoint: ContinuationDestinationCheckpoint } | null> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || !entry.handoffId || entry.state === 'awaiting-summary') return null;
+    if (entry.destinationSend.state === 'attempted-unresolved') {
+      return { allowed: true, checkpoint: { ...entry.destinationSend } };
+    }
+    if (entry.destinationSend.state !== 'not-attempted') {
+      return { allowed: false, checkpoint: { ...entry.destinationSend } };
+    }
+    await transitionNow(entry, (current) => ({
+      ...current,
+      destinationSend: { state: 'attempted-unresolved', conversationId: null, messageId: null }
+    }));
+    return { allowed: true, checkpoint: { ...entry.destinationSend } };
+  });
+}
+
+/**
+ * Arms the replacement's click, exclusively. Past this the bootstrap may exist server-side in a
+ * chat this app cannot yet name, so it is never retyped; only the marked message resolves it.
+ */
+export async function dispatchContinuationDestinationSendNow(token: string): Promise<boolean> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || !entry.handoffId || entry.state === 'awaiting-summary') return false;
+    if (entry.destinationSend.state !== 'attempted-unresolved') return false;
+    await transitionNow(entry, (current) => ({
+      ...current,
+      destinationSend: { state: 'dispatched-unresolved', conversationId: null, messageId: null }
+    }));
+    return true;
+  });
+}
+
+/** Binds the marked bootstrap to its exact ChatGPT conversation and user-message identity. */
+export async function bindContinuationDestinationMessageNow(
+  token: string,
+  conversationId: string,
+  messageId: string
+): Promise<boolean> {
+  if (!conversationId || !messageId || conversationId.length > 256 || messageId.length > 200) return false;
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || !entry.handoffId || conversationId === entry.from) return false;
+    if (entry.destinationSend.state === 'sent') {
+      return (
+        entry.destinationSend.conversationId === conversationId &&
+        entry.destinationSend.messageId === messageId
+      );
+    }
+    if (entry.destinationSend.state !== 'dispatched-unresolved') return false;
+    await transitionNow(entry, (current) => ({
+      ...current,
+      destinationSend: { state: 'sent', conversationId, messageId }
+    }));
+    return true;
+  });
 }
 
 /**
@@ -1001,6 +1176,14 @@ export async function abortContinuationNow(token: string, reason: string): Promi
   return true;
 }
 
+const SEND_STATES = new Set<ContinuationSendState>([
+  'not-attempted',
+  'attempted-unresolved',
+  'dispatched-unresolved',
+  'sent'
+]);
+
+
 /**
  * Restores open continuation transactions after the agent/session projections are loaded.
  *
@@ -1046,7 +1229,34 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       capture: null,
       handoff: null,
       claimedBy: typeof raw.claimedBy === 'string' ? raw.claimedBy : null,
-      armed: raw.armed === true,
+      sourceSend:
+        raw.sourceSend && SEND_STATES.has(raw.sourceSend.state as ContinuationSendState)
+          ? {
+              state: raw.sourceSend.state as ContinuationSendState,
+              messageId:
+                typeof raw.sourceSend.messageId === 'string' ? raw.sourceSend.messageId.slice(0, 200) : null
+            }
+          : {
+              // The retired `armed` flag was raised around the click, not before it, so it
+              // cannot promise the prompt was never dispatched. It migrates to the ambiguous
+              // state, which is exactly what it always meant.
+              state: raw.armed === true ? 'dispatched-unresolved' : 'not-attempted',
+              messageId: null
+            },
+      destinationSend:
+        raw.destinationSend && SEND_STATES.has(raw.destinationSend.state as ContinuationSendState)
+          ? {
+              state: raw.destinationSend.state as ContinuationSendState,
+              conversationId:
+                typeof raw.destinationSend.conversationId === 'string'
+                  ? raw.destinationSend.conversationId.slice(0, 256)
+                  : null,
+              messageId:
+                typeof raw.destinationSend.messageId === 'string'
+                  ? raw.destinationSend.messageId.slice(0, 200)
+                  : null
+            }
+          : { state: 'not-attempted', conversationId: null, messageId: null },
       error: typeof raw.error === 'string' ? raw.error : null
     };
     const waitingExpired =
@@ -1165,6 +1375,7 @@ export function resetContinuationsForTests(): void {
   byToken.clear();
   openingBySession.clear();
   commitLocks.clear();
+  checkpointLocks.clear();
   recoveryHooks = {};
   // The gate is part of this module's state even though it lives next door, and a claim
   // outlives a cleared transaction by RESUME_CLAIM_WINDOW_MS. Left behind, it makes the

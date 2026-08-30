@@ -1321,17 +1321,31 @@ describe('delivering a bootstrap', () => {
     expect((await getSession(sessionId))?.conversationId).toBe(destination);
   });
 
-  /** One page owns one command. A second document on the same marker gets nothing. */
-  it('refuses a second page on the same marker while the first still holds it', async () => {
+  /**
+   * Document ownership is replaceable up to the click and never past it.
+   *
+   * Holding the claim is not having sent: it is written before the composer is submitted at
+   * all, so a page that dies there left nothing behind and the next page may have the prompt.
+   * Arming is the opposite — the click comes first and its acceptance only seconds later — so
+   * from there on no page is offered this bootstrap again.
+   */
+  it('lets a reloaded page adopt a resume until one arms the click, and refuses every page afterwards', async () => {
     await pair();
     const { sessionId, token } = await compactedSession('99999999-8888-7777-6666-555555555555', 'the only brief');
     const command = queueResume(sessionId, token)!;
 
     expect((await redeem(command.id, 'tab-1')).text).toContain('the only brief');
     const second = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-2' } });
-    expect(second.status).toBe(409);
-    // The owner's own retries are the same owner, and are answered every time.
-    expect((await redeem(command.id, 'tab-1')).text).toContain('the only brief');
+    expect(second.status).toBe(200);
+
+    const claimed = await request('POST', '/compact', { body: { token, destinationAttempt: true } });
+    expect(claimed.body.allowed).toBe(true);
+    expect((await redeem(command.id, 'tab-3')).text).toContain('the only brief');
+
+    const armed = await request('POST', '/compact', { body: { token, destinationDispatch: true } });
+    expect(armed.body.armed).toBe(true);
+    expect((await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-3' } })).status).toBe(409);
+    expect((await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-4' } })).status).toBe(409);
   });
 
   /**
@@ -3978,7 +3992,126 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('sleeps a silent joined turn when its granted activity runs out, without commanding the browser', async () => {
+  it('gives an ordinary solo chat the same one-shot stale-turn reload as Prime', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-solo-silent')]);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await sweepStaleSwarm(Date.now());
+      const reload = await maintenance();
+      expect(chatOf(reload)).toBe(OTHER);
+
+      // A receipt proves Chrome carried the reload out. With no new durable observation, the
+      // next sweep abandons this open turn instead of reloading it again forever.
+      expect(await maintenance(reload!.token)).toBeNull();
+      await sweepStaleSwarm(Date.now());
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('moves the stale deadline on real assistant progress and removes it on a formal turn end', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-solo-progress')]);
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS - 1);
+      await events(OTHER, [{
+        kind: 'assistant_message',
+        time: Date.now(),
+        messageId: 'assistant-solo-progress',
+        turnId: 'turn-solo-progress',
+        text: 'Still working through it',
+        state: 'streaming',
+        final: false
+      }]);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS - 1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+
+      await events(OTHER, [endTurn('turn-solo-progress', 'completed')]);
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * A tool call is attributed after the turn that made it has already ended.
+   *
+   * The recorder can spend up to REQUEST_ID_GRACE_MS proving one request id, so the page's
+   * `turn_end` regularly reaches this app before the call inside that turn is filed. The
+   * silence deadline belongs to an *open* turn, so a late attribution must not mint one for a
+   * chat that finished perfectly - that reloaded a completed answer two minutes after the user
+   * already had it.
+   */
+  it('never reloads a chat whose turn formally ended before its last call was attributed', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-solo-late-join')]);
+      await events(OTHER, [endTurn('turn-solo-late-join', 'completed')]);
+      await attributed(OTHER);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * An unrelated unattributed incident used to cancel a confirmed stale-turn recovery.
+   *
+   * `repairCandidates()` pruned the activity ledger on its own clock, two minutes behind the
+   * deadline it prunes. A silence recovery that Chrome had already carried out could therefore
+   * lose the grant that says which chats to spend, and the verdict on that reload was never
+   * reached: the Worker slot stayed occupied by a chat this app had already given up on, and
+   * the repair sat in flight forever. The open turn, not a second clock, decides this now.
+   */
+  it('still spends a confirmed stale-turn reload after an unrelated unattributed incident', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [openTurn('turn-worker-pruned')]);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await sweepStaleSwarm(Date.now());
+      const reload = await maintenance();
+      expect(chatOf(reload)).toBe(WORKER);
+      expect(await maintenance(reload!.token)).toBeNull();
+
+      // The incident's own minute lands well past the silence deadline, which is exactly when
+      // the old ledger prune fired. The reload above is still the outstanding verdict.
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await unattributed();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await sweepStaleSwarm(Date.now());
+      expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+        state: 'sleeping',
+        revivable: true
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reloads a silent joined turn once, then sleeps the Worker only if it stays dead', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -3992,13 +4125,15 @@ describe('unattributed activity recovery', () => {
       expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
       expect(liveConversations().find((entry) => entry.conversationId === WORKER)).toMatchObject({ generating: true });
 
-      // Silence alone no longer commands a browser action. A turn that produces nothing may
-      // simply be a long answer, and reloading it destroys the answer to fix nothing; only
-      // unattributed activity says a chat is failing to be heard. So this worker is left to
-      // run and then released by the ordinary sleep, with no reload asked for at any point.
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS - 1);
       expect(await maintenance()).toBeNull();
       await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      const reload = await maintenance();
+      expect(chatOf(reload)).toBe(WORKER);
+      expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+
+      expect(await maintenance(reload!.token)).toBeNull();
       await sweepStaleSwarm(Date.now());
       expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
         state: 'sleeping',
@@ -4022,6 +4157,10 @@ describe('unattributed activity recovery', () => {
       noteAgentContextTokens(WORKER, WORKER_CONTEXT_CEILING_TOKENS);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await sweepStaleSwarm(Date.now());
+      const reload = await maintenance();
+      expect(chatOf(reload)).toBe(WORKER);
+      expect(await maintenance(reload!.token)).toBeNull();
       await sweepStaleSwarm(Date.now());
       expect(swarmStateForCaller({ conversationId: PRIME }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
         state: 'finished',
