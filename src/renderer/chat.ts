@@ -178,11 +178,9 @@ function sessionBadges(summary: SessionSummary): Badge[] {
     : swarm?.agents.find(
         (entry) => entry.role === 'prime' && entry.conversationId === summary.conversationId
       );
-  if (agent) {
-    badges.push(AGENT_BADGE[agent.state]);
-    return badges;
-  }
-
+  // Prime owning the run is not Prime running a turn. Workers use their broker lifecycle;
+  // Prime's visible activity comes from the recorder's exact open-turn identity.
+  if (agent && (agent.role !== 'prime' || summary.activeTurnId)) badges.push(AGENT_BADGE[agent.state]);
   return badges;
 }
 

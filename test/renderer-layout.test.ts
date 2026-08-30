@@ -122,6 +122,10 @@ describe('a session row', () => {
     // old worker-2 rows all suddenly said `active` when one new worker-2 was active.
     expect(chatSource).toMatch(/entry\.id === origin\.agentId[\s\S]{0,220}entry\.conversationId === summary\.conversationId/);
   });
+
+  it('does not call an idle prime active merely because it still owns the run', () => {
+    expect(chatSource).toMatch(/agent\.role !== 'prime' \|\| summary\.activeTurnId/);
+  });
 });
 
 describe('the session-row chat actions', () => {
