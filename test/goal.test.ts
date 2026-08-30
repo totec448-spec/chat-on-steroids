@@ -1254,7 +1254,7 @@ describe('a chat driven towards a specific goal', () => {
     expect(box.seen.filter((message) => message.role !== 'system')).toEqual([
       { role: 'user', content: 'start on the port' }
     ]);
-    expect(box.seen.at(-1)!.content).toContain('name the parts of the goal that are still not done');
+    expect(box.seen.at(-1)!.content).toContain('naming the unmet condition and next useful action');
   });
 
   /**
