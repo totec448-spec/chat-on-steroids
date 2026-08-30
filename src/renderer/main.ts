@@ -325,7 +325,7 @@ function paintDesktopAccess(next: AppState): void {
   const box = $('desktopAccess');
   const access = next.desktopAccess;
   const needsScreen = next.config.capabilities.screen;
-  const needsAccessibility = next.config.capabilities.control;
+  const needsAccessibility = next.config.capabilities.control && !next.config.readOnly;
   if (next.platform?.family !== 'macos' || (!needsScreen && !needsAccessibility) || !access) {
     box.hidden = true;
     return;

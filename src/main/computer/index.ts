@@ -30,9 +30,12 @@ export const MAX_SCREENSHOT_WIDTH = 2560;
 const HELPER_TIMEOUT_MS = 30_000;
 const HELPER_STARTUP_GRACE_MS = 10_000;
 const MAX_FRAMES = 16;
+/** Keeps the base64 image plus ordinary MCP metadata inside an 8 MiB wire envelope. */
+export const MAX_SCREENSHOT_PNG_BYTES = Math.floor((((8 * 1024 * 1024) - (64 * 1024)) * 3) / 4);
 
 let macOSDesktopAccess: MacOSDesktopAccessStatus | null = null;
 const macOSDesktopAccessListeners = new Set<(status: MacOSDesktopAccessStatus) => void>();
+let macOSDesktopAccessRefreshGeneration = 0;
 
 export function getMacOSDesktopAccess(): MacOSDesktopAccessStatus | null {
   return macOSDesktopAccess;
@@ -223,10 +226,10 @@ export function helperTimeoutMs(
     case 'act':
       if (platform !== 'darwin') return 15_000;
       // Every macOS physical mutation can now re-prove the exact AX/WindowServer input
-      // target, and an explicit focus may spend up to one second in its bounded poll. Size
+      // target, and an explicit focus may spend up to two seconds in its bounded poll. Size
       // the parent deadline for the whole permitted batch so the helper can return partial
       // completion evidence instead of being killed after earlier actions already landed.
-      return 15_000 + Math.min(20, Array.isArray(request['actions']) ? request['actions'].length : 1) * 1_100;
+      return 15_000 + Math.min(20, Array.isArray(request['actions']) ? request['actions'].length : 1) * 2_100;
     default:
       return HELPER_TIMEOUT_MS;
   }
@@ -721,6 +724,8 @@ interface Frame {
   height: number;
   windowId: number | null;
   windowGeometry: Rect | null;
+  /** Exact active-display rectangles captured with a screen frame; null for window frames. */
+  displayTopology: Rect[] | null;
   captureMode: Screenshot['captureMode'];
 }
 
@@ -1052,6 +1057,14 @@ async function screenshotFromReply(
     throw new ComputerError('The desktop helper returned invalid screenshot geometry.');
   }
   const readStartedAt = Date.now();
+  const fileInfo = await fs.stat(file).catch(() => {
+    throw new ComputerError('The screen capture produced no image.');
+  });
+  if (fileInfo.size > MAX_SCREENSHOT_PNG_BYTES) {
+    throw new ComputerError(
+      `SCREENSHOT_TOO_LARGE: encoded PNG is ${fileInfo.size} bytes; limit ${MAX_SCREENSHOT_PNG_BYTES} bytes`
+    );
+  }
   const png = await fs.readFile(file).catch(() => {
     throw new ComputerError('The screen capture produced no image.');
   });
@@ -1063,6 +1076,22 @@ async function screenshotFromReply(
     rawMode === 'window' || rawMode === 'screen_fallback' ? rawMode : 'screen';
   const scale = size.width / region.width;
   const replyWindowGeometry = reply['windowGeometry'] as Rect | undefined;
+  const rawDisplays = reply['displays'];
+  const displayTopology = Array.isArray(rawDisplays) && rawDisplays.length > 0 && rawDisplays.every((value) =>
+    value &&
+    typeof value === 'object' &&
+    Number.isFinite((value as Rect).x) &&
+    Number.isFinite((value as Rect).y) &&
+    Number.isFinite((value as Rect).width) &&
+    Number.isFinite((value as Rect).height) &&
+    (value as Rect).width > 0 &&
+    (value as Rect).height > 0
+  )
+    ? (rawDisplays as Rect[]).map((value) => ({ ...value }))
+    : null;
+  if (process.platform === 'darwin' && requestedWindow === null && !displayTopology) {
+    throw new ComputerError('The macOS desktop helper returned a screen frame without exact display topology.');
+  }
   const frame: Frame = {
     id: nextFrameId++,
     region,
@@ -1076,6 +1105,7 @@ async function screenshotFromReply(
           ? null
           : replyWindowGeometry ?? { ...region }
         : inheritedWindowGeometry,
+    displayTopology: requestedWindow === null ? displayTopology : null,
     captureMode
   };
   rememberFrame(frame);
@@ -1382,6 +1412,7 @@ async function actLocked(
       height: 1,
       windowId: null,
       windowGeometry: null,
+      displayTopology: null,
       captureMode: 'screen' as const
     };
   if (needsFrame) {
@@ -1508,6 +1539,7 @@ async function actLocked(
                 window: frame.windowId,
                 region: frame.region,
                 windowGeometry: frame.windowGeometry,
+                displays: frame.displayTopology,
                 captureMode: frame.captureMode
               }
             }
@@ -1670,6 +1702,7 @@ export async function refreshMacOSDesktopAccess(
   options: { promptAccessibility?: boolean } = {}
 ): Promise<MacOSDesktopAccessStatus | null> {
   if (process.platform !== 'darwin') return null;
+  const generation = ++macOSDesktopAccessRefreshGeneration;
   if (options.promptAccessibility === true) await requestParentAccessibility();
   try {
     const reply = await runHelper({ op: 'warm' });
@@ -1679,8 +1712,8 @@ export async function refreshMacOSDesktopAccess(
       checkedAt: Date.now(),
       error: null
     };
-    publishMacOSDesktopAccess(status);
-    return status;
+    if (generation === macOSDesktopAccessRefreshGeneration) publishMacOSDesktopAccess(status);
+    return generation === macOSDesktopAccessRefreshGeneration ? status : macOSDesktopAccess;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     const status: MacOSDesktopAccessStatus = {
@@ -1689,8 +1722,8 @@ export async function refreshMacOSDesktopAccess(
       checkedAt: Date.now(),
       error: message
     };
-    publishMacOSDesktopAccess(status);
-    return status;
+    if (generation === macOSDesktopAccessRefreshGeneration) publishMacOSDesktopAccess(status);
+    return generation === macOSDesktopAccessRefreshGeneration ? status : macOSDesktopAccess;
   }
 }
 
