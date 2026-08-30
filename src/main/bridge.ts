@@ -101,6 +101,7 @@ import {
   attachSummary,
   claimContinuationNow,
   commitContinuationResult,
+  CONTINUATION_TTL_MS,
   continuationByToken,
   continuationForSession,
   openContinuationNow,
@@ -147,7 +148,8 @@ const RATE_LIMIT = 900;
  * A deadline, not a retry interval. One command is one delivery: the app opens the exact
  * chat, and this is how long that page has to redeem the marker, type the bootstrap and
  * report which conversation it landed in. Long enough for a tab to open, ChatGPT to finish
- * loading and the composer to accept text on a slow machine.
+ * loading and the composer to accept text on a slow machine. A redeemed resume may keep waiting
+ * only while its existing continuation is still alive; that continuation already has its own TTL.
  *
  * What happens when it runs out is `drop()`, which is an ending rather than another go:
  * the continuation is aborted and the session stays in the chat it is already in, or the
@@ -1970,6 +1972,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         const claimed = await claimContinuationNow(command.spec.token, `${command.id}:${client}`);
         if (!claimed) return json(res, 409, { error: 'continuation_not_claimable' }, origin);
         claimedSummary = claimed.summary;
+        // Replace the short page-open timer with the continuation's existing outer lifetime.
+        armDeadline(command);
       } catch (err) {
         logWarn(`bridge: could not durably claim ${specKey(command.spec)} — ${err instanceof Error ? err.message : String(err)}`);
         return json(res, 503, { error: 'continuation_claim_not_durable', retryable: true }, origin);
@@ -3418,10 +3422,13 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number | null
   // exact worker chat may still be rendering the assistant message that contains agents.finish,
   // so the content script deliberately refuses to redeem until that page is submit-ready. That
   // wait must survive a tab reload/browser restart without turning ordinary ChatGPT busyness into
-  // a failed broker revival. Once a document actually redeems (`owner !== null`), the ordinary
-  // short acknowledgement deadline applies again: text may be about to cross the irreversible
-  // send boundary and a dead document must not own it indefinitely.
+  // a failed broker revival. A redeemed resume is already bounded by its continuation lifetime,
+  // so let that existing state machine remain the outer deadline while ChatGPT exposes chat B.
   if (waitingForRevivalReadiness(command)) return null;
+  if (command.spec.type === 'resume' && command.owner !== null) {
+    const continuation = continuationByToken(command.spec.token);
+    if (continuation?.state === 'claimed') return continuation.openedAt + CONTINUATION_TTL_MS - now;
+  }
   const claimedAt = command.claimedAt ?? now;
   return claimedAt + COMMAND_DEADLINE_MS - now;
 }
@@ -3703,7 +3710,7 @@ const isLeased = (command: Command): boolean => {
   if (Date.now() - command.claimedAt < COMMAND_DEADLINE_MS) return true;
   if (command.spec.type !== 'resume') return false;
   const state = continuationByToken(command.spec.token)?.state;
-  return state === 'committing' || state === 'committed';
+  return state === 'claimed' || state === 'committing' || state === 'committed';
 };
 
 /**
