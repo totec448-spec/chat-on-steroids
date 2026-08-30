@@ -697,6 +697,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     const fetch = vi.fn(async (input: string) => {
       const url = new URL(input);
       if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/closed') return response(200, { ok: true });
       if (url.pathname === '/status') {
         const repaired = url.searchParams.get('repaired');
         asked.push(repaired ? (repaired === token ? `repaired:${outstanding}` : `stale:${repaired}`) : 'status');
@@ -781,6 +782,40 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).not.toHaveBeenCalled();
     expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${OTHER}` });
     expect(asked).toEqual(['status', `repaired:${OTHER}`]);
+  });
+
+  it('opens an active agent chat in the same close transaction instead of losing its retry alarm', async () => {
+    const asked: string[] = [];
+    let repaired = false;
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/closed' && init.method === 'POST') {
+        return response(200, { ok: true });
+      }
+      if (url.pathname === '/status') {
+        const receipt = url.searchParams.get('repaired');
+        asked.push(receipt ? `repaired:${receipt}` : 'status');
+        if (receipt === 'close-repair') repaired = true;
+        return response(200, {
+          ok: true,
+          recoveryMonitoring: !repaired,
+          repair: repaired ? null : { conversationId: CHAT, token: 'close-repair' }
+        });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(71);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 71);
+
+    await worker.closeTab(71);
+    for (let turn = 0; turn < 8; turn++) await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${CHAT}` });
+    expect(asked).toEqual(['status', 'repaired:close-repair']);
+    expect(worker.alarmClear).not.toHaveBeenCalled();
   });
 
   /**
@@ -1645,6 +1680,8 @@ describe('extension observation journal', () => {
       const url = new URL(input);
       if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
       if (url.pathname === '/events') return healthy ? response(200, { ok: true }) : response(503, { error: 'retry' });
+      if (url.pathname === '/closed') return response(200, { ok: true });
+      if (url.pathname === '/status') return response(200, { ok: true, repair: null, recoveryMonitoring: false });
       return response(404, {});
     });
     const worker = loadWorker({ local, session, fetch });

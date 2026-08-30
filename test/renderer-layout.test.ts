@@ -118,8 +118,8 @@ describe('a session row', () => {
   it('never borrows live worker status from a different run that reused worker-1/worker-2', () => {
     // Worker ids are slot names and repeat every run. The conversation is the durable chat
     // identity, so both have to match before an old recorded session can show the current
-    // swarm's `joined` / `finished` badge. This pins the screenshot regression where several
-    // old worker-2 rows all suddenly said `joined` when one new worker-2 was active.
+    // swarm's `active` / `finished` badge. This pins the screenshot regression where several
+    // old worker-2 rows all suddenly said `active` when one new worker-2 was active.
     expect(chatSource).toMatch(/entry\.id === origin\.agentId[\s\S]{0,220}entry\.conversationId === summary\.conversationId/);
   });
 });
