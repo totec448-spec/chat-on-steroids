@@ -759,15 +759,16 @@ re-checks, and macOS Screen Recording/Accessibility consent remains an independe
 The helper is prewarmed only when native Desktop capabilities are published; window observation is
 background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
 window geometry; semantic refs bind cached elements to bounded native accessibility snapshots.
-Visible-pixel crops are always screen-bound even when their coordinates came from a window frame;
-otherwise an occluding app's pixels could be relabelled as the covered window. Screen captures
-compare the exact active-display rectangles with ScreenCaptureKit's snapshot and re-check them
-through and after capture. Physical input revalidates the target, and a semantic or explicit focus
-step carries its proven window into later keyboard actions in the same batch instead of degrading
-to global HID input. Batches report partial completion and route evidence.
-The in-process Swift path sets a native AX messaging timeout and bounded traversal deadlines because a
-Node Worker timeout cannot pre-empt a synchronous accessibility call. Physical input batches report
-partial completion and route evidence, and compact local postconditions avoid model-driven wait/observe loops. Tests: `computer*.test.ts` and
+Visible-pixel crops and window-capture fallbacks are always screen-bound even when their request or
+coordinates named a window; otherwise an occluding app's pixels could be relabelled as the covered
+window. Screen captures compare the exact active-display rectangles with ScreenCaptureKit's snapshot
+and re-check them through and after capture. Physical input revalidates the target, and a semantic or
+explicit focus step carries its proven window into later keyboard actions in the same batch instead
+of degrading to global HID input. Batches report partial completion and route evidence.
+Image coordinates clamp to the frame's inclusive integer interior, and final text plus base64 image
+share one measured MCP result budget. The in-process Swift path sets a native AX messaging timeout and
+one aggregate bounded traversal deadline because a Node Worker timeout cannot pre-empt a synchronous
+accessibility call. Compact local postconditions avoid model-driven wait/observe loops. Tests: `computer*.test.ts` and
 the opt-in `macos-computer-live.test.ts` packaged-host probe.
 
 **On-disk state to inspect.** Electron `userData` — `%APPDATA%\chat-on-steroids\` on Windows,
