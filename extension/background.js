@@ -1600,7 +1600,9 @@ function conversationFromUrl(value) {
   try {
     const url = new URL(String(value || ''));
     if (url.protocol !== 'https:' || (url.hostname !== 'chatgpt.com' && url.hostname !== 'chat.openai.com')) return null;
-    const match = /^\/c\/([0-9a-f-]{8,64})/i.exec(url.pathname);
+    // Matches chatgpt-dom.js: a Project conversation is `/g/<project>/c/<id>`, while
+    // `/share/c/<id>` is a public snapshot the service worker must never bind a tab to.
+    const match = /^\/(?:g\/[^/]+\/)?c\/([0-9a-f-]{8,64})(?:\/|$)/i.exec(url.pathname);
     return match ? match[1] : null;
   } catch {
     return null;
