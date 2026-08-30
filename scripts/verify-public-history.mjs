@@ -79,9 +79,18 @@ function checkMessageFile(messagePath) {
 
 function checkHistory() {
   const failures = [];
-  const commits = String(runGit(['rev-list', '--all']).stdout)
-    .split(/\r?\n/)
-    .filter(Boolean);
+  // Only history that can actually enter the releasable line. `--all` walks every local and
+  // remote-tracking ref in the clone, so an unrelated fetched branch — someone else's fork, an
+  // abandoned experiment — could fail verification for a clean checked-out branch that never
+  // contains it. A fresh CI checkout has no such refs, which is why this passes there and
+  // fails locally on a full clone.
+  const head = runGit(['rev-parse', '--verify', 'HEAD'], { allowFailure: true });
+  const commits =
+    head.status === 0
+      ? String(runGit(['rev-list', 'HEAD']).stdout)
+          .split(/\r?\n/)
+          .filter(Boolean)
+      : [];
   // pull_request jobs default to a GitHub-generated merge object that can never enter
   // public history. Its identity belongs to GitHub's test ref, not to the proposed tree.
   const syntheticPullRequestCommit =
@@ -102,9 +111,14 @@ function checkHistory() {
     );
   }
 
-  const tags = String(runGit(['tag', '--list']).stdout)
-    .split(/\r?\n/)
-    .filter(Boolean);
+  // Same rule for tags: an annotated tag reachable from HEAD is part of this line's public
+  // history and stays checked. One that is not reachable belongs to a different line.
+  const tags =
+    head.status === 0
+      ? String(runGit(['tag', '--merged', 'HEAD', '--list']).stdout)
+          .split(/\r?\n/)
+          .filter(Boolean)
+      : [];
   for (const tag of tags) {
     const type = String(runGit(['cat-file', '-t', tag]).stdout).trim();
     if (type !== 'tag') continue;
@@ -122,7 +136,6 @@ function checkHistory() {
     );
   }
 
-  const head = runGit(['rev-parse', '--verify', 'HEAD'], { allowFailure: true });
   if (head.status === 0) failures.push(...checkIndexedOrCommittedFiles('HEAD'));
   return { failures, commits: commits.length, tags: tags.length };
 }
