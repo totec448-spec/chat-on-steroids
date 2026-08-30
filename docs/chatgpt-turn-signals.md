@@ -267,12 +267,13 @@ Crucially, the real `Stop answering` control remained present for more than sixt
 still no canonical assistant message, final response action row, visible transport-failure phrase,
 or Goal follow-up at the end of that observation window.
 
-This is **slow but still live**, not the stale/reload shape. Placeholder disappearance is not proof
-that generation stopped; the delay notice plus live Stop control says the server still owns an
-active request. Recovery must not reload this chat merely because no assistant message or tool call
-has appeared for twenty seconds. It becomes eligible only after the live-generation evidence also
-ends without a terminal answer, or exact unattributed activity supplies the separate correlation
-signal described by the recovery policy.
+This is **slow but still live** inside the bounded silence window. Placeholder disappearance is not
+proof that generation stopped; the delay notice plus live Stop control says the server still owns
+an active request, so a twenty- or sixty-second gap is not reload authority. The current recovery
+boundary is two full minutes without a new durable assistant/native/error observation or attributed
+MCP call. At that point an open ordinary, Prime or Worker chat receives one receipt-tracked reload;
+a formal `turn_end` cancels it, and a reload that produces no new durable evidence is abandoned
+rather than repeated. Exact Unattributed activity remains a separate one-minute correlation signal.
 
 ### Auto-compaction across that delayed turn
 
@@ -293,6 +294,32 @@ This observed chain establishes that the safety notice neither became a fake fin
 destroyed compaction. The trigger waited for the live turn to end; the handoff answer was captured
 by exact generation; the continuation kept one session lineage across two concrete conversation
 ids; and the replacement received the brief before beginning work.
+
+### Refresh/close break run and the durable checkpoint rewrite
+
+Two signed-in runs on 2026-08-30 tested the document-lifetime boundary directly. In the first,
+the page was refreshed while ChatGPT generated the handoff, then the tab was closed before the
+replacement opened. ChatGPT completed the full brief while the tab was absent, but the old
+document-local capture disappeared and no replacement was opened. In a second clean chat
+(`Hello. Reply with exactly: hello back`), the source brief completed and the UI reached
+`Opening…`, but the replacement failed with `the replacement chat already belongs to another local
+session`: ordinary destination journaling had won the race against continuation commit.
+
+The implementation now makes the continuation WAL and ChatGPT-authored message ids the only
+recovery authority. Each side is fenced twice: the app moves it to `attempted-unresolved` before
+the composer is submitted at all, and then to `dispatched-unresolved` immediately before the
+click. Only the caller that takes the second transition may press Send. Source and destination prompts
+carry `[[CLF-HANDOFF:<token>]]` / `[[CLF-RESUME:<token>]]`. A new document scans the canonical Fiber
+message model, binds the stable marked user-message id, and advances the checkpoint. The source
+brief is accepted only from that turn's stable terminal assistant message with every connector call
+answered and no local call pending. The destination binds its concrete conversation and message id
+and commits the session rebind before ordinary page journaling can create a shadow session.
+
+There is no `sessionStorage` capture, document-local generation ownership or second-send recovery.
+The two pre-click states are replayable, because both are written before anything is submitted;
+`dispatched-unresolved` is not, because a document that died there may or may not have sent, and
+no local evidence can decide which. Automatic compaction enters the same `startCompact`/checkpoint
+path as a manual press.
 
 ## 7. Turn markup as the live site serves it — 2026-08-30
 

@@ -2038,6 +2038,18 @@ const HANDLERS = {
         // ever becoming this session's handoff.
         ...(typeof message.token === 'string' && typeof message.summary === 'string'
           ? { token: message.token, summary: message.summary }
+          : {}),
+        ...(typeof message.token === 'string' && message.sourceAttempt === true
+          ? { token: message.token, sourceAttempt: true }
+          : {}),
+        ...(typeof message.token === 'string' && typeof message.sourceMessageId === 'string'
+          ? { token: message.token, sourceMessageId: message.sourceMessageId }
+          : {}),
+        ...(typeof message.token === 'string' && message.destinationAttempt === true
+          ? { token: message.token, destinationAttempt: true }
+          : {}),
+        ...(typeof message.token === 'string' && typeof message.destinationMessageId === 'string'
+          ? { token: message.token, destinationMessageId: message.destinationMessageId }
           : {})
       })
     });
@@ -2071,7 +2083,8 @@ const HANDLERS = {
       body: JSON.stringify({
         conversationId,
         turnId: String(message.turnId || ''),
-        clientId: String(source.tab)
+        clientId: String(source.tab),
+        ...(message.terminalRequired === true ? { terminalRequired: true } : {})
       })
     });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };

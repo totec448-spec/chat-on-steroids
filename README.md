@@ -150,7 +150,7 @@ The bundled Chrome extension adds browser-side conversation identity, page-visib
 
 For long recorded sessions, the app estimates context pressure locally. Fresh installs warn around **400k estimated tokens**, use **533k** as the limit marker, and enable automatic compaction at 400k. These are local estimates, not ChatGPT's private context counter.
 
-Compact & Resume asks the current chat to write a handoff, stores it locally, opens a fresh ChatGPT conversation and rebinds the **same local session** to it. The original session remains intact if the handoff cannot be completed.
+Compact & Resume asks the current chat to write a handoff, stores it locally, opens a fresh ChatGPT conversation and rebinds the **same local session** to it. Each source and replacement send has a durable pre-send checkpoint tied to a marked ChatGPT message, so refreshing, closing or restarting the browser/app does not make a document-local capture the owner and cannot submit either prompt twice. Manual and automatic compaction use this same transaction. The original session remains intact if the handoff cannot be completed.
 
 <p align="center">
   <img src="docs/images/composer-gear-sheet.png" width="52%" alt="Gear sheet beside the ChatGPT composer; in worker chats Auto-compaction and Goal are locked off and Compact and Resume is unavailable" />

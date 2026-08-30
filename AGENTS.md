@@ -588,6 +588,13 @@ Because this is where browser-observed lifecycle meets recorder, agents, continu
 workspace state, a `bridge.ts` bug presents as a session, extension, or agent bug depending
 on which end you inspect.
 
+An open turn also grants its **conversation** a two-minute silence deadline. Durable assistant
+text/native activity/errors and attributed MCP calls move it; `turn_end` removes it. Expiry queues
+one receipt-tracked browser reload for an ordinary chat, Prime or Worker alike. If the reload
+produces no new durable evidence, the grant is forgotten rather than reloaded again; a Worker also
+releases its slot. Separately, one minute of Unattributed calls still reloads every otherwise-active
+chat whose exact request-id join did not prove itself. Agent role is never an eligibility gate.
+
 **Tests.** `bridge.test.ts`, `extension.test.ts`.
 
 ## 15. Compact & Resume — `session/continuation.ts`
@@ -597,9 +604,12 @@ frontends attached to that one session in sequence.
 
 ```text
 chat A owns session S
-  → A writes its own final handoff brief   → captured and stored verbatim
   → open continuation token for S
-  → open one marked fresh chat; exactly one claimant B redeems it
+  → claim source prompt (nothing typed) → arm the click → A sends [[CLF-HANDOFF:token]]
+  → bind ChatGPT's stable user id → exact terminal assistant id supplies the brief
+  → store brief verbatim; open one marked fresh chat
+  → claim bootstrap (nothing typed) → arm the click → B sends [[CLF-RESUME:token]]
+  → bind B + ChatGPT's stable user id before ordinary page journaling
   → preflight   freeze prime/swarm transfers that must move atomically
   → DURABLE COMMIT   rebind S from A to B on disk        ← the one fallible phase
   → publish     recorder mapping, workspace binding, swarm prime binding
@@ -612,7 +622,21 @@ compaction by creating a second session or copying history — the whole feature
 of one durable id. Automatic compaction is a live level plus page-turn decision: an idle old
 chat never fires merely because it sits above the threshold, a transient pre-send barrier
 failure may retry on a later turn, and the continuation transaction is the sole durable
-authority once the handoff crosses the semantic send boundary.
+authority once either prompt crosses its semantic send boundary. Browser documents,
+`sessionStorage`, local generation ids and command leases are never semantic ownership.
+
+Each prompt has **two** durable writes around its click, because a document can die on either
+side of it and the two sides have opposite answers. `attempted-unresolved` is written before the
+composer is submitted at all, so it *proves* nothing reached ChatGPT: a reload, tab close,
+browser restart or app restart replays it, and it is equally the state a second live document
+may claim. `dispatched-unresolved` is written immediately before the click, so it proves
+nothing — `CLF_DOM.send()` clicks first and watches for acceptance seconds later, and neither
+the page nor the app can tell a click that never happened from one whose request outlived its
+document. That state is never replayed by anything: it ends at ChatGPT's own marked message, or
+at an explicit cancel, or at the transaction's TTL. A surfaced ambiguity is the correct outcome
+there; a second Send is not. Exactly one caller can move `attempted-unresolved ->
+dispatched-unresolved`, which is what makes the click at-most-once without any clock, tab
+identity or claim token. Manual and automatic compaction call this exact same path.
 
 **Tests.** `continuation.test.ts`, `resume.test.ts`.
 

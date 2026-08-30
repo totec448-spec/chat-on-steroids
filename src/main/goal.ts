@@ -229,6 +229,167 @@ interface GoalDraft extends Omit<GoalDraftView, 'retryable'> {
 /** At most one draft per conversation. A new turn replaces the old chat's finished draft. */
 const drafts = new Map<string, GoalDraft>();
 
+/**
+ * The stable ChatGPT reply that still needs one terminal Goal decision.
+ *
+ * Local generation ids are deliberately not the identity here: ChatGPT remints them after a
+ * reload and can replay several start/end pairs for one authored reply. replyId is the
+ * canonical assistant message id already used by the session store; eventSeq only orders
+ * genuinely newer replies. A handled row is retained so enabling Goal later never replays
+ * history that was accepted while it was off.
+ */
+interface GoalReplyObligation {
+  conversationId: string;
+  sessionId: string;
+  replyId: string;
+  turnId: string;
+  eventSeq: number;
+  /** When this app froze the decision. The row's whole lifetime is measured from here. */
+  acceptedAt: number;
+  state: 'pending' | 'handled';
+}
+
+const goalReplies = new Map<string, GoalReplyObligation>();
+
+/**
+ * How long one reply may wait for its Goal decision, and how many chats may be waiting.
+ *
+ * The obligation is durable so a reload, a crashed page or an app restart cannot lose a
+ * finished reply the loop still owes an answer to. It is *not* a standing invitation: a row
+ * that outlives this window is retired unanswered, because typing into a chat somebody left
+ * a day ago is the failure this whole subsystem is careful about, and the page-side trigger
+ * has always refused to manufacture Goal work from an old finished turn.
+ *
+ * The cap is the second half of the same statement. One row per conversation is written for
+ * every final assistant reply this app records, each one fsynced before its HTTP 200, so an
+ * unbounded ledger would make every reply in every chat pay for every chat that came before.
+ */
+const GOAL_REPLY_TTL_MS = 12 * 60 * 60_000;
+const MAX_GOAL_REPLIES = 200;
+
+/** Drops rows this app may no longer act on, newest kept. Returns the surviving ledger. */
+function boundGoalReplies(now: number): void {
+  for (const [conversationId, reply] of goalReplies) {
+    if (now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) goalReplies.delete(conversationId);
+  }
+  if (goalReplies.size <= MAX_GOAL_REPLIES) return;
+  const oldestFirst = [...goalReplies.values()].sort((a, b) => a.acceptedAt - b.acceptedAt);
+  for (const reply of oldestFirst.slice(0, goalReplies.size - MAX_GOAL_REPLIES)) {
+    goalReplies.delete(reply.conversationId);
+  }
+}
+export const GOAL_REPLIES_STATE = 'goal-replies';
+
+export interface GoalRepliesSnapshot {
+  version: 1;
+  savedAt: number;
+  replies: GoalReplyObligation[];
+}
+
+export function snapshotGoalReplies(): GoalRepliesSnapshot {
+  boundGoalReplies(Date.now());
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    replies: [...goalReplies.values()].map((reply) => ({ ...reply }))
+  };
+}
+
+export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
+  goalReplies.clear();
+  if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.replies)) return;
+  for (const raw of snapshot.replies) {
+    if (
+      !raw ||
+      !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId) ||
+      !raw.sessionId ||
+      !raw.replyId ||
+      !raw.turnId ||
+      !Number.isSafeInteger(raw.eventSeq) ||
+      raw.eventSeq < 1 ||
+      !Number.isSafeInteger(raw.acceptedAt) ||
+      raw.acceptedAt <= 0 ||
+      (raw.state !== 'pending' && raw.state !== 'handled')
+    ) continue;
+    goalReplies.set(raw.conversationId, {
+      conversationId: raw.conversationId,
+      sessionId: String(raw.sessionId).slice(0, 200),
+      replyId: String(raw.replyId).slice(0, 200),
+      turnId: String(raw.turnId).slice(0, 200),
+      eventSeq: raw.eventSeq,
+      acceptedAt: raw.acceptedAt,
+      state: raw.state
+    });
+  }
+  boundGoalReplies(Date.now());
+}
+
+function persistGoalRepliesSoon(): void {
+  writeDurableSoon(GOAL_REPLIES_STATE, snapshotGoalReplies());
+}
+
+export function goalPendingReplyFor(
+  conversationId: string
+): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq'> | null {
+  const reply = goalReplies.get(conversationId);
+  // Expiry is read here as well as pruned on write, because the ledger is only pruned when
+  // something writes to it. A chat reopened after the window must not be offered work the
+  // next prune would have thrown away.
+  if (reply && Date.now() - reply.acceptedAt >= GOAL_REPLY_TTL_MS) return null;
+  return reply?.state === 'pending'
+    ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq }
+    : null;
+}
+
+/** Freezes Goal eligibility at the durable recorder boundary. */
+export async function acceptGoalReplyNow(input: {
+  conversationId: string;
+  sessionId: string;
+  replyId: string;
+  turnId: string;
+  eventSeq: number;
+  blocked: boolean;
+}): Promise<void> {
+  const current = goalReplies.get(input.conversationId);
+  if (current?.replyId === input.replyId || (current && current.eventSeq > input.eventSeq)) return;
+  const before = current ? { ...current } : null;
+  const bounded = snapshotGoalReplies().replies;
+  const active =
+    !input.blocked &&
+    getConfig().sessions.record &&
+    (getConfig().goal.enabled || goalObjectiveFor(input.conversationId) !== '') &&
+    (await getSecret('openRouterApiKey')) !== null;
+  goalReplies.set(input.conversationId, {
+    conversationId: input.conversationId,
+    sessionId: input.sessionId,
+    replyId: input.replyId.slice(0, 200),
+    turnId: input.turnId.slice(0, 200),
+    eventSeq: input.eventSeq,
+    acceptedAt: Date.now(),
+    state: active ? 'pending' : 'handled'
+  });
+  try {
+    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  } catch (error) {
+    // The rejected write is one whole revision, so the rollback is too: the row this accept
+    // added and the expired rows it pruned go back together, leaving the ledger exactly as the
+    // decision found it.
+    goalReplies.clear();
+    for (const reply of bounded) goalReplies.set(reply.conversationId, reply);
+    if (before) goalReplies.set(input.conversationId, before);
+    else goalReplies.delete(input.conversationId);
+    persistGoalRepliesSoon();
+    throw error;
+  }
+}
+
+function handleGoalReply(conversationId: string, turnId?: string): void {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.state !== 'pending' || (turnId && reply.turnId !== turnId)) return;
+  reply.state = 'handled';
+  persistGoalRepliesSoon();
+}
+
 /** Durable state file for per-chat Goal objectives. */
 export const GOAL_OBJECTIVES_STATE = 'goal-objectives';
 
@@ -372,6 +533,7 @@ function expireDraftPayload(draft: GoalDraft): void {
   draft.reply = '';
   draft.error = null;
   draft.work = null;
+  handleGoalReply(draft.conversationId, draft.turnId);
 }
 
 /** What the page should be told about this chat right now, or null when there is nothing. */
@@ -406,7 +568,21 @@ export function ackGoalDraft(conversationId: string, token: string, clientId?: s
   // aborting the controller closes the stream immediately.
   draft.abort?.abort();
   if (draft.settledAt === 0) draft.settledAt = Date.now();
+  if (draft.stage !== 'failed' || SETTLED_FAILURE.test(draft.error ?? '')) {
+    handleGoalReply(conversationId, draft.turnId);
+  }
   return true;
+}
+
+/** The browser ACK is not successful until the reply tombstone is crash-durable. */
+export async function ackGoalDraftNow(
+  conversationId: string,
+  token: string,
+  clientId?: string
+): Promise<boolean> {
+  const acknowledged = ackGoalDraft(conversationId, token, clientId);
+  if (acknowledged) await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  return acknowledged;
 }
 
 /**
@@ -427,6 +603,8 @@ export function retireGoalDrafts(): number {
     draft.reply = '';
     retired += 1;
   }
+  for (const reply of goalReplies.values()) reply.state = 'handled';
+  if (goalReplies.size > 0) persistGoalRepliesSoon();
   return retired;
 }
 
@@ -439,18 +617,24 @@ export function retireGoalDrafts(): number {
  */
 export function retireGoalDraftsFor(conversationId: string): boolean {
   const draft = drafts.get(conversationId);
-  if (!draft || draft.acknowledged) return false;
+  const pending = goalReplies.get(conversationId)?.state === 'pending';
+  if (!draft || draft.acknowledged) {
+    if (pending) handleGoalReply(conversationId);
+    return pending;
+  }
   draft.acknowledged = true;
   draft.abort?.abort();
   if (draft.settledAt === 0) draft.settledAt = Date.now();
   draft.text = '';
   draft.reply = '';
+  handleGoalReply(conversationId);
   return true;
 }
 
 export function resetGoalStateForTests(): void {
   for (const draft of drafts.values()) draft.abort?.abort();
   drafts.clear();
+  goalReplies.clear();
   goalObjectives.clear();
   firstUserCache.clear();
   legacyCommittedResumeCache.clear();

@@ -235,6 +235,8 @@ export type SessionEvent =
       state?: MessageState;
       /** Compatibility mirror for older consumers; equivalent to state === 'final'. */
       final: boolean;
+      /** This exact stable reply was proven terminal and may enter Goal policy. */
+      goalEligible?: boolean;
       /** First sequence assigned to this logical message; later revisions keep this anchor. */
       origin?: number;
     })

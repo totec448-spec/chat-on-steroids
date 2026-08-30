@@ -937,7 +937,8 @@ export function upsertMessageEvent(
           (nextEvent.kind === 'assistant_message' &&
             storedTextEqual(previous.renderedHtml, nextEvent.renderedHtml) &&
             previous.state === nextEvent.state &&
-            previous.final === nextEvent.final)) &&
+            previous.final === nextEvent.final &&
+            previous.goalEligible === nextEvent.goalEligible)) &&
         (previous.turnId ?? undefined) === settledTurnId &&
         (nextEvent.agent === undefined || previous.agent === nextEvent.agent) &&
         (!options.preferTime || previous.time === nextEvent.time)

@@ -19,6 +19,7 @@ import type {
   Handoff,
   SessionEvent,
   SessionSummary,
+  StoredText,
   SwarmState,
   TokenPressure
 } from '../shared/session.js';
@@ -481,17 +482,31 @@ function safeRenderedHref(value: string): string | null {
  * semantic Markdown tags, discard executable/form/embed content, strip every attribute by
  * default, and allow only the tiny attribute set that affects normal Markdown semantics.
  */
-export function renderedMessage(html: string, fallback: string): HTMLElement {
-  const box = el('div', 'msg rich');
+/**
+ * One assistant message, as ChatGPT rendered it when that is available and whole, and as its
+ * own markdown source when it is not.
+ *
+ * The two are laid out differently on purpose. Rendered markup carries its own block
+ * structure, so it is flowed (`rich`). Markdown source is plain text whose every line break,
+ * heading and list item is a newline, so it keeps `msg`'s pre-wrap — flowing it would run a
+ * whole brief together into one paragraph.
+ */
+export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
+  const box = el('div', 'msg');
   const safeFallback = fallback.slice(0, MAX_RENDERED_HTML_CHARS);
-  if (!html) {
+  // A capture the store had to cut is markup that stops mid-element — very often inside a
+  // code block, whose wrapper chrome is far larger than the code in it — so it presents part
+  // of the message and ends as an unclosed box. It is not a presentation of this message and
+  // is not shown as one.
+  if (!html || html.truncated || !html.text) {
     box.textContent = safeFallback;
     return box;
   }
+  box.classList.add('rich');
   const template = document.createElement('template');
   // Parsing untrusted captured HTML constructs a second tree before sanitisation. Bound it
   // before innerHTML so a valid but huge recorded turn cannot freeze/OOM the renderer.
-  template.innerHTML = html.slice(0, MAX_RENDERED_HTML_CHARS);
+  template.innerHTML = html.text.slice(0, MAX_RENDERED_HTML_CHARS);
   const visit = (parent: ParentNode): void => {
     for (const node of [...parent.childNodes]) {
       // Namespace elements (SVG/MathML) are not HTMLElements. Checking HTMLElement here
@@ -528,7 +543,10 @@ export function renderedMessage(html: string, fallback: string): HTMLElement {
   };
   visit(template.content);
   box.append(template.content);
-  if (!box.textContent?.trim() && safeFallback) box.textContent = safeFallback;
+  if (!box.textContent?.trim() && safeFallback) {
+    box.classList.remove('rich');
+    box.textContent = safeFallback;
+  }
   return box;
 }
 
@@ -608,7 +626,7 @@ function eventBody(event: SessionEvent): HTMLElement {
     case 'assistant_message': {
       const box = el('div', 'said');
       box.append(el('b', '', event.final ? 'ChatGPT' : 'ChatGPT (partial)'));
-      box.append(renderedMessage(event.renderedHtml?.text ?? '', event.message.text));
+      box.append(renderedMessage(event.renderedHtml, event.message.text));
       return box;
     }
     case 'progress':

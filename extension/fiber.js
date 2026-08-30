@@ -685,7 +685,16 @@
       const block = blocks[at];
       let renderedHtml = '';
       try {
-        renderedHtml = budgetedText(block.innerHTML, budget, MAX_RENDERED_HTML);
+        // All of the markup or none of it. Cutting HTML at a character count cuts it mid-tag,
+        // and ChatGPT's code blocks carry several hundred characters of wrapper chrome around
+        // a few lines of code — so a cut lands inside one often, and everything after it is
+        // lost while the visible remainder ends as an unclosed box. The canonical raw text is
+        // always carried beside this, so an absent capture costs presentation, never content.
+        const markup = block.innerHTML;
+        renderedHtml =
+          markup.length <= Math.min(MAX_RENDERED_HTML, budget.remaining)
+            ? budgetedText(markup, budget, MAX_RENDERED_HTML)
+            : '';
       } catch {
         renderedHtml = '';
       }

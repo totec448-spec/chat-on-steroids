@@ -309,19 +309,83 @@ describe('a brief that never really arrived', () => {
 });
 
 describe('one press, one transaction', () => {
-  // The instruction is not information: submitting it *is* the compaction. So a second
-  // request gets the transaction back and nothing it could send — otherwise a lost response
-  // or a reloaded tab becomes two compaction turns, each with a claim on being the brief.
-  it('answers a second press with the same transaction and no second instruction', async () => {
+  // The two crash points either side of the click, which the durable fence exists to tell
+  // apart. A page that died holding the claim provably submitted nothing; a page that died
+  // after arming may have submitted, and no local evidence can decide it.
+  it('re-offers the prompt to a replacement document that died holding the claim', async () => {
     await connect();
     await record();
     const first = await press();
     const again = await request('POST', '/compact', { body: { conversationId: CHAT_A } });
-    expect(again.status).toBe(200);
+    expect(again.status).toBe(202);
     expect(again.body.token).toBe(first.token);
     expect(again.body.started).toBe(false);
-    expect(again.body.armed).toBe(true);
-    expect(again.body.prompt).toBeNull();
+    expect(again.body.prompt).toContain(`[[CLF-HANDOFF:${first.token}]]`);
+
+    const claimed = await request('POST', '/compact', {
+      body: { conversationId: CHAT_A, token: first.token, sourceAttempt: true }
+    });
+    expect(claimed.body.allowed).toBe(true);
+    expect(claimed.body.sourceSend.state).toBe('attempted-unresolved');
+
+    // The document is gone here, between the claim and the click. Nothing reached ChatGPT,
+    // so the same transaction is handed to the next document rather than stranded.
+    const replacement = await request('POST', '/compact', { body: { conversationId: CHAT_A } });
+    expect(replacement.status).toBe(202);
+    expect(replacement.body.token).toBe(first.token);
+    expect(replacement.body.prompt).toContain(`[[CLF-HANDOFF:${first.token}]]`);
+    const reclaimed = await request('POST', '/compact', {
+      body: { conversationId: CHAT_A, token: first.token, sourceAttempt: true }
+    });
+    expect(reclaimed.body.allowed).toBe(true);
+  });
+
+  it('never re-offers the prompt once a document armed the click', async () => {
+    await connect();
+    await record();
+    const first = await press();
+    await request('POST', '/compact', {
+      body: { conversationId: CHAT_A, token: first.token, sourceAttempt: true }
+    });
+    const armed = await request('POST', '/compact', {
+      body: { conversationId: CHAT_A, token: first.token, sourceDispatch: true }
+    });
+    expect(armed.status).toBe(200);
+    expect(armed.body.armed).toBe(true);
+
+    // The document is gone here, after the click was armed and before ChatGPT's acceptance
+    // was ever observed. The prompt may be with ChatGPT; it is never typed a second time.
+    const afterArming = await request('POST', '/compact', { body: { conversationId: CHAT_A } });
+    expect(afterArming.status).toBe(200);
+    expect(afterArming.body.prompt).toBeNull();
+    expect(afterArming.body.sourceSend.state).toBe('dispatched-unresolved');
+    const reclaim = await request('POST', '/compact', {
+      body: { conversationId: CHAT_A, token: first.token, sourceAttempt: true }
+    });
+    expect(reclaim.body.allowed).toBe(false);
+  });
+
+  it('lets exactly one of two live documents arm the same claim', async () => {
+    await connect();
+    await record();
+    const first = await press();
+    // Both pages composed the prompt and both hold the claim: that state promises only that
+    // neither has submitted yet.
+    for (const _ of [0, 1]) {
+      const claimed = await request('POST', '/compact', {
+        body: { conversationId: CHAT_A, token: first.token, sourceAttempt: true }
+      });
+      expect(claimed.body.allowed).toBe(true);
+    }
+    const first_click = await request('POST', '/compact', {
+      body: { conversationId: CHAT_A, token: first.token, sourceDispatch: true }
+    });
+    const second_click = await request('POST', '/compact', {
+      body: { conversationId: CHAT_A, token: first.token, sourceDispatch: true }
+    });
+    expect(first_click.body.armed).toBe(true);
+    expect(second_click.status).toBe(409);
+    expect(second_click.body.error).toBe('source_send_reclaimed');
   });
 
   it('stores one brief for a retried capture and never a second', async () => {
@@ -408,7 +472,7 @@ describe('a brief longer than the app can type', () => {
 describe('the replacement chat', () => {
   // Two pages on one marker is the shape every duplicate-tab failure takes: a reload
   // restored into a new document, "reopen closed tab", a link opened twice.
-  it('is delivered to one page only, however many redeem the same marker', async () => {
+  it('can move documents until a page arms the click, and never after it', async () => {
     await connect();
     await record();
     const { token: continuation } = await press();
@@ -418,11 +482,30 @@ describe('the replacement chat', () => {
     expect(first.body.command.text).toContain(BRIEF);
 
     const second = await redeem(commandId, 'page-2');
-    expect(second.status).toBe(409);
+    expect(second.status).toBe(200);
+    expect(second.body.command.text).toContain(BRIEF);
 
-    // The page that owns it may retry as often as it likes; that is the same claim.
-    const retry = await redeem(commandId, 'page-1');
-    expect(retry.body.command.text).toContain(BRIEF);
+    // Claimed, then gone before the click — the same crash point as the source half, and the
+    // same answer: nothing was typed under this state, so the next document may have it.
+    const claimed = await request('POST', '/compact', {
+      body: { token: continuation, destinationAttempt: true }
+    });
+    expect(claimed.body.allowed).toBe(true);
+    const afterClaim = await redeem(commandId, 'page-3');
+    expect(afterClaim.status).toBe(200);
+    expect(afterClaim.body.command.text).toContain(BRIEF);
+
+    // Armed. This bootstrap may exist in a chat this app cannot yet name, so it is never
+    // handed to another document; only the marked message can resolve it.
+    const armed = await request('POST', '/compact', {
+      body: { token: continuation, destinationDispatch: true }
+    });
+    expect(armed.body.armed).toBe(true);
+    expect((await redeem(commandId, 'page-3')).status).toBe(409);
+    expect((await redeem(commandId, 'page-4')).status).toBe(409);
+    expect(
+      (await request('POST', '/compact', { body: { token: continuation, destinationAttempt: true } })).body.allowed
+    ).toBe(false);
   });
 
   /**
