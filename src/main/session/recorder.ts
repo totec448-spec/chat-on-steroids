@@ -1356,6 +1356,8 @@ export interface ChatObservation {
   fiberConversationId?: string;
   outcome?: TurnOutcome;
   detail?: string;
+  /** chat_error only: a recognised transport failure inside an assistant turn. */
+  recoverable?: boolean;
   /** tool_evidence only: the connector requests this turn's message model holds. */
   calls?: PageCallEvidence[];
 }

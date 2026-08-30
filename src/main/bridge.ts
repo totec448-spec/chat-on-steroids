@@ -133,8 +133,14 @@ const PORTS = ((): number[] => {
   return parsed.length > 0 ? parsed : DEFAULT_PORTS;
 })();
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
-/** User-requested orphan safety net: slow enough to require durable inactivity, not a heartbeat lease. */
+/** Durable settled-turn orphan safety net. */
 export const STALE_SWARM_MS = 2 * 60_000;
+/** One browser check after this much silence in an agent turn. */
+export const AGENT_INACTIVITY_RECOVERY_MS = 2 * 60_000;
+/** A worker that stays open-turn silent this long releases its slot through normal sleep/finish. */
+export const AGENT_INACTIVITY_SLEEP_MS = 4 * 60_000;
+/** Per-conversation floor between browser reload/open actions, regardless of why they were requested. */
+export const BROWSER_RECOVERY_COOLDOWN_MS = 3 * 60_000;
 const STALE_SWARM_SWEEP_MS = 30_000;
 /** /events batches currently between parse and durable/session+worker lifecycle completion. */
 let observationWritesInFlight = 0;
@@ -732,6 +738,7 @@ function parseObservations(input: unknown): ChatObservation[] {
       observation.outcome = item['outcome'] as ChatObservation['outcome'];
     }
     if (typeof item['detail'] === 'string') observation.detail = item['detail'].slice(0, 500);
+    if (item['recoverable'] === true) observation.recoverable = true;
     if (Array.isArray(item['calls'])) observation.calls = parseCallEvidence(item['calls']);
     out.push(observation);
   }
@@ -964,6 +971,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
   if (route === '/status') {
     const live = liveConversations();
+    queueInactiveAgentRecoveries();
     // The extension's maintenance pass, and the whole conversation about repairs: `repaired`
     // reports the one it was last handed and has now carried out, and `repair` is the next one
     // for it — the chat whose local tool calls stopped being attributable to it, see
@@ -971,7 +979,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // last repair did not happen. Null, which is almost always, costs this pass one request.
     const repaired = url.searchParams.get('repaired');
     if (repaired) confirmRepair(repaired.slice(0, 64));
-    return json(res, 200, { ok: true, conversations: live, commands: commands.length, repair: takePendingRepair() }, origin);
+    return json(
+      res,
+      200,
+      {
+        ok: true,
+        conversations: live,
+        commands: commands.length,
+        repair: takePendingRepair(),
+        recoveryMonitoring: browserRecoveryMonitoring()
+      },
+      origin
+    );
   }
 
   if (route === '/correlations' && req.method === 'POST') {
@@ -1087,6 +1106,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         }
       }
       const result = await recordChatObservations(id, observations, agent);
+      noteRecoveryObservations(id, observations);
       // How full this chat is, measured by the app's own session record rather than by
       // anything the model said about itself, and fed in before the finish reconciliation
       // below. That ordering is the whole point: a worker that crossed the context ceiling
@@ -1173,6 +1193,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       else if (workerConversationGone(id)) {
         logInfo(`bridge: worker chat ${id} closed — its slot is detached, not ended, until it also goes quiet`);
       }
+      queueMissingAgentTab(id);
     }
     return json(res, 200, { ok: true }, origin);
   }
@@ -1435,9 +1456,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // has just been reloaded into a turn already in flight adopts this instead of
         // minting a second id for the same run. See liveConversations().
         activeTurnId: live.activeTurnId ?? null,
-        // Unattributed-activity recovery, delivered on the poll this exact conversation already
-        // makes. Nothing else can address one document: a URL open would make a second tab of a
-        // chat that is already on screen. Taken away by the first poll that reads it.
+        // Browser recovery is delivered by /status, whose service-worker caller can scan every
+        // actual ChatGPT tab immediately before deciding exact reload vs exact open. Keeping it
+        // out of this document-local feed also lets a dead content script be recovered.
         ...(retiredWorker ? { retiredWorker } : {})
       },
       origin
@@ -2422,11 +2443,34 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   // from the bridge's 30-second maintenance loop as well; attached/background workers are
   // explicitly excluded inside sleepSilentDetachedWorkers and still require durable turn proof.
   const stoppedWorkers: string[] = [];
+
+  // One bounded rescue, then release the slot if the same *open* turn remains completely
+  // silent. The first browser action is tracked by the activity episode and cannot repeat;
+  // sleeping at four minutes uses the broker's existing context-ceiling decision, so a worker
+  // at 400k becomes finished while every other worker remains reusable.
+  const liveByConversation = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
+  for (const worker of state.agents.filter((agent) => agent.role === 'worker' && agent.state === 'active')) {
+    if (!worker.conversationId) continue;
+    const live = liveByConversation.get(worker.conversationId);
+    if (!live?.generating && !live?.activeTurnId) continue;
+    const activityAt = Math.max(worker.activatedAt ?? 0, worker.lastSeenAt ?? 0);
+    if (activityAt <= 0 || now - activityAt < AGENT_INACTIVITY_SLEEP_MS) continue;
+    const slept = sleepWorker(
+      worker.id,
+      'Its ChatGPT turn stayed open but produced no message, page activity, or tool call for four minutes after one browser recovery check.'
+    );
+    repairsInFlight.delete(worker.conversationId);
+    if (slept?.report) await recordAgentMessage(slept.report, 'sent');
+    if (slept) stoppedWorkers.push(worker.id);
+  }
+
   for (const slept of sleepSilentDetachedWorkers(now)) {
+    if (slept.info.conversationId) repairsInFlight.delete(slept.info.conversationId);
     if (slept.report) await recordAgentMessage(slept.report, 'sent');
     stoppedWorkers.push(slept.info.id);
   }
   if (stoppedWorkers.length > 0) state = swarmState();
+  queueInactiveAgentRecoveries(now);
 
   // The one place a worker that never called finish is allowed to stop holding its slot, and
   // the only one entitled to say so: durable quiescence is proof that no turn is running, which
@@ -3355,7 +3399,7 @@ export function commandUrl(id: string, conversationId?: string | null): string {
   return `${base}?${marker}#${marker}`;
 }
 
-// ------------------------------------------------- unattributed-activity recovery
+// -------------------------------------------------------- exact browser recovery
 
 /**
  * How long one Unattributed incident is given to prove itself wrong.
@@ -3404,6 +3448,11 @@ let unattributedIncident: UnattributedIncident | null = null;
 interface Repair {
   endedTurns: number;
   state: 'queued' | 'handed' | 'done';
+  /** Stable identity of the failure/inactivity episode. A new activity stamp mints a new one. */
+  episode: string;
+  reason: 'unattributed' | 'assistant-error' | 'inactive' | 'no-tab';
+  /** Cooldown boundary. The browser is never asked before this instant. */
+  notBefore: number;
   /**
    * Names this exact handout, and is what a receipt has to quote to be believed.
    *
@@ -3418,6 +3467,128 @@ interface Repair {
 }
 
 const repairsInFlight = new Map<string, Repair>();
+/** Last browser action per exact chat. One cooldown covers errors, silence and missing tabs. */
+const lastBrowserRecoveryAt = new Map<string, number>();
+/** Last attributed connector completion for ordinary non-agent error recovery. */
+const lastAttributedCallAt = new Map<string, number>();
+
+function recoveryAgent(conversationId: string) {
+  const info = agentInfoForOwnedConversation(conversationId);
+  if (!info) return null;
+  return info.state === 'active' || info.state === 'detached' || info.state === 'waking' ? info : null;
+}
+
+/**
+ * Queues one exact browser action for one inactivity/failure episode.
+ *
+ * Every trigger converges here. A second reason while an action is already pending is the same
+ * recovery, not another reload. Once carried out it stays spent until new activity changes the
+ * episode key; the three-minute floor then protects even two genuinely distinct failures.
+ */
+function queueBrowserRecovery(
+  conversationId: string,
+  episode: string,
+  reason: Repair['reason'],
+  endedTurns = 0,
+  now = Date.now()
+): boolean {
+  if (!getConfig().multiAgent.recoverAgentTabs && reason !== 'unattributed') return false;
+  const held = repairsInFlight.get(conversationId);
+  if (held?.episode === episode) return false;
+  if (held && held.state !== 'done') return false;
+  const notBefore = Math.max(now, (lastBrowserRecoveryAt.get(conversationId) ?? 0) + BROWSER_RECOVERY_COOLDOWN_MS);
+  repairsInFlight.set(conversationId, {
+    endedTurns,
+    state: 'queued',
+    episode,
+    reason,
+    notBefore,
+    token: ''
+  });
+  return true;
+}
+
+/** Meaningful page/call activity is the episode boundary; empty polling is intentionally absent. */
+function noteRecoveryActivity(conversationId: string): void {
+  const held = repairsInFlight.get(conversationId);
+  if (held && held.reason !== 'unattributed') repairsInFlight.delete(conversationId);
+}
+
+const MEANINGFUL_RECOVERY_ACTIVITY = new Set<ChatObservation['kind']>([
+  'user_message',
+  'assistant_message',
+  'page_tool',
+  'turn_start',
+  'turn_end',
+  'tool_evidence'
+]);
+
+/** Applies one accepted observation batch to the recovery episode, after it is durable. */
+function noteRecoveryObservations(conversationId: string, observations: readonly ChatObservation[]): void {
+  if (observations.some((item) => MEANINGFUL_RECOVERY_ACTIVITY.has(item.kind))) noteRecoveryActivity(conversationId);
+
+  if (!getConfig().multiAgent.recoverAgentTabs) return;
+  const now = Date.now();
+  const agent = recoveryAgent(conversationId);
+  const recentCall = now - (lastAttributedCallAt.get(conversationId) ?? 0) <= AGENT_INACTIVITY_RECOVERY_MS;
+  if (!agent && !recentCall) return;
+  for (const item of observations) {
+    // This is the role fence. Top-level alerts and anything rendered under a user message are
+    // still recorded, but only the DOM adapter's assistant-turn classifier may set this bit.
+    if (item.kind !== 'chat_error' || item.recoverable !== true || !item.turnId) continue;
+    const episode = `assistant-error:${item.turnId}:${(item.text ?? '').slice(0, 240)}`;
+    if (queueBrowserRecovery(conversationId, episode, 'assistant-error', 0, now)) {
+      logInfo(`bridge: assistant transport failure — asking the browser to recover ${conversationId}`);
+    }
+    break;
+  }
+}
+
+/** The active agent chats for which the browser must keep asking the app for recovery work. */
+function browserRecoveryMonitoring(): boolean {
+  if (repairsInFlight.size > 0) return true;
+  if (!getConfig().multiAgent.recoverAgentTabs) return false;
+  return swarmState().agents.some(
+    (agent) =>
+      Boolean(agent.conversationId) &&
+      (agent.state === 'active' || agent.state === 'detached' || agent.state === 'waking')
+  );
+}
+
+/** Queues the single check for a still-open agent turn's current silence episode. */
+function queueInactiveAgentRecoveries(now = Date.now()): void {
+  if (!getConfig().multiAgent.recoverAgentTabs) return;
+  const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
+  for (const agent of swarmState().agents) {
+    if (!agent.conversationId || agent.state !== 'active') continue;
+    const conversation = live.get(agent.conversationId);
+    if (!conversation?.generating && !conversation?.activeTurnId) continue;
+    const activityAt = Math.max(agent.activatedAt ?? 0, agent.lastSeenAt ?? 0);
+    if (activityAt <= 0 || now - activityAt < AGENT_INACTIVITY_RECOVERY_MS) continue;
+    if (
+      queueBrowserRecovery(
+        agent.conversationId,
+        `inactive:${activityAt}`,
+        'inactive',
+        conversation.endedTurns,
+        now
+      )
+    ) {
+      logInfo(`multi-agent: ${agent.id} has one silent active-turn episode — asking the browser to check its tab`);
+    }
+  }
+}
+
+/** A final-tab close is one no-tab episode; the browser still scans before it opens anything. */
+function queueMissingAgentTab(conversationId: string, now = Date.now()): void {
+  if (!getConfig().multiAgent.recoverAgentTabs) return;
+  const agent = recoveryAgent(conversationId);
+  if (!agent || agent.state !== 'detached') return;
+  const detachedAt = agent.detachedAt ?? now;
+  if (queueBrowserRecovery(conversationId, `no-tab:${detachedAt}`, 'no-tab', 0, now)) {
+    logInfo(`multi-agent: ${agent.id} has no tab — asking the browser to open the exact chat once`);
+  }
+}
 
 /**
  * Every chat this app can presently prove is mid-turn, and whether it still has a document.
@@ -3474,6 +3645,7 @@ function repairCandidates(): Array<{ conversationId: string; detached: boolean; 
 function retireSpentRepairs(): void {
   const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
   for (const [conversationId, repair] of repairsInFlight) {
+    if (repair.reason !== 'unattributed') continue;
     const entry = live.get(conversationId);
     if (entry && entry.endedTurns > repair.endedTurns) repairsInFlight.delete(conversationId);
   }
@@ -3495,6 +3667,9 @@ function retireSpentRepairs(): void {
  */
 function noteCallAttribution(conversationId: string | null): void {
   if (conversationId) {
+    const now = Date.now();
+    lastAttributedCallAt.set(conversationId, now);
+    noteRecoveryActivity(conversationId);
     unattributedIncident?.proven.add(conversationId);
     repairsInFlight.delete(conversationId);
     return;
@@ -3528,33 +3703,22 @@ function repairUnattributedChat(): void {
     }
     return;
   }
-  if (!target.detached) {
-    // Queued for the browser, which owns the tab this chat is in and can reload that exact
-    // document. Opening the url from here would put a second tab of a chat that is still on
-    // screen — the duplicate this whole path exists to avoid.
-    repairsInFlight.set(target.conversationId, { endedTurns: target.endedTurns, state: 'queued', token: '' });
-    logInfo(`bridge: unattributed activity — asking the browser to reload ${target.conversationId}`);
-    return;
+  // The browser owns the final open-vs-reload decision for both cases. It scans actual tabs at
+  // action time, so a stale close event cannot open a duplicate and an open chat is reloaded
+  // rather than copied. One queue is also what prevents an unattributed incident and an agent
+  // silence incident from each performing their own recovery.
+  if (
+    queueBrowserRecovery(
+      target.conversationId,
+      `unattributed:${target.endedTurns}`,
+      'unattributed',
+      target.endedTurns
+    )
+  ) {
+    logInfo(
+      `bridge: unattributed activity — asking the browser to ${target.detached ? 'open or reload' : 'reload'} ${target.conversationId}`
+    );
   }
-  // Nothing can open the chat, so nothing was attempted: the next incident finds this worker
-  // exactly as it was.
-  if (!openInBrowser) return;
-  logInfo(`bridge: unattributed activity — reopening ${target.conversationId}`);
-  // Nothing is recorded about this one, and that is the point. `openInBrowser` resolving means
-  // the browser accepted a url, not that ChatGPT loaded that conversation and bound it — so
-  // filing it as a repair carried out would suppress every later incident for a worker whose
-  // replacement page never arrived, and suppress it *permanently*: a chat that never reports has
-  // no live record to retire the entry, and a broken join is precisely what never produces the
-  // attributed call that would clear it.
-  //
-  // The proof this needs already exists, is exact, and is not a timeout. A page reporting for
-  // that conversation is what takes its worker out of `detached` (see noteAgentAlive's `page`
-  // source), and a worker that is not detached is not a candidate here. So a reopen that
-  // actually worked suppresses the next incident by itself, and one that quietly did nothing is
-  // tried again — which is the only reason to try at all.
-  void openInBrowser(chatUrl(target.conversationId)).catch((err: Error) =>
-    logWarn(`unattributed chat repair failed: ${err.message}`)
-  );
 }
 
 /**
@@ -3570,18 +3734,19 @@ function repairUnattributedChat(): void {
  * handed out again here. That is what keeps a repair the browser could not carry out from
  * being filed as one that worked.
  */
-function takePendingRepair(): { conversationId: string; token: string } | null {
+function takePendingRepair(now = Date.now()): { conversationId: string; token: string; reason: Repair['reason'] } | null {
   retireSpentRepairs();
   for (const repair of repairsInFlight.values()) {
     if (repair.state === 'handed') repair.state = 'queued';
   }
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'queued') continue;
+    if (now < repair.notBefore) continue;
     repair.state = 'handed';
     // A fresh token every time it goes out. A handout that was not carried out is dead the
     // moment it is re-queued, so a receipt that arrives for it later cannot close anything.
     repair.token = randomBytes(9).toString('base64url');
-    return { conversationId, token: repair.token };
+    return { conversationId, token: repair.token, reason: repair.reason };
   }
   return null;
 }
@@ -3594,9 +3759,10 @@ function takePendingRepair(): { conversationId: string; token: string } | null {
  * nothing and closes nothing, which is the only safe reading of it.
  */
 function confirmRepair(token: string): void {
-  for (const repair of repairsInFlight.values()) {
+  for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
       repair.state = 'done';
+      lastBrowserRecoveryAt.set(conversationId, Date.now());
       return;
     }
   }
@@ -3606,6 +3772,8 @@ function clearUnattributedIncident(): void {
   if (unattributedIncident) clearTimeout(unattributedIncident.timer);
   unattributedIncident = null;
   repairsInFlight.clear();
+  lastBrowserRecoveryAt.clear();
+  lastAttributedCallAt.clear();
 }
 
 /**

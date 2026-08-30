@@ -108,8 +108,6 @@
   const STATUS_MS = 15_000;
   /** Longer than any honest tool call: past this a silent turn is called stalled. */
   const STALL_MS = 10 * 60 * 1000;
-  /** Claims the one reload a broken turn gets, and survives the reload that carries it out. */
-  const BROKEN_TURN_RELOAD_KEY = 'clf-broken-turn-reload';
   /** How long the button says "Starting…" before believing something went wrong. */
   const PRESS_GRACE_MS = 12_000;
   /** Persistent popup preference. On by default as of 1.7.4; the popup can turn it off. */
@@ -1390,72 +1388,6 @@
     return turnStartedAt > 0 && Date.now() - lastChangeAt > STALL_MS;
   }
 
-  function latestUserMessageKey(turns) {
-    for (let at = turns.length - 1; at >= 0; at--) {
-      const turn = turns[at];
-      if (!turn || turn.role !== 'user') continue;
-      const message = CLF_DOM.messagesIn(turn).findLast((entry) => entry && entry.role === 'user' && entry.id);
-      if (message) return String(message.id);
-    }
-    return '';
-  }
-
-  /**
-   * Reload the exact owned chat once when this turn's answer is not going to arrive by itself.
-   *
-   * Two things break a turn past the point of waiting, and the recovery for both is the same
-   * page fetched again:
-   *
-   * - **ChatGPT says so.** Its "Connection interrupted" notice, once generation has gone quiet.
-   * - **Nothing says anything.** The stop button is still on screen and the page has produced
-   *   no output, no tool activity and no DOM change for ten minutes. This half used to end at a
-   *   single logged `chat_error`: the `stalled` outcome exists, but the only code that reads it
-   *   runs in the branch where generation has *already* gone quiet, so a page frozen mid-turn
-   *   sat there for as long as the tab stayed open.
-   *
-   * One primitive and one key — conversation plus the latest user message — so a broken turn
-   * gets one reload however it broke, and a page that reloads back into the same broken turn
-   * does not reload again. sessionStorage survives that reload, which is what makes the dedupe
-   * durable without another authority.
-   *
-   * The key is written before asking and given back if the ask fails, so it is a claim on
-   * the attempt rather than a record of it. Keeping it on a refusal would be the same
-   * mistake as calling a repair done because it was handed out: a sleeping worker, a
-   * document the worker has since retired, and a chrome.tabs.reload that threw all mean no
-   * page was fetched, and suppressing this chat afterwards strands the frozen turn for the
-   * life of the tab. A reload that succeeded takes this document with it, so nothing here
-   * ever clears a real one.
-   *
-   * A turn the user stopped is never reloaded, in either half. That is a decision, not a fault.
-   */
-  async function maybeReloadBrokenTurn(turns, errors, nowGenerating) {
-    if (userStopped || !conversationId) return;
-    const interrupted =
-      !nowGenerating &&
-      errors.some((error) => /^Connection interrupted\.? Waiting for the complete answer\.?$/i.test(error.text));
-    if (!interrupted && !(nowGenerating && turnStalled())) return;
-    const messageKey = latestUserMessageKey(turns);
-    if (!messageKey) return;
-    const attempt = `${conversationId}\u0000${messageKey}`;
-    try {
-      if (sessionStorage.getItem(BROKEN_TURN_RELOAD_KEY) === attempt) return;
-      sessionStorage.setItem(BROKEN_TURN_RELOAD_KEY, attempt);
-    } catch {
-      return;
-    }
-    const done = await ask({ type: 'reload_owned_chat', conversationId, messageKey });
-    if (done && done.ok === true) return;
-    try {
-      // Only while it is still this attempt's claim. A newer broken turn owns the key by
-      // then, and taking that away would let this one reload the page a second time.
-      if (sessionStorage.getItem(BROKEN_TURN_RELOAD_KEY) === attempt) {
-        sessionStorage.removeItem(BROKEN_TURN_RELOAD_KEY);
-      }
-    } catch {
-      /* Storage that refuses to forget costs one missed retry, never a wrong reload. */
-    }
-  }
-
   /**
    * The exact public assistant message corroborated as terminal by the quiet page, or null.
    *
@@ -1888,7 +1820,6 @@
     for (const error of visibleErrors) {
       if (!errorFirstSeen.has(error.node)) errorFirstSeen.set(error.node, turnId);
     }
-    void maybeReloadBrokenTurn(observedTurns, visibleErrors, nowGenerating);
 
     const turn = generating ? generationTurn(observedTurns) : currentAssistantTurn(observedTurns);
     if (generating && turn && turn.id) {
@@ -2038,7 +1969,12 @@
       const scope = error.turnId || '';
       if (!unreportedError(error, scope)) continue;
       markErrorReported(error, scope);
-      emit({ kind: 'chat_error', text: error.text, turnId: error.turnId || recordedTurn || undefined });
+      emit({
+        kind: 'chat_error',
+        text: error.text,
+        turnId: error.turnId || recordedTurn || undefined,
+        recoverable: error.recoverable === true
+      });
     }
 
     // Last, so the next generation's idea of "what was already on the page" is this tick's
@@ -6299,8 +6235,10 @@
    * Only ever this chat's own work: `job` is reported per conversation, so a tab sitting
    * idle beside a chat that is compacting shows nothing.
    */
+  const COMPACT_STEPS = ['Preparing', 'Writing the handoff', 'Saving it', 'Opening the new chat'];
+
   function stageView(input) {
-    const { job, goal } = input;
+    const { job, goal, phase = nativePhase } = input;
     if (job && job.busy) {
       const stage =
         job.stage === 'opening'
@@ -6308,9 +6246,15 @@
           : job.stage === 'waiting-for-browser'
             ? 'Waiting for Chrome'
             : 'ChatGPT is writing the handoff';
-      // No bar: a compaction is one long wait with no named parts to it, and drawing an
-      // empty track under it would say there are stages nobody is being shown.
-      return { stage, detail: '', body: '', kind: 'none', steps: [], at: 0, done: false };
+      const at =
+        job.stage === 'opening' || job.stage === 'waiting-for-browser'
+          ? 3
+          : phase === 'delivering'
+            ? 2
+            : phase === 'prompting' || phase === 'waiting'
+              ? 1
+              : 0;
+      return { stage, detail: '', body: '', kind: 'compact', steps: COMPACT_STEPS, at, done: false };
     }
     return goalStageView(goal);
   }
@@ -6431,6 +6375,7 @@
   function dismissTerminalGoalStage() {
     const view = stageView({
       job,
+      phase: nativePhase,
       goal: goalConfig
         ? {
             phase: goalPhase,

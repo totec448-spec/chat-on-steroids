@@ -155,6 +155,7 @@ Some failures arrive as ordinary assistant markdown rather than a banner. `trans
 
 ```
 message delivery timed out
+connection interrupted. waiting for the complete answer
 unknown error occurred
 there was an error generating (a|the) response
 error in message stream
@@ -164,6 +165,8 @@ something went wrong
 
 This list is narrow on purpose — it runs against assistant prose, so a loose pattern would
 classify a model *discussing* an error as an error.
+
+The connection-interrupted line was added from the live 2026-08-30 renderer evidence in section 8.
 
 `error in message stream` describes ChatGPT's own answer stream and can make that chat turn fail.
 It is unrelated to the OpenRouter request made by the Goal model; bounded Goal-provider retries
@@ -313,3 +316,120 @@ relies on against what ChatGPT actually renders today.
 - **Generating state, confirmed together in one reading**: `[data-testid="stop-button"]` present,
   `[data-testid="send-button"]` absent, and `#prompt-textarea` still `contenteditable="true"` —
   so composer editability is not a generation signal, and the button pair is.
+
+## 8. Failure-card markup from two existing live tabs — 2026-08-30
+
+Captured read-only from two already-open signed-in Chrome tabs: no navigation, reload, Retry click,
+or composer input. Private conversation, turn, and message ids are omitted. Both failures were
+ordinary assistant turns, not top-level alert banners:
+
+```html
+<section data-testid="conversation-turn-N" data-turn="assistant" data-turn-id="…">
+  <div data-message-author-role="assistant" data-message-id="…">
+    <div class="… failure-card …">
+      <div class="markdown"><p>…exact notice…</p></div>
+      <!-- Delivery timeout only: native Retry button here -->
+    </div>
+  </div>
+</section>
+```
+
+The permanent screen-reader live regions were still present, but empty and hidden. There was no
+displayed `[role="alert"]` for either failure.
+
+### Delivery timeout — terminal retry surface
+
+Exact normalized assistant markdown:
+
+```text
+Message delivery timed out. Please try again.
+```
+
+Corroborating structure:
+
+- the nearest card used ChatGPT's error tokens (`text-token-text-error`,
+  `border-token-surface-error/15`, `bg-token-surface-error/5`)
+- the same card contained
+  `button[data-testid="regenerate-thread-error-button"]` with visible text `Retry`
+- `[data-testid="stop-button"]` was absent
+
+The current `transportFailure()` expression matches this exact prose, so `CLF_DOM.errors()`
+returned this occurrence through the assistant-markdown path even without a `role="alert"`.
+The Retry `data-testid` is strong corroboration of the terminal native error surface; the generated
+utility-class list is descriptive evidence, not a selector contract.
+
+### Connection interruption — waiting card that later went quiet
+
+Exact normalized assistant markdown, notably with no final period in this rendering:
+
+```text
+Connection interrupted. Waiting for the complete answer
+```
+
+Corroborating structure:
+
+- the nearest card used normal text/border tokens plus `mask-shimmer-muted`
+- there was no native Retry button and no `[data-interrupted="true"]` descendant
+- the screenshot caught ChatGPT's Stop control while the notice was waiting; the later read-only
+  DOM capture found Stop absent while the same shimmer card remained mounted
+
+The repaired detector recognises this exact assistant-authored line through `transportFailure()`.
+It does not treat a displayed top-level alert, a user-authored row, or arbitrary assistant prose as
+reload authority. Those occurrences remain recorded as session errors with `recoverable: false`.
+
+### Recovery contract
+
+Keep ownership in `extension/chatgpt-dom.js`; do not add another direct page scan in
+`content.js`. The durable rule should be based on:
+
+1. the latest exact assistant turn:
+   `section[data-turn="assistant"][data-testid^="conversation-turn-"]`
+2. assistant-authored markdown under `[data-message-author-role="assistant"]`
+3. the exact whitespace-normalized notice, classified by a deliberately narrow allowlist
+4. the native Retry `data-testid` and shimmer class only as corroborating evidence
+
+Do not key an occurrence by text alone: the same wording can fail in two different turns. Preserve
+the existing node-plus-turn identity. Do not depend on full Tailwind class strings; use
+`mask-shimmer-muted` only as supporting evidence until ChatGPT exposes a semantic attribute for the
+waiting card.
+
+The DOM adapter only classifies and reports. It never reloads the page. The app accepts a
+recoverable assistant error only for an active agent chat, or for an ordinary chat whose last
+attributed connector call completed within two minutes. The same app-owned recovery queue also
+handles a missing agent tab and a joined agent whose open turn produced no page or tool activity
+for two minutes.
+
+The extension then scans Chrome's actual `chatgpt.com` tabs immediately before acting:
+
+- exactly one tab for the conversation: reload that tab
+- no tab: open that exact `/c/<conversation-id>` URL
+- more than one tab: do nothing; never guess and never add another duplicate
+
+One action receipt spends that failure/inactivity episode. A second action for the same
+conversation cannot happen for at least three minutes, even for a different trigger. New meaningful
+page/tool activity is required to create a new silence episode. At four minutes of uninterrupted
+open-turn silence, a joined worker uses the existing stop decision: below 400k context tokens it
+becomes sleeping/revivable; at or above 400k it becomes finished. The setting **Recover inactive
+agent tabs** disables error, silence, and missing-tab browser recovery without changing the worker's
+underlying lifecycle state.
+
+## 9. Overwrite ambiguity from one reused ChatGPT request id — 2026-08-30
+
+A read-only live inspection of an existing long-running chat found 24 native tool rows, but only
+one row carried app-owned call identity. The durable session held 130 correctly request-attributed
+tool calls. ChatGPT had reused the same request id for every call while the recorder held them
+across three local turn groups: 64 calls in one turn id, 16 in another, and 50 with no local turn
+id.
+
+That is not missing tool history. It is an ambiguous presentation join: request id alone selects
+all 130 calls, while local turn id selects only fragments of what the reloaded page renders as one
+response. Overwrite therefore fails closed and leaves ChatGPT's native rows visible instead of
+attaching the wrong local activity to the wrong assistant response. Do not repair this by choosing
+the first matching group or by treating a repeated request id as a turn id.
+
+The local session remains authoritative for tool execution: all 130 calls and their outcomes were
+present and request-attributed. The authored transcript has a different evidence boundary. The
+interrupted long turn contained only the 163-character streaming assistant fragment the browser
+actually observed before it stalled; a later turn contained its separate settled assistant answer.
+The app must not invent missing final prose or merge those messages merely to make Overwrite look
+complete.

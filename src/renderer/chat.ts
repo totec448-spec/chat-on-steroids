@@ -170,9 +170,14 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   // worker session may borrow the live swarm state.
   const agent = origin?.agentId
     ? swarm?.agents.find(
-        (entry) => entry.id === origin.agentId && Boolean(entry.conversationId) && entry.conversationId === summary.conversationId
+        (entry) =>
+          entry.id === origin.agentId &&
+          Boolean(entry.conversationId) &&
+          entry.conversationId === summary.conversationId
       )
-    : undefined;
+    : swarm?.agents.find(
+        (entry) => entry.role === 'prime' && entry.conversationId === summary.conversationId
+      );
   if (agent) {
     badges.push(AGENT_BADGE[agent.state]);
     return badges;
@@ -1041,7 +1046,8 @@ export function chatSettingsPatch(current: Config): {
       // panel keeps only the worker count, so it reads the one control that exists.
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
-      allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked
+      allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
+      recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked
     },
     goal: {
       enabled: $<HTMLInputElement>('goalEnabled').checked,
@@ -1310,6 +1316,7 @@ const CHAT_INPUTS = [
   'autoCompactTokens',
   'maWorkers',
   'allowUnattributedCalls',
+  'recoverAgentTabs',
   'goalEnabled',
   'goalReasoning',
   'goalPrompt',
@@ -1337,6 +1344,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('allowUnattributedCalls'),
     config.multiAgent.allowUnattributedCalls,
     previous?.multiAgent.allowUnattributedCalls
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('recoverAgentTabs'),
+    config.multiAgent.recoverAgentTabs,
+    previous?.multiAgent.recoverAgentTabs
   );
 
   applyGoal(state, previous);

@@ -213,6 +213,8 @@ export interface MultiAgentSettings {
   maxWorkers: number;
   /** Permit self-contained calls when browser evidence cannot identify their conversation. */
   allowUnattributedCalls: boolean;
+  /** Reopen/reload an active agent chat once when its browser view disappears or goes silent. */
+  recoverAgentTabs: boolean;
 }
 
 export interface Config {

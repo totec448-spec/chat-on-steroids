@@ -156,7 +156,7 @@ export const TRANSFER_TTL_MS = 10 * 60_000;
  * It is no longer a failure, because it no longer has to be: a slept worker keeps its chat and
  * the prime can wake it. Silence now costs the run a slot back, not a worker.
  */
-export const DETACHED_SILENCE_MS = 5 * 60_000;
+export const DETACHED_SILENCE_MS = 4 * 60_000;
 
 /**
  * The context a worker chat may reach before it stops being worth reviving.

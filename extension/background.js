@@ -208,6 +208,8 @@ const deferredRevivalOffers = new Map();
  * conversation. Browser-session only because numeric tab ids do not survive a browser restart.
  */
 let revivalPreferences = {};
+/** App says an active agent/recovery episode still needs the maintenance cadence. */
+let recoveryMonitoring = false;
 
 function load() {
   if (loaded) return Promise.resolve();
@@ -241,6 +243,7 @@ async function loadOnce() {
     'closeOutbox',
     'commandAckOutbox',
     'revivalPreferences',
+    'recoveryMonitoring',
     'delivery'
   ]);
   settled = Array.isArray(live.settled) ? live.settled : [];
@@ -268,6 +271,7 @@ async function loadOnce() {
     live.revivalPreferences && typeof live.revivalPreferences === 'object' && !Array.isArray(live.revivalPreferences)
       ? { ...live.revivalPreferences }
       : {};
+  recoveryMonitoring = live.recoveryMonitoring === true;
   if (live.delivery && typeof live.delivery === 'object' && !Array.isArray(live.delivery)) {
     delivery = { ...delivery, ...live.delivery };
   }
@@ -293,6 +297,7 @@ function persistLive() {
         closeOutbox: closeOutbox.slice(-200),
         commandAckOutbox: commandAckOutbox.slice(-200),
         revivalPreferences,
+        recoveryMonitoring,
         delivery
       }),
       // Only small command-control metadata crosses browser restarts. No transcript and no
@@ -808,7 +813,8 @@ function retryWanted() {
     journal.length > 0 ||
     closeOutbox.length > 0 ||
     commandAckOutbox.length > 0 ||
-    Object.keys(tabConversations).length > 0
+    Object.keys(tabConversations).length > 0 ||
+    recoveryMonitoring
   );
 }
 
@@ -1551,29 +1557,42 @@ async function noteTabConversation(source, value) {
  * registry here is the authority on which tab that chat is in, so the app hands out the
  * conversation id and nothing else and this decides whether there is a tab to reload.
  *
- * Exactly one match reloads. None means the chat is not open in this browser; more than one is
- * genuinely ambiguous, and reloading the wrong one of two tabs of the same chat would interrupt
- * a turn to repair a different one. Neither is reported, and that silence is the answer: the
- * app hands the same repair out again next time, so a duplicate tab closing or the chat opening
- * here is enough for a later pass to finish it. Only a reload that actually happened is
- * reported, because only that is an action worth not repeating.
+ * Exactly one match reloads. None opens the exact conversation. More than one is genuinely
+ * ambiguous, so it does nothing rather than reload one at random or add a third copy. The scan
+ * happens immediately before the action; the content-script registry alone is too stale to
+ * prevent duplicates. Only a browser action that actually happened is reported, because only
+ * that is worth placing behind the app's per-chat cooldown.
  */
 async function maintain() {
-  if (Object.keys(tabConversations).length === 0) return;
+  if (Object.keys(tabConversations).length === 0 && !recoveryMonitoring) return;
   const reply = await call('/status');
+  if (!reply.ok || !reply.data) return;
+  const monitoring = reply.data.recoveryMonitoring === true;
+  if (monitoring !== recoveryMonitoring) {
+    recoveryMonitoring = monitoring;
+    await persistLive().catch(() => undefined);
+  }
   const repair = (reply.ok && reply.data ? reply.data.repair : null) || null;
   const conversationId = cleanConversationId(repair && repair.conversationId);
   // Quoted back exactly as it arrived. It names the handout being answered, so that a receipt
   // this pass sends late cannot close a repair the app has since raised for a different turn.
   const token = repair && typeof repair.token === 'string' ? repair.token : '';
   if (!conversationId || !token) return;
-  const tabs = Object.keys(tabConversations).filter((key) => tabConversations[key] === conversationId);
-  if (tabs.length !== 1) return;
+  let candidates = [];
   try {
-    await chrome.tabs.reload(Number(tabs[0]));
+    const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    candidates = tabs.filter((tab) => conversationForTab(tab) === conversationId);
   } catch {
-    // That tab closed between the registry and the call, or refused to reload. Nothing is
-    // reported, so the app keeps the repair and the next pass tries again.
+    return;
+  }
+  // Two copies are ambiguous. Never reload one at random and never add a third.
+  if (candidates.length > 1) return;
+  try {
+    if (candidates.length === 1) await chrome.tabs.reload(candidates[0].id);
+    else await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` });
+  } catch {
+    // A tab changed between the scan and action, or Chrome refused it. No receipt means the
+    // app keeps this exact handout pending; it cannot turn a failed action into another tab.
     return;
   }
   await call(`/status?repaired=${encodeURIComponent(token)}`);
@@ -1586,6 +1605,9 @@ function conversationStillOpen(conversationId) {
 async function enqueueClose(conversationId) {
   const id = cleanConversationId(conversationId);
   if (!id) return false;
+  // One status pass after the final tab closes lets the app decide whether that exact chat is
+  // an active agent needing a reopen. The pass clears this again when it is ordinary history.
+  recoveryMonitoring = true;
   if (!closeOutbox.some((entry) => entry && entry.conversationId === id)) {
     closeOutbox.push({ conversationId: id, queuedAt: Date.now() });
     closeOutbox = closeOutbox.slice(-200);
@@ -2169,33 +2191,6 @@ const HANDLERS = {
     const result = await call('/settings', { method: 'POST', body: JSON.stringify(body) });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
-  /**
-   * Reload the one tab that owns this exact conversation, and nothing else.
-   *
-   * The page's own interrupted-connection notice, and only that: a document that can still
-   * see its connection is broken asking to be rebuilt. It may not name another tab — the
-   * sender's registered conversation has to agree, and it is that sender's tab that reloads,
-   * so no tab registry or newest-tab guess is involved. A chat whose reporting died cannot
-   * ask for anything; that one is repaired from the tab registry, in maintain().
-   */
-  async reload_owned_chat(message, _sender, source) {
-    await load();
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
-    const conversationId = cleanConversationId(message.conversationId);
-    if (!conversationId) return { ok: false, error: 'bad_conversation_id' };
-    const registeredConversation = cleanConversationId(tabConversations[String(source.tab)]);
-    if (registeredConversation && registeredConversation !== conversationId) {
-      return { ok: false, error: 'stale_conversation' };
-    }
-    await noteTabConversation(source, conversationId);
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
-    try {
-      await chrome.tabs.reload(source.tab);
-      return { ok: true };
-    } catch {
-      return { ok: false, error: 'reload_failed' };
-    }
-  },
   /** The marked page asking for the one command it was opened for. */
   async redeem(message) {
     return redeemCommand(
@@ -2302,7 +2297,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'goal_open',
     'settings_set',
     'settings_get',
-    'reload_owned_chat',
     'repair_fiber',
     'redeem',
     'defer_revival',
