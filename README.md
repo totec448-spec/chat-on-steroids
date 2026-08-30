@@ -29,7 +29,7 @@ Chat On Steroids is a Windows, macOS and Linux desktop app that exposes only the
 | **macOS** | [DMG](../../releases/latest/download/Chat-On-Steroids-macOS-x64.dmg) · [ZIP](../../releases/latest/download/Chat-On-Steroids-macOS-x64.zip) | [DMG](../../releases/latest/download/Chat-On-Steroids-macOS-arm64.dmg) · [ZIP](../../releases/latest/download/Chat-On-Steroids-macOS-arm64.zip) |
 | **Linux** | [AppImage](../../releases/latest/download/Chat-On-Steroids-Linux-x64.AppImage) · [DEB](../../releases/latest/download/Chat-On-Steroids-Linux-x64.deb) | [AppImage](../../releases/latest/download/Chat-On-Steroids-Linux-arm64.AppImage) · [DEB](../../releases/latest/download/Chat-On-Steroids-Linux-arm64.deb) |
 
-Every package is architecture-specific and carries matching Electron/native dependencies, `tunnel-client`, ripgrep and the Chrome extension. macOS packages additionally carry a thin native Desktop helper for ScreenCaptureKit, AXUIElement and CGEvent. Windows uses a per-user-capable assisted installer; macOS ships DMG/ZIP; Linux ships AppImage and Debian packages. **On Debian/Ubuntu, prefer the DEB.** The portable AppImage uses electron-builder's static launcher; if the host disables unprivileged user namespaces, that launcher can fall back to starting Chromium with `--no-sandbox` so the app can still run. On such restrictive hosts, use the DEB when you do not want that AppImage fallback. In packaged builds **Open extension folder** points at a stable per-user copy of the bundled extension, so Chrome's **Load unpacked** path survives AppImage remounts and app upgrades. A standalone [extension zip](../../releases/latest/download/Chat-On-Steroids-Extension.zip) is attached too for manual installs.
+Every package is architecture-specific and carries matching Electron/native dependencies, `tunnel-client`, ripgrep and the Chrome extension. macOS packages additionally carry a thin in-process native Desktop backend for ScreenCaptureKit, AXUIElement and CGEvent; it runs on a Node Worker thread inside the Electron main process so TCC checks and native execution share one authorization subject without blocking the UI. Windows uses a per-user-capable assisted installer; macOS ships DMG/ZIP; Linux ships AppImage and Debian packages. **On Debian/Ubuntu, prefer the DEB.** The portable AppImage uses electron-builder's static launcher; if the host disables unprivileged user namespaces, that launcher can fall back to starting Chromium with `--no-sandbox` so the app can still run. On such restrictive hosts, use the DEB when you do not want that AppImage fallback. In packaged builds **Open extension folder** points at a stable per-user copy of the bundled extension, so Chrome's **Load unpacked** path survives AppImage remounts and app upgrades. A standalone [extension zip](../../releases/latest/download/Chat-On-Steroids-Extension.zip) is attached too for manual installs.
 
 Every release includes [`SHA256SUMS.txt`](../../releases/latest/download/SHA256SUMS.txt). Verify an installer before running it, then compare the printed hash with the matching line in that file:
 
@@ -111,6 +111,20 @@ The MCP connector uses ChatGPT's documented Developer mode and Secure MCP Tunnel
 ### Unsigned release builds
 
 Release binaries are not yet publisher-signed, and macOS builds are unnotarized, so Windows SmartScreen, macOS Gatekeeper or your browser may warn about an unverified download. Apple-silicon Mach-O files can contain ad-hoc signatures required by the platform; those do not identify a publisher. Verify the SHA-256 first. On Windows, **More info → Run anyway** is the SmartScreen path; on macOS use the normal system-approved open flow only after verifying the file. If you do not want to run an unverified binary, [build from source](#building) instead.
+
+### macOS Desktop permissions after a rebuild
+
+Desktop automation crosses two independent macOS TCC decisions: Screen Recording for pixels and Accessibility for AXUIElement controls/input. Earlier development builds launched a raw Swift child process: `tccd` authorised the Electron responsible parent by bundle id for a parent check but reduced the child request to a path-based subject, so an allowed parent and denied helper could coexist. The packaged backend now loads the Swift implementation in-process on a Node Worker thread. Permission check/request and execution therefore share the `Chat On Steroids.app` TCC subject. The app's Home warning and **Run checks** report the parent verdict, the executing backend verdict and their current fingerprints.
+
+Unsigned/ad-hoc development binaries still have content-bound designated requirements. Rebuilding can therefore leave System Settings showing an enabled `Chat On Steroids.app` row for an older binary. The visible basename does not reveal the stored path or code requirement. When that warning appears, remove the stale parent row and re-add the **current** `Chat On Steroids.app` in Privacy & Security → Accessibility (Device Control and Data Access on newer macOS), then fully quit and reopen the app. A leftover `macos-desktop-helper` row belongs to the retired child-process backend or a direct smoke run and is not used by current packaged builds. **Run checks** is the authoritative test.
+
+For repeat local development, set `COS_MACOS_SIGNING_IDENTITY` to a long-lived code-signing certificate already installed in the login keychain:
+
+```sh
+COS_MACOS_SIGNING_IDENTITY="Chat On Steroids Development" npm run dist:dir:mac:arm64
+```
+
+This opt-in overrides `mac.identity` only for that packaging command, allowing electron-builder to sign nested helpers before the outer app with the same stable identity. The default release workflow remains deliberately unsigned until project-owned release signing is configured; no certificate name or credential belongs in the repository.
 
 ## Permissions and security boundaries
 

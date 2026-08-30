@@ -25,8 +25,9 @@ import {
   type PollHealth
 } from './tunnel/health.js';
 
-import type { Check, Diagnosis } from '../shared/types.js';
+import type { Capabilities, Check, Diagnosis, MacOSCodeIdentity, MacOSDesktopAccessStatus } from '../shared/types.js';
 import { surfaceIsUseful } from './mcp/surfaces.js';
+import { refreshMacOSDesktopAccess } from './computer/index.js';
 
 async function fetchJson(
   url: string,
@@ -124,6 +125,68 @@ export function describeRoute(
     ok: false,
     detail: `Not verified — last completed handshake ${ago(health.lastSuccessMs, nowMs)}; ${errors}.`
   };
+}
+
+function identity(identity: MacOSCodeIdentity): string {
+  const team = identity.teamIdentifier ? `, team ${identity.teamIdentifier}` : '';
+  const cdhash = identity.cdhash ? `, cdhash ${identity.cdhash.slice(0, 12)}` : '';
+  return `${identity.identifier ?? identity.executable} (${identity.signingMode}${team}${cdhash})`;
+}
+
+/** Pure projection used by both the live self-test and targeted regressions. */
+export function describeMacOSDesktopAccess(
+  access: MacOSDesktopAccessStatus | null,
+  caps: Pick<Capabilities, 'screen' | 'control'>
+): Check[] {
+  const checks: Check[] = [];
+  if (!caps.screen && !caps.control) return checks;
+  if (access === null) {
+    return [{
+      name: 'macOS Desktop permissions',
+      status: 'not-run',
+      ok: null,
+      detail: 'The native helper has not reported its Screen Recording or Accessibility state yet.'
+    }];
+  }
+
+  const identities = `Current identities: parent ${identity(access.parent)}; backend ${identity(access.backend)}.`;
+  const decisions =
+    ` Parent reports screen=${access.parentPermissions.screen}, accessibility=${access.parentPermissions.accessibility};` +
+    ` backend reports screen=${access.backendPermissions.screen}, accessibility=${access.backendPermissions.accessibility}.`;
+  const stale = access.rebuildMayInvalidateAuthorization
+    ? ' This development build is unsigned or ad-hoc signed, so rebuilding can leave an enabled System Settings row attached to an older binary. Remove and re-add the current Chat On Steroids.app entry, then fully quit and reopen the app.'
+    : ' Fully quit and reopen the app after changing the macOS permission.';
+  const check = (
+    name: string,
+    state: MacOSDesktopAccessStatus['screen'],
+    missing: string
+  ): Check => ({
+    name,
+    status: state === 'granted' ? 'pass' : state === 'missing' ? 'fail' : 'not-run',
+    ok: state === 'granted' ? true : state === 'missing' ? false : null,
+    detail:
+      state === 'granted'
+        ? `Granted to the current build.${decisions} ${identities}`
+        : state === 'missing'
+          ? `${missing}${stale}${decisions} ${identities}`
+          : `${access.error ?? 'The helper could not determine the live TCC decision.'}${decisions} ${identities}`
+  });
+
+  if (caps.screen) {
+    checks.push(check(
+      'macOS Screen Recording',
+      access.screen,
+      'macOS denied Screen Recording to the current Desktop process. Open Privacy & Security → Device Control and Data Access.'
+    ));
+  }
+  if (caps.control) {
+    checks.push(check(
+      'macOS Accessibility',
+      access.accessibility,
+      'macOS denied AXUIElement access to the in-process Chat On Steroids.app backend. Open Privacy & Security → Accessibility (Device Control and Data Access on newer macOS).'
+    ));
+  }
+  return checks;
 }
 
 /** Runs an initialize + tools/list against our own loopback endpoint. */
@@ -249,6 +312,14 @@ export async function runDiagnostics(): Promise<Diagnosis> {
         ? 'Nothing is switched on, so the connector would expose no tools.'
         : `${config.roots.length} folder${config.roots.length === 1 ? '' : 's'} shared; on: ${enabled.join(', ')}${config.readOnly ? ' (read-only)' : ''}`
   });
+
+  // macOS has two separate native permission decisions, and an enabled System Settings row
+  // is not proof that the current ad-hoc binary still owns it after a rebuild. Ask the helper
+  // that will perform the operation, then show both code identities in the result.
+  if (process.platform === 'darwin' && (caps.screen || caps.control)) {
+    const access = await refreshMacOSDesktopAccess();
+    checks.push(...describeMacOSDesktopAccess(access, caps));
+  }
 
   // 2. Our own server, end to end, over the same URL the tunnel uses.
   if (!isServerRunning() || !status.localUrl) {

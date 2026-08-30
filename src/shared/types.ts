@@ -369,6 +369,43 @@ export interface BridgeStatus {
   lastSeenAt: number | null;
 }
 
+export type MacOSPermissionState = 'granted' | 'missing' | 'unknown';
+export type MacOSSigningMode = 'signed' | 'adhoc' | 'unsigned' | 'unknown';
+
+export interface MacOSPermissionPair {
+  screen: MacOSPermissionState;
+  accessibility: MacOSPermissionState;
+}
+
+/**
+ * The parent authorization identity and the native payload fingerprint involved in Desktop automation.
+ *
+ * Packaged builds execute the payload in-process, so only the Electron parent is a TCC
+ * subject. Exposing the payload fingerprint still makes it possible to identify exactly
+ * which native implementation produced a live verdict.
+ */
+export interface MacOSCodeIdentity {
+  executable: string;
+  identifier: string | null;
+  teamIdentifier: string | null;
+  signingMode: MacOSSigningMode;
+  /** Content fingerprint used by ad-hoc designated requirements. */
+  cdhash: string | null;
+}
+
+export interface MacOSDesktopAccessStatus extends MacOSPermissionPair {
+  /** Decision reported by Electron's responsible parent process. */
+  parentPermissions: MacOSPermissionPair;
+  /** Fail-closed preflight reported by the Swift process that performs the operation. */
+  backendPermissions: MacOSPermissionPair;
+  parent: MacOSCodeIdentity;
+  backend: MacOSCodeIdentity;
+  /** True when rebuilding can change the content-bound TCC requirement. */
+  rebuildMayInvalidateAuthorization: boolean;
+  checkedAt: number;
+  error: string | null;
+}
+
 /**
  * Whether the enabled product surface currently needs the companion browser extension.
  *
@@ -395,6 +432,8 @@ export interface AppState {
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */
   bundledTunnelVersion: string | null;
   bridge: BridgeStatus;
+  /** Present only on macOS once the native helper has reported its live TCC state. */
+  desktopAccess?: MacOSDesktopAccessStatus | null;
 }
 
 export const DEFAULT_CAPABILITIES: Capabilities = {

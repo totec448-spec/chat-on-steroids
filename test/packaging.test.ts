@@ -374,6 +374,7 @@ describe('cross-platform packaging targets', () => {
   it('pins the current macOS release to unsigned thin native bundles with explicit metadata checks', () => {
     const builder = yamlFile('electron-builder.yml');
     const macSmoke = readFileSync(path.join(root, 'scripts', 'smoke-macos-bundle.mjs'), 'utf8');
+    const packageScript = readFileSync(path.join(root, 'scripts', 'package.mjs'), 'utf8');
     expect(builder.mac.identity).toBeNull();
     expect(builder.mac.notarize).toBe(false);
     expect(builder.mac.category).toBe('public.app-category.developer-tools');
@@ -392,7 +393,8 @@ describe('cross-platform packaging targets', () => {
       "LSApplicationCategoryType: 'public.app-category.developer-tools'",
       "LSMinimumSystemVersion: '12.0'",
       'NSScreenCaptureUsageDescription:',
-      "path.join(resources, 'desktop', 'macos-desktop-helper')",
+      "path.join(resources, 'desktop', 'macos-desktop-addon.node')",
+      "path.join(resources, 'desktop', 'libcos-desktop.dylib')",
       "path.join(ptyDir, 'spawn-helper')",
       "path.join(nodeModules, 'tree-sitter', 'prebuilds'",
       "path.join(nodeModules, 'tree-sitter-bash', 'prebuilds'",
@@ -402,7 +404,8 @@ describe('cross-platform packaging targets', () => {
       'walkFiles(contents)',
       "normalized.includes('.app/Contents/MacOS/')",
       "path.basename(file) === 'chrome_crashpad_handler'",
-      "requireThinMachO(file, launched, file === desktopHelper ? '12.3'",
+      "path.basename(file) === 'macos-desktop-addon.node'",
+      'desktopPayload ? \'12.3\'',
       'launchedMachOCount < 6',
       "run('plutil', ['-extract', key, 'raw', plist])",
       "run('codesign', ['--display', '--verbose=4', app]",
@@ -411,11 +414,15 @@ describe('cross-platform packaging targets', () => {
     ]) expect(macSmoke).toContain(marker);
     expect(macSmoke).toContain("requireFile(path.join(resources, 'icon.icns'))");
     expect(macSmoke).toContain("iconBytes.toString('ascii', 0, 4) !== 'icns'");
+    expect(packageScript).toContain("process.env['COS_MACOS_SIGNING_IDENTITY']");
+    expect(packageScript).toContain('`--config.mac.identity=${macSigningIdentity}`');
 
     const packagedRuntime = readFileSync(path.join(root, 'scripts', 'smoke-packaged-runtime.mjs'), 'utf8');
     expect(packagedRuntime).toContain("for (const dependency of ['node-pty', 'tree-sitter', 'tree-sitter-bash'])");
     expect(packagedRuntime).toContain('directories.length !== 1 || directories[0] !== nativeDir');
-    expect(packagedRuntime).toContain("required('desktop/macos-desktop-helper')");
+    expect(packagedRuntime).toContain("required('desktop/macos-desktop-addon.node')");
+    expect(packagedRuntime).toContain("required('desktop/libcos-desktop.dylib')");
+    expect(packagedRuntime).toContain("addon.handle('{\"op\":\"warm\"}')");
 
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
     const notes = readFileSync(path.join(root, 'docs', 'release-notes', 'v2.0.2.md'), 'utf8');

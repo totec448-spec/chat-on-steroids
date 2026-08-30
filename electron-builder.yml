@@ -100,7 +100,7 @@ mac:
   extraResources:
     - from: resources/packaging/desktop/darwin/${arch}
       to: desktop
-      filter: ['macos-desktop-helper']
+      filter: ['macos-desktop-addon.node', 'libcos-desktop.dylib']
     - from: resources/packaging/native/darwin/${arch}/node_modules/@img/sharp-libvips-darwin-${arch}/README.md
       to: THIRD-PARTY-NOTICES-sharp-libvips-darwin-${arch}.md
     - from: resources/packaging/tunnel/darwin/${arch}

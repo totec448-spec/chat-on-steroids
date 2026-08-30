@@ -17,10 +17,13 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { ensureUsablePath, normalizeEnvironment, setEnvValue } from '../env.js';
 import { findWindowsPowerShell, terminateProcessTree } from '../exec.js';
 import { logInfo, logWarn } from '../logger.js';
+import type { MacOSDesktopAccessStatus, MacOSPermissionPair, MacOSPermissionState } from '../../shared/types.js';
 import { HELPER_SCRIPT } from './helper.js';
+import { inspectMacOSDesktopAccess } from './macos-access.js';
 
 /** Width the screenshot is scaled down to, matching computer-use convention. */
 export const DEFAULT_SCREENSHOT_WIDTH = 1280;
@@ -28,6 +31,25 @@ export const MAX_SCREENSHOT_WIDTH = 2560;
 const HELPER_TIMEOUT_MS = 30_000;
 const HELPER_STARTUP_GRACE_MS = 10_000;
 const MAX_FRAMES = 16;
+
+let macOSDesktopAccess: MacOSDesktopAccessStatus | null = null;
+const macOSDesktopAccessListeners = new Set<(status: MacOSDesktopAccessStatus) => void>();
+
+export function getMacOSDesktopAccess(): MacOSDesktopAccessStatus | null {
+  return macOSDesktopAccess;
+}
+
+export function onMacOSDesktopAccessChange(
+  listener: (status: MacOSDesktopAccessStatus) => void
+): () => void {
+  macOSDesktopAccessListeners.add(listener);
+  return () => macOSDesktopAccessListeners.delete(listener);
+}
+
+function publishMacOSDesktopAccess(status: MacOSDesktopAccessStatus): void {
+  macOSDesktopAccess = status;
+  for (const listener of macOSDesktopAccessListeners) listener(status);
+}
 
 export class ComputerError extends Error {
   readonly completedCount: number | null;
@@ -139,11 +161,12 @@ export type Action =
   | { type: 'write_clipboard'; text: string };
 
 /**
- * One long-lived native helper process.
+ * One long-lived native backend transport.
  *
- * Windows launches the fixed PowerShell/Win32 bridge; macOS launches the packaged Swift
- * helper. Both speak the same newline-delimited JSON protocol, so frame identity, stale
- * refs, batching and model-facing semantics remain platform-neutral in this file.
+ * Windows launches the fixed PowerShell/Win32 bridge. macOS loads the Swift backend through
+ * an N-API addon on a Node Worker thread in this Electron process; the old subprocess path is
+ * retained only behind an explicit test/development override. Both speak the same JSON
+ * protocol, so frame identity, stale refs, batching and model-facing semantics remain neutral.
  */
 interface PendingHelperRequest {
   resolve: (value: Record<string, any>) => void;
@@ -160,8 +183,16 @@ interface HelperRuntime {
   ready: boolean;
 }
 
+interface MacOSAddonRuntime {
+  worker: Worker;
+  pending: PendingHelperRequest | null;
+  exited: boolean;
+}
+
 let helperRuntime: HelperRuntime | null = null;
 let helperStarting: Promise<HelperRuntime> | null = null;
+let macOSAddonRuntime: MacOSAddonRuntime | null = null;
+let macOSAddonStarting: Promise<MacOSAddonRuntime> | null = null;
 let helperQueue: Promise<void> = Promise.resolve();
 let helperGeneration = 0;
 let helperStopping = false;
@@ -394,8 +425,195 @@ function locateMacOSDesktopHelper(): string {
   );
 }
 
+function useMacOSDesktopAddon(): boolean {
+  return process.platform === 'darwin' && !process.env['COS_MACOS_DESKTOP_HELPER'];
+}
+
+function locateMacOSDesktopAddon(): { addon: string; library: string } {
+  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const explicitAddon = process.env['COS_MACOS_DESKTOP_ADDON'];
+  const explicitLibrary = process.env['COS_MACOS_DESKTOP_LIBRARY'];
+  const candidates = [
+    explicitAddon && explicitLibrary ? { addon: explicitAddon, library: explicitLibrary } : null,
+    resourcesPath
+      ? {
+          addon: path.join(resourcesPath, 'desktop', 'macos-desktop-addon.node'),
+          library: path.join(resourcesPath, 'desktop', 'libcos-desktop.dylib')
+        }
+      : null,
+    {
+      addon: path.resolve(
+        process.cwd(),
+        'resources',
+        'packaging',
+        'desktop',
+        'darwin',
+        process.arch,
+        'macos-desktop-addon.node'
+      ),
+      library: path.resolve(
+        process.cwd(),
+        'resources',
+        'packaging',
+        'desktop',
+        'darwin',
+        process.arch,
+        'libcos-desktop.dylib'
+      )
+    }
+  ].filter((candidate): candidate is { addon: string; library: string } => candidate !== null);
+  const found = candidates.find((candidate) => existsSync(candidate.addon) && existsSync(candidate.library));
+  if (found) return found;
+  throw new ComputerError(
+    `The in-process macOS desktop backend is missing for ${process.arch}. Run npm run desktop:mac before development, or rebuild the macOS package.`
+  );
+}
+
+const MACOS_ADDON_WORKER_SOURCE = String.raw`
+  const { parentPort, workerData } = require('node:worker_threads');
+  const { createRequire } = require('node:module');
+  try {
+    const addon = createRequire(process.execPath)(workerData.addon);
+    addon.initialize(workerData.library);
+    parentPort.postMessage({ type: 'ready' });
+    parentPort.on('message', ({ request }) => {
+      try {
+        const reply = JSON.parse(addon.handle(JSON.stringify(request)));
+        parentPort.postMessage({ type: 'reply', reply });
+      } catch (error) {
+        parentPort.postMessage({ type: 'failure', message: error instanceof Error ? error.message : String(error) });
+      }
+    });
+  } catch (error) {
+    parentPort.postMessage({ type: 'failure', message: error instanceof Error ? error.message : String(error) });
+  }
+`;
+
+function protocolFailure(reply: Record<string, any>): ComputerError | null {
+  if (reply['ok'] !== false) return null;
+  const completed = Number(reply['completed_count']);
+  const failed = Number(reply['failed_index']);
+  return new ComputerError(
+    `${String(reply['error_code'] ?? 'HELPER_ERROR')}: ${String(reply['message'] ?? 'Desktop helper failed')}`,
+    {
+      ...(Number.isInteger(completed) && completed >= 0 ? { completedCount: completed } : {}),
+      ...(Number.isInteger(failed) && failed >= 0 ? { failedIndex: failed } : {})
+    }
+  );
+}
+
+async function retireMacOSAddon(runtime: MacOSAddonRuntime): Promise<void> {
+  if (macOSAddonRuntime === runtime) macOSAddonRuntime = null;
+  runtime.exited = true;
+  await runtime.worker.terminate().then(() => undefined, () => undefined);
+}
+
+async function startMacOSAddon(): Promise<MacOSAddonRuntime> {
+  if (helperStopping) throw new ComputerError('The desktop helper is shutting down.');
+  if (macOSAddonRuntime && !macOSAddonRuntime.exited) return macOSAddonRuntime;
+  if (macOSAddonStarting) return macOSAddonStarting;
+  const payload = locateMacOSDesktopAddon();
+  macOSAddonStarting = new Promise<MacOSAddonRuntime>((resolve, reject) => {
+    const worker = new Worker(MACOS_ADDON_WORKER_SOURCE, { eval: true, workerData: payload });
+    const runtime: MacOSAddonRuntime = { worker, pending: null, exited: false };
+    let started = false;
+    const startupTimer = setTimeout(() => {
+      if (started) return;
+      void retireMacOSAddon(runtime);
+      reject(new ComputerError('The macOS Desktop addon did not initialize in time.'));
+    }, HELPER_STARTUP_GRACE_MS);
+    worker.on('message', (message: { type?: string; reply?: unknown; message?: string }) => {
+      if (message.type === 'ready' && !started) {
+        started = true;
+        clearTimeout(startupTimer);
+        macOSAddonRuntime = runtime;
+        helperGeneration += 1;
+        resolve(runtime);
+        return;
+      }
+      if (message.type === 'failure') {
+        const error = new ComputerError(`macOS Desktop addon failed: ${message.message ?? 'unknown failure'}`);
+        if (!started) {
+          clearTimeout(startupTimer);
+          reject(error);
+        }
+        const pending = runtime.pending;
+        runtime.pending = null;
+        if (pending) {
+          clearTimeout(pending.timer);
+          pending.reject(error);
+        }
+        void retireMacOSAddon(runtime);
+        return;
+      }
+      if (message.type !== 'reply') return;
+      const pending = runtime.pending;
+      runtime.pending = null;
+      if (!pending) {
+        logWarn('macOS Desktop addon sent an unsolicited reply');
+        return;
+      }
+      clearTimeout(pending.timer);
+      const reply = message.reply;
+      if (reply === null || typeof reply !== 'object' || Array.isArray(reply)) {
+        pending.reject(new ComputerError('The macOS Desktop addon returned a malformed protocol response.'));
+        return;
+      }
+      const record = reply as Record<string, any>;
+      const failure = protocolFailure(record);
+      if (failure) pending.reject(failure);
+      else pending.resolve(record);
+    });
+    worker.once('error', (error) => {
+      if (!started) {
+        clearTimeout(startupTimer);
+        reject(new ComputerError(`Could not start the macOS Desktop addon: ${error.message}`));
+      }
+      const pending = runtime.pending;
+      runtime.pending = null;
+      if (pending) {
+        clearTimeout(pending.timer);
+        pending.reject(new ComputerError(`macOS Desktop addon error: ${error.message}`));
+      }
+    });
+    worker.once('exit', () => {
+      runtime.exited = true;
+      if (macOSAddonRuntime === runtime) macOSAddonRuntime = null;
+      if (!started) {
+        clearTimeout(startupTimer);
+        reject(new ComputerError('The macOS Desktop addon exited during startup.'));
+      }
+      const pending = runtime.pending;
+      runtime.pending = null;
+      if (pending) {
+        clearTimeout(pending.timer);
+        pending.reject(new ComputerError('The macOS Desktop addon exited before answering.'));
+      }
+    });
+  }).finally(() => {
+    macOSAddonStarting = null;
+  });
+  return macOSAddonStarting;
+}
+
+async function sendMacOSAddonRequest(request: Record<string, unknown>): Promise<Record<string, any>> {
+  const runtime = await startMacOSAddon();
+  if (runtime.pending) throw new ComputerError('macOS Desktop addon received overlapping requests.');
+  return new Promise<Record<string, any>>((resolve, reject) => {
+    let pending: PendingHelperRequest;
+    const timer = setTimeout(() => {
+      if (runtime.pending !== pending) return;
+      runtime.pending = null;
+      void retireMacOSAddon(runtime).then(() => reject(new ComputerError('The macOS Desktop addon did not answer in time.')));
+    }, helperTimeoutMs(request));
+    pending = { resolve, reject, timer };
+    runtime.pending = pending;
+    runtime.worker.postMessage({ request });
+  });
+}
+
 /**
- * Stops the long-lived native desktop helper and waits for its process tree to exit.
+ * Stops the long-lived native desktop backend and waits for its process/worker to exit.
  *
  * The helper is an app-owned process, not an implementation detail of one request: a
  * timeout or Electron shutdown must therefore retire the whole tree before the process
@@ -405,12 +623,26 @@ export async function stopComputerHelper(): Promise<void> {
   helperStopping = true;
   const starting = helperStarting;
   if (starting) await starting.catch(() => null);
+  const addonStarting = macOSAddonStarting;
+  if (addonStarting) await addonStarting.catch(() => null);
   const runtime = helperRuntime;
+  const addonRuntime = macOSAddonRuntime;
   helperRuntime = null;
   helperStarting = null;
+  macOSAddonRuntime = null;
+  macOSAddonStarting = null;
   uiRefs.clear();
   frames.clear();
   lastFrame = null;
+  if (addonRuntime) {
+    const pending = addonRuntime.pending;
+    addonRuntime.pending = null;
+    if (pending) {
+      clearTimeout(pending.timer);
+      pending.reject(new ComputerError('The desktop helper was stopped because the app is shutting down.'));
+    }
+    await retireMacOSAddon(addonRuntime);
+  }
   if (!runtime) {
     await Promise.allSettled([...helperRetirements]);
     return;
@@ -432,6 +664,7 @@ export async function stopComputerHelper(): Promise<void> {
 }
 
 async function sendHelperRequest(request: Record<string, unknown>): Promise<Record<string, any>> {
+  if (useMacOSDesktopAddon()) return sendMacOSAddonRequest(request);
   const runtime = await startHelper();
   if (runtime.pending) throw new ComputerError('Desktop helper received overlapping requests.');
 
@@ -553,7 +786,10 @@ function uiTarget(ref: string): { window: number; runtimeKey: string; snapshotId
       `UNKNOWN_UI_REF: ${ref}. Call get_window_state or find_ui again and use a ref from that reply.`
     );
   }
-  if (!helperRuntime || helperRuntime.child.exitCode !== null || target.generation !== helperGeneration) {
+  const helperAlive = useMacOSDesktopAddon()
+    ? macOSAddonRuntime !== null && !macOSAddonRuntime.exited
+    : helperRuntime !== null && helperRuntime.child.exitCode === null;
+  if (!helperAlive || target.generation !== helperGeneration) {
     throw new ComputerError(
       `STALE_REF: ${ref} was issued by a desktop helper that is no longer active, so it no longer identifies anything. Call get_window_state again and use a ref from that reply.`
     );
@@ -628,7 +864,15 @@ async function findUiLocked(
   if (!Number.isInteger(snapshotId) || snapshotId < 1) {
     throw new ComputerError('The desktop helper returned UI elements without a valid snapshot identity.');
   }
-  const windowId = Number(reply['window']);
+  const replyWindow = reply['window'];
+  const windowId = Number(
+    replyWindow && typeof replyWindow === 'object'
+      ? (replyWindow as Record<string, unknown>)['id']
+      : replyWindow
+  );
+  if (!Number.isInteger(windowId) || windowId < 1) {
+    throw new ComputerError('The desktop helper returned UI elements without a valid window identity.');
+  }
   logInfo(
     `desktop uia window_snapshot=${snapshotId} visited=${Number(reply['visited']) || 0} returned=${raw.length} truncated=${reply['truncated'] === true}`
   );
@@ -1408,17 +1652,71 @@ export async function checkAvailable(): Promise<string | null> {
  * Connection owns when Desktop becomes publishable; shutdown remains owned by
  * `stopComputerHelper`. Clipboard-only configurations deliberately never call this.
  */
-export async function prewarmComputerHelper(): Promise<void> {
+function mediaPermission(value: string): MacOSPermissionState {
+  if (value === 'granted') return 'granted';
+  if (value === 'denied' || value === 'restricted' || value === 'not-determined') return 'missing';
+  return 'unknown';
+}
+
+async function parentMacOSDesktopAccess(promptAccessibility: boolean): Promise<MacOSPermissionPair> {
+  try {
+    // The Electron main process is tccd's responsible authorization subject for an
+    // app-launched helper. Keep the Electron dependency lazy so protocol/unit tests can
+    // import this module outside a running Electron main process.
+    const electron = await import('electron');
+    const preferences = electron.systemPreferences;
+    if (!preferences) return { screen: 'unknown', accessibility: 'unknown' };
+    return {
+      screen: mediaPermission(preferences.getMediaAccessStatus('screen')),
+      accessibility: preferences.isTrustedAccessibilityClient(promptAccessibility) ? 'granted' : 'missing'
+    };
+  } catch {
+    return { screen: 'unknown', accessibility: 'unknown' };
+  }
+}
+
+export async function refreshMacOSDesktopAccess(
+  options: { promptAccessibility?: boolean } = {}
+): Promise<MacOSDesktopAccessStatus | null> {
+  if (process.platform !== 'darwin') return null;
+  const helper = useMacOSDesktopAddon() ? locateMacOSDesktopAddon().addon : locateMacOSDesktopHelper();
+  const parentPermissions = await parentMacOSDesktopAccess(options.promptAccessibility === true);
   try {
     const reply = await runHelper({ op: 'warm' });
-    if (process.platform === 'darwin') {
-      logInfo(
-        `desktop macos permissions screen=${reply['screenPermission'] === true ? 'granted' : 'missing'} ` +
-          `accessibility=${reply['accessibilityPermission'] === true ? 'granted' : 'missing'}`
-      );
-    }
+    const status = await inspectMacOSDesktopAccess(helper, reply, parentPermissions);
+    publishMacOSDesktopAccess(status);
+    return status;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    logWarn(`computer use prewarm failed: ${message}`);
+    const status = await inspectMacOSDesktopAccess(helper, {}, parentPermissions, message);
+    publishMacOSDesktopAccess(status);
+    return status;
   }
+}
+
+export async function prewarmComputerHelper(): Promise<void> {
+  if (process.platform !== 'darwin') {
+    try {
+      await runHelper({ op: 'warm' });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logWarn(`computer use prewarm failed: ${message}`);
+    }
+    return;
+  }
+  const status = await refreshMacOSDesktopAccess();
+  if (!status) return;
+  if (status.error) {
+    logWarn(`computer use prewarm failed: ${status.error}`);
+    return;
+  }
+  const identity = (value: MacOSDesktopAccessStatus['parent']): string =>
+    `${value.identifier ?? value.executable}/${value.signingMode}`;
+  logInfo(
+    `desktop macos permissions screen=${status.screen} accessibility=${status.accessibility} ` +
+      `parent_permissions=${status.parentPermissions.screen}/${status.parentPermissions.accessibility} ` +
+      `backend_permissions=${status.backendPermissions.screen}/${status.backendPermissions.accessibility} ` +
+      `parent=${identity(status.parent)} backend=${identity(status.backend)} ` +
+      `rebuild_stale_risk=${status.rebuildMayInvalidateAuthorization ? 'yes' : 'no'}`
+  );
 }

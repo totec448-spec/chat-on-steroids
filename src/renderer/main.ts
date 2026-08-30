@@ -321,6 +321,48 @@ function paintGroups(): void {
   }
 }
 
+function paintDesktopAccess(next: AppState): void {
+  const box = $('desktopAccess');
+  const access = next.desktopAccess;
+  const needsScreen = next.config.capabilities.screen;
+  const needsAccessibility = next.config.capabilities.control;
+  if (next.platform?.family !== 'macos' || (!needsScreen && !needsAccessibility) || !access) {
+    box.hidden = true;
+    return;
+  }
+
+  const missing: string[] = [];
+  if (needsScreen && access.screen !== 'granted') missing.push(`Screen Recording: ${access.screen}`);
+  if (needsAccessibility && access.accessibility !== 'granted') {
+    missing.push(`Accessibility: ${access.accessibility}`);
+  }
+  const unstable = access.rebuildMayInvalidateAuthorization;
+  box.hidden = missing.length === 0 && !unstable;
+  if (box.hidden) return;
+
+  const fingerprint = (value: typeof access.parent): string =>
+    `${value.identifier ?? value.executable}/${value.signingMode}${value.cdhash ? `#${value.cdhash.slice(0, 10)}` : ''}`;
+  const parent = fingerprint(access.parent);
+  const backend = fingerprint(access.backend);
+  const decisions =
+    ` Parent=${access.parentPermissions.screen}/${access.parentPermissions.accessibility};` +
+    ` backend=${access.backendPermissions.screen}/${access.backendPermissions.accessibility}.`;
+  box.classList.toggle('is-note', missing.length === 0);
+  $('desktopAccessTitle').textContent =
+    missing.length > 0 ? 'Desktop access needs attention' : 'Development build permission note';
+  $('desktopAccessDetail').textContent =
+    missing.length > 0
+      ? `${missing.join(' · ')}. macOS authorises the current code identity, not just the displayed app name. ${
+          unstable
+            ? 'This unsigned/ad-hoc build may leave a stale enabled row after rebuilding; remove and re-add the current Chat On Steroids.app, then fully restart. The native backend executes inside that same TCC subject.'
+            : 'Fully restart after changing the permission.'
+        }${decisions} Parent ${parent}; backend ${backend}.`
+      : `Screen Recording and Accessibility are granted now. This unsigned/ad-hoc development build may need reauthorisation after rebuilding.${decisions} Parent ${parent}; backend ${backend}.`;
+  $<HTMLButtonElement>('openDesktopPrivacy').hidden = missing.length === 0;
+  $<HTMLButtonElement>('requestDesktopAccessibility').hidden =
+    !needsAccessibility || access.accessibility === 'granted';
+}
+
 /**
  * How many MCP tools this app can expose in total, across both connectors.
  *
@@ -717,6 +759,7 @@ function apply(next: AppState): void {
     previousState?.config.sessions.record
   );
   paintGroups();
+  paintDesktopAccess(next);
 
   // ---- folders
   paintRoots(config.roots);
@@ -1293,6 +1336,16 @@ async function runChecks(): Promise<void> {
 }
 
 $('runChecks').addEventListener('click', () => void runChecks());
+$('requestDesktopAccessibility').addEventListener('click', async () => {
+  const button = $<HTMLButtonElement>('requestDesktopAccessibility');
+  button.disabled = true;
+  try {
+    const next = await run(api.requestDesktopAccessibility());
+    if (next) apply(next);
+  } finally {
+    button.disabled = false;
+  }
+});
 $('closeChecks').addEventListener('click', () => {
   $('checksBox').hidden = true;
 });

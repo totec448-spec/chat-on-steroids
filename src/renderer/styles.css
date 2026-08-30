@@ -993,6 +993,36 @@ main {
   color: var(--red);
 }
 
+/* Live macOS TCC state from the same helper that will capture/control the desktop. */
+.desktop-access {
+  margin: 8px 10px 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--line));
+  border-radius: 9px;
+  background: var(--red-wash);
+  font-size: 11.5px;
+}
+
+.desktop-access strong {
+  color: var(--red);
+  font-size: 12px;
+}
+
+.desktop-access p {
+  margin: 4px 0 8px;
+  color: var(--soft);
+  line-height: 1.4;
+}
+
+.desktop-access.is-note {
+  border-color: var(--line);
+  background: var(--wash);
+}
+
+.desktop-access.is-note strong {
+  color: var(--ink);
+}
+
 /* ---------------------------------------------------------------- activity
    Grey monospace, one line per event. The only colour is red, and only when
    something actually failed — so a red line is always worth looking at. */
