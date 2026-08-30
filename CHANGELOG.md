@@ -12,13 +12,14 @@ the app refuses the extension and asks you to reload the matching copy.
 ## Unreleased
 
 ### Added
-- **macOS now publishes the optional Desktop connector.** A thin architecture-specific Swift
-  helper implements window/display capture through ScreenCaptureKit, snapshot-scoped semantic
-  controls through AXUIElement, and physical mouse/keyboard input through CGEvent while preserving
-  the existing `observe` / `computer` schemas, frame identity and partial-batch contract.
-- **macOS packaging and smoke checks include the Desktop helper and screen-capture purpose string.**
-  The helper is compiled natively for each x64/arm64 package, kept outside asar, audited as a thin
-  executable and exercised over its real newline-delimited JSON protocol.
+- **macOS now publishes the optional Desktop connector.** Architecture-matched Swift code implements
+  window/display capture through ScreenCaptureKit, snapshot-scoped semantic controls through
+  AXUIElement, and physical mouse/keyboard input through CGEvent while preserving the existing
+  `observe` / `computer` schemas, frame identity and partial-batch contract.
+- **macOS packaging and smoke checks cover the in-process Desktop boundary and screen-capture purpose
+  string.** Each x64/arm64 package ships a thin Swift dylib plus N-API addon outside asar. A Node
+  Worker invokes that backend inside the responsible Electron process, and packaged-runtime smoke
+  exercises this real addon/dylib path rather than the standalone development CLI protocol probe.
 
 ### Security
 - macOS Screen Recording and Accessibility remain independent OS grants. The helper requests no

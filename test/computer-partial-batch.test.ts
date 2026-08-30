@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fake = vi.hoisted(() => {
   type Listener = { fn: (...args: any[]) => void; once: boolean };
@@ -23,6 +23,21 @@ const fake = vi.hoisted(() => {
     }
   }
 
+  let response: Record<string, unknown> = {};
+  const resetResponse = () => {
+    response = {
+      ok: false,
+      error_code: 'SENDINPUT_FAILED',
+      message: 'second action failed',
+      completed_count: 1,
+      failed_index: 1,
+      routes: ['sendinput']
+    };
+  };
+  resetResponse();
+  const setResponse = (next: Record<string, unknown>) => {
+    response = next;
+  };
   const spawn = vi.fn(() => {
     const child = new Emitter() as any;
     child.pid = 9300;
@@ -35,15 +50,7 @@ const fake = vi.hoisted(() => {
         queueMicrotask(() =>
           child.stdout.emit(
             'data',
-            Buffer.from(
-              `${JSON.stringify({
-                ok: false,
-                error_code: 'SENDINPUT_FAILED',
-                message: 'second action failed',
-                completed_count: 1,
-                failed_index: 1
-              })}\n`
-            )
+            Buffer.from(`${JSON.stringify(response)}\n`)
           )
         );
         return true;
@@ -53,7 +60,7 @@ const fake = vi.hoisted(() => {
     queueMicrotask(() => child.emit('spawn'));
     return child;
   });
-  return { spawn };
+  return { spawn, resetResponse, setResponse };
 });
 
 vi.mock('node:child_process', () => ({ spawn: fake.spawn }));
@@ -76,6 +83,8 @@ vi.stubEnv('COS_MACOS_DESKTOP_HELPER', process.execPath);
 import { act } from '../src/main/computer/index.js';
 
 describe('desktop partial batch result', () => {
+  beforeEach(() => fake.resetResponse());
+
   it('reports exactly what ran before a helper action failed', async () => {
     await expect(
       act([
@@ -85,7 +94,31 @@ describe('desktop partial batch result', () => {
     ).rejects.toMatchObject({
       completedCount: 1,
       failedIndex: 1,
-      message: expect.stringMatching(/completed_count=1 failed_index=1/)
+      completedRoutes: ['sendinput'],
+      message: expect.stringMatching(/completed_count=1 failed_index=1 routes=sendinput/)
+    });
+  });
+
+  it('does not invent route evidence when the helper route list is malformed', async () => {
+    fake.setResponse({
+      ok: false,
+      error_code: 'SENDINPUT_FAILED',
+      message: 'second action failed',
+      completed_count: 1,
+      failed_index: 1,
+      routes: ['invented-route']
+    });
+
+    await expect(
+      act([
+        { type: 'type', text: 'first' },
+        { type: 'type', text: 'second' }
+      ])
+    ).rejects.toMatchObject({
+      completedCount: 1,
+      failedIndex: 1,
+      completedRoutes: null,
+      message: expect.stringMatching(/completed_count=1 failed_index=1 routes=unavailable/)
     });
   });
 });

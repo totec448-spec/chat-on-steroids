@@ -16,6 +16,7 @@ describe('macOS desktop safety hardening', () => {
     expect(swift).toMatch(/private func inputTargetMatches[\s\S]*frontmostPID\(\) == row\.pid/);
     expect(swift).toMatch(/private func inputTargetMatches[\s\S]*windowServerFrontWindowID\(rows: rows\) == row\.id/);
     expect(swift).toMatch(/private func inputTargetMatches[\s\S]*focusedAXWindowID\(for: row\.pid, rows: rows\) == row\.id/);
+    expect(swift).toMatch(/private func inputTargetMatches[\s\S]*focusedAXElementWindowID\(for: row\.pid, rows: rows\) == row\.id/);
   });
 
   it('revalidates a window-bound frame at every physical mutation boundary', () => {
@@ -51,6 +52,7 @@ describe('macOS desktop safety hardening', () => {
     expect(swift).toContain('if globalShortcut { event.post(tap: .cghidEventTap) }');
     expect(swift).toContain('UI_ACTION_DISABLED');
     expect(swift).toContain('the referenced accessibility control is disabled');
+    expect(swift).toContain('axBool(element, kAXEnabledAttribute as CFString, default: false)');
     expect(swift).toContain('["volumeup", "volumedown", "mute"]');
     expect(swift).toContain('(1...20).contains(value)');
   });
@@ -91,10 +93,30 @@ describe('macOS desktop safety hardening', () => {
 
   it('binds screen frames to the exact active-display topology', () => {
     expect(swift).toContain('private func sameDisplayTopology');
+    expect(swift).toContain('let contentDisplayRects = content.displays.map(\\.frame)');
+    expect(swift).toContain('sameDisplayTopology(displayRects, contentDisplayRects)');
+    expect(swift).toContain('active display topology changed while screenshot capture was in progress');
+    expect(swift).toContain('active display topology changed while screenshot was captured');
     expect(swift).toContain('"displays": displayTopologyObject(displayRects)');
     expect(swift).toContain('active display topology changed after the screenshot');
     expect(computer).toContain('displayTopology: Rect[] | null');
     expect(computer).toContain('displays: frame.displayTopology');
+  });
+
+  it('keeps explicit UI and captured-pixel target identities fail-closed', () => {
+    expect(swift).toMatch(/rawRequested = request\["id"\][\s\S]*WINDOW_NOT_FOUND/);
+    expect(swift).toContain('window \\(requested) is no longer available');
+    expect(computer).toContain('Publish the crop as');
+    expect(computer).toMatch(/screenshotFromReply\(reply, file, opts\.crop \? null : opts\.window \?\? null\)/);
+    expect(computer).not.toContain('lastFrame?.windowId ?? null : cropFrame?.windowId');
+  });
+
+  it('carries proven semantic and explicit focus targets into later keyboard input', () => {
+    expect(swift).toContain('var inputWindow = frameWindow');
+    expect(swift).toMatch(/case "click_ui", "set_value_ui":[\s\S]*inputWindow = actionWindow/);
+    expect(swift).toMatch(/case "type":[\s\S]*assertInputTarget\(inputWindow\)[\s\S]*targetWindow: inputWindow/);
+    expect(swift).toMatch(/case "keypress":[\s\S]*assertInputTarget\(inputWindow\)[\s\S]*targetWindow: inputWindow/);
+    expect(swift).toMatch(/case "focus":[\s\S]*inputWindow = requested/);
   });
 
   it('publishes only the newest overlapping macOS permission refresh', () => {
