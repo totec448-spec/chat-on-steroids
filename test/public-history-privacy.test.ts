@@ -31,6 +31,19 @@ function commit(repository: string, message: string, email: string): void {
   });
 }
 
+function tag(repository: string, name: string, message: string, email: string): void {
+  execFileSync('git', ['tag', '-a', name, '-m', message], {
+    cwd: repository,
+    env: {
+      ...process.env,
+      GIT_COMMITTER_NAME: 'totec448-spec',
+      GIT_COMMITTER_EMAIL: email,
+      GIT_AUTHOR_NAME: 'totec448-spec',
+      GIT_AUTHOR_EMAIL: email,
+    },
+  });
+}
+
 function verify(repository: string) {
   return spawnSync(process.execPath, [script], {
     cwd: repository,
@@ -73,5 +86,58 @@ describe('public-history privacy gate', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Claude session');
     expect(result.stderr).not.toContain(sessionUrl);
+  });
+
+  /**
+   * A full clone carries refs this branch will never contain: other contributors' fetched
+   * branches, abandoned local experiments. Those cannot enter the releasable line, so they
+   * are not this gate's business — and failing on them made a clean branch look unsafe.
+   */
+  it('passes a clean checked-out line even when an unrelated ref carries unsafe identity', () => {
+    const repository = makeRepository();
+    const privateEmail = ['totec448', 'gmail.com'].join('@');
+    execFileSync('git', ['checkout', '-q', '-b', 'unrelated'], { cwd: repository });
+    commit(repository, 'Unsafe identity on a ref this branch never contains', privateEmail);
+    execFileSync('git', ['checkout', '-q', 'main'], { cwd: repository });
+
+    const result = verify(repository);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('privacy check passed');
+  });
+
+  it('still rejects unsafe identity that is an ancestor of HEAD', () => {
+    const repository = makeRepository();
+    const privateEmail = ['totec448', 'gmail.com'].join('@');
+    commit(repository, 'Unsafe identity in ancestry', privateEmail);
+    commit(repository, 'Clean commit on top', safeEmail);
+
+    const result = verify(repository);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('non-noreply maintainer email');
+    expect(result.stderr).not.toContain(privateEmail);
+  });
+
+  it('keeps annotated tags reachable from HEAD under the same checks', () => {
+    const repository = makeRepository();
+    const sessionUrl = ['https://claude.ai/code/', 'session_taggedIdentifier'].join('');
+    tag(repository, 'v0.0.1-test', `Release\n\n${['Claude', 'Session'].join('-')}: ${sessionUrl}`, safeEmail);
+
+    const result = verify(repository);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Claude session');
+    expect(result.stderr).not.toContain(sessionUrl);
+  });
+
+  it('ignores an annotated tag that is not reachable from HEAD', () => {
+    const repository = makeRepository();
+    const sessionUrl = ['https://claude.ai/code/', 'session_otherLineIdentifier'].join('');
+    execFileSync('git', ['checkout', '-q', '-b', 'other-line'], { cwd: repository });
+    commit(repository, 'Only on the other line', safeEmail);
+    tag(repository, 'v0.0.2-other', `Release\n\n${['Claude', 'Session'].join('-')}: ${sessionUrl}`, safeEmail);
+    execFileSync('git', ['checkout', '-q', 'main'], { cwd: repository });
+
+    const result = verify(repository);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('privacy check passed');
   });
 });
