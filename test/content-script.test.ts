@@ -7769,7 +7769,7 @@ describe('the fresh chat the app opened', () => {
           command: {
             id: 'cmd-project',
             type: 'resume',
-            text: 'Continue the previous ChatGPT session. Handoff: h-project',
+            text: '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nContinue the previous ChatGPT session. Handoff: h-project',
             agent: null
           }
         }),
@@ -7788,14 +7788,14 @@ describe('the fresh chat the app opened', () => {
 
     expect(live.sent.filter((message) => message.type === 'redeem')).toHaveLength(1);
     expect(live.document.querySelector('#prompt-textarea')!.textContent).toContain('Handoff: h-project');
-    expect(live.sent.filter((message) => message.type === 'ack')).toMatchObject([
-      {
-        type: 'ack',
-        id: 'cmd-project',
-        status: 'sent',
-        conversationId: '77777777-6666-5555-4444-333333333333'
-      }
-    ]);
+    expect(live.sent.some((message) => message.type === 'compact' && message.destinationAttempt === true)).toBe(true);
+    // A resume is committed from its own marker, so it never acks. What proves the Project
+    // route was read is that the page can name the chat ChatGPT just gave it: with a `/c/`
+    // test of its own, every message after the send still carried no conversation at all.
+    expect(live.sent.filter((message) => message.type === 'ack')).toEqual([]);
+    expect(
+      live.sent.some((message) => message.conversationId === '77777777-6666-5555-4444-333333333333')
+    ).toBe(true);
   });
 
   it('abandons a redeemed bootstrap if SPA navigation retargets the tab before insertion', async () => {

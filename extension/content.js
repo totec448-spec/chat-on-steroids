@@ -5834,6 +5834,20 @@
    * and the panel above the composer is driven from here rather than from a polled draft —
    * the run is still visible, it is simply this tab reporting it rather than the app.
    */
+  /**
+   * Whether asking for this opening again could answer differently.
+   *
+   * The app says so itself for the refusals it owns, and a deadline says it by being one: the
+   * request outlived the wait rather than being turned down. Everything else — no key, no
+   * objective, a model that refused the goal — is a decision, and repeating it only spends
+   * somebody's credit on the same answer.
+   */
+  function openRetryable(reply) {
+    if (!reply || reply.ok === true) return false;
+    if (reply.retryable === true || (reply.data && reply.data.retryable === true)) return true;
+    return reply.status === 0 && reply.error !== 'app_not_found';
+  }
+
   async function openWithObjective(goal) {
     pendingObjective = goal;
     pendingObjectiveSent = false;
@@ -5844,7 +5858,21 @@
     menuDraft = '';
     closeMenu();
     setGoalPhase('requesting');
-    const reply = await ask({ type: 'goal_open', text: goal });
+    // Asked again on a retryable refusal, and only on one. A goal opening is a single request
+    // holding a whole model completion, so the transient failures — the app still starting,
+    // its worker asleep, a provider that stalled past the deadline — all land on the one
+    // attempt the user made, and there is no later turn for the ordinary Goal loop to try
+    // again from. Bounded, because a refusal that keeps repeating is an answer.
+    let reply = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        setGoalPhase('requesting');
+        await sleep(1_000 * attempt);
+        if (!alive || composerChat().state !== 'new') break;
+      }
+      reply = await ask({ type: 'goal_open', text: goal });
+      if (!alive || (reply && reply.ok === true) || !openRetryable(reply)) break;
+    }
     if (!alive || composerChat().state !== 'new') {
       // This request never proved that *our* opening message was sent. The route may now be an
       // unrelated existing chat the user selected while generation was in flight, so discard the
@@ -7566,19 +7594,17 @@
    * The conversation this document was opened at, read once before ChatGPT rewrites anything.
    *
    * Null for the ordinary case — a chat with no id of its own yet — and set only when the app
-   * pointed the browser at one exact `/c/<id>`, which it does for exactly one reason: waking a
-   * sleeping worker in the chat it already has. Read at script start rather than at send time
+   * pointed the browser at one exact conversation, which it does for exactly one reason: waking
+   * a sleeping worker in the chat it already has. Read at script start rather than at send time
    * so that the SPA navigating this document afterwards cannot turn a stale marker into
    * permission to type into whatever chat the user ended up on.
+   *
+   * Through the canonical parser, because the app builds that url as `/c/<id>` and ChatGPT
+   * redirects a Project chat to `/g/<project>/c/<id>` before this script ever runs. Read with a
+   * `/c/` test of its own, the wake tab named no conversation and every revival into a Project
+   * failed the target fence instead of typing into the worker's own chat.
    */
-  const OPENED_CONVERSATION = (() => {
-    try {
-      const match = /^\/c\/([0-9a-f-]{8,64})/i.exec(location.pathname);
-      return match ? match[1] : null;
-    } catch {
-      return null;
-    }
-  })();
+  const OPENED_CONVERSATION = CLF_DOM.conversationFromPath(location.pathname);
 
   /**
    * The command id this page was opened for, from ?clf= or #clf=.
