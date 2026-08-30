@@ -244,7 +244,7 @@ private func requireAccessibility() throws {
     guard AXIsProcessTrusted() else {
         throw fail(
             "ACCESSIBILITY_PERMISSION_REQUIRED",
-            "enable Accessibility for the current Chat On Steroids.app (Device Control on newer macOS), then fully quit and reopen it. An enabled row from an older unsigned/ad-hoc build does not authorize a rebuilt binary"
+            "enable Accessibility for Chat On Steroids (Device Control on newer macOS), then fully quit and reopen the app"
         )
     }
 }
@@ -254,7 +254,7 @@ private func requireScreenCapture() throws {
         _ = CGRequestScreenCaptureAccess()
         throw fail(
             "SCREEN_PERMISSION_REQUIRED",
-            "enable Screen Recording for the current Chat On Steroids build, then fully quit and reopen it. An enabled entry from an older unsigned/ad-hoc build may not authorize a rebuilt binary"
+            "enable Screen Recording for Chat On Steroids, then fully quit and reopen the app"
         )
     }
 }

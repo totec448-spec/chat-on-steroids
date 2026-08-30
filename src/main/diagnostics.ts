@@ -25,7 +25,7 @@ import {
   type PollHealth
 } from './tunnel/health.js';
 
-import type { Capabilities, Check, Diagnosis, MacOSCodeIdentity, MacOSDesktopAccessStatus } from '../shared/types.js';
+import type { Capabilities, Check, Diagnosis, MacOSDesktopAccessStatus } from '../shared/types.js';
 import { surfaceIsUseful } from './mcp/surfaces.js';
 import { refreshMacOSDesktopAccess } from './computer/index.js';
 
@@ -127,12 +127,6 @@ export function describeRoute(
   };
 }
 
-function identity(identity: MacOSCodeIdentity): string {
-  const team = identity.teamIdentifier ? `, team ${identity.teamIdentifier}` : '';
-  const cdhash = identity.cdhash ? `, cdhash ${identity.cdhash.slice(0, 12)}` : '';
-  return `${identity.identifier ?? identity.executable} (${identity.signingMode}${team}${cdhash})`;
-}
-
 /** Pure projection used by both the live self-test and targeted regressions. */
 export function describeMacOSDesktopAccess(
   access: MacOSDesktopAccessStatus | null,
@@ -145,17 +139,10 @@ export function describeMacOSDesktopAccess(
       name: 'macOS Desktop permissions',
       status: 'not-run',
       ok: null,
-      detail: 'The native helper has not reported its Screen Recording or Accessibility state yet.'
+      detail: 'The in-process native backend has not reported its Screen Recording or Accessibility state yet.'
     }];
   }
 
-  const identities = `Current identities: parent ${identity(access.parent)}; backend ${identity(access.backend)}.`;
-  const decisions =
-    ` Parent reports screen=${access.parentPermissions.screen}, accessibility=${access.parentPermissions.accessibility};` +
-    ` backend reports screen=${access.backendPermissions.screen}, accessibility=${access.backendPermissions.accessibility}.`;
-  const stale = access.rebuildMayInvalidateAuthorization
-    ? ' This development build is unsigned or ad-hoc signed, so rebuilding can leave an enabled System Settings row attached to an older binary. Remove and re-add the current Chat On Steroids.app entry, then fully quit and reopen the app.'
-    : ' Fully quit and reopen the app after changing the macOS permission.';
   const check = (
     name: string,
     state: MacOSDesktopAccessStatus['screen'],
@@ -166,10 +153,10 @@ export function describeMacOSDesktopAccess(
     ok: state === 'granted' ? true : state === 'missing' ? false : null,
     detail:
       state === 'granted'
-        ? `Granted to the current build.${decisions} ${identities}`
+        ? 'Granted to the in-process Desktop backend.'
         : state === 'missing'
-          ? `${missing}${stale}${decisions} ${identities}`
-          : `${access.error ?? 'The helper could not determine the live TCC decision.'}${decisions} ${identities}`
+          ? `${missing} Fully quit and reopen the app after changing the macOS permission.`
+          : access.error ?? 'The in-process Desktop backend could not determine the live TCC decision.'
   });
 
   if (caps.screen) {
@@ -313,9 +300,8 @@ export async function runDiagnostics(): Promise<Diagnosis> {
         : `${config.roots.length} folder${config.roots.length === 1 ? '' : 's'} shared; on: ${enabled.join(', ')}${config.readOnly ? ' (read-only)' : ''}`
   });
 
-  // macOS has two separate native permission decisions, and an enabled System Settings row
-  // is not proof that the current ad-hoc binary still owns it after a rebuild. Ask the helper
-  // that will perform the operation, then show both code identities in the result.
+  // Ask the in-process backend that performs protected operations. A settings row or the
+  // parent prompt API alone is not an authorization verdict.
   if (process.platform === 'darwin' && (caps.screen || caps.control)) {
     const access = await refreshMacOSDesktopAccess();
     checks.push(...describeMacOSDesktopAccess(access, caps));
