@@ -187,8 +187,8 @@ private func minimizedWindowIDs(in rows: [WindowRow]) -> Set<CGWindowID> {
     pidLoop: for pid in candidatePids {
         if ProcessInfo.processInfo.systemUptime >= deadline { break }
         let app = axApplication(pid)
-        let windows = axAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
-        for window in windows.prefix(64) where axBool(window, kAXMinimizedAttribute as CFString, default: false) {
+        let windows = axElementValues(app, attribute: kAXWindowsAttribute as CFString, limit: 64)
+        for window in windows where axBool(window, kAXMinimizedAttribute as CFString, default: false) {
             if ProcessInfo.processInfo.systemUptime >= deadline { break pidLoop }
             if let id = axWindowNumber(window) { ids.insert(id) }
         }
@@ -345,17 +345,21 @@ private func axBounds(_ element: AXUIElement) -> CGRect? {
     return CGRect(origin: point, size: size)
 }
 
-private func axChildren(_ element: AXUIElement, limit: Int) -> [AXUIElement] {
+private func axElementValues(_ element: AXUIElement, attribute: CFString, limit: Int) -> [AXUIElement] {
     guard limit > 0 else { return [] }
     var values: CFArray?
     guard AXUIElementCopyAttributeValues(
         element,
-        kAXChildrenAttribute as CFString,
+        attribute,
         0,
         limit,
         &values
     ) == .success else { return [] }
     return values as? [AXUIElement] ?? []
+}
+
+private func axChildren(_ element: AXUIElement, limit: Int) -> [AXUIElement] {
+    axElementValues(element, attribute: kAXChildrenAttribute as CFString, limit: limit)
 }
 
 private func axRole(_ element: AXUIElement) -> String {
@@ -467,19 +471,24 @@ private func setAXBooleanIfPossible(_ element: AXUIElement, _ attribute: CFStrin
     setAXValueIfPossible(element, attribute, value ? kCFBooleanTrue : kCFBooleanFalse)
 }
 
-private func matchingAXWindow(_ row: WindowRow) throws -> AXUIElement {
+private func matchingAXWindow(_ row: WindowRow, deadline suppliedDeadline: TimeInterval? = nil) throws -> AXUIElement {
     try requireAccessibility()
     let app = axApplication(row.pid)
-    let windows = axAttribute(app, kAXWindowsAttribute as CFString) as? [AXUIElement] ?? []
-    let deadline = ProcessInfo.processInfo.systemUptime + maxAXTraversalSeconds
-    for window in windows.prefix(64) {
+    let deadline = suppliedDeadline ?? (ProcessInfo.processInfo.systemUptime + maxAXTraversalSeconds)
+    guard ProcessInfo.processInfo.systemUptime < deadline else {
+        throw fail("UIA_TIMEOUT", "accessibility window matching exceeded its bounded native deadline")
+    }
+    // The limit belongs at the AX copy boundary. Fetching the complete provider array and
+    // applying prefix(64) afterwards would already have materialized unbounded native state.
+    let windows = axElementValues(app, attribute: kAXWindowsAttribute as CFString, limit: 64)
+    for window in windows {
         guard ProcessInfo.processInfo.systemUptime < deadline else {
             throw fail("UIA_TIMEOUT", "exact accessibility window matching exceeded its bounded native deadline")
         }
         if axWindowNumber(window) == row.id { return window }
     }
     var geometryCandidates: [(element: AXUIElement, distance: CGFloat)] = []
-    for window in windows.prefix(64) {
+    for window in windows {
         guard ProcessInfo.processInfo.systemUptime < deadline else {
             throw fail("UIA_TIMEOUT", "accessibility window matching exceeded its bounded native deadline")
         }
@@ -555,6 +564,10 @@ private func findUI(
     _ request: JSONObject,
     suppliedWindow: WindowRow? = nil
 ) throws -> JSONObject {
+    // Window matching and control traversal are two phases of one native operation, not
+    // two independent six-second allowances. The parent timeout can now safely outlive
+    // this one aggregate deadline even though a synchronous addon call is not pre-emptible.
+    let deadline = ProcessInfo.processInfo.systemUptime + maxAXTraversalSeconds
     let row: WindowRow
     if let suppliedWindow {
         row = suppliedWindow
@@ -571,7 +584,7 @@ private func findUI(
     } else {
         throw fail("WINDOW_NOT_FOUND", "no matching visible window is available")
     }
-    let root = try matchingAXWindow(row)
+    let root = try matchingAXWindow(row, deadline: deadline)
     let query = string(request["query"]).lowercased()
     let roleFilter = string(request["role"]).lowercased()
     let maxResults = min(100, max(1, int(request["maxResults"], default: 30)))
@@ -583,8 +596,6 @@ private func findUI(
     var visited = 0
     var returned: [JSONObject] = []
     var retained: [String: AXUIElement] = [:]
-    let deadline = ProcessInfo.processInfo.systemUptime + maxAXTraversalSeconds
-
     while cursor < queue.count && visited < maxVisited && returned.count < maxResults {
         guard ProcessInfo.processInfo.systemUptime < deadline else {
             throw fail("UIA_TIMEOUT", "accessibility traversal exceeded its bounded native deadline")

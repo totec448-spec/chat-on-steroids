@@ -30,7 +30,7 @@ export const MAX_SCREENSHOT_WIDTH = 2560;
 const HELPER_TIMEOUT_MS = 30_000;
 const HELPER_STARTUP_GRACE_MS = 10_000;
 const MAX_FRAMES = 16;
-/** Keeps the base64 image plus ordinary MCP metadata inside an 8 MiB wire envelope. */
+/** Per-image ceiling; the final Desktop tool layer separately measures text + image together. */
 export const MAX_SCREENSHOT_PNG_BYTES = Math.floor((((8 * 1024 * 1024) - (64 * 1024)) * 3) / 4);
 
 let macOSDesktopAccess: MacOSDesktopAccessStatus | null = null;
@@ -907,6 +907,10 @@ async function findUiLocked(
     let imageCenter: { x: number; y: number } | null = null;
     if (
       frame &&
+      // A screen fallback can contain an occluding application's pixels even though the
+      // semantic tree belongs to the requested window. Keep refs and desktop bounds, but
+      // do not claim those controls occupy pixels the screenshot may not show.
+      frame.captureMode !== 'screen_fallback' &&
       bounds.x >= frame.region.x &&
       bounds.y >= frame.region.y &&
       bounds.x + bounds.width <= frame.region.x + frame.region.width &&
@@ -1094,6 +1098,10 @@ async function screenshotFromReply(
   const rawMode = String(reply['captureMode'] ?? (requestedWindow === null ? 'screen' : 'screen_fallback'));
   const captureMode: Screenshot['captureMode'] =
     rawMode === 'window' || rawMode === 'screen_fallback' ? rawMode : 'screen';
+  // Only an actual background-window bitmap can authorize later input against that
+  // window. A screen fallback contains visible pixels (possibly an occluder), so it must
+  // retain screen topology rather than relabel those pixels with the requested window.
+  const frameWindow = captureMode === 'window' ? requestedWindow : null;
   const scale = size.width / region.width;
   const replyWindowGeometry = reply['windowGeometry'] as Rect | undefined;
   const rawDisplays = reply['displays'];
@@ -1109,7 +1117,7 @@ async function screenshotFromReply(
   )
     ? (rawDisplays as Rect[]).map((value) => ({ ...value }))
     : null;
-  if (process.platform === 'darwin' && requestedWindow === null && !displayTopology) {
+  if (process.platform === 'darwin' && frameWindow === null && !displayTopology) {
     throw new ComputerError('The macOS desktop helper returned a screen frame without exact display topology.');
   }
   const frame: Frame = {
@@ -1118,9 +1126,9 @@ async function screenshotFromReply(
     scale,
     width: size.width,
     height: size.height,
-    windowId: requestedWindow,
-    windowGeometry: requestedWindow === null ? null : replyWindowGeometry ?? { ...region },
-    displayTopology: requestedWindow === null ? displayTopology : null,
+    windowId: frameWindow,
+    windowGeometry: frameWindow === null ? null : replyWindowGeometry ?? { ...region },
+    displayTopology: frameWindow === null ? displayTopology : null,
     captureMode
   };
   rememberFrame(frame);
@@ -1138,7 +1146,7 @@ async function screenshotFromReply(
     scale: frame.scale,
     focused: requestedWindow === null ? null : reply['focused'] === true,
     captureMode,
-    windowId: requestedWindow
+    windowId: frame.windowId
   };
 }
 
@@ -1453,8 +1461,15 @@ async function actLocked(
       }
     }
   }
-  const toScreenX = (x: number): number => Math.round(frame.region.x + x / frame.scale);
-  const toScreenY = (y: number): number => Math.round(frame.region.y + y / frame.scale);
+  const clampMappedCoordinate = (mapped: number, origin: number, extent: number): number => {
+    const lower = Math.ceil(origin);
+    const upper = Math.max(lower, Math.ceil(origin + extent) - 1);
+    return Math.min(upper, Math.max(lower, mapped));
+  };
+  const toScreenX = (x: number): number =>
+    clampMappedCoordinate(Math.round(frame.region.x + x / frame.scale), frame.region.x, frame.region.width);
+  const toScreenY = (y: number): number =>
+    clampMappedCoordinate(Math.round(frame.region.y + y / frame.scale), frame.region.y, frame.region.height);
 
   // Resolve every semantic ref before the first side effect in the batch. Clipboard and wait
   // actions run locally and can occur before a later click_ref/set_value; resolving refs lazily

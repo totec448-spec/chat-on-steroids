@@ -48,6 +48,29 @@ const DEFAULT_WINDOW_RESULTS = 60;
 const MAX_WINDOW_RESULTS = 100;
 const MAX_CLIPBOARD_LINE_CHARS = 16_000;
 const MAX_CLIPBOARD_OUTPUT_CHARS = 64_000;
+const MAX_MCP_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MCP_RESPONSE_ENVELOPE_RESERVE_BYTES = 64 * 1024;
+
+/**
+ * The image and its observation text share one MCP response budget. The capture layer can
+ * bound PNG bytes, but only this final assembly layer knows the actual control metadata.
+ */
+function desktopImageResult(text: string, data: string): { content: ToolContent[] } {
+  const result = {
+    content: [
+      { type: 'text', text } as ToolContent,
+      { type: 'image', data, mimeType: 'image/png' } as ToolContent
+    ]
+  };
+  const bytes = Buffer.byteLength(JSON.stringify(result), 'utf8');
+  const limit = MAX_MCP_RESPONSE_BYTES - MCP_RESPONSE_ENVELOPE_RESERVE_BYTES;
+  if (bytes > limit) {
+    throw new ComputerError(
+      `DESKTOP_RESULT_TOO_LARGE: combined screenshot and control metadata are ${bytes} bytes; limit ${limit}. Retry with a smaller max_width or max_elements.`
+    );
+  }
+  return result;
+}
 
 const computerActionArg = z.discriminatedUnion('type', [
   z.object({ type: z.literal('click_ref'), ref: z.string().min(1).max(64) }).strict().describe('Click a control by ref from observe.'),
@@ -265,18 +288,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               throw err;
             }
             const shot = await screenshot({ maxWidth: input.max_width });
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: prefix(
-                    waited,
-                    `No foreground window, so this is the whole primary monitor.\nframe: ${shot.frameId}  ${shot.width}x${shot.height} — pass frameId ${shot.frameId} with any coordinates you read off it`
-                  )
-                } as ToolContent,
-                { type: 'image', data: shot.data, mimeType: 'image/png' } as ToolContent
-              ]
-            };
+            return desktopImageResult(
+              prefix(
+                waited,
+                `No foreground window, so this is the whole primary monitor.\nframe: ${shot.frameId}  ${shot.width}x${shot.height} — pass frameId ${shot.frameId} with any coordinates you read off it`
+              ),
+              shot.data
+            );
           }
           noteCount(state.elements.length);
           logInfo(`tool observe ${what} window=${state.window.id} (${state.elements.length} controls)`);
@@ -312,12 +330,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
 
           const text = prefix(waited, lines.join('\n'));
           if (!state.screenshot) return ok(text);
-          return {
-            content: [
-              { type: 'text', text } as ToolContent,
-              { type: 'image', data: state.screenshot.data, mimeType: 'image/png' } as ToolContent
-            ]
-          };
+          return desktopImageResult(text, state.screenshot.data);
         })
     );
   }
@@ -535,15 +548,10 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           const done = `Done ${result.completedCount}/${parsed.length} via ${routeSummary}: ${parsed.map((a) => a.type).join(', ')}. ${pointer}${clipboard ? `\n${clipboard}` : ''}${verified}`;
           const shot = result.screenshot;
           if (shot) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: `${done}\nCaptured frame ${shot.frameId}, ${shot.width}x${shot.height}. Use this frame for the next coordinates.`
-                } as ToolContent,
-                { type: 'image', data: shot.data, mimeType: 'image/png' } as ToolContent
-              ]
-            };
+            return desktopImageResult(
+              `${done}\nCaptured frame ${shot.frameId}, ${shot.width}x${shot.height}. Use this frame for the next coordinates.`,
+              shot.data
+            );
           }
           return ok(done);
         })
