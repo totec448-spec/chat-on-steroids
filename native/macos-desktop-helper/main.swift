@@ -91,7 +91,7 @@ private func boundedAXString(_ value: String) -> String {
     return String(prefix.dropLast()) + "…"
 }
 
-private func virtualScreenRect() throws -> CGRect {
+private func activeDisplayRects() throws -> [CGRect] {
     var count: UInt32 = 0
     guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else {
         throw fail("SCREEN_UNAVAILABLE", "no active display is available")
@@ -100,7 +100,21 @@ private func virtualScreenRect() throws -> CGRect {
     guard CGGetActiveDisplayList(count, &displays, &count) == .success else {
         throw fail("SCREEN_UNAVAILABLE", "the active display list could not be read")
     }
-    return displays.prefix(Int(count)).map(CGDisplayBounds).reduce(CGRect.null) { $0.union($1) }
+    return displays.prefix(Int(count)).map(CGDisplayBounds)
+}
+
+private func virtualScreenRect() throws -> CGRect {
+    try activeDisplayRects().reduce(CGRect.null) { $0.union($1) }
+}
+
+private func requirePointOnActiveDisplay(_ point: CGPoint, displays suppliedDisplays: [CGRect]? = nil) throws {
+    let displays = try suppliedDisplays ?? activeDisplayRects()
+    guard displays.contains(where: { $0.contains(point) }) else {
+        throw fail(
+            "OUTSIDE_ACTIVE_DISPLAY",
+            "point \(Int(point.x.rounded())),\(Int(point.y.rounded())) falls outside every active display; no input was sent"
+        )
+    }
 }
 
 private struct WindowRow {
@@ -523,10 +537,12 @@ private func postMouse(_ type: CGEventType, point: CGPoint, button: CGMouseButto
 }
 
 private func movePointer(_ point: CGPoint) throws {
+    try requirePointOnActiveDisplay(point)
     try postMouse(.mouseMoved, point: point, button: .left)
 }
 
 private func click(_ point: CGPoint, button: CGMouseButton, count: Int, targetWindow: CGWindowID? = nil) throws {
+    try requirePointOnActiveDisplay(point)
     let (down, up, _) = mouseTypes(button)
     for clickIndex in 1...count {
         if let targetWindow { _ = try assertInputTarget(targetWindow) }
@@ -552,6 +568,8 @@ private func drag(
 ) throws {
     guard xs.count == ys.count, xs.count >= 2 else { throw fail("BAD_ACTION", "drag needs at least two points") }
     let points = zip(xs, ys).map { CGPoint(x: $0.0.doubleValue, y: $0.1.doubleValue) }
+    let displays = try activeDisplayRects()
+    for point in points { try requirePointOnActiveDisplay(point, displays: displays) }
     let (down, up, dragged) = mouseTypes(button)
     if let targetWindow { _ = try assertInputTarget(targetWindow) }
     try postMouse(down, point: points[0], button: button)
@@ -607,6 +625,16 @@ private func normalizedKeyName(_ name: String) -> String {
     case "esc": return "escape"
     default: return name.lowercased()
     }
+}
+
+private func isSystemShortcut(_ names: [String]) -> Bool {
+    let keys = Set(names)
+    if keys.contains("command") && (keys.contains("tab") || keys.contains("space")) { return true }
+    if keys.contains("command") && keys.contains("option") && keys.contains("escape") { return true }
+    if keys.contains("control") && !keys.isDisjoint(with: ["left", "right", "up", "down"]) { return true }
+    if keys.contains("control") && keys.contains("space") { return true }
+    if keys.contains("command") && keys.contains("shift") && !keys.isDisjoint(with: ["3", "4", "5"]) { return true }
+    return false
 }
 
 private struct ResolvedKey {
@@ -672,6 +700,7 @@ private func resolveKey(_ name: String) throws -> ResolvedKey {
 private func pressKeys(_ names: [String], targetWindow: CGWindowID? = nil) throws {
     let normalized = names.map(normalizedKeyName)
     let resolved = try normalized.map(resolveKey)
+    let globalShortcut = isSystemShortcut(normalized)
     guard let source = CGEventSource(stateID: .privateState) else {
         throw fail("INPUT_FAILED", "could not create a keyboard event source")
     }
@@ -683,7 +712,9 @@ private func pressKeys(_ names: [String], targetWindow: CGWindowID? = nil) throw
             throw fail("INPUT_FAILED", "could not create a keyboard event")
         }
         event.flags = flags
-        if let targetPID { event.postToPid(targetPID) } else { event.post(tap: .cghidEventTap) }
+        if globalShortcut { event.post(tap: .cghidEventTap) }
+        else if let targetPID { event.postToPid(targetPID) }
+        else { event.post(tap: .cghidEventTap) }
     }
 
     var flags: CGEventFlags = []
@@ -770,6 +801,9 @@ private func actUI(_ request: JSONObject) throws -> JSONObject {
     }
     guard let element = snapshot.elements[runtimeKey] else {
         throw fail("UNKNOWN_UI_REF", "the UI element no longer exists in snapshot \(snapshotID)")
+    }
+    guard axBool(element, kAXEnabledAttribute as CFString, default: true) else {
+        throw fail("UI_ACTION_DISABLED", "the referenced accessibility control is disabled")
     }
     let action = string(request["action"])
     var route = "uia"

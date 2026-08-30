@@ -45,6 +45,20 @@ describe('macOS desktop safety hardening', () => {
     expect(preparation).toMatch(/'-framework',\s*'Carbon'/);
   });
 
+  it('routes system shortcuts globally and rejects disabled semantic controls', () => {
+    expect(swift).toContain('private func isSystemShortcut');
+    expect(swift).toContain('if globalShortcut { event.post(tap: .cghidEventTap) }');
+    expect(swift).toContain('UI_ACTION_DISABLED');
+    expect(swift).toContain('the referenced accessibility control is disabled');
+  });
+
+  it('rejects physical points that fall between active displays', () => {
+    expect(swift).toContain('private func activeDisplayRects');
+    expect(swift).toContain('private func requirePointOnActiveDisplay');
+    expect(swift).toContain('OUTSIDE_ACTIVE_DISPLAY');
+    expect(swift).toContain('for point in points { try requirePointOnActiveDisplay(point, displays: displays) }');
+  });
+
   it('keeps the installed SDK availability guard on ScreenCaptureKit dimensions', () => {
     expect(swift).toContain('The current SDK marks these setters macOS 13+');
     expect(swift).toMatch(/if #available\(macOS 13\.0, \*\) \{\s*configuration\.width = width\s*configuration\.height = height/);
