@@ -14,6 +14,7 @@
  */
 
 import { McpServer } from '@modelcontextprotocol/server';
+import { withPlanGuard } from '../plan.js';
 import { createRegistrar, type ToolContext } from './kernel.js';
 import { registerCoreTools } from './tools-core.js';
 import { registerDesktopTools } from './tools-desktop.js';
@@ -31,8 +32,9 @@ export function buildServer(ctx: ToolContext, surface: SurfaceId): McpServer {
   );
 
   const registrar = createRegistrar(server, ctx, surface);
-  if (surface === 'core') registerCoreTools(registrar);
-  else registerDesktopTools(registrar);
+  const guardedRegistrar = withPlanGuard(registrar);
+  if (surface === 'core') registerCoreTools(guardedRegistrar);
+  else registerDesktopTools(guardedRegistrar);
 
   // Cheap self-check on a property the tests assert and the design depends on: a surface
   // may register fewer tools than it declares — permissions decide that — but it may never

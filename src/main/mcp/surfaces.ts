@@ -94,6 +94,9 @@ export interface SurfaceDefinition {
  * Core declares 8 possible tool names below, but at most 7 schemas are live at once. `find`
  * and the exec pair are mutually exclusive — `find` exists only when command execution is
  * off — so no runtime tools/list reaches all 8 declarations.
+ *
+ * /plan deliberately does not add a ninth declaration: it is a session directive enforced in
+ * front of these same handlers, preserving the existing no-query discovery budget.
  */
 const CORE: SurfaceDefinition = {
   id: 'core',
@@ -104,7 +107,8 @@ const CORE: SurfaceDefinition = {
     'Use for: opening and reading files, searching a repository, applying patches, creating, renaming and deleting files, ' +
     'running builds, tests, linters, git, npm and shell commands, and continuing long-running or interactive terminal sessions. ' +
     'Also searches and reads local recordings of previous or concurrently running ChatGPT work, and — when the user has ' +
-    'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations.',
+    'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations. ' +
+    'Slash Plan Mode is built in: a user message beginning /plan starts a read-only planning phase; inspect and produce a decision-complete plan without editing, running shell commands, desktop input or workers. /plan run approves execution and /plan clear cancels the fence.',
   cardSummary: 'Files, patches and the terminal. Required — this is the coding connector.',
   required: true,
   tools: ['read', 'view_image', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'session', 'agents']
@@ -128,7 +132,8 @@ const DESKTOP: SurfaceDefinition = {
     'See and control this Windows desktop, including its clipboard. ' +
     'Use for: taking a screenshot, reading what is on screen, listing and finding windows, inspecting buttons, fields and other UI controls, ' +
     'clicking, typing, pressing keys, scrolling and dragging in any Windows application, ' +
-    'and reading the clipboard or copying and pasting text between programs.',
+    'and reading the clipboard or copying and pasting text between programs. ' +
+    'When the current recorded session is in /plan mode, observe remains available but computer input/control is hard-blocked until the user sends /plan run.',
   cardSummary:
     'Screenshots, windows, mouse/keyboard control and the clipboard. Optional — connect it only if you want desktop automation.',
   required: false,
