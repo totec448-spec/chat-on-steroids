@@ -10995,6 +10995,47 @@ describe('the goal loop', () => {
   });
 
   /**
+   * The same rebuild, for a goal long enough to scroll.
+   *
+   * The caret was carried through a repaint; where the box was scrolled to was not, and a
+   * freshly built textarea starts at the top. So a goal of any length threw its reader back
+   * to the first line on every activity poll — once a second, whichever way they scrolled,
+   * and whether or not they were typing. Both halves are pinned: the reader who has only
+   * scrolled has no caret to restore, and the caret restore of the one who is typing scrolls
+   * the box itself and must not get the last word on where it is looking.
+   */
+  it('keeps a long goal where its reader scrolled it, focused or not', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
+    await live.hook.pullActivity();
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+    (live.document.querySelector('.clf-menu-goal-link') as HTMLButtonElement).click();
+
+    const box = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    const long = Array.from({ length: 40 }, (_, line) => `step ${line + 1}: do the thing`).join('\n');
+    box.value = long;
+    box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
+
+    // Read back, not written: no focus, and scrolled away from the top.
+    box.blur();
+    box.scrollTop = 260;
+    live.hook.renderControl();
+    let after = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    expect(after.value).toBe(long);
+    expect(after.scrollTop).toBe(260);
+
+    // And while it is being written, where the selection restore also moves the box.
+    after.focus();
+    after.setSelectionRange(12, 12);
+    after.scrollTop = 300;
+    live.hook.renderControl();
+    after = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    expect(live.document.activeElement).toBe(after);
+    expect(after.selectionStart).toBe(12);
+    expect(after.scrollTop).toBe(300);
+  });
+
+  /**
    * The settings sheet, which is where a chat is given its goal and where the reason a
    * chat cannot have one has to be legible.
    */
