@@ -3306,15 +3306,16 @@ describe('targeted open', () => {
     );
   });
 
-  it('renews the command deadline when the opened page finally redeems it', async () => {
+  it('keeps a redeemed resume alive past the short ACK deadline without outliving its continuation', async () => {
     vi.useFakeTimers();
     try {
       setBrowserOpener(async (url) => {
         opened.push(url);
       });
       await pair();
+      const sourceConversation = '44444444-5555-6666-7777-888888888888';
       const { sessionId, token } = await compactedSession(
-        '44444444-5555-6666-7777-888888888888',
+        sourceConversation,
         'the slow-start brief'
       );
       const command = queueResume(sessionId, token)!;
@@ -3323,11 +3324,18 @@ describe('targeted open', () => {
       await vi.advanceTimersByTimeAsync(60_000);
       expect((await redeem(command.id, 'slow-tab')).text).toContain('the slow-start brief');
 
-      // content.js can still legitimately be waiting for the composer/conversation id here.
-      // The original timer would fire 30s after redeem despite `claimedAt` having been renewed.
-      await vi.advanceTimersByTimeAsync(60_000);
+      // Hidden Chromium tabs can stretch content.js's conversation-id wait beyond 90s. The exact
+      // page already owns the one-shot continuation, so the short command deadline must not abort
+      // it while that existing continuation is still valid.
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
       expect(pendingCommands().map((entry) => entry.what)).toEqual([`resume:${sessionId}`]);
-      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      expect(continuationByToken(token)?.state).toBe('claimed');
+
+      // No new lifetime is invented: the existing 10m continuation TTL remains the outer bound.
+      await vi.advanceTimersByTimeAsync(7 * 60_000);
+      expect(pendingCommands()).toEqual([]);
+      expect(continuationByToken(token)?.state).toBe('aborted');
+      expect((await getSession(sessionId))?.conversationId).toBe(sourceConversation);
     } finally {
       vi.useRealTimers();
     }
