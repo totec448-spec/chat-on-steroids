@@ -23,6 +23,22 @@
 const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * The deadline for the one route that waits on a model rather than on the app's own state.
+ *
+ * Every other request this worker makes is answered from something the app already has, so the
+ * ordinary ten seconds is a generous ceiling for it. `/goal/open` is different: it holds the
+ * connection open for a whole OpenRouter completion, which the app itself allows 180s for. A
+ * shorter deadline here does not cancel that work — the app keeps going and the account is
+ * still billed for the answer — it only guarantees nobody is left to receive it.
+ *
+ * So this sits above the app's own timeout on purpose. Whichever way the request ends, the
+ * app's error handling is the half that gets to say why.
+ */
+const MODEL_REQUEST_TIMEOUT_MS = 190_000;
+
+/** The reason a deadline aborts with, so it is a fact the caller can act on rather than prose. */
+const TIMED_OUT = 'the app took too long to answer';
 /** Bumped only when the request/response shape changes; the app compares it. */
 const BRIDGE_PROTOCOL = 9;
 
@@ -788,7 +804,10 @@ async function fetchBounded(url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const abort = () => controller.abort();
   if (external && external.aborted) controller.abort();
   else if (external && typeof external.addEventListener === 'function') external.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(abort, timeoutMs);
+  // Aborted with a reason on purpose. An abort with none rejects as the platform's opaque
+  // "signal is aborted without reason", which is exactly what this worker's own deadline
+  // used to put on screen in place of anything a reader could act on.
+  const timer = setTimeout(() => controller.abort(new Error(TIMED_OUT)), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
@@ -944,16 +963,21 @@ async function call(path, init = {}, retried = false) {
     const got = await provision();
     if (!got.ok) return { ok: false, status: 401, error: got.error || 'not_paired' };
   }
+  const { timeoutMs = REQUEST_TIMEOUT_MS, ...rest } = init;
   try {
-    const response = await fetchBounded(`http://127.0.0.1:${found.port}${path}`, {
-      ...init,
-      cache: 'no-store',
-      headers: {
-        ...(init.body ? { 'content-type': 'application/json' } : {}),
-        ...versionHeaders(),
-        authorization: `Bearer ${token}`
-      }
-    });
+    const response = await fetchBounded(
+      `http://127.0.0.1:${found.port}${path}`,
+      {
+        ...rest,
+        cache: 'no-store',
+        headers: {
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+          ...versionHeaders(),
+          authorization: `Bearer ${token}`
+        }
+      },
+      timeoutMs
+    );
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) {
       if (data && data.error === 'browser_disconnected') {
@@ -970,10 +994,15 @@ async function call(path, init = {}, retried = false) {
     }
     return { ok: response.ok, status: response.status, data };
   } catch (err) {
-    // The request never reached anything, so the belief that the app is on this port is
+    const detail = String(err && err.message ? err.message : err);
+    // A deadline disproves nothing about where the app is. It answered on this port, and the
+    // request simply outlived the wait — so keep the port, and say so in a way the caller can
+    // act on. Dropping it here made every slow answer cost a rediscovery as well.
+    if (detail === TIMED_OUT) return { ok: false, status: 0, error: detail, retryable: true };
+    // Anything else never reached anything, so the belief that the app is on this port is
     // exactly what has just been disproved. Next call looks properly.
     forgetPort();
-    return { ok: false, status: 0, error: String(err && err.message ? err.message : err) };
+    return { ok: false, status: 0, error: detail };
   }
 }
 
@@ -2170,6 +2199,7 @@ const HANDLERS = {
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
     const result = await call('/goal/open', {
       method: 'POST',
+      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({ text: String(message.text || '') })
     });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
