@@ -10,7 +10,7 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { z } from 'zod';
-import { CAPABILITIES, GOAL_REASONING_LEVELS, type AppState, type Config } from '../shared/types.js';
+import { CAPABILITIES, GOAL_REASONING_LEVELS, RELEASES_PAGE, type AppState, type Config } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { getConfig, updateConfig } from './config.js';
@@ -25,6 +25,7 @@ import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
 import {
   bridgeStatus,
   cancelWorkerCommands,
+  chatUrl,
   onBridgeChange,
   startBridge,
   stopBridge,
@@ -52,6 +53,8 @@ import {
 import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
+import { openInPreferredBrowser } from './browser.js';
+import { onUpdateChange, updateStatus } from './update.js';
 
 /** The only URLs the renderer may ask the OS to open. */
 const ALLOWED_LINKS = new Set([
@@ -66,7 +69,9 @@ const ALLOWED_LINKS = new Set([
   // Where the key for the goal loop comes from. The button beside the key field is useless
   // without this: `link:open` refuses anything not named here, so it threw where nobody
   // was looking and the button did nothing at all.
-  'https://openrouter.ai/settings/keys'
+  'https://openrouter.ai/settings/keys',
+  // Where an installation that cannot update itself gets the new version by hand.
+  RELEASES_PAGE
 ]);
 
 const capabilityPatch = z.object(
@@ -113,7 +118,8 @@ const settingsPatch = z.object({
   }),
   multiAgent: z.object({
     enabled: z.boolean(),
-    maxWorkers: z.number().int().min(1).max(8)
+    maxWorkers: z.number().int().min(1).max(8),
+    allowUnattributedCalls: z.boolean()
   }),
   goal: z.object({
     enabled: z.boolean(),
@@ -196,7 +202,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     },
     multiAgent: {
       enabled: pick(current.multiAgent.enabled, base.multiAgent.enabled, wanted.multiAgent.enabled),
-      maxWorkers: pick(current.multiAgent.maxWorkers, base.multiAgent.maxWorkers, wanted.multiAgent.maxWorkers)
+      maxWorkers: pick(current.multiAgent.maxWorkers, base.multiAgent.maxWorkers, wanted.multiAgent.maxWorkers),
+      allowUnattributedCalls: pick(
+        current.multiAgent.allowUnattributedCalls,
+        base.multiAgent.allowUnattributedCalls,
+        wanted.multiAgent.allowUnattributedCalls
+      )
     },
     goal: {
       enabled: pick(current.goal.enabled, base.goal.enabled, wanted.goal.enabled),
@@ -241,7 +252,8 @@ async function buildState(): Promise<AppState> {
     hasGoalKey: await hasSecret('openRouterApiKey'),
     resolvedBinary: resolvedBinary(config),
     bundledTunnelVersion: bundledVersion(),
-    bridge: await bridgeStatus()
+    bridge: await bridgeStatus(),
+    update: updateStatus()
   };
 }
 
@@ -529,6 +541,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     return { summary, events, total: summary.events, nextFrom };
   });
 
+  handle('sessions:openChat', async (payload) => {
+    const { id } = sessionIdArg.parse(payload);
+    const summary = await getSession(id);
+    const conversationId = summary?.conversationId;
+    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
+      throw new Error('This session has no valid ChatGPT conversation');
+    }
+    const browser = await openInPreferredBrowser(chatUrl(conversationId));
+    if (!browser) throw new Error('Chrome or Chromium was not found');
+    return true;
+  });
+
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     // Detach first. The recorder maps live ChatGPT conversations to session ids, so
@@ -657,6 +681,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
+  onUpdateChange(pushState);
   onLog((entry) => push('log:entry', entry));
   onSessionChange(() => push('session:changed'));
   onSwarmChange(() => push('swarm:changed', swarmState()));

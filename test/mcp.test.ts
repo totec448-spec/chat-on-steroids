@@ -17,6 +17,7 @@
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1734,6 +1735,27 @@ describe('sandbox enforcement through the tool layer', () => {
     const instructions: string = reply.body.result.instructions ?? '';
     expect(instructions).toContain('/workspace');
     expect(instructions).toContain('Read only');
+  });
+
+  /**
+   * Every worked example the model is shown must name a root that exists, and no error may send
+   * it after a tool that does not. Both cost a refused call and a retry, and neither is visible
+   * from inside the app.
+   */
+  it('names only live roots and live tools in what the model is shown', async () => {
+    const read = toolList(await core('tools/list')).find((tool) => tool.name === 'read')!;
+    const paths = String(read.inputSchema.properties.paths.description);
+    expect(paths).toContain('/workspace');
+    // `/project` is nobody's root; it was a hardcoded example the model could not act on.
+    expect(paths).not.toContain('/project');
+
+    // list_roots is retired, so no refusal may tell the model to call it. A native path outside
+    // every root is the refusal that used to, and it must still name the roots that do exist.
+    const refusal = textOf(
+      await core('tools/call', { name: 'read', arguments: { paths: [path.join(os.tmpdir(), 'nope.txt')] } })
+    );
+    expect(refusal).toContain('Approved roots');
+    expect(refusal).not.toContain('list_roots');
   });
 });
 

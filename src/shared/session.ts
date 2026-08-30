@@ -373,16 +373,6 @@ export interface SessionSummary {
    * compaction immediately after every compaction.
    */
   contextTokens: number;
-  /**
-   * When this chat's one automatic compaction was claimed, or null while it still has one.
-   *
-   * The whole durable state of automatic compaction, because the rest of the rule is read
-   * live rather than remembered: the chat is over `contextTokens`, and the model is working
-   * *right now*. Set before the browser is touched, so a failed or abandoned attempt can
-   * never become a retry loop, and reset when Compact & Resume attaches this session to a
-   * fresh ChatGPT conversation — a new chat gets a new budget and a new trigger.
-   */
-  autoCompactTriggeredAt: number | null;
   /** Id of the newest stored handoff, or null when the session was never compacted. */
   lastHandoffId: string | null;
   lastHandoffAt: number | null;

@@ -87,6 +87,7 @@ const api = {
     call<SessionList>('sessions:list', options ?? {}),
   getSession: (id: string, options?: { from?: number; limit?: number }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),
+  openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 

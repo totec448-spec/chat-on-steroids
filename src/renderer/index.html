@@ -91,6 +91,15 @@
         </span>
       </header>
 
+      <!-- Everything this app knows about being out of date, in one line. Painted from
+           state.update plus the extension version the bridge already reports; see
+           src/main/update.ts. Hidden whenever there is nothing to say. -->
+      <div class="notice" id="updateNotice" hidden>
+        <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
+        <span id="updateText"></span>
+        <button class="btn btn-quiet" id="updateGet" type="button" hidden>Get it</button>
+      </div>
+
       <main>
         <!-- ============================================================ Home -->
         <section class="panel is-active" data-panel="home">
@@ -645,6 +654,14 @@
                     <input id="maWorkers" class="num" type="number" min="1" max="8" step="1" />
                     <span class="unit">max</span>
                   </div>
+
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Allow unattributed calls</b>
+                      <em>Run self-contained calls even when the extension cannot prove which chat sent them. Activity stays visible as Unattributed.</em>
+                    </span>
+                    <input id="allowUnattributedCalls" type="checkbox" />
+                  </label>
 
                   <div id="swarmList"></div>
                   <div class="step-actions">

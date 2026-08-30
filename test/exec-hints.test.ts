@@ -27,6 +27,7 @@ import {
   bindBundledRipgrep,
   execRecoveryHints,
   nonZeroExitIsBenign,
+  normalizePowerShellOperators,
   normalizeShellCommand,
   repairPowerShellQuoting,
   statusDeterminingProgram,
@@ -35,6 +36,7 @@ import {
 import { locateRipgrep } from '../src/main/ripgrep.js';
 
 const BOUND_RG = "& 'C:\\tools\\rg.exe'";
+const WINDOWS_POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
 
 describe('which program decided the exit code', () => {
   it('reads through a pipeline of cmdlets to the program that generated the output', () => {
@@ -71,6 +73,34 @@ describe('which program decided the exit code', () => {
   });
 });
 
+describe('PowerShell 5.1 conditional chains', () => {
+  const rewrite = (cmd: string) => normalizePowerShellOperators(cmd, 'powershell', WINDOWS_POWERSHELL);
+
+  it('preserves && and || semantics with $? guards', () => {
+    expect(rewrite('a.exe && b.exe || c.exe').cmd).toBe(
+      'a.exe; if ($?) { b.exe }; if (-not $?) { c.exe }'
+    );
+  });
+
+  it.each([
+    'a.exe > out.txt && b.exe',
+    'a.exe; b.exe && c.exe',
+    'a.exe && b.exe && c.exe && d.exe && e.exe',
+    'a.exe # comment && b.exe'
+  ])('leaves unsafe or ambiguous input unchanged: %s', (cmd) => {
+    expect(rewrite(cmd)).toEqual({ cmd, notes: [] });
+  });
+
+  it('does nothing for PowerShell 7 or POSIX shells', () => {
+    const cmd = 'a.exe && b.exe';
+    expect(normalizePowerShellOperators(cmd, 'powershell', 'C:\\Program Files\\PowerShell\\7\\pwsh.exe')).toEqual({
+      cmd,
+      notes: []
+    });
+    expect(normalizePowerShellOperators(cmd, 'bash', '/bin/bash')).toEqual({ cmd, notes: [] });
+  });
+});
+
 describe('a non-zero exit that is a result rather than a failure', () => {
   it('treats ripgrep exit 1 with no output as "no matches"', () => {
     const output = 'Wall time: 0.0056 seconds\nProcess exited with code 1\nOutput:\n';
@@ -81,6 +111,26 @@ describe('a non-zero exit that is a result rather than a failure', () => {
     // The pipe closing early is why the code is non-zero; the matches did arrive.
     const output = 'Process exited with code 1\nOutput:\nclient.go:36: defaultMaxInFlightRequests = 20\n';
     expect(nonZeroExitIsBenign(`${BOUND_RG} -n "Max" $root | Select-Object -First 160`, 1, output)).toBe(true);
+  });
+
+  it('keeps matches from valid paths when one ripgrep path is missing', () => {
+    const output = [
+      'Process exited with code 2',
+      'Output:',
+      'rg: src/missing.ts: The system cannot find the file specified. (os error 2)',
+      'src/main.ts:9:export const found = true;'
+    ].join('\n');
+    const command = `${BOUND_RG} -n found src/missing.ts src/main.ts`;
+    expect(nonZeroExitIsBenign(command, 2, output)).toBe(true);
+    expect(benignExitNote(command, 'powershell', 2, output)).toContain('matches above are complete');
+  });
+
+  it('keeps diagnostic-only, multi-statement, and bare ripgrep exit 2 as failures', () => {
+    const diagnostic = 'Output:\nrg: src/missing.ts: The system cannot find the file specified. (os error 2)';
+    const partial = `${diagnostic}\nsrc/main.ts:9:found`;
+    expect(nonZeroExitIsBenign(`${BOUND_RG} found src/missing.ts`, 2, diagnostic)).toBe(false);
+    expect(nonZeroExitIsBenign(`Write-Output found; ${BOUND_RG} found src/missing.ts`, 2, partial)).toBe(false);
+    expect(nonZeroExitIsBenign('rg found src/missing.ts src/main.ts', 2, partial)).toBe(false);
   });
 
   it('still calls it an error when ripgrep printed an error of its own', () => {

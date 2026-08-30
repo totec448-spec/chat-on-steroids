@@ -59,7 +59,6 @@ import {
   awaitRequestCorrelation,
   observeRequestCorrelations,
   requestCorrelation,
-  requestCorrelationConflicted,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
 import { resumeOpeningChat } from './resume-gate.js';
@@ -580,12 +579,24 @@ export function liveConversations(): Array<{
   sessionId: string;
   generating: boolean;
   activeTurnId: string | null;
+  /**
+   * How many turns of this chat have finished. Only ever goes up, for the life of the entry.
+   *
+   * `knownTurnEnds` is the recorder's idempotency set for turn ends, so its size is already an
+   * exact count of them - including the ends recovered from a final assistant message after a
+   * page reload. It answers the one question a turn id cannot: whether the turn that was live a
+   * moment ago is the turn that is live now. A reload mints a fresh local id for a generation
+   * that never ended, so id inequality means "or the page came back", while this counter moves
+   * only when a turn is actually over.
+   */
+  endedTurns: number;
 }> {
   return [...conversations.values()].map((entry) => ({
     conversationId: entry.conversationId,
     sessionId: entry.sessionId,
     generating: entry.turnStartedAt !== null,
-    activeTurnId: entry.turnStartedAt !== null ? entry.turnId : null
+    activeTurnId: entry.turnStartedAt !== null ? entry.turnId : null,
+    endedTurns: entry.knownTurnEnds.size
   }));
 }
 
@@ -612,8 +623,8 @@ export function evidenceWindow(production: number): number {
  * How long a completed MCP call may wait for its exact page-side request id observation.
  *
  * This wait is request-specific: only the identical normalized x-request-id can satisfy it.
- * Chrome-off, conflicting, or missing evidence ends in Unattributed activity rather than a
- * tool/time/generation guess.
+ * Chrome-off or missing evidence ends in Unattributed activity rather than a tool, time or
+ * generation guess.
  */
 const REQUEST_ID_GRACE_MS = evidenceWindow(15_000);
 
@@ -678,16 +689,12 @@ function scheduleAttributionRepair(): void {
  * React tree that also supplied these request messages. When both exist and disagree, none
  * of the batch is ownership evidence: choosing either side would silently cross-attribute.
  *
- * Disagreement discards the batch and nothing else. It used to mark every request id in it
- * as contradictory, which is a permanent verdict — `requestCorrelation` answers null for a
- * conflicted id forever, and the deterministic repair pass skips it — and the premise was
- * wrong. Two conversations both claiming one request id is a contradiction, and merge()
- * still calls that one; a page whose URL and React tree disagree is a page caught in the
- * middle of something, which is the common case rather than the corrupt one: a chat being
- * switched, a model still mounted from the conversation before it, a fresh chat whose
- * client-side thread id is not yet the server's. Every one of those resolves a moment
- * later, and the old rule spent that moment condemning perfectly provable calls to
- * Unattributed activity for good.
+ * Disagreement discards the batch and nothing else. A page whose URL and React tree disagree
+ * is a page caught in the middle of something, which is the common case rather than the
+ * corrupt one: a chat being switched, a model still mounted from the conversation before it,
+ * a fresh chat whose client-side thread id is not yet the server's. Every one of those
+ * resolves a moment later, so the batch is worth nothing as evidence and worth nothing as a
+ * verdict either.
  */
 function noteCallEvidence(
   conversationId: string,
@@ -712,13 +719,8 @@ function noteCallEvidence(
   }
   const observedAt = Math.min(at, Date.now());
   const evidencedCalls = calls.filter((call): call is PageCallEvidence & { requestId: string } => !!call.requestId);
-  // One ChatGPT workflow request id can legitimately cover dozens of connector calls. Capture
-  // the pre-batch state once so a single cross-conversation contradiction produces one useful
-  // transition warning, rather than one identical line per call. A later at-least-once replay
-  // of an already-conflicted id contains no new diagnostic fact and stays silent.
-  const alreadyConflicted = new Set(
-    evidencedCalls.map((call) => call.requestId).filter((requestId) => requestCorrelationConflicted(requestId))
-  );
+  // One ChatGPT workflow request id can legitimately cover dozens of connector calls, so read
+  // the owners once up front and report a refusal once per id rather than once per call.
   const priorOwners = new Map(
     evidencedCalls.map((call) => [call.requestId, requestCorrelation(call.requestId)?.conversationId ?? null] as const)
   );
@@ -732,17 +734,19 @@ function noteCallEvidence(
       observedAt
     }))
   );
-  const warnedConflicts = new Set<string>();
+  const refusals = new Set<string>();
   for (const [index, call] of evidencedCalls.entries()) {
     const result = results[index]!;
-    if (result === 'conflict') {
-      if (!alreadyConflicted.has(call.requestId) && !warnedConflicts.has(call.requestId)) {
-        warnedConflicts.add(call.requestId);
-        const prior = priorOwners.get(call.requestId);
-        logWarn(
-          `request attribution conflict for ${call.requestId}` +
-            (prior ? `: conversation ${prior} vs ${conversationId}` : '') +
-            '; ownership will remain unattributed'
+    if (result === 'refused') {
+      // A note, not a problem. Nothing is lost when a claim is refused - the calls under this id
+      // go on reaching the conversation that proved it - so this must not join the count of
+      // things wrong with the run. It was a warning while a contradiction destroyed the owner,
+      // which was a real fault and was worth shouting about.
+      if (!refusals.has(call.requestId)) {
+        refusals.add(call.requestId);
+        logInfo(
+          `request attribution: ${call.requestId} stays with conversation ${priorOwners.get(call.requestId)}` +
+            `; conversation ${conversationId} claimed it too and was refused`
         );
       }
     } else if (result === 'stored') {
@@ -1214,6 +1218,11 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       ...(target.turnId ? { turnId: target.turnId } : {})
     });
     notifyChanged();
+    try {
+      attributionListener?.(target.conversationId);
+    } catch (err) {
+      logWarn(`call attribution listener failed: ${(err as Error).message}`);
+    }
     return call;
   } catch (err) {
     logWarn(`session recorder could not store a tool call: ${(err as Error).message}`);
@@ -1235,6 +1244,23 @@ let agentBinder: (agent: string, conversationId: string) => void = () => undefin
 
 export function setAgentConversationLookup(lookup: (agent: string) => string | null): void {
   agentConversationLookup = lookup;
+}
+
+/**
+ * Set by the bridge. Called once per filed call with the verdict this module just reached: the
+ * conversation the request-id join proved, or null for a call that finished the grace with no
+ * page evidence at all. Both are already durable when it runs.
+ *
+ * One hook rather than two, because the two facts are one fact — which chats' reporting works
+ * and which activity nobody claimed — and splitting them invites a second attribution clock
+ * somewhere else. Nothing here decides what a verdict is worth; the bridge owns that.
+ */
+let attributionListener: ((conversationId: string | null) => void) | null = null;
+
+export function setCallAttributionListener(
+  listen: ((conversationId: string | null) => void) | null
+): void {
+  attributionListener = listen;
 }
 
 /** Set by the agent broker, for the deferred prime binding in recordToolCall. */
@@ -1823,6 +1849,8 @@ export function resetRecorderForTests(): void {
   attributionRepairChain = Promise.resolve();
   agentConversationLookup = () => null;
   agentBinder = () => undefined;
+  // The attribution listener is deliberately not cleared here: it belongs to the bridge's
+  // start/stop lifecycle, and a recorder reset between tests must not silently unwire it.
   if (notifyTimer) {
     clearTimeout(notifyTimer);
     notifyTimer = null;

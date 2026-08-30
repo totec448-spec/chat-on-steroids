@@ -76,6 +76,20 @@ const MAX_CONTEXT_CHARS = 120_000;
 const MAX_MESSAGE_CHARS = 12_000;
 /** How long one draft may take before it is abandoned as failed. */
 const REQUEST_TIMEOUT_MS = 180_000;
+
+/**
+ * Failures that asking again cannot answer, whoever asks and however long they wait.
+ *
+ * A key that is refused, an account with no credit, a model id OpenRouter does not know and a
+ * chat with nothing to continue from are all settings, not weather. Everything else — the
+ * provider erroring, a stream cut short, a timeout, an answer in a shape this app cannot read —
+ * is the same request having a bad moment, and it is asked again.
+ *
+ * Nothing in this module acts on that distinction: one draft is one request, and asking again
+ * belongs to the page's Goal loop, which is the only place that can tell whether the turn is
+ * still the one being answered. This is what that loop reads, published as `retryable`.
+ */
+const SETTLED_FAILURE = /^(?:auth_rejected|out_of_credit|unknown_model|no_api_key|no_conversation|no_objective)(?:$|:)/;
 /** The catalogue is UI data; a dead provider must not leave the picker request hanging forever. */
 const MODEL_LIST_TIMEOUT_MS = 30_000;
 /** A single SSE record should be tiny; this still leaves ample room around the 12k reply cap. */
@@ -176,9 +190,20 @@ export interface GoalDraftView {
   reply: string;
   /** A short machine-readable reason, shown by the page when the stage is `failed`. */
   error: string | null;
+  /**
+   * Whether this failure is one the same request could still answer.
+   *
+   * A Goal run ends on one of two answers — `[no reply]`, or words to type — so a failure ends
+   * nothing by itself; it leaves the turn still waiting. This is the app's half of that: it
+   * says whether asking again is capable of producing an answer. Whether asking again is
+   * *allowed* stays with the page, which is where every reason Goal may not act already lives.
+   */
+  retryable: boolean;
 }
 
-interface GoalDraft extends GoalDraftView {
+// `retryable` is left out on purpose: it is read off the failure every time it is asked for,
+// so there is no second place where a draft can be described as retryable and be wrong.
+interface GoalDraft extends Omit<GoalDraftView, 'retryable'> {
   sessionId: string;
   /** Frozen with the draft, just like its model, so one request never mixes two settings saves. */
   systemPrompt: string;
@@ -332,7 +357,8 @@ function view(draft: GoalDraft): GoalDraftView {
     // The reply is handed over only while it is still the thing to do. Once acknowledged it
     // is history, and a page that polls again must not find a message to type a second time.
     reply: draft.stage === 'ready' && !draft.acknowledged ? draft.reply : '',
-    error: draft.error
+    error: draft.error,
+    retryable: draft.stage === 'failed' && !SETTLED_FAILURE.test(draft.error ?? '')
   };
 }
 
@@ -460,7 +486,14 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
   }
   // Same turn, same draft. This is the idempotency that keeps a retried POST or a second
   // request from the owning tab from putting two messages into one conversation.
-  if (existing && existing.turnId === input.turnId) return view(existing);
+  //
+  // A failed draft the page has already retired is the one exception, and for exactly that
+  // reason: nothing was written, so asking again is this turn still waiting for its answer
+  // rather than a second message. Requiring the acknowledgement is what keeps it to one
+  // attempt at a time — an unacknowledged failure is still the page's to read.
+  const spentFailure =
+    existing?.stage === 'failed' && existing.acknowledged && !SETTLED_FAILURE.test(existing.error ?? '');
+  if (existing && existing.turnId === input.turnId && !spentFailure) return view(existing);
   // A different turn supersedes whatever the last one left behind, including an unfinished
   // request: the answer it was writing was about a conversation that has since moved on.
   if (existing) {
@@ -533,6 +566,16 @@ interface GoalRequest {
   publish?: (text: string) => void;
 }
 
+/**
+ * One request, one answer — including "no usable answer".
+ *
+ * There is deliberately no retry here. A provider error, a cut stream and a reply in a shape
+ * this app cannot read are all the same event, and whether asking again is worth anything
+ * depends on facts this function cannot see: whether the turn being answered is still the last
+ * one, whether the user has started typing, whether Goal is even switched on. Those live in the
+ * page's Goal loop, which reads the failure back off `retryable` and asks again on its own
+ * clock. A second attempt from in here would be spent against a turn nobody rechecked.
+ */
 async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision | { action: 'http'; error: string }> {
   const settings = getConfig().goal;
   const body: Record<string, unknown> = {
@@ -652,7 +695,9 @@ async function run(draft: GoalDraft): Promise<void> {
  * awaited by the page that will type it.
  *
  * It is deliberately not idempotent, because there is nothing yet to key idempotency to. The
- * page holds that end: one save, one call, and the result goes into an empty composer.
+ * page holds that end: one save, one call, and the result goes into an empty composer. It also
+ * holds the retry: a failure here goes back to whoever pressed the button, with the reason, and
+ * pressing it again is the second attempt — which is why this path needs none of its own.
  */
 export async function draftOpeningMessage(
   objective: string

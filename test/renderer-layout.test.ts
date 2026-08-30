@@ -124,10 +124,22 @@ describe('a session row', () => {
   });
 });
 
-describe('the session-row delete affordance', () => {
-  it('reserves its top-right hit target instead of laying the timestamp underneath it', () => {
-    expect(rule('.sess-del')).toContain('position: absolute');
-    expect(rule('.sess-top em')).toContain('margin-right: 30px');
+describe('the session-row chat actions', () => {
+  it('reserves both top-right hit targets instead of laying the timestamp underneath them', () => {
+    expect(rule('.sess-action')).toContain('position: absolute');
+    expect(rule('.sess-top em')).toContain('margin-right: 58px');
+  });
+
+  it('opens only recorded conversations and never selects or deletes the adjacent row', () => {
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,500}openSessionChat\(summary\.id\)/);
+    expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
+  });
+});
+
+describe('the live worker list', () => {
+  it('shows the exact broker id instead of a generic worker role chip', () => {
+    expect(chatSource).toMatch(/if \(label !== agent\.id\)[^\n]*agent\.id/);
+    expect(chatSource).not.toContain("el('span', 'chip', agent.role)");
   });
 });
 

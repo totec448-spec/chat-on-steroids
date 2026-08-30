@@ -8,7 +8,17 @@
  * which is the same decision made at run time instead of compile time.
  */
 
+import { defaultUserShell, isWindowsPowerShell5 } from './shell.js';
+
 const IS_WINDOWS = process.platform === 'win32';
+
+/**
+ * Whether the shell `exec_command` launches is the one without `&&` and `||`.
+ *
+ * Not the same question as "is this Windows": `defaultUserShell()` prefers `pwsh.exe`, so on a
+ * PowerShell 7 machine the operators work and saying otherwise would cost the model a working line.
+ */
+export const LAUNCHES_WINDOWS_POWERSHELL_5 = IS_WINDOWS && isWindowsPowerShell5(defaultUserShell().shellPath);
 
 /** `windows_shell_guidance()`. */
 export const WINDOWS_SHELL_GUIDANCE = `Windows safety rules:
@@ -20,7 +30,18 @@ export const EXEC_COMMAND_DESCRIPTION = IS_WINDOWS
   ? `Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n${WINDOWS_SHELL_GUIDANCE}`
   : 'Runs a command in a PTY, returning output or a session ID for ongoing interaction.';
 
-export const EXEC_COMMAND_CMD_DESCRIPTION = 'Shell command to execute.';
+/**
+ * Codex's text is 'Shell command to execute.'; two measured additions.
+ *
+ * Windows PowerShell 5.1 has no `&&` or `||` at all, and recorded sessions show the model reaching
+ * for them and getting a parse error that names the token without saying the feature is missing.
+ * Separately, 109 recorded exec calls were a file being read through the shell, which `read` does
+ * better and without the exec capability. Both live on the parameter because `tools/list` is
+ * re-sent every turn while the session instructions are read once.
+ */
+export const EXEC_COMMAND_CMD_DESCRIPTION = LAUNCHES_WINDOWS_POWERSHELL_5
+  ? 'Shell command to execute. To read a file, use the read tool instead. This shell is Windows PowerShell 5.1, which has no && or ||: use the cmds array for a sequence, or A; if ($?) { B }.'
+  : 'Shell command to execute. To read a file, use the read tool instead.';
 
 export const EXEC_COMMAND_CMDS_DESCRIPTION =
   'Sequential shell commands to run in one shell session. Use this for related checks instead of separate exec_command calls. Each command gets a labeled output section and exit code; all commands run after ordinary non-zero exits, and the overall exit code is the first non-zero code.';
@@ -34,8 +55,23 @@ export const EXEC_COMMAND_YIELD_TIME_DESCRIPTION = IS_WINDOWS
   ? 'Maximum time to wait before returning a session ID for a still-running command. Commands that finish sooner return immediately. For ordinary commands, omit this parameter to use the 10000 ms default. Effective range on Windows is 250-30000 ms.'
   : 'Wait before yielding output. Defaults to 10000 ms; effective range is 250-30000 ms.';
 
+/**
+ * `max_output_tokens` is retired from the model-facing surface, a divergence from Codex.
+ *
+ * ChatGPT drops a tool result over roughly 10,000 tokens before the model reads it, so raising the
+ * budget bought nothing while the model spent a parameter and a guess on every call. The budget is
+ * fixed at `DEFAULT_MAX_OUTPUT_TOKENS`; the runtime below still takes `maxOutputTokens`.
+ *
+ * It is still *accepted* because these schemas are `.strict()` and ChatGPT caches tool definitions:
+ * dropping the key turned older chats' calls into `Unrecognized key`, refusing the whole command.
+ * So take the key, ignore it, and say so once in the notes.
+ */
 export const MAX_OUTPUT_TOKENS_DESCRIPTION =
-  'Output token budget. Defaults to 10000 tokens; larger requests may be capped by policy.';
+  'Ignored; still accepted so older cached schemas keep working. Omit it.';
+
+/** The note a call that still sends the retired budget gets back, once, alongside its output. */
+export const MAX_OUTPUT_TOKENS_RETIRED_NOTE =
+  'max_output_tokens is retired and was ignored; output uses the fixed 10000-token budget. Omit the parameter.';
 
 export const EXEC_COMMAND_SHELL_DESCRIPTION = "Shell binary to launch. Defaults to the user's default shell.";
 

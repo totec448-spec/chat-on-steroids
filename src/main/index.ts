@@ -46,6 +46,7 @@ import {
 } from './session/continuation.js';
 import { startSessionRetentionMaintenance } from './session/retention.js';
 import { runShutdownSequence } from './shutdown.js';
+import { applyStagedUpdate, checkForUpdates } from './update.js';
 import { windowLayoutForWorkArea } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
 import {
@@ -355,6 +356,11 @@ void app.whenReady().then(async () => {
   });
 
   if (getConfig().ui.autoConnect) void connect();
+
+  // Once per app open, and never awaited: an unreachable GitHub, a slow download or a broken
+  // release must not delay a window that is already on screen. Everything it learns arrives
+  // through the ordinary state push, and every failure ends inside it.
+  void checkForUpdates();
 });
 
 app.on('before-quit', () => {
@@ -403,7 +409,12 @@ app.on('will-quit', (event) => {
       // Phase 3: recorder work can enqueue both session projections and named durable state.
       { name: 'recorder flush', budgetMs: 10_000, run: () => [flushRecorder()] },
       // These are independent writers. One rejection must never skip the other flush.
-      { name: 'durable flush', budgetMs: 10_000, run: () => [flushSessions(), flushDurable()] }
+      { name: 'durable flush', budgetMs: 10_000, run: () => [flushSessions(), flushDurable()] },
+      // Last, because it is the one phase whose effect is meant to outlive this process: a
+      // staged update is handed to the platform's installer here, so the next start of the app
+      // is the new version. Nothing is staged unless it downloaded whole and matched the
+      // release's published SHA-256, and applying it cannot fail loudly - see update.ts.
+      { name: 'update handoff', budgetMs: 5_000, run: () => [applyStagedUpdate()] }
     ],
     {
       info: logInfo,

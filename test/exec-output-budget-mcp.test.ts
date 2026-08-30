@@ -3,12 +3,13 @@
  *
  * `exec-output-budget.test.ts` pins the formatter, but it builds its own `ExecCommandToolOutput`
  * and therefore chooses the policy itself. That cannot see which constant `tools-core` actually
- * hands the process manager: passing `DEFAULT_TRUNCATION_POLICY` at the handler would restore the
- * 10_000-token ceiling, make every `max_output_tokens` above the default inert again, and leave
- * every unit test passing.
+ * hands the process manager.
  *
- * So this goes through the server the connector really serves: one `exec_command` request with
- * `max_output_tokens: 30000`, one without, against a command that emits ~200 KB.
+ * `max_output_tokens` is retired at the model-facing surface: still accepted, so chats holding a
+ * cached schema are not refused, but ignored. So this goes through the server the connector really
+ * serves and pins both halves of that — one `exec_command` request with `max_output_tokens: 30000`
+ * and one without must retain the *same* fixed budget, and the request that sent the retired key
+ * must be told once that it did nothing.
  */
 
 import { promises as fs } from 'node:fs';
@@ -112,21 +113,23 @@ async function execOutput(url: string, maxOutputTokens: number | undefined): Pro
   return text;
 }
 
-it('honours max_output_tokens above the default through the real exec_command handler', async () => {
+it('ignores the retired max_output_tokens and says so, through the real exec_command handler', async () => {
   endpoint = await serve();
 
   const requested = await execOutput(endpoint.url, 30_000);
   const omitted = await execOutput(endpoint.url, undefined);
 
-  // The command really ran and really overflowed both budgets.
+  // The command really ran and really overflowed the budget.
   expect(requested).toContain('Process exited with code 0');
   expect(requested).toContain('Warning: truncated output');
   expect(omitted).toContain('Warning: truncated output');
 
-  // 30_000 tokens is ~120 KB of retained output. Under a 10_000-token ceiling this is ~40 KB,
-  // and under the original bytes:10_000 policy it is ~10 KB.
-  expect(requested.length).toBeGreaterThan(100_000);
-  // And the default is still the default: asking for nothing must not get the ceiling.
+  // The retired key buys nothing: 30_000 tokens would be ~120 KB, the fixed budget is ~40 KB.
+  expect(requested.length).toBeLessThan(60_000);
   expect(omitted.length).toBeLessThan(60_000);
-  expect(requested.length).toBeGreaterThan(omitted.length);
+
+  // Accepted, not refused, and the caller is told once why it changed nothing.
+  expect(requested).toContain('max_output_tokens is retired and was ignored');
+  // Only the call that actually sent it gets the note.
+  expect(omitted).not.toContain('max_output_tokens is retired');
 }, 30_000);

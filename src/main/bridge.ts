@@ -45,12 +45,12 @@ import {
   recordAgentMessage,
   recordChatObservations,
   restoreRecordedConversation,
+  setCallAttributionListener,
   type ChatObservation,
   type PageCallEvidence
 } from './session/recorder.js';
 import {
   autoCompactionReady,
-  claimAutoCompaction,
   findSessionByConversation,
   getSession,
   readRecentEvents,
@@ -156,10 +156,11 @@ const RATE_LIMIT = 900;
  * after everybody had stopped expecting them.
  */
 const COMMAND_DEADLINE_MS = 90_000;
+/** A worker may occupy the broker's `waking` state for one short, absolute attempt. */
+const REVIVAL_DEADLINE_MS = 30_000;
 /**
- * Past this age an ordinary bootstrap/restored command is stale, not pending. An exact-chat
- * revival that already opened its target and is still waiting for page submit-readiness is the
- * deliberate exception: broker `waking` + run identity, rather than elapsed wall time, cancels it.
+ * Past this age an ordinary bootstrap/restored command is stale, not pending. Worker revivals
+ * use the shorter deadline above because their slot is already reserved while they are waking.
  */
 const COMMAND_TTL_MS = 30 * 60_000;
 const MAX_COMMANDS = 20;
@@ -260,7 +261,25 @@ type CommandSpec =
    * stops a revival left over from a retired incarnation from ever reaching the same friendly
    * worker id in a later run.
    */
-  | { type: 'revive'; agent: string; conversationId: string; runId: string }
+  | {
+      type: 'revive';
+      agent: string;
+      conversationId: string;
+      runId: string;
+      /**
+       * Which wake this is: the prime messages it exists to put into that chat.
+       *
+       * Without it a revive command names a worker and nothing else, and two wakes of the same
+       * worker are byte-identical specs — so the second folds into the first by the dedupe
+       * below and inherits a lease, an owner and a delivery marker that belong to a send that
+       * already happened. A worker can be woken, call, finish and be woken again well inside
+       * one command's life, and that second wake is a different piece of work every time: no
+       * two wakes can carry the same messages, because `beginRevival` only ever runs on a
+       * `sleeping` worker and delivery marks what it offered. So this is the identity, the
+       * supersede test and the same-wake dedupe all at once.
+       */
+      wake: string;
+    }
   /**
    * The replacement chat for a Compact & Resume.
    *
@@ -401,7 +420,8 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     port,
     paired: stored !== null && stored !== BROWSER_DISCONNECTED,
     present: browserPresent(),
-    lastSeenAt
+    lastSeenAt,
+    extensionVersion
   };
 }
 
@@ -944,7 +964,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
   if (route === '/status') {
     const live = liveConversations();
-    return json(res, 200, { ok: true, conversations: live, commands: commands.length }, origin);
+    // The extension's maintenance pass, and the whole conversation about repairs: `repaired`
+    // reports the one it was last handed and has now carried out, and `repair` is the next one
+    // for it — the chat whose local tool calls stopped being attributable to it, see
+    // repairUnattributedChat. Reporting first is what makes a pass that says nothing mean the
+    // last repair did not happen. Null, which is almost always, costs this pass one request.
+    const repaired = url.searchParams.get('repaired');
+    if (repaired) confirmRepair(repaired.slice(0, 64));
+    return json(res, 200, { ok: true, conversations: live, commands: commands.length, repair: takePendingRepair() }, origin);
   }
 
   if (route === '/correlations' && req.method === 'POST') {
@@ -1408,58 +1435,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // has just been reloaded into a turn already in flight adopts this instead of
         // minting a second id for the same run. See liveConversations().
         activeTurnId: live.activeTurnId ?? null,
+        // Unattributed-activity recovery, delivered on the poll this exact conversation already
+        // makes. Nothing else can address one document: a URL open would make a second tab of a
+        // chat that is already on screen. Taken away by the first poll that reads it.
         ...(retiredWorker ? { retiredWorker } : {})
       },
       origin
     );
-  }
-
-  /**
-   * Claims the one durable automatic-compaction edge for this chat.
-   *
-   * This is intentionally separate from `/compact`: the browser claims *before* it starts
-   * the stop-and-settle barrier. A failed barrier, reload or lost response can therefore
-   * never turn one threshold crossing into an automatic retry loop.
-   */
-  if (route === '/compact/claim-auto' && req.method === 'POST') {
-    let body: Record<string, unknown>;
-    try {
-      body = (await readBody(req)) as Record<string, unknown>;
-    } catch (err) {
-      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
-      return json(res, 400, { error: 'bad_request' }, origin);
-    }
-    const id = conversationId(body['conversationId']);
-    if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
-    if (goalWorkerChat(id)) {
-      return json(
-        res,
-        409,
-        {
-          error: 'worker_compaction_disabled',
-          message: 'Worker chats stay in their existing conversation so the prime can revive them safely.'
-        },
-        origin
-      );
-    }
-    const live = liveConversations().find((entry) => entry.conversationId === id);
-    const known = live ? null : await findSessionByConversation(id, { requireUnique: true });
-    const sessionId = live?.sessionId ?? known?.id ?? null;
-    if (!sessionId) {
-      return json(
-        res,
-        409,
-        { error: 'session_not_recorded', message: 'This chat has no recorded local session to compact.' },
-        origin
-      );
-    }
-    // A claim is only meaningful while this chat is still mid-turn: an automatic compaction
-    // is a handoff *out of work in progress*, and once the answer has landed there is
-    // nothing left to carry across. Checked again inside the durable write, so a turn that
-    // finishes while the claim is queued leaves the trigger unspent for the next one.
-    if (!chatIsWorking(id)) return json(res, 200, { claimed: false, sessionId }, origin);
-    const claimed = await claimAutoCompaction(sessionId, id, () => chatIsWorking(id));
-    return json(res, 200, { claimed, sessionId }, origin);
   }
 
   /**
@@ -1901,6 +1883,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // does nothing, which is the point: a stale marker must never type anything.
       return json(res, 404, { error: 'no_such_command' }, origin);
     }
+    if (revivalDeliveryProven(command)) {
+      // The browser send already crossed its semantic boundary. Keep the durable command only
+      // as the original 30-second liveness clock; never hand its text to any document again.
+      return json(res, 409, { error: 'command_already_sent', final: true }, origin);
+    }
     if (command.spec.type === 'revive' && !revivalFor(command.spec.agent)) {
       // tidyCommands() above normally retires these. This is the fail-closed twin of that:
       // an empty revival has no message of the prime's to type, and a page must never be
@@ -2082,7 +2069,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           workerRevivalDeliveredSince(revive.agent, conversation, command.id, command.claimedAt);
         // The send is an *offer*, not an acknowledgement: the words are in the worker's chat,
         // and the worker's own next authenticated call is what retires them from its inbox.
-        const woke = revival ? noteWorkerRevived(revive.agent, conversation, revival.messageIds, command.id) : alreadySent;
+        const woke = alreadySent || (revival ? noteWorkerRevived(revive.agent, conversation, revival.messageIds, command.id) : false);
         if (woke) {
           receipt = {
             id,
@@ -2312,6 +2299,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         logWarn(`bridge: worker state for ${specKey(command.spec)} is not durable yet — ${err instanceof Error ? err.message : String(err)}`);
         return json(res, 503, { error: 'worker_state_not_durable', retryable: true }, origin);
       }
+    }
+
+    if (command.spec.type === 'revive' && receipt.committed) {
+      // Delivery is not worker liveness. Leave the exact leased command (and its original
+      // createdAt deadline) in place. Its durable broker offer makes retries idempotent, while
+      // nextDeliverable() treats it as non-deliverable so it neither resends nor blocks siblings.
+      logInfo(`bridge: ${specKey(command.spec)} was delivered; waiting for attributed worker activity`);
+      changed();
+      void deliver();
+      return json(res, 200, receiptReply(receipt), origin);
     }
 
     if (!(await finalizeCommand(command, receipt))) {
@@ -2673,7 +2670,7 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
       // is the first moment anything can reopen that tab for it.
       dropReviveRequestListener?.();
       dropReviveRequestListener = onReviveRequest((revivals: WorkerRevival[]) => {
-        for (const revival of revivals) queueWorkerRevival(revival.id, revival.conversationId);
+        for (const revival of revivals) queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds);
       });
       // When a run ends — cleared in the app, finished, or taken over by another chat —
       // its worker chats must stop existing everywhere at once. A queued bootstrap that
@@ -2698,6 +2695,8 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
         void runStaleSwarmSweep().catch((err: Error) => logWarn(`stale swarm sweep failed: ${err.message}`));
       }, STALE_SWARM_SWEEP_MS);
       staleSwarmTimer.unref?.();
+      // The recorder decides when a call is Unattributed; this owns what that is worth.
+      setCallAttributionListener(noteCallAttribution);
       bridgeRecovering = false;
       // Anything restored from the previous run goes out now rather than waiting for a
       // browser to come and ask.
@@ -2745,6 +2744,8 @@ export async function stopBridge(): Promise<void> {
     dropReviveRequestListener = null;
     if (staleSwarmTimer) clearInterval(staleSwarmTimer);
     staleSwarmTimer = null;
+    setCallAttributionListener(null);
+    clearUnattributedIncident();
     await new Promise<void>((resolve) => {
       // Stop admission and drain accepted extension writes. Abruptly destroying sockets here
       // could lose an /events or /closed item after Chrome had already handed it to the app.
@@ -3278,11 +3279,24 @@ export function queueWorkerBootstrap(agent: string, task: string): BridgeCommand
  * inbox when the page asks for them, so a revival that waits in the queue hands over what is
  * true at hand-out time rather than a stale snapshot.
  */
-export function queueWorkerRevival(agent: string, conversationId: string): BridgeCommand | null {
+export function queueWorkerRevival(
+  agent: string,
+  conversationId: string,
+  wake: readonly string[]
+): BridgeCommand | null {
   const runId = currentRunId();
   // Same rule as a bootstrap: authority for one concrete broker incarnation, or nothing.
   if (!runId || !conversationId) return null;
-  const command = queue({ type: 'revive', agent, conversationId, runId });
+  // An empty wake is not a wake. The broker republishes its whole `waking` list on every
+  // restart and on any staging that touches it, and a worker whose words the browser has
+  // already typed plans nothing further — its own call is what ends the wake, not another
+  // send. Superseding the command it is already living under would restart the one absolute
+  // deadline it has and open its tab a second time to type nothing.
+  const carried = commands.find((entry) => entry.spec.type === 'revive' && entry.spec.agent === agent);
+  if (wake.length === 0 && carried) return describe(carried, null);
+  const command = queue({ type: 'revive', agent, conversationId, runId, wake: wake.join(' ') });
+  // Start the waking clock at broker admission, not only after a browser accepts the command.
+  armDeadline(command);
   deliver();
   return describe(command, null);
 }
@@ -3322,6 +3336,11 @@ export function setBrowserOpener(open: ((url: string) => Promise<void>) | null):
   openInBrowser = open;
 }
 
+/** The one place this app writes a ChatGPT conversation URL. */
+export function chatUrl(conversationId: string): string {
+  return `https://chatgpt.com/c/${encodeURIComponent(conversationId)}`;
+}
+
 /** Where the app sends the browser. The marker is an id, not a credential. */
 export function commandUrl(id: string, conversationId?: string | null): string {
   // Both a query and a fragment: ChatGPT is a single-page app that rewrites its own URL
@@ -3332,8 +3351,261 @@ export function commandUrl(id: string, conversationId?: string | null): string {
   // A continuation opens the worker's own conversation rather than a new one. The page
   // still has to redeem the marker, and the command it gets back names this same
   // conversation, so the two have to agree before anything is typed.
-  const base = conversationId ? `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` : 'https://chatgpt.com/';
+  const base = conversationId ? chatUrl(conversationId) : 'https://chatgpt.com/';
   return `${base}?${marker}#${marker}`;
+}
+
+// ------------------------------------------------- unattributed-activity recovery
+
+/**
+ * How long one Unattributed incident is given to prove itself wrong.
+ *
+ * Unattributed activity means a chat is running tools while the request-id join is broken —
+ * usually because that page's content script or Fiber helper died under it. It never says
+ * which chat, so nothing here guesses one. It is deliberately slow to arm: the live probes in
+ * docs/chatgpt-turn-signals.md show ChatGPT can sit for more than a minute on a genuinely live
+ * request, so silence is never read as failure. Only the recorder's own post-grace Unattributed
+ * verdict starts this clock, and only the recorder's attributed verdicts end it.
+ */
+const UNATTRIBUTED_REPAIR_MS = 20_000;
+
+interface UnattributedIncident {
+  timer: NodeJS.Timeout;
+  /** Chats whose calls kept being attributed while this incident was open. Not the broken one. */
+  proven: Set<string>;
+}
+
+let unattributedIncident: UnattributedIncident | null = null;
+
+/**
+ * One repair per chat, and how far along it is.
+ *
+ *   `queued`  decided, and waiting for the browser to collect it.
+ *   `handed`  the browser has it. Nothing is known yet about whether it worked.
+ *   `done`    it was carried out — that exact tab reloaded, or the chat reopened.
+ *
+ * Only `done` suppresses a further repair, because only `done` is an action whose effect there
+ * is any point waiting to observe. A repair the browser could not carry out — no tab of that
+ * chat, two of them, a reload that threw — must go back in the queue, or the one failure this
+ * whole path exists for would be recorded as handled and never tried again.
+ *
+ * `endedTurns` is how many turns the chat had already finished when this repair was filed, and
+ * one more of them is what retires the entry: the broken turn is over. Without that, this map
+ * would be permanent conversation state, and one repaired turn that never makes another tool
+ * call would block every later broken turn in the same chat.
+ *
+ * A count rather than the turn's own id, because the repair changes the id. The replacement
+ * document re-observes a generation that never ended and names it something new, so a repair
+ * pinned to an id looked spent seconds after its own reload landed — and while ChatGPT stayed
+ * broken, the next incident reloaded the same chat again, and the one after that again. A turn
+ * that has actually ended is the only thing that means the failure this repair answered is
+ * over, and it says so whether or not the broken turn ever named itself.
+ */
+interface Repair {
+  endedTurns: number;
+  state: 'queued' | 'handed' | 'done';
+  /**
+   * Names this exact handout, and is what a receipt has to quote to be believed.
+   *
+   * The conversation id is not enough to fence it. A repair is scoped to one broken turn, so
+   * one chat can hold several over its life: a receipt for the turn-1 repair, delayed behind a
+   * turn that ended and a turn-2 repair that took its place, would otherwise mark turn 2
+   * repaired — and turn 2, still broken and now recorded as done, would never be repaired at
+   * all. Minted per handout rather than per turn because a turn that names itself is not
+   * something this can insist on.
+   */
+  token: string;
+}
+
+const repairsInFlight = new Map<string, Repair>();
+
+/**
+ * Every chat this app can presently prove is mid-turn, and whether it still has a document.
+ *
+ * Two exact populations, and nothing else qualifies: a conversation whose own page reports it
+ * is generating, and a worker whose page went away mid-turn (`detached`). An idle chat, a chat
+ * that finished, and one the user stopped all fail `generating` and never appear here — which
+ * is why this needs no turn-outcome lookup of its own.
+ *
+ * `detached` is the difference between the two repairs, and it is the one thing this app knows
+ * first-hand: that worker's tab reported itself closed, so there is nothing to reload and
+ * opening the chat cannot duplicate a tab. For every other candidate the browser is the only
+ * authority on whether a tab exists — see the repair handed out by `/status`.
+ */
+function repairCandidates(): Array<{ conversationId: string; detached: boolean; endedTurns: number }> {
+  const live = liveConversations();
+  const candidates = live
+    .filter((entry) => entry.generating)
+    .map((entry) => ({ conversationId: entry.conversationId, detached: false, endedTurns: entry.endedTurns }));
+  for (const agent of swarmState().agents) {
+    if (agent.state !== 'detached' || !agent.conversationId) continue;
+    if (candidates.some((entry) => entry.conversationId === agent.conversationId)) continue;
+    // Nothing is counted: a detached worker's chat is closed, and reopening it files nothing
+    // that would need retiring. Its own replacement page reporting is what ends the repair.
+    candidates.push({ conversationId: agent.conversationId, detached: true, endedTurns: 0 });
+  }
+  return candidates;
+}
+
+/**
+ * Forgets repairs whose broken turn is over.
+ *
+ * One rule, because one fact means what this needs: the chat has finished a turn since the
+ * repair was filed. A repair answers one broken turn, so that turn ending is what spends it,
+ * whether or not the browser ever carried it out and whether or not a new turn has begun since.
+ *
+ * Everything a turn id could have been asked here is worse. The reload this path performs mints
+ * a new one for a generation that never ended, so id inequality reads a repair that is working
+ * as a repair that is spent — and a join the reload did not fix goes on producing unattributed
+ * calls, so the next incident reloaded the same chat again, and the one after that again, every
+ * twenty seconds for as long as ChatGPT stayed broken. One reload per failure; ten reloads
+ * prove only that the first nine did not help. Generation stopping is not the fact either: a
+ * turn that ends and a turn that begins can reach this app in one batch, and by the time this
+ * runs the chat is simply generating again.
+ *
+ * What ends a repair early is proof it worked: an attributed call from that chat, in
+ * `noteCallAttribution`. That is the only thing that says the join this repair existed to
+ * restore is restored.
+ *
+ * A chat with no live record at all is judged by nothing here: that is a detached worker whose
+ * conversation was closed, and its reopen is retired when its replacement page reports — see
+ * `repairCandidates` — or by the attributed call that proves its join.
+ */
+function retireSpentRepairs(): void {
+  const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
+  for (const [conversationId, repair] of repairsInFlight) {
+    const entry = live.get(conversationId);
+    if (entry && entry.endedTurns > repair.endedTurns) repairsInFlight.delete(conversationId);
+  }
+}
+
+/**
+ * The recorder's verdict on one finished call: the conversation it proved, or null for a call
+ * that finished the request-id grace with no page evidence at all.
+ *
+ * An attributed call is the only evidence that a chat's join works — page liveness is not, since
+ * a document can keep reporting turns and progress while its request-id reporting is dead. So an
+ * attributed call is what clears a chat, and an unattributed one is what opens the incident. The
+ * incident opens once: a broken join produces a call every few seconds, and a deadline that
+ * renewed on each of them would never fire.
+ *
+ * Clearing the chat's repair here is also what allows the next one. A repair that was carried
+ * out is kept until exactly this line runs, so that a reload which did not help is not repeated
+ * — see `retireSpentRepairs`. This call is the proof that it did help.
+ */
+function noteCallAttribution(conversationId: string | null): void {
+  if (conversationId) {
+    unattributedIncident?.proven.add(conversationId);
+    repairsInFlight.delete(conversationId);
+    return;
+  }
+  if (unattributedIncident) return;
+  const timer = setTimeout(repairUnattributedChat, UNATTRIBUTED_REPAIR_MS);
+  timer.unref?.();
+  unattributedIncident = { timer, proven: new Set() };
+}
+
+/**
+ * Reattaches the one chat the app can name, or leaves every chat alone.
+ *
+ * Exactly one candidate is the whole test. Two chats that are both mid-turn and have both gone
+ * quiet on attribution are indistinguishable from here, and reloading either would be a guess at
+ * the cost of a running turn; none means whatever was calling has already stopped or proved
+ * itself. Both answers are "do nothing", which is why there is no fallback below this line.
+ */
+function repairUnattributedChat(): void {
+  const incident = unattributedIncident;
+  unattributedIncident = null;
+  if (!incident) return;
+  retireSpentRepairs();
+  const candidates = repairCandidates().filter(
+    (entry) => !incident.proven.has(entry.conversationId) && !repairsInFlight.has(entry.conversationId)
+  );
+  const [target] = candidates;
+  if (candidates.length !== 1 || !target) {
+    if (candidates.length > 1) {
+      logInfo(`bridge: unattributed activity — ${candidates.length} chats could be the one; leaving them alone`);
+    }
+    return;
+  }
+  if (!target.detached) {
+    // Queued for the browser, which owns the tab this chat is in and can reload that exact
+    // document. Opening the url from here would put a second tab of a chat that is still on
+    // screen — the duplicate this whole path exists to avoid.
+    repairsInFlight.set(target.conversationId, { endedTurns: target.endedTurns, state: 'queued', token: '' });
+    logInfo(`bridge: unattributed activity — asking the browser to reload ${target.conversationId}`);
+    return;
+  }
+  // Nothing can open the chat, so nothing was attempted: the next incident finds this worker
+  // exactly as it was.
+  if (!openInBrowser) return;
+  logInfo(`bridge: unattributed activity — reopening ${target.conversationId}`);
+  // Nothing is recorded about this one, and that is the point. `openInBrowser` resolving means
+  // the browser accepted a url, not that ChatGPT loaded that conversation and bound it — so
+  // filing it as a repair carried out would suppress every later incident for a worker whose
+  // replacement page never arrived, and suppress it *permanently*: a chat that never reports has
+  // no live record to retire the entry, and a broken join is precisely what never produces the
+  // attributed call that would clear it.
+  //
+  // The proof this needs already exists, is exact, and is not a timeout. A page reporting for
+  // that conversation is what takes its worker out of `detached` (see noteAgentAlive's `page`
+  // source), and a worker that is not detached is not a candidate here. So a reopen that
+  // actually worked suppresses the next incident by itself, and one that quietly did nothing is
+  // tried again — which is the only reason to try at all.
+  void openInBrowser(chatUrl(target.conversationId)).catch((err: Error) =>
+    logWarn(`unattributed chat repair failed: ${err.message}`)
+  );
+}
+
+/**
+ * The repair for the browser to carry out now, if there is one.
+ *
+ * A conversation to reload and the token that names this handout. Which tab that is, whether it
+ * still exists, and whether there is exactly one of it are questions only the browser's own tab
+ * registry can answer, and it answers them there.
+ *
+ * A maintenance pass that arrives without confirming the repair it was last handed *is* the
+ * verdict on it. There is nothing else to wait for — the browser reports success in the same
+ * breath as asking for more work — so an unconfirmed handout goes back in the queue and is
+ * handed out again here. That is what keeps a repair the browser could not carry out from
+ * being filed as one that worked.
+ */
+function takePendingRepair(): { conversationId: string; token: string } | null {
+  retireSpentRepairs();
+  for (const repair of repairsInFlight.values()) {
+    if (repair.state === 'handed') repair.state = 'queued';
+  }
+  for (const [conversationId, repair] of repairsInFlight) {
+    if (repair.state !== 'queued') continue;
+    repair.state = 'handed';
+    // A fresh token every time it goes out. A handout that was not carried out is dead the
+    // moment it is re-queued, so a receipt that arrives for it later cannot close anything.
+    repair.token = randomBytes(9).toString('base64url');
+    return { conversationId, token: repair.token };
+  }
+  return null;
+}
+
+/**
+ * That repair actually happened: this exact chat's tab reloaded.
+ *
+ * The token, not the conversation, is what is answered here. A receipt that names a handout
+ * this app is no longer waiting on - an older turn's, or one already re-queued - matches
+ * nothing and closes nothing, which is the only safe reading of it.
+ */
+function confirmRepair(token: string): void {
+  for (const repair of repairsInFlight.values()) {
+    if (repair.state === 'handed' && repair.token === token) {
+      repair.state = 'done';
+      return;
+    }
+  }
+}
+
+function clearUnattributedIncident(): void {
+  if (unattributedIncident) clearTimeout(unattributedIncident.timer);
+  unattributedIncident = null;
+  repairsInFlight.clear();
 }
 
 /**
@@ -3413,30 +3685,32 @@ function waitingForRevivalReadiness(command: Command): boolean {
   return command.spec.type === 'revive' && command.claimedAt !== null && command.owner === null;
 }
 
-function commandDeadlineDelay(command: Command, now = Date.now()): number | null {
-  // A revival's first lease belongs to the *browser-open attempt*, not yet to a document. The
-  // exact worker chat may still be rendering the assistant message that contains agents.finish,
-  // so the content script deliberately refuses to redeem until that page is submit-ready. That
-  // wait must survive a tab reload/browser restart without turning ordinary ChatGPT busyness into
-  // a failed broker revival. Once a document actually redeems (`owner !== null`), the ordinary
-  // short acknowledgement deadline applies again: text may be about to cross the irreversible
-  // send boundary and a dead document must not own it indefinitely.
-  if (waitingForRevivalReadiness(command)) return null;
+function revivalDeliveryProven(command: Command): boolean {
+  return (
+    command.spec.type === 'revive' &&
+    command.claimedAt !== null &&
+    workerRevivalDeliveredSince(
+      command.spec.agent,
+      command.spec.conversationId,
+      command.id,
+      command.claimedAt
+    )
+  );
+}
+
+const revivalNotDeliverable = (command: Command): boolean =>
+  waitingForRevivalReadiness(command) || revivalDeliveryProven(command);
+
+function commandDeadlineDelay(command: Command, now = Date.now()): number {
+  // Revival is one absolute waking attempt. Redeeming the marked page must not renew it and leave
+  // a worker occupying `waking` indefinitely when the page never sends or reports valid activity.
+  if (command.spec.type === 'revive') return command.createdAt + REVIVAL_DEADLINE_MS - now;
   const claimedAt = command.claimedAt ?? now;
   return claimedAt + COMMAND_DEADLINE_MS - now;
 }
 
 function armDeadline(command: Command, delay = commandDeadlineDelay(command)): void {
   if (command.timer) clearTimeout(command.timer);
-  if (delay === null) {
-    // An exact-chat revival waiting for submit-readiness has no wall-clock failure. Its broker
-    // `waking` reservation and run/conversation identity are the cancellation authority instead:
-    // tidyCommands/onSwarmEnd retire it as soon as any of those facts changes. This is what lets
-    // a browser stay closed or a ChatGPT turn stay busy for arbitrarily long without converting
-    // page availability into a false worker failure.
-    command.timer = null;
-    return;
-  }
   command.timer = setTimeout(() => {
     command.timer = null;
     expire(command);
@@ -3449,9 +3723,8 @@ function rearmRetainedCommandDeadlines(): void {
   const now = Date.now();
   const expired: Command[] = [];
   for (const command of commands) {
-    if (command.claimedAt === null || command.timer) continue;
+    if ((command.claimedAt === null && command.spec.type !== 'revive') || command.timer) continue;
     const remaining = commandDeadlineDelay(command, now);
-    if (remaining === null) continue;
     if (remaining > 0) armDeadline(command, remaining);
     else expired.push(command);
   }
@@ -3690,7 +3963,10 @@ function tidyCommands(): void {
       retire(command, 'its worker is bound and running');
       continue;
     }
-    if (now - command.createdAt > COMMAND_TTL_MS && !waitingForRevivalReadiness(command)) {
+    const stale = command.spec.type === 'revive'
+      ? now - command.createdAt >= REVIVAL_DEADLINE_MS
+      : now - command.createdAt > COMMAND_TTL_MS;
+    if (stale) {
       drop(command, 'it has been waiting too long to still be what the user expects');
     }
   }
@@ -3699,8 +3975,7 @@ function tidyCommands(): void {
 /** Whether a page is already working on this command, with time still on its deadline. */
 const isLeased = (command: Command): boolean => {
   if (command.claimedAt === null) return false;
-  if (waitingForRevivalReadiness(command)) return true;
-  if (Date.now() - command.claimedAt < COMMAND_DEADLINE_MS) return true;
+  if (commandDeadlineDelay(command) > 0) return true;
   if (command.spec.type !== 'resume') return false;
   const state = continuationByToken(command.spec.token)?.state;
   return state === 'committing' || state === 'committed';
@@ -3720,8 +3995,8 @@ function nextDeliverable(): Command | null {
   // open attempt. It must stay durable without monopolising the global browser-delivery slot:
   // unrelated workers/resumes can still open their own marker-addressed pages while this one
   // waits. A document-owned lease remains exclusive and still blocks the next irreversible send.
-  if (commands.some((command) => isLeased(command) && !waitingForRevivalReadiness(command))) return null;
-  return commands.find((command) => !waitingForRevivalReadiness(command)) ?? null;
+  if (commands.some((command) => isLeased(command) && !revivalNotDeliverable(command))) return null;
+  return commands.find((command) => !revivalNotDeliverable(command)) ?? null;
 }
 
 /**
@@ -3864,7 +4139,15 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
     if (revive.runId !== currentRunId()) return null;
     const revivalState = swarmState().agents.find((entry) => entry.id === revive.agent && entry.role === 'worker')?.state;
     if (revivalState !== 'waking' && revivalState !== 'active') return null;
-    return { type: 'revive', agent: revive.agent, conversationId: revive.conversationId, runId: revive.runId };
+    return {
+      type: 'revive',
+      agent: revive.agent,
+      conversationId: revive.conversationId,
+      runId: revive.runId,
+      // A row written before wakes were named restores as the unnamed wake. The live broker
+      // still holds the messages, so the next real wake for this worker supersedes it.
+      wake: typeof revive.wake === 'string' ? revive.wake : ''
+    };
   }
   if (
     raw.type === 'resume' &&
@@ -3958,9 +4241,10 @@ function planCommandRestore(
   for (const { raw, spec, createdAt } of durableCandidates.values()) {
     if (spec.type === 'resume') resumeTokens.push({ sessionId: spec.sessionId, token: spec.token });
     const persistedLeased = version !== 1 && raw.phase === 'leased';
-    const persistedWaitingRevival =
-      spec.type === 'revive' && persistedLeased && (raw.owner === null || raw.owner === undefined);
-    if (now - createdAt > COMMAND_TTL_MS && !persistedWaitingRevival) {
+    const stale = spec.type === 'revive'
+      ? now - createdAt >= REVIVAL_DEADLINE_MS
+      : now - createdAt > COMMAND_TTL_MS;
+    if (stale) {
       if (spec.type === 'revive') expiredRevivals.push({ id: raw.id!, spec });
       continue;
     }
@@ -3985,18 +4269,14 @@ function planCommandRestore(
     restored += 1;
   }
 
-  // Retained commands normally win over disk, but TTL still applies to transports that have not
-  // crossed the revival readiness boundary. An owner-null leased revival is different: its exact
-  // chat was opened and is intentionally waiting on page submit-readiness, so the broker's durable
-  // `waking` reservation/run identity, not wall time, owns cancellation. A newer retained revival
-  // is not touched by an older expired disk row because disk candidates for its key were discarded
-  // above before expiry was considered.
+  // Retained commands normally win over disk, but the same absolute waking deadline still applies.
+  // A newer retained revival is not touched by an older expired disk row because disk candidates
+  // for its key were discarded above before expiry was considered.
   const expiredRetainedRevivalIds = new Set<string>();
   for (const command of plannedCommands) {
     if (
       command.spec.type !== 'revive' ||
-      waitingForRevivalReadiness(command) ||
-      now - command.createdAt <= COMMAND_TTL_MS
+      now - command.createdAt < REVIVAL_DEADLINE_MS
     ) continue;
     expiredRevivals.push({ id: command.id, spec: command.spec });
     expiredRetainedRevivalIds.add(command.id);
@@ -4018,12 +4298,10 @@ function planCommandRestore(
  * Reloads commands left over from a previous run.
  *
  * Ordinary commands older than the TTL are discarded rather than acted on: reopening the app
- * the next morning must not spray yesterday's chats across the browser. The exception is a
- * persisted owner-null revival lease: that exact worker chat has already been opened and the
- * broker still owns a durable `waking` reservation for it, so browser/page busyness may wait as
- * long as necessary without manufacturing a failed wake. Run turnover or loss of that broker
- * reservation retires it instead. Version 2 persists the queued/leased phase and document owner;
- * version 1 is migrated conservatively, including resume commands whose continuation WAL survived.
+ * the next morning must not spray yesterday's chats across the browser. A revival is stricter:
+ * after thirty seconds it releases the broker's `waking` reservation and the worker becomes
+ * sleeping/revivable again. Version 2 persists the queued/leased phase and document owner; version
+ * 1 is migrated conservatively, including resume commands whose continuation WAL survived.
  */
 export async function restoreCommands(): Promise<void> {
   const saved = await readDurable<{ version?: number; commands?: unknown; receipts?: unknown }>(COMMANDS_STATE);
@@ -4112,6 +4390,7 @@ export function resetBridgeForTests(): void {
   commandRedeems.clear();
   bridgeRecovering = false;
   bridgeShutdownRequested = false;
+  clearUnattributedIncident();
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;

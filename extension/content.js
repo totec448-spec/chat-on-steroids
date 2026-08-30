@@ -108,6 +108,8 @@
   const STATUS_MS = 15_000;
   /** Longer than any honest tool call: past this a silent turn is called stalled. */
   const STALL_MS = 10 * 60 * 1000;
+  /** Claims the one reload a broken turn gets, and survives the reload that carries it out. */
+  const BROKEN_TURN_RELOAD_KEY = 'clf-broken-turn-reload';
   /** How long the button says "Starting…" before believing something went wrong. */
   const PRESS_GRACE_MS = 12_000;
   /** Persistent popup preference. On by default as of 1.7.4; the popup can turn it off. */
@@ -594,8 +596,8 @@
   /**
    * The app's answer to "may this chat compact itself right now?", refreshed every poll.
    *
-   * True while the chat is over the configured threshold, still holds its one automatic
-   * compaction, and has a turn open. It is a live reading rather than a remembered edge, so
+   * True while the chat is over the configured threshold and has a turn open. It is a live
+   * reading rather than a remembered edge, so
    * it goes false again on its own the moment the answer lands.
    */
   let autoCompactReady = false;
@@ -624,8 +626,31 @@
   let goalTurnId = null;
   /** What this tab is doing about the goal loop right now. '' when it is doing nothing. */
   let goalPhase = '';
-  /** The last goal failure, in the app's own words, kept until the next turn replaces it. */
+  /** Why the loop is where it is, in the app's own words. Empty unless something stopped. */
   let goalError = '';
+  /**
+   * Moves the goal loop to a step, says why, and shows it. The only way to do any of the three.
+   *
+   * The panel is drawn from these two fields, and the reason outranks the step: any non-empty
+   * `goalError` draws "The goal loop stopped", whatever the phase says. So they are one fact
+   * and not two, and starting a step clears the reason the previous one ended with - by
+   * construction, rather than by every caller remembering to. Assigning them apart is what
+   * froze the panel on a retryable OpenRouter failure: the retry did run and did set
+   * `requesting`, but the stale reason kept the stopped card up until a message appeared
+   * fifteen seconds later, so the loop looked dead while it was working.
+   *
+   * Redrawing here rather than at the call sites is the other half of that. A phase nobody can
+   * see is a phase nobody has, and "remember to repaint" is a rule that need only be forgotten
+   * once, at any one of twenty-odd assignments, to strand the user in front of a stale card.
+   */
+  function setGoalPhase(phase, reason = '') {
+    if (goalPhase === phase && goalError === reason) return;
+    goalPhase = phase;
+    goalError = reason;
+    injectStage();
+    renderControl();
+  }
+
   /** Guards the settle watch and the send, so one finished turn produces one message. */
   let goalBusy = false;
   /** When this tab started trying to type a ready draft, so a held composer eventually gives up. */
@@ -1119,9 +1144,8 @@
     // exits; what it leaves behind is what this clears.
     goalTurnId = null;
     goalConfig = null;
-    goalPhase = '';
     goalDraft = null;
-    goalError = '';
+    setGoalPhase('');
     goalTypingSince = 0;
     dismissedGoalStage = null;
     // A specific goal belongs to the chat it was written for. Carrying a pending one into a
@@ -1351,10 +1375,85 @@
     if (fiberPresent && answerText(turn).length > 0 && fiberQuietTerminal(turn)) {
       return { outcome: 'completed' };
     }
-    if (turnStartedAt > 0 && Date.now() - lastChangeAt > STALL_MS) {
+    if (turnStalled()) {
       return { outcome: 'stalled', detail: 'no visible output and no progress for ten minutes' };
     }
     return { outcome: 'unknown' };
+  }
+
+  /**
+   * A generation that has stopped moving: one is open, and nothing has changed it in ten
+   * minutes. `turnStartedAt` is set when a generation opens and cleared when it closes, so it
+   * is what makes `lastChangeAt` mean anything.
+   */
+  function turnStalled() {
+    return turnStartedAt > 0 && Date.now() - lastChangeAt > STALL_MS;
+  }
+
+  function latestUserMessageKey(turns) {
+    for (let at = turns.length - 1; at >= 0; at--) {
+      const turn = turns[at];
+      if (!turn || turn.role !== 'user') continue;
+      const message = CLF_DOM.messagesIn(turn).findLast((entry) => entry && entry.role === 'user' && entry.id);
+      if (message) return String(message.id);
+    }
+    return '';
+  }
+
+  /**
+   * Reload the exact owned chat once when this turn's answer is not going to arrive by itself.
+   *
+   * Two things break a turn past the point of waiting, and the recovery for both is the same
+   * page fetched again:
+   *
+   * - **ChatGPT says so.** Its "Connection interrupted" notice, once generation has gone quiet.
+   * - **Nothing says anything.** The stop button is still on screen and the page has produced
+   *   no output, no tool activity and no DOM change for ten minutes. This half used to end at a
+   *   single logged `chat_error`: the `stalled` outcome exists, but the only code that reads it
+   *   runs in the branch where generation has *already* gone quiet, so a page frozen mid-turn
+   *   sat there for as long as the tab stayed open.
+   *
+   * One primitive and one key — conversation plus the latest user message — so a broken turn
+   * gets one reload however it broke, and a page that reloads back into the same broken turn
+   * does not reload again. sessionStorage survives that reload, which is what makes the dedupe
+   * durable without another authority.
+   *
+   * The key is written before asking and given back if the ask fails, so it is a claim on
+   * the attempt rather than a record of it. Keeping it on a refusal would be the same
+   * mistake as calling a repair done because it was handed out: a sleeping worker, a
+   * document the worker has since retired, and a chrome.tabs.reload that threw all mean no
+   * page was fetched, and suppressing this chat afterwards strands the frozen turn for the
+   * life of the tab. A reload that succeeded takes this document with it, so nothing here
+   * ever clears a real one.
+   *
+   * A turn the user stopped is never reloaded, in either half. That is a decision, not a fault.
+   */
+  async function maybeReloadBrokenTurn(turns, errors, nowGenerating) {
+    if (userStopped || !conversationId) return;
+    const interrupted =
+      !nowGenerating &&
+      errors.some((error) => /^Connection interrupted\.? Waiting for the complete answer\.?$/i.test(error.text));
+    if (!interrupted && !(nowGenerating && turnStalled())) return;
+    const messageKey = latestUserMessageKey(turns);
+    if (!messageKey) return;
+    const attempt = `${conversationId}\u0000${messageKey}`;
+    try {
+      if (sessionStorage.getItem(BROKEN_TURN_RELOAD_KEY) === attempt) return;
+      sessionStorage.setItem(BROKEN_TURN_RELOAD_KEY, attempt);
+    } catch {
+      return;
+    }
+    const done = await ask({ type: 'reload_owned_chat', conversationId, messageKey });
+    if (done && done.ok === true) return;
+    try {
+      // Only while it is still this attempt's claim. A newer broken turn owns the key by
+      // then, and taking that away would let this one reload the page a second time.
+      if (sessionStorage.getItem(BROKEN_TURN_RELOAD_KEY) === attempt) {
+        sessionStorage.removeItem(BROKEN_TURN_RELOAD_KEY);
+      }
+    } catch {
+      /* Storage that refuses to forget costs one missed retry, never a wrong reload. */
+    }
   }
 
   /**
@@ -1628,9 +1727,8 @@
           pendingObjectiveSent = false;
           goalConfig = null;
           goalDraft = null;
-          goalPhase = '';
-          goalError = '';
           objectiveError = '';
+          setGoalPhase('');
           removeStagePanel();
         }
       }
@@ -1790,6 +1888,7 @@
     for (const error of visibleErrors) {
       if (!errorFirstSeen.has(error.node)) errorFirstSeen.set(error.node, turnId);
     }
+    void maybeReloadBrokenTurn(observedTurns, visibleErrors, nowGenerating);
 
     const turn = generating ? generationTurn(observedTurns) : currentAssistantTurn(observedTurns);
     if (generating && turn && turn.id) {
@@ -5420,7 +5519,7 @@
    * Starts automatic compaction in the middle of the work, which is the only place it helps.
    *
    * The page does not compare `tokens >= threshold` itself — the app owns the number and
-   * says, per poll, whether this chat is over it and still has its one trigger. What the
+   * says, per poll, whether this chat is over it. What the
    * page adds is the half only it can see: ChatGPT is answering *right now*.
    *
    * That condition is the exact inverse of what this used to demand, and the inversion is
@@ -5437,13 +5536,13 @@
       epoch === expectedEpoch &&
       CLF_DOM.conversationId() === expectedConversation;
     if (!current()) return;
-    // Belt-and-suspenders with the bridge role gate. A worker must never emit even the
-    // auto-compaction *claim* command: its conversation is its durable agent identity and the
-    // 400k ceiling only changes whether the next stop can be revived.
+    // Belt-and-suspenders with the bridge role gate. A worker must never start automatic
+    // compaction: its conversation is its durable agent identity and the 400k ceiling only
+    // changes whether the next stop can be revived.
     if (goalConfig && goalConfig.blocked === 'worker') return;
     if (!conversationId || !context || !context.auto || !autoCompactReady) return;
     // Anything already running owns this chat, including a run started by hand.
-    if (nativeBusy || pressedAt > 0) return;
+    if (nativeBusy || pressedAt > 0 || localError) return;
     if (job && job.busy) return;
     // Three views of liveness, and any of them is enough. `CLF_DOM.generating()` flickers
     // false between phases of one answer, so demanding all three would miss long turns at
@@ -5452,16 +5551,9 @@
     // what lets an old 500k conversation be opened and read without being compacted.
     if (!generating && !appActiveTurnId && !CLF_DOM.generating()) return;
 
-    // Consume before touching ChatGPT. If the tab vanishes or the barrier fails after this,
-    // this chat's automatic compaction is spent and the user can still press the button.
-    const claimed = await ask({ type: 'auto_compact_claim', conversationId });
-    if (!current()) return;
-    if (!claimed || claimed.ok !== true || claimed.data?.claimed !== true) {
-      autoCompactReady = false;
-      return;
-    }
-    autoCompactReady = false;
-    if (!current()) return;
+    // The continuation transaction is the durable post-barrier authority. A pre-barrier error
+    // stays local to this generation, blocking poll-driven retry churn; the next real generation
+    // clears it and may try again instead of permanently stranding an over-limit chat.
     await startCompact();
   }
 
@@ -5782,7 +5874,7 @@
       // retried one does not.
       if (!generating && !CLF_DOM.generating() && !goalBusy && !compactCapture && !nativeBusy && !(job && job.busy)) {
         goalTurnId = `objective-${Date.now().toString(36)}`;
-        goalError = '';
+        setGoalPhase('');
         const forId = conversationId;
         const forEpoch = epoch;
         const forTurn = goalTurnId;
@@ -5818,9 +5910,7 @@
     menuEditing = false;
     menuDraft = '';
     closeMenu();
-    goalPhase = 'requesting';
-    goalError = '';
-    injectStage();
+    setGoalPhase('requesting');
     const reply = await ask({ type: 'goal_open', text: goal });
     if (!alive || composerChat().state !== 'new') {
       // This request never proved that *our* opening message was sent. The route may now be an
@@ -5829,45 +5919,35 @@
       pendingObjective = '';
       pendingObjectiveSent = false;
       goalConfig = null;
-      goalPhase = '';
-      injectStage();
+      setGoalPhase('');
       return;
     }
     if (!reply || reply.ok !== true) {
-      goalPhase = 'requesting';
       objectiveError = replyError(reply) || 'the app did not answer';
-      goalError = objectiveError;
-      injectStage();
+      setGoalPhase('requesting', objectiveError);
       return;
     }
     const opening = reply.data && typeof reply.data.reply === 'string' ? reply.data.reply : '';
     if (reply.data && typeof reply.data.model === 'string') goalConfig.model = reply.data.model;
     if (!opening) {
-      goalPhase = 'requesting';
-      goalError = 'the model wrote nothing to open with';
-      injectStage();
+      setGoalPhase('requesting', 'the model wrote nothing to open with');
       return;
     }
-    goalPhase = 'sending';
-    injectStage();
+    setGoalPhase('sending');
     if (!CLF_DOM.insertPrompt(opening)) {
-      goalError = 'the message box was in use, so nothing was sent';
-      injectStage();
+      setGoalPhase('sending', 'the message box was in use, so nothing was sent');
       return;
     }
     await sleep(200);
     const sent = await CLF_DOM.send();
     if (!sent) {
-      goalError = 'ChatGPT would not send the message';
-      injectStage();
+      setGoalPhase('sending', 'ChatGPT would not send the message');
       return;
     }
     // From here the goal outlives this composer: ChatGPT is about to name the conversation,
     // and that name is what the goal is finally saved against. See observe().
     pendingObjectiveSent = true;
-    goalPhase = '';
-    goalError = '';
-    injectStage();
+    setGoalPhase('');
   }
 
   function renderMenu() {
@@ -6151,7 +6231,11 @@
           : state.label;
     control.button.setAttribute('data-clf-tip', meter ? `${tip}\n${meter.tip}` : tip);
     if (menuOpen) renderMenu();
-    control.pill.hidden = state.mode === 'idle' && !state.hint;
+    // The pill carries transient run state — progress, the opened chat, a failure. `idle` and
+    // `off` are neither, and their label is the button's own name: a pill reading "Compact"
+    // beside the Compact button said nothing and spent scarce composer width doing it. Why the
+    // control is off is real information, but it is a sentence, so it lives on the hover tip.
+    control.pill.hidden = state.mode === 'idle' || state.mode === 'off';
     control.cancel.hidden = state.action !== 'cancel';
     // One word, always. The pill sits inside ChatGPT's composer and has a button's width
     // to work with; `label · hint` spent all of it on a sentence that then got ellipsed
@@ -7297,9 +7381,22 @@
   const GOAL_WATCH_MS = 5 * 60_000;
   /** How long a ready draft waits for a composer somebody else is using. */
   const GOAL_TYPING_WINDOW_MS = 2 * 60_000;
+  /**
+   * How long the loop waits before asking again about a turn whose draft failed.
+   *
+   * Long enough that a provider outage costs one small request every quarter minute rather
+   * than a storm, short enough that a passing error is not felt. There is deliberately no
+   * attempt limit: the loop is finished when the model answers, and until then the only
+   * things that end it are the ones that end it anyway — Goal switched off, the user typing,
+   * a new generation, this chat left behind.
+   */
+  const GOAL_RETRY_MS = 15_000;
 
   /** The turn endings worth writing a next message about. See noteGoalTurn for the rest. */
-  const GOAL_CONTINUABLE = new Set(['completed', 'interrupted']);
+  // Goal answers a finished, non-partial reply and nothing else: `completed` carries Fiber's
+  // `end_turn` bit, `stopped` is the user's own decision, and interrupted/failed/stalled/unknown
+  // are turns with no final answer to continue from — those belong to recovery, not to Goal.
+  const GOAL_CONTINUABLE = new Set(['completed']);
 
   /** How long a specific goal may be. Matches MAX_GOAL_OBJECTIVE_CHARS in src/shared/goal.ts. */
   const MAX_OBJECTIVE_CHARS = 4000;
@@ -7333,17 +7430,8 @@
    */
   function noteGoalTurn(ended, outcome, endedTurnId) {
     if (!endedTurnId || !goalUsable()) return;
-    // Not a turn to continue from. `stopped` is the user's own hand on the stop button and
-    // is exactly the turn they are about to say something about themselves; `failed` and
-    // `stalled` describe a turn whose text cannot be trusted to say where the work got to.
-    //
-    // `interrupted` used to be refused with them, and that was wrong. It does not mean the
-    // user stopped anything — endOutcome() reaches it only when `userStopped` is false — it
-    // means ChatGPT closed its own turn early, which is the single moment this loop exists
-    // for. A retained live regression is the whole argument: four consecutive prime turns
-    // ended `interrupted` with "ChatGPT marked the turn interrupted", the answers said in
-    // as many words that work was still unfinished, and the loop declined every one of them
-    // without drawing anything, so from outside it looked like a feature that never ran.
+    // Only a finished, non-partial answer. See GOAL_CONTINUABLE for why every other outcome —
+    // including `interrupted` — belongs to recovery rather than to this loop.
     if (!GOAL_CONTINUABLE.has(outcome)) return;
     // A compaction owns this turn: its answer is the brief, not a message to reply to, and
     // the chat is about to be replaced anyway.
@@ -7353,7 +7441,7 @@
     if (goalTurnId === endedTurnId) return;
     if (goalBusy) return;
     goalTurnId = endedTurnId;
-    goalError = '';
+    setGoalPhase('');
     // Goal is now authoritative for this exact completed turn. Raising the sender tab is a
     // courtesy after that decision, never an input to it: hidden tabs take this same path and a
     // failed focus request must not stop the draft. Claim goalTurnId first so the visibility
@@ -7447,7 +7535,7 @@
    */
   async function watchGoalTurn(ended, forTurn) {
     goalBusy = true;
-    goalPhase = 'settling';
+    setGoalPhase('settling');
     const forId = conversationId;
     const forEpoch = epoch;
     const current = () => alive && conversationId === forId && epoch === forEpoch && goalTurnId === forTurn;
@@ -7460,9 +7548,9 @@
         await sleep(GOAL_POLL_MS);
         if (!current()) return;
         // Somebody — the user, or a turn ChatGPT started on its own — is talking again.
-        if (generating) return void (goalPhase = '');
-        if (compactCapture || nativeBusy || (job && job.busy)) return void (goalPhase = '');
-        if (!goalUsable()) return void (goalPhase = '');
+        if (generating) return void setGoalPhase('');
+        if (compactCapture || nativeBusy || (job && job.busy)) return void setGoalPhase('');
+        if (!goalUsable()) return void setGoalPhase('');
         const nextText = briefSoFar(ended, text);
         const nextActivity = briefActivityMark(ended);
         const pending = await peekPendingTools();
@@ -7484,14 +7572,55 @@
         // of them means the conversation moved on and there is nothing to report; these two
         // mean the loop gave up on a turn it was watching, and now say which.
         if (!text.trim()) {
-          goalError = 'that answer had no text to continue from';
-          injectStage();
+          setGoalPhase('settling', 'that answer had no text to continue from');
           return;
         }
         await requestGoalDraft(forTurn, current);
         return;
       }
-      goalError = 'the answer never stopped changing, so nothing was written';
+      setGoalPhase('settling', 'the answer never stopped changing, so nothing was written');
+    } finally {
+      goalBusy = false;
+      renderControl();
+      injectStage();
+    }
+  }
+
+  /**
+   * Asks again about a turn whose draft failed for a reason another request could answer.
+   *
+   * Deliberately re-entrant through nothing: it holds the same `goalTurnId` claim and re-reads
+   * the same permissions `watchGoalTurn` reads, so a Goal switched off, a user typing, a fresh
+   * generation or a move to another chat ends the loop here for the same reasons it would have
+   * refused to start it.
+   *
+   * **The wait is taken outside the lock.** `goalBusy` is the one thing that makes
+   * `noteGoalTurn` refuse a finished turn, and holding it across a fifteen-second sleep makes
+   * every turn that finishes inside that window invisible — with no later edge to recover it,
+   * because the only edge there is was the turn ending. A single retryable draft failure would
+   * silently cost the next real answer its Goal run. The claim on this turn is `goalTurnId`,
+   * which is what stops two retries of the same turn, and the lock is taken only for the
+   * request it actually guards.
+   */
+  async function retryGoalDraft(forTurn) {
+    if (goalTurnId !== forTurn) return;
+    const forId = conversationId;
+    const forEpoch = epoch;
+    const current = () => alive && conversationId === forId && epoch === forEpoch && goalTurnId === forTurn;
+    await sleep(GOAL_RETRY_MS);
+    // A turn that finished during the wait has taken the claim, and this retry is about an
+    // older one. It says nothing and touches nothing: the phase on screen is that turn's now.
+    if (!current()) return;
+    // Something else holds the loop while this turn is still the claimed one — a compaction
+    // brief, say. It will not be interrupted for a retry.
+    if (goalBusy) return;
+    // The conversation moved on while we waited: whatever this loop was going to write is
+    // about a turn that is no longer the last one, which is an answer of its own.
+    if (generating || CLF_DOM.generating() || compactCapture || nativeBusy || (job && job.busy)) return void setGoalPhase('');
+    if (!goalUsable()) return void setGoalPhase('');
+    goalBusy = true;
+    try {
+      await requestGoalDraft(forTurn, current);
     } finally {
       goalBusy = false;
       renderControl();
@@ -7501,24 +7630,20 @@
 
   /** Asks the app to draft the next user message. The answer arrives on the activity feed. */
   async function requestGoalDraft(forTurn, current) {
-    goalPhase = 'requesting';
     goalTypingSince = 0;
-    injectStage();
+    setGoalPhase('requesting');
     const reply = await ask({ type: 'goal_draft', conversationId, turnId: forTurn });
     if (!current()) return;
     if (!reply || reply.ok !== true) {
       // The phase is kept rather than collapsed into `failed`: it names the step that
       // stopped, so the bar draws the run where it ended instead of back at the beginning.
-      goalPhase = 'requesting';
-      goalError = replyError(reply) || 'the app did not answer';
-      injectStage();
+      setGoalPhase('requesting', replyError(reply) || 'the app did not answer');
       return;
     }
     // From here the draft lives on /activity: its stage, its streaming text and — once — the
     // message to type. See maybeSendGoalReply, which runs on every pull.
-    goalPhase = 'drafting';
     goalDraft = (reply.data && reply.data.goal) || null;
-    injectStage();
+    setGoalPhase('drafting');
     void pullActivity();
   }
 
@@ -7549,24 +7674,30 @@
       // Settings are live. Turning Goal Mode off (or removing its key) while OpenRouter is
       // drafting must revoke permission to type the result, even if that result becomes ready
       // on the very poll that carries the new setting.
-      goalPhase = '';
       goalDraft = null;
+      setGoalPhase('');
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
       return;
     }
     if (draft.stage === 'failed') {
-      goalPhase = 'drafting';
-      goalError = draft.error || 'OpenRouter did not answer';
       goalDraft = null;
+      // Retryable is not the same story as stopped, and the panel is the only place the user
+      // finds out which one this is. Saying so costs a clause here; leaving it out cost a
+      // fifteen-second silence that read as a loop which had given up.
+      const why = draft.error || 'OpenRouter did not answer';
+      setGoalPhase('drafting', draft.retryable === true ? why + ' - trying again in a moment' : why);
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
+      // The two answers that end a Goal run are `[no reply]` and words to type. This is
+      // neither, so the turn is still owed one and the loop keeps its claim on it — with the
+      // reason on screen in the meantime, which is the only thing a failure was ever good for.
+      if (draft.retryable === true) void retryGoalDraft(draft.turnId);
       return;
     }
     if (draft.stage === 'no-reply') {
       // The model read the conversation and decided the thing the user asked for is done.
       // That is the loop ending the way it is meant to, not a failure.
-      goalPhase = 'done';
-      goalError = '';
       goalDraft = null;
+      setGoalPhase('done');
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
       return;
     }
@@ -7574,24 +7705,22 @@
     // A turn started while the draft was being written — the user typed, or ChatGPT began
     // something of its own. The draft is about a conversation that has moved on.
     if (generating || CLF_DOM.generating() || compactCapture || nativeBusy || (job && job.busy)) {
-      goalPhase = '';
       goalDraft = null;
+      setGoalPhase('');
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
       return;
     }
     goalBusy = true;
     try {
       if (goalTypingSince === 0) goalTypingSince = Date.now();
-      goalPhase = 'sending';
-      injectStage();
+      setGoalPhase('sending');
       if (!CLF_DOM.insertPrompt(draft.reply)) {
         // Somebody is writing in it. Keep the draft and try again on the next pull, until
         // the window runs out — at which point the message is dropped rather than queued
         // behind a draft the user may still be working on.
         if (Date.now() - goalTypingSince < GOAL_TYPING_WINDOW_MS) return;
-        goalPhase = 'sending';
-        goalError = 'the message box was in use, so nothing was sent';
         goalDraft = null;
+        setGoalPhase('sending', 'the message box was in use, so nothing was sent');
         await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
         return;
       }
@@ -7600,16 +7729,14 @@
       goalDraft = null;
       if (!sent) {
         await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
-        goalPhase = 'sending';
-        goalError = 'ChatGPT would not send the message';
+        setGoalPhase('sending', 'ChatGPT would not send the message');
         return;
       }
       // Sending is the irreversible step. Record it before the fallible ACK hop so a lost
       // receipt can never turn the same ready draft into a second user message.
       rememberGoalSpent(conversationId, draft.token);
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
-      goalPhase = '';
-      goalError = '';
+      setGoalPhase('');
     } finally {
       goalBusy = false;
       // Only once the draft is spent. This marks when *this draft* first found the composer
@@ -8660,6 +8787,7 @@
       /** So a test settles a turn by the real window rather than a copy of the number. */
       TURN_SETTLE_MS,
       STALL_MS,
+      GOAL_RETRY_MS,
       PRESENTATION_SCROLL_IDLE_MS,
       /** Test-only: production defaults ON; tests opt into renderer cases explicitly. */
       setRenderStream: (on) => {

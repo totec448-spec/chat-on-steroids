@@ -126,7 +126,7 @@ export function splitVirtualPath(input: string): string[] {
   }
   const segments = (IS_WINDOWS ? input.split(/[/\\]+/) : input.split(/\/+/)).filter((s) => s.length > 0);
   if (segments.length === 0) {
-    throw new SandboxError('Path is empty. Use /<root> — call list_roots to see the roots.');
+    throw new SandboxError('Path is empty. Use an approved virtual root such as /<root>/file.txt.');
   }
   for (const segment of segments) checkSegment(segment);
   return segments;
@@ -267,7 +267,7 @@ async function normaliseNativePath(roots: readonly Root[], input: string): Promi
     const names = roots.map((r) => `/${r.name}`).join(', ') || '(none approved)';
     throw new SandboxError(
       `Native path "${trimmed}" is not inside an approved folder. ` +
-        `Approved roots: ${names} — call list_roots to see what each one maps to.`
+        `Approved roots: ${names}`
     );
   }
   const native = path.resolve(trimmed);
@@ -297,7 +297,7 @@ async function normaliseNativePath(roots: readonly Root[], input: string): Promi
   const names = roots.map((r) => `/${r.name}`).join(', ') || '(none approved)';
   throw new SandboxError(
     `Native path "${input.trim()}" is not inside an approved folder. ` +
-      `Approved roots: ${names} — call list_roots to see what each one maps to.`
+      `Approved roots: ${names}`
   );
 }
 

@@ -28,7 +28,6 @@ import {
 import {
   appendEvent,
   autoCompactionReady,
-  claimAutoCompaction,
   createSession,
   deleteSession,
   endSession,
@@ -999,17 +998,7 @@ describe('session store', () => {
     expect(await readAsset(summary.id, '../../../config.json')).toBeNull();
   });
 
-  /**
-   * The store half of automatic compaction is a level, not an edge.
-   *
-   * The edge version armed on the below-to-above crossing and waited for that turn to end
-   * cleanly, which had two consequences nobody wanted: one interrupted turn destroyed the
-   * trigger forever (a counter that only grows never crosses the same line twice), and
-   * every compaction that did fire landed after the answer, where a handoff carries
-   * nothing across. So the store now answers only "over the line, and this chat still has
-   * its one compaction". Whether the model is working is asked live, in bridge.ts.
-   */
-  it('offers its one automatic compaction while the chat is over the line', async () => {
+  it('keeps automatic compaction ready above the line across interrupted and later turns', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
     try {
@@ -1025,83 +1014,15 @@ describe('session store', () => {
       });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
 
-      // Mid-turn is exactly when it is meant to be taken, and taking it is terminal here.
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-level')).toBe(true);
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-level')).toBe(false);
-      const claimed = await getSession(summary.id);
-      expect(claimed?.autoCompactTriggeredAt).not.toBeNull();
-      expect(autoCompactionReady(claimed)).toBe(false);
-
-      // Not after several more turns above the line either: one per chat.
-      await appendEvent(summary.id, { time: 3, source: 'extension', kind: 'turn_end', turnId: 't-1', outcome: 'completed' });
+      await appendEvent(summary.id, { time: 3, source: 'extension', kind: 'turn_end', turnId: 't-1', outcome: 'interrupted' });
       await appendEvent(summary.id, { time: 4, source: 'extension', kind: 'turn_start', turnId: 't-2' });
-      expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
-    } finally {
-      await saveConfig(base);
-    }
-  });
-
-  /**
-   * The interrupted crossing that used to be fatal. Replaying a real 587-event session
-   * armed correctly at the crossing, lost the arm to `interrupted` on that very turn, and
-   * then ran to 433k tokens against a 40k threshold without ever becoming ready.
-   */
-  it('still offers the trigger after the turn that crossed the line was interrupted', async () => {
-    const base = defaultConfig();
-    await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
-    try {
-      const summary = await createSession({ title: 'interrupted', conversationId: 'conv-auto-interrupted' });
-      await appendEvent(summary.id, { time: 1, source: 'extension', kind: 'turn_start', turnId: 't-crossed' });
-      await appendEvent(summary.id, {
-        time: 2,
-        source: 'extension',
-        kind: 'user_message',
-        messageId: 'cross',
-        turnId: 't-crossed',
-        message: { text: 'c'.repeat(44_000), truncated: false, chars: 44_000 }
-      });
-      await appendEvent(summary.id, {
-        time: 3,
-        source: 'extension',
-        kind: 'turn_end',
-        turnId: 't-crossed',
-        outcome: 'interrupted'
-      });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
     } finally {
       await saveConfig(base);
     }
   });
 
-  /**
-   * The claim is where the one-shot is spent, so it is also where liveness has to be
-   * proved. A turn that ends while the claim sits in the session queue must leave the
-   * trigger alone: the chat is still over the line, and its next turn can have it.
-   */
-  it('spends nothing when the chat stopped working before the claim was written', async () => {
-    const base = defaultConfig();
-    await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
-    try {
-      const summary = await createSession({ title: 'raced', conversationId: 'conv-auto-raced' });
-      await appendEvent(summary.id, {
-        time: 1,
-        source: 'extension',
-        kind: 'user_message',
-        messageId: 'u1',
-        message: { text: 'a'.repeat(44_000), truncated: false, chars: 44_000 }
-      });
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-raced', () => false)).toBe(false);
-      const current = await getSession(summary.id);
-      expect(current?.autoCompactTriggeredAt).toBeNull();
-      expect(autoCompactionReady(current)).toBe(true);
-
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-raced', () => true)).toBe(true);
-    } finally {
-      await saveConfig(base);
-    }
-  });
-
-  it('offers nothing while the switch is off, below the line, or for another chat', async () => {
+  it('offers nothing while the switch is off or below the line', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, compaction: { ...base.compaction, auto: false, autoTokens: 10_000 } });
     try {
@@ -1114,26 +1035,18 @@ describe('session store', () => {
         message: { text: 'a'.repeat(44_000), truncated: false, chars: 44_000 }
       });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-off')).toBe(false);
 
       await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 4_000_000 } });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
 
       await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
-      // A claim names the chat it belongs to; the session's own id is not enough.
-      expect(await claimAutoCompaction(summary.id, 'conv-somebody-else')).toBe(false);
     } finally {
       await saveConfig(base);
     }
   });
 
-  /**
-   * Reopening a closed chat must not hand it a second automatic compaction. Nothing about
-   * the trigger is reset there any more: the level speaks for itself, and the latch is a
-   * fact about this chat that outlives the tab being closed.
-   */
-  it('keeps a spent trigger spent across a close and a reopen', async () => {
+  it('keeps the level ready across a close and reopen so a later generation can retry', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
     try {
@@ -1145,14 +1058,10 @@ describe('session store', () => {
         messageId: 'u1',
         message: { text: 'r'.repeat(44_000), truncated: false, chars: 44_000 }
       });
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-reopen')).toBe(true);
-
       await endSession(summary.id);
       await reopenSession(summary.id);
       const reopened = await getSession(summary.id);
-      expect(reopened?.autoCompactTriggeredAt).not.toBeNull();
-      expect(autoCompactionReady(reopened)).toBe(false);
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-reopen')).toBe(false);
+      expect(autoCompactionReady(reopened)).toBe(true);
     } finally {
       await saveConfig(base);
     }
@@ -1667,7 +1576,15 @@ describe('canonical recorder 1.8', () => {
     expect(call?.conversationId).toBeNull();
   });
 
-  it('logs one transition when a shared request id becomes conflicted, not one warning per call or replay', async () => {
+  /**
+   * One line, and not a problem line.
+   *
+   * A refused claim means the registry did its job: the id keeps the chat that proved it and
+   * every call under it keeps arriving there. Reporting that as a fault put a run that was
+   * working perfectly into the problem count, and reporting it once per call put it there
+   * thirty-five times over.
+   */
+  it('reports a refused claim once per batch, and as a note rather than a problem', async () => {
     const firstConversation = 'conv-conflict-log-first';
     const secondConversation = 'conv-conflict-log-second';
     const requestId = `wfr_conflict_log_${Date.now()}`;
@@ -1681,10 +1598,9 @@ describe('canonical recorder 1.8', () => {
       calls: [{ messageId: 'first-proof', tool: 'read', order: 0, answered: true, requestId }]
     }]);
 
-    const warnings = (): number => getLog().filter(
-      (entry) => entry.level === 'warn' && entry.message.includes(`request attribution conflict for ${requestId}`)
+    const lines = (level: 'warn' | 'info'): number => getLog().filter(
+      (entry) => entry.level === level && entry.message.includes(`${requestId} stays with conversation`)
     ).length;
-    const before = warnings();
     const conflictingCalls = Array.from({ length: 35 }, (_, index) => ({
       messageId: `conflicting-call-${index}`,
       tool: index % 2 === 0 ? 'read' : 'exec_command',
@@ -1698,18 +1614,14 @@ describe('canonical recorder 1.8', () => {
       fiberConversationId: secondConversation,
       calls: conflictingCalls
     }]);
-    expect(warnings()).toBe(before + 1);
+    expect(lines('info')).toBe(1);
+    expect(lines('warn')).toBe(0);
 
-    // Once the registry is already in the fail-closed state, another at-least-once browser
-    // replay contains no new diagnostic fact. It must not refill the Activity panel with the
-    // same warning again.
-    await recordChatObservations(secondConversation, [{
-      kind: 'tool_evidence',
-      time: now + 2,
-      fiberConversationId: secondConversation,
-      calls: conflictingCalls
-    }]);
-    expect(warnings()).toBe(before + 1);
+    // And the id still belongs to the chat that proved it, which is the whole point of having
+    // refused: a call arriving under it now is filed there, not left unattributed.
+    const call = await tool(requestId, now + 2);
+    expect(call?.attributionMethod).toBe('request_id');
+    expect(call?.conversationId).toBe(firstConversation);
   });
 
   /**
