@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 import ScreenCaptureKit
 import CoreMedia
 import CoreImage
@@ -54,6 +55,7 @@ private func rect(_ value: Any?) -> CGRect? {
 }
 
 private let maxDecodedScreenshotPixels = 8_000_000
+private let maxAXStringCharacters = 4_096
 
 private func approximatelyEqual(_ left: CGRect, _ right: CGRect, tolerance: CGFloat = 2) -> Bool {
     abs(left.minX - right.minX) <= tolerance &&
@@ -76,6 +78,17 @@ private func convincinglyMatchesWindow(_ candidate: CGRect, _ expected: CGRect) 
         abs(candidate.maxY - expected.maxY)
     )
     return maximumEdgeDelta <= 64
+}
+
+private func windowGeometryDistance(_ candidate: CGRect, _ expected: CGRect) -> CGFloat {
+    abs(candidate.minX - expected.minX) + abs(candidate.minY - expected.minY) +
+        abs(candidate.width - expected.width) + abs(candidate.height - expected.height)
+}
+
+private func boundedAXString(_ value: String) -> String {
+    let prefix = value.prefix(maxAXStringCharacters)
+    guard prefix.endIndex != value.endIndex else { return value }
+    return String(prefix.dropLast()) + "…"
 }
 
 private func virtualScreenRect() throws -> CGRect {
@@ -171,9 +184,28 @@ private func windowRow(_ id: CGWindowID) -> WindowRow? {
     allWindowRows().first { $0.id == id }
 }
 
+private func frontmostPID() -> pid_t? {
+    NSWorkspace.shared.frontmostApplication?.processIdentifier
+}
+
+private func windowServerFrontWindowID(rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
+    let rows = suppliedRows ?? allWindowRows(includeMinimized: false)
+    return rows.first(where: { $0.onScreen })?.id
+}
+
 private func foregroundWindowID() -> CGWindowID? {
-    guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-    return allWindowRows(includeMinimized: false).first { $0.pid == app.processIdentifier }?.id
+    guard let pid = frontmostPID() else { return nil }
+    let rows = allWindowRows(includeMinimized: false)
+    guard let frontID = windowServerFrontWindowID(rows: rows),
+          let front = rows.first(where: { $0.id == frontID }),
+          front.pid == pid else { return nil }
+    // Screen-only observation must still work without Accessibility. When AX is available,
+    // disagreement means an app transition is in flight, so expose no active window rather
+    // than attributing input or pixels to stale state from either subsystem.
+    if AXIsProcessTrusted(), let focused = focusedAXWindowID(for: pid, rows: rows), focused != front.id {
+        return nil
+    }
+    return front.id
 }
 
 private func requireAccessibility(prompt: Bool) throws {
@@ -200,6 +232,13 @@ private func axAttribute(_ element: AXUIElement, _ attribute: CFString) -> AnyOb
     var value: CFTypeRef?
     guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else { return nil }
     return value
+}
+
+private func axElementAttribute(_ element: AXUIElement, _ attribute: CFString) -> AXUIElement? {
+    var value: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success, let value else { return nil }
+    guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+    return (value as! AXUIElement)
 }
 
 private func axString(_ element: AXUIElement, _ attribute: CFString) -> String? {
@@ -246,13 +285,79 @@ private func axRole(_ element: AXUIElement) -> String {
 private func axName(_ element: AXUIElement) -> String {
     for attribute in [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute] {
         if let value = axString(element, attribute as CFString)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !value.isEmpty { return value }
+           !value.isEmpty { return boundedAXString(value) }
     }
     return ""
 }
 
 private func axWindowNumber(_ element: AXUIElement) -> CGWindowID? {
     (axAttribute(element, "AXWindowNumber" as CFString) as? NSNumber)?.uint32Value
+}
+
+private func focusedAXWindowID(for pid: pid_t, rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
+    guard AXIsProcessTrusted() else { return nil }
+    let app = AXUIElementCreateApplication(pid)
+    guard let focused = axElementAttribute(app, kAXFocusedWindowAttribute as CFString) else { return nil }
+    if let exact = axWindowNumber(focused) { return exact }
+    guard let bounds = axBounds(focused) else { return nil }
+    let rows = suppliedRows ?? allWindowRows(includeMinimized: false)
+    return rows
+        .filter { $0.pid == pid && convincinglyMatchesWindow(bounds, $0.bounds) }
+        .min(by: { windowGeometryDistance(bounds, $0.bounds) < windowGeometryDistance(bounds, $1.bounds) })?.id
+}
+
+private func focusedAXElementWindowID(for pid: pid_t, rows suppliedRows: [WindowRow]? = nil) -> CGWindowID? {
+    guard AXIsProcessTrusted() else { return nil }
+    let app = AXUIElementCreateApplication(pid)
+    guard let element = axElementAttribute(app, kAXFocusedUIElementAttribute as CFString) else { return nil }
+    var current: AXUIElement? = element
+    for _ in 0..<10 {
+        guard let candidate = current else { return nil }
+        let window = axElementAttribute(candidate, kAXWindowAttribute as CFString) ??
+            (axRole(candidate) == "Window" ? candidate : nil)
+        if let window {
+            if let exact = axWindowNumber(window) { return exact }
+            if let bounds = axBounds(window) {
+                let rows = suppliedRows ?? allWindowRows(includeMinimized: false)
+                return rows
+                    .filter { $0.pid == pid && convincinglyMatchesWindow(bounds, $0.bounds) }
+                    .min(by: { windowGeometryDistance(bounds, $0.bounds) < windowGeometryDistance(bounds, $1.bounds) })?.id
+            }
+        }
+        current = axElementAttribute(candidate, kAXParentAttribute as CFString)
+    }
+    return nil
+}
+
+private func inputTargetMatches(_ row: WindowRow) -> Bool {
+    guard frontmostPID() == row.pid else { return false }
+    let rows = allWindowRows(includeMinimized: false)
+    guard windowServerFrontWindowID(rows: rows) == row.id else { return false }
+    guard focusedAXWindowID(for: row.pid, rows: rows) == row.id else { return false }
+    if let focusedElementWindow = focusedAXElementWindowID(for: row.pid, rows: rows),
+       focusedElementWindow != row.id { return false }
+    return true
+}
+
+private func assertInputTarget(_ id: CGWindowID) throws -> WindowRow {
+    guard let row = windowRow(id), row.onScreen else {
+        throw fail("INPUT_TARGET_LOST", "target window \(id) no longer exists on screen; no input was sent")
+    }
+    guard inputTargetMatches(row) else {
+        throw fail("INPUT_TARGET_LOST", "window \(id) is no longer the exact active input target; no input was sent")
+    }
+    return row
+}
+
+private func setAXValueIfPossible(_ element: AXUIElement, _ attribute: CFString, _ value: CFTypeRef) {
+    var settable = DarwinBoolean(false)
+    guard AXUIElementIsAttributeSettable(element, attribute, &settable) == .success,
+          settable.boolValue else { return }
+    _ = AXUIElementSetAttributeValue(element, attribute, value)
+}
+
+private func setAXBooleanIfPossible(_ element: AXUIElement, _ attribute: CFString, _ value: Bool) {
+    setAXValueIfPossible(element, attribute, value ? kCFBooleanTrue : kCFBooleanFalse)
 }
 
 private func matchingAXWindow(_ row: WindowRow, prompt: Bool = true) throws -> AXUIElement {
@@ -278,6 +383,7 @@ private func matchingAXWindow(_ row: WindowRow, prompt: Bool = true) throws -> A
 private func focusWindow(_ id: CGWindowID) throws -> Bool {
     guard let row = windowRow(id) else { return false }
     try requireAccessibility(prompt: true)
+    if inputTargetMatches(row) { return true }
     guard let app = NSRunningApplication(processIdentifier: row.pid) else { return false }
     let window = try matchingAXWindow(row)
     var minimizedSettable = DarwinBoolean(false)
@@ -286,9 +392,15 @@ private func focusWindow(_ id: CGWindowID) throws -> Bool {
         _ = AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
     }
     _ = app.activate(options: [.activateIgnoringOtherApps])
+    let appElement = AXUIElementCreateApplication(row.pid)
+    setAXBooleanIfPossible(appElement, kAXFrontmostAttribute as CFString, true)
+    setAXValueIfPossible(appElement, kAXMainWindowAttribute as CFString, window)
+    setAXValueIfPossible(appElement, kAXFocusedWindowAttribute as CFString, window)
+    setAXBooleanIfPossible(window, kAXMainAttribute as CFString, true)
+    setAXBooleanIfPossible(window, kAXFocusedAttribute as CFString, true)
     _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     for _ in 0..<50 {
-        if foregroundWindowID() == id { return true }
+        if inputTargetMatches(row) { return true }
         usleep(20_000)
     }
     return false
@@ -296,10 +408,12 @@ private func focusWindow(_ id: CGWindowID) throws -> Bool {
 
 private final class UISnapshot {
     let window: CGWindowID
+    let windowBounds: CGRect
     let elements: [String: AXUIElement]
 
-    init(window: CGWindowID, elements: [String: AXUIElement]) {
+    init(window: CGWindowID, windowBounds: CGRect, elements: [String: AXUIElement]) {
         self.window = window
+        self.windowBounds = windowBounds
         self.elements = elements
     }
 }
@@ -308,10 +422,10 @@ private var nextSnapshotID = 1
 private var snapshots: [Int: UISnapshot] = [:]
 private var snapshotOrder: [Int] = []
 
-private func rememberSnapshot(window: CGWindowID, elements: [String: AXUIElement]) -> Int {
+private func rememberSnapshot(window: CGWindowID, windowBounds: CGRect, elements: [String: AXUIElement]) -> Int {
     let id = nextSnapshotID
     nextSnapshotID += 1
-    snapshots[id] = UISnapshot(window: window, elements: elements)
+    snapshots[id] = UISnapshot(window: window, windowBounds: windowBounds, elements: elements)
     snapshotOrder.append(id)
     while snapshotOrder.count > 16 {
         let removed = snapshotOrder.removeFirst()
@@ -356,7 +470,7 @@ private func findUI(
 
         let role = axRole(element)
         let name = axName(element)
-        let identifier = axString(element, kAXIdentifierAttribute as CFString) ?? ""
+        let identifier = boundedAXString(axString(element, kAXIdentifierAttribute as CFString) ?? "")
         let haystack = "\(name) \(role) \(identifier)".lowercased()
         guard (query.isEmpty || haystack.contains(query)),
               (roleFilter.isEmpty || role.lowercased().contains(roleFilter)) else { continue }
@@ -374,7 +488,7 @@ private func findUI(
         ])
     }
 
-    let snapshotID = rememberSnapshot(window: row.id, elements: retained)
+    let snapshotID = rememberSnapshot(window: row.id, windowBounds: row.bounds, elements: retained)
     return [
         "window": Int(row.id),
         "snapshotId": snapshotID,
@@ -412,25 +526,49 @@ private func movePointer(_ point: CGPoint) throws {
     try postMouse(.mouseMoved, point: point, button: .left)
 }
 
-private func click(_ point: CGPoint, button: CGMouseButton, count: Int) throws {
+private func click(_ point: CGPoint, button: CGMouseButton, count: Int, targetWindow: CGWindowID? = nil) throws {
     let (down, up, _) = mouseTypes(button)
     for clickIndex in 1...count {
+        if let targetWindow { _ = try assertInputTarget(targetWindow) }
         try postMouse(down, point: point, button: button, clickState: Int64(clickIndex))
-        try postMouse(up, point: point, button: button, clickState: Int64(clickIndex))
+        do {
+            if let targetWindow { _ = try assertInputTarget(targetWindow) }
+            try postMouse(up, point: point, button: button, clickState: Int64(clickIndex))
+        } catch {
+            // Release the button even if focus changed after mouse-down; never leave a
+            // system-wide synthetic button held while reporting the target-loss failure.
+            try? postMouse(up, point: point, button: button, clickState: Int64(clickIndex))
+            throw error
+        }
         usleep(35_000)
     }
 }
 
-private func drag(_ xs: [NSNumber], _ ys: [NSNumber], button: CGMouseButton) throws {
+private func drag(
+    _ xs: [NSNumber],
+    _ ys: [NSNumber],
+    button: CGMouseButton,
+    targetWindow: CGWindowID? = nil
+) throws {
     guard xs.count == ys.count, xs.count >= 2 else { throw fail("BAD_ACTION", "drag needs at least two points") }
     let points = zip(xs, ys).map { CGPoint(x: $0.0.doubleValue, y: $0.1.doubleValue) }
     let (down, up, dragged) = mouseTypes(button)
+    if let targetWindow { _ = try assertInputTarget(targetWindow) }
     try postMouse(down, point: points[0], button: button)
-    for point in points.dropFirst() {
-        try postMouse(dragged, point: point, button: button)
-        usleep(12_000)
+    var current = points[0]
+    do {
+        for point in points.dropFirst() {
+            if let targetWindow { _ = try assertInputTarget(targetWindow) }
+            try postMouse(dragged, point: point, button: button)
+            current = point
+            usleep(12_000)
+        }
+        if let targetWindow { _ = try assertInputTarget(targetWindow) }
+        try postMouse(up, point: points[points.count - 1], button: button)
+    } catch {
+        try? postMouse(up, point: current, button: button)
+        throw error
     }
-    try postMouse(up, point: points[points.count - 1], button: button)
 }
 
 private let keyCodes: [String: CGKeyCode] = [
@@ -450,42 +588,170 @@ private let keyCodes: [String: CGKeyCode] = [
     "f2": 120, "pagedown": 121, "f1": 122, "left": 123, "right": 124, "down": 125, "up": 126
 ]
 
-private func pressKeys(_ names: [String]) throws {
-    let codes = try names.map { name -> CGKeyCode in
-        guard let code = keyCodes[name.lowercased()] else { throw fail("BAD_KEY", "unknown key \(name)") }
-        return code
-    }
-    for code in codes {
-        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: true) else {
-            throw fail("INPUT_FAILED", "could not create a key-down event")
-        }
-        event.post(tap: .cghidEventTap)
-    }
-    usleep(35_000)
-    for code in codes.reversed() {
-        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: false) else {
-            throw fail("INPUT_FAILED", "could not create a key-up event")
-        }
-        event.post(tap: .cghidEventTap)
+private let modifierFlags: [String: CGEventFlags] = [
+    "command": .maskCommand,
+    "shift": .maskShift,
+    "rightshift": .maskShift,
+    "option": .maskAlternate,
+    "rightoption": .maskAlternate,
+    "control": .maskControl,
+    "rightcontrol": .maskControl,
+    "capslock": .maskAlphaShift
+]
+
+private func normalizedKeyName(_ name: String) -> String {
+    switch name.lowercased() {
+    case "cmd", "meta": return "command"
+    case "alt": return "option"
+    case "ctrl": return "control"
+    case "esc": return "escape"
+    default: return name.lowercased()
     }
 }
 
-private func typeText(_ text: String) throws {
+private struct ResolvedKey {
+    let code: CGKeyCode
+    let requiredFlags: CGEventFlags
+}
+
+private func currentLayoutKey(for logicalName: String) -> ResolvedKey? {
+    let source = TISCopyCurrentKeyboardLayoutInputSource().takeRetainedValue()
+    guard let rawData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+    let data = unsafeBitCast(rawData, to: CFData.self)
+    guard let bytes = CFDataGetBytePtr(data) else { return nil }
+    let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
+    let modifierCandidates: [(carbon: UInt32, event: CGEventFlags)] = [
+        (0, []),
+        (UInt32(shiftKey >> 8), .maskShift),
+        (UInt32(optionKey >> 8), .maskAlternate),
+        (UInt32((shiftKey | optionKey) >> 8), [.maskShift, .maskAlternate])
+    ]
+
+    for candidate in modifierCandidates {
+        for rawCode in 0..<128 {
+            var deadKeyState: UInt32 = 0
+            var actualLength = 0
+            var characters = Array<UniChar>(repeating: 0, count: 8)
+            let status = characters.withUnsafeMutableBufferPointer { buffer in
+                UCKeyTranslate(
+                    layout,
+                    UInt16(rawCode),
+                    UInt16(kUCKeyActionDisplay),
+                    candidate.carbon,
+                    UInt32(LMGetKbdType()),
+                    OptionBits(kUCKeyTranslateNoDeadKeysMask),
+                    &deadKeyState,
+                    buffer.count,
+                    &actualLength,
+                    buffer.baseAddress!
+                )
+            }
+            guard status == noErr, actualLength > 0 else { continue }
+            let rendered = characters.withUnsafeBufferPointer {
+                String(utf16CodeUnits: $0.baseAddress!, count: Int(actualLength))
+            }
+            if rendered.lowercased() == logicalName.lowercased() {
+                return ResolvedKey(code: CGKeyCode(rawCode), requiredFlags: candidate.event)
+            }
+        }
+    }
+    return nil
+}
+
+private func resolveKey(_ name: String) throws -> ResolvedKey {
+    if name.count == 1 {
+        guard let resolved = currentLayoutKey(for: name) else {
+            throw fail("BAD_KEY", "active keyboard layout does not expose logical key \(name)")
+        }
+        return resolved
+    }
+    guard let code = keyCodes[name] else { throw fail("BAD_KEY", "unknown key \(name)") }
+    return ResolvedKey(code: code, requiredFlags: [])
+}
+
+private func pressKeys(_ names: [String], targetWindow: CGWindowID? = nil) throws {
+    let normalized = names.map(normalizedKeyName)
+    let resolved = try normalized.map(resolveKey)
+    guard let source = CGEventSource(stateID: .privateState) else {
+        throw fail("INPUT_FAILED", "could not create a keyboard event source")
+    }
+    var targetPID: pid_t?
+    if let targetWindow { targetPID = try assertInputTarget(targetWindow).pid }
+
+    func postKey(_ code: CGKeyCode, keyDown: Bool, flags: CGEventFlags) throws {
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: keyDown) else {
+            throw fail("INPUT_FAILED", "could not create a keyboard event")
+        }
+        event.flags = flags
+        if let targetPID { event.postToPid(targetPID) } else { event.post(tap: .cghidEventTap) }
+    }
+
+    var flags: CGEventFlags = []
+    let modifierIndices = normalized.indices.filter { modifierFlags[normalized[$0]] != nil }
+    let ordinaryIndices = normalized.indices.filter { modifierFlags[normalized[$0]] == nil }
+    var pressedModifierIndices: [Int] = []
+    do {
+        if let targetWindow { targetPID = try assertInputTarget(targetWindow).pid }
+        for index in modifierIndices {
+            guard let flag = modifierFlags[normalized[index]] else { continue }
+            flags.insert(flag)
+            try postKey(resolved[index].code, keyDown: true, flags: flags)
+            pressedModifierIndices.append(index)
+        }
+        // A window transition while modifiers are down must abort before the ordinary key.
+        if let targetWindow { targetPID = try assertInputTarget(targetWindow).pid }
+        for index in ordinaryIndices {
+            try postKey(resolved[index].code, keyDown: true, flags: flags.union(resolved[index].requiredFlags))
+        }
+        usleep(35_000)
+        for index in ordinaryIndices.reversed() {
+            try postKey(resolved[index].code, keyDown: false, flags: flags.union(resolved[index].requiredFlags))
+        }
+        for index in pressedModifierIndices.reversed() {
+            guard let flag = modifierFlags[normalized[index]] else { continue }
+            flags.remove(flag)
+            try postKey(resolved[index].code, keyDown: false, flags: flags)
+        }
+    } catch {
+        for index in pressedModifierIndices.reversed() {
+            guard let flag = modifierFlags[normalized[index]] else { continue }
+            flags.remove(flag)
+            try? postKey(resolved[index].code, keyDown: false, flags: flags)
+        }
+        throw error
+    }
+}
+
+private func typeText(_ text: String, targetWindow: CGWindowID? = nil) throws {
+    guard let source = CGEventSource(stateID: .privateState) else {
+        throw fail("INPUT_FAILED", "could not create a keyboard event source")
+    }
     let units = Array(text.utf16)
     var cursor = 0
     while cursor < units.count {
-        let end = min(units.count, cursor + 32)
+        var end = min(units.count, cursor + 32)
+        if end < units.count, end > cursor,
+           units[end - 1] >= 0xD800, units[end - 1] <= 0xDBFF,
+           units[end] >= 0xDC00, units[end] <= 0xDFFF {
+            end -= 1
+        }
         let chunk = Array(units[cursor..<end])
-        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-              let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
+        guard let down = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+              let up = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
             throw fail("INPUT_FAILED", "could not create a text input event")
         }
         chunk.withUnsafeBufferPointer { pointer in
             down.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: pointer.baseAddress!)
             up.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: pointer.baseAddress!)
         }
-        down.post(tap: .cghidEventTap)
-        up.post(tap: .cghidEventTap)
+        if let targetWindow {
+            let target = try assertInputTarget(targetWindow)
+            down.postToPid(target.pid)
+            up.postToPid(target.pid)
+        } else {
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+        }
         cursor = end
     }
 }
@@ -519,6 +785,10 @@ private func actUI(_ request: JSONObject) throws -> JSONObject {
             guard try focusWindow(snapshot.window) else {
                 throw fail("FOCUS_FAILED", "snapshot window \(snapshot.window) could not be activated")
             }
+            guard let live = windowRow(snapshot.window),
+                  live.bounds.integral == snapshot.windowBounds.integral else {
+                throw fail("STALE_UI_SNAPSHOT", "the UI snapshot window moved or resized")
+            }
             guard let bounds = axBounds(element), !bounds.isEmpty else {
                 throw fail("UI_ACTION_FAILED", "the control exposes neither AXPress nor usable bounds")
             }
@@ -527,7 +797,12 @@ private func actUI(_ request: JSONObject) throws -> JSONObject {
                   row.bounds.insetBy(dx: -24, dy: -24).contains(CGPoint(x: bounds.midX, y: bounds.midY)) else {
                 throw fail("STALE_UI_SNAPSHOT", "the control is no longer inside snapshot window \(snapshot.window)")
             }
-            try click(CGPoint(x: bounds.midX, y: bounds.midY), button: .left, count: 1)
+            try click(
+                CGPoint(x: bounds.midX, y: bounds.midY),
+                button: .left,
+                count: 1,
+                targetWindow: snapshot.window
+            )
             route = "sendinput"
         }
     } else {
@@ -550,10 +825,30 @@ private func validateFrame(_ frame: JSONObject) throws {
         guard let after = windowRow(windowID), after.bounds.integral == expected.integral else {
             throw fail("STALE_FRAME", "target window \(windowID) changed geometry while it was activated")
         }
+        _ = try assertFrameTarget(frame)
     } else {
         let screen = try virtualScreenRect()
         guard screen.contains(region) else { throw fail("STALE_FRAME", "desktop geometry changed after the screenshot") }
     }
+}
+
+@discardableResult
+private func assertFrameTarget(_ frame: JSONObject) throws -> CGWindowID? {
+    guard let region = rect(frame["region"]) else { throw fail("STALE_FRAME", "the coordinate frame is malformed") }
+    if let windowID = number(frame["window"])?.uint32Value {
+        guard let row = windowRow(windowID), row.onScreen else {
+            throw fail("STALE_FRAME", "target window \(windowID) is no longer drawable")
+        }
+        let expected = rect(frame["windowGeometry"]) ?? region
+        guard row.bounds.integral == expected.integral else {
+            throw fail("STALE_FRAME", "target window \(windowID) moved or resized after the screenshot")
+        }
+        _ = try assertInputTarget(windowID)
+        return windowID
+    }
+    let screen = try virtualScreenRect()
+    guard screen.contains(region) else { throw fail("STALE_FRAME", "desktop geometry changed after the screenshot") }
+    return nil
 }
 
 private func shareableContent() throws -> SCShareableContent {
@@ -884,7 +1179,9 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
         }
     case "act":
         try requireAccessibility(prompt: true)
-        if let frame = request["frame"] as? JSONObject { try validateFrame(frame) }
+        let frame = request["frame"] as? JSONObject
+        if let frame { try validateFrame(frame) }
+        let frameWindow = number(frame?["window"])?.uint32Value
         let actions = request["actions"] as? [JSONObject] ?? []
         var routes: [String] = []
         var completed = 0
@@ -893,6 +1190,13 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
                 let type = string(action["type"])
                 switch type {
                 case "click_ui", "set_value_ui":
+                    let actionWindow = number(action["window"])?.uint32Value
+                    if let frameWindow, let actionWindow, frameWindow != actionWindow {
+                        throw fail(
+                            "TARGET_WINDOW_CONFLICT",
+                            "semantic action targets window \(actionWindow), but frame targets window \(frameWindow)"
+                        )
+                    }
                     var uiRequest = action
                     uiRequest["id"] = action["window"]
                     uiRequest["action"] = type == "click_ui" ? "click" : "set_value"
@@ -900,17 +1204,22 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
                     let reply = try actUI(uiRequest)
                     routes.append(string(reply["route"], default: "uia"))
                 case "move":
+                    if let frame { _ = try assertFrameTarget(frame) }
                     try movePointer(CGPoint(x: int(action["x"]), y: int(action["y"])))
                     routes.append("sendinput")
                 case "click", "double_click":
+                    if let frame { _ = try assertFrameTarget(frame) }
                     try click(
                         CGPoint(x: int(action["x"]), y: int(action["y"])),
                         button: mouseButton(string(action["button"])),
-                        count: type == "double_click" ? 2 : 1
+                        count: type == "double_click" ? 2 : 1,
+                        targetWindow: frameWindow
                     )
                     routes.append("sendinput")
                 case "scroll":
+                    if let frame { _ = try assertFrameTarget(frame) }
                     try movePointer(CGPoint(x: int(action["x"]), y: int(action["y"])))
+                    if let frame { _ = try assertFrameTarget(frame) }
                     guard let event = CGEvent(
                         scrollWheelEvent2Source: nil,
                         units: .line,
@@ -922,20 +1231,31 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
                     event.post(tap: .cghidEventTap)
                     routes.append("sendinput")
                 case "drag":
+                    if let frame { _ = try assertFrameTarget(frame) }
                     try drag(
                         action["xs"] as? [NSNumber] ?? [],
                         action["ys"] as? [NSNumber] ?? [],
-                        button: mouseButton(string(action["button"]))
+                        button: mouseButton(string(action["button"])),
+                        targetWindow: frameWindow
                     )
                     routes.append("sendinput")
                 case "type":
-                    try typeText(string(action["text"]))
+                    if let frameWindow { _ = try assertInputTarget(frameWindow) }
+                    try typeText(string(action["text"]), targetWindow: frameWindow)
                     routes.append("sendinput")
                 case "keypress":
-                    try pressKeys(action["keys"] as? [String] ?? [])
+                    if let frameWindow { _ = try assertInputTarget(frameWindow) }
+                    try pressKeys(action["keys"] as? [String] ?? [], targetWindow: frameWindow)
                     routes.append("sendinput")
                 case "focus":
-                    guard try focusWindow(CGWindowID(int(action["window"]))) else {
+                    let requested = CGWindowID(int(action["window"]))
+                    if let frameWindow, frameWindow != requested {
+                        throw fail(
+                            "TARGET_WINDOW_CONFLICT",
+                            "focus targets window \(requested), but frame targets window \(frameWindow)"
+                        )
+                    }
+                    guard try focusWindow(requested) else {
                         throw fail("FOCUS_FAILED", "the requested window could not be activated")
                     }
                     routes.append("focus")

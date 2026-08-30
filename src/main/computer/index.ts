@@ -167,7 +167,10 @@ let helperGeneration = 0;
 let helperStopping = false;
 const helperRetirements = new Set<Promise<void>>();
 
-function helperTimeoutMs(request: Record<string, unknown>): number {
+export function helperTimeoutMs(
+  request: Record<string, unknown>,
+  platform: NodeJS.Platform = process.platform
+): number {
   switch (request['op']) {
     case 'windows':
     case 'active':
@@ -184,11 +187,16 @@ function helperTimeoutMs(request: Record<string, unknown>): number {
       // budgets instead of retiring a helper that is still within its own deadline.
       // A visible-screen fallback may then capture more than one intersecting display
       // sequentially, so retain enough headroom for a normal multi-monitor host too.
-      return process.platform === 'darwin' ? 120_000 : 10_000;
+      return platform === 'darwin' ? 120_000 : 10_000;
     case 'warm':
       return 10_000;
     case 'act':
-      return 15_000;
+      if (platform !== 'darwin') return 15_000;
+      // Every macOS physical mutation can now re-prove the exact AX/WindowServer input
+      // target, and an explicit focus may spend up to one second in its bounded poll. Size
+      // the parent deadline for the whole permitted batch so the helper can return partial
+      // completion evidence instead of being killed after earlier actions already landed.
+      return 15_000 + Math.min(20, Array.isArray(request['actions']) ? request['actions'].length : 1) * 1_100;
     default:
       return HELPER_TIMEOUT_MS;
   }

@@ -1473,6 +1473,8 @@ describe('desktop capabilities', () => {
     const schema = JSON.stringify(toolList(await desktop('tools/list')).find((t) => t.name === 'computer'));
     expect(schema).toContain('read_clipboard');
     expect(schema).toContain('write_clipboard');
+    expect(schema).toContain('command+v on macOS');
+    expect(schema).toContain('ctrl+v on Windows/Linux');
   });
 
   it('rejects a malformed action before it reaches the desktop', async () => {
