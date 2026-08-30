@@ -53,14 +53,21 @@ function publishMacOSDesktopAccess(status: MacOSDesktopAccessStatus): void {
   for (const listener of macOSDesktopAccessListeners) listener(status);
 }
 
+export type ActionRoute = 'uia' | 'sendinput' | 'focus' | 'local';
+
 export class ComputerError extends Error {
   readonly completedCount: number | null;
   readonly failedIndex: number | null;
+  readonly completedRoutes: ActionRoute[] | null;
 
-  constructor(message: string, details: { completedCount?: number; failedIndex?: number } = {}) {
+  constructor(
+    message: string,
+    details: { completedCount?: number; failedIndex?: number; completedRoutes?: ActionRoute[] } = {}
+  ) {
     super(message);
     this.completedCount = details.completedCount ?? null;
     this.failedIndex = details.failedIndex ?? null;
+    this.completedRoutes = details.completedRoutes ? [...details.completedRoutes] : null;
   }
 }
 
@@ -126,7 +133,7 @@ export interface ActionResult {
   cursor: PointerResult | null;
   clipboard: string[];
   completedCount: number;
-  routes: Array<'uia' | 'sendinput' | 'focus' | 'local'>;
+  routes: ActionRoute[];
 }
 
 export type VerificationSpec =
@@ -352,10 +359,12 @@ async function startHelper(): Promise<HelperRuntime> {
           const message = String(reply['message'] ?? 'Desktop helper failed');
           const completed = Number(reply['completed_count']);
           const failed = Number(reply['failed_index']);
+          const completedRoutes = completedHelperRoutes(reply, completed);
           pending.reject(
             new ComputerError(`${code}: ${message}`, {
               ...(Number.isInteger(completed) && completed >= 0 ? { completedCount: completed } : {}),
-              ...(Number.isInteger(failed) && failed >= 0 ? { failedIndex: failed } : {})
+              ...(Number.isInteger(failed) && failed >= 0 ? { failedIndex: failed } : {}),
+              ...(completedRoutes ? { completedRoutes } : {})
             })
           );
         } else {
@@ -491,15 +500,27 @@ const MACOS_ADDON_WORKER_SOURCE = String.raw`
   }
 `;
 
+function completedHelperRoutes(reply: Record<string, any>, completed: number): ActionRoute[] | undefined {
+  const raw = reply['routes'];
+  if (!Number.isInteger(completed) || completed < 0 || !Array.isArray(raw) || raw.length !== completed) {
+    return undefined;
+  }
+  const routes = raw.map(String);
+  if (!routes.every((route) => route === 'uia' || route === 'sendinput' || route === 'focus')) return undefined;
+  return routes as ActionRoute[];
+}
+
 function protocolFailure(reply: Record<string, any>): ComputerError | null {
   if (reply['ok'] !== false) return null;
   const completed = Number(reply['completed_count']);
   const failed = Number(reply['failed_index']);
+  const completedRoutes = completedHelperRoutes(reply, completed);
   return new ComputerError(
     `${String(reply['error_code'] ?? 'HELPER_ERROR')}: ${String(reply['message'] ?? 'Desktop helper failed')}`,
     {
       ...(Number.isInteger(completed) && completed >= 0 ? { completedCount: completed } : {}),
-      ...(Number.isInteger(failed) && failed >= 0 ? { failedIndex: failed } : {})
+      ...(Number.isInteger(failed) && failed >= 0 ? { failedIndex: failed } : {}),
+      ...(completedRoutes ? { completedRoutes } : {})
     }
   );
 }
@@ -1035,8 +1056,7 @@ export async function screenshot(opts: {
 async function screenshotFromReply(
   reply: Record<string, any>,
   file: string,
-  requestedWindow: number | null,
-  inheritedWindowGeometry?: Rect | null
+  requestedWindow: number | null
 ): Promise<Screenshot> {
   const region = reply['region'] as Rect;
   const size = reply['image'] as { width: number; height: number };
@@ -1099,12 +1119,7 @@ async function screenshotFromReply(
     width: size.width,
     height: size.height,
     windowId: requestedWindow,
-    windowGeometry:
-      inheritedWindowGeometry === undefined
-        ? requestedWindow === null
-          ? null
-          : replyWindowGeometry ?? { ...region }
-        : inheritedWindowGeometry,
+    windowGeometry: requestedWindow === null ? null : replyWindowGeometry ?? { ...region },
     displayTopology: requestedWindow === null ? displayTopology : null,
     captureMode
   };
@@ -1199,12 +1214,11 @@ async function screenshotLocked(
       ...(opts.window === undefined ? {} : { id: opts.window }),
       ...(opts.full === true ? { full: true } : {})
     });
-    return await screenshotFromReply(
-      reply,
-      file,
-      opts.crop ? (cropFrame === undefined ? lastFrame?.windowId ?? null : cropFrame?.windowId ?? null) : opts.window ?? null,
-      opts.crop ? (cropFrame === undefined ? lastFrame?.windowGeometry ?? null : cropFrame?.windowGeometry ?? null) : undefined
-    );
+    // A crop is a fresh capture of visible display pixels, even when its coordinates came
+    // from a window-bound frame. Keeping the source window id here would let pixels from an
+    // occluding app authorize later input against the covered window. Publish the crop as
+    // screen-bound so its frame identity describes the pixels that were actually captured.
+    return await screenshotFromReply(reply, file, opts.crop ? null : opts.window ?? null);
   } finally {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -1555,16 +1569,25 @@ async function actLocked(
     } catch (err) {
       const partial = err instanceof ComputerError ? (err.completedCount ?? 0) : 0;
       const failedBatchIndex = err instanceof ComputerError ? (err.failedIndex ?? partial) : partial;
-      for (let index = 0; index < partial; index++) {
-        const action = sending[index];
-        routes.push(action?.['type'] === 'click_ui' || action?.['type'] === 'set_value_ui' ? 'uia' : 'sendinput');
-      }
+      const helperRoutes = err instanceof ComputerError ? err.completedRoutes : null;
+      const hasExactPartialRoutes = helperRoutes !== null && helperRoutes.length === partial;
+      if (hasExactPartialRoutes) routes.push(...helperRoutes);
       const totalCompleted = completedCount + partial;
       const originalFailed = sendingIndices[failedBatchIndex] ?? sendingIndices[partial] ?? totalCompleted;
       const message = err instanceof Error ? err.message : String(err);
+      const exactRoutes = hasExactPartialRoutes ? [...routes] : null;
+      const routeEvidence = exactRoutes
+        ? exactRoutes.length > 0
+          ? exactRoutes.join('+')
+          : 'none'
+        : 'unavailable';
       throw new ComputerError(
-        `PARTIAL_BATCH: completed_count=${totalCompleted} failed_index=${originalFailed}. ${message}`,
-        { completedCount: totalCompleted, failedIndex: originalFailed }
+        `PARTIAL_BATCH: completed_count=${totalCompleted} failed_index=${originalFailed} routes=${routeEvidence}. ${message}`,
+        {
+          completedCount: totalCompleted,
+          failedIndex: originalFailed,
+          ...(exactRoutes ? { completedRoutes: exactRoutes } : {})
+        }
       );
     }
   };

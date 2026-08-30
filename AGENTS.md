@@ -759,8 +759,12 @@ re-checks, and macOS Screen Recording/Accessibility consent remains an independe
 The helper is prewarmed only when native Desktop capabilities are published; window observation is
 background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
 window geometry; semantic refs bind cached elements to bounded native accessibility snapshots.
-Physical input revalidates the target, batches report partial completion and route evidence, and
-screen frames additionally retain the exact active-display rectangles rather than only their union.
+Visible-pixel crops are always screen-bound even when their coordinates came from a window frame;
+otherwise an occluding app's pixels could be relabelled as the covered window. Screen captures
+compare the exact active-display rectangles with ScreenCaptureKit's snapshot and re-check them
+through and after capture. Physical input revalidates the target, and a semantic or explicit focus
+step carries its proven window into later keyboard actions in the same batch instead of degrading
+to global HID input. Batches report partial completion and route evidence.
 The in-process Swift path sets a native AX messaging timeout and bounded traversal deadlines because a
 Node Worker timeout cannot pre-empt a synchronous accessibility call. Physical input batches report
 partial completion and route evidence, and compact local postconditions avoid model-driven wait/observe loops. Tests: `computer*.test.ts` and

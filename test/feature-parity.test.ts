@@ -48,7 +48,10 @@ describe('portable browser-backed feature parity', () => {
   });
 
   it('ships the complete Core/browser product plus native Desktop automation on macOS', () => {
-    const config = defaultConfig('darwin');
+    // Model the oldest supported Desktop host explicitly. The real-host projection is
+    // intentionally false on macOS 12.0-12.2, and this policy test must not depend on the
+    // Darwin release of the machine running Vitest.
+    const config = defaultConfig('darwin', '21.4.0');
     expect(surfaceDefinition('core').tools).toEqual([
       'read',
       'view_image',

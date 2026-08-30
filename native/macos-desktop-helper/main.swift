@@ -439,8 +439,10 @@ private func inputTargetMatches(_ row: WindowRow) -> Bool {
     let rows = allWindowRows(includeMinimized: false)
     guard windowServerFrontWindowID(rows: rows) == row.id else { return false }
     guard focusedAXWindowID(for: row.pid, rows: rows) == row.id else { return false }
-    if let focusedElementWindow = focusedAXElementWindowID(for: row.pid, rows: rows),
-       focusedElementWindow != row.id { return false }
+    // Missing focused-control evidence is not agreement. AX can return nil on a timeout,
+    // an untyped value or an app transition; accepting that would turn an unprovable
+    // keyboard destination into global physical input.
+    guard focusedAXElementWindowID(for: row.pid, rows: rows) == row.id else { return false }
     return true
 }
 
@@ -556,7 +558,13 @@ private func findUI(
     let row: WindowRow
     if let suppliedWindow {
         row = suppliedWindow
-    } else if let requested = number(request["id"])?.uint32Value, let found = windowRow(requested) {
+    } else if let rawRequested = request["id"], !(rawRequested is NSNull) {
+        guard let requested = number(rawRequested)?.uint32Value else {
+            throw fail("BAD_REQUEST", "find_ui window id is malformed")
+        }
+        guard let found = windowRow(requested) else {
+            throw fail("WINDOW_NOT_FOUND", "window \(requested) is no longer available")
+        }
         row = found
     } else if let foreground = foregroundWindowID(), let found = windowRow(foreground) {
         row = found
@@ -932,7 +940,9 @@ private func actUI(_ request: JSONObject) throws -> JSONObject {
             "the referenced accessibility control no longer belongs to snapshot window \(snapshot.window)"
         )
     }
-    guard axBool(element, kAXEnabledAttribute as CFString, default: true) else {
+    // Mutation requires an explicitly readable true value. Missing, untyped or timed-out
+    // AXEnabled evidence is not permission to click through the uncertainty.
+    guard axBool(element, kAXEnabledAttribute as CFString, default: false) else {
         throw fail("UI_ACTION_DISABLED", "the referenced accessibility control is disabled")
     }
     let action = string(request["action"])
@@ -1219,7 +1229,12 @@ private func captureDisplay(_ display: SCDisplay, maxWidth: Int) throws -> (CGIm
     return (try resizedImage(image, width: width, height: height), region)
 }
 
-private func captureComposite(region target: CGRect, maxWidth: Int, displays: [SCDisplay]) throws -> CGImage {
+private func captureComposite(
+    region target: CGRect,
+    maxWidth: Int,
+    displays: [SCDisplay],
+    expectedDisplays: [CGRect]
+) throws -> CGImage {
     let (outputWidth, outputHeight) = scaledDimensions(region: target, maxWidth: maxWidth)
     let scale = CGFloat(outputWidth) / target.width
     let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -1236,7 +1251,13 @@ private func captureComposite(region target: CGRect, maxWidth: Int, displays: [S
     context.fill(CGRect(x: 0, y: 0, width: outputWidth, height: outputHeight))
 
     for display in displays where display.frame.intersects(target) {
+        guard sameDisplayTopology(expectedDisplays, try activeDisplayRects()) else {
+            throw fail("STALE_FRAME", "active display topology changed while screenshot capture was in progress")
+        }
         let (image, displayRegion) = try captureDisplay(display, maxWidth: display.width)
+        guard sameDisplayTopology(expectedDisplays, try activeDisplayRects()) else {
+            throw fail("STALE_FRAME", "active display topology changed while screenshot capture was in progress")
+        }
         let intersection = displayRegion.intersection(target)
         guard !intersection.isNull, !intersection.isEmpty else { continue }
         let imageScaleX = CGFloat(image.width) / displayRegion.width
@@ -1268,6 +1289,10 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
     let displayRects = try activeDisplayRects()
     let screen = displayRects.reduce(CGRect.null) { $0.union($1) }
     let content = try shareableContent()
+    let contentDisplayRects = content.displays.map(\.frame)
+    guard sameDisplayTopology(displayRects, contentDisplayRects) else {
+        throw fail("STALE_FRAME", "active display topology changed before screenshot capture began")
+    }
     let requestedWindow = forcedWindow ?? number(request["id"])?.uint32Value
 
     let image: CGImage
@@ -1296,7 +1321,12 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
             ].contains(error.code)
             guard canUseVisibleFallback else { throw error }
             region = row.bounds
-            image = try captureComposite(region: region, maxWidth: maxWidth, displays: content.displays)
+            image = try captureComposite(
+                region: region,
+                maxWidth: maxWidth,
+                displays: content.displays,
+                expectedDisplays: displayRects
+            )
             captureMode = "screen_fallback"
         }
         guard let fresh = windowRow(requestedWindow), approximatelyEqual(fresh.bounds, row.bounds) else {
@@ -1304,11 +1334,21 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
         }
     } else if let requestedRegion = rect(request["region"]) {
         region = requestedRegion
-        image = try captureComposite(region: region, maxWidth: maxWidth, displays: content.displays)
+        image = try captureComposite(
+            region: region,
+            maxWidth: maxWidth,
+            displays: content.displays,
+            expectedDisplays: displayRects
+        )
         captureMode = "screen"
     } else if bool(request["full"]) {
         region = screen
-        image = try captureComposite(region: region, maxWidth: maxWidth, displays: content.displays)
+        image = try captureComposite(
+            region: region,
+            maxWidth: maxWidth,
+            displays: content.displays,
+            expectedDisplays: displayRects
+        )
         captureMode = "screen"
     } else {
         guard let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first else {
@@ -1316,6 +1356,9 @@ private func capture(_ request: JSONObject, forcedWindow: CGWindowID? = nil) thr
         }
         (image, region) = try captureDisplay(display, maxWidth: maxWidth)
         captureMode = "screen"
+    }
+    guard sameDisplayTopology(displayRects, try activeDisplayRects()) else {
+        throw fail("STALE_FRAME", "active display topology changed while screenshot was captured")
     }
     try writePNG(image, path: file)
     var response: JSONObject = [
@@ -1385,6 +1428,11 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
         let frame = request["frame"] as? JSONObject
         if let frame { try validateFrame(frame) }
         let frameWindow = number(frame?["window"])?.uint32Value
+        // A successful semantic or explicit focus step becomes the authority for later
+        // keyboard input in this same batch. The later input still re-proves exact focus;
+        // carrying the id prevents a frame-less click_ref -> type sequence from degrading
+        // into an unscoped global HID event.
+        var inputWindow = frameWindow
         let actions = request["actions"] as? [JSONObject] ?? []
         var routes: [String] = []
         var completed = 0
@@ -1393,8 +1441,10 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
                 let type = string(action["type"])
                 switch type {
                 case "click_ui", "set_value_ui":
-                    let actionWindow = number(action["window"])?.uint32Value
-                    if let frameWindow, let actionWindow, frameWindow != actionWindow {
+                    guard let actionWindow = number(action["window"])?.uint32Value else {
+                        throw fail("BAD_ACTION", "semantic action has no target window")
+                    }
+                    if let frameWindow, frameWindow != actionWindow {
                         throw fail(
                             "TARGET_WINDOW_CONFLICT",
                             "semantic action targets window \(actionWindow), but frame targets window \(frameWindow)"
@@ -1406,6 +1456,7 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
                     uiRequest["value"] = action["value"]
                     let reply = try actUI(uiRequest)
                     routes.append(string(reply["route"], default: "uia"))
+                    inputWindow = actionWindow
                 case "move":
                     if let frame { _ = try assertFrameTarget(frame) }
                     try movePointer(CGPoint(x: int(action["x"]), y: int(action["y"])))
@@ -1443,12 +1494,12 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
                     )
                     routes.append("sendinput")
                 case "type":
-                    if let frameWindow { _ = try assertInputTarget(frameWindow) }
-                    try typeText(string(action["text"]), targetWindow: frameWindow)
+                    if let inputWindow { _ = try assertInputTarget(inputWindow) }
+                    try typeText(string(action["text"]), targetWindow: inputWindow)
                     routes.append("sendinput")
                 case "keypress":
-                    if let frameWindow { _ = try assertInputTarget(frameWindow) }
-                    try pressKeys(action["keys"] as? [String] ?? [], targetWindow: frameWindow)
+                    if let inputWindow { _ = try assertInputTarget(inputWindow) }
+                    try pressKeys(action["keys"] as? [String] ?? [], targetWindow: inputWindow)
                     routes.append("sendinput")
                 case "focus":
                     let requested = CGWindowID(int(action["window"]))
@@ -1462,6 +1513,7 @@ private func handle(_ request: JSONObject) throws -> JSONObject {
                         throw fail("FOCUS_FAILED", "the requested window could not be activated")
                     }
                     routes.append("focus")
+                    inputWindow = requested
                 default:
                     throw fail("BAD_ACTION", "unknown action \(type)")
                 }
