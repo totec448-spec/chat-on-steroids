@@ -730,12 +730,12 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
   });
 
   /**
-   * Two tabs of one chat is exactly the situation this repair exists to stop making worse.
-   * Which of them holds the broken turn is not knowable from here, and reloading the wrong
-   * one interrupts a running answer to fix a different document. So it reports nothing - and
-   * because it reported nothing, the repair is still there to finish when one tab closes.
+   * Two tabs of one chat used to end the repair: neither was reloaded and the duplicate stayed
+   * open, so the chat was left broken *and* the tab spam was left standing. One chat is one tab,
+   * so the ambiguity is resolved rather than deferred - the registry-bound copy is the one
+   * reloaded, deterministically, and no third tab is ever created to settle it.
    */
-  it('refuses to guess between two tabs of one chat, and finishes once one of them closes', async () => {
+  it('reloads the registry-bound copy when one chat has two tabs', async () => {
     const { fetch, asked } = appWith(CHAT);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
     await worker.registerTab(31);
@@ -744,14 +744,14 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     await worker.send({ type: 'bind', conversationId: CHAT }, 32);
 
     await worker.fireAlarm();
-    expect(worker.tabsReload).not.toHaveBeenCalled();
-    expect(asked).toEqual(['status']);
-
-    await worker.closeTab(32);
-    await worker.fireAlarm();
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
     expect(worker.tabsReload).toHaveBeenCalledWith(31);
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
     expect(asked).toContain(`repaired:${CHAT}`);
+
+    // Reported, so nothing outstanding remains and the duplicate is never reloaded after it.
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
   });
 
   /** A reload that throws repaired nothing, so it is not reported and the next pass retries. */

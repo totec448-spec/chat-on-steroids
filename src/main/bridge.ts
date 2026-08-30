@@ -136,10 +136,16 @@ const PORTS = ((): number[] => {
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 /** Durable settled-turn orphan safety net. */
 export const STALE_SWARM_MS = 2 * 60_000;
-/** One browser check after this much silence in an agent turn. */
-export const AGENT_INACTIVITY_RECOVERY_MS = 2 * 60_000;
-/** A worker that stays open-turn silent this long releases its slot through normal sleep/finish. */
-export const AGENT_INACTIVITY_SLEEP_MS = 4 * 60_000;
+/**
+ * How much activity one turn start or one attributed tool call grants a chat.
+ *
+ * Activity is granted, not measured. A chat is active because something it did says so - its turn
+ * began, or it ran a tool - and it stays active for exactly this long unless it does one of those
+ * again, which simply moves the deadline. Nothing else counts. Page heartbeats and progress
+ * reports kept a chat whose request-id join had already died looking permanently alive, which is
+ * the failure this window exists to expose rather than hide.
+ */
+export const CHAT_ACTIVE_MS = 3 * 60_000;
 /** Per-conversation floor between browser reload/open actions, regardless of why they were requested. */
 export const BROWSER_RECOVERY_COOLDOWN_MS = 3 * 60_000;
 const STALE_SWARM_SWEEP_MS = 30_000;
@@ -973,7 +979,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
 
   if (route === '/status') {
     const live = liveConversations();
-    queueInactiveAgentRecoveries();
     // The extension's maintenance pass, and the whole conversation about repairs: `repaired`
     // reports the one it was last handed and has now carried out, and `repair` is the next one
     // for it — the chat whose local tool calls stopped being attributable to it, see
@@ -1088,6 +1093,27 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const revived = noteAgentAlive(id, 'page');
     if (revived?.report) await recordAgentMessage(revived.report, 'sent');
     const observations = parseObservations(body['events']);
+    // A turn beginning is the one page fact that outranks the app's own idea of this worker's
+    // state. Reported here rather than inferred from `generating`, because this is the exact
+    // moment the model started running and the only one that can outvote a sleep decision made
+    // a second earlier on missing evidence.
+    let edge = 0;
+    let spends = false;
+    for (const item of observations) {
+      if (item.kind === 'turn_start') {
+        edge = Math.max(edge, item.time);
+        spends = false;
+      } else if (item.kind === 'turn_end') {
+        edge = Math.max(edge, item.time);
+        spends = true;
+      }
+    }
+    if (edge > 0 && spends) endActivity(id, edge);
+    else if (edge > 0) {
+      grantActivity(id, edge);
+      const woke = noteAgentAlive(id, 'turn', edge);
+      if (woke?.report) await recordAgentMessage(woke.report, 'sent');
+    }
     observationWritesInFlight += 1;
     try {
       const agent = agentForOwnedConversation(id);
@@ -2458,17 +2484,19 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   // silent. The first browser action is tracked by the activity episode and cannot repeat;
   // sleeping at four minutes uses the broker's existing context-ceiling decision, so a worker
   // at 400k becomes finished while every other worker remains reusable.
-  const liveByConversation = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
   for (const worker of state.agents.filter((agent) => agent.role === 'worker' && agent.state === 'active')) {
     if (!worker.conversationId) continue;
-    const live = liveByConversation.get(worker.conversationId);
-    if (!live?.generating && !live?.activeTurnId) continue;
-    const activityAt = Math.max(worker.activatedAt ?? 0, worker.lastSeenAt ?? 0);
-    if (activityAt <= 0 || now - activityAt < AGENT_INACTIVITY_SLEEP_MS) continue;
+    // The granted window is the whole test. A worker that has never started a turn and never
+    // called a tool has nothing to expire and is left to the paths that own it; one whose window
+    // ran out has produced nothing this app can attribute for three minutes, whatever its page
+    // still says about itself.
+    const granted = activityEndsAt(worker.conversationId);
+    if (granted === null || granted > now) continue;
     const slept = sleepWorker(
       worker.id,
-      'Its ChatGPT turn stayed open but produced no message, page activity, or tool call for four minutes after one browser recovery check.'
+      'Its ChatGPT turn started but produced no tool call for three minutes.'
     );
+    forgetActivity(worker.conversationId);
     repairsInFlight.delete(worker.conversationId);
     if (slept?.report) await recordAgentMessage(slept.report, 'sent');
     if (slept) stoppedWorkers.push(worker.id);
@@ -2480,7 +2508,6 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
     stoppedWorkers.push(slept.info.id);
   }
   if (stoppedWorkers.length > 0) state = swarmState();
-  queueInactiveAgentRecoveries(now);
 
   // The one place a worker that never called finish is allowed to stop holding its slot, and
   // the only one entitled to say so: durable quiescence is proof that no turn is running, which
@@ -3412,18 +3439,75 @@ export function commandUrl(id: string, conversationId?: string | null): string {
 // -------------------------------------------------------- exact browser recovery
 
 /**
+ * Every chat that has been granted activity, and the instant that grant runs out.
+ *
+ * One number per chat is the entire notion of "active" in this file. A value in the future means
+ * the chat is active; a value in the past means its grant ran out; no entry at all means the chat
+ * has never done anything that grants one. That third case is deliberately distinct from the
+ * second - a chat that never started is not a chat that stopped, and only the latter is something
+ * to act on.
+ *
+ * This replaced a pair of clocks that disagreed: an agent's `lastSeenAt`, which any page report
+ * refreshed, and the recorder's open-turn flags, which stayed true for as long as the DOM kept
+ * spinning. Both read a page that was still moving as a chat that was still working, and a chat
+ * whose request-id join has broken is exactly a page that is still moving while the app hears
+ * nothing from it.
+ */
+const activeUntil = new Map<string, number>();
+
+/** A turn start or an attributed tool call. Grants CHAT_ACTIVE_MS from the moment it happened. */
+function grantActivity(conversationId: string, at = Date.now()): void {
+  activeUntil.set(conversationId, at + CHAT_ACTIVE_MS);
+}
+
+/**
+ * A turn end. Spends the grant now rather than dropping it, because "stopped" and "never started"
+ * are different answers and the sleep sweep acts on only one of them. A later call grants again.
+ */
+function endActivity(conversationId: string, at = Date.now()): void {
+  if (activeUntil.has(conversationId)) activeUntil.set(conversationId, at);
+}
+
+/** The instant this chat's grant runs out, or null if it was never granted one. */
+function activityEndsAt(conversationId: string): number | null {
+  return activeUntil.get(conversationId) ?? null;
+}
+
+/** Drops a chat out of the activity ledger entirely, once nothing is waiting on it. */
+function forgetActivity(conversationId: string): void {
+  activeUntil.delete(conversationId);
+}
+
+/**
  * How long one Unattributed incident is given to prove itself wrong.
  *
  * Unattributed activity means a chat is running tools while the request-id join is broken —
  * usually because that page's content script or Fiber helper died under it. It never says
  * which chat, so nothing here guesses one. It is deliberately slow to arm: the live probes in
  * docs/chatgpt-turn-signals.md show ChatGPT can sit for more than a minute on a genuinely live
- * request, so silence is never read as failure. Only the recorder's own post-grace Unattributed
- * verdict starts this clock, and only the recorder's attributed verdicts end it.
+ * request, and reloading a chat that was merely thinking destroys the answer it was writing. A
+ * whole minute of every other chat carrying on normally is what makes the silent ones stand out.
+ * Only the recorder's own post-grace Unattributed verdict starts this clock, and only the
+ * recorder's attributed verdicts end it.
  */
-const UNATTRIBUTED_REPAIR_MS = 20_000;
+const UNATTRIBUTED_REPAIR_MS = 60_000;
+
+/**
+ * Seconds until the open incident acts, or null when nothing is going to act.
+ *
+ * With no incident open the answer is the whole window rather than a placeholder: the call
+ * asking this is an unattributed one, so it is the call that opens the incident. With no
+ * browser in sight there is no answer at all — nothing can reload a tab this app cannot see,
+ * and promising a chat a repair that will never come is worse than saying nothing.
+ */
+export function unattributedRepairEta(now = Date.now()): number | null {
+  if (!browserPresent()) return null;
+  const startedAt = unattributedIncident?.startedAt ?? now;
+  return Math.max(0, Math.round((startedAt + UNATTRIBUTED_REPAIR_MS - now) / 1000));
+}
 
 interface UnattributedIncident {
+  startedAt: number;
   timer: NodeJS.Timeout;
   /** Chats whose calls kept being attributed while this incident was open. Not the broken one. */
   proven: Set<string>;
@@ -3460,7 +3544,7 @@ interface Repair {
   state: 'queued' | 'handed' | 'done';
   /** Stable identity of the failure/inactivity episode. A new activity stamp mints a new one. */
   episode: string;
-  reason: 'unattributed' | 'assistant-error' | 'inactive' | 'no-tab';
+  reason: 'unattributed' | 'assistant-error' | 'no-tab';
   /** Cooldown boundary. The browser is never asked before this instant. */
   notBefore: number;
   /**
@@ -3479,8 +3563,6 @@ interface Repair {
 const repairsInFlight = new Map<string, Repair>();
 /** Last browser action per exact chat. One cooldown covers errors, silence and missing tabs. */
 const lastBrowserRecoveryAt = new Map<string, number>();
-/** Last attributed connector completion for ordinary non-agent error recovery. */
-const lastAttributedCallAt = new Map<string, number>();
 
 function recoveryAgent(conversationId: string) {
   const info = agentInfoForOwnedConversation(conversationId);
@@ -3502,7 +3584,8 @@ function queueBrowserRecovery(
   endedTurns = 0,
   now = Date.now()
 ): boolean {
-  if (!getConfig().multiAgent.recoverAgentTabs && reason !== 'unattributed') return false;
+  if (!getConfig().multiAgent.recoverAgentTabs && reason !== 'unattributed' && reason !== 'assistant-error')
+    return false;
   const held = repairsInFlight.get(conversationId);
   if (held?.episode === episode) return false;
   if (held && held.state !== 'done') return false;
@@ -3537,11 +3620,12 @@ const MEANINGFUL_RECOVERY_ACTIVITY = new Set<ChatObservation['kind']>([
 function noteRecoveryObservations(conversationId: string, observations: readonly ChatObservation[]): void {
   if (observations.some((item) => MEANINGFUL_RECOVERY_ACTIVITY.has(item.kind))) noteRecoveryActivity(conversationId);
 
-  if (!getConfig().multiAgent.recoverAgentTabs) return;
+  // A transport failure rendered inside an assistant turn is the page saying, in its own words,
+  // that the answer it was producing is gone. That is true of any chat: an ordinary conversation
+  // with no worker attached breaks the same way, and leaving it parked on "message delivery
+  // timed out" until a human notices was the whole of this bug. Neither an agent binding nor a
+  // recent attributed call is evidence about that failure, so neither may gate the repair.
   const now = Date.now();
-  const agent = recoveryAgent(conversationId);
-  const recentCall = now - (lastAttributedCallAt.get(conversationId) ?? 0) <= AGENT_INACTIVITY_RECOVERY_MS;
-  if (!agent && !recentCall) return;
   for (const item of observations) {
     // This is the role fence. Top-level alerts and anything rendered under a user message are
     // still recorded, but only the DOM adapter's assistant-turn classifier may set this bit.
@@ -3565,30 +3649,6 @@ function browserRecoveryMonitoring(): boolean {
   );
 }
 
-/** Queues the single check for a still-open agent turn's current silence episode. */
-function queueInactiveAgentRecoveries(now = Date.now()): void {
-  if (!getConfig().multiAgent.recoverAgentTabs) return;
-  const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
-  for (const agent of swarmState().agents) {
-    if (!agent.conversationId || agent.state !== 'active') continue;
-    const conversation = live.get(agent.conversationId);
-    if (!conversation?.generating && !conversation?.activeTurnId) continue;
-    const activityAt = Math.max(agent.activatedAt ?? 0, agent.lastSeenAt ?? 0);
-    if (activityAt <= 0 || now - activityAt < AGENT_INACTIVITY_RECOVERY_MS) continue;
-    if (
-      queueBrowserRecovery(
-        agent.conversationId,
-        `inactive:${activityAt}`,
-        'inactive',
-        conversation.endedTurns,
-        now
-      )
-    ) {
-      logInfo(`multi-agent: ${agent.id} has one silent active-turn episode — asking the browser to check its tab`);
-    }
-  }
-}
-
 /** A final-tab close during one exact open turn is one no-tab recovery episode. */
 function queueMissingAgentTab(conversationId: string, closedMidTurn: boolean, now = Date.now()): void {
   if (!closedMidTurn || !getConfig().multiAgent.recoverAgentTabs) return;
@@ -3607,10 +3667,20 @@ function queueMissingAgentTab(conversationId: string, closedMidTurn: boolean, no
  * mid-turn already filed its exact no-tab repair at `/closed`; treating every durable `detached`
  * agent as still mid-turn made completed Prime chats reopen merely because they owned a run.
  */
-function repairCandidates(): Array<{ conversationId: string; endedTurns: number }> {
-  return liveConversations()
-    .filter((entry) => entry.generating)
-    .map((entry) => ({ conversationId: entry.conversationId, endedTurns: entry.endedTurns }));
+function repairCandidates(now = Date.now()): Array<{ conversationId: string; endedTurns: number }> {
+  // A grant that ran out a whole window ago is behind every decision that reads it: the sleep
+  // sweep runs every thirty seconds and has long since had its say. Forgetting it here is what
+  // keeps the ledger the size of the chats in play rather than the size of the session.
+  for (const [conversationId, until] of activeUntil) {
+    if (until + CHAT_ACTIVE_MS < now) activeUntil.delete(conversationId);
+  }
+  const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
+  return [...activeUntil]
+    .filter(([, until]) => until > now)
+    .map(([conversationId]) => ({
+      conversationId,
+      endedTurns: live.get(conversationId)?.endedTurns ?? 0
+    }));
 }
 
 /**
@@ -3624,7 +3694,7 @@ function repairCandidates(): Array<{ conversationId: string; endedTurns: number 
  * a new one for a generation that never ended, so id inequality reads a repair that is working
  * as a repair that is spent — and a join the reload did not fix goes on producing unattributed
  * calls, so the next incident reloaded the same chat again, and the one after that again, every
- * twenty seconds for as long as ChatGPT stayed broken. One reload per failure; ten reloads
+ * minute for as long as ChatGPT stayed broken. One reload per failure; ten reloads
  * prove only that the first nine did not help. Generation stopping is not the fact either: a
  * turn that ends and a turn that begins can reach this app in one batch, and by the time this
  * runs the chat is simply generating again.
@@ -3662,8 +3732,7 @@ function retireSpentRepairs(): void {
  */
 function noteCallAttribution(conversationId: string | null): void {
   if (conversationId) {
-    const now = Date.now();
-    lastAttributedCallAt.set(conversationId, now);
+    grantActivity(conversationId);
     noteRecoveryActivity(conversationId);
     unattributedIncident?.proven.add(conversationId);
     repairsInFlight.delete(conversationId);
@@ -3672,16 +3741,17 @@ function noteCallAttribution(conversationId: string | null): void {
   if (unattributedIncident) return;
   const timer = setTimeout(repairUnattributedChat, UNATTRIBUTED_REPAIR_MS);
   timer.unref?.();
-  unattributedIncident = { timer, proven: new Set() };
+  unattributedIncident = { startedAt: Date.now(), timer, proven: new Set() };
 }
 
 /**
- * Reattaches the one chat the app can name, or leaves every chat alone.
+ * Reattaches every chat that has gone quiet on attribution.
  *
- * Exactly one candidate is the whole test. Two chats that are both mid-turn and have both gone
- * quiet on attribution are indistinguishable from here, and reloading either would be a guess at
- * the cost of a running turn; none means whatever was calling has already stopped or proved
- * itself. Both answers are "do nothing", which is why there is no fallback below this line.
+ * Health is a per-chat fact, not a competition between chats. This used to act only when
+ * exactly one candidate existed, so the case it exists for — several workers losing the same
+ * evidence path at once — was the one case it refused. Two silent mid-turn chats are not an
+ * ambiguity to resolve, they are two broken chats. Each is judged on its own evidence, and a
+ * chat that proves its join with an attributed call has already left the incident by here.
  */
 function repairUnattributedChat(): void {
   const incident = unattributedIncident;
@@ -3691,28 +3761,21 @@ function repairUnattributedChat(): void {
   const candidates = repairCandidates().filter(
     (entry) => !incident.proven.has(entry.conversationId) && !repairsInFlight.has(entry.conversationId)
   );
-  const [target] = candidates;
-  if (candidates.length !== 1 || !target) {
-    if (candidates.length > 1) {
-      logInfo(`bridge: unattributed activity — ${candidates.length} chats could be the one; leaving them alone`);
-    }
-    return;
-  }
   // The browser owns the final open-vs-reload decision for both cases. It scans actual tabs at
   // action time, so a stale close event cannot open a duplicate and an open chat is reloaded
   // rather than copied. One queue is also what prevents an unattributed incident and an agent
   // silence incident from each performing their own recovery.
-  if (
-    queueBrowserRecovery(
-      target.conversationId,
-      `unattributed:${target.endedTurns}`,
-      'unattributed',
-      target.endedTurns
-    )
-  ) {
-    logInfo(
-      `bridge: unattributed activity — asking the browser to reload ${target.conversationId}`
-    );
+  for (const target of candidates) {
+    if (
+      queueBrowserRecovery(
+        target.conversationId,
+        `unattributed:${target.endedTurns}`,
+        'unattributed',
+        target.endedTurns
+      )
+    ) {
+      logInfo(`bridge: unattributed activity — asking the browser to reload ${target.conversationId}`);
+    }
   }
 }
 
@@ -3731,8 +3794,14 @@ function repairUnattributedChat(): void {
  */
 function takePendingRepair(now = Date.now()): { conversationId: string; token: string; reason: Repair['reason'] } | null {
   retireSpentRepairs();
-  for (const repair of repairsInFlight.values()) {
-    if (repair.state === 'handed') repair.state = 'queued';
+  // A handout the browser did not confirm goes back at the *end* of the queue. Re-queueing it
+  // in place let the first entry win every pass, so one repair the browser could not carry out
+  // starved every other chat behind it — precisely when several chats break at once.
+  for (const [conversationId, repair] of [...repairsInFlight]) {
+    if (repair.state !== 'handed') continue;
+    repair.state = 'queued';
+    repairsInFlight.delete(conversationId);
+    repairsInFlight.set(conversationId, repair);
   }
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'queued') continue;
@@ -3768,7 +3837,6 @@ function clearUnattributedIncident(): void {
   unattributedIncident = null;
   repairsInFlight.clear();
   lastBrowserRecoveryAt.clear();
-  lastAttributedCallAt.clear();
 }
 
 /**
@@ -4558,6 +4626,7 @@ export function resetBridgeForTests(): void {
   bridgeRecovering = false;
   bridgeShutdownRequested = false;
   clearUnattributedIncident();
+  activeUntil.clear();
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;

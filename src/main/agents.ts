@@ -2842,7 +2842,11 @@ export interface AliveResult {
  * governs how many chats this app will start, and refusing to recognise one that is already
  * working would only make its calls unattributable.
  */
-export function noteAgentAlive(conversationId: string | null | undefined, source: 'call' | 'page' = 'call'): AliveResult | null {
+export function noteAgentAlive(
+  conversationId: string | null | undefined,
+  source: 'call' | 'page' | 'turn' = 'call',
+  at = Date.now()
+): AliveResult | null {
   if (!run || !conversationId) return null;
   const agent = boundAgent(conversationId);
   if (!agent) return null;
@@ -2865,8 +2869,16 @@ export function noteAgentAlive(conversationId: string | null | undefined, source
   // its turn settles and keeps reporting the same transcript, so waking on that would undo
   // every sleep the moment it happened and hand the slot straight back. A proven tool call is
   // different: the model in that chat is running, whatever the app decided a moment ago.
+  //
+  // So is a turn that *started after this app put the worker to sleep*. That is not the old
+  // transcript being re-reported, it is a new generation beginning, and it is the model running
+  // just as much as a call is. Refusing it made a worker whose request-id path broke unwakeable
+  // by construction: its calls arrive with no conversation to wake, so `call` never fires, and
+  // every page fact was refused here — the app then slept a worker that was visibly generating
+  // and spent the next revival deadline typing at a chat it had already given up on.
   const sleeping = agent.info.state === 'sleeping' || agent.info.state === 'waking';
-  if (sleeping && source === 'page') {
+  const staleTurn = source === 'turn' && at <= (agent.info.sleptAt ?? 0);
+  if (sleeping && (source === 'page' || staleTurn)) {
     agent.info.lastSeenAt = now;
     return { agentId: agent.info.id, revived: false, report: null };
   }
