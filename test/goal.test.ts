@@ -543,6 +543,121 @@ describe('the reply', () => {
     expect(view.error).toMatch(/stream|provider|request_failed/i);
   });
 
+  /**
+   * One draft is one request, and a failure is not an answer.
+   *
+   * The two answers that end a Goal run are `[no reply]` and words to type. A dead socket, a
+   * try-later status, a stream that breaks and a reply this app cannot read are all the same
+   * event — no answer — so none of them may spend the turn: the draft settles `failed` and
+   * `retryable`, which is the page loop being told the turn is still owed one. Asking again is
+   * that loop's job, because only it can still see whether this is the turn being answered.
+   */
+  it('asks once per draft, and leaves an unanswered turn still owed an answer', async () => {
+    const cases: Array<[string, () => unknown]> = [
+      ['socket', () => { throw new TypeError('fetch failed'); }],
+      ['408', () => new Response('{}', { status: 408 })],
+      ['429', () => new Response('{}', { status: 429 })],
+      ['503', () => new Response('{}', { status: 503 })],
+      ['broken-stream', () => stream([delta('half an instruction'), `data: ${JSON.stringify({ error: { message: 'upstream provider failed' } })}\n`, 'data: [DONE]\n'])],
+      ['malformed', () => stream([delta('unfinished thought'), 'data: {not-json}\n'])],
+      ['oversize', () => stream([delta('x'.repeat(12_001)), 'data: [DONE]\n'])]
+    ];
+    for (const [name, fail] of cases) {
+      const id = `c-unanswered-${name}`;
+      const sessionId = await seed(id);
+      let attempts = 0;
+      globalThis.fetch = (async () => {
+        attempts += 1;
+        return fail();
+      }) as never;
+
+      goal.startGoalDraft({ sessionId, conversationId: id, turnId: 'g-1' });
+      const view = await settled(id);
+      expect(attempts, name).toBe(1);
+      expect(view.stage, name).toBe('failed');
+      expect(view.retryable, name).toBe(true);
+      // Whatever arrived before the failure was never an answer, and never becomes one.
+      expect(view.reply, name).toBe('');
+    }
+  });
+
+  /** A refused key, an empty account or a model id nobody knows answers the same way twice. */
+  it('asks once about a failure the same request would only repeat', async () => {
+    const cases: Array<[string, () => unknown]> = [
+      ['auth', () => new Response('{}', { status: 401 })],
+      ['credit', () => new Response('{}', { status: 402 })],
+      ['unknown-model', () => new Response('{}', { status: 404 })]
+    ];
+    for (const [name, fail] of cases) {
+      const id = `c-terminal-${name}`;
+      const sessionId = await seed(id);
+      let attempts = 0;
+      globalThis.fetch = (async () => {
+        attempts += 1;
+        return fail();
+      }) as never;
+
+      goal.startGoalDraft({ sessionId, conversationId: id, turnId: 'g-1' });
+      const view = await settled(id);
+      expect(attempts, name).toBe(1);
+      expect(view.stage, name).toBe('failed');
+      expect(view.retryable, name).toBe(false);
+    }
+  });
+
+  /**
+   * The one retry authority, exercised end to end: ack the failure, ask again, same turn.
+   *
+   * This is exactly what the page's Goal loop does, and the idempotency that stops a second
+   * message has to keep letting it through — nothing was typed, so this is still the first
+   * message for that turn rather than a second one.
+   */
+  it('draws a new draft for the same turn once the page has retired the failed one', async () => {
+    const sessionId = await seed('c-again');
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      return attempts === 1
+        ? new Response('{}', { status: 503 })
+        : stream([delta('the real instruction'), 'data: [DONE]\n']);
+    }) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-again', turnId: 'g-1' });
+    const failure = await settled('c-again');
+    expect(failure.stage).toBe('failed');
+    expect(failure.retryable).toBe(true);
+
+    // Unread, the failure is still the page's to see: asking again hands back the same one.
+    expect(goal.startGoalDraft({ sessionId, conversationId: 'c-again', turnId: 'g-1' }).stage).toBe('failed');
+    expect(attempts).toBe(1);
+
+    expect(goal.ackGoalDraft('c-again', failure.token)).toBe(true);
+    goal.startGoalDraft({ sessionId, conversationId: 'c-again', turnId: 'g-1' });
+    const view = await settled('c-again');
+    expect(attempts).toBe(2);
+    expect(view.stage).toBe('ready');
+    expect(view.reply).toBe(goal.humanReply('the real instruction'));
+  });
+
+  /** …and never for a failure that would only be paid for again. */
+  it('refuses a fresh attempt at a turn whose failure was settings, not weather', async () => {
+    const sessionId = await seed('c-again-settled');
+    let attempts = 0;
+    globalThis.fetch = (async () => {
+      attempts += 1;
+      return new Response('{}', { status: 402 });
+    }) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-again-settled', turnId: 'g-1' });
+    const failure = await settled('c-again-settled');
+    expect(failure.retryable).toBe(false);
+    expect(goal.ackGoalDraft('c-again-settled', failure.token)).toBe(true);
+
+    const again = goal.startGoalDraft({ sessionId, conversationId: 'c-again-settled', turnId: 'g-1' });
+    expect(again.stage).toBe('failed');
+    expect(attempts).toBe(1);
+  });
+
   /** The loop's stopping condition, and the whole reason it can be left running. */
   it('sends nothing when the model says the goal is met', async () => {
     const sessionId = await seed('c-done');

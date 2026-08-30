@@ -115,14 +115,12 @@ const DEFAULT_COMPACTION: CompactionSettings = {
  * newest first, and whatever is chosen there is stored here verbatim.
  */
 /**
- * The `~` prefix is OpenRouter's marker for a family alias: this one always resolves to the
- * newest DeepSeek V4 Flash, so the default does not quietly rot into a snapshot from months
- * ago the way a pinned id does. `deepseek/deepseek-v4-flash` was such a pin — it reads like
- * "the flash model" but OpenRouter publishes it as V4 Flash 0423, and by August there were
- * two newer revisions the default would never have reached. The alias is also the cheaper
- * of the two: $0.04/M prompt against the pin's $0.057/M.
+ * The shipped Goal baseline. Keep the exact OpenRouter model id here rather than a provider
+ * fallback or a local alias: changing providers after one failed request would also change the
+ * protocol behaviour the Goal loop is validating. Existing user-selected models remain stored
+ * verbatim; this value is only the fresh/repair default.
  */
-export const DEFAULT_GOAL_MODEL = '~deepseek/deepseek-v4-flash-latest';
+export const DEFAULT_GOAL_MODEL = 'z-ai/glm-5.3';
 const DEFAULT_GOAL: GoalSettings = {
   enabled: false,
   model: DEFAULT_GOAL_MODEL,
@@ -132,12 +130,12 @@ const DEFAULT_GOAL: GoalSettings = {
 };
 // Two workers, not three: three concurrent workers reproducibly trips ChatGPT's rate limit
 // ("too many requests"), which strands the run rather than making it faster.
-const DEFAULT_MULTI_AGENT: MultiAgentSettings = { enabled: false, maxWorkers: 2 };
+const DEFAULT_MULTI_AGENT: MultiAgentSettings = { enabled: false, maxWorkers: 2, allowUnattributedCalls: false };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
   CAPABILITIES.map((capability) => [capability, true])
 ) as Capabilities;
-const FIRST_LAUNCH_MULTI_AGENT: MultiAgentSettings = { enabled: true, maxWorkers: DEFAULT_MULTI_AGENT.maxWorkers };
+const FIRST_LAUNCH_MULTI_AGENT: MultiAgentSettings = { ...DEFAULT_MULTI_AGENT, enabled: true };
 
 const rootSchema = z.object({
   name: z
@@ -268,7 +266,8 @@ const configSchema = z.object({
   multiAgent: z
     .object({
       enabled: z.boolean().optional().default(DEFAULT_MULTI_AGENT.enabled),
-      maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers)
+      maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
+      allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls)
     })
     .optional()
     .default({ ...DEFAULT_MULTI_AGENT }),

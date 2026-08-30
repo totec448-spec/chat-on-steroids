@@ -47,5 +47,8 @@ export function extensionDownloadUrl(version = APP_VERSION): string {
  *     `disconnected`, protected routes distinguish that revocation from a stale token, and
  *     /pair accepts `reconnect: true` only for an explicit browser-side reconnect. An older
  *     extension would otherwise silently undo the user's app-side Disconnect on its next 401.
+ * 9 — automatic compaction no longer spends a separate pre-send `/compact/claim-auto` wire
+ *     claim. The live page owns retryable preflight and the existing continuation transaction
+ *     remains the only durable post-send authority.
  */
-export const BRIDGE_PROTOCOL = 8;
+export const BRIDGE_PROTOCOL = 9;

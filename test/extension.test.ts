@@ -38,8 +38,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(8);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 8;');
+    expect(BRIDGE_PROTOCOL).toBe(9);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 9;');
   });
 
   /**
@@ -415,6 +415,8 @@ interface WorkerHarness {
   navigateTab(tabId: number, url: string): Promise<void>;
   /** Fires the extension install/update lifecycle event. */
   installed(reason?: string): Promise<void>;
+  /** Fires the periodic maintenance alarm this worker schedules for itself. */
+  fireAlarm(name?: string): Promise<void>;
   /** Registers the browser document that owns subsequent tab-scoped messages. */
   registerTab(tabId: number, documentId?: string): Promise<any>;
   /** Fires Chrome's tab-created lifecycle event, the way opening a link in a new tab does. */
@@ -424,6 +426,7 @@ interface WorkerHarness {
   tabsUpdate: ReturnType<typeof vi.fn>;
   tabsSendMessage: ReturnType<typeof vi.fn>;
   tabsRemove: ReturnType<typeof vi.fn>;
+  tabsReload: ReturnType<typeof vi.fn>;
   windowsUpdate: ReturnType<typeof vi.fn>;
   scriptingExecuteScript: ReturnType<typeof vi.fn>;
   scriptingInsertCSS: ReturnType<typeof vi.fn>;
@@ -458,11 +461,13 @@ function loadWorker(options: {
   const tabCreatedListeners: Array<(tab: { id?: number; url?: string; pendingUrl?: string }) => void> = [];
   const tabUpdatedListeners: Array<(tabId: number, changeInfo: { url?: string; status?: string }) => void> = [];
   const installedListeners: Array<(details: { reason: string }) => void> = [];
+  const alarmListeners: Array<(alarm: { name: string }) => void> = [];
   const tabsCreate = vi.fn(async () => ({ id: 99 }));
   const tabsQuery = vi.fn(options.tabsQuery ?? (async () => []));
   const tabsUpdate = vi.fn(async (id: number) => ({ id, windowId: 7 }));
   const tabsSendMessage = vi.fn(options.tabsSendMessage ?? (async () => ({ ok: true })));
   const tabsRemove = vi.fn(async () => undefined);
+  const tabsReload = vi.fn(async () => undefined);
   const scriptingExecuteScript = vi.fn(async () => []);
   const scriptingInsertCSS = vi.fn(async () => undefined);
   const alarmCreate = vi.fn(() => undefined);
@@ -503,7 +508,11 @@ function loadWorker(options: {
     alarms: {
       create: alarmCreate,
       clear: alarmClear,
-      onAlarm: event()
+      onAlarm: {
+        addListener(fn: (alarm: { name: string }) => void) {
+          alarmListeners.push(fn);
+        }
+      }
     },
     tabs: {
       create: tabsCreate,
@@ -514,6 +523,7 @@ function loadWorker(options: {
       }),
       sendMessage: tabsSendMessage,
       remove: tabsRemove,
+      reload: tabsReload,
       onCreated: {
         addListener(fn: (tab: { id?: number; url?: string; pendingUrl?: string }) => void) {
           tabCreatedListeners.push(fn);
@@ -550,11 +560,16 @@ function loadWorker(options: {
     tabsUpdate,
     tabsSendMessage,
     tabsRemove,
+    tabsReload,
     windowsUpdate,
     scriptingExecuteScript,
     scriptingInsertCSS,
     alarmCreate,
     alarmClear,
+    async fireAlarm(name = 'clf-bridge-drain') {
+      for (const fn of alarmListeners) fn({ name });
+      for (let turn = 0; turn < 12; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+    },
     async installed(reason = 'update') {
       for (const fn of installedListeners) fn({ reason });
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -635,6 +650,226 @@ function journalOf(session: FakeStorageArea): any[] {
   const value = session.data.journal;
   return Array.isArray(value) ? value : [];
 }
+
+describe('interrupted ChatGPT response recovery', () => {
+  it('reloads only the exact tab and currently owned document that requested repair', async () => {
+    const worker = loadWorker({ local: new FakeStorageArea(), session: new FakeStorageArea() });
+    const tabId = 17;
+    const documentId = 'document-interrupted-response';
+    await worker.registerTab(tabId, documentId);
+
+    expect(
+      await worker.send(
+        {
+          type: 'reload_owned_chat',
+          conversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+          messageKey: 'user-message-exact'
+        },
+        tabId,
+        documentId
+      )
+    ).toEqual({ ok: true });
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+    expect(worker.tabsReload).toHaveBeenCalledWith(tabId);
+
+    expect(
+      await worker.send(
+        {
+          type: 'reload_owned_chat',
+          conversationId: 'ffffffff-1111-4222-8333-444444444444',
+          messageKey: 'wrong-chat-message'
+        },
+        tabId,
+        documentId
+      )
+    ).toEqual({ ok: false, error: 'stale_conversation' });
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * The unattributed-chat repair, from the browser's side.
+ *
+ * The app can prove one chat's tool calls stopped being attributable to it, and can name that
+ * chat — but it cannot reach it. The page it would instruct is the page that stopped listening,
+ * and opening the url would make a second tab of a chat that is still on screen, which is the
+ * failure this whole path exists to avoid. The tab registry lives here, so the decision does
+ * too: this worker asks on the maintenance alarm it already runs, and reloads the exact tab.
+ */
+describe('unattributed chat repair from the tab registry', () => {
+  const paired = { port: 8765, token: 'paired-token' };
+  const CHAT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const OTHER = '11111111-2222-4333-8444-555555555555';
+
+  /**
+   * The app, as far as this worker can tell: it keeps handing the same repair out until a pass
+   * reports having carried it out. That is the contract these tests are written against - a
+   * pass that reports nothing must leave the repair outstanding.
+   *
+   * Each handout is minted with its own token, and only that token closes it, exactly as the
+   * app does it. `asked` records what a receipt actually quoted, so a test can tell the
+   * difference between a pass that reported the repair and one that reported something else.
+   */
+  function appWith(repair: string | null) {
+    const asked: string[] = [];
+    let outstanding = repair;
+    let token = '';
+    let minted = 0;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') {
+        const repaired = url.searchParams.get('repaired');
+        asked.push(repaired ? (repaired === token ? `repaired:${outstanding}` : `stale:${repaired}`) : 'status');
+        if (repaired && repaired === token) outstanding = null;
+        if (!outstanding) return response(200, { ok: true, repair: null });
+        token = `tok-${(minted += 1)}`;
+        return response(200, { ok: true, repair: { conversationId: outstanding, token } });
+      }
+      return response(404, {});
+    });
+    return { fetch, asked, arm: (id: string) => { outstanding = id; } };
+  }
+
+  it('reloads the exact tab holding the chat the app named, and reports it once', async () => {
+    const { fetch, asked } = appWith(CHAT);
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(21);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+    await worker.registerTab(22);
+    await worker.send({ type: 'bind', conversationId: OTHER }, 22);
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+    expect(worker.tabsReload).toHaveBeenCalledWith(21);
+    expect(asked).toEqual(['status', `repaired:${CHAT}`]);
+
+    // Reported, so the app has nothing outstanding and nothing here repeats it.
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * Two tabs of one chat is exactly the situation this repair exists to stop making worse.
+   * Which of them holds the broken turn is not knowable from here, and reloading the wrong
+   * one interrupts a running answer to fix a different document. So it reports nothing - and
+   * because it reported nothing, the repair is still there to finish when one tab closes.
+   */
+  it('refuses to guess between two tabs of one chat, and finishes once one of them closes', async () => {
+    const { fetch, asked } = appWith(CHAT);
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(31);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 31);
+    await worker.registerTab(32);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 32);
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(asked).toEqual(['status']);
+
+    await worker.closeTab(32);
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+    expect(worker.tabsReload).toHaveBeenCalledWith(31);
+    expect(asked).toContain(`repaired:${CHAT}`);
+  });
+
+  /** A reload that throws repaired nothing, so it is not reported and the next pass retries. */
+  it('retries a repair whose reload failed', async () => {
+    const { fetch, asked } = appWith(CHAT);
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(51);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 51);
+    worker.tabsReload.mockRejectedValueOnce(new Error('tab is gone'));
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledTimes(1);
+    expect(asked).toEqual(['status']);
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledTimes(2);
+    expect(asked).toEqual(['status', 'status', `repaired:${CHAT}`]);
+  });
+
+  /** No tab of it here, and none is opened: this browser has nothing to repair, and says so. */
+  it('opens nothing for a chat this browser is not holding', async () => {
+    const { fetch, asked } = appWith(OTHER);
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(41);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 41);
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(asked).toEqual(['status']);
+  });
+
+  /**
+   * The alarm is the only thing that wakes a stopped service worker, and a dead reporter is
+   * precisely the case where no page will wake it. So holding a chat is itself a reason to
+   * keep the alarm running - without that, the repair waits for traffic that never comes.
+   */
+  it('keeps its maintenance alarm running while it holds a chat, and asks nobody when it holds none', async () => {
+    const { fetch, asked } = appWith(null);
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+
+    await worker.fireAlarm();
+    expect(asked).toEqual([]);
+    expect(worker.alarmCreate).not.toHaveBeenCalled();
+
+
+    await worker.registerTab(51);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 51);
+    expect(worker.alarmCreate).toHaveBeenCalledWith('clf-bridge-drain', { delayInMinutes: 0.5 });
+
+    await worker.fireAlarm();
+    expect(asked).toEqual(['status']);
+  });
+
+  /**
+   * How long a repair can sit in the app before this browser sees it.
+   *
+   * The app arms a repair exactly twenty seconds into an unattributed incident. A collector
+   * that came round once a minute would make that deadline meaningless: an alarm created at
+   * T+0 with `periodInMinutes: 1` ticks at T+15, too early for the app to have decided, and
+   * then not again until T+75.
+   *
+   * Every pass re-arms the next one at Chrome's floor instead. Thirty seconds is that floor -
+   * alarms fire at most twice a minute, and a packed extension has anything shorter clamped up
+   * to it whatever this asks for - so the honest guarantee is that a repair armed at T+20 is
+   * collected by T+50 at the latest, not that it is collected at T+20. One alarm, one owner,
+   * one cadence, and it still stops dead when there is nothing left to hold.
+   */
+  it('comes round at Chrome’s alarm floor while it holds a chat, so a repair waits at most one pass', async () => {
+    const { fetch, asked, arm } = appWith(null);
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(61);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 61);
+
+    const armings = () => worker.alarmCreate.mock.calls.filter((call) => call[0] === 'clf-bridge-drain');
+    expect(armings()).toHaveLength(1);
+
+    // Every pass leaves the next one armed, and never asks for a delay Chrome would clamp -
+    // asking for less is not an error, it is a number that quietly means something else in a
+    // packed extension than it does in the unpacked copy a developer is looking at.
+    for (let pass = 1; pass <= 3; pass++) {
+      await worker.fireAlarm();
+      expect(armings()).toHaveLength(pass + 1);
+      expect(armings().at(-1)![1]).toEqual({ delayInMinutes: 0.5 });
+      expect(armings().at(-1)![1].delayInMinutes).toBeGreaterThanOrEqual(0.5);
+    }
+
+    // A repair armed by the app between two passes is carried out on the very next one.
+    arm(CHAT);
+    await worker.fireAlarm();
+    expect(worker.tabsReload).toHaveBeenCalledWith(61);
+    expect(asked.slice(-2)).toEqual(['status', `repaired:${CHAT}`]);
+
+    // And the cadence stops with the tab, rather than waking a worker forever.
+    await worker.closeTab(61);
+    expect(worker.alarmClear).toHaveBeenCalledWith('clf-bridge-drain');
+  });
+});
 
 describe('worker settings authority', () => {
   const paired = { port: 8765, token: 'paired-token' };
@@ -1423,7 +1658,7 @@ describe('extension observation journal', () => {
     expect(JSON.stringify(journalOf(session))).not.toContain('rejected by the local bridge');
   });
 
-  it('keeps one retry alarm while durable work remains instead of resetting it on every failure', async () => {
+  it('keeps one retry alarm while work remains instead of resetting it on every failure', async () => {
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
     const session = new FakeStorageArea();
     let healthy = false;
@@ -1440,12 +1675,18 @@ describe('extension observation journal', () => {
     await worker.send({ type: 'events', conversationId, entries: [event('first')] });
     await worker.send({ type: 'events', conversationId, entries: [event('second')] });
     expect(worker.alarmCreate).toHaveBeenCalledTimes(1);
-    expect(worker.alarmCreate).toHaveBeenCalledWith('clf-bridge-drain', { delayInMinutes: 0.25, periodInMinutes: 1 });
+    expect(worker.alarmCreate).toHaveBeenCalledWith('clf-bridge-drain', { delayInMinutes: 0.5 });
     expect(journalOf(session)).toHaveLength(2);
 
     healthy = true;
     await worker.send({ type: 'events', conversationId, entries: [event('third')] });
     expect(journalOf(session)).toEqual([]);
+    // Delivered, but this browser is still holding that chat - and a chat it holds is itself
+    // work, because the alarm is the only thing that wakes a stopped worker to collect a
+    // repair for it. It stops when the tab does.
+    expect(worker.alarmClear).not.toHaveBeenCalled();
+
+    await worker.closeTab(1);
     expect(worker.alarmClear).toHaveBeenCalledWith('clf-bridge-drain');
   });
 

@@ -215,7 +215,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   bar.title = `~${compactNumber(summary.estimatedTokens)} rough context tokens from messages and tool I/O; transient progress is excluded`;
 
   const remove = document.createElement('button');
-  remove.className = 'btn sess-del';
+  remove.className = 'btn sess-action sess-del';
   remove.type = 'button';
   remove.title = 'Delete this recorded session';
   remove.append(icon('i-trash'));
@@ -224,7 +224,21 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     void deleteSession(summary.id);
   });
 
-  row.append(top, sub, bar, remove);
+  const actions: HTMLButtonElement[] = [];
+  if (summary.conversationId) {
+    const open = document.createElement('button');
+    open.className = 'btn sess-action sess-open';
+    open.type = 'button';
+    open.title = 'Open this chat in Chrome';
+    open.append(icon('i-out'));
+    open.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void run(api.openSessionChat(summary.id));
+    });
+    actions.push(open);
+  }
+
+  row.append(top, sub, bar, ...actions, remove);
   return row;
 }
 
@@ -945,8 +959,9 @@ function paintSwarm(state: SwarmState): void {
       ...state.agents.map((agent) => {
         const row = el('div', 'agent');
         const top = el('div', 'model-top');
-        top.append(el('b', '', agent.label || agent.id));
-        top.append(el('span', 'chip', agent.role));
+        const label = agent.label || agent.id;
+        top.append(el('b', '', label));
+        if (label !== agent.id) top.append(el('span', 'chip', agent.id));
         top.append(el('span', `chip is-${agent.state}`, agent.state));
         // Clearing is offered where the agent is, not only as one global reset at the
         // bottom of a settings form. The two rows mean different things and the tooltip
@@ -1025,7 +1040,8 @@ export function chatSettingsPatch(current: Config): {
       // The exposure switch lives with every other ChatGPT tool switch, on Home. This
       // panel keeps only the worker count, so it reads the one control that exists.
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
-      maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8)
+      maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
+      allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked
     },
     goal: {
       enabled: $<HTMLInputElement>('goalEnabled').checked,
@@ -1275,7 +1291,7 @@ function wireGoal(save: () => Promise<void>): void {
  */
 function applyAutoCompactHint(config: Config): void {
   $('autoCompactHint').textContent = config.compaction.auto
-    ? 'Interrupts the answer at this many tokens, writes a handoff, opens a fresh chat. Once per chat.'
+    ? 'Interrupts an active answer at this many tokens, writes a handoff, and opens a fresh chat.'
     : 'Off — only the Compact & resume button in the ChatGPT tab compacts.';
 }
 
@@ -1293,6 +1309,7 @@ const CHAT_INPUTS = [
   'autoCompact',
   'autoCompactTokens',
   'maWorkers',
+  'allowUnattributedCalls',
   'goalEnabled',
   'goalReasoning',
   'goalPrompt',
@@ -1316,6 +1333,11 @@ export function chatApply(state: AppState, previous?: Config): void {
   applyAutoCompactHint(config);
 
   applyChatValue($<HTMLInputElement>('maWorkers'), String(config.multiAgent.maxWorkers), previous?.multiAgent.maxWorkers);
+  applyChatChecked(
+    $<HTMLInputElement>('allowUnattributedCalls'),
+    config.multiAgent.allowUnattributedCalls,
+    previous?.multiAgent.allowUnattributedCalls
+  );
 
   applyGoal(state, previous);
 

@@ -96,9 +96,12 @@ const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
 let dir: string;
 
-async function setEnabled(enabled: boolean, maxWorkers = 3): Promise<void> {
+async function setEnabled(enabled: boolean, maxWorkers = 3, allowUnattributedCalls = false): Promise<void> {
   const base = defaultConfig();
-  await saveConfig({ ...base, multiAgent: { enabled, maxWorkers } });
+  await saveConfig({
+    ...base,
+    multiAgent: { ...base.multiAgent, enabled, maxWorkers, allowUnattributedCalls }
+  });
 }
 
 beforeAll(async () => {
@@ -756,6 +759,7 @@ describe('a worker that is sleeping', () => {
     // later completion as evidence that it saw the injected user message.
     expect(acknowledgeOffers('worker-1', false, offeredAt)).toEqual([]);
     expect(offerMessages('worker-1')).toEqual([]);
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
     expect(acknowledgeOffers('worker-1', false, offeredAt + 1)).toHaveLength(1);
     expect(pendingCount('worker-1')).toBe(0);
   });
@@ -773,8 +777,9 @@ describe('a worker that is sleeping', () => {
 
     resetAgentsForTests();
     restoreSwarm(saved);
-    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
     expect(offerMessages('worker-1')).toEqual([]);
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
     expect(acknowledgeOffers('worker-1', false, offeredAt + 1)).toHaveLength(1);
     expect(pendingCount('worker-1')).toBe(0);
   });
@@ -1114,11 +1119,14 @@ describe('a worker that is sleeping', () => {
     // Another chat is not this worker's revival, whatever the extension reports.
     expect(noteWorkerRevived('worker-1', 'c-somebody-else', owed?.messageIds ?? [])).toBe(false);
     expect(noteWorkerRevived('worker-1', 'c-worker-1', owed?.messageIds ?? [])).toBe(true);
-    const awake = swarmState().agents.find((agent) => agent.id === 'worker-1');
-    expect(awake?.state).toBe('active');
+    let awake = swarmState().agents.find((agent) => agent.id === 'worker-1');
+    expect(awake?.state).toBe('waking');
     expect(awake?.result).toBeNull();
     // Offered, not acknowledged: the worker's own next call is what retires it.
     expect(pendingCount('worker-1')).toBe(1);
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
+    awake = swarmState().agents.find((agent) => agent.id === 'worker-1');
+    expect(awake?.state).toBe('active');
     expect(acknowledgeOffers('worker-1')).toHaveLength(1);
     expect(pendingCount('worker-1')).toBe(0);
   });
@@ -1150,6 +1158,8 @@ describe('a worker that is sleeping', () => {
     expect(workerConversationGone('c-worker-1')).toBe(false);
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
     expect(noteWorkerRevived('worker-1', 'c-worker-1', staged.messages.map((message) => message.id))).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
   });
 
@@ -2006,6 +2016,7 @@ describe('through the MCP endpoint', () => {
   });
 
   it('fences an exact dormant worker tool call while another prime owns the active run', async () => {
+    await setEnabled(true, 3, true);
     startSwarm(1);
     const worker = startWorker('worker-1');
     finishAgent(worker.caller, 'first prime work done');
@@ -2029,10 +2040,50 @@ describe('through the MCP endpoint', () => {
     ]);
     const reply = await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] });
     const text = textOfReply(reply);
+    await setEnabled(true);
     expect(text).toContain('WORKER_SLEEPING');
     expect(text).toContain('Nothing was run');
     expect(text).not.toMatch(/unknown root|not found/i);
     expect(identify({ conversationId: 'c-prime-b' }).id).toBe(PRIME_ID);
+  });
+
+  it('allows only ambiguous unattributed execution while preserving an exact retired-worker fence', async () => {
+    startSwarm(1);
+    startWorker('worker-1', 'c-retired-worker-policy');
+    expect(clearAgent(PRIME_ID).cleared).toBe('run');
+
+    const blocked = await callTool('read', { paths: ['/anything'] });
+    expect(blocked).toContain('CALLER_IDENTITY_REQUIRED');
+
+    await setEnabled(true, 3, true);
+    const anonymous = await callTool('read', { paths: ['/anything'] });
+    expect(anonymous).not.toContain('CALLER_IDENTITY_REQUIRED');
+    expect(anonymous).toMatch(/unknown root|not found/i);
+
+    const requestId = 'wfr_retired_worker_allow_unattributed';
+    await recordChatObservations('c-retired-worker-policy', [
+      { kind: 'turn_start', time: Date.now(), turnId: 't-retired-policy' },
+      {
+        kind: 'tool_evidence',
+        time: Date.now(),
+        turnId: 't-retired-policy',
+        calls: [{ messageId: 'm-retired-policy', tool: 'read', order: 0, answered: false, requestId }]
+      }
+    ]);
+    const exact = textOfReply(await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] }));
+    await setEnabled(true);
+    expect(exact).toContain('WORKER_RETIRED');
+  });
+
+  it('permits an unattributed workspace-dependent call to fail honestly instead of guessing a chat', async () => {
+    await setEnabled(true, 3, true);
+    startSwarm(1);
+    const text = await callTool('read', { paths: ['relative.txt'] });
+    await setEnabled(true);
+
+    expect(text).not.toContain('CALLER_IDENTITY_REQUIRED');
+    expect(text).toMatch(/relative.*no active folder/i);
+    expect(text).toContain('(none approved)');
   });
 
   it('waits for late exact identity while dormant worker histories exist, then fences that worker', async () => {

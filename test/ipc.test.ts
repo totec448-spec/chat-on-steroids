@@ -31,6 +31,7 @@ vi.mock('electron', () => ({
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
 vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd() }));
+vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async () => 'chrome.exe') }));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
@@ -59,6 +60,7 @@ const {
   swarmStateForCaller
 } = await import('../src/main/agents.js');
 const { registerIpc } = await import('../src/main/ipc.js');
+const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const { app, nativeTheme, safeStorage, shell } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
@@ -133,7 +135,7 @@ beforeEach(async () => {
   await saveConfig({
     ...defaultConfig(),
     sessions: { ...defaultConfig().sessions, record: true },
-    multiAgent: { enabled: true, maxWorkers: 3 }
+    multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false }
   });
 });
 
@@ -360,6 +362,22 @@ describe('settings writes from more than one UI', () => {
     expect(currentWindow.setBackgroundColor).toHaveBeenCalledWith('#0e0e11');
     expect(getConfig().goal.enabled).toBe(false);
   });
+
+  it('preserves a newer unattributed-call choice across an unrelated stale renderer save', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    await saveConfig({
+      ...base,
+      multiAgent: { ...base.multiAgent, allowUnattributedCalls: true }
+    });
+
+    const wanted = { ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } };
+    const reply = await save(wanted, base);
+
+    expect(reply.ok, reply.error).toBe(true);
+    expect(getConfig().ui.minimizeToTray).toBe(!base.ui.minimizeToTray);
+    expect(getConfig().multiAgent.allowUnattributedCalls).toBe(true);
+  });
 });
 
 describe('root namespace invariants', () => {
@@ -471,9 +489,9 @@ describe('the goal model id', () => {
   const withModel = (model: string) => ({ ...settings({ record: false, multiAgent: false }), goal: { ...defaultConfig().goal, model } });
 
   it('accepts the family aliases OpenRouter marks with a tilde', async () => {
-    const reply = await save(withModel('~deepseek/deepseek-v4-flash-latest'));
+    const reply = await save(withModel('~z-ai/glm-latest'));
     expect(reply.ok, reply.error).toBe(true);
-    expect(getConfig().goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
+    expect(getConfig().goal.model).toBe('~z-ai/glm-latest');
   });
 
   it('still accepts an ordinary pinned id, with or without a variant suffix', async () => {
@@ -558,6 +576,23 @@ describe('session IPC contracts', () => {
     expect(new Set(reply.data.pressure.map((entry: { id: string }) => entry.id))).toEqual(
       new Set(reply.data.sessions.map((entry: { id: string }) => entry.id))
     );
+  });
+
+  it('opens only the stored conversation URL in Chrome', async () => {
+    const session = await createSession({
+      title: 'open me',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    });
+    const reply = await handlers.get('sessions:openChat')!(null, { id: session.id }) as any;
+    expect(reply.ok, reply.error).toBe(true);
+    expect(openInPreferredBrowser).toHaveBeenCalledWith(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    );
+
+    const unattributed = await createSession({ title: 'no conversation', conversationId: null });
+    const refused = await handlers.get('sessions:openChat')!(null, { id: unattributed.id }) as any;
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
   });
 });
 

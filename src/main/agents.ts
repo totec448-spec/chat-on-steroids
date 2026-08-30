@@ -2321,7 +2321,8 @@ export function rollbackWorkerRevivalClaim(id: string, conversationId: string): 
 export function workerRevivalClaimed(conversationId: string | null | undefined): boolean {
   if (!run || !conversationId) return false;
   const agent = boundAgent(conversationId);
-  return Boolean(agent?.info.role === 'worker' && agent.info.state === 'waking' && !agent.info.revivable);
+  return Boolean(agent?.info.role === 'worker' && agent.info.state === 'waking' &&
+    !agent.info.revivable && !agent.info.lastRevivalCommandId);
 }
 
 /**
@@ -2345,8 +2346,14 @@ export function workerRevivalDeliveredSince(
   if (commandId && agent.info.lastRevivalCommandId === commandId) return true;
   // Backward-compatible evidence for a snapshot written between introduction of durable
   // revival offers and the exact command-id marker. New sends always take the exact branch.
+  //
+  // Unread is part of that evidence, not decoration. An offer the worker has already answered
+  // belongs to a wake that is over, and reading it as proof of delivery is what refused a
+  // later, legitimate wake as `command_already_sent`. This is the same reading of "a revival
+  // was delivered" that noteAgentAlive() uses.
   return agent.queue.some(
     (message) =>
+      message.ackedAt === null &&
       message.offeredViaRevival === true &&
       message.offeredAt !== null &&
       message.offeredAt >= claimedAt
@@ -2401,6 +2408,7 @@ function beginRevival(agent: Agent): void {
   // old server-side turn never stopped and take the worker active; `/commands/redeem` flips this
   // false durably before it returns any payload, after which the browser owns the wake instead.
   agent.info.revivable = true;
+  agent.info.lastRevivalCommandId = null;
   logInfo(`multi-agent: ${agent.info.id} is being woken in conversation ${agent.info.conversationId}`);
 }
 
@@ -2493,11 +2501,8 @@ export function requestWorkerRevivals(ids: readonly string[]): number {
 /**
  * The browser proved it typed the prime's message into the worker's own chat.
  *
- * That send is the delivery, so it is recorded as an *offer* rather than an acknowledgement,
- * on exactly the terms every other inbox offer gets: the worker's next authenticated call is
- * what retires those rows. Nothing here is taken on trust from the model — the conversation
- * the extension reports has to be the one this slot is bound to, or the revival is not this
- * worker's.
+ * Delivery is recorded as an offer, not liveness. The worker stays `waking` until an exact
+ * authenticated call proves the model reacted; a different conversation never counts.
  */
 export function noteWorkerRevived(
   id: string,
@@ -2512,13 +2517,10 @@ export function noteWorkerRevived(
     return false;
   }
   const now = Date.now();
-  agent.info.state = 'active';
   agent.info.revivable = false;
   agent.info.finishedAt = null;
   agent.info.sleptAt = null;
   agent.info.result = null;
-  agent.info.lastSeenAt = now;
-  if (!agent.info.activatedAt) agent.info.activatedAt = now;
   if (commandId) agent.info.lastRevivalCommandId = commandId;
   const offered = new Set(messageIds);
   for (const message of agent.queue) {
@@ -2529,8 +2531,8 @@ export function noteWorkerRevived(
     message.offeredViaRevival = true;
   }
   recount(agent);
-  logInfo(`multi-agent: ${id} is awake again in conversation ${conversationId}`);
-  changed();
+  logInfo(`multi-agent: revival message reached ${id} in conversation ${conversationId}; waiting for worker liveness`);
+  changed('critical');
   return true;
 }
 
@@ -2627,8 +2629,8 @@ export function failWorkerRevival(id: string, why: string): AgentMessage | null 
   const report = newMessage(
     id,
     PRIME_ID,
-    `[${id} could not be woken] ${why} It is still asleep and still holds everything it knew, and what you sent it is ` +
-      'still queued unread. Its slot is free again: try agents action=message to="' +
+    `[${id} could not be woken] ${why} It is still asleep and still holds everything it knew. Any revival text ChatGPT ` +
+      'accepted remains offered but was not proven read, so it will not be injected twice. Its slot is free again: try agents action=message to="' +
       id +
       '" once more, or do that work another way.'
   );
@@ -2880,7 +2882,16 @@ export function noteAgentAlive(conversationId: string | null | undefined, source
     agent.info.state !== 'active' && agent.info.state !== 'invited';
   // A worker that was ended on the work's own evidence stays ended: its chat calling again is
   // a model that has not stopped, not a slot to reopen.
-  if (!ended || (agent.info.state !== 'detached' && !agent.info.revivable)) {
+  // Redeem makes `revivable=false`; only a delivery marker followed by this exact call may finish
+  // the wake. Before redeem, a late old-turn call may still prove the wake was unnecessary.
+  const hasDeliveredRevival =
+    Boolean(agent.info.lastRevivalCommandId) ||
+    agent.queue.some((message) => message.ackedAt === null && message.offeredViaRevival && message.offeredAt !== null);
+  const provedDeliveredWake =
+    agent.info.state === 'waking' &&
+    source === 'call' &&
+    (agent.info.revivable || hasDeliveredRevival);
+  if (!ended || (!provedDeliveredWake && agent.info.state !== 'detached' && !agent.info.revivable)) {
     agent.info.lastSeenAt = now;
     return { agentId: agent.info.id, revived: false, report: null };
   }

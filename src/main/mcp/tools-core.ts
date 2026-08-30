@@ -78,6 +78,7 @@ import {
   EXEC_COMMAND_WORKDIR_DESCRIPTION,
   EXEC_COMMAND_YIELD_TIME_DESCRIPTION,
   MAX_OUTPUT_TOKENS_DESCRIPTION,
+  MAX_OUTPUT_TOKENS_RETIRED_NOTE,
   WRITE_STDIN_CHARS_DESCRIPTION,
   WRITE_STDIN_DESCRIPTION,
   WRITE_STDIN_SESSION_ID_DESCRIPTION,
@@ -89,6 +90,7 @@ import {
   bindBundledRipgrep,
   execRecoveryHints,
   nonZeroExitIsBenign,
+  normalizePowerShellOperators,
   normalizeShellCommand,
   repairPowerShellQuoting,
   withExecNotes
@@ -218,6 +220,14 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
 
 export function registerCoreTools(reg: SurfaceRegistrar): void {
   const { ctx, caps, exposedCaps } = reg;
+  // Named from the live roots, never from a `/project` that may not exist: a worked example the
+  // model cannot act on costs a refused call and a retry.
+  const virtualRoots = ctx.roots.map((root) => `/${root.name}`);
+  const readPathDescription =
+    virtualRoots.length > 0
+      ? `Paths inside the live approved roots: ${virtualRoots.join(', ')}. Example: ${virtualRoots[0]}/src/main.ts. ` +
+        'Absolute native paths copied from command output are also accepted when they resolve inside one of these roots; globs work in either spelling.'
+      : 'Paths require an approved virtual root in the form /<root>/...; no root is currently approved. Globs are supported after a root is approved.';
 
   // ------------------------------------------------------------------- read
 
@@ -242,9 +252,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               .array(pathArg)
               .min(1)
               .max(20)
-              .describe(
-                'Paths inside approved roots. Use virtual paths such as /project/src/main.ts, or paste an absolute native path from command output that is inside an approved root; native paths are normalized to the same virtual sandbox. Globs are supported in either spelling.'
-              ),
+              .describe(readPathDescription),
             start_line: lineNumberArg
               .optional()
               .describe('First line, 1-based. Applied to every file the call reads, so prefer one path when the range is file-specific.'),
@@ -610,6 +618,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             workdir: z.string().optional().describe(EXEC_COMMAND_WORKDIR_DESCRIPTION),
             tty: z.boolean().optional().describe(EXEC_COMMAND_TTY_DESCRIPTION),
             yield_time_ms: unsignedIntegerNumber.optional().describe(EXEC_COMMAND_YIELD_TIME_DESCRIPTION),
+            // Accepted and ignored on purpose; see MAX_OUTPUT_TOKENS_DESCRIPTION.
             max_output_tokens: unsignedIntegerNumber.optional().describe(MAX_OUTPUT_TOKENS_DESCRIPTION),
             shell: z.string().optional().describe(EXEC_COMMAND_SHELL_DESCRIPTION),
             login: z.boolean().optional().describe(EXEC_COMMAND_LOGIN_DESCRIPTION)
@@ -672,12 +681,18 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               nodeFs.readdirSync(nodePath.resolve(dir.real, relativeDirectory))
             );
             const prefix = (note: string): string => (isBatch ? `Command ${index + 1}: ${note}` : note);
-            commandNotes.push(...repaired.notes.map(prefix), ...normalized.notes.map(prefix));
-            return bindBundledRipgrep(
+            const bound = bindBundledRipgrep(
               normalized.cmd,
               shell.shellType,
               shell.shellType === 'cmd' ? null : locateRipgrep()
             );
+            const chained = normalizePowerShellOperators(bound, shell.shellType, shell.shellPath);
+            commandNotes.push(
+              ...repaired.notes.map(prefix),
+              ...normalized.notes.map(prefix),
+              ...chained.notes.map(prefix)
+            );
+            return chained.cmd;
           });
           // Shell functions/aliases can resolve before applications on PATH. The app deliberately
           // ships ripgrep, parses rg's flags against that exact version, and puts it first on child
@@ -726,7 +741,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                     wallTimeMs: 0,
                     rawOutput: Buffer.from(patchRun.content, 'utf8'),
                     truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
-                    maxOutputTokens: input.max_output_tokens,
+                    maxOutputTokens: undefined,
                     processId: null,
                     exitCode: null,
                     originalTokenCount: null,
@@ -750,7 +765,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               hookCommand: commandDetail,
               processId,
               yieldTimeMs: input.yield_time_ms ?? DEFAULT_EXEC_YIELD_TIME_MS,
-              maxOutputTokens: input.max_output_tokens,
+              maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
               cwd: dir.real,
               displayCwd: dir.virtual,
@@ -807,14 +822,20 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // `Process exited with code 1` under an empty body and re-run a search that had
             // already answered. It is the same classification, now also said out loud.
             const notes = [
+              ...(input.max_output_tokens === undefined ? [] : [MAX_OUTPUT_TOKENS_RETIRED_NOTE]),
               ...commandNotes,
               ...(benign
                 ? isBatch
                   ? nonZeroSections.map(
                       (section) =>
-                        `Command ${section.index}: ${benignExitNote(boundCommands[section.index - 1] ?? '', shell.shellType)}`
+                        `Command ${section.index}: ${benignExitNote(
+                          boundCommands[section.index - 1] ?? '',
+                          shell.shellType,
+                          section.exitCode,
+                          section.text
+                        )}`
                     )
-                  : [benignExitNote(boundCommand, shell.shellType)]
+                  : [benignExitNote(boundCommand, shell.shellType, output.exitCode, responseText)]
                 : []),
               ...execRecoveryHints(rawCommands.join('\n'), responseText, shell.shellType)
             ];
@@ -866,7 +887,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               processId: input.session_id,
               input: input.chars ?? '',
               yieldTimeMs: input.yield_time_ms ?? DEFAULT_WRITE_STDIN_YIELD_TIME_MS,
-              maxOutputTokens: input.max_output_tokens,
+              maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY
             });
             if (output.processId === null) forgetExecOwner(input.session_id);

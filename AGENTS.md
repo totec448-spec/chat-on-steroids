@@ -1,5 +1,25 @@
 # Chat On Steroids — the agent map
 
+Quality>> quantity. User wants less new code and delete more old code. Don't bloat the codebase, make it shorter and better and more maintainable Everytime you work on it. It should shrink not ballon.
+
+**User hates a growing codebase. Quality >> quantity.** New findings should improve the underlying
+decision and replace/delete obsolete logic, not stack another fallback, watcher, state machine, or
+special case on top. Prefer less code, fewer branches, one deterministic source of truth, and reuse
+of existing mechanisms. Every change should make the system smaller, simpler, and easier to reason
+about where practical. Do not spam fixes into the codebase; fix the decision from the ground up.
+
+**No build-up: rewrite the affected subsystem with the new feature/invariant in mind.** Do not keep
+the old architecture and bolt a new path beside it merely because that is the smallest diff. When a
+new implementation supersedes an old assumption, recode that specific area around the new source of
+truth, delete the obsolete branches/state/fallbacks it replaces, and converge callers/tests on that
+one design. This is not permission for broad rewrites: change only the affected subsystem, but leave
+it architecturally cleaner and preferably smaller than before.
+
+**Rule: no build up; rewrite with the new feature in mind.**
+
+**This tree is usually dirty and shared with the user and other agents — never `reset`,
+`checkout`, `clean`, reformat, or overwrite work you did not do.**
+
 The single orientation document for this repository. Read it before changing anything.
 
 **How to use it.** §1–§3 is the mental model; read those once, in order. §4 is "where is the
@@ -11,10 +31,6 @@ entry point when you have a symptom and no theory. §19–§22 is how to work he
 duplicated roughly 60% of its content and had already drifted between copies. It is sized
 for completeness rather than for any tool's default project-document budget; if your
 harness truncates long project docs, raise its limit rather than cutting this down.
-
-Because a truncated tail would drop §19 first, the one rule whose loss is irreversible is
-repeated here: **this tree is usually dirty and shared with the user and other agents —
-never `reset`, `checkout`, `clean`, reformat, or overwrite work you did not do.**
 
 ---
 
@@ -557,7 +573,7 @@ after the successor owns the document.
 
 A second loopback HTTP service on the first free port of **8765–8769**. The extension finds
 it with `/hello`, silently provisions a bearer token with `/pair`, then uses authenticated
-routes: `/status`, `/events`, `/closed`, `/activity`, `/compact/claim-auto`, `/compact`,
+routes: `/status`, `/events`, `/closed`, `/activity`, `/compact`,
 `/goal/draft`, `/goal/ack`, `/goal/objective`, `/goal/open`, `/settings` (GET and POST),
 `/commands/redeem`, `/commands/ack`. `/settings` is the only pair the page may write, and
 its GET exists for the one composer with no conversation to read `/activity` for: a New Chat.
@@ -593,8 +609,10 @@ chat A owns session S
 **Must hold.** If preflight or the durable write fails, **A keeps the session**. Once the
 durable write succeeds, publication is total in-memory map movement. Never implement
 compaction by creating a second session or copying history — the whole feature is continuity
-of one durable id. Automatic compaction is **edge-triggered and durable**: reopening an
-already-large old chat must not re-fire merely because its level sits above the threshold.
+of one durable id. Automatic compaction is a live level plus page-turn decision: an idle old
+chat never fires merely because it sits above the threshold, a transient pre-send barrier
+failure may retry on a later turn, and the continuation transaction is the sole durable
+authority once the handoff crosses the semantic send boundary.
 
 **Tests.** `continuation.test.ts`, `resume.test.ts`.
 
@@ -792,7 +810,7 @@ Each has a different persistence boundary.
 | navigation resurrects wrong chat | `background.js` tab registry, `content.js` epoch | `extension`, `content-script` |
 | bridge pairing / connect / stop | `bridge.ts`, `background.js`, `popup.*` | `bridge`, `extension` |
 | Compact & Resume split or lost | `continuation.ts`, `bridge.ts`, `store.ts`, `workspace.ts`, `agents.ts` | `continuation`, `resume` |
-| auto-compaction repeats or never fires | `store.ts` edge state, `/compact/claim-auto` in `bridge.ts` | `continuation`, `resume` |
+| auto-compaction repeats or never fires | `store.ts` live level, `content.js::maybeAutoCompact`, `continuation.ts` | `content-script`, `continuation`, `resume` |
 | agents spawn/message/finish | `agents.ts`, `tools-core.ts`, `bridge.ts` | `agents`, `swarm`, `bridge` |
 | session UI or main process freezes | `store.ts`, `chronology.ts`, `ipc.ts` read path, `chat.ts` | `session`, retained stress probe |
 | stale render / typed input clobbered | `renderer/main.ts`, `chat.ts` generation guards, `ipc.ts` push order | `ipc`, `renderer-state` |

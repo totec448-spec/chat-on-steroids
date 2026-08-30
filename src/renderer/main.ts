@@ -17,6 +17,8 @@ import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
 import type { AppState, Capability, LogEntry, SurfaceStatus } from '../shared/types.js';
 import {
   browserExtensionRequired,
+  isNewer,
+  RELEASES_PAGE,
   CAPABILITY_DETAILS,
   CAPABILITY_LABELS,
   CAPABILITY_TOOLS,
@@ -653,6 +655,58 @@ function paintRoots(roots: AppState['config']['roots']): void {
 
 // ----------------------------------------------------------------- render
 
+/**
+ * One line for everything that is out of date, or no line at all.
+ *
+ * Two facts feed it and this owns neither: what the update service found (state.update, which
+ * reports a `latest` only when it is genuinely newer, so nothing here compares versions), and
+ * the version of the extension the bridge is talking to. An extension that is not present has
+ * no version worth reporting - a stale number from a browser that has since closed would nag
+ * about nothing.
+ *
+ * `latest` set with a stage of `idle` is the deliberate case: a new version exists and this
+ * installation - a Linux .deb, macOS, an architecture with no artifact - is not one the app can
+ * update by itself. That is exactly when the button matters, so it is the only case that
+ * offers one.
+ */
+function paintUpdate(next: AppState): void {
+  const { bridge, update } = next;
+  // Only an extension older than this app is the user's to fix. The other direction is an app
+  // that has not caught up yet - normal while an update downloads - and telling that user to
+  // load the bundled folder again would talk them into downgrading a working extension. The
+  // app-update line below already owns being behind, so there is nothing to add here.
+  const extension =
+    bridge.present && bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion)
+      ? bridge.extensionVersion
+      : null;
+  const notice = $('updateNotice');
+  if (!update.latest && !extension) {
+    notice.hidden = true;
+    return;
+  }
+  const lines: string[] = [];
+  if (update.latest) {
+    lines.push(
+      update.stage === 'ready'
+        ? `Chat On Steroids ${update.latest} is downloaded and installs the next time you start the app.`
+        : update.stage === 'downloading'
+          ? `Chat On Steroids ${update.latest} is downloading. Keep working; it installs on your next start.`
+          : update.stage === 'failed'
+            ? `Chat On Steroids ${update.latest} could not be downloaded: ${update.error ?? 'the download stopped'}.`
+            : `Chat On Steroids ${update.latest} is out. This installation has to be updated by hand.`
+    );
+  }
+  if (extension) {
+    lines.push(
+      `The browser extension is ${extension} and this app is ${update.current}. ` +
+        'Load the extension folder again in Chrome.'
+    );
+  }
+  $('updateText').textContent = lines.join(' ');
+  $<HTMLButtonElement>('updateGet').hidden = !update.latest || update.stage === 'downloading' || update.stage === 'ready';
+  notice.hidden = false;
+}
+
 function apply(next: AppState): void {
   const previousState = state;
   state = next;
@@ -692,6 +746,9 @@ function apply(next: AppState): void {
   $('connectLabel').textContent = running ? 'Disconnect' : 'Connect';
   connectBtn.disabled = !running && missing !== null;
   connectBtn.title = !running && missing ? missing.text : '';
+
+  // ---- out of date, app or extension
+  paintUpdate(next);
 
   // ---- health numbers and facts
   paintClock();
@@ -1322,6 +1379,7 @@ $('wizExpand').addEventListener('click', () => {
   showAllSteps = !showAllSteps;
   if (state) apply(state);
 });
+$('updateGet').addEventListener('click', () => void run(api.openLink(RELEASES_PAGE)));
 $('connectBtn').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 

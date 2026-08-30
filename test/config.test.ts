@@ -1,7 +1,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { defaultConfig, initConfigPath, loadConfig, saveConfig, updateConfig } from '../src/main/config.js';
+import {
+  DEFAULT_GOAL_MODEL,
+  defaultConfig,
+  initConfigPath,
+  loadConfig,
+  saveConfig,
+  updateConfig
+} from '../src/main/config.js';
 import { DESKTOP_CAPABILITIES, type Capability } from '../src/shared/types.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -325,6 +332,7 @@ describe('shipped defaults', () => {
       }
       expect(config.multiAgent.enabled).toBe(true);
       expect(config.multiAgent.maxWorkers).toBe(2);
+      expect(config.multiAgent.allowUnattributedCalls).toBe(false);
     }
   );
 
@@ -341,6 +349,7 @@ describe('shipped defaults', () => {
     expect(loaded.capabilities.command).toBe(false);
     expect(loaded.capabilities.control).toBe(false);
     expect(loaded.multiAgent.enabled).toBe(false);
+    expect(loaded.multiAgent.allowUnattributedCalls).toBe(false);
     expect(loaded.readOnly).toBe(true);
   });
 
@@ -383,7 +392,7 @@ describe('the goal loop settings', () => {
   it('is off out of the box', () => {
     const config = defaultConfig();
     expect(config.goal.enabled).toBe(false);
-    expect(config.goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
+    expect(config.goal.model).toBe('z-ai/glm-5.3');
     expect(config.goal.reasoning).toBe('default');
     expect(config.goal.prompt).toContain('Your job is to prompt ChatGPT');
     expect(config.goal.prompt).toContain('Nobody handed you a separate goal');
@@ -478,7 +487,7 @@ describe('the goal loop settings', () => {
       'utf8'
     );
     const loaded = await loadConfig();
-    expect(loaded.goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
+    expect(loaded.goal.model).toBe(DEFAULT_GOAL_MODEL);
     expect(loaded.goal.prompt).toBe(defaultConfig().goal.prompt);
     expect(loaded.goal.enabled).toBe(true);
     expect(loaded.roots).toEqual(config.roots);
@@ -490,7 +499,7 @@ describe('the goal loop settings', () => {
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(withoutGoal), 'utf8');
     expect((await loadConfig()).goal).toEqual({
       enabled: false,
-      model: '~deepseek/deepseek-v4-flash-latest',
+      model: DEFAULT_GOAL_MODEL,
       reasoning: 'default',
       prompt: defaultConfig().goal.prompt,
       objectivePrompt: defaultConfig().goal.objectivePrompt

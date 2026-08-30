@@ -241,7 +241,6 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     errors: 0,
     estimatedTokens: 0,
     contextTokens: 0,
-    autoCompactTriggeredAt: null,
     lastHandoffId: null,
     lastHandoffAt: null,
     lastCommittedResumeHandoffId: null,
@@ -757,7 +756,7 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
 }
 
 /**
- * Whether this chat is over its automatic-compaction line and still has its one trigger.
+ * Whether this chat is over its automatic-compaction line.
  *
  * A level, and deliberately not the edge this used to be. The edge version armed on the
  * below-to-above crossing and then waited for that turn to end cleanly, which had two
@@ -767,50 +766,18 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
  * one moment where a handoff is pointless, because the work it would carry across is
  * already done.
  *
- * So this half of the rule is just "over the line, not yet used". The other half — that
+ * So this half of the rule is just "over the line". The other half — that
  * the model is working *right now* — is a fact about the open browser connection rather
  * than about the recording, so it is asked at the point of use, in bridge.ts. That is what
  * keeps a stale 500k chat quiet when it is merely opened: it is over the line all day, and
- * nothing is running in it.
+ * nothing is running in it. The existing continuation transaction is the durable authority
+ * once a stopped/settled chat asks for its handoff prompt; pre-barrier refusal owns no durable
+ * state and may be attempted by a later generation.
  */
 export function autoCompactionReady(summary: SessionSummary | null | undefined): boolean {
-  if (!summary || summary.autoCompactTriggeredAt !== null) return false;
+  if (!summary) return false;
   const config = getConfig().compaction;
   return config.auto && config.autoTokens > 0 && summary.contextTokens >= config.autoTokens;
-}
-
-/**
- * Atomically consumes the one automatic trigger before the browser starts doing anything.
- *
- * Consumption is durable and happens before ChatGPT is stopped or prompted. If the browser
- * then disappears, the stop barrier fails, or the user cancels, reopening the same old chat
- * cannot replay the automatic trigger. A manual Compact & Resume is still always available.
- */
-export async function claimAutoCompaction(
-  sessionId: string,
-  conversationId: string,
-  stillWorking: () => boolean = () => true
-): Promise<boolean> {
-  const entry = await ensureOpen(sessionId);
-  const claim = entry.queue.then(async () => {
-    if (entry.summary.conversationId !== conversationId || !autoCompactionReady(entry.summary)) return false;
-    // Asked here rather than by the caller beforehand, because the answer decides whether
-    // the one-shot is spent. A turn that ended while this claim was queued must leave the
-    // trigger untouched: under the level rule the chat stays over the line, so the next
-    // turn it opens can still have it. Spending it on a race would silently retire
-    // automatic compaction for the whole chat.
-    if (!stillWorking()) return false;
-    const staged: SessionSummary = { ...entry.summary, autoCompactTriggeredAt: Date.now() };
-    await writeSummary(staged, entry.historySeq);
-    Object.assign(entry.summary, staged);
-    entry.metaDirty = false;
-    return true;
-  });
-  entry.queue = claim.then(
-    () => undefined,
-    (err: Error) => logError(`automatic compaction claim failed: ${err.message}`)
-  );
-  return claim;
 }
 
 /**
@@ -1330,8 +1297,6 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
             : [],
         contextTokens:
           typeof publicSummary.contextTokens === 'number' ? publicSummary.contextTokens : publicSummary.estimatedTokens,
-        autoCompactTriggeredAt:
-          typeof publicSummary.autoCompactTriggeredAt === 'number' ? publicSummary.autoCompactTriggeredAt : null,
         // Older summaries predate successful-resume provenance. Missing means unknown, never
         // "use lastHandoffId": capture publication happens before the continuation rebind.
         lastCommittedResumeHandoffId:
@@ -1763,10 +1728,6 @@ export async function reopenSession(id: string): Promise<void> {
   await enqueueSessionOperation(entry, 'reopen', async () => {
     if (entry.summary.endedAt === null) return;
     entry.summary.endedAt = null;
-    // Nothing about automatic compaction is reset here. Reopening a stale chat cannot fire
-    // it — that takes a turn running in the page right now — and `autoCompactTriggeredAt`
-    // is a fact about this chat that a reopen must not forget, or every reopen would hand
-    // the same conversation another automatic compaction.
     entry.summary.updatedAt = Date.now();
     await writeMeta(entry);
   });
@@ -1855,7 +1816,6 @@ export async function rebindSession(
         ? [...entry.summary.chatIds]
         : [...entry.summary.chatIds, toConversationId],
       contextTokens: 0,
-      autoCompactTriggeredAt: null,
       activeTurnId: null,
       ...(committedResumeHandoffId !== undefined
         ? { lastCommittedResumeHandoffId: committedResumeHandoffId }

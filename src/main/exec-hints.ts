@@ -55,7 +55,7 @@
  * rewrite is far worse than a missed one.
  */
 
-import type { ShellType } from './codex/shell.js';
+import { isWindowsPowerShell5, type ShellType } from './codex/shell.js';
 
 /**
  * Programs whose exit code 1 means "found nothing", not "went wrong".
@@ -216,7 +216,7 @@ function hasUnsupportedShellLexemes(command: string): boolean {
 }
 
 /** Index of every top-level occurrence of any separator in `seps`, ignoring quoted text. */
-function splitTopLevel(command: string, seps: readonly string[]): string[] {
+function splitTopLevel(command: string, seps: readonly string[], hits?: string[]): string[] {
   const parts: string[] = [];
   let current = '';
   let quote: '"' | "'" | null = null;
@@ -237,18 +237,26 @@ function splitTopLevel(command: string, seps: readonly string[]): string[] {
     // `$( … )`, `@( … )` and plain grouping all hide separators that are not statement
     // boundaries. Depth-tracking keeps `(a; b)` from being read as two statements.
     if (char === '(' || char === '{') depth++;
-    else if (char === ')' || char === '}') depth = Math.max(0, depth - 1);
+    else if (char === ')' || char === '}') {
+      if (depth === 0) return [command];
+      depth--;
+    }
 
     if (depth === 0) {
       const hit = seps.find((sep) => command.startsWith(sep, i));
       if (hit !== undefined) {
         parts.push(current);
+        hits?.push(hit);
         current = '';
         i += hit.length - 1;
         continue;
       }
     }
     current += char;
+  }
+  if (quote !== null || depth !== 0) {
+    hits?.splice(0);
+    return [command];
   }
   parts.push(current);
   return parts.filter((part) => part.trim() !== '');
@@ -535,6 +543,22 @@ function cutPipelineGeneratorOnlyReports(command: string): boolean {
   return !tokens.some((argument) => GIT_FLAGS_THAT_MAKE_THE_EXIT_MEAN_SOMETHING.test(argument.value));
 }
 
+const SEARCH_DIAGNOSTIC = /^\s*(rg|ripgrep|grep|egrep|fgrep|findstr):/im;
+
+/** A path-proven search answered for at least one path while naming another path it could not read. */
+function searchAnsweredDespiteBadPath(command: string, outputText: string): boolean {
+  if (splitTopLevel(command, [';', '\n']).length !== 1) return false;
+  const token = statusDeterminingToken(command);
+  if (token === null || !/[\\/]/.test(token.value) || !NO_MATCH_MEANS_EXIT_1.has(programName(token))) return false;
+  if (!SEARCH_DIAGNOSTIC.test(outputText)) return false;
+  const lines = outputText.split('\n').map((line) => line.replace(/\r$/, ''));
+  const outputAt = lines.indexOf('Output:');
+  const body = outputAt < 0 ? lines : lines.slice(outputAt + 1);
+  return body.some(
+    (line) => line.trim() !== '' && !SEARCH_DIAGNOSTIC.test(line) && !line.startsWith('Warning: truncated output')
+  );
+}
+
 /**
  * Whether a non-zero exit is a reported result rather than a failure.
  *
@@ -548,12 +572,14 @@ export function nonZeroExitIsBenign(
   exitCode: number | null,
   outputText: string
 ): boolean {
-  if (exitCode !== 1) return false;
+  if (exitCode === null) return false;
   // A shell that refused the command never reached the search at all, so reading the exit
   // code as the search's answer is a fabrication. `Write-Output hi && rg foo` is the case
   // that matters: Windows PowerShell 5.1 rejects `&&` outright, exits 1 without running a
   // thing, and this function would otherwise call it ripgrep finding no matches.
   if (SHELL_REFUSED.test(outputText)) return false;
+  if (exitCode === 2) return searchAnsweredDespiteBadPath(command, outputText);
+  if (exitCode !== 1) return false;
   // A reporting git command that was cut short by `Select-Object -First`. Three things have to
   // hold together before this is provable, and each one alone withholds it: the pipeline has a
   // truncating stage and nothing that could have set the status itself, the generator is a git
@@ -911,7 +937,18 @@ function isRipgrepPatternRegion(command: string, region: QuotedRegion): boolean 
  * conclusion — the measured consequence being re-runs of searches that had already answered.
  * Both benign shapes are named, because nothing in the exit code tells them apart.
  */
-export function benignExitNote(command: string, shellType: ShellType = 'powershell'): string {
+export function benignExitNote(
+  command: string,
+  shellType: ShellType = 'powershell',
+  exitCode: number | null = 1,
+  outputText = ''
+): string {
+  if (exitCode === 2 && searchAnsweredDespiteBadPath(command, outputText)) {
+    return (
+      'Exit code 2 here means one search path could not be read, not that the whole search failed: ' +
+      'the matches above are complete for the paths that do exist. Re-check only the path named by ripgrep.'
+    );
+  }
   if (shellType === 'powershell' && cutPipelineGeneratorOnlyReports(command)) {
     const program = programName(pipelineStopCandidate(command) ?? undefined);
     return (
@@ -942,6 +979,42 @@ export interface NormalizedCommand {
   cmd: string;
   /** Human-readable description of every rewrite, for the model and the log. */
   notes: string[];
+}
+
+/** Rewrites only small, top-level conditional chains that PowerShell 5.1 would reject outright. */
+export function normalizePowerShellOperators(
+  cmd: string,
+  shellType: ShellType,
+  shellPath: string
+): NormalizedCommand {
+  if (shellType !== 'powershell' || !isWindowsPowerShell5(shellPath)) return { cmd, notes: [] };
+  if ((!cmd.includes('&&') && !cmd.includes('||')) || hasUnsupportedShellLexemes(cmd)) return { cmd, notes: [] };
+
+  const operators: string[] = [];
+  const operands = splitTopLevel(cmd, ['&&', '||'], operators);
+  if (operators.length === 0 || operands.length !== operators.length + 1 || operands.length > 4) {
+    return { cmd, notes: [] };
+  }
+  if (
+    operands.some((operand) => {
+      const value = operand.trim();
+      return !value || value.includes('>') || value.includes('$?') || splitTopLevel(value, [';', '\n']).length !== 1;
+    })
+  ) {
+    return { cmd, notes: [] };
+  }
+
+  const rewritten = operands
+    .map((operand, index) => {
+      if (index === 0) return operand.trim();
+      const guard = operators[index - 1] === '&&' ? 'if ($?)' : 'if (-not $?)';
+      return `${guard} { ${operand.trim()} }`;
+    })
+    .join('; ');
+  return {
+    cmd: rewritten,
+    notes: ['Windows PowerShell 5.1 cannot parse && or ||, so this simple chain was rewritten as guards on `$?`.']
+  };
 }
 
 /**

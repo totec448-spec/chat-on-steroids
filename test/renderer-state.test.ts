@@ -42,7 +42,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2 },
+    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -57,7 +57,8 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
     hasGoalKey: false,
     resolvedBinary: null,
     bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null }
+    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.0.2', latest: null, stage: 'idle', error: null }
   };
   const ok = (data: any) => Promise.resolve({ ok: true, data });
   const api: any = new Proxy({
@@ -91,6 +92,13 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   stateListener(structuredClone(state));
   expect(w.document.activeElement).toBe(multiAgent);
   expect(multiAgent.checked).toBe(true);
+
+  const allowUnattributed = w.document.getElementById('allowUnattributedCalls') as HTMLInputElement;
+  allowUnattributed.focus();
+  allowUnattributed.checked = true;
+  stateListener(structuredClone(state));
+  expect(w.document.activeElement).toBe(allowUnattributed);
+  expect(allowUnattributed.checked).toBe(true);
 
   // The settings sheet used to bypass the dirty-field guard used by Home. An unrelated
   // status push therefore erased this value while the user was still typing it.
@@ -165,7 +173,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2 },
+    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -180,7 +188,8 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
     hasGoalKey: false,
     resolvedBinary: null,
     bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null }
+    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.0.2', latest: null, stage: 'idle', error: null }
   });
   let current = appState(baseConfig);
   const calls: any[] = [];
@@ -311,7 +320,7 @@ async function mountChat(
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as const },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2 },
+    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -326,7 +335,8 @@ async function mountChat(
     hasGoalKey: false,
     resolvedBinary: null,
     bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null },
+    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.0.2', latest: null, stage: 'idle', error: null },
     ...overrides
   };
   let listener: (next: any) => void = () => undefined;
@@ -570,7 +580,8 @@ it('requires a live browser only when a browser-backed feature is actually enabl
     },
     // The token survived, but this process has not heard from the extension. This is the
     // disabled/uninstalled-extension-after-app-restart repro.
-    bridge: { running: true, port: 8765, paired: true, present: false, lastSeenAt: null }
+    bridge: { running: true, port: 8765, paired: true, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.0.2', latest: null, stage: 'idle', error: null }
   });
   const doc = mounted.window.document;
   const browserStep = doc.querySelector<HTMLElement>('[data-step="browser"]')!;
@@ -603,6 +614,30 @@ it('requires a live browser only when a browser-backed feature is actually enabl
   expect(doc.getElementById('bridgeState')!.textContent).toContain('not needed');
   expect((doc.getElementById('goalEnabled') as HTMLInputElement).disabled).toBe(true);
   expect(doc.getElementById('goalHint')!.textContent).toMatch(/recording first/i);
+});
+
+/**
+ * The version difference has a direction, and only one of them is the user's to act on.
+ *
+ * An extension newer than the app is the ordinary state while an app update is downloading, and
+ * the bundled folder is then the older copy: "load the extension folder again" would talk that
+ * user into downgrading a working extension. The app-update line already owns being behind.
+ */
+it('asks for an extension reload only when the extension is older than this app', async () => {
+  const mounted = await mountChat({
+    bridge: {
+      running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.1'
+    }
+  });
+  const doc = mounted.window.document;
+  const notice = doc.getElementById('updateNotice')!;
+  expect(notice.hidden).toBe(false);
+  expect(doc.getElementById('updateText')!.textContent).toContain('2.0.1');
+
+  const ahead = structuredClone(mounted.state) as any;
+  ahead.bridge.extensionVersion = '2.0.3';
+  mounted.push(ahead);
+  expect(notice.hidden, 'a newer extension is not a downgrade prompt').toBe(true);
 });
 
 /**

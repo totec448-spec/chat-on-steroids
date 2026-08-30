@@ -14,7 +14,6 @@ import {
   observeRequestCorrelation,
   observeRequestCorrelations,
   requestCorrelation,
-  requestCorrelationConflicted,
   restoreRequestCorrelations,
   resetCorrelationRegistryForTests
 } from '../src/main/session/correlation.js';
@@ -56,12 +55,22 @@ describe('request correlation ownership', () => {
       })
     ).toBe('same');
 
-    expect(requestCorrelationConflicted(requestId)).toBe(false);
     expect(requestCorrelation(requestId)?.conversationId).toBe('conv-a');
     expect(requestCorrelation(requestId)?.sessionId).toBe('session-a');
   });
 
-  it('still fails closed when the same request id is claimed by two conversations', () => {
+  /**
+   * The rule the whole registry exists to keep: a request id is bound to a chat once, and then
+   * it is that chat's for good.
+   *
+   * A second conversation claiming a proven id is a page that is wrong about itself - a React
+   * tree still mounted from the chat before it, a fresh chat whose client thread id has not
+   * caught up. Believing it used to cost the id itself: the entry went permanently unresolved,
+   * so every further call of a workflow that was still running waited fifteen seconds for
+   * evidence that could no longer be accepted, and landed in Unattributed activity. Refusing
+   * the claimant costs the claimant nothing that was ever really theirs.
+   */
+  it('keeps the first proven owner when a second conversation claims the same request id', () => {
     const requestId = 'wfr_cross_chat';
     const now = Date.now();
     observeRequestCorrelation({
@@ -91,9 +100,23 @@ describe('request correlation ownership', () => {
         tool: 'read',
         observedAt: now + 2
       })
-    ).toBe('conflict');
-    expect(requestCorrelationConflicted(requestId)).toBe(true);
-    expect(requestCorrelation(requestId)).toBeNull();
+    ).toBe('refused');
+    expect(requestCorrelation(requestId)?.conversationId).toBe('conv-a');
+    expect(requestCorrelation(requestId)?.sessionId).toBe('session-a');
+
+    // And the owner is still an owner afterwards, not a survivor in a degraded state: its own
+    // later sightings keep being accepted exactly as they were before anyone argued.
+    expect(
+      observeRequestCorrelation({
+        requestId,
+        conversationId: 'conv-a',
+        sessionId: 'session-a',
+        messageId: 'msg-a-later',
+        tool: 'exec_command',
+        observedAt: now + 3
+      })
+    ).toBe('same');
+    expect(requestCorrelation(requestId)?.observedAt).toBe(now + 3);
   });
 
   it('does not age a proven request owner out just because the page evidence is old', () => {
@@ -172,7 +195,7 @@ describe('request correlation ownership', () => {
     }
   });
 
-  it('migrates v3 proven owners but discards v3 sticky conflicts created by stale provisional evidence', async () => {
+  it('migrates older proven owners and forgets the sticky conflicts those versions wrote', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'clf-correlation-v3-conflict-'));
     try {
       resetDurableForTests();
@@ -205,8 +228,19 @@ describe('request correlation ownership', () => {
       resetCorrelationRegistryForTests();
       await restoreRequestCorrelations();
       expect(requestCorrelation('wfr_v3_proven_owner')?.conversationId).toBe('conv-v3-proven');
-      expect(requestCorrelationConflicted('wfr_v3_false_conflict')).toBe(false);
+      // Forgotten, not restored as a verdict: the id is simply unproved again, and the next page
+      // that proves it owns it.
       expect(requestCorrelation('wfr_v3_false_conflict')).toBeNull();
+      expect(
+        observeRequestCorrelation({
+          requestId: 'wfr_v3_false_conflict',
+          conversationId: 'conv-after-migration',
+          sessionId: 'session-after-migration',
+          messageId: 'message-after-migration',
+          tool: 'read',
+          observedAt: 200
+        })
+      ).toBe('stored');
     } finally {
       resetCorrelationRegistryForTests();
       resetSessionStoreForTests();

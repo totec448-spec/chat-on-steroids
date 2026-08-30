@@ -109,7 +109,6 @@ function summary(id: string, updatedAt: number, events: number): SessionSummary 
     errors: 0,
     estimatedTokens: 0,
     contextTokens: 0,
-    autoCompactTriggeredAt: null,
     lastHandoffId: null,
     lastHandoffAt: null,
     lastTurnOutcome: null,

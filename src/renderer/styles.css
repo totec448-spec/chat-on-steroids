@@ -519,6 +519,29 @@ main {
   padding: 2px 8px;
 }
 
+/* ----------------------------------------------------------------- notice */
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--wash);
+  border-bottom: 1px solid var(--line);
+}
+
+.notice .ico {
+  flex: none;
+  color: var(--blue);
+}
+
+.notice span {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ------------------------------------------------------------- permissions */
 
 .perm + .perm {
@@ -1451,8 +1474,8 @@ input[readonly] {
 }
 
 .sess-top {
-  /* `.sess-del` is absolutely positioned at the row's top-right. Reserve its hit target
-     so the age text never sits underneath an invisible delete button. */
+  /* Session actions are absolutely positioned at the row's top-right. Reserve their hit targets
+     so the age text never sits underneath invisible buttons. */
   padding-right: 0;
   display: flex;
   align-items: baseline;
@@ -1480,8 +1503,8 @@ input[readonly] {
 }
 
 .sess-top em {
-  /* Keep the age out from under the hover-only delete hit target. */
-  margin-right: 30px;
+  /* Keep the age out from under the hover-only Open Chat + delete hit targets. */
+  margin-right: 58px;
   flex: 0 0 auto;
   font-style: normal;
   font-size: 11px;
@@ -1530,15 +1553,22 @@ input[readonly] {
   background: var(--red);
 }
 
-.sess-del {
+.sess-action {
   position: absolute;
   top: 6px;
-  right: 6px;
   padding: 3px 5px;
   opacity: 0;
 }
 
-.sess:hover .sess-del {
+.sess-open {
+  right: 32px;
+}
+
+.sess-del {
+  right: 6px;
+}
+
+.sess:hover .sess-action {
   opacity: 1;
 }
 

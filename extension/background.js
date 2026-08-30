@@ -24,7 +24,7 @@ const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 8;
+const BRIDGE_PROTOCOL = 9;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -35,6 +35,25 @@ const MAX_JOURNAL = 4000;
 const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
 const BATCH = 100;
 const RETRY_ALARM = 'clf-bridge-drain';
+/**
+ * How long the worker sleeps between maintenance passes, in minutes.
+ *
+ * Thirty seconds, because thirty seconds is the floor. Chrome fires an alarm at most twice a
+ * minute and clamps anything shorter in a packed extension — an unpacked development copy is
+ * exempt, which is the trap: 0.25 works on this machine and silently becomes 0.5 for everybody
+ * who installs a release.
+ *
+ * So this is a sleeping-service-worker fallback with an honest bound, not a fast path. The app
+ * arms a repair twenty seconds into an unattributed incident; the browser sees it on the next
+ * pass, which is up to thirty seconds later. Anything better would need a keepalive, an
+ * offscreen document or a second timer framework to beat a browser API floor, and a broken
+ * turn is not worth that.
+ *
+ * A one-shot re-armed at the end of every pass, rather than `periodInMinutes`: a period may not
+ * go below a minute at all, and that periodic form was why a repair armed at T+20 could wait
+ * until T+75.
+ */
+const RETRY_PERIOD_MIN = 0.5;
 let retryAlarmScheduled = false;
 
 let port = null;
@@ -773,12 +792,32 @@ async function fetchBounded(url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   }
 }
 
+/**
+ * Whether the periodic alarm still has something to do.
+ *
+ * Undelivered records are the obvious half. Open ChatGPT tabs are the other: while this
+ * browser is holding chats, the app may need one of them reloaded — see maintain() — and this
+ * alarm is the only thing that wakes a stopped service worker to ask. Both halves are work
+ * this worker owes somebody, so they share the one alarm rather than growing a second.
+ *
+ * It is also what ends the cadence: the pass that finds nothing left to do arms nothing, and
+ * the worker goes back to sleep until a page or the browser wakes it.
+ */
+function retryWanted() {
+  return (
+    journal.length > 0 ||
+    closeOutbox.length > 0 ||
+    commandAckOutbox.length > 0 ||
+    Object.keys(tabConversations).length > 0
+  );
+}
+
 function scheduleRetry() {
-  if (journal.length === 0 && closeOutbox.length === 0 && commandAckOutbox.length === 0) return;
+  if (!retryWanted()) return;
   if (retryAlarmScheduled) return;
   try {
     if (chrome.alarms && typeof chrome.alarms.create === 'function') {
-      chrome.alarms.create(RETRY_ALARM, { delayInMinutes: 0.25, periodInMinutes: 1 });
+      chrome.alarms.create(RETRY_ALARM, { delayInMinutes: RETRY_PERIOD_MIN });
       retryAlarmScheduled = true;
     }
   } catch {
@@ -787,7 +826,7 @@ function scheduleRetry() {
 }
 
 function clearRetryIfIdle() {
-  if (journal.length > 0 || closeOutbox.length > 0 || commandAckOutbox.length > 0) return;
+  if (retryWanted()) return;
   try {
     if (chrome.alarms && typeof chrome.alarms.clear === 'function') void chrome.alarms.clear(RETRY_ALARM);
     retryAlarmScheduled = false;
@@ -1489,6 +1528,7 @@ async function noteTabConversation(source, value) {
   const previous = cleanConversationId(tabConversations[key]);
   tabConversations[key] = conversationId;
   await persistLive();
+  scheduleRetry();
   if (!ownsDocument(source)) return false;
   // A same-tab full navigation is not a close until the replacement document proves it is
   // a different conversation. This keeps ordinary reloads alive while still retiring A
@@ -1499,6 +1539,44 @@ async function noteTabConversation(source, value) {
     await drainCloses();
   }
   return true;
+}
+
+/**
+ * Asks the app whether one of the chats this browser is holding needs putting back together.
+ *
+ * The app can prove that a chat's local tool calls have stopped being attributable to it —
+ * usually that document's own reporting died mid-turn — but it cannot do anything about it:
+ * the page it would instruct is the page that stopped listening, and opening the url would
+ * make a second tab of a chat that is still on screen. This worker can, because the tab
+ * registry here is the authority on which tab that chat is in, so the app hands out the
+ * conversation id and nothing else and this decides whether there is a tab to reload.
+ *
+ * Exactly one match reloads. None means the chat is not open in this browser; more than one is
+ * genuinely ambiguous, and reloading the wrong one of two tabs of the same chat would interrupt
+ * a turn to repair a different one. Neither is reported, and that silence is the answer: the
+ * app hands the same repair out again next time, so a duplicate tab closing or the chat opening
+ * here is enough for a later pass to finish it. Only a reload that actually happened is
+ * reported, because only that is an action worth not repeating.
+ */
+async function maintain() {
+  if (Object.keys(tabConversations).length === 0) return;
+  const reply = await call('/status');
+  const repair = (reply.ok && reply.data ? reply.data.repair : null) || null;
+  const conversationId = cleanConversationId(repair && repair.conversationId);
+  // Quoted back exactly as it arrived. It names the handout being answered, so that a receipt
+  // this pass sends late cannot close a repair the app has since raised for a different turn.
+  const token = repair && typeof repair.token === 'string' ? repair.token : '';
+  if (!conversationId || !token) return;
+  const tabs = Object.keys(tabConversations).filter((key) => tabConversations[key] === conversationId);
+  if (tabs.length !== 1) return;
+  try {
+    await chrome.tabs.reload(Number(tabs[0]));
+  } catch {
+    // That tab closed between the registry and the call, or refused to reload. Nothing is
+    // reported, so the app keeps the repair and the next pass tries again.
+    return;
+  }
+  await call(`/status?repaired=${encodeURIComponent(token)}`);
 }
 
 function conversationStillOpen(conversationId) {
@@ -1582,6 +1660,7 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
   if (current && (!wanted || current === wanted)) {
     delete tabConversations[key];
     await persistLive();
+    clearRetryIfIdle();
   }
   if (!stillOwned()) return { ok: true, closed: false };
   const conversationId = wanted || current;
@@ -1936,17 +2015,6 @@ const HANDLERS = {
     });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
-  async auto_compact_claim(message, _sender, source) {
-    await load();
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
-    await noteTabConversation(source, message.conversationId);
-    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
-    const result = await call('/compact/claim-auto', {
-      method: 'POST',
-      body: JSON.stringify({ conversationId: message.conversationId })
-    });
-    return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
-  },
   /**
    * The goal loop: this page saw its turn genuinely finish and wants the next user message.
    *
@@ -2101,6 +2169,33 @@ const HANDLERS = {
     const result = await call('/settings', { method: 'POST', body: JSON.stringify(body) });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
+  /**
+   * Reload the one tab that owns this exact conversation, and nothing else.
+   *
+   * The page's own interrupted-connection notice, and only that: a document that can still
+   * see its connection is broken asking to be rebuilt. It may not name another tab — the
+   * sender's registered conversation has to agree, and it is that sender's tab that reloads,
+   * so no tab registry or newest-tab guess is involved. A chat whose reporting died cannot
+   * ask for anything; that one is repaired from the tab registry, in maintain().
+   */
+  async reload_owned_chat(message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const conversationId = cleanConversationId(message.conversationId);
+    if (!conversationId) return { ok: false, error: 'bad_conversation_id' };
+    const registeredConversation = cleanConversationId(tabConversations[String(source.tab)]);
+    if (registeredConversation && registeredConversation !== conversationId) {
+      return { ok: false, error: 'stale_conversation' };
+    }
+    await noteTabConversation(source, conversationId);
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    try {
+      await chrome.tabs.reload(source.tab);
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'reload_failed' };
+    }
+  },
   /** The marked page asking for the one command it was opened for. */
   async redeem(message) {
     return redeemCommand(
@@ -2200,7 +2295,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'correlate',
     'closed',
     'compact',
-    'auto_compact_claim',
     'goal_draft',
     'goal_focus',
     'goal_ack',
@@ -2208,6 +2302,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'goal_open',
     'settings_set',
     'settings_get',
+    'reload_owned_chat',
     'repair_fiber',
     'redeem',
     'defer_revival',
@@ -2676,7 +2771,7 @@ async function restoreOpenChatgptTabs() {
 chrome.runtime.onInstalled.addListener(() => {
   void restoreOpenChatgptTabs().then(() => recoverDeferredRevivals()).catch(() => undefined);
   void load().then(() => {
-    if (journal.length > 0 || closeOutbox.length > 0 || commandAckOutbox.length > 0) scheduleRetry();
+    scheduleRetry();
   });
 });
 
@@ -2697,7 +2792,15 @@ if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addLi
     void drainCommandAcks()
       .then(() => drain())
       .then(() => drainCloses())
-      .catch(() => undefined);
+      .then(() => maintain())
+      .catch(() => undefined)
+      .then(() => {
+        // Re-armed here and nowhere else. Every other caller of scheduleRetry() finds the
+        // alarm already standing and leaves it alone, which is what keeps a burst of failing
+        // requests from pushing the next pass further and further away.
+        retryAlarmScheduled = false;
+        scheduleRetry();
+      });
   });
 }
 
@@ -2707,5 +2810,5 @@ if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addLi
 // dead or stale recorder pays the scripting cost.
 void restoreOpenChatgptTabs().then(() => recoverDeferredRevivals()).catch(() => undefined);
 void load().then(() => {
-  if (journal.length > 0 || closeOutbox.length > 0 || commandAckOutbox.length > 0) scheduleRetry();
+  scheduleRetry();
 });
