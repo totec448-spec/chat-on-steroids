@@ -14,6 +14,13 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SessionEvent, SessionSummary, StoredText } from '../../shared/session.js';
 import { getSession, listAllSessions, readEvents } from '../session/store.js';
+import {
+  cancelLoopFromCurrentCall,
+  listLoopsForCurrentCall,
+  startLoopFromCurrentCall,
+  stopLoopFromCurrentCall,
+  wakeLoopFromCurrentCall
+} from '../loop.js';
 import { noteCount, noteDetail } from './call-context.js';
 import { expandStored, fail, guard, ok, type SurfaceRegistrar, type ToolResult } from './kernel.js';
 
@@ -147,7 +154,11 @@ const cursorSchema = z.discriminatedUnion('kind', [
 
 const inputSchema = z
   .object({
-    action: z.enum(['search', 'read']).describe('search discovers recordings; read inspects one explicit recording.'),
+    action: z
+      .enum(['search', 'read', 'loop_start', 'loop_wakeup', 'loop_stop', 'loop_list', 'loop_cancel'])
+      .describe(
+        'search/read inspect recordings. loop_start begins the latest recorded /loop or /proactive user request; loop_wakeup self-paces a dynamic loop; loop_stop/loop_cancel end one; loop_list shows this calling session’s active loops.'
+      ),
     query: z.string().max(500).optional().describe('search only. Omit to list the 30 newest recordings.'),
     session_id: z.string().min(8).max(64).optional().describe('read only. Exact id returned by search.'),
     include: z
@@ -168,37 +179,74 @@ const inputSchema = z
       .min(1)
       .max(CURSOR_MAX_CHARS)
       .optional()
-      .describe('Opaque continuation, older-history, search-result or update checkpoint returned by this tool.')
+      .describe('search/read only. Opaque checkpoint returned by this tool.'),
+    input: z
+      .string()
+      .max(12_000)
+      .optional()
+      .describe('loop_start only. Optional echo of the /loop arguments. The recorded user message remains authoritative.'),
+    loop_id: z
+      .string()
+      .regex(/^[0-9a-f]{8}$/i)
+      .optional()
+      .describe('loop_wakeup/loop_stop/loop_cancel only. The 8-character id returned by loop_start or loop_list.'),
+    delay_seconds: z
+      .number()
+      .int()
+      .min(60)
+      .max(3600)
+      .optional()
+      .describe('loop_wakeup only. Self-paced next wake, 60–3600 seconds from now.'),
+    reason: z
+      .string()
+      .max(500)
+      .optional()
+      .describe('loop_wakeup only. Short reason the selected delay fits the current state.')
   })
   .superRefine((input, ctx) => {
-    if (input.action === 'search') {
-      for (const field of ['session_id', 'include', 'tool_call'] as const) {
-        if (input[field] !== undefined) {
-          ctx.addIssue({ code: 'custom', path: [field], message: `${field} is only valid with action=read` });
+    const reject = (fields: string[], allowed: Set<string>) => {
+      for (const field of fields) {
+        if (!allowed.has(field) && (input as Record<string, unknown>)[field] !== undefined) {
+          ctx.addIssue({ code: 'custom', path: [field], message: `${field} is not valid with action=${input.action}` });
         }
       }
+    };
+    const fields = ['query', 'session_id', 'include', 'tool_call', 'cursor', 'input', 'loop_id', 'delay_seconds', 'reason'];
+
+    if (input.action === 'search') {
+      reject(fields, new Set(['query', 'cursor']));
       if (input.cursor && input.query !== undefined) {
         ctx.addIssue({ code: 'custom', path: ['query'], message: 'A search continuation cursor already contains its query' });
       }
       return;
     }
-
-    if (!input.session_id) {
-      ctx.addIssue({ code: 'custom', path: ['session_id'], message: 'session_id is required with action=read' });
+    if (input.action === 'read') {
+      reject(fields, new Set(['session_id', 'include', 'tool_call', 'cursor']));
+      if (!input.session_id) ctx.addIssue({ code: 'custom', path: ['session_id'], message: 'session_id is required with action=read' });
+      if (input.cursor && (input.include !== undefined || input.tool_call !== undefined)) {
+        ctx.addIssue({ code: 'custom', path: ['cursor'], message: 'A read cursor already contains its filters and mode; do not combine it with include or tool_call' });
+      }
+      if (input.tool_call && input.include !== undefined) {
+        ctx.addIssue({ code: 'custom', path: ['include'], message: 'include cannot be combined with tool_call' });
+      }
+      return;
     }
-    if (input.query !== undefined) {
-      ctx.addIssue({ code: 'custom', path: ['query'], message: 'query is only valid with action=search' });
+    if (input.action === 'loop_start') {
+      reject(fields, new Set(['input']));
+      return;
     }
-    if (input.cursor && (input.include !== undefined || input.tool_call !== undefined)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['cursor'],
-        message: 'A read cursor already contains its filters and mode; do not combine it with include or tool_call'
-      });
+    if (input.action === 'loop_list') {
+      reject(fields, new Set());
+      return;
     }
-    if (input.tool_call && input.include !== undefined) {
-      ctx.addIssue({ code: 'custom', path: ['include'], message: 'include cannot be combined with tool_call' });
+    if (input.action === 'loop_wakeup') {
+      reject(fields, new Set(['loop_id', 'delay_seconds', 'reason']));
+      if (!input.loop_id) ctx.addIssue({ code: 'custom', path: ['loop_id'], message: 'loop_id is required with action=loop_wakeup' });
+      if (input.delay_seconds === undefined) ctx.addIssue({ code: 'custom', path: ['delay_seconds'], message: 'delay_seconds is required with action=loop_wakeup' });
+      return;
     }
+    reject(fields, new Set(['loop_id']));
+    if (!input.loop_id) ctx.addIssue({ code: 'custom', path: ['loop_id'], message: `loop_id is required with action=${input.action}` });
   })
   .strict();
 
@@ -206,20 +254,31 @@ export function registerSessionTool(reg: SurfaceRegistrar): void {
   reg.register(
     'session',
     {
-      title: 'Recorded sessions',
+      title: 'Session control and recordings',
       description:
-        'Search and read this app’s local recordings, including other and concurrently running chats. ' +
-        'action=search lists the 30 newest sessions when query is omitted, or finds recordings containing a term. ' +
-        'action=read requires session_id and returns exact user/assistant text plus compact tool headlines. ' +
-        'Save update_cursor and pass it later to receive only activity not already read; pass a short T… reference as tool_call to inspect exact arguments and result.',
+        'Search/read local recordings and control this calling session’s /loop tasks. ' +
+        'For a user message beginning /loop or /proactive: call action=loop_start first, then immediately execute the returned task once. ' +
+        'Intervals make fixed loops; prompt-only loops self-pace; interval-only loops run maintenance. ' +
+        'At the end of each dynamic iteration call loop_wakeup with the returned loop_id and a 60–3600 second delay chosen from current state, or loop_stop when no further run is useful. ' +
+        'Bare /loop runs maintenance; prefer project .claude/loop.md, then ~/.claude/loop.md. Fixed loops and dynamic fallback wakes are delivered only after the current ChatGPT turn is idle; missed fixed periods collapse to one fire; loops auto-expire after seven days. ' +
+        'search lists/fetches recordings; read returns exact user/assistant text and compact tool headlines, with update_cursor for incremental reads.',
       inputSchema,
-      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
     },
     async (input) =>
       guard('session', async () => {
         if (!reg.sessionToolsLive) return reg.featureDisabled('Session recording', 'Record sessions');
-        if (input.action === 'search') return searchSessions(input.query, input.cursor);
-        return readSession(input.session_id!, input.include, input.tool_call, input.cursor);
+        try {
+          if (input.action === 'search') return searchSessions(input.query, input.cursor);
+          if (input.action === 'read') return readSession(input.session_id!, input.include, input.tool_call, input.cursor);
+          if (input.action === 'loop_start') return ok(await startLoopFromCurrentCall(input.input));
+          if (input.action === 'loop_wakeup') return ok(await wakeLoopFromCurrentCall(input.loop_id!, input.delay_seconds!, input.reason));
+          if (input.action === 'loop_stop') return ok(await stopLoopFromCurrentCall(input.loop_id!));
+          if (input.action === 'loop_cancel') return ok(await cancelLoopFromCurrentCall(input.loop_id!));
+          return ok(await listLoopsForCurrentCall());
+        } catch (error) {
+          return fail(error instanceof Error ? error.message : String(error));
+        }
       })
   );
 }

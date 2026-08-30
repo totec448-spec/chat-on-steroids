@@ -47,5 +47,7 @@ export function extensionDownloadUrl(version = APP_VERSION): string {
  *     `disconnected`, protected routes distinguish that revocation from a stale token, and
  *     /pair accepts `reconnect: true` only for an explicit browser-side reconnect. An older
  *     extension would otherwise silently undo the user's app-side Disconnect on its next 401.
+ * 9 — session-scoped /loop delivery adds /loop/due, /loop/ack and /loop/escape plus the
+ *     matching extension messages. Older peers cannot safely provide the scheduler handshake.
  */
-export const BRIDGE_PROTOCOL = 8;
+export const BRIDGE_PROTOCOL = 9;

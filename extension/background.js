@@ -24,7 +24,7 @@ const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 8;
+const BRIDGE_PROTOCOL = 9;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -1947,6 +1947,40 @@ const HANDLERS = {
     });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
+  /** Claim one due /loop prompt only for the document that owns this exact chat. */
+  async loop_due(message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const conversationId = cleanConversationId(message.conversationId);
+    if (!conversationId) return { ok: false, status: 400, error: 'bad_conversation_id' };
+    await noteTabConversation(source, conversationId);
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    if (!(await deliverConversationJournal(conversationId))) {
+      return { ok: false, status: 503, error: 'transcript_not_delivered', retryable: true };
+    }
+    const result = await call('/loop/due', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId, clientId: String(source.tab) })
+    });
+    return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
+  },
+  async loop_ack(message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const conversationId = cleanConversationId(message.conversationId);
+    if (!conversationId) return { ok: false, status: 400, error: 'bad_conversation_id' };
+    return call('/loop/ack', {
+      method: 'POST',
+      body: JSON.stringify({ conversationId, token: String(message.token || ''), sent: message.sent === true })
+    });
+  },
+  async loop_escape(message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const conversationId = cleanConversationId(message.conversationId);
+    if (!conversationId) return { ok: false, status: 400, error: 'bad_conversation_id' };
+    return call('/loop/escape', { method: 'POST', body: JSON.stringify({ conversationId }) });
+  },
   /**
    * The goal loop: this page saw its turn genuinely finish and wants the next user message.
    *
@@ -2201,6 +2235,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'closed',
     'compact',
     'auto_compact_claim',
+    'loop_due',
+    'loop_ack',
+    'loop_escape',
     'goal_draft',
     'goal_focus',
     'goal_ack',

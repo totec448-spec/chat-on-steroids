@@ -37,6 +37,7 @@ import {
   setGoalObjectiveNow,
   startGoalDraft
 } from './goal.js';
+import { ackLoopDelivery, cancelDynamicWakeups, claimDueLoop } from './loop.js';
 import { logInfo, logWarn } from './logger.js';
 import {
   closeConversation,
@@ -1667,6 +1668,54 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       },
       origin
     );
+  }
+
+  /** Claim at most one due /loop iteration for this exact conversation. */
+  if (route === '/loop/due' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const id = conversationId(body['conversationId']);
+    const clientId = typeof body['clientId'] === 'string' ? body['clientId'].slice(0, 100) : '';
+    if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    const delivery = await claimDueLoop(id, clientId);
+    return json(res, 200, { delivery }, origin);
+  }
+
+  /** A loop prompt crossed (or failed to cross) the browser's irreversible send boundary. */
+  if (route === '/loop/ack' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const id = conversationId(body['conversationId']);
+    const token = typeof body['token'] === 'string' ? body['token'].slice(0, 100) : '';
+    const sent = body['sent'] === true;
+    if (!id || !token) return json(res, 400, { error: 'bad_loop_ack' }, origin);
+    const accepted = await ackLoopDelivery(id, token, sent);
+    return accepted ? json(res, 200, { accepted: true }, origin) : json(res, 404, { error: 'no_such_loop_delivery' }, origin);
+  }
+
+  /** Esc while a self-paced loop is waiting clears pending dynamic wakeups, not fixed loops. */
+  if (route === '/loop/escape' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const id = conversationId(body['conversationId']);
+    if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    const cancelled = await cancelDynamicWakeups(id);
+    return json(res, 200, { cancelled }, origin);
   }
 
   /**

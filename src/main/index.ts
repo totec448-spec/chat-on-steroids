@@ -38,6 +38,7 @@ import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDura
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { stopComputerHelper } from './computer/index.js';
 import { GOAL_OBJECTIVES_STATE, restoreGoalObjectives, type GoalObjectivesSnapshot } from './goal.js';
+import { LOOPS_STATE, restoreLoops, type LoopSnapshot } from './loop.js';
 import {
   CONTINUATIONS_STATE,
   restoreContinuations,
@@ -233,6 +234,9 @@ void app.whenReady().then(async () => {
   const savedGoalObjectives = await readDurable<GoalObjectivesSnapshot>(GOAL_OBJECTIVES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalObjectives(savedGoalObjectives);
+  const savedLoops = await readDurable<LoopSnapshot>(LOOPS_STATE);
+  if (windowActivation.isDisabled()) return;
+  restoreLoops(savedLoops);
   // Request ownership must exist before either side of the bridge can race in. A request id
   // that was proved yesterday remains the same workflow today even if its ChatGPT tab closed.
   await restoreRequestCorrelations();

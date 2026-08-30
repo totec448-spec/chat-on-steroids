@@ -628,6 +628,7 @@
   let goalError = '';
   /** Guards the settle watch and the send, so one finished turn produces one message. */
   let goalBusy = false;
+  let loopBusy = false;
   /** When this tab started trying to type a ready draft, so a held composer eventually gives up. */
   let goalTypingSince = 0;
   /** Terminal Goal card the user dismissed. Keyed to its chat + finished turn across repaints. */
@@ -7523,6 +7524,48 @@
   }
 
   /**
+   * Deliver one app-owned scheduled /loop iteration through the same conservative composer
+   * boundary as Goal: never type over the user, never race a live turn, and remember the
+   * irreversible send before the fallible ACK hop.
+   */
+  async function maybeSendLoopDue() {
+    if (!conversationId || loopBusy || goalBusy || goalDraft || compactCapture || nativeBusy || (job && job.busy)) return;
+    if (generating || CLF_DOM.generating()) return;
+    const forId = conversationId;
+    const forEpoch = epoch;
+    loopBusy = true;
+    try {
+      const reply = await ask({ type: 'loop_due', conversationId: forId });
+      if (!alive || conversationId !== forId || epoch !== forEpoch) return;
+      const delivery = reply && reply.ok === true && reply.data ? reply.data.delivery : null;
+      if (!delivery || !delivery.token || !delivery.prompt) return;
+      const token = String(delivery.token);
+      if (goalWasSpent(forId, token)) {
+        await ask({ type: 'loop_ack', conversationId: forId, token, sent: true }).catch(() => undefined);
+        return;
+      }
+      if (generating || CLF_DOM.generating() || goalBusy || goalDraft || compactCapture || nativeBusy || (job && job.busy)) {
+        await ask({ type: 'loop_ack', conversationId: forId, token, sent: false }).catch(() => undefined);
+        return;
+      }
+      if (!CLF_DOM.insertPrompt(String(delivery.prompt))) {
+        await ask({ type: 'loop_ack', conversationId: forId, token, sent: false }).catch(() => undefined);
+        return;
+      }
+      await sleep(200);
+      const sent = await CLF_DOM.send();
+      if (!sent) {
+        await ask({ type: 'loop_ack', conversationId: forId, token, sent: false }).catch(() => undefined);
+        return;
+      }
+      rememberGoalSpent(forId, token);
+      await ask({ type: 'loop_ack', conversationId: forId, token, sent: true }).catch(() => undefined);
+    } finally {
+      loopBusy = false;
+    }
+  }
+
+  /**
    * Types a ready draft into the composer and sends it, once.
    *
    * Called from the activity pull, because that is where the draft arrives. Every exit
@@ -8322,6 +8365,10 @@
     // pagehide also happens on reload, so closing here corrupts live turn identity.
   };
   listen(window, 'pagehide', notePageHide);
+  listen(window, 'keydown', (event) => {
+    if (TEST_MODE || event.key !== 'Escape' || !conversationId || generating || CLF_DOM.generating()) return;
+    void ask({ type: 'loop_escape', conversationId }).catch(() => undefined);
+  }, true);
 
   function every(ms, fn) {
     const timer = setInterval(() => {
@@ -8568,6 +8615,7 @@
     };
     listen(document, 'visibilitychange', visibilityChanged);
   }
+  every(2000, () => { void maybeSendLoopDue(); });
   every(STATUS_MS, checkStatus);
 
   // Only now, with every binding above initialised, does this recorder answer for itself.

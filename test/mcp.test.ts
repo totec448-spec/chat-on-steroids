@@ -1288,7 +1288,7 @@ describe('capability gating', () => {
     ctx.sessionTools = true;
     const advertised = toolList(await core('tools/list')).find((tool) => tool.name === 'session');
     expect(advertised?.inputSchema).toMatchObject({
-      properties: { action: { enum: ['search', 'read'] } },
+      properties: { action: { enum: ['search', 'read', 'loop_start', 'loop_wakeup', 'loop_stop', 'loop_list', 'loop_cancel'] } },
       required: ['action']
     });
     expect(advertised?.inputSchema?.properties).not.toHaveProperty('limit');
@@ -1576,7 +1576,7 @@ describe('tool annotations', () => {
     expect(read?.annotations?.destructiveHint).toBe(false);
     // Both session actions are inspection only. Marking this as a write tool makes clients
     // apply confirmation/write semantics to searching and reading local recordings.
-    expect(session?.annotations?.readOnlyHint).toBe(true);
+    expect(session?.annotations?.readOnlyHint).toBe(false);
     expect(session?.annotations?.destructiveHint).toBe(false);
   });
 });

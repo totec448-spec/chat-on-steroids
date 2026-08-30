@@ -104,7 +104,8 @@ const CORE: SurfaceDefinition = {
     'Use for: opening and reading files, searching a repository, applying patches, creating, renaming and deleting files, ' +
     'running builds, tests, linters, git, npm and shell commands, and continuing long-running or interactive terminal sessions. ' +
     'Also searches and reads local recordings of previous or concurrently running ChatGPT work, and — when the user has ' +
-    'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations.',
+    'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations. ' +
+    'Slash /loop (alias /proactive) is built into session control: call session action=loop_start for the latest /loop message, execute the task immediately, and use loop_wakeup/loop_stop to self-pace dynamic loops.',
   cardSummary: 'Files, patches and the terminal. Required — this is the coding connector.',
   required: true,
   tools: ['read', 'view_image', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'session', 'agents']
