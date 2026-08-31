@@ -219,6 +219,8 @@ let deferredRevivals = [];
 const deferredRevivalOffers = new Map();
 /** App says an active agent/recovery episode still needs the maintenance cadence. */
 let recoveryMonitoring = false;
+/** Tabs whose normal auto-discard policy this extension changed for a live agent conversation. */
+let discardProtectedTabs = {};
 
 function load() {
   if (loaded) return Promise.resolve();
@@ -252,6 +254,7 @@ async function loadOnce() {
     'closeOutbox',
     'commandAckOutbox',
     'recoveryMonitoring',
+    'discardProtectedTabs',
     'delivery'
   ]);
   settled = Array.isArray(live.settled) ? live.settled : [];
@@ -276,6 +279,13 @@ async function loadOnce() {
       ? live.commandAckOutbox.slice(-200)
       : [];
   recoveryMonitoring = live.recoveryMonitoring === true;
+  const savedDiscardProtection =
+    live.discardProtectedTabs && typeof live.discardProtectedTabs === 'object' && !Array.isArray(live.discardProtectedTabs)
+      ? live.discardProtectedTabs
+      : {};
+  discardProtectedTabs = Object.fromEntries(
+    Object.entries(savedDiscardProtection).filter(([id, owned]) => /^\d+$/.test(id) && owned === true)
+  );
   if (live.delivery && typeof live.delivery === 'object' && !Array.isArray(live.delivery)) {
     delivery = { ...delivery, ...live.delivery };
   }
@@ -301,6 +311,7 @@ function persistLive() {
         closeOutbox: closeOutbox.slice(-200),
         commandAckOutbox: commandAckOutbox.slice(-200),
         recoveryMonitoring,
+        discardProtectedTabs,
         delivery
       }),
       // Only small command-control metadata crosses browser restarts. No transcript and no
@@ -821,6 +832,7 @@ function retryWanted() {
     commandAckOutbox.length > 0 ||
     deferredRevivals.length > 0 ||
     Object.keys(tabConversations).length > 0 ||
+    Object.keys(discardProtectedTabs).length > 0 ||
     recoveryMonitoring
   );
 }
@@ -1519,7 +1531,13 @@ async function noteTabConversation(source, value) {
  * that is worth placing behind the app's per-chat cooldown.
  */
 async function maintain() {
-  if (Object.keys(tabConversations).length === 0 && !recoveryMonitoring && deferredRevivals.length === 0) return;
+  if (
+    Object.keys(tabConversations).length === 0 &&
+    Object.keys(discardProtectedTabs).length === 0 &&
+    !recoveryMonitoring &&
+    deferredRevivals.length === 0
+  )
+    return;
   const reply = await call('/status');
   if (!reply.ok || !reply.data) return;
   const monitoring = reply.data.recoveryMonitoring === true;
@@ -1533,29 +1551,67 @@ async function maintain() {
   // Quoted back exactly as it arrived. It names the handout being answered, so that a receipt
   // this pass sends late cannot close a repair the app has since raised for a different turn.
   const token = repair && typeof repair.token === 'string' ? repair.token : '';
-  if (!conversationId || !token) return clearRetryIfIdle();
-  let candidates = [];
+  const nonDiscardable = new Set(
+    (Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : [])
+      .map(cleanConversationId)
+      .filter(Boolean)
+  );
+  const protectionWork = nonDiscardable.size > 0 || Object.keys(discardProtectedTabs).length > 0;
+  if (!protectionWork && (!conversationId || !token)) return clearRetryIfIdle();
+  let tabs = [];
   try {
-    const tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
-    candidates = tabs.filter((tab) => conversationForTab(tab) === conversationId);
+    tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
   } catch {
     return;
   }
+  if (protectionWork) {
+    let changed = false;
+    for (const tab of tabs) {
+      if (!Number.isInteger(tab && tab.id)) continue;
+      const key = String(tab.id);
+      const ours = discardProtectedTabs[key] === true;
+      const protect = nonDiscardable.has(conversationForTab(tab));
+      if (protect && tab.autoDiscardable !== false) {
+        try {
+          await chrome.tabs.update(tab.id, { autoDiscardable: false });
+          if (!ours) {
+            discardProtectedTabs[key] = true;
+            changed = true;
+          }
+        } catch {
+          // The tab changed after the scan. Its lifecycle event or the next pass reconciles it.
+        }
+      } else if (!protect && ours) {
+        try {
+          await chrome.tabs.update(tab.id, { autoDiscardable: true });
+          delete discardProtectedTabs[key];
+          changed = true;
+        } catch {
+          // Keep ownership so a transient failure cannot leave the tab protected forever.
+        }
+      }
+    }
+    if (changed) await persistLive().catch(() => undefined);
+  }
+  if (!conversationId || !token) return clearRetryIfIdle();
+  const candidates = tabs.filter((tab) => conversationForTab(tab) === conversationId);
   // One chat is one tab. Bailing out on two copies left the chat broken *and* left the duplicate
   // sitting there, so the ambiguity is resolved instead: reload the copy this worker's registry
   // already binds to the conversation, falling back to the lowest tab id so two passes never
   // pick differently. A tab is only ever created when the chat has none.
   const owned = candidates.filter((tab) => tabConversations[tab.id] === conversationId);
   const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
+  const repairAction = target ? 'reloaded' : 'reopened';
   try {
     if (target) await chrome.tabs.reload(target.id);
     else await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` });
   } catch {
-    // A tab changed between the scan and action, or Chrome refused it. No receipt means the
-    // app keeps this exact handout pending; it cannot turn a failed action into another tab.
+    // A tab changed between the scan and action, or Chrome refused it. Report the exact failed
+    // handout so the app can show the failure while keeping the same repair retryable.
+    await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
     return;
   }
-  await call(`/status?repaired=${encodeURIComponent(token)}`);
+  await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=${repairAction}`);
 }
 
 function conversationStillOpen(conversationId) {
@@ -1639,10 +1695,19 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
   if (!stillOwned()) return { ok: true, closed: false };
   const current = cleanConversationId(tabConversations[key]);
   const wanted = cleanConversationId(expected);
+  const protectedHere = discardProtectedTabs[key] === true;
   if (current && (!wanted || current === wanted)) {
     delete tabConversations[key];
-    await persistLive();
   }
+  if (protectedHere) {
+    try {
+      await chrome.tabs.update(tab, { autoDiscardable: true });
+    } catch {
+      // A closed tab needs no restoration; navigation races are reconciled on the next pass.
+    }
+    delete discardProtectedTabs[key];
+  }
+  if ((current && (!wanted || current === wanted)) || protectedHere) await persistLive();
   if (!stillOwned()) return { ok: true, closed: false };
   const conversationId = wanted || current;
   if (!conversationId || conversationStillOpen(conversationId)) {
@@ -2170,7 +2235,11 @@ const HANDLERS = {
     // both. Pass through whichever one the sheet actually moved.
     if (typeof message.goal === 'boolean') body.goal = message.goal;
     else if (typeof message.loop === 'boolean') body.loop = message.loop;
-    if (typeof message.autoCompact === 'boolean' && conversationId) body.conversationId = conversationId;
+    // The conversation, whichever switch moved. Auto-compaction needs it so worker-role policy
+    // is enforced in the app; Goal and Loop need it because they are now that chat's own setting,
+    // and a sheet drawn beside one conversation is answering about that conversation. A New Chat
+    // has none, and moves the app-wide default it would have inherited.
+    if (conversationId) body.conversationId = conversationId;
     const result = await call('/settings', { method: 'POST', body: JSON.stringify(body) });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },

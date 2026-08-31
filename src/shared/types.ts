@@ -415,16 +415,22 @@ export interface BridgeStatus {
  * `stage` says what this installation is doing about it, and the pair reads as:
  * - `latest === null` — up to date, or nothing checked yet.
  * - `latest` set, `stage: 'idle'` — a new version exists that this installation cannot apply
- *   for itself (a Linux `.deb`, macOS, an unsupported architecture). It is a manual download.
+ *   for itself (a Linux `.deb`, macOS, a development tree, an unsupported architecture). It is
+ *   a manual download.
  * - `downloading` / `ready` — it is being fetched, or is fetched and installs on the next start.
- * - `failed` — the check or the download stopped; `error` says why, and the next app start
+ * - `failed` — the check or the download stopped; `error` says why, and the next check
  *   tries again. Nothing about the running app is affected either way.
+ *
+ * `checkedAt` is what separates the two silences: null means GitHub has not answered yet in
+ * this run, and only a timestamp lets the UI say "up to date" rather than "nothing to report".
  */
 export interface UpdateStatus {
   current: string;
   latest: string | null;
   stage: 'idle' | 'checking' | 'downloading' | 'ready' | 'failed';
   error: string | null;
+  /** When the release API last answered, as epoch ms. Null until it has. */
+  checkedAt: number | null;
 }
 
 /** Where an installation that cannot update itself gets the new version by hand. */

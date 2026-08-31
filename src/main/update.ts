@@ -1,9 +1,9 @@
 /**
  * Whether a newer Chat On Steroids has been published, and the file that becomes it.
  *
- * This is the whole updater: one pass, run once per app start, that asks GitHub for the latest
- * release, stages the artifact this installation can actually apply, and hands that file to the
- * platform's own installer on the way out. There is no second check loop, no renderer-side
+ * This is the whole updater: one pass, run at startup and repeated on a slow timer, that asks
+ * GitHub for the latest release, stages the artifact this installation can actually apply, and
+ * hands that file to the platform's own installer on the way out. There is no renderer-side
  * download state and no `electron-updater`; the shipping pipeline already publishes exactly the
  * artifacts named below, so the smallest correct updater is the one that fetches them by name.
  *
@@ -13,7 +13,8 @@
  *   app is fully usable at the old version, which is why no caller ever awaits this.
  * - **One pass at a time.** Checking and downloading are one operation, deduplicated by one
  *   promise, so a second call while a download is running joins it rather than starting a
- *   second download of the same file.
+ *   second download of the same file. That is what makes the repeat timer free: a pass that
+ *   finds the release it already staged stops at the release call.
  * - **The user restarts, not this app.** A staged update is applied during the ordinary quit
  *   sequence. Nothing here quits, relaunches, or interrupts what the user is doing.
  *
@@ -49,6 +50,14 @@ const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest
 
 const CHECK_TIMEOUT_MS = 15_000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+/**
+ * How often the check repeats while the app is open.
+ *
+ * This app lives in the tray and is routinely left running for days, so "once per start" was in
+ * practice "never" for exactly the installations nobody is about to restart to collect a fix.
+ * Six hours is slow enough to be invisible, and costs one request whenever there is nothing new.
+ */
+const RECHECK_MS = 6 * 60 * 60_000;
 
 /**
  * The artifact this exact installation can apply to itself, or null for one that cannot.
@@ -62,12 +71,19 @@ const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
  * `APPIMAGE` is the environment variable the AppImage runtime sets to the path of the file that
  * is running. Its absence is exactly what distinguishes a portable AppImage from a `.deb`
  * install, so it is both the eligibility test and the target of the swap.
+ *
+ * An unpackaged run — `electron-vite dev`, or a maintainer's working tree — is not an
+ * installation. Its version is whatever the source says, so it reads as out of date the moment a
+ * release ships, and staging for it would let quitting a dev session silently run an installer
+ * over the real per-user install. It is told what is published and replaces nothing.
  */
 export function stagedArtifact(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
-  appImage: string | undefined = process.env.APPIMAGE
+  appImage: string | undefined = process.env.APPIMAGE,
+  packaged: boolean = app.isPackaged
 ): { name: string; kind: 'installer' | 'appimage'; target: string } | null {
+  if (!packaged) return null;
   if (arch !== 'x64' && arch !== 'arm64') return null;
   if (platform === 'win32') return { name: `Chat-On-Steroids-Setup-${arch}.exe`, kind: 'installer', target: '' };
   if (platform === 'linux' && appImage) {
@@ -83,7 +99,9 @@ export function releaseVersion(tag: unknown): string | null {
   return /^\d+\.\d+\.\d+$/.test(version) ? version : null;
 }
 
-let status: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle', error: null };
+const CLEAR: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle', error: null, checkedAt: null };
+
+let status: UpdateStatus = CLEAR;
 let staged: { version: string; file: string; kind: 'installer' | 'appimage'; target: string } | null = null;
 let pass: Promise<void> | null = null;
 const listeners = new Set<() => void>();
@@ -103,10 +121,21 @@ function set(next: Partial<UpdateStatus>): void {
 }
 
 /**
+ * Runs the check at startup, and keeps running it for as long as the app is open.
+ *
+ * The timer is unreferenced: it is a background courtesy, never a reason for the process to stay
+ * alive, and the shutdown sequence does not have to know it exists.
+ */
+export function startUpdateChecks(): void {
+  void checkForUpdates();
+  setInterval(() => void checkForUpdates(), RECHECK_MS).unref();
+}
+
+/**
  * Looks for a newer release and, if this installation can apply one, stages it.
  *
- * Called once when the app opens. Concurrent callers get the pass that is already running,
- * which is what keeps a second call from downloading the same installer twice.
+ * Concurrent callers get the pass that is already running, which is what keeps a second call
+ * from downloading the same installer twice.
  */
 export function checkForUpdates(): Promise<void> {
   if (pass) return pass;
@@ -125,6 +154,9 @@ export function checkForUpdates(): Promise<void> {
 async function runPass(): Promise<void> {
   set({ stage: 'checking', error: null });
   const release = { version: await latestVersion() };
+  // GitHub answered. From here the UI can tell "current" from "not asked yet", whatever the
+  // rest of this pass does with the answer.
+  set({ checkedAt: Date.now() });
   if (!isNewer(release.version, APP_VERSION)) {
     // Up to date, or ahead of the published release on a development build. Both mean nothing
     // to offer, and `latest` stays null so nothing in the UI claims otherwise.
@@ -278,7 +310,7 @@ export async function applyStagedUpdate(): Promise<void> {
 
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
-  status = { current: APP_VERSION, latest: null, stage: 'idle', error: null };
+  status = CLEAR;
   staged = null;
   pass = null;
   listeners.clear();

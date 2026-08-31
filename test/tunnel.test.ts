@@ -276,7 +276,10 @@ describe('route observation under partial health failures', () => {
     expect(routeObservation(null, null, { since: T - 100_000, handshakeBefore: null }, T)).toBe(
       'unknown'
     );
-    expect(routeObservation(0, null, NO_OUTAGE, T)).toBe('unknown');
+  });
+
+  it('reports a ready startup while the first readable long poll is still open', () => {
+    expect(routeObservation(0, null, NO_OUTAGE, T)).toBe('connected');
   });
 
   it('requires the full complaint window before calling a ready client offline', () => {
@@ -295,8 +298,8 @@ describe('route observation under partial health failures', () => {
 /**
  * The other half of the same log: every launch reported "1 problem: Route to OpenAI"
  * three seconds after "tunnel connected", because the first long poll had not come
- * back yet. The runtime stays connecting until it has proof; the self-test adds a bounded
- * startup grace before it calls a still-unverified route broken.
+ * back yet. Runtime readiness and verified-link age are separate facts; the self-test adds a
+ * bounded startup grace before it calls a still-unverified route broken.
  */
 describe('self-test route check', () => {
   const T = 1_000_000_000_000;

@@ -10,6 +10,7 @@
 import http from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
+import { foldProgress, type SessionEvent } from '../src/shared/session.js';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import type { SwarmSnapshot } from '../src/main/agents.js';
 
@@ -60,7 +61,7 @@ const {
   resetGoalStateForTests,
   setGoalObjective
 } = await import('../src/main/goal.js');
-const { createSession, deleteSession, getSession, initSessionStore, readEvents, resetSessionStoreForTests } = await import(
+const { createSession, deleteSession, findSessionByConversation, getSession, initSessionStore, readEvents, resetSessionStoreForTests } = await import(
   '../src/main/session/store.js'
 );
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
@@ -486,6 +487,25 @@ describe('provisioning', () => {
     // Authorization survived, so the first normal extension poll proves presence again.
     expect((await request('GET', '/status')).status).toBe(200);
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
+  });
+});
+
+describe('active agent tab discard projection', () => {
+  it('publishes exact Prime and Worker chat ids only while their run is live', async () => {
+    await pair();
+    const workerConversation = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    spawn({ workers: [{ task: 'stay live while Chrome applies the tab policy' }], caller: { conversationId: PRIME_CHAT } });
+
+    expect((await request('GET', '/status')).body.nonDiscardableConversations).toEqual([PRIME_CHAT]);
+
+    expect(bindConversation('worker-1', workerConversation)).toBe(true);
+    expect((await request('GET', '/status')).body.nonDiscardableConversations).toEqual([
+      workerConversation,
+      PRIME_CHAT
+    ].sort());
+
+    finishAgent({ conversationId: workerConversation }, 'the worker is sleeping now');
+    expect((await request('GET', '/status')).body.nonDiscardableConversations).toEqual([PRIME_CHAT]);
   });
 });
 
@@ -3676,8 +3696,13 @@ describe('unattributed activity recovery', () => {
    * `repaired` is the token the app minted for a previous handout, never a conversation id.
    * That is the fence, and being able to quote the wrong one is what a test here needs.
    */
-  async function maintenance(repaired?: string): Promise<{ conversationId: string; token: string } | null> {
-    const path = repaired ? `/status?repaired=${encodeURIComponent(repaired)}` : '/status';
+  async function maintenance(
+    repaired?: string,
+    repairAction?: 'reloaded' | 'reopened'
+  ): Promise<{ conversationId: string; token: string; reason: string } | null> {
+    const path = repaired
+      ? `/status?repaired=${encodeURIComponent(repaired)}${repairAction ? `&repairAction=${repairAction}` : ''}`
+      : '/status';
     const reply = await request('GET', path);
     expect(reply.status).toBe(200);
     return reply.body.repair ?? null;
@@ -3715,12 +3740,60 @@ describe('unattributed activity recovery', () => {
     }
   });
 
+  it('replaces one recovery timeline row as the browser attempt fails, retries and succeeds', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(PRIME, [openTurn('turn-reload-note')]);
+      await unattributed();
+      await vi.advanceTimersByTimeAsync(60_000);
+      const session = await findSessionByConversation(PRIME, { requireUnique: true });
+      expect(session).not.toBeNull();
+      const before = (await readEvents(session!.id)).reduce((seq, event) => Math.max(seq, event.seq), 0);
+      const snapshots = async () => (await readEvents(session!.id, { kinds: ['progress'] })).filter(
+        (event): event is Extract<SessionEvent, { kind: 'progress' }> => event.seq > before && event.kind === 'progress'
+      );
+
+      const handout = await maintenance();
+      expect(chatOf(handout)).toBe(PRIME);
+      expect((await snapshots()).map((event) => event.message.text)).toEqual([
+        'Trying to reload chat to recover missing connector attribution…'
+      ]);
+
+      const failed = await request(
+        'GET',
+        `/status?repairFailed=${encodeURIComponent(handout!.token)}&repairAction=reloaded`
+      );
+      expect(failed.status).toBe(200);
+      expect(failed.body.repair).toBeNull();
+      expect(foldProgress(await snapshots()).map((event) => event.kind === 'progress' ? event.message.text : '')).toEqual([
+        'Reload failed while recovering missing connector attribution; will retry.'
+      ]);
+
+      const retry = await maintenance();
+      expect(chatOf(retry)).toBe(PRIME);
+      expect(foldProgress(await snapshots()).map((event) => event.kind === 'progress' ? event.message.text : '')).toEqual([
+        'Trying to reload chat to recover missing connector attribution…'
+      ]);
+
+      await maintenance(retry!.token, 'reloaded');
+      // Replaying the same receipt is harmless: only the still-handed token can update the row.
+      const recorded = (await snapshots()).length;
+      await maintenance(retry!.token, 'reloaded');
+      expect(await snapshots()).toHaveLength(recorded);
+      expect(foldProgress(await snapshots()).map((event) => event.kind === 'progress' ? event.message.text : '')).toEqual([
+        'Reloaded chat to recover missing connector attribution.'
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   /**
-   * The browser could not carry it out: no tab of that chat, two of them, or a reload that
-   * threw. It reports nothing, and a pass that reports nothing is the verdict - there is
-   * nothing else to wait for, since success is reported in the same breath as asking for more
-   * work. Filing an action that did not happen would strand the exact failure this exists for,
-   * because a chat whose reporting is dead may never produce the attributed call that clears it.
+   * A browser worker can disappear after collecting a handout but before reporting an action.
+   * Its next plain maintenance pass is the negative acknowledgement: success would have been
+   * reported in the same request, while an action-level exception uses the explicit failure
+   * receipt tested above. Either path must keep the repair retryable.
    */
   it('hands the same repair out again until the browser says it carried one out', async () => {
     vi.useFakeTimers();
@@ -4167,6 +4240,70 @@ describe('unattributed activity recovery', () => {
   });
 
   /**
+   * …and a repair that can never retire may not take the chat's silence watch down with it.
+   *
+   * The live prime trace: "Connection interrupted" at 21:40, the turn it broke ending failed at
+   * 21:45, eleven further minutes of attributed calls from the model behind the dead stream,
+   * and then nothing at all. The repair filed for that turn was still on file — the turn's own
+   * ending is the last one that chat ever had, so no later ending could retire it — and the
+   * two-minute watch read the entry as a recovery already in progress. Nothing was in progress.
+   * The chat sat dead for eighteen minutes until a human reloaded it by hand.
+   *
+   * Silence asks whether the conversation is alive at all, which no fact about one of its turns
+   * can answer, so it supersedes the entry rather than obeying it — including the browser floor
+   * that entry is waiting behind, which silence has never been subject to.
+   */
+  it('reloads a silent chat over a turn repair that can no longer retire', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      // An earlier transport failure, repaired and then retired by a turn the chat got through.
+      // That spends this chat's browser action and starts its three-minute floor.
+      await events(OTHER, [openTurn('turn-first')]);
+      await events(OTHER, [
+        {
+          kind: 'chat_error',
+          time: Date.now(),
+          text: 'Connection interrupted. Waiting for the complete answer',
+          turnId: 'turn-first',
+          recoverable: true
+        }
+      ]);
+      const first = await maintenance();
+      expect(chatOf(first)).toBe(OTHER);
+      expect(await maintenance(first!.token, 'reloaded')).toBeNull();
+      await events(OTHER, [endTurn('turn-first', 'failed')]);
+      await events(OTHER, [openTurn('turn-through'), endTurn('turn-through', 'completed')]);
+      expect(await maintenance()).toBeNull();
+
+      await events(OTHER, [openTurn('turn-broken')]);
+      await events(OTHER, [
+        {
+          kind: 'chat_error',
+          time: Date.now(),
+          text: 'Message delivery timed out. Please try again.',
+          turnId: 'turn-broken',
+          recoverable: true
+        }
+      ]);
+      await events(OTHER, [endTurn('turn-broken', 'failed')]);
+      // Filed against the turn that just died, so nothing will ever retire it, and still behind
+      // the floor the reopen started. The model goes on calling tools through the dead stream.
+      await attributed(OTHER);
+      expect(await maintenance()).toBeNull();
+
+      // Now the chat stops for good. It is owed its one reload whatever else is on file.
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      const rescue = await maintenance();
+      expect(chatOf(rescue)).toBe(OTHER);
+      expect(rescue?.reason).toBe('silence');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
    * Nor may the wait itself be the window in which it is forgotten.
    *
    * The exact live shape: a tab closed and reopened spends this chat's browser action, so the
@@ -4481,6 +4618,42 @@ describe('unattributed activity recovery', () => {
       });
       expect(getConfig().multiAgent.recoverAgentTabs).toBe(true);
     }
+  });
+
+  /**
+   * The other half of "an ordinary chat is recovered exactly like Prime".
+   *
+   * The silence deadline already reopened this chat, but only two minutes after its last sign
+   * of life. A closed tab is first-hand proof that the page is gone now, and the user watching
+   * a Worker come straight back while their own chat sat there dead is the whole bug.
+   */
+  it('reopens an ordinary chat that uses this connector the moment its last tab closes mid-turn', async () => {
+    const SOLO = 'b2b2b2b2-1111-2222-3333-444444444444';
+    await pair();
+    await events(SOLO, [openTurn('turn-solo-closed')]);
+    // One proved call is what makes this chat the app's business at all.
+    await attributed(SOLO);
+
+    await request('POST', '/closed', { body: { conversationId: SOLO } });
+
+    // Nothing is waited out: the close itself is the evidence.
+    expect(chatOf(await maintenance())).toBe(SOLO);
+  });
+
+  /**
+   * And the fence on it. A chat that has never called a tool is somebody reading a recipe with
+   * this app installed; its tab is not this app's to put back, and reopening it would be the
+   * connector helping itself to a window nobody asked it to keep. Its open turn stays on the
+   * ordinary silence clock like any other — this is about the close, not about the turn.
+   */
+  it('leaves a chat that has never called a tool closed when its tab goes', async () => {
+    const BROWSING = 'b3b3b3b3-1111-2222-3333-444444444444';
+    await pair();
+    await events(BROWSING, [openTurn('turn-browsing')]);
+
+    await request('POST', '/closed', { body: { conversationId: BROWSING } });
+
+    expect(await maintenance()).toBeNull();
   });
 
   it('gives an ordinary solo chat the same one-shot stale-turn reload as Prime', async () => {
@@ -5606,6 +5779,215 @@ describe('the goal loop over the bridge', () => {
     const cleared = await request('POST', '/goal/objective', { body: { conversationId: chat, text: '   ' } });
     expect(cleared.body.objective).toBe('');
     expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.objective).toBe('');
+  });
+
+  /**
+   * The switch belongs to the chat it was flipped in.
+   *
+   * It used to be one app-wide setting reachable from every composer, which is the wrong shape
+   * for what people do with it: leave a loop running in one conversation while the rest stay
+   * conversations. Turning it off to stop one runaway chat stopped all of them. A chat with no
+   * answer of its own still follows the app-wide setting, so nothing that has never been touched
+   * changes behaviour — and that inheritance is what retires an old chat safely: turn Goal off
+   * where it pops up, and no later app-wide change can revive that one.
+   */
+  it('stores the Goal switch against the chat whose composer sent it', async () => {
+    await pair();
+    const driven = 'cafe0071-0000-4000-8000-000000000071';
+    const other = 'cafe0072-0000-4000-8000-000000000072';
+    for (const chat of [driven, other]) {
+      await request('POST', '/events', {
+        body: {
+          conversationId: chat,
+          events: [{ kind: 'user_message', time: Date.now(), text: 'hello', messageId: `m-switch-${chat}` }]
+        }
+      });
+    }
+    // Both inherit the app-wide setting until one of them says otherwise.
+    expect((await request('GET', `/activity?conversationId=${driven}`)).body.goal.enabled).toBe(true);
+    expect((await request('GET', `/activity?conversationId=${other}`)).body.goal.enabled).toBe(true);
+
+    const off = await request('POST', '/settings', { body: { conversationId: driven, goal: false } });
+    expect(off.status).toBe(200);
+    expect(off.body.goal).toMatchObject({ enabled: false });
+    expect((await request('GET', `/activity?conversationId=${driven}`)).body.goal.enabled).toBe(false);
+    // The chat that said nothing is untouched, and so is the app-wide default it follows.
+    expect((await request('GET', `/activity?conversationId=${other}`)).body.goal.enabled).toBe(true);
+    expect(getConfig().goal.enabled).toBe(true);
+    expect((await request('GET', '/settings')).body.goal.enabled).toBe(true);
+
+    // Loop in one chat is Loop in that chat. The other keeps answering `goal`, which is what
+    // makes the two switches mutually exclusive per conversation rather than across the app.
+    const loop = await request('POST', '/settings', { body: { conversationId: other, loop: true } });
+    expect(loop.body.goal).toMatchObject({ enabled: true, mode: 'loop' });
+    expect((await request('GET', `/activity?conversationId=${other}`)).body.goal).toMatchObject({
+      enabled: true,
+      mode: 'loop'
+    });
+    expect((await request('GET', `/activity?conversationId=${driven}`)).body.goal).toMatchObject({
+      enabled: false,
+      mode: 'goal'
+    });
+    expect(getConfig().goal.mode).toBe('goal');
+
+    // A saved switch is durable before the page is told it saved, exactly like a saved goal.
+    expect(
+      await readDurable<{ switches: Array<{ conversationId: string; enabled: boolean; mode: string }> }>('goal-switches')
+    ).toMatchObject({
+      switches: expect.arrayContaining([
+        expect.objectContaining({ conversationId: driven, enabled: false }),
+        expect.objectContaining({ conversationId: other, enabled: true, mode: 'loop' })
+      ])
+    });
+  });
+
+  /**
+   * The app watching its own ledger, because the loop's only trigger lives in the page.
+   *
+   * A content script sees a turn end and asks for a draft. That is the right place for the
+   * trigger and the wrong place for the *guarantee*: a document that dies between the final
+   * answer and that request takes the loop down with it silently, leaving an obligation
+   * correctly marked pending and nobody alive to redeem it. This is what the live prime trace
+   * was — the reply landed at 21:56:46 and the app first heard a Goal was owed at 22:00:33,
+   * when a human reloaded the page by hand.
+   *
+   * So the schedule is the silence rule's two minutes, and then two, five, ten, fifteen. Five
+   * reloads, a little over half an hour, and then it stops for good: every one of them is this
+   * app typing into somebody's browser about an answer already on screen, and a page that has
+   * not come back inside half an hour is not coming back.
+   */
+  it('reloads a chat whose finished reply nothing ever came to collect, then stops', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0073-0000-4000-8000-000000000073';
+      await request('POST', '/events', {
+        body: {
+          conversationId: chat,
+          events: [
+            { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-watchdog' },
+            { kind: 'turn_start', time: Date.now(), turnId: 'g-watchdog' },
+            { kind: 'turn_end', time: Date.now(), turnId: 'g-watchdog', outcome: 'completed' }
+          ]
+        }
+      });
+      await request('POST', '/events', {
+        body: {
+          conversationId: chat,
+          events: [{
+            kind: 'assistant_message',
+            time: Date.now(),
+            messageId: 'a-watchdog',
+            text: 'Done with that part.',
+            state: 'final',
+            final: true,
+            // What the page says when it has just watched this exact answer settle. It is the
+            // page's verdict that mints the obligation, and the whole point of the watchdog is
+            // that the page can die between minting it and coming back to redeem it.
+            goalEligible: true,
+            activeNow: true
+          }]
+        }
+      });
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).not.toBeNull();
+
+      const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repair ?? null;
+      };
+
+      // The page owns the first two minutes. Nothing is wrong with a chat whose script is
+      // simply taking a moment to ask.
+      await vi.advanceTimersByTimeAsync(2 * 60_000 - 1_000);
+      expect(await takeRepair()).toBeNull();
+
+      // Two minutes, then 2 / 5 / 10 / 15 between the retries. Each reload is confirmed the way
+      // the extension confirms it, so what is measured here is the schedule and not a handout
+      // being retried because nobody said it worked.
+      const gaps = [1_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000];
+      for (const [index, gap] of gaps.entries()) {
+        await vi.advanceTimersByTimeAsync(gap);
+        const handout = await takeRepair();
+        expect(handout, `reload ${index + 1} of ${gaps.length}`).toMatchObject({
+          conversationId: chat,
+          reason: 'goal'
+        });
+        expect((await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`)).status).toBe(200);
+        // And never twice for the same step: the next one is owed only after its own gap.
+        expect(await takeRepair()).toBeNull();
+      }
+
+      // Five is all it gets. The obligation is still on file — it stays there for the page to
+      // redeem if it ever comes back — but this app has stopped asking.
+      await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
+      expect(await takeRepair()).toBeNull();
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Collected is collected, and only collecting counts.
+   *
+   * A finished response is not a pickup — the whole failure this watches for happens *after*
+   * the response is finished. The obligation is discharged by the page acknowledging a terminal
+   * decision, and that is the exact moment the schedule ends.
+   */
+  it('stops watching a goal the page comes and collects', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0074-0000-4000-8000-000000000074';
+      await request('POST', '/events', {
+        body: {
+          conversationId: chat,
+          events: [
+            { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-collected' },
+            {
+              kind: 'assistant_message',
+              time: Date.now(),
+              messageId: 'a-collected',
+              text: 'All done.',
+              state: 'final',
+              final: true,
+              goalEligible: true,
+              activeNow: true
+            }
+          ]
+        }
+      });
+      const pending = (await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending;
+      expect(pending).not.toBeNull();
+
+      const realFetch = globalThis.fetch;
+      globalThis.fetch = (async () =>
+        Response.json({
+          choices: [{ message: { content: JSON.stringify({ action: 'stop', reply: '' }) } }]
+        })) as never;
+      try {
+        const drafted = await request('POST', '/goal/draft', {
+          body: { conversationId: chat, turnId: pending.turnId, terminalRequired: true, clientId: 'collector' }
+        });
+        expect(drafted.status).toBe(200);
+        await vi.waitFor(async () => {
+          const view = (await request('GET', `/activity?conversationId=${chat}&goalClient=collector`)).body.goal.draft;
+          expect(view?.stage).toBe('no-reply');
+        });
+        const decided = (await request('GET', `/activity?conversationId=${chat}&goalClient=collector`)).body.goal.draft;
+        expect((await request('POST', '/goal/ack', {
+          body: { conversationId: chat, token: decided.token, clientId: 'collector' }
+        })).body.acknowledged).toBe(true);
+      } finally {
+        globalThis.fetch = realFetch;
+      }
+
+      await vi.advanceTimersByTimeAsync(40 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repair ?? null).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /**

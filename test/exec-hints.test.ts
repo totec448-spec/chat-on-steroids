@@ -609,6 +609,32 @@ describe('globs PowerShell will not expand for a native program', () => {
     );
   });
 
+  it('expands a directory bigger than the old bound, which is where the bound bit', () => {
+    // Recorded four times in one day: this repository's own `test/` holds 71 `*.test.ts`
+    // files, the previous limit of 48 refused them, and refusing does not fail politely —
+    // ripgrep receives the literal asterisk and answers `os error 123`, which is the failure
+    // this expansion exists to remove rather than a hint the caller can act on.
+    const many = Array.from({ length: 71 }, (_, i) => `case-${String(i).padStart(2, '0')}.test.ts`);
+    const tree = (directory = '.'): readonly string[] => (directory === 'test' ? many : []);
+    const result = normalizeShellCommand('rg -n "turnEnd" test/*.test.ts', 'powershell', tree);
+
+    for (const name of many) expect(result.cmd).toContain(`'test/${name}'`);
+    // The wall of filenames was the note's problem, not the command's: every name still runs.
+    expect(result.notes.join(' ')).toContain('the 71 entries');
+    expect(result.notes.join(' ')).toContain('and 59 more');
+    expect(result.notes.join(' ')).not.toContain('case-70.test.ts');
+  });
+
+  it('still has a bound, and still fails to ripgrep rather than to a guess', () => {
+    // The limit moved to where the real constraint is; it did not stop existing. Past it the
+    // command is left exactly as written, which is the one honest outcome — substituting a
+    // shortened list would silently search less than the caller asked for.
+    const tree = (directory = '.'): readonly string[] =>
+      directory === 'test' ? Array.from({ length: 129 }, (_, i) => `case-${i}.test.ts`) : [];
+    const cmd = 'rg -n "turnEnd" test/*.test.ts';
+    expect(normalizeShellCommand(cmd, 'powershell', tree)).toEqual({ cmd, notes: [] });
+  });
+
   it('never mistakes the search pattern for a filename glob', () => {
     // `.*` and `foo?` are regex here. Expanding either would change what is searched for.
     const cmd = 'rg -n "json\\.Marshal|Write\\(.*" src';
@@ -1162,6 +1188,65 @@ describe('a pipeline stopped early by Select-Object -First', () => {
     expect(run(`${generator} | Select-Object -First 5 | Out-Null`)).not.toBe(0);
     // -Wait drains instead of stopping, which is the remedy the note hands the model.
     expect(run(`${generator} | Select-Object -First 5 -Wait | Out-Null`)).toBe(0);
+  });
+});
+
+describe('git grep, which spends exit 1 on "found nothing" like every other search', () => {
+  // Verbatim shape from the corpus: three git commands in one batch, the last of them a
+  // `git grep` that matched nothing, and the whole call stored as an error. `git` is not a
+  // name a search table can hold — exit 1 from `git diff` means the opposite — so the
+  // subcommand is what has to be read, in the one position it can be read from safely.
+  const NO_MATCH = 'git grep -n -i "edge-triggered" -- AGENTS.md';
+
+  it('is a result, not a failure', () => {
+    expect(nonZeroExitIsBenign(NO_MATCH, 1, '')).toBe(true);
+    expect(nonZeroExitIsBenign('git grep -n foo | Select-Object -First 40', 1, '')).toBe(true);
+  });
+
+  it('needs no path-qualified spelling, because -NoProfile leaves nothing to impersonate it', () => {
+    // A bare `rg` is refused for exactly this reason: a profile function can answer to the
+    // name. exec.ts launches every command through `powershell -NoProfile`, and no profile
+    // function can then be answering to `git`.
+    expect(nonZeroExitIsBenign('rg -n foo src', 1, '')).toBe(false);
+    expect(nonZeroExitIsBenign('git grep -n foo', 1, '')).toBe(true);
+  });
+
+  it('names the subcommand in the note, so the exemption cannot be read as covering git', () => {
+    const note = benignExitNote(NO_MATCH, 'powershell', 1, '');
+    expect(note).toContain('`git grep`');
+    expect(note).toContain('no matches');
+  });
+
+  // The negatives are the ones that matter: each is a real failure this must keep recording.
+  it('is not benign for a git subcommand whose exit 1 means something else', () => {
+    for (const cmd of ['git diff --check -- AGENTS.md', 'git apply patch.diff', 'git push origin main']) {
+      expect(nonZeroExitIsBenign(cmd, 1, '')).toBe(false);
+    }
+  });
+
+  it('is not benign when a flag has already spent the exit code on an answer', () => {
+    for (const flag of ['--quiet', '--exit-code']) {
+      expect(nonZeroExitIsBenign(`git grep ${flag} foo -- src`, 1, '')).toBe(false);
+    }
+  });
+
+  it('does not let a later git stage hide behind the generator it decided over', () => {
+    // The whole reason the deciding stage has to *be* the generator. Reading the subcommand
+    // off the front while git's predicate ran at the back would file that failure as a
+    // search that found nothing — the exact laundering this file exists to prevent.
+    expect(nonZeroExitIsBenign('git grep -n foo | git diff --exit-code', 1, '')).toBe(false);
+    expect(nonZeroExitIsBenign('git grep -n foo | Where-Object { $_ -match "x" }', 1, '')).toBe(false);
+  });
+
+  it('withholds the exemption from a form whose subcommand it cannot prove', () => {
+    expect(nonZeroExitIsBenign('git -C sub grep -n foo', 1, '')).toBe(false);
+    expect(nonZeroExitIsBenign('cmd /c exit 1 && git grep -n foo', 1, '')).toBe(false);
+  });
+
+  it('is not benign when git printed a failure of its own, or exited some other way', () => {
+    expect(nonZeroExitIsBenign(NO_MATCH, 1, 'fatal: not a git repository')).toBe(false);
+    expect(nonZeroExitIsBenign(NO_MATCH, 128, '')).toBe(false);
+    expect(nonZeroExitIsBenign(NO_MATCH, 2, '')).toBe(false);
   });
 });
 

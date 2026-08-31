@@ -2247,6 +2247,26 @@ nav button.is-sel::after {
   background: var(--red);
 }
 
+/* The Activity panel's one line about being current. It borrows the foot's geometry
+   because it is the same kind of thing - a quiet fact under the feed - and gains colour
+   only for the two states that mean something: current, and not able to say so. */
+.upline {
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--soft);
+}
+
+.upline.is-ok {
+  background: var(--green-wash);
+  color: var(--green);
+}
+
+.upline.is-bad {
+  background: var(--red-wash);
+  color: var(--red);
+}
+
 /* ------------------------------------------------------------------- toast */
 
 .toast {

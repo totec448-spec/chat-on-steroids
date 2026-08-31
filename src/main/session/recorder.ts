@@ -1779,6 +1779,34 @@ export async function recordNote(sessionId: string, text: string): Promise<void>
 }
 
 /**
+ * Records one app-owned status whose later snapshots replace its text in-place.
+ *
+ * The first durable snapshot owns chronology. Callers retain that anchor and reuse the
+ * progress id, so a retry can move from trying to failed to successful without leaving three
+ * contradictory rows in the transcript.
+ */
+export async function recordProgress(
+  sessionId: string,
+  progressId: string,
+  text: string,
+  anchor?: { seq: number; time: number }
+): Promise<{ seq: number; time: number } | null> {
+  if (!recordingEnabled() || !progressId) return null;
+  const time = anchor?.time ?? Date.now();
+  const event = await appendEvent(sessionId, {
+    time,
+    source: 'app',
+    kind: 'progress',
+    progressId,
+    ...(anchor ? { origin: anchor.seq } : {}),
+    message: await storeText(sessionId, text, 4000)
+  }).catch(() => null);
+  if (!event) return null;
+  notifyChanged();
+  return anchor ?? { seq: event.seq, time };
+}
+
+/**
  * Records a brokered message in the relevant agent's own session.
  *
  * Called twice per message and on purpose. `sent` goes into the sender's history when

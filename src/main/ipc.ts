@@ -21,7 +21,7 @@ import {
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { getConfig, updateConfig } from './config.js';
-import { listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts } from './goal.js';
+import { clearAllGoalSwitches, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
@@ -332,6 +332,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     ) {
       retireGoalDrafts();
     }
+    // The app-wide switch going off is the master stop, and has to actually stop things. Chats
+    // carry their own Goal/Loop answer now, so without this the one control that looks like it
+    // governs everything would govern only the chats that never disagreed with it — and a loop
+    // somebody wanted stopped would go on running with nowhere obvious to switch it off.
+    // Turning it *on* deliberately does not reach into a chat that has said no.
+    if (before.goal.enabled && !next.goal.enabled) clearAllGoalSwitches();
     // Switching multi-agent mode off has to be able to remove the `agents` tool from the
     // schemas, and the exposed surface only ever widens by default. So the latch is
     // released here — the one place that knows the user made the decision

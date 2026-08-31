@@ -187,7 +187,7 @@ export function outageRecovered(run: UnreachableRun, lastHandshake: number | nul
 
 export type RouteObservation = 'connected' | 'offline' | 'unknown';
 
-/** Missing metrics prove neither recovery nor failure. */
+/** Missing metrics prove neither recovery nor failure; a readable zero is a ready first poll. */
 export function routeObservation(
   read: number | null,
   lastHandshake: number | null,
@@ -196,7 +196,7 @@ export function routeObservation(
 ): RouteObservation {
   if (read === null) return 'unknown';
   if (outageConfirmed(run, nowMs)) return 'offline';
-  if (lastHandshake === null) return 'unknown';
+  if (lastHandshake === null) return 'connected';
   return nowMs - lastHandshake > POLL_FRESH_MS ? 'offline' : 'connected';
 }
 
@@ -404,10 +404,10 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
    * reported and waited out. /readyz cannot distinguish them, because it stays green
    * while the machine is offline.
    *
-   * What can distinguish them is the client's own poll metric: the timestamp of the
-   * last control-plane poll that actually completed. Fresh means a live round trip to
-   * OpenAI happened within the last poll cycle, which is the only honest basis for
-   * saying "connected". The log lines only supply the wording for *why* it is down.
+   * What can distinguish them is the client's own poll metric. A readable metric plus
+   * /readyz is enough for startup readiness while the first long poll is open; its first
+   * timestamp separately verifies the OpenAI link. After that, freshness is the proof
+   * used to detect a lost route. The log lines only supply the wording for *why* it is down.
    */
   const watch = (run: ClientRun): void => {
     if (stopped || current !== run || !run.healthBase) return;
