@@ -10,7 +10,14 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { z } from 'zod';
-import { CAPABILITIES, GOAL_REASONING_LEVELS, RELEASES_PAGE, type AppState, type Config } from '../shared/types.js';
+import {
+  CAPABILITIES,
+  GOAL_MODES,
+  GOAL_REASONING_LEVELS,
+  RELEASES_PAGE,
+  type AppState,
+  type Config
+} from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { getConfig, updateConfig } from './config.js';
@@ -124,6 +131,9 @@ const settingsPatch = z.object({
   }),
   goal: z.object({
     enabled: z.boolean(),
+    // Which of the two standing modes the switch runs. One field, so the renderer has no way
+    // to describe a state where Goal and Loop are both on.
+    mode: z.enum(GOAL_MODES),
     // An OpenRouter model id, and validated only as a shape: the catalogue changes weekly,
     // and an allow-list here would mean this app deciding which models exist.
     // The leading `~` is OpenRouter's own marker for an alias that always resolves to the
@@ -140,7 +150,8 @@ const settingsPatch = z.object({
       ),
     reasoning: z.enum(GOAL_REASONING_LEVELS),
     prompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS),
-    objectivePrompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
+    objectivePrompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS),
+    loopPrompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
   })
 });
 
@@ -217,6 +228,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     },
     goal: {
       enabled: pick(current.goal.enabled, base.goal.enabled, wanted.goal.enabled),
+      mode: pick(current.goal.mode, base.goal.mode, wanted.goal.mode),
       model: pick(current.goal.model, base.goal.model, wanted.goal.model),
       reasoning: pick(current.goal.reasoning, base.goal.reasoning, wanted.goal.reasoning),
       prompt: pick(current.goal.prompt, base.goal.prompt, wanted.goal.prompt),
@@ -224,7 +236,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.goal.objectivePrompt,
         base.goal.objectivePrompt,
         wanted.goal.objectivePrompt
-      )
+      ),
+      loopPrompt: pick(current.goal.loopPrompt, base.goal.loopPrompt, wanted.goal.loopPrompt)
     }
   };
 }
@@ -308,10 +321,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     getWindow()?.setBackgroundColor(next.ui.theme === 'dark' ? '#0e0e11' : '#ffffff');
     if (
       before.goal.enabled !== next.goal.enabled ||
+      // The mode is authority too: a draft started as a gate must not be typed after the user
+      // asked for a loop, and a loop draft must not be typed after they asked for a gate.
+      before.goal.mode !== next.goal.mode ||
       before.goal.model !== next.goal.model ||
       before.goal.reasoning !== next.goal.reasoning ||
       before.goal.prompt !== next.goal.prompt ||
-      before.goal.objectivePrompt !== next.goal.objectivePrompt
+      before.goal.objectivePrompt !== next.goal.objectivePrompt ||
+      before.goal.loopPrompt !== next.goal.loopPrompt
     ) {
       retireGoalDrafts();
     }

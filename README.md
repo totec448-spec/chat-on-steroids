@@ -60,6 +60,7 @@ sha256sum Chat-On-Steroids-Linux-x64.AppImage   # Linux
 | Sessions | Local durable history, real tool-call evidence and Compact & Resume |
 | Workers | Experimental prime/worker chats with deterministic local routing |
 | Goal loop | Optional: a second model writes your next message until the goal is met (needs an OpenRouter key) |
+| Loop | The same loop with no stopping condition: it answers every finished turn until you switch it off |
 
 The app has no replacement chat UI and does not host a model. It runs quietly in the system tray/menu bar and bridges ChatGPT to capabilities on the computer you already use.
 
@@ -174,8 +175,23 @@ action must belong to the exact terminal assistant section. Hidden tabs do not d
 throttled debounce timer to notice the final Stop removal. A message sent into a turn that is
 still working would read as a correction to it, so ambiguous/interim states stay open.
 
+**Loop: the same loop, with no way to stop.** Goal ends when it decides the job is done, and
+that judgement is the part that goes wrong on a long unattended run — one over-confident "all
+done" from ChatGPT and the run is over. **Loop** is the same machinery with that decision
+removed: every finished turn gets a message back, and the only thing that ends the run is the
+Loop switch going off again. Goal and Loop are the two positions of one setting, so exactly one
+of them can be on and turning either on turns the other off. It uses its own editable prompt,
+which spends most of its length on the two things a model that must always speak gets wrong: it
+tells it to come back to the whole job and restate the requirements rather than circling one
+detail, and, when everything looks finished, to say so and ask for another pass — verify it
+runs, harden what was rushed, cover what is untested — instead of inventing new work. It works
+with or without a specific goal. The guarantee is enforced by the app as well as the prompt: the
+model is sent a response schema with no stop in it, an answer that tries to stop anyway is asked
+again, and if it still refuses the turn fails *retryably* rather than typing a sentence the model
+never wrote.
+
 **Give one chat a specific goal.** The gear beside the composer has an **add specific goal**
-line under the Goal switch. Write what the chat has to reach, press Save, and the same loop
+line under the two switches. Write what the chat has to reach, press Save, and the same loop
 prompts towards that goal until it is reached, then stops without forgetting the goal text. A
 goal is enough on its own: you do not have to turn the standing switch on as well. In a **New
 Chat** it also writes the first message, so a goal is all you have to type. Goals are durable and
@@ -194,10 +210,10 @@ file contents and command output, and none of that belongs in a chat message.
 
 It needs an **OpenRouter API key**, which is stored encrypted alongside the app's other secrets
 and never reaches the browser: the request is made by the app. Set the key, model, reasoning level
-and editable system prompt under **Chat → Settings**; the prompt editor includes a one-click
-restore to the eager-but-bounded shipped default. The model picker lists OpenRouter's catalogue newest first,
-twenty at a time. The switch is also on the gear beside the ChatGPT composer, together with
-automatic compaction. A finished or failed Goal status stays visible above the composer for the
+and the three editable system prompts — the gate, the goal driver and the loop — under
+**Chat → Settings**; each prompt editor includes a one-click restore to its shipped default. The model picker lists OpenRouter's catalogue newest first,
+twenty at a time. Both switches are also on the gear beside the ChatGPT composer, together
+with automatic compaction. A finished or failed Goal status stays visible above the composer for the
 finished turn, can be dismissed immediately with its top-right ×, and clears automatically when
 you send the next prompt, open New Chat or switch conversations.
 

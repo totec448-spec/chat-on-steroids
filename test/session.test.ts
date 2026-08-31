@@ -57,6 +57,8 @@ import {
 import { summarizeToolCall } from '../src/main/session/summarize.js';
 import { HANDOFF_BRIEF_RULES, nativeHandoffPrompt } from '../src/main/session/handoff-prompt.js';
 import {
+  CHAT_ACTIVE_MS,
+  CHAT_SILENCE_MS,
   estimateTokens,
   eventTokens,
   foldProgress,
@@ -736,6 +738,31 @@ describe('session store', () => {
     });
 
     expect((await getSession(summary.id))?.lastAssistantFinalAt).toBe(200);
+  });
+
+  it('keeps the open turn open when the ChatGPT page detaches mid-turn', async () => {
+    const conversationId = 'c-detach-keeps-turn-open';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: 10, text: 'run the long job', messageId: 'detach-user-1' },
+      { kind: 'turn_start', time: 11, turnId: 'g-detach-open' }
+    ]);
+    const sessionId = opened.sessionId!;
+
+    await closeConversation(conversationId);
+
+    // A detach is not evidence about the turn. It may not end it, and it may not end it
+    // "unknown" either: an ended turn is unreachable for the recovery that follows.
+    expect(await readEvents(sessionId, { kinds: ['turn_end'] })).toEqual([]);
+    const notes = await readEvents(sessionId, { kinds: ['note'] });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.turnId).toBe('g-detach-open');
+
+    const reopened = await recordChatObservations(conversationId, [
+      { kind: 'turn_end', time: 30, turnId: 'g-detach-open', outcome: 'completed' }
+    ]);
+    expect(reopened.sessionId).toBe(sessionId);
+    const ends = await readEvents(sessionId, { kinds: ['turn_end'] });
+    expect(ends.map((event) => event.kind === 'turn_end' && event.outcome)).toEqual(['completed']);
   });
 
   it('offers a stable final reply to Goal after reload lost an uncertain turn identity', async () => {
@@ -2628,5 +2655,24 @@ describe('a session store nobody has pointed anywhere', () => {
   it('refuses to read as well, instead of reporting an empty history', async () => {
     unsetSessionRootForTests();
     await expect(listSessions()).rejects.toThrow(/initSessionStore/);
+  });
+});
+
+describe('activity windows', () => {
+  /**
+   * The label must outlive the reload it triggers.
+   *
+   * Both durations came from one constant, so the Active badge expired on the same instant the
+   * silence ledger did — and the browser action still had this app's sweep and Chrome's alarm
+   * ahead of it. What a user saw was a chat going idle and then reloading itself half a minute
+   * later for no visible reason. Any future edit that collapses these two back into one number,
+   * or reorders them, reproduces that exactly.
+   */
+  it('keeps the Active badge alive past the silence reload it triggers', () => {
+    expect(CHAT_SILENCE_MS).toBe(2 * 60_000);
+    expect(CHAT_ACTIVE_MS).toBeGreaterThan(CHAT_SILENCE_MS);
+    // Enough headroom for both hops a queued reload still has to make: this app's maintenance
+    // tick and the extension's thirty-second alarm floor.
+    expect(CHAT_ACTIVE_MS - CHAT_SILENCE_MS).toBeGreaterThanOrEqual(60_000);
   });
 });

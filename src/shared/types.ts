@@ -185,8 +185,26 @@ export type GoalReasoning = (typeof GOAL_REASONING_LEVELS)[number];
  * Off by default, and useless without an OpenRouter API key: the key is the credential the
  * whole feature runs on, so the UI says so rather than failing quietly at the first turn.
  */
+/**
+ * Which of the two standing modes the switch runs.
+ *
+ * One field rather than two booleans, because Goal and Loop are mutually exclusive by
+ * construction here: there is nothing to keep in step and no state where both are on. `enabled`
+ * stays the master switch it has always been, so everything that only wants to know whether a
+ * second model may type into a chat keeps reading exactly that.
+ */
+export const GOAL_MODES = ['goal', 'loop'] as const;
+export type GoalMode = (typeof GOAL_MODES)[number];
+
 export interface GoalSettings {
   enabled: boolean;
+  /**
+   * `goal` stops when the job is done; `loop` never stops on its own.
+   *
+   * Only consulted while `enabled` is true. A chat driven solely by its own saved objective
+   * with the switch off runs as `goal`, because Loop is a thing the user switches on.
+   */
+  mode: GoalMode;
   /** An OpenRouter model id, exactly as its `/models` listing spells it. */
   model: string;
   reasoning: GoalReasoning;
@@ -201,6 +219,14 @@ export interface GoalSettings {
    * point, and the person whose chat gets typed into is the one who should own it.
    */
   objectivePrompt: string;
+  /**
+   * Editable loop instruction, used instead of both of the above while the mode is `loop`.
+   *
+   * A third prompt rather than a flag on the other two, because the job is a different one:
+   * the gate and the driver decide whether to speak, and this one only ever decides what to
+   * say. It is combined with a chat's own goal when it has one, exactly as the driver is.
+   */
+  loopPrompt: string;
 }
 
 /**

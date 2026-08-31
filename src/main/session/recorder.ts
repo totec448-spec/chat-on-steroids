@@ -624,7 +624,7 @@ export function liveConversations(): Array<{
  * These windows exist because a real browser reports a request id up to several seconds
  * after the connector already answered. The suite has no browser: it hands the recorder its
  * evidence in the same process, microseconds later, or deliberately never. So every test
- * that asserts "this ends up unattributed" paid the full fifteen seconds to prove a
+ * that asserts "this ends up unattributed" paid the full twenty seconds to prove a
  * negative, and a handful of them dominated the whole run.
  *
  * Never set outside the test runner, so production keeps the measured windows. The value is
@@ -644,7 +644,7 @@ export function evidenceWindow(production: number): number {
  * Chrome-off or missing evidence ends in Unattributed activity rather than a tool, time or
  * generation guess.
  */
-const REQUEST_ID_GRACE_MS = evidenceWindow(15_000);
+const REQUEST_ID_GRACE_MS = evidenceWindow(20_000);
 
 /**
  * Late exact request-id evidence can arrive after a call already fell into Unattributed.
@@ -1375,6 +1375,10 @@ export interface ChatObservation {
   time: number;
   /** True when `time` is ChatGPT's own authored create_time, not local observation time. */
   authoredTime?: boolean;
+  /** True only for the newest DOM user row that this document proved was just sent. */
+  authoredNow?: boolean;
+  /** True only when the current page generation owns this assistant revision now. */
+  activeNow?: boolean;
   text?: string;
   /** ChatGPT's already-rendered authored markup for this same logical message. */
   renderedHtml?: string;
@@ -1473,6 +1477,7 @@ export function recordChatObservations(
 ): Promise<{
   sessionId: string | null;
   stored: number;
+  activity: { meaningful: boolean; working: boolean; terminal: boolean };
   goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
 }> {
   const prior = observationChains.get(conversationId) ?? Promise.resolve();
@@ -1495,9 +1500,11 @@ async function recordChatObservationsNow(
 ): Promise<{
   sessionId: string | null;
   stored: number;
+  activity: { meaningful: boolean; working: boolean; terminal: boolean };
   goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
 }> {
-  if (!recordingEnabled()) return { sessionId: null, stored: 0, goalCandidates: [] };
+  const activity = { meaningful: false, working: false, terminal: false };
+  if (!recordingEnabled()) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   let firstUser: ChatObservation | undefined;
   let pageTitle: ChatObservation | undefined;
   const explicitEnds = new Set<string>();
@@ -1519,7 +1526,7 @@ async function recordChatObservationsNow(
     conversationId,
     pageTitle?.text?.trim() || (firstUser?.text ? firstUser.text.slice(0, 80) : undefined)
   );
-  if (!sessionId) return { sessionId: null, stored: 0, goalCandidates: [] };
+  if (!sessionId) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   const live = conversations.get(conversationId);
   let stored = 0;
   let recoveredGoalSeen = false;
@@ -1573,6 +1580,10 @@ async function recordChatObservationsNow(
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true });
         if (!written.changed) continue;
+        if (item.authoredNow === true) {
+          activity.meaningful = true;
+          activity.working = true;
+        }
         break;
       }
       case 'assistant_message': {
@@ -1595,6 +1606,12 @@ async function recordChatObservationsNow(
             ? live.lastTurnStartedAt
             : null;
         const uncertainTurnStartedAt = batchUncertainStartedAt ?? priorUncertainStartedAt;
+        const terminalActivity =
+          state === 'final' &&
+          (item.activeNow === true ||
+            item === recoveredFinal ||
+            (uncertainTurnStartedAt !== null && item.time >= uncertainTurnStartedAt));
+        const workingActivity = state !== 'final' && item.activeNow === true;
         const recoveredGoalEligible =
           state === 'final' &&
           !item.turnId &&
@@ -1635,6 +1652,9 @@ async function recordChatObservationsNow(
           recoveredGoalSeen = true;
         }
         if (!written.changed && item !== recoveredFinal) continue;
+        if (terminalActivity || workingActivity) activity.meaningful = true;
+        if (terminalActivity) activity.terminal = true;
+        if (workingActivity) activity.working = true;
         if (item === recoveredFinal && item.turnId) {
           await appendEvent(sessionId, {
             time: item.time,
@@ -1675,6 +1695,7 @@ async function recordChatObservationsNow(
           kind: 'chat_error',
           message: await storeText(sessionId, item.text ?? '', 2000)
         });
+        activity.meaningful = true;
         break;
       case 'turn_start':
         // Lifecycle without a durable local id is not a lifecycle boundary a later reader
@@ -1699,6 +1720,8 @@ async function recordChatObservationsNow(
           live.turnId = item.turnId;
           live.openTurns.add(item.turnId);
         }
+        activity.meaningful = true;
+        activity.working = true;
         break;
       // Also not stored, and for the same reason: this is the page describing which calls
       // it made, which is a fact about attribution rather than something that happened in
@@ -1732,13 +1755,15 @@ async function recordChatObservationsNow(
             live.turnId = null;
           }
         }
+        activity.meaningful = true;
+        if (item.outcome !== 'unknown') activity.terminal = true;
         break;
     }
     stored++;
   }
   if (recoveredGoalSeen && live) live.lastTurnOutcome = 'completed';
   notifyChanged();
-  return { sessionId, stored, goalCandidates };
+  return { sessionId, stored, activity, goalCandidates };
 }
 
 /** Records something the app itself decided, e.g. a saved handoff. */
@@ -1839,12 +1864,14 @@ export async function ensureHandoffRecorded(
 /**
  * Called when a conversation page goes away.
  *
- * `pagehide` cannot tell a reload from a real tab close, and ChatGPT may keep a server
- * generation alive while the page is absent. Calling that "interrupted" was therefore
- * too strong and made a reload look like a failed turn even when the final answer was
- * waiting on the page a moment later. Record the lifecycle break as unknown; if the
- * chat reopens with a new final assistant message, recordChatObservations reconciles it
- * to a later completed turn_end.
+ * Browser lifetime owns the *binding* — which tab speaks for this conversation — and
+ * nothing else. `pagehide` cannot tell a reload from a navigation from a real close, and
+ * in every one of those cases ChatGPT keeps the server generation running while no page
+ * is watching it. So a detach is not evidence about the turn, not even weak evidence:
+ * synthesising a `turn_end` here closed the exact turn the recovery path was supposed to
+ * reopen, and a closed turn can never be resolved by later real evidence. The open turn
+ * stays open; the detach is recorded as a note, which the timeline shows without ending
+ * anything, and recordChatObservations writes the real terminal when the chat comes back.
  */
 export async function closeConversation(conversationId: string): Promise<void> {
   const live = conversations.get(conversationId);
@@ -1853,10 +1880,13 @@ export async function closeConversation(conversationId: string): Promise<void> {
     await appendEvent(live.sessionId, {
       time: Date.now(),
       source: 'extension',
-      kind: 'turn_end',
+      kind: 'note',
       ...(live.turnId ? { turnId: live.turnId } : {}),
-      outcome: 'unknown',
-      detail: 'the ChatGPT page detached while generating; outcome may be recovered when the chat reopens'
+      message: await storeText(
+        live.sessionId,
+        'the ChatGPT page detached while this turn was still open; the turn stays open until real evidence ends it',
+        4000
+      )
     }).catch(() => undefined);
   }
   conversations.delete(conversationId);

@@ -12,6 +12,7 @@ import { z } from 'zod';
 import {
   CAPABILITIES,
   DEFAULT_CAPABILITIES,
+  GOAL_MODES,
   GOAL_REASONING_LEVELS,
   WRITE_CAPABILITIES,
   type Capabilities,
@@ -23,6 +24,7 @@ import {
   type SessionSettings
 } from '../shared/types.js';
 import {
+  DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
   DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS,
@@ -123,10 +125,15 @@ const DEFAULT_COMPACTION: CompactionSettings = {
 export const DEFAULT_GOAL_MODEL = 'z-ai/glm-5.3';
 const DEFAULT_GOAL: GoalSettings = {
   enabled: false,
+  // The mode a fresh install runs the moment somebody flips the switch. Goal, because it is
+  // the one that can end by itself: a loop that never stops is a deliberate choice, not a
+  // default anybody should discover by turning something on.
+  mode: 'goal',
   model: DEFAULT_GOAL_MODEL,
   reasoning: 'default',
   prompt: DEFAULT_GOAL_SYSTEM_PROMPT,
-  objectivePrompt: DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT
+  objectivePrompt: DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
+  loopPrompt: DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
 };
 // Two workers, not three: three concurrent workers reproducibly trips ChatGPT's rate limit
 // ("too many requests"), which strands the run rather than making it faster.
@@ -283,6 +290,10 @@ const configSchema = z.object({
   goal: z
     .object({
       enabled: z.boolean().optional().default(DEFAULT_GOAL.enabled),
+      // Repaired rather than rejected for the same reason `reasoning` below is: a config
+      // written by a version that knows one more mode than this one must not send every root
+      // and permission in the file through conservative recovery over a single word.
+      mode: z.enum(GOAL_MODES).optional().default(DEFAULT_GOAL.mode).catch(DEFAULT_GOAL.mode),
       model: z
         .string()
         .max(160)
@@ -319,7 +330,17 @@ const configSchema = z.object({
         .transform((prompt) =>
           prompt.trim() === '' ? DEFAULT_GOAL.objectivePrompt : prompt.trim()
         )
-        .catch(DEFAULT_GOAL.objectivePrompt)
+        .catch(DEFAULT_GOAL.objectivePrompt),
+      // The third editor, repaired exactly like the two above. Loop is the mode that cannot
+      // stop on its own, so an empty instruction here would be an unconstrained model typing
+      // into somebody's chat forever — the one shape this section must never load in.
+      loopPrompt: z
+        .string()
+        .max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
+        .optional()
+        .default(DEFAULT_GOAL.loopPrompt)
+        .transform((prompt) => (prompt.trim() === '' ? DEFAULT_GOAL.loopPrompt : prompt.trim()))
+        .catch(DEFAULT_GOAL.loopPrompt)
     })
     .optional()
     .default({ ...DEFAULT_GOAL })

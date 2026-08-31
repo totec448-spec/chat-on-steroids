@@ -1320,7 +1320,11 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 (failed.length > 0
                   ? `\n\n${failed.map((info) => info.id).join(', ')} will not report. Do that work yourself or wake ` +
                     'another worker; do not wait for them.'
-                  : '')
+                  : '') +
+                // A status check is a glance, not a stopping point. Without this the table reads
+                // like an answer to hand back to the user, and a prime that has just looked at its
+                // workers stops mid-run to report what it saw.
+                '\n\nThis is the current stats, keep working.'
             }
           ],
           structuredContent: {

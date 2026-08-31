@@ -470,7 +470,16 @@ conversation. Those calls therefore renew one activity grant even though there i
 turn; two minutes after the last one, the normal one-shot browser recovery runs. A call that merely
 settles late after `completed` or `stopped` does not receive that authority. The renderer uses the
 same exact tool-call timestamps, not generic session `updatedAt`, to show any agent chat as
-`active` for three minutes.
+`active` — for three minutes, deliberately one minute longer than the recovery window.
+
+**The two windows are separate constants and must stay ordered.** `CHAT_SILENCE_MS` (two minutes)
+is when a silent open turn earns its one reload; `CHAT_ACTIVE_MS` (three minutes) is how long the
+badge keeps calling that chat active. Sharing one constant made the label expire on the same
+instant the ledger did, while the reload still had this app's maintenance tick and the extension's
+thirty-second alarm floor in front of it — a chat measured silent at 2:00 was observed reopening at
+2:40, after its badge had already gone dark. The app half of that lag is gone: the ledger is
+inspected on the deadline itself, not at the next thirty-second tick. Chrome's alarm floor still
+owns the rest, which is what the extra minute of badge covers.
 
 A stable final assistant message is stronger than the lost local generation for two decisions:
 
