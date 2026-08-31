@@ -1460,6 +1460,52 @@ describe('a chat driven towards a specific goal', () => {
     });
   });
 
+  it('upgrades a decided provisional turn to the stable reply without reopening it', async () => {
+    const conversationId = 'c-reply-provisional-upgrade';
+    const turnId = 'g-reply-provisional-upgrade';
+    const session = await createSession({ title: 'goal', conversationId });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'finish the work', truncated: false, chars: 15 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId,
+      sessionId: session.id,
+      replyId: `turn:${turnId}`,
+      turnId,
+      eventSeq: 0,
+      blocked: false
+    });
+    globalThis.fetch = (async () => decision('stop')) as never;
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId, turnId });
+    const decided = await settled(conversationId);
+    expect(decided.stage).toBe('no-reply');
+    expect(goal.ackGoalDraft(conversationId, decided.token)).toBe(true);
+
+    // Fiber can publish the stable assistant id after the provider decision. It strengthens
+    // the tombstone's identity; it does not turn the already-decided message back into work.
+    await goal.acceptGoalReplyNow({
+      conversationId,
+      sessionId: session.id,
+      replyId: 'assistant-stable-provisional-upgrade',
+      turnId,
+      eventSeq: 12,
+      blocked: false
+    });
+    expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    expect(goal.snapshotGoalReplies().replies).toContainEqual(
+      expect.objectContaining({
+        replyId: 'assistant-stable-provisional-upgrade',
+        turnId,
+        eventSeq: 12,
+        state: 'handled'
+      })
+    );
+  });
+
   it('restores an accepted pending reply after app restart', async () => {
     await goal.acceptGoalReplyNow({
       conversationId: 'c-reply-restored',
@@ -1497,6 +1543,132 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.snapshotGoalReplies().replies).toContainEqual(
       expect.objectContaining({ replyId: 'assistant-message-disabled', state: 'handled' })
     );
+  });
+
+  /**
+   * The obligation outlives every way of failing to answer it.
+   *
+   * The ledger row says one exact turn is owed a decision. Only a decision discharges it —
+   * a message the page typed, or NO_REPLY. A dropped stream, a rejected key, an exhausted
+   * balance and a clock running out are all this app failing to produce one, and recording a
+   * failure to answer as an answer is how a turn ended up silently owed nothing.
+   */
+  it('keeps the reply obligation pending through a retryable draft failure', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-owed-after-failure' });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'keep going', truncated: false, chars: 10 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId: 'c-owed-after-failure',
+      sessionId: session.id,
+      replyId: 'assistant-owed-after-failure',
+      turnId: 'g-owed-failure',
+      eventSeq: 3,
+      blocked: false
+    });
+    globalThis.fetch = (async () => new Response('nope', { status: 502 })) as never;
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-owed-after-failure', turnId: 'g-owed-failure' });
+    const failure = await settled('c-owed-after-failure');
+    expect(failure.stage).toBe('failed');
+    expect(goal.ackGoalDraft('c-owed-after-failure', failure.token)).toBe(true);
+
+    expect(goal.goalPendingReplyFor('c-owed-after-failure')).toMatchObject({
+      replyId: 'assistant-owed-after-failure',
+      turnId: 'g-owed-failure'
+    });
+  });
+
+  it('keeps the reply obligation pending through a settings failure the page will not retry', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-owed-after-settings' });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'keep going', truncated: false, chars: 10 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId: 'c-owed-after-settings',
+      sessionId: session.id,
+      replyId: 'assistant-owed-after-settings',
+      turnId: 'g-owed-settings',
+      eventSeq: 5,
+      blocked: false
+    });
+    globalThis.fetch = (async () => new Response('{}', { status: 402 })) as never;
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-owed-after-settings', turnId: 'g-owed-settings' });
+    const failure = await settled('c-owed-after-settings');
+    expect(failure.retryable).toBe(false);
+    expect(goal.ackGoalDraft('c-owed-after-settings', failure.token)).toBe(true);
+
+    // The user fixing their balance must find the turn it was owed for still owed.
+    expect(goal.goalPendingReplyFor('c-owed-after-settings')).toMatchObject({
+      turnId: 'g-owed-settings'
+    });
+  });
+
+  it('keeps the reply obligation pending when the draft payload ages past its ten-minute TTL', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-owed-after-ttl' });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'keep going', truncated: false, chars: 10 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId: 'c-owed-after-ttl',
+      sessionId: session.id,
+      replyId: 'assistant-owed-after-ttl',
+      turnId: 'g-owed-ttl',
+      eventSeq: 9,
+      blocked: false
+    });
+    globalThis.fetch = (async () => stream([delta('one last correction'), 'data: [DONE]\n'])) as never;
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-owed-after-ttl', turnId: 'g-owed-ttl' });
+    expect((await settled('c-owed-after-ttl')).stage).toBe('ready');
+
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60_000);
+    try {
+      // Reading the view is what runs the payload expiry. It may drop the text; it may not
+      // decide, on a clock, that a turn nobody answered has been answered.
+      expect(goal.goalViewFor('c-owed-after-ttl')).toBeNull();
+      expect(goal.goalPendingReplyFor('c-owed-after-ttl')).toMatchObject({ turnId: 'g-owed-ttl' });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('discharges the reply obligation only once the page acknowledges a real decision', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-owed-until-typed' });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'keep going', truncated: false, chars: 10 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId: 'c-owed-until-typed',
+      sessionId: session.id,
+      replyId: 'assistant-owed-until-typed',
+      turnId: 'g-owed-typed',
+      eventSeq: 11,
+      blocked: false
+    });
+    globalThis.fetch = (async () => stream([delta('one last correction'), 'data: [DONE]\n'])) as never;
+
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-owed-until-typed', turnId: 'g-owed-typed' });
+    const ready = await settled('c-owed-until-typed');
+    expect(ready.stage).toBe('ready');
+    // Still owed while the page holds the message but has not written it.
+    expect(goal.goalPendingReplyFor('c-owed-until-typed')).toMatchObject({ turnId: 'g-owed-typed' });
+
+    expect(goal.ackGoalDraft('c-owed-until-typed', ready.token)).toBe(true);
+    expect(goal.goalPendingReplyFor('c-owed-until-typed')).toBeNull();
   });
 
   it('moves the same objective to the replacement chat on resume', () => {
@@ -1581,5 +1753,207 @@ describe('opening a chat on a goal', () => {
     globalThis.fetch = (async () => decision('stop')) as never;
     expect(await goal.draftOpeningMessage('finish it')).toEqual({ error: 'nothing_to_open_with' });
     expect(await goal.draftOpeningMessage('   ')).toEqual({ error: 'no_objective' });
+  });
+});
+/**
+ * Loop mode: Goal with the stop taken away.
+ *
+ * Everything else about it is deliberately the same request — same key, same model, same
+ * context, same reply hygiene — so what is worth pinning here is only the difference, and the
+ * difference is a promise: with Loop on, a finished turn always gets a message back. Three
+ * things have to hold for that promise to be real, and all three are tested below.
+ *
+ *   · The model is not offered a way to stop, in the instruction *and* in the schema.
+ *   · A stop that arrives anyway is asked again rather than accepted.
+ *   · A model that will not write is a failure the page can retry, never a sentence this app
+ *     wrote and attributed to it.
+ */
+describe('the loop that never stops', () => {
+  const loopMode = async (): Promise<void> => {
+    await saveConfig({
+      ...defaultConfig(),
+      goal: {
+        ...defaultConfig().goal,
+        enabled: true,
+        mode: 'loop',
+        model: 'deepseek/deepseek-v4-flash'
+      }
+    });
+  };
+
+  const seed = async (conversationId: string): Promise<string> => {
+    const session = await createSession({ title: 'loop', conversationId });
+    await appendEvent(session.id, {
+      time: 1_000,
+      source: 'extension',
+      kind: 'user_message',
+      message: { text: 'build the parser', truncated: false, chars: 16 }
+    });
+    await appendEvent(session.id, {
+      time: 1_100,
+      source: 'extension',
+      kind: 'assistant_message',
+      final: true,
+      message: { text: 'all done, everything works', truncated: false, chars: 26 }
+    });
+    return session.id;
+  };
+
+  /**
+   * The instruction is the feature. A loop told it has two moves is a gate with extra words,
+   * and the whole point of this mode is that the second move does not exist.
+   */
+  it('is written with one move and no stop sentinel of its own', () => {
+    const prompt = goal.goalLoopPrompt();
+    expect(prompt).toContain('Your job is to prompt ChatGPT');
+    expect(prompt).toContain('You have exactly one move');
+    expect(prompt).toContain('you never answer NO_REPLY');
+    // The two failure modes a must-always-speak model actually has, both named.
+    expect(prompt).toContain('Come back to the whole thing often');
+    expect(prompt).toContain('"Looks done" is a reason to raise the bar, never a reason to stop');
+  });
+
+  it('sends the loop instruction, its own trailer, and a schema with no stop in it', async () => {
+    await loopMode();
+    const sessionId = await seed('c-loop-1');
+    let body: any = null;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return decision('continue', 'go over the whole thing again and tell me what changed');
+    }) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-loop-1', turnId: 'g-loop-1' });
+    const view = await settled('c-loop-1');
+
+    expect(view.stage).toBe('ready');
+    const system = body.messages
+      .filter((message: { role: string }) => message.role === 'system')
+      .map((message: { content: string }) => message.content);
+    expect(system[0]).toBe(goal.goalLoopPrompt());
+    // Neither of the other two instructions comes along: one would tell the model it may stop
+    // while the other tells it it may not.
+    expect(system.join('\n')).not.toContain('You have exactly two moves');
+    expect(system[1]).toContain('Action is always "continue"');
+    expect(body.messages.at(-1).content).toContain('stopping, silence and NO_REPLY do not exist here');
+    // The app's half of the same promise, made where a model cannot argue with it.
+    expect(body.response_format.json_schema.schema.properties.action.enum).toEqual(['continue']);
+  });
+
+  it('keeps a chat’s own goal in front of the loop', async () => {
+    await loopMode();
+    const sessionId = await seed('c-loop-goal');
+    goal.setGoalObjective('c-loop-goal', 'port the module and keep the suite green');
+    let body: any = null;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return decision('continue', 'the suite is still red. fix it');
+    }) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-loop-goal', turnId: 'g-loop-goal' });
+    expect((await settled('c-loop-goal')).stage).toBe('ready');
+
+    const system = body.messages
+      .filter((message: { role: string }) => message.role === 'system')
+      .map((message: { content: string }) => message.content);
+    expect(system[0]).toBe(goal.goalLoopPrompt());
+    expect(system[1]).toContain('port the module and keep the suite green');
+    // Loop replaces the instruction, not the goal — so the driver's own prompt stays out.
+    expect(system.join('\n')).not.toContain('stop, by answering exactly NO_REPLY');
+  });
+
+  /**
+   * The mode is a thing the user switched on, so it is never inherited. A chat that runs only
+   * because it carries its own goal, with the standing switch off, is still a Goal run — and
+   * Goal is the half of this pair that is allowed to decide the job is finished.
+   */
+  it('is not entered by a chat that only carries its own goal while the switch is off', async () => {
+    await saveConfig({
+      ...defaultConfig(),
+      goal: { ...defaultConfig().goal, enabled: false, mode: 'loop', model: 'deepseek/deepseek-v4-flash' }
+    });
+    const sessionId = await seed('c-loop-off');
+    goal.setGoalObjective('c-loop-off', 'get the release out');
+    let body: any = null;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      body = JSON.parse(String(init.body));
+      return decision('stop');
+    }) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-loop-off', turnId: 'g-loop-off' });
+    const view = await settled('c-loop-off');
+
+    // Stopping is available again, and it was asked exactly once.
+    expect(view.stage).toBe('no-reply');
+    expect(body.messages[0].content).toBe(goal.goalObjectivePrompt());
+    expect(body.response_format.json_schema.schema.properties.action.enum).toEqual(['stop', 'continue']);
+  });
+
+  /**
+   * Structured output already removes the word, so a stop reaching the app means the model
+   * wrote the sentinel into the message text. That is a malformed answer, and the repair is
+   * to ask again with the refusal spelled out — never to invent the message ourselves.
+   */
+  it('asks again when the loop tries to stop, and uses the message it writes next', async () => {
+    await loopMode();
+    const sessionId = await seed('c-loop-retry');
+    const bodies: any[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      bodies.push(JSON.parse(String(init.body)));
+      return bodies.length === 1 ? decision('continue', 'NO_REPLY') : decision('continue', 'keep going, the export is missing');
+    }) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-loop-retry', turnId: 'g-loop-retry' });
+    const view = await settled('c-loop-retry');
+
+    expect(view.stage).toBe('ready');
+    expect(view.reply).toBe(goal.humanReply('keep going, the export is missing'));
+    expect(bodies).toHaveLength(2);
+    // The second attempt is the first one plus the refusal, so the model is told exactly what
+    // was wrong with the answer it just gave.
+    const second = bodies[1].messages
+      .filter((message: { role: string }) => message.role === 'system')
+      .map((message: { content: string }) => message.content);
+    expect(second.join('\n')).toContain('Your previous answer tried to end the conversation');
+  });
+
+  it('gives up retryably rather than typing a sentence the model never wrote', async () => {
+    await loopMode();
+    const sessionId = await seed('c-loop-refused');
+    let asked = 0;
+    globalThis.fetch = (async () => {
+      asked += 1;
+      return decision('continue', 'NO_REPLY');
+    }) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: 'c-loop-refused', turnId: 'g-loop-refused' });
+    const view = await settled('c-loop-refused');
+
+    // Bounded: a chat that will not answer must not spend the key in a circle.
+    expect(asked).toBe(3);
+    expect(view.stage).toBe('failed');
+    expect(view.error).toBe('loop_stop_refused');
+    expect(view.reply).toBe('');
+    // The turn is still owed an answer, so the page may ask again on its own clock. This is
+    // the one thing that keeps the promise honest across a model having a bad minute.
+    expect(view.retryable).toBe(true);
+  });
+
+  it('writes the opening message of a new chat under the loop instruction too', async () => {
+    await loopMode();
+    const seen: { role: string; content: string }[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { messages: { role: string; content: string }[] };
+      seen.push(...body.messages);
+      return decision('continue', 'start on the scraper, one row per product');
+    }) as never;
+
+    const drafted = await goal.draftOpeningMessage('scrape the prices into a csv');
+
+    expect(drafted).toEqual({
+      reply: goal.humanReply('start on the scraper, one row per product'),
+      model: 'deepseek/deepseek-v4-flash'
+    });
+    expect(seen[0]!.content).toBe(goal.goalLoopPrompt());
+    expect(seen[1]!.content).toContain('scrape the prices into a csv');
   });
 });

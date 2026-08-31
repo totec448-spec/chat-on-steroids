@@ -791,7 +791,11 @@ describe('surface boundaries', () => {
             : tool.name === 'agents'
               ? 3_400
               : tool.name === 'exec_command'
-                ? 3_500
+                // Windows carries `WINDOWS_SHELL_GUIDANCE` in the same description, and that text
+                // is quoted verbatim from Codex's own shell spec — it is not ours to trim to fit a
+                // budget. The non-Windows number is the one that says whether *our* additions have
+                // grown, so both are asserted rather than one loose bound covering both.
+                ? (process.platform === 'win32' ? 3_800 : 3_500)
                 : 3_000;
       expect(bytes, `${tool.name} schema is ${bytes} bytes`).toBeLessThan(budget);
     }

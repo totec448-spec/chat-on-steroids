@@ -407,23 +407,28 @@ describe('the goal loop settings', () => {
   it('keeps the model, reasoning level and system prompt that were chosen', async () => {
     const prompt = 'Custom continuation gate. Reply NO_REPLY when finished.';
     const objectivePrompt = 'Custom goal driver. Reply NO_REPLY once the goal is reached.';
+    const loopPrompt = 'Custom loop. Always write the next message.';
     await saveConfig({
       ...defaultConfig(),
       goal: {
         ...defaultConfig().goal,
         enabled: true,
+        mode: 'loop',
         model: 'openai/gpt-5.2-mini:nitro',
         reasoning: 'high',
         prompt,
-        objectivePrompt
+        objectivePrompt,
+        loopPrompt
       }
     });
     expect((await loadConfig()).goal).toEqual({
       enabled: true,
+      mode: 'loop',
       model: 'openai/gpt-5.2-mini:nitro',
       reasoning: 'high',
       prompt,
-      objectivePrompt
+      objectivePrompt,
+      loopPrompt
     });
   });
 
@@ -501,11 +506,50 @@ describe('the goal loop settings', () => {
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(withoutGoal), 'utf8');
     expect((await loadConfig()).goal).toEqual({
       enabled: false,
+      mode: 'goal',
       model: DEFAULT_GOAL_MODEL,
       reasoning: 'default',
       prompt: defaultConfig().goal.prompt,
-      objectivePrompt: defaultConfig().goal.objectivePrompt
+      objectivePrompt: defaultConfig().goal.objectivePrompt,
+      loopPrompt: defaultConfig().goal.loopPrompt
     });
+  });
+
+  /**
+   * Loop is the mode that cannot stop on its own, so a blank instruction here would be an
+   * unconstrained model typing into somebody's chat for ever. Repaired like the other two.
+   */
+  it('repairs a blank loop prompt rather than running the loop with no instruction', async () => {
+    const config = defaultConfig();
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, goal: { ...config.goal, enabled: true, mode: 'loop', loopPrompt: '   ' } }),
+      'utf8'
+    );
+    const loaded = await loadConfig();
+    expect(loaded.goal.loopPrompt).toBe(defaultConfig().goal.loopPrompt);
+    expect(loaded.goal.mode).toBe('loop');
+  });
+
+  /**
+   * The mode is one word out of a file holding every root and permission this app has. A
+   * version that knows a third mode must not cost the rest of it a trip through recovery.
+   */
+  it('repairs an unknown mode without discarding the config around it', async () => {
+    const config = defaultConfig();
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({
+        ...config,
+        roots: [{ name: 'project', path: 'C:\\Users\\example\\project' }],
+        goal: { ...config.goal, enabled: true, mode: 'swarm' }
+      }),
+      'utf8'
+    );
+    const loaded = await loadConfig();
+    expect(loaded.goal.mode).toBe('goal');
+    expect(loaded.goal.enabled).toBe(true);
+    expect(loaded.roots).toEqual([{ name: 'project', path: 'C:\\Users\\example\\project' }]);
   });
 
   it('repairs a blank prompt to the safe continuation-gate default', async () => {

@@ -23,9 +23,10 @@ import type {
   SwarmState,
   TokenPressure
 } from '../shared/session.js';
-import { ATTRIBUTION_LABELS, TURN_OUTCOME_LABELS, foldProgress } from '../shared/session.js';
+import { ATTRIBUTION_LABELS, CHAT_ACTIVE_MS, TURN_OUTCOME_LABELS, foldProgress } from '../shared/session.js';
 import { chronological } from '../shared/chronology.js';
 import {
+  DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
   DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS
@@ -156,7 +157,8 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  * from the swarm or the compaction currently reported by the app.
  */
 /**
- * How long after its last exact attributed tool call an agent chat still reads as working.
+ * How long after its session start or last exact attributed tool call a chat still reads as
+ * working.
  *
  * Prime owns the run for its whole life, so its agent state alone would light this badge
  * permanently and say nothing. An open turn was the gate instead, which is exact but too
@@ -164,24 +166,24 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  * behind it goes on calling tools for minutes. That is a chat very much at work, shown as idle
  * — and the moment a user most wants to see that it is still going.
  *
- * Deliberately a display window rather than the bridge's own two-minute activity grant. That
- * clock decides when to reload a chat, and a number that answers "is this worth acting on"
- * should not be the same number that answers "is this worth showing".
+ * The bridge's recovery window is deliberately the shorter of the two, and the authorities remain
+ * separate: this derives display state from the durable session summary; the bridge derives a
+ * browser action from exact observations and attributed calls. The label outliving the reload
+ * window is the point — a chat being reloaded on the app's instruction is mid-repair, and the
+ * badge going dark first is what made that reload look like it came out of nowhere.
  */
-const TOOL_ACTIVE_MS = 3 * 60_000;
-
-/** Exact calls stay active for three minutes unless a later stable model answer finished them. */
-function recentToolActivity(summary: SessionSummary, now = Date.now()): boolean {
+/** A new session and exact calls stay active for three minutes unless a later final finished them. */
+function recentChatActivity(summary: SessionSummary, now = Date.now()): boolean {
+  const lastActivityAt = Math.max(summary.startedAt, summary.lastToolCallAt ?? 0);
   return (
-    summary.lastToolCallAt !== null &&
-    summary.lastToolCallAt > (summary.lastAssistantFinalAt ?? 0) &&
-    now - summary.lastToolCallAt < TOOL_ACTIVE_MS
+    lastActivityAt > (summary.lastAssistantFinalAt ?? 0) &&
+    now - lastActivityAt < CHAT_ACTIVE_MS
   );
 }
 
-/** Reload-generated turn boundaries are not activity authority; exact calls and finals are. */
+/** Reload-generated turn boundaries are not activity authority; session start, calls and finals are. */
 function sessionWorking(summary: SessionSummary): boolean {
-  return summary.endedAt === null && recentToolActivity(summary);
+  return summary.endedAt === null && recentChatActivity(summary);
 }
 
 function sessionBadges(summary: SessionSummary): Badge[] {
@@ -389,7 +391,7 @@ function paintSessions(): void {
   scheduleToolActivityExpiry();
 }
 
-/** Repaint once at the nearest three-minute boundary; no polling clock is needed. */
+/** Repaint once at the nearest activity-window boundary; no polling clock is needed. */
 function scheduleToolActivityExpiry(): void {
   window.clearTimeout(toolActivityTimer);
   toolActivityTimer = undefined;
@@ -398,8 +400,9 @@ function scheduleToolActivityExpiry(): void {
   let nearest = Number.POSITIVE_INFINITY;
   for (const summary of sessions) {
     const lastToolCallAt = summary.lastToolCallAt;
-    if (lastToolCallAt === null || !recentToolActivity(summary, now)) continue;
-    const expiry = lastToolCallAt + TOOL_ACTIVE_MS;
+    const lastActivityAt = Math.max(summary.startedAt, lastToolCallAt ?? 0);
+    if (!recentChatActivity(summary, now)) continue;
+    const expiry = lastActivityAt + CHAT_ACTIVE_MS;
     if (expiry > now) nearest = Math.min(nearest, expiry);
   }
   if (!Number.isFinite(nearest)) return;
@@ -1119,7 +1122,7 @@ export function chatSettingsPatch(current: Config): {
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked
     },
     goal: {
-      enabled: $<HTMLInputElement>('goalEnabled').checked,
+      ...goalSwitches(current.goal),
       // The chosen model is held here rather than in an input, because it is picked from a
       // list and never typed. `current` is the fallback for the first save after a repaint.
       model: goalModel || current.goal.model,
@@ -1128,9 +1131,30 @@ export function chatSettingsPatch(current: Config): {
       prompt: $<HTMLTextAreaElement>('goalPrompt').value.trim() || DEFAULT_GOAL_SYSTEM_PROMPT,
       objectivePrompt:
         $<HTMLTextAreaElement>('goalObjectivePrompt').value.trim() ||
-        DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT
+        DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
+      loopPrompt:
+        $<HTMLTextAreaElement>('goalLoopPrompt').value.trim() || DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
     }
   };
+}
+
+/**
+ * Two checkboxes, one mode.
+ *
+ * Goal and Loop are the two values of a single stored setting, so the pair has to be resolved
+ * rather than read: the click that turns one on leaves the other still checked until the save
+ * comes back and repaints it. The one that *changed* is therefore the one that means something,
+ * which is what `current` is compared against here. Neither checked is simply off, and the mode
+ * is left where it was — a user who switches Loop off and on again should get Loop back.
+ */
+function goalSwitches(current: Config['goal']): { enabled: boolean; mode: Config['goal']['mode'] } {
+  const goalOn = $<HTMLInputElement>('goalEnabled').checked;
+  const loopOn = $<HTMLInputElement>('loopEnabled').checked;
+  const wasGoal = current.enabled && current.mode === 'goal';
+  const wasLoop = current.enabled && current.mode === 'loop';
+  const mode =
+    goalOn && !wasGoal ? 'goal' : loopOn && !wasLoop ? 'loop' : goalOn ? 'goal' : loopOn ? 'loop' : current.mode;
+  return { enabled: goalOn || loopOn, mode };
 }
 
 // --------------------------------------------------------------- the goal loop
@@ -1252,17 +1276,29 @@ function applyGoal(state: AppState, previous?: Config): void {
   const { config } = state;
   const secureStorageAvailable = state.secureStorage?.available ?? true;
   goalModel = config.goal.model;
+  const goalOn = config.goal.enabled && config.goal.mode === 'goal';
+  const loopOn = config.goal.enabled && config.goal.mode === 'loop';
+  const wasGoalOn = previous && previous.goal.enabled && previous.goal.mode === 'goal';
+  const wasLoopOn = previous && previous.goal.enabled && previous.goal.mode === 'loop';
   const goalToggle = $<HTMLInputElement>('goalEnabled');
-  applyChatChecked(goalToggle, config.goal.enabled, previous?.goal.enabled);
+  const loopToggle = $<HTMLInputElement>('loopEnabled');
+  applyChatChecked(goalToggle, goalOn, previous ? Boolean(wasGoalOn) : undefined);
+  applyChatChecked(loopToggle, loopOn, previous ? Boolean(wasLoopOn) : undefined);
   // Goal reads the local recorded transcript. Keep the dependency visible at the switch rather
   // than accepting a click that the config boundary must immediately repair back to off.
   goalToggle.disabled = !config.sessions.record;
+  loopToggle.disabled = !config.sessions.record;
   applyChatValue($<HTMLSelectElement>('goalReasoning'), config.goal.reasoning, previous?.goal.reasoning);
   applyChatValue($<HTMLTextAreaElement>('goalPrompt'), config.goal.prompt, previous?.goal.prompt);
   applyChatValue(
     $<HTMLTextAreaElement>('goalObjectivePrompt'),
     config.goal.objectivePrompt,
     previous?.goal.objectivePrompt
+  );
+  applyChatValue(
+    $<HTMLTextAreaElement>('goalLoopPrompt'),
+    config.goal.loopPrompt,
+    previous?.goal.loopPrompt
   );
   // The one sentence somebody switching this on needs, and the exact words the extension
   // shows under the same switch — two places saying the same thing differently is how a
@@ -1271,10 +1307,24 @@ function applyGoal(state: AppState, previous?: Config): void {
     ? 'Turn on session recording first — Goal needs the recorded conversation to decide what is still missing.'
     : !state.hasGoalKey
       ? 'OpenRouter API key essential for goal feature.'
-      : config.goal.enabled
+      : goalOn
         ? 'A second model reads each finished answer and writes your next message, until it decides the goal is met.'
-        : 'Off — nothing is sent to OpenRouter and nothing is typed into your chats.';
+        : loopOn
+          ? 'Off — Loop has this chat instead. The two cannot run together.'
+          : 'Off — nothing is sent to OpenRouter and nothing is typed into your chats.';
   $('goalHint').classList.toggle('is-warn', !config.sessions.record || !state.hasGoalKey);
+  // The one thing worth saying twice: this one does not stop by itself. Everything else about
+  // it — the key, the model, the recording — is the same sentence the Goal switch already said.
+  $('loopHint').textContent = !config.sessions.record
+    ? 'Turn on session recording first — Loop needs the recorded conversation to write the next message.'
+    : !state.hasGoalKey
+      ? 'OpenRouter API key essential for goal feature.'
+      : loopOn
+        ? 'On — a message is written after every answer and never withheld. Only this switch ends it.'
+        : goalOn
+          ? 'Off — Goal has this chat instead. The two cannot run together.'
+          : 'Off — Goal, but with no way to stop: it keeps prompting until you switch it back off.';
+  $('loopHint').classList.toggle('is-warn', !config.sessions.record || !state.hasGoalKey);
   $('goalModelName').textContent = config.goal.model;
   const goalKey = $<HTMLInputElement>('goalKey');
   goalKey.placeholder = state.hasGoalKey ? '•••••••• stored' : 'sk-or-v1-…';
@@ -1313,6 +1363,18 @@ function wireGoal(save: () => Promise<void>): void {
     $<HTMLTextAreaElement>('goalObjectivePrompt').value = DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT;
     await save();
     toast('Goal driver prompt restored to default');
+  });
+  $<HTMLTextAreaElement>('goalLoopPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
+  $('goalLoopPromptEdit').addEventListener('click', () => {
+    const panel = $('goalLoopPromptPanel');
+    panel.hidden = !panel.hidden;
+    $('goalLoopPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    if (!panel.hidden) $<HTMLTextAreaElement>('goalLoopPrompt').focus();
+  });
+  $('goalLoopPromptReset').addEventListener('click', async () => {
+    $<HTMLTextAreaElement>('goalLoopPrompt').value = DEFAULT_GOAL_LOOP_SYSTEM_PROMPT;
+    await save();
+    toast('Loop prompt restored to default');
   });
   // The catalogue is fetched on the first press and kept afterwards: the picker closing is
   // not a reason to spend another round trip on a list that changes weekly.
@@ -1387,9 +1449,11 @@ const CHAT_INPUTS = [
   'allowUnattributedCalls',
   'recoverAgentTabs',
   'goalEnabled',
+  'loopEnabled',
   'goalReasoning',
   'goalPrompt',
-  'goalObjectivePrompt'
+  'goalObjectivePrompt',
+  'goalLoopPrompt'
 ];
 
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */

@@ -404,14 +404,6 @@
    * baselineSections below, so a genuinely new section/action mounted on the same tick Stop first
    * appears is not accidentally classified as history.
    */
-  let completionActionBaselineSections = new WeakSet();
-  /**
-   * A reloaded page rediscovers historical user messages on its first observation because
-   * the in-memory seen set is new. Those are baseline, not proof that a new turn began.
-   * Cleared after that one observation; every later genuinely new user message while a
-   * generation is still locally open is a definitive turn boundary.
-   */
-  let resumedFirstObservation = false;
   /**
    * The identity every event of the turn in flight carries.
    *
@@ -463,10 +455,17 @@
    */
   let appActiveTurnId = null;
   /**
-   * A reloaded identified chat has not yet heard the app's answer to "is one of my durable
-   * turns still open?". While true, observe() may journal stable user history but may not mint
-   * a new local generation merely because ChatGPT still shows Stop. The next successful
-   * /activity response resolves it exactly once; no timeout guesses identity.
+   * This document has adopted an identified chat whose durable state the app has not answered
+   * for yet: neither "is one of my turns still open?" nor "which user messages do I already
+   * have?". Both boot and an SPA move into another chat land here — in each the transcript on
+   * screen is entirely unknown to this document, so nothing in it can be told apart from a
+   * send that has just happened. While true, observe() does not read the transcript at all —
+   * not "reads it and declines to open a turn", which is what the first version did and which
+   * is worse than useless: consuming a message marks it seen forever, so the one send that
+   * really did just happen is spent before the answer that could have recognised it arrives,
+   * and its turn can never be opened. Withholding the reading costs one observation and keeps
+   * every message classifiable. The next successful /activity response resolves it exactly
+   * once; no timeout guesses identity.
    */
   let resumeIdentityPending = false;
   /**
@@ -502,7 +501,6 @@
   /** Assistant sections present at the end of the last observation. See priorSections. */
   let baselineSections = [];
   /** Sections from the previous observation which already exposed a completed-message action. */
-  let baselineCompletionSections = [];
   /** What the newest of those said then, so a reused section can prove it has moved. */
   let baselineMarks = [];
   /**
@@ -1014,8 +1012,8 @@
   function adoptOpenTurn(open) {
     if (!open || generating) return false;
     seedResumeBaseline();
+    anchorAdoptedQuestion();
     generating = true;
-    resumedFirstObservation = true;
     turnId = open;
     genNode = null;
     priorSections = new WeakSet(baselineSections);
@@ -1030,6 +1028,27 @@
     fiberTerminalMessageId = null;
     bindResumeGoalTurn(open);
     return true;
+  }
+
+  /**
+   * The question the adopted turn is answering is, by construction, already asked.
+   *
+   * A turn the app holds open was opened by a send, and the newest user message on the page
+   * *is* that send. Recording it as an anchor here says so, which closes the one race the
+   * durable anchor set cannot: a reload that lands between ChatGPT accepting the message and
+   * the app journalling it would otherwise find the message newest and unanchored, read the
+   * question as freshly asked, and end the very turn this document just adopted in order to
+   * keep. Only that one id, and only alongside an adoption — everything else on the page
+   * still has to be recognised from what the app actually holds.
+   */
+  function anchorAdoptedQuestion() {
+    let newest = null;
+    for (const message of CLF_DOM.messages()) {
+      if (message.role === 'user' && message.id && message.text) newest = message.id;
+    }
+    if (newest && !userAnchorByMessage.has(newest)) {
+      userAnchorByMessage.set(newest, { seq: -1, time: Date.now(), messageId: newest });
+    }
   }
 
   async function resumeOpenTurn() {
@@ -1137,7 +1156,10 @@
     job = null;
     pendingTools = 0;
     autoCompactReady = false;
-    resumeIdentityPending = false;
+    // An SPA move into another identified chat leaves this document facing a full transcript
+    // it has never seen, exactly as a reload does. Until the app has said which of those user
+    // messages it already holds, none of them can be read as a send — see resumeIdentityPending.
+    resumeIdentityPending = Boolean(conversationId);
     nativeBusy = false;
     nativePhase = '';
     pressedAt = 0;
@@ -1166,15 +1188,12 @@
     quietSince = 0;
     quietTurn = null;
     quietOutcome = null;
-    completionActionBaselineSections = new WeakSet();
-    resumedFirstObservation = false;
     turnId = null;
     genNode = null;
     priorSections = new WeakSet();
     priorMarks = [];
     baselineSections = [];
     baselineMarks = [];
-    baselineCompletionSections = [];
     userStopped = false;
     stallReported = false;
     fiberTerminalMessageId = null;
@@ -1372,16 +1391,6 @@
     // A browser where Fiber genuinely is unavailable still needs a usable lifecycle, so the
     // old DOM rule remains there behind this capability check.
     if (!fiberPresent && answerText(turn).length > 0) return { outcome: 'completed' };
-    // Fiber normally supplies the exact `end_turn:true` message and refreshFiber() closes from
-    // that immediately. The live 2026-08-25 failure proved that a visibly final response can
-    // occasionally lose that bit while the page still mounts its completed-message action row.
-    // Use that only as *corroboration*, never as a replacement for Fiber: exact turn ownership,
-    // public prose, no unanswered connector call, a fresh completed-message action, and the
-    // existing Stop-gone settle window must all agree. This keeps the old multi-second tool-phase
-    // Stop dropout open, including its transient data-interrupted marker.
-    if (fiberPresent && answerText(turn).length > 0 && fiberQuietTerminal(turn)) {
-      return { outcome: 'completed' };
-    }
     if (turnStalled()) {
       return { outcome: 'stalled', detail: 'no visible output and no progress for ten minutes' };
     }
@@ -1395,75 +1404,6 @@
    */
   function turnStalled() {
     return turnStartedAt > 0 && Date.now() - lastChangeAt > STALL_MS;
-  }
-
-  /**
-   * The exact public assistant message corroborated as terminal by the quiet page, or null.
-   *
-   * Scope both Fiber and the final-action row to the generation-owned DOM node whenever one is
-   * known. ChatGPT reuses data-turn-id across later requests and CLF_DOM intentionally groups
-   * those rendered sections for presentation; asking that merged logical turn for "the" Fiber
-   * descriptor or first Copy button makes an old response mask the new one forever.
-   */
-  function fiberQuietTerminal(turn) {
-    if (!turn || !CLF_DOM.completionAction) return null;
-    const nodes = turn.nodes || (turn.node ? [turn.node] : []);
-    const ownedNode = genNode && nodes.includes(genNode) ? genNode : null;
-    const fiber = ownedNode ? fiberTurnForNode(ownedNode) : fiberTurnFor(turn);
-    if (!fiber) return null;
-    if ((fiber.calls || []).some((call) => !call || call.answered !== true)) return null;
-
-    // A single ChatGPT response can grow across several sibling <section> elements. genNode is
-    // intentionally pinned to the first section this local generation touched, and quietTurn is
-    // intentionally a snapshot from the first Stop-gone observation. Neither may therefore be
-    // used as a frozen list of where the response can later finish: the live 2026-08-25
-    // foreground failure put its final prose + Copy action on S2 while both still pointed at S1.
-    //
-    // Refresh the *membership*, not the identity. Every section fiber.js says belongs to this
-    // exact descriptor carries the current scanToken:index stamp, so object identity here is a
-    // stronger join than ChatGPT's reused data-turn-id. Never widen to all nodes of the logical
-    // DOM turn: turns() deliberately groups equal page ids globally for recorder compatibility,
-    // and an old response with a recycled id can still have its stale Copy action mounted.
-    const exactNodes = [];
-    for (const current of CLF_DOM.turns()) {
-      if (current?.role !== 'assistant') continue;
-      for (const node of current.nodes || (current.node ? [current.node] : [])) {
-        if (fiberTurnForNode(node) === fiber) exactNodes.push(node);
-      }
-    }
-    if (exactNodes.length === 0) return null;
-    const messages = (fiber.messages || []).filter((message) => message && message.role !== 'user' && message.rawText);
-    const terminal = messages.length > 0 ? messages[messages.length - 1] : null;
-    const terminalId = terminal?.rawMessageId || terminal?.messageId || null;
-    if (!terminalId) return null;
-
-    // Descriptor equality alone is insufficient. One long response can have an earlier sibling
-    // whose completed-message action is already mounted and a newer sibling whose prose is still
-    // live; using "any Copy in exactNodes" would let the old action certify the new prose during
-    // a transient Stop dropout. Require rendered ownership of the *chosen terminal Fiber
-    // message*, then require the action on that exact sibling only.
-    let terminalNode = null;
-    if (
-      Number.isInteger(terminal.sectionIndex) &&
-      terminal.sectionIndex >= 0 &&
-      terminal.sectionIndex < exactNodes.length
-    ) {
-      terminalNode = exactNodes[terminal.sectionIndex] || null;
-    } else if (CLF_DOM.messagesIn) {
-      // Backward-compatible/fail-closed fallback for a helper reply without sectionIndex (and
-      // for explicit data-message-id renderers): locate the raw model id in one exact sibling.
-      const owners = [];
-      for (const node of exactNodes) {
-        const rendered = CLF_DOM.messagesIn({ role: 'assistant', id: turn.id || null, node, nodes: [node] });
-        if (rendered.some((message) => message && message.role === 'assistant' && message.id === terminalId)) owners.push(node);
-      }
-      if (owners.length === 1) terminalNode = owners[0];
-    }
-    if (!terminalNode) return null;
-    if (completionActionBaselineSections.has(terminalNode)) return null;
-    const action = CLF_DOM.completionAction({ nodes: [terminalNode] });
-    if (!action) return null;
-    return terminalId;
   }
 
   /** The turn section a node is rendered in, or null. */
@@ -1506,16 +1446,63 @@
     return null;
   }
 
+  function currentGenerationOwner() {
+    if (!generating || !turnId) return null;
+    const pageTurn = generationTurn();
+    return pageTurn ? { pageTurnId: pageTurn.id || null, localTurnId: turnId, pageTurn } : null;
+  }
+
   /**
    * Records the messages on screen that are not still being written.
    *
    * Called before the generation transition, so what the page already had is journalled
    * ahead of anything this tick opens, and again the moment a turn settles, so its answer
    * lands before its `turn_end` rather than a tick later.
+   *
+   * Returns the id of a user message that was *authored just now*, or null. That is a much
+   * narrower fact than "a user message this document had not journalled yet", and the
+   * difference is the whole of two live bugs. `seenMessages` is per document, so after a
+   * reload the entire transcript is unjournalled — including the prompt of the turn that is
+   * still running — and on a fresh chat ChatGPT mounts the Stop control before it mounts the
+   * user bubble that caused it. Both used to read as "the user has moved on", which closed a
+   * turn that had not ended. See `authoredNow`.
    */
   function reportMessages(nowGenerating) {
-    let newUserMessage = false;
-    for (const message of CLF_DOM.messages()) {
+    // See resumeIdentityPending: until the app has said what it already holds for this chat,
+    // this transcript is unreadable rather than merely unopenable.
+    if (resumeIdentityPending) return null;
+    let newUserMessage = null;
+    const rendered = CLF_DOM.messages();
+    // The newest user message on screen, by document order. A send the user has just made is
+    // always the last one; anything above it is transcript, however new it is to this
+    // document — which is what makes scrolling an old turn back into a virtualized page
+    // harmless while a turn is open.
+    let newestUserId = null;
+    for (const message of rendered) {
+      if (message.role === 'user' && message.id && message.text) newestUserId = message.id;
+    }
+    /**
+     * Whether this rendered user message is a send that has just happened.
+     *
+     * This is the only opening evidence in the script, so it is stated as facts about the
+     * conversation rather than about this document's uptime: the message is the newest user
+     * message on the page, and the app — which holds the durable record — does not have it.
+     * A reloaded or renavigated document therefore recognises every message it is
+     * rediscovering as history without needing to have seen it itself, which a per-document
+     * set can never do and which no one-observation grace period ever approximated correctly:
+     * the live page mounts its transcript seconds after boot.
+     *
+     * Known gap: an empty anchor set is ambiguous. It means "the app holds nothing for this
+     * chat", which is true both of a chat whose newest question really is unrecorded and of
+     * one the app has never recorded at all — an old conversation opened for the first time
+     * after install. In the second case the newest question of a months-old transcript reads
+     * as a send. Closing it needs the app to say which of the two it is; requiring a
+     * non-empty anchor set instead is not the answer, because it also starves the first real
+     * send into a chat the app has only just started recording.
+     */
+    const authoredNow = (message) =>
+      message.id === newestUserId && !userAnchorByMessage.has(message.id);
+    for (const message of rendered) {
       if (!message.id || !message.text) continue;
       // Left over from a chat this tab has already navigated away from. Not "probably
       // old" — the section it is in was one this script watched under the previous
@@ -1534,12 +1521,14 @@
           commandJournalGate = true;
         }
         markSeen(key);
-        newUserMessage = true;
+        const justAuthored = authoredNow(message);
+        if (justAuthored) newUserMessage = message.id;
         emit({
           kind: 'user_message',
           text: message.text,
           messageId: message.id,
-          turnId: message.turnId || undefined
+          turnId: message.turnId || undefined,
+          ...(justAuthored ? { authoredNow: true } : {})
         });
       } else if (message.role === 'assistant') {
         // Assistant identity/content comes exclusively from the MAIN-world Fiber scan now.
@@ -1568,17 +1557,10 @@
     // other named turn by accident. Modern generations always mint/adopt an id; this is the
     // fail-closed guard for stale/legacy/reinjected state.
     const endedTurnId = turnId;
-    // A quiet completed turn whose Fiber object lost end_turn can still have one exact terminal
-    // public message, corroborated by the completed-message action row. Capture that identity
-    // before `generating`/`genNode` are torn down so the post-turn Fiber settle scan may promote
-    // only that message to final. Unknown/interrupted/failed/stopped turns capture nothing.
-    const corroboratedTerminalMessageId =
-      result.outcome === 'completed' && ended ? fiberQuietTerminal(ended) : null;
     generating = false;
     quietSince = 0;
     quietTurn = null;
     quietOutcome = null;
-    completionActionBaselineSections = new WeakSet();
     if (ended && endedTurnId) {
       for (const node of ended.nodes || [ended.node]) {
         if (node) settledGenerations.set(node, { turnId: endedTurnId, mark: sectionMark(node) });
@@ -1600,8 +1582,7 @@
       fiberSettled = {
         pageTurnId: ended?.id || null,
         localTurnId: endedTurnId,
-        pageTurn: ended || null,
-        terminalMessageId: corroboratedTerminalMessageId || null
+        pageTurn: ended || null
       };
       fiberSettleUntil = Date.now() + FIBER_SETTLE_MS;
     }
@@ -1609,8 +1590,7 @@
       void refreshFiber({
         pageTurnId: ended?.id || null,
         localTurnId: endedTurnId,
-        pageTurn: ended || null,
-        terminalMessageId: corroboratedTerminalMessageId || null
+        pageTurn: ended || null
       });
     }
     if (endedTurnId) emit({ kind: 'turn_end', turnId: endedTurnId, ...result });
@@ -1658,6 +1638,12 @@
         epoch++;
         conversationId = id;
         resetConversation();
+        // The same question boot asks, at the same moment boot asks it: which of this chat's
+        // user messages does the app already hold? resetConversation() has just armed the
+        // identity gate, and until it is answered this document reads no transcript at all,
+        // so bring the pull forward instead of leaving the new chat unreadable until the
+        // ordinary poll comes round.
+        void pullActivity();
       } else {
         // An id-less tab can become concrete in two very different ways: our own proven
         // opening send created this conversation, or the user opened an already-existing chat.
@@ -1746,33 +1732,60 @@
     }
     if (!nowGenerating) fiberTerminalMessageId = null;
 
-    // A new user message after the stop control went quiet is definitive evidence that the
-    // quiet generation is over, even if it never produced final prose or an error. This is
-    // the interruption/follow-up shape that previously merged two user turns because the
-    // stop button for the new generation came back before the old four-second window closed.
-    if (generating && newUserMessage && !resumedFirstObservation) {
+    // A user message the user has just authored is definitive evidence that the generation
+    // before it is over, even if it never produced final prose or an error. This is the
+    // interruption/follow-up shape that previously merged two user turns because the stop
+    // button for the new generation came back before the old four-second window closed.
+    //
+    // "Just authored" is `reportMessages`'s judgement, not this document's memory. The
+    // version that asked only whether *this page load* had journalled the message closed a
+    // live turn on every reload, and split every chat's opening turn in two.
+    if (generating && newUserMessage) {
       const ended = quietTurn || generationTurn(observedTurns);
       const fresh = endOutcome(ended);
       const result = quietOutcome && quietOutcome.outcome !== 'unknown' ? quietOutcome : fresh;
       // A new user message is an actual boundary, unlike a disappearing Stop control. Once
       // that boundary is proven, authored prose is enough to classify the old turn as a
       // completed answer when no stronger failure/interruption/stall outcome exists.
-      const bounded = result.outcome === 'unknown' && answerText(ended).length > 0 ? { outcome: 'completed' } : result;
-      finishGeneration(ended, bounded.outcome === 'unknown' ? { outcome: 'unknown' } : bounded, false);
+      const bounded = result.outcome === 'unknown'
+        ? answerText(ended).length > 0
+          ? { outcome: 'completed' }
+          : { outcome: 'interrupted', detail: 'a new user message replaced the unfinished turn' }
+        : result;
+      finishGeneration(ended, bounded, false);
     }
 
-    if (nowGenerating && !generating && !fiberTerminalMessageId && !resumeIdentityPending) {
+    // A turn is opened by a send, and by nothing else.
+    //
+    // The Stop control used to be the opener, and it is not evidence that a turn began — it is
+    // evidence that the page is busy, which is a different claim and one the browser makes on
+    // its own account. Measured live, on every page load of a conversation: ChatGPT mounts
+    // `data-testid="stop-button"` about 2.7 s in and holds it for roughly 1.2 s over an empty
+    // transcript. Read as a generation, that hydration artifact opened a turn on the app side
+    // for a chat that was doing nothing, and because `endOutcome()` can find no answer, error
+    // or stall for a turn that never existed, the turn stayed open indefinitely and eventually
+    // adopted the *previous* turn's final message as its own completion. Requiring a rendered
+    // transcript alongside Stop only narrows that window; it leaves the same wrong premise in
+    // place, and any later flicker of the control over a settled transcript reproduces it.
+    //
+    // The premise is replaced instead. `newUserMessage` is a conversation-level fact —
+    // ChatGPT's own stable id for the newest user message, which the app has no durable record
+    // of — so it is true exactly once per send and false for every reload, renavigation and
+    // rehydration of that same send. It is also what the user means by a turn: the question
+    // starts it. The two branches above and here are therefore one boundary read twice: a send
+    // ends whatever generation was running and opens the one it asked for.
+    //
+    // Everything Stop still does is downstream of this, describing a turn that already exists:
+    // its liveness, the quiet window that closes it, the flicker that cancels that window. A
+    // turn a previous document opened arrives by adoptOpenTurn() from the app's `activeTurnId`,
+    // which is adoption and not opening — no second `turn_start` for one generation.
+    if (newUserMessage && !generating) {
       generating = true;
       quietSince = 0;
       quietTurn = null;
       quietOutcome = null;
       userStopped = false;
       stallReported = false;
-      // Same previous-observation boundary as priorSections: by the time Stop first appears the
-      // new response may already have mounted its section and its final action. Snapshotting the
-      // current DOM here would call that genuine new evidence stale. Conversely, every section
-      // that *already* had Copy last observation stays stale even if React remounts the button.
-      completionActionBaselineSections = new WeakSet(baselineCompletionSections);
       genCount++;
       turnId = `g-${RUN_ID}-${epoch}-${genCount}`;
       bindResumeGoalTurn(turnId);
@@ -1928,15 +1941,9 @@
       // never a terminal boundary on its own. User stop is already explicit; a new user
       // message is handled above, and Fiber end_turn closes independently in refreshFiber().
       const markerOnlyInterrupted = result.outcome === 'interrupted' && !userStopped;
-      // `interrupted` itself is only an outcome marker, but a *separate* exact completed-message
-      // proof can supply the missing boundary: current generation-owned Fiber descriptor, no
-      // unanswered calls, and this response's fresh Copy-message action. Keep the latched
-      // interrupted outcome for the record, while no longer forcing the user to type another
-      // message merely to prove the already-finished turn ended.
-      const corroboratedTerminalBoundary = markerOnlyInterrupted && Boolean(fiberQuietTerminal(quietTurn || turn));
       if (
         userStopped ||
-        ((result.outcome !== 'unknown' && (!markerOnlyInterrupted || corroboratedTerminalBoundary)) && quietFor >= TURN_SETTLE_MS)
+        (result.outcome !== 'unknown' && !markerOnlyInterrupted && quietFor >= TURN_SETTLE_MS)
       ) {
         // The turn the end is about is the one that was on screen when it went quiet.
         // Re-reading it here would pick up whatever ChatGPT has rendered since, which during
@@ -1982,10 +1989,6 @@
     // generation ever binds to a section further back than that.
     baselineSections = assistantSections(observedTurns);
     baselineMarks = baselineSections.slice(-3).map((node) => ({ node, mark: sectionMark(node) }));
-    baselineCompletionSections = CLF_DOM.completionAction
-      ? baselineSections.filter((node) => Boolean(CLF_DOM.completionAction({ nodes: [node] })))
-      : [];
-    resumedFirstObservation = false;
     maybeRecoverResumeGoalTurn();
     // A revival can be waiting outside the command lease while this exact turn settles. Its
     // readiness depends partly on recorder state (`generating`, pending tools/native work), not
@@ -2307,7 +2310,7 @@
   /** Failed handshake attempts per owner/request pair, so a permanently unplaceable id
    *  cannot turn refreshFiber() into a 2-second retry pump for the life of the tab. */
   const requestOwnerAttempts = new Map();
-  /** Last canonical browser snapshot sent for each ChatGPT assistant message id. */
+  /** Last canonical snapshot and strongest non-conflicting local owner per assistant message. */
   const messagesReported = new Map();
   /** ChatGPT-authored create_time already emitted for each stable user-message occurrence. */
   const userAuthoredTimesReported = new Map();
@@ -2729,6 +2732,14 @@
     // never be emitted under chat B's conversation id.
     const askedEpoch = epoch;
     const askedConversation = conversationId;
+    // A page-model scan belongs to the generation that requested it, not to whichever one is
+    // current when its asynchronous reply returns. Live 2026-08-31: an old final answered after
+    // a follow-up had opened the next generation; reading mutable `generating`/`turnId` below
+    // emitted that exact final with no owner. Capture the node + durable id before the await.
+    // If the lifecycle moves meanwhile, localGenerationOf() below accepts the claim only while
+    // finishGeneration's exact node/signature tombstone still proves the old ownership.
+    const requestedLiveOwner = !settled ? currentGenerationOwner() : null;
+    const requestedOwner = settled || requestedLiveOwner;
     let answer = await askFiber();
     if (answer === null) {
       // One missed reply is not proof the helper is gone: a busy main thread can outlive this
@@ -2775,8 +2786,11 @@
     // actually owns, and its `data-clf-fiber-turn` stamp names the descriptor exactly even
     // when the virtualized renderer published no page turn id at all. The page-id match
     // stays as the fallback for a scan whose stamps have not been applied yet.
-    const ownedPageNode = generating ? generationTurn() : settled?.pageTurn || null;
-    const ownedPageTurnId = generating ? ownedPageNode?.id || null : settled?.pageTurnId || null;
+    const exactOwner = requestedLiveOwner && localGenerationOf(requestedLiveOwner.pageTurn) !== requestedLiveOwner.localTurnId
+      ? null
+      : requestedOwner;
+    const ownedPageNode = exactOwner?.pageTurn || null;
+    const ownedPageTurnId = exactOwner?.pageTurnId || null;
     let ownedPageTurn = stampedFiberTurn(ownedPageNode, answer.turns, answer.scanToken);
     if (!ownedPageTurn && ownedPageTurnId) {
       for (let index = answer.turns.length - 1; index >= 0; index--) {
@@ -2836,6 +2850,17 @@
     fiberRows = answer.rows;
     fiberScanToken = answer.scanToken;
     fiberTurns = new Map();
+    // User messages have one normal owner: the DOM recorder above. Its stable
+    // data-message-id is also the send receipt that opens the local turn. Publishing the
+    // same visible row first from Fiber marked it seen while an SPA identity pull was still
+    // gated; the later DOM pass then quite correctly treated it as already recorded and
+    // never emitted turn_start. Keep Fiber only for the narrow thing it adds: page-model
+    // messages whose stable id is not rendered in the DOM yet.
+    const renderedUserMessageIds = new Set(
+      CLF_DOM.messages()
+        .filter((message) => message.role === 'user' && message.id)
+        .map((message) => message.id)
+    );
     for (const turn of answer.turns) {
       if (fiberTurns.has(turn.index)) fiberTurns.set(turn.index, null);
       else fiberTurns.set(turn.index, turn);
@@ -2850,7 +2875,7 @@
     // identity. Only the *newest* Fiber turn matching the assistant section this local
     // generation is currently bound to may inherit `turnId`; historical/reused matches still
     // prove the conversation made the call, but carry no durable turn id.
-    const activeLocalTurnId = generating ? turnId : settled?.localTurnId || null;
+    const activeLocalTurnId = exactOwner?.localTurnId || null;
     const activeTurnIndex =
       ownedPageTurn && activeLocalTurnId ? answer.turns.indexOf(ownedPageTurn) : -1;
     if (askedConversation) {
@@ -2987,9 +3012,20 @@
     // `settledTurnOwner` already gives for an ambiguous id. The live generation's own
     // binding is authoritative and is seeded first, so a settled turn can never take a
     // turn id out from under the turn currently being written.
+    //
+    // The seed is not conditional on that binding being *resolvable*. Live 2026-08-31,
+    // session `2026-08-31-7c0253f2`: ChatGPT held a tool-heavy turn's whole output back and
+    // released it in one burst at 12:00:41, while generation `…-0-3` was live and
+    // `ownedPageTurn` unresolved. `activeTurnIndex` was therefore -1, the seed was skipped,
+    // and a historical section — carrying prose authored at 11:28:07, two minutes before
+    // `…-0-3` even started — claimed `…-0-3` unopposed through a reused request id. Its two
+    // messages were journalled under a turn that had not begun when they were written, which
+    // merges two responses into one group and paints both of them into the first section.
+    // An unresolved live binding is not evidence that the live turn owns nothing; it is
+    // exactly the case where a settled claim on that id cannot be proven.
     const settledOwners = new Map();
     const ownerClaims = new Map();
-    if (activeTurnIndex >= 0 && activeLocalTurnId) ownerClaims.set(activeLocalTurnId, 1);
+    if (activeLocalTurnId) ownerClaims.set(activeLocalTurnId, 1);
     for (let index = 0; index < answer.turns.length; index++) {
       if (index === activeTurnIndex) continue;
       const owner = settledTurnOwner(answer.turns[index]);
@@ -3044,6 +3080,7 @@
 
         const message = item.value;
         if (message.role === 'user') {
+          if (renderedUserMessageIds.has(message.messageId)) continue;
           const key = occurrenceKey(message.messageId, message.rawText);
           if (message.createTime) {
             if (userAuthoredTimesReported.get(key) === message.createTime) continue;
@@ -3066,11 +3103,7 @@
         // upgrading every message in a completed turn to `final:true` made interim prose look
         // like a sequence of finished answers and could let recovery treat the wrong one as
         // completion evidence.
-        const corroboratedTerminal =
-          !turn.endMessageId && turn === ownedPageTurn && settled?.terminalMessageId
-            ? settled.terminalMessageId
-            : null;
-        const terminalMessageId = turn.endMessageId || corroboratedTerminal;
+        const terminalMessageId = turn.endMessageId;
         const exactTerminal = Boolean(
           terminalMessageId &&
             (message.rawMessageId === terminalMessageId || message.messageId === terminalMessageId)
@@ -3091,12 +3124,20 @@
         // were the dedupe key, that first unowned snapshot permanently prevented the later
         // exact local turn id from reaching the recorder. The recorder upsert is expressly
         // able to promote the same canonical message when stronger ownership arrives.
-        const owner = localOwner || '';
+        const priorMessage = messagesReported.get(message.messageId);
+        const ownerConflict = Boolean(
+          priorMessage?.conflicted || (localOwner && priorMessage?.owner && priorMessage.owner !== localOwner)
+        );
+        let owner = ownerConflict ? '' : localOwner || (priorMessage && priorMessage.owner) || '';
+        // Ownership may strengthen after an earlier scan saw the message before its DOM turn
+        // was bound. It may never weaken merely because a concurrent later scan has no local
+        // claim: that was the 2026-08-31 final-without-turnId race. A contradictory positive
+        // claim is different and fails closed instead of choosing either generation.
         const signature =
           `${state}\u0000${message.rawText}\u0000${message.renderedHtml}\u0000${owner}` +
           `\u0000${message.createTime || ''}`;
-        if (messagesReported.get(message.messageId) === signature) continue;
-        messagesReported.set(message.messageId, signature);
+        if (priorMessage?.signature === signature) continue;
+        messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict });
         if (state === 'streaming') lastChangeAt = Date.now();
         const liveAssistant =
           Boolean(localOwner) ||
@@ -3113,6 +3154,7 @@
           // locally-owned turn, first observation is the comparable clock. Historical backfill
           // has no local turn anchor, so it keeps authored create_time instead.
           ...(!liveAssistant && message.createTime ? { time: message.createTime, authoredTime: true } : {}),
+          ...(liveAssistant ? { activeNow: true } : {}),
           state,
           final: state === 'final',
           ...(state === 'final' && localOwner && goalTerminalCandidate('completed', localOwner)
@@ -5201,7 +5243,11 @@
     const blocked = goal && typeof goal.blocked === 'string' ? goal.blocked : '';
     const auto = Boolean(context && context.auto) && blocked !== 'worker';
     const threshold = context && context.threshold > 0 ? context.threshold : 0;
-    const goalOn = Boolean(goal && goal.enabled);
+    // One setting, two switches. The app sends the mode beside `enabled`, which is what makes
+    // it impossible for this sheet to ever draw both of them on: there is one value to read.
+    const mode = goal && goal.mode === 'loop' ? 'loop' : 'goal';
+    const goalOn = Boolean(goal && goal.enabled) && mode === 'goal';
+    const loopOn = Boolean(goal && goal.enabled) && mode === 'loop';
     const hasKey = Boolean(goal && goal.hasKey);
     const objective = goal && typeof goal.objective === 'string' ? goal.objective : '';
     // The app's own reason, rather than this tab's guess. Today there is exactly one: a
@@ -5209,7 +5255,7 @@
     const from = threshold > 0 ? `from ${roundK(threshold)} tokens` : '';
     // Either half is enough to make the loop run here, which is why the summary line says
     // "on" for a chat that has a goal even while the standing switch is off.
-    const running = (goalOn || Boolean(objective)) && hasKey && !blocked;
+    const running = (goalOn || loopOn || Boolean(objective)) && hasKey && !blocked;
     return {
       // Two short lines rather than a sentence: this is read while reaching for something
       // else, and the only questions it answers are "is it on" and "at what point".
@@ -5217,13 +5263,17 @@
         auto ? `Auto-compaction on${from ? `, ${from}` : ''}` : 'Auto-compaction off',
         blocked === 'worker'
           ? 'Goal off — the prime writes this chat'
-          : objective
-            ? 'Goal on — chasing this chat’s goal'
-            : goalOn
-              ? hasKey
-                ? 'Goal on'
-                : 'Goal on — no API key'
-              : 'Goal off'
+          : loopOn
+            ? hasKey
+              ? 'Loop on — never stops on its own'
+              : 'Loop on — no API key'
+            : objective
+              ? 'Goal on — chasing this chat’s goal'
+              : goalOn
+                ? hasKey
+                  ? 'Goal on'
+                  : 'Goal on — no API key'
+                : 'Goal and Loop off'
       ].join('\n'),
       rows: [
         {
@@ -5262,13 +5312,40 @@
           on: goalOn,
           warn: !hasKey || blocked === 'worker',
           disabled: blocked === 'worker'
+        },
+        {
+          /**
+           * The other half of the same setting.
+           *
+           * Loop is Goal with the stop taken away: the model writes the next message every
+           * time, and the only thing that ends the run is this switch going off again. Drawn
+           * as its own row rather than a mode picker inside Goal because that is the decision
+           * being made — "keep it going" is a different intent from "finish what I asked for" —
+           * and turning either one on turns the other off, which the app enforces.
+           */
+          key: 'loop',
+          label: 'Loop',
+          note:
+            blocked === 'worker'
+              ? 'off here: the prime agent writes this worker’s messages'
+              : !hasKey
+                ? 'OpenRouter API key essential for goal feature'
+                : loopOn
+                  ? objective
+                    ? `never stops — chases this chat’s goal with ${modelLabel(goal.model)}`
+                    : `never stops — replies as you with ${modelLabel(goal.model)}`
+                  : 'keep prompting for ever, until you switch it off',
+          on: loopOn,
+          warn: !hasKey || blocked === 'worker',
+          disabled: blocked === 'worker'
         }
       ],
       /**
-       * The specific goal, under the switch it belongs to.
+       * The specific goal, under the pair of switches it belongs to.
        *
        * A link rather than a third switch, because it is not a mode — it is a piece of text,
        * and until there is one there is nothing to be on. Saving one is what turns it on.
+       * Goal chases it and stops when it is reached; Loop chases it and never stops.
        */
       objective: {
         text: objective,
@@ -5989,7 +6066,9 @@
         });
       }
       root.append(line);
-      if (row.key === 'goal') root.append(buildObjective(view.objective));
+      // Under the pair, not between them: the goal text is what either mode is pointed at,
+      // so it belongs below both switches rather than wedged between Goal and Loop.
+      if (row.key === 'loop') root.append(buildObjective(view.objective));
     }
 
     const act = document.createElement('button');
@@ -6360,7 +6439,7 @@
    * rather than collapsing everything into one `failed`. `failed` itself is the older shape
    * and still means the request, so a stale state does not draw a bar with nothing lit.
    */
-  const GOAL_STEP_AT = { settling: 0, requesting: 1, drafting: 2, sending: 3, failed: 1 };
+  const GOAL_STEP_AT = { settling: 0, requesting: 1, drafting: 2, retrying: 2, sending: 3, failed: 1 };
 
   function goalStageView(goal) {
     if (!goal) return null;
@@ -6370,6 +6449,9 @@
     const failure = goal.error || (draft && draft.stage === 'failed' ? draft.error || 'OpenRouter did not answer' : '');
     if (failure) {
       const at = draft && draft.stage === 'failed' ? 2 : (GOAL_STEP_AT[goal.phase] ?? 1);
+      if (goal.phase === 'retrying') {
+        return { stage: 'Retrying Goal in 15 seconds', detail: failure, body: '', kind: 'goal', ...bar(at) };
+      }
       return { stage: 'The goal loop stopped', detail: failure, body: '', kind: 'goal-error', ...bar(at) };
     }
     // A chat opening on a specific goal. There is no answer to read and no turn to settle,
@@ -7415,6 +7497,12 @@
       // The phase is kept rather than collapsed into `failed`: it names the step that
       // stopped, so the bar draws the run where it ended instead of back at the beginning.
       setGoalPhase('requesting', replyError(reply) || 'the app did not answer');
+      // The app never heard the question, so nothing durable moved and the turn is still owed
+      // its answer. Release this document's claim on it: holding the claim after a dropped
+      // message parked the obligation until the next reload, which is the one thing a
+      // transport failure must never be able to do to it. maybeRecoverDurableGoalTurn picks
+      // the same durable pending row up again on the next pull.
+      if (goalTurnId === forTurn) goalTurnId = null;
       return;
     }
     // From here the draft lives on /activity: its stage, its streaming text and — once — the
@@ -7458,16 +7546,33 @@
     }
     if (draft.stage === 'failed') {
       goalDraft = null;
-      // Retryable is not the same story as stopped, and the panel is the only place the user
-      // finds out which one this is. Saying so costs a clause here; leaving it out cost a
-      // fifteen-second silence that read as a loop which had given up.
       const why = draft.error || 'OpenRouter did not answer';
-      setGoalPhase('drafting', draft.retryable === true ? why + ' - trying again in a moment' : why);
+      const pending = goalConfig && goalConfig.pending;
+      let retrying = draft.retryable === true && goalTurnId === draft.turnId;
+      // A reload loses the document-local claim while the app keeps both the failed attempt
+      // and the durable obligation it was answering. Only that exact durable turn may restore
+      // the claim: trusting an arbitrary old draft would let a stale tab answer after the chat
+      // moved on. Active ChatGPT/native work is newer evidence and wins.
+      if (
+        !retrying &&
+        draft.retryable === true &&
+        !goalTurnId &&
+        pending &&
+        pending.turnId === draft.turnId &&
+        !generating &&
+        !CLF_DOM.generating() &&
+        !nativeBusy &&
+        !(job && job.busy)
+      ) {
+        goalTurnId = draft.turnId;
+        retrying = true;
+      }
+      setGoalPhase(retrying ? 'retrying' : 'drafting', why);
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
       // The two answers that end a Goal run are `[no reply]` and words to type. This is
       // neither, so the turn is still owed one and the loop keeps its claim on it — with the
       // reason on screen in the meantime, which is the only thing a failure was ever good for.
-      if (draft.retryable === true) void retryGoalDraft(draft.turnId);
+      if (retrying) void retryGoalDraft(draft.turnId);
       return;
     }
     if (draft.stage === 'no-reply') {
@@ -7765,6 +7870,12 @@
   function rememberResumeGoalPending(conversation, commandId) {
     resumeGoalPending = { conversationId: conversation, commandId, turnId: null };
     persistResumeGoalPending();
+    // The generation this provenance is about may already be open: a turn now begins the
+    // moment the bootstrap message is observed, which can land before the command finishes
+    // redeeming. Binding only from the opener left that turn unclaimed and made the recovery
+    // mint a synthetic `g-resume-<command>` id for a generation this document had watched
+    // start. Both orderings reach the same binding from here.
+    if (generating) bindResumeGoalTurn(turnId);
   }
 
   function bindResumeGoalTurn(localTurnId) {
@@ -8270,7 +8381,8 @@
     // A goal draft lives entirely on this feed — its streamed text is what the stage panel
     // shows, and the finished message only arrives here — so it polls at the live cadence
     // even in a hidden tab, which is exactly the tab this feature runs in.
-    const drafting = Boolean(goalDraft) || goalPhase === 'requesting' || goalPhase === 'drafting';
+    const drafting =
+      Boolean(goalDraft) || goalPhase === 'requesting' || goalPhase === 'drafting' || goalPhase === 'retrying';
     return activityPullDelay({
       hidden,
       generating,

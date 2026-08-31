@@ -2166,7 +2166,10 @@ const HANDLERS = {
     const conversationId = cleanConversationId(tabConversations[key]) ?? requestedConversation;
     const body = {};
     if (typeof message.autoCompact === 'boolean') body.autoCompact = message.autoCompact;
+    // Goal and Loop are one setting behind two switches, and the app refuses a body carrying
+    // both. Pass through whichever one the sheet actually moved.
     if (typeof message.goal === 'boolean') body.goal = message.goal;
+    else if (typeof message.loop === 'boolean') body.loop = message.loop;
     if (typeof message.autoCompact === 'boolean' && conversationId) body.conversationId = conversationId;
     const result = await call('/settings', { method: 'POST', body: JSON.stringify(body) });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };

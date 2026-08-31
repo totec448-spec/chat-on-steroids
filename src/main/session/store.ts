@@ -1350,7 +1350,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         processExitNonzero: publicSummary.processExitNonzero ?? 0,
         toolRejected: publicSummary.toolRejected ?? 0,
         toolInternalErrors: publicSummary.toolInternalErrors ?? 0,
-        // A three-minute display clock is not worth replaying every legacy session during the
+        // A two-minute display clock is not worth replaying every legacy session during the
         // attachment-catalog scan. The next real tool call sets the exact value immediately.
         lastToolCallAt:
           typeof publicSummary.lastToolCallAt === 'number' && Number.isFinite(publicSummary.lastToolCallAt)

@@ -565,6 +565,20 @@
                     <span class="sw"><input type="checkbox" id="goalEnabled" /><i></i></span>
                   </div>
 
+                  <!--
+                    Loop is Goal with the stop taken away, which is why it is a second switch
+                    on the same block rather than a section of its own: same key, same model,
+                    same reasoning. Turning either one on turns the other off - there is one
+                    mode stored, and these two controls are the two values it can hold.
+                  -->
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Loop</b>
+                      <em id="loopHint"></em>
+                    </span>
+                    <span class="sw"><input type="checkbox" id="loopEnabled" /><i></i></span>
+                  </div>
+
                   <div class="field">
                     <label for="goalKey">OpenRouter API key</label>
                     <input id="goalKey" type="password" spellcheck="false" placeholder="sk-or-v1-…" autocomplete="off" />
@@ -643,6 +657,23 @@
                     <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
                     <div class="step-actions">
                       <button class="btn" id="goalObjectivePromptReset" type="button">Restore default</button>
+                    </div>
+                  </div>
+
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Loop prompt</b>
+                      <em>Used instead of both of the above while Loop is on. Never stops: it writes a message every turn, with or without a goal of its own.</em>
+                    </span>
+                    <button class="btn" id="goalLoopPromptEdit" type="button">Edit prompt</button>
+                  </div>
+
+                  <div class="field goal-prompt" id="goalLoopPromptPanel" hidden>
+                    <label for="goalLoopPrompt">Loop system prompt</label>
+                    <textarea id="goalLoopPrompt" rows="14" spellcheck="false"></textarea>
+                    <p class="hint">Saved when you leave the editor. There is no stop response here - the app refuses one and asks again.</p>
+                    <div class="step-actions">
+                      <button class="btn" id="goalLoopPromptReset" type="button">Restore default</button>
                     </div>
                   </div>
 
