@@ -144,7 +144,7 @@ aktuell vorhandenen Änderungen ihre bestehenden Regressionen nicht brechen.
 | #2 Power Agent tools | Nicht im aktuellen Baum; bestehende Primitive decken fast alles ab | PR #17 offen; Architektur widerspricht dem kleinen Surface-Budget | **Als architecture-superseded schließen; PR #17 nicht mergen. `web_fetch` nur als neues, separat begründetes Issue.** |
 | #21 Auto-compaction / self-compaction | Teilweise behoben; absolute 10m-Expiry existiert noch **zweimal** (Continuation + PrimeTransfer) | send checkpoints + marker reconciliation vorhanden; PR #39 offen | **Continuation-WAL zur einzigen A→B-Autorität machen; side-effect-aware Expiry statt globalem Heartbeat/TTL; broker transfer lease löschen.** |
 | #22 Firefox | Nicht implementiert; Port legt zusätzlich den heutigen global-singleton Browser-Pairing-Fehler offen | kein passender Merge | **Eine WebExtension-Codebasis + genau eine explizit gepaarte Companion-Installation/Profile als Browser-Custody-Owner; Manifest/runtime delta + signierter XPI-Releasepfad.** |
-| #23 Tunnel supervisor | Unfixed; mehrere aktuelle Root-Races | aktueller `src/main/tunnel/index.ts`; `b5b6239` nur als non-ancestor Referenz | **Eine Restart-Autorität + per-client generation health; Konzepte/tests chirurgisch übernehmen, nicht den großen Commit.** |
+| #23 Tunnel supervisor | **Lokal implementiert und deterministisch getestet; Live-Tunnel-Akzeptanz bleibt offen** | `src/main/tunnel/index.ts`, `src/main/diagnostics.ts`, `test/tunnel-lifecycle.test.ts`; `b5b6239` nur als historische Referenz | **Ein `ClientRun` ist Process- und Health-Generation; compare-and-retire besitzt genau einen Restart, Stop-Barriere verhindert Overlap, unknown bleibt unknown.** |
 | #24 verify/history + AppImage flake | **CLOSED** | PR #37 in `origin/main`; lokale verhaltensäquivalente Änderung vorhanden | **Keine Produktarbeit mehr. Public-history-Blocker als separaten Release-Fakt behandeln.** |
 | #25 Project chats | **CLOSED** | PR #38 in `origin/main`; lokale verhaltensäquivalente Route-Fixes vorhanden | **Keine zweite Route-Implementation bauen; zentrale Parser-Lektion beibehalten.** |
 | #26 resume-shadow loop in v2.0.2 | Code-Fix bereits gemerged | PR #19 / `03acfba` | **Release verifizieren; danach den hot-poll Compatibility-Repair aus `/activity` löschen/auf bounded startup verschieben.** |
@@ -152,10 +152,31 @@ aktuell vorhandenen Änderungen ihre bestehenden Regressionen nicht brechen.
 | #29 macOS Desktop boundary | Umfangreiche validierte Mac-Vertical-Slice existiert in CLEAN PR #28 | Electron → Worker → N-API → Swift dylib; arm64 live/CI evidence | **Vertical slice nicht mit spekulativem Vorab-Refactor blockieren; erst sicher mergen, danach kleinsten echten Driver-Seam aus zwei Backends extrahieren.** |
 | #30 autosaved New Chat draft blocks bootstrap | Safe failure/surfacing schon vorhanden; Opt-in fehlt | `insertPrompt()` + `runCommand()` + worker failure report | **Nur persistenten fresh-bootstrap Replace-Opt-in ergänzen; preserve default unverändert.** |
 | #31 persistent/self-verifying Secure Tunnel | Persistence größtenteils schon fertig | config/safe storage/per-surface request+tool timestamps + monotonic surface exposure | **Fingerprint der tatsächlich ausgelieferten `tools/list`-Shape pro Surface; #23-health nur projizieren; capability-bearing lokale URLs aus generischen Renderer-Facts entfernen.** |
-| #34 stale hidden worker output | Noch vorhanden | hidden cadence gewinnt vor generating | **Scheduling-Priorität korrigieren; hidden nur idle throttlen.** |
+| #34 stale hidden worker output | **Lokal implementiert und getestet; Browser-Live-Akzeptanz bleibt offen** | lokaler Commit `324648d`; 382 Extension/Content-Tests | **Ein Scheduler entscheidet nach Arbeit; hidden generating/active läuft schnell, exact final delivery bleibt bis zum Feed-ACK live.** |
 | #35 explain waits/blocks | Noch kein einheitliches Modell | Zustände existieren verteilt; `.clf-stage` vorhanden | **Eine read-only Runtime-/Obligations-Projektion in bestehender Stage-UI; keine LLM-Statusmeldungen.** |
-| #36 unread background exec results | Teilweise vorhanden; globaler Capacity-Pfad kann result-bearing Sessions LRU-evicten | `b4cab48`, `exitedUnread`, `ensureProcessCapacity()` | **LRU-Eviction vollständig löschen: Capacity ist Admission, nie Garbage Collection; bestehende Resultate bleiben drainbar.** |
+| #36 unread background exec results | **Lokal implementiert und getestet; Modell-Live-Akzeptanz bleibt offen** | lokaler Commit `5463f17`; 157 UnifiedExec/MCP-Tests | **LRU-Eviction gelöscht: Capacity ist Admission; exact-chat unread obligation begrenzt neue Starts und bleibt über `write_stdin` drainbar.** |
 | #40 Chrome Memory Saver suspends agent tabs | Neu offen; Background kennt Tab-Identity, aber projiziert aktive Execution nicht in Chrome discard policy; `onUpdated` ignoriert `discarded`/`frozen` | `extension/background.js` + Chrome `tabs.autoDiscardable`/`discarded`/`frozen` APIs | **Eine read-only browser-live-required Projektion; bestehende 30s maintenance cadence reconciled `autoDiscardable=false` nur für tatsächlich execution-relevante Tabs. Discard ≠ Freeze: keine erfundene Freeze-API/Heartbeat.** |
+
+### 2.1 Lokaler Implementierungsstand dieses Passes
+
+Dieser Pass implementiert bewusst nur drei Issues mit klarer Root-Cause und deterministischer
+lokaler Proof-Fläche: #36, #34 und #23. Er installiert, paketiert, pusht und schließt keine Issues.
+
+- **#36:** Der globale UnifiedExec-Cap entfernt keine result-bearing Session mehr. Admission wird
+  global und pro exakter Conversation verweigert, während `write_stdin` zum Drain offen bleibt.
+- **#34:** Der bestehende Activity-Poller ist work-state-driven statt visibility-first. Eine
+  canonical final assistant revision bleibt eine kleine exact-delivery obligation, bis dieselbe
+  Message-ID plus finaler Text aus dem app-eigenen Feed zurückkommt.
+- **#23:** Alle mutable OpenAI-Tunnel-Fakten gehören jetzt einem `ClientRun`. Nur der Gewinner von
+  `current === run` darf retiren/restarten; die alte Process-Tree-Barriere endet vor dem Backoff,
+  und eine unbestätigte Beendigung startet bewusst keinen zweiten Tree. Metrics-Ausfall und ein
+  fehlender `last_success` bleiben `connecting/unknown`; ein frischer Poll entfernt zusätzlich
+  einen sticky historischen Diagnostics-Fehler.
+
+Nicht implementiert wurden insbesondere #21, #22, #29, #30, #31, #35 und #40: ihre Architektur-
+oder Produktentscheidungen sind größer als dieser Reliability-Pass oder brauchen Browser-/Plattform-
+Live-Evidenz. Die bereits im Checkpoint vorhandenen #27-/Goal-/Tool-activity-Änderungen wurden als
+vorhanden erkannt und nicht als zweite Parallel-Implementation neu gebaut.
 
 ---
 
