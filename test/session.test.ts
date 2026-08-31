@@ -711,6 +711,33 @@ describe('session store', () => {
     expect(await getSession(summary.id)).toMatchObject({ updatedAt: laterAt, lastToolCallAt: toolAt });
   });
 
+  it('projects a stable final assistant message as the exact end of recent tool activity', async () => {
+    const summary = await createSession({ title: 'final activity boundary' });
+    const messageId = 'assistant-final-activity-boundary';
+    await upsertMessageEvent(summary.id, {
+      time: 100,
+      source: 'extension',
+      kind: 'assistant_message',
+      messageId,
+      message: { text: 'Still working', truncated: false, chars: 13 },
+      state: 'streaming',
+      final: false
+    });
+    expect((await getSession(summary.id))?.lastAssistantFinalAt).toBeNull();
+
+    await upsertMessageEvent(summary.id, {
+      time: 200,
+      source: 'extension',
+      kind: 'assistant_message',
+      messageId,
+      message: { text: 'Finished.', truncated: false, chars: 9 },
+      state: 'final',
+      final: true
+    });
+
+    expect((await getSession(summary.id))?.lastAssistantFinalAt).toBe(200);
+  });
+
   it('offers a stable final reply to Goal after reload lost an uncertain turn identity', async () => {
     const conversationId = 'c-goal-final-after-reload';
     await recordChatObservations(conversationId, [

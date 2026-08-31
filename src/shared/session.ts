@@ -387,6 +387,8 @@ export interface SessionSummary {
   toolCalls: number;
   /** Start time of the newest exact attributed tool call, independent of later page noise. */
   lastToolCallAt: number | null;
+  /** Observation time of the newest stable final assistant message. */
+  lastAssistantFinalAt?: number | null;
   processExitNonzero: number;
   toolRejected: number;
   /** Connector/tool implementation failures; the tool reliability numerator. */

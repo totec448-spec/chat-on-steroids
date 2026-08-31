@@ -1115,21 +1115,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // state. Reported here rather than inferred from `generating`, because this is the exact
     // moment the model started running and the only one that can outvote a sleep decision made
     // a second earlier on missing evidence.
-    let edge = 0;
-    let spends = false;
+    let turnStartedAt = 0;
     for (const item of observations) {
       if (item.kind === 'turn_start') {
-        edge = Math.max(edge, item.time);
-        spends = false;
-      } else if (item.kind === 'turn_end') {
-        edge = Math.max(edge, item.time);
-        spends = true;
+        turnStartedAt = Math.max(turnStartedAt, item.time);
       }
     }
-    if (edge > 0 && spends) endActivity(id, edge);
-    else if (edge > 0) {
-      grantActivity(id, edge);
-      const woke = noteAgentAlive(id, 'turn', edge);
+    if (turnStartedAt > 0) {
+      const woke = noteAgentAlive(id, 'turn', turnStartedAt);
       if (woke?.report) await recordAgentMessage(woke.report, 'sent');
     }
     observationWritesInFlight += 1;
@@ -3635,7 +3628,7 @@ function grantActivity(conversationId: string, at = Date.now(), recoverWithoutOp
   activeUntil.set(conversationId, { until: at + CHAT_ACTIVE_MS, recoverWithoutOpenTurn });
 }
 
-/** A formal turn end spends the current grant; only later exact calls may open an uncertain one. */
+/** A stable final answer, explicit user stop or worker finish spends the activity grant. */
 function endActivity(conversationId: string, _at = Date.now()): void {
   activeUntil.delete(conversationId);
 }
@@ -3813,8 +3806,10 @@ function noteRecoveryObservations(
   stored: number
 ): void {
   const meaningful = stored > 0 && observations.some((item) => MEANINGFUL_RECOVERY_ACTIVITY.has(item.kind));
-  const terminal = observations.some(
-    (item) => item.kind === 'assistant_message' && item.final === true && item.state === 'final'
+  const terminal = stored > 0 && observations.some(
+    (item) =>
+      (item.kind === 'assistant_message' && item.final === true && item.state === 'final') ||
+      (item.kind === 'turn_end' && item.outcome === 'stopped')
   );
   const interim = observations.some(
     (item) => item.kind === 'assistant_message' && item.final !== true && item.state !== 'final'
@@ -3938,12 +3933,20 @@ function repairCandidates(now = Date.now()): Array<{ conversationId: string; end
   // spent. A second expiry clock here used to delete a grant whose reload had been carried out
   // but not yet judged, which left that repair in flight forever and never released its slot.
   const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
-  return [...activeUntil]
-    .filter(([, grant]) => grant.until > now)
-    .map(([conversationId]) => ({
-      conversationId,
-      endedTurns: live.get(conversationId)?.endedTurns ?? 0
-    }));
+  const candidates = new Set(
+    [...activeUntil]
+      .filter(([, grant]) => grant.until > now)
+      .map(([conversationId]) => conversationId)
+  );
+  // Unattributed recovery is the one place a browser-local open turn remains useful: it narrows
+  // an identity failure without itself creating a silence-reload episode. A reload-generated
+  // turn_start therefore cannot re-arm ordinary recovery, while a genuinely open page can still
+  // be one of the exact chats whose request-id join may have failed.
+  for (const entry of live.values()) if (entry.activeTurnId) candidates.add(entry.conversationId);
+  return [...candidates].map((conversationId) => ({
+    conversationId,
+    endedTurns: live.get(conversationId)?.endedTurns ?? 0
+  }));
 }
 
 /**
@@ -3995,18 +3998,32 @@ function retireSpentRepairs(): void {
  * out is kept until exactly this line runs, so that a reload which did not help is not repeated
  * — see `retireSpentRepairs`. This call is the proof that it did help.
  */
-function noteCallAttribution(conversationId: string | null): void {
+function noteCallAttribution(
+  conversationId: string | null,
+  startedAt: number,
+  endsActivity = false,
+  lastAssistantFinalAt: number | null = null
+): void {
   if (conversationId) {
-    const live = liveConversations().find((entry) => entry.conversationId === conversationId);
-    const recoverWithoutOpenTurn =
-      !live?.activeTurnId &&
-      live?.lastTurnOutcome !== null &&
-      live?.lastTurnOutcome !== undefined &&
-      live.lastTurnOutcome !== 'completed' &&
-      live.lastTurnOutcome !== 'stopped';
-    grantActivity(conversationId, Date.now(), recoverWithoutOpenTurn);
-    noteRecoveryActivity(conversationId);
     unattributedIncident?.proven.add(conversationId);
+    if (endsActivity) {
+      endActivity(conversationId);
+      repairsInFlight.delete(conversationId);
+      return;
+    }
+    // Attribution can finish after the page has already stored the final answer. The call's own
+    // start time decides which side of that durable boundary it belongs to; recorder latency may
+    // never resurrect work that the model has visibly completed.
+    if (lastAssistantFinalAt !== null && startedAt <= lastAssistantFinalAt) {
+      if (repairsInFlight.get(conversationId)?.reason === 'unattributed') {
+        repairsInFlight.delete(conversationId);
+      }
+      return;
+    }
+    // The exact call is stronger than browser lifecycle state: the model is still working even
+    // when Chrome, the tab or a reload destroyed the page's local turn projection.
+    grantActivity(conversationId, Date.now(), true);
+    noteRecoveryActivity(conversationId);
     // Scoped to the repair this fact is evidence about. An attributed call proves the request-id
     // join, which is the whole of what an `unattributed` repair exists to restore. It proves
     // nothing about the answer stream a page lost, and the live trace is why that distinction is

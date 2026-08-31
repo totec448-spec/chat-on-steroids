@@ -636,7 +636,8 @@ async function dispatchTracked(
     agent: context.agent,
     bind: context.bindOnAttribution ?? null,
     requestId: context.caller.requestId,
-    conversationId: context.caller.conversationId
+    conversationId: context.caller.conversationId,
+    endsActivity: isFinish && !result.isError
   });
   // Exact request-id identity needs no browser wait, so make its durable session append part
   // of completing the MCP call. The recorder catches storage failures and returns null, so a

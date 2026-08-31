@@ -208,6 +208,8 @@ interface MetaCheckpoint {
   historySeq: number | null;
   /** Derived migration signal; never persisted. */
   outcomeCountersMissing: boolean;
+  /** Derived final-message activity boundary was added after the original summaries. */
+  activityBoundaryMissing: boolean;
 }
 
 function messageKey(event: Pick<MessageEvent, 'kind' | 'messageId'>): string | null {
@@ -241,6 +243,7 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     userMessages: 0,
     toolCalls: 0,
     lastToolCallAt: null,
+    lastAssistantFinalAt: null,
     processExitNonzero: 0,
     toolRejected: 0,
     toolInternalErrors: 0,
@@ -624,6 +627,7 @@ async function rebuildSummaryFromHistory(
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
         lastToolCallAt: rebuilt.lastToolCallAt,
+        lastAssistantFinalAt: rebuilt.lastAssistantFinalAt,
         processExitNonzero: rebuilt.processExitNonzero,
         toolRejected: rebuilt.toolRejected,
         toolInternalErrors: rebuilt.toolInternalErrors,
@@ -668,7 +672,11 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     const checkpoint = await readMetaCheckpoint(id);
 
     // A pre-taxonomy checkpoint can have a current watermark but stale outcome classification.
-    if (checkpoint?.historySeq === historySeq && !checkpoint.outcomeCountersMissing) {
+    if (
+      checkpoint?.historySeq === historySeq &&
+      !checkpoint.outcomeCountersMissing &&
+      !checkpoint.activityBoundaryMissing
+    ) {
       return { summary: checkpoint.summary, messages, historySeq, reconciled: false };
     }
     if (checkpoint && historySeq === 0) {
@@ -676,7 +684,8 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
       const summary = {
         ...checkpoint.summary,
         ...(checkpoint.outcomeCountersMissing ? { errors: 0 } : {}),
-        lastToolCallAt: null
+        lastToolCallAt: null,
+        lastAssistantFinalAt: null
       };
       await writeSummary(summary, 0);
       return { summary, messages, historySeq: 0, reconciled: true };
@@ -766,6 +775,9 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
       summary.toolInternalErrors += 1;
       summary.errors += 1;
     }
+  }
+  if (event.kind === 'assistant_message' && (event.final === true || event.state === 'final')) {
+    summary.lastAssistantFinalAt = Math.max(summary.lastAssistantFinalAt ?? 0, event.time);
   }
   if (event.kind === 'chat_error') summary.errors += 1;
   if (event.kind === 'turn_end') summary.lastTurnOutcome = event.outcome;
@@ -982,6 +994,12 @@ export function upsertMessageEvent(
         entry.summary.estimatedTokens = Math.max(0, entry.summary.estimatedTokens + delta);
         entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens + delta);
         entry.summary.updatedAt = Math.max(entry.summary.updatedAt, nextEvent.time);
+        if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final')) {
+          entry.summary.lastAssistantFinalAt = Math.max(
+            entry.summary.lastAssistantFinalAt ?? 0,
+            nextEvent.time
+          );
+        }
         if (full.agent && !entry.summary.agents.includes(full.agent)) entry.summary.agents.push(full.agent);
       }
       entry.historySeq = full.seq;
@@ -1273,6 +1291,7 @@ export async function rewriteUnattributedToolCalls(
       userMessages: 0,
       toolCalls: 0,
       lastToolCallAt: null,
+      lastAssistantFinalAt: null,
       processExitNonzero: 0,
       toolRejected: 0,
       toolInternalErrors: 0,
@@ -1320,9 +1339,11 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
       typeof publicSummary.processExitNonzero !== 'number' ||
       typeof publicSummary.toolRejected !== 'number' ||
       typeof publicSummary.toolInternalErrors !== 'number';
+    const activityBoundaryMissing = !Object.prototype.hasOwnProperty.call(publicSummary, 'lastAssistantFinalAt');
     return {
       historySeq,
       outcomeCountersMissing,
+      activityBoundaryMissing,
       summary: {
         ...publicSummary,
         // Keep in-place increments numeric until the forced rebuild supplies the real values.
@@ -1334,6 +1355,10 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         lastToolCallAt:
           typeof publicSummary.lastToolCallAt === 'number' && Number.isFinite(publicSummary.lastToolCallAt)
             ? publicSummary.lastToolCallAt
+            : null,
+        lastAssistantFinalAt:
+          typeof publicSummary.lastAssistantFinalAt === 'number' && Number.isFinite(publicSummary.lastAssistantFinalAt)
+            ? publicSummary.lastAssistantFinalAt
             : null,
         agents: Array.isArray(publicSummary.agents) ? publicSummary.agents : [],
         origin: publicSummary.origin ?? null,
