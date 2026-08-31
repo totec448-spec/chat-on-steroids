@@ -414,6 +414,16 @@ Keep ownership in `extension/chatgpt-dom.js`; do not add another direct page sca
 2. assistant-authored markdown under `[data-message-author-role="assistant"]`
 3. the exact whitespace-normalized notice, classified by a deliberately narrow allowlist
 4. the native Retry `data-testid` and shimmer class only as corroborating evidence
+5. a visible `role="alert"` live region carrying that same notice
+
+Point 5 is not a lesser case of point 1. A send that fails before the model answers has no
+assistant turn to render into, so ChatGPT announces it above the whole thread — "Message delivery
+timed out" is only ever seen there. Such a banner names no turn of its own: the adapter reports
+`turnId: null`, and `content.js` stamps the generation that was live when the banner came into
+view, which is the same attribution `endOutcome` uses to close the turn as `failed`. Classifying
+that shape as unrecoverable is what left chats parked on a visible error with the app having
+recorded the failure, marked the turn failed, and then done nothing about it. An announcement the
+allowlist does not recognise is still recorded as session evidence and still authorizes nothing.
 
 Do not key an occurrence by text alone: the same wording can fail in two different turns. Preserve
 the existing node-plus-turn identity. Do not depend on full Tailwind class strings; use
@@ -421,16 +431,28 @@ the existing node-plus-turn identity. Do not depend on full Tailwind class strin
 waiting card.
 
 The DOM adapter only classifies and reports. It never reloads the page. The app accepts a
-recoverable assistant error only for an active agent chat, or for an ordinary chat whose last
-attributed connector call completed within two minutes. The same app-owned recovery queue also
-handles a missing agent tab and a joined agent whose open turn produced no page or tool activity
-for two minutes.
+recoverable transport error only when the observation names the exact conversation and the page's
+live local generation. The same app-owned recovery queue also handles a missing agent tab and a
+chat whose open turn produced no page or tool activity for two minutes.
 
 The extension then scans Chrome's actual `chatgpt.com` tabs immediately before acting:
 
 - exactly one tab for the conversation: reload that tab
 - no tab: open that exact `/c/<conversation-id>` URL
-- more than one tab: do nothing; never guess and never add another duplicate
+- more than one tab: reload the copy the worker's own tab registry binds to that conversation,
+  falling back to the lowest tab id so two passes cannot pick differently. Bailing out here left
+  the chat broken *and* left the duplicate sitting there. Never open another tab in this case.
+
+**What retires a queued repair is scoped to the evidence it was filed on.** A `silence` or
+`no-tab` repair is about a chat, so ordinary activity ends its episode. An `unattributed` or
+`assistant-error` repair is about one broken *turn*, and only two facts retire it: the browser
+carrying it out, or the chat finishing a turn since it was filed. Do not let an attributed
+connector call delete an `assistant-error` repair — attribution proves the request-id join, not
+the answer stream the page lost. The 2026-08-31 trace is why: a worker printed "Connection
+interrupted. Waiting for the complete answer" and the model went on running server-side, so
+fifteen attributed calls arrived over the next four minutes and each one deleted the reload that
+notice had just asked for. A chat sick enough to need reloading is usually a chat still calling
+tools, so a repair that can be erased by activity is a repair that is never handed out at all.
 
 One action receipt spends that failure/inactivity episode. A second action for the same
 conversation cannot happen for at least three minutes, even for a different trigger. New meaningful
@@ -439,6 +461,30 @@ open-turn silence, a joined worker uses the existing stop decision: below 400k c
 becomes sleeping/revivable; at or above 400k it becomes finished. The setting **Recover inactive
 agent tabs** disables error, silence, and missing-tab browser recovery without changing the worker's
 underlying lifecycle state.
+
+### Post-reload final answers and attributed activity
+
+A page reload can end the only local generation as `unknown` while the server-side model keeps
+working. Exact request-id attribution still proves every later connector call belongs to that
+conversation. Those calls therefore renew one activity grant even though there is no open local
+turn; two minutes after the last one, the normal one-shot browser recovery runs. A call that merely
+settles late after `completed` or `stopped` does not receive that authority. The renderer uses the
+same exact tool-call timestamps, not generic session `updatedAt`, to show any agent chat as
+`active` for three minutes.
+
+A stable final assistant message is stronger than the lost local generation for two decisions:
+
+- it ends the browser-recovery grant immediately, so a complete answer is never reloaded later;
+- after a newer `unknown`/`failed`/`interrupted`/`stalled` turn boundary, it creates the Goal
+  obligation even when the page can no longer supply that turn id.
+
+The prior uncertain boundary and its turn-start timestamp fence this recovery: opening an old idle
+chat, or seeing a final authored before that uncertain turn began, creates no Goal work. The
+canonical stable assistant message id is the exactly-once identity. The recorder preserves its `goalEligible` fact
+monotonically, the app writes the pending/handled Goal ledger before acknowledging `/events`, and
+replays after a 503, page reload or app restart converge on that same reply. A synthetic
+`reply:<stable-message-id>` draft key is used only when the document-local generation is gone; it
+does not fabricate a `turn_end` event.
 
 ## 9. Overwrite ambiguity from one reused ChatGPT request id — 2026-08-30
 

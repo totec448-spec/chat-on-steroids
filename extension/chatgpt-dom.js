@@ -1087,9 +1087,17 @@ var CLF_DOM = (() => {
         if (!displayed(node)) continue;
         const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
         if (value.length <= 2 || value.length >= 500) continue;
-        // Toasts and user-row errors are recorded, but never authorize recovery. Only a
-        // recognised failure rendered inside an assistant turn proves which response broke.
-        out.push({ text: value, node, turnId: null, recoverable: false });
+        // A live region names no turn. It is announced above the thread, outside every
+        // section, so `turnId` stays null here and the caller's own live generation is what
+        // places it. The wording it does carry goes through the same classifier the in-turn
+        // branch below trusts, because that is the only difference between the two: a send
+        // that dies before an assistant turn exists has nowhere to paint "Message delivery
+        // timed out" except up here. Withholding recovery authority from that one case left
+        // the app recording the failure, marking the turn failed, and then leaving the chat
+        // parked on it - which is what a reload exists to undo. An announcement that is not
+        // a recognised transport failure ("Reasoning details opened", a user-row error) is
+        // still recorded as session evidence and still authorizes nothing.
+        out.push({ text: value, node, turnId: null, recoverable: transportFailure(value) });
         texts.add(value);
       }
       for (const turn of turns()) {

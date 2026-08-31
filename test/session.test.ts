@@ -679,6 +679,133 @@ describe('session store', () => {
     expect(after?.estimatedTokens).toBeGreaterThanOrEqual(100);
   });
 
+  it('keeps the exact last attributed tool-call time separate from unrelated session activity', async () => {
+    const summary = await createSession({ title: 'tool activity clock' });
+    const toolAt = summary.startedAt + 20;
+    const laterAt = summary.startedAt + 90;
+    await appendEvent(summary.id, {
+      time: toolAt,
+      source: 'mcp',
+      kind: 'tool_call',
+      call: {
+        callId: 'call-tool-clock',
+        tool: 'read',
+        attribution: 'request_id',
+        requestId: 'wfr-tool-clock',
+        conversationId: 'c-tool-clock',
+        attributionMethod: 'request_id',
+        args: { text: '{"paths":["/project/a.ts"]}', truncated: false, chars: 27 },
+        result: { text: 'ok', truncated: false, chars: 2 },
+        outcome: 'ok',
+        durationMs: 1,
+        summary: { title: 'Read a.ts', tone: 'neutral', kind: 'read' }
+      }
+    });
+    await appendEvent(summary.id, {
+      time: laterAt,
+      source: 'extension',
+      kind: 'note',
+      message: { text: 'later but not a tool call', truncated: false, chars: 25 }
+    });
+
+    expect(await getSession(summary.id)).toMatchObject({ updatedAt: laterAt, lastToolCallAt: toolAt });
+  });
+
+  it('offers a stable final reply to Goal after reload lost an uncertain turn identity', async () => {
+    const conversationId = 'c-goal-final-after-reload';
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 10, turnId: 'g-before-reload' },
+      { kind: 'turn_end', time: 20, turnId: 'g-before-reload', outcome: 'unknown' }
+    ]);
+
+    const recovered = await recordChatObservations(conversationId, [{
+      kind: 'assistant_message',
+      // ChatGPT may stamp the assistant object when generation starts, before a later detach.
+      time: 15,
+      messageId: 'assistant-stable-after-reload',
+      text: 'The complete final answer that appeared after reload.',
+      state: 'final',
+      final: true
+    }]);
+
+    expect(recovered.goalCandidates).toEqual([{
+      replyId: 'assistant-stable-after-reload',
+      turnId: 'reply:assistant-stable-after-reload',
+      eventSeq: expect.any(Number)
+    }]);
+
+    const replayed = await recordChatObservations(conversationId, [{
+      kind: 'assistant_message',
+      time: 15,
+      messageId: 'assistant-stable-after-reload',
+      text: 'The complete final answer that appeared after reload.',
+      state: 'final',
+      final: true
+    }]);
+    expect(replayed.goalCandidates).toEqual(recovered.goalCandidates);
+    const [storedFinal] = await readEvents(recovered.sessionId!, { kinds: ['assistant_message'] });
+    expect(storedFinal?.kind === 'assistant_message' && storedFinal.goalEligible).toBe(true);
+  });
+
+  it('does not turn a historical final answer into Goal work merely because a chat was opened', async () => {
+    const conversationId = 'c-goal-historical-final';
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 100, turnId: 'g-newer-uncertain' },
+      { kind: 'turn_end', time: 200, turnId: 'g-newer-uncertain', outcome: 'unknown' }
+    ]);
+    const recovered = await recordChatObservations(conversationId, [{
+      kind: 'assistant_message',
+      time: 30,
+      messageId: 'assistant-historical-final',
+      text: 'An answer from an already idle chat.',
+      state: 'final',
+      final: true
+    }]);
+
+    expect(recovered.goalCandidates).toEqual([]);
+  });
+
+  it('uses the stable final when it and the uncertain end arrive in the same browser batch', async () => {
+    const recovered = await recordChatObservations('c-goal-final-same-batch', [
+      { kind: 'turn_start', time: 10, turnId: 'g-same-batch' },
+      {
+        kind: 'assistant_message',
+        time: 15,
+        messageId: 'assistant-final-same-batch',
+        text: 'Complete despite the page losing its finish edge.',
+        state: 'final',
+        final: true
+      },
+      { kind: 'turn_end', time: 20, turnId: 'g-same-batch', outcome: 'unknown' }
+    ]);
+
+    expect(recovered.goalCandidates).toEqual([expect.objectContaining({
+      replyId: 'assistant-final-same-batch',
+      turnId: 'reply:assistant-final-same-batch'
+    })]);
+  });
+
+  it('does not spend an earlier uncertain boundary while a newer turn is still open', async () => {
+    const conversationId = 'c-goal-newer-turn-open';
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 10, turnId: 'g-old-uncertain' },
+      { kind: 'turn_end', time: 20, turnId: 'g-old-uncertain', outcome: 'unknown' }
+    ]);
+    const current = await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 30, turnId: 'g-new-open' },
+      {
+        kind: 'assistant_message',
+        time: 35,
+        messageId: 'assistant-while-new-open',
+        text: 'Do not decide this turn before its own terminal boundary.',
+        state: 'final',
+        final: true
+      }
+    ]);
+
+    expect(current.goalCandidates).toEqual([]);
+  });
+
   it('does not advance seq or summary state when the durable append fails', async () => {
     const summary = await createSession({ title: 'append failure is not an event' });
     const append = vi.spyOn(fs, 'appendFile').mockRejectedValueOnce(new Error('disk full'));

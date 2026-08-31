@@ -3596,13 +3596,12 @@ export function commandUrl(id: string, conversationId?: string | null): string {
 // -------------------------------------------------------- exact browser recovery
 
 /**
- * Every chat that has been granted activity, and the instant that grant runs out.
+ * Every chat that has been granted activity, its deadline and the evidence shape behind it.
  *
- * One number per chat is the entire notion of "active" in this file. A value in the future means
- * the chat is active; a value in the past means its grant ran out; no entry at all means the chat
- * has never done anything that grants one. That third case is deliberately distinct from the
- * second - a chat that never started is not a chat that stopped, and only the latter is something
- * to act on.
+ * A deadline in the future means the chat is active; one in the past means its grant ran out; no
+ * entry at all means the chat has never done anything that grants one. The boolean keeps the one
+ * exceptional evidence shape explicit: exact calls continued after the page had to close the
+ * local lifecycle as uncertain, so those calls remain reload authority without an open turn.
  *
  * This replaced a pair of clocks that disagreed: an agent's `lastSeenAt`, which any page report
  * refreshed, and the recorder's open-turn flags, which stayed true for as long as the DOM kept
@@ -3610,14 +3609,20 @@ export function commandUrl(id: string, conversationId?: string | null): string {
  * whose request-id join has broken is exactly a page that is still moving while the app hears
  * nothing from it.
  */
-const activeUntil = new Map<string, number>();
-
-/** A turn start, durable update or attributed tool call moves the open chat's silence deadline. */
-function grantActivity(conversationId: string, at = Date.now()): void {
-  activeUntil.set(conversationId, at + CHAT_ACTIVE_MS);
+interface ActivityGrant {
+  until: number;
+  /** Exact calls continued after the page could only close its local turn as uncertain. */
+  recoverWithoutOpenTurn: boolean;
 }
 
-/** A formal turn end is the exact proof this chat is no longer eligible for stale-turn recovery. */
+const activeUntil = new Map<string, ActivityGrant>();
+
+/** A turn start, durable update or attributed tool call moves the open chat's silence deadline. */
+function grantActivity(conversationId: string, at = Date.now(), recoverWithoutOpenTurn = false): void {
+  activeUntil.set(conversationId, { until: at + CHAT_ACTIVE_MS, recoverWithoutOpenTurn });
+}
+
+/** A formal turn end spends the current grant; only later exact calls may open an uncertain one. */
 function endActivity(conversationId: string, _at = Date.now()): void {
   activeUntil.delete(conversationId);
 }
@@ -3755,10 +3760,22 @@ function queueBrowserRecovery(
   return true;
 }
 
-/** Meaningful page/call activity is the episode boundary; empty polling is intentionally absent. */
+/**
+ * Meaningful page/call activity is the episode boundary; empty polling is intentionally absent.
+ *
+ * Two reasons are exempt, because neither is about whether the chat is doing something. An
+ * `unattributed` repair is about a broken request-id join, and an `assistant-error` one is about
+ * a specific turn whose answer the page said it lost. Both are retired by facts about that turn -
+ * the browser carrying the repair out, or the chat finishing a turn since it was filed - and
+ * `retireSpentRepairs` owns exactly that. Letting activity delete them instead is what made the
+ * error case unreachable: the model keeps running server-side through a lost stream, so the chat
+ * goes on producing activity for as long as it stays broken.
+ */
 function noteRecoveryActivity(conversationId: string): void {
   const held = repairsInFlight.get(conversationId);
-  if (held && held.reason !== 'unattributed') repairsInFlight.delete(conversationId);
+  if (!held) return;
+  if (held.reason === 'unattributed' || held.reason === 'assistant-error') return;
+  repairsInFlight.delete(conversationId);
 }
 
 const MEANINGFUL_RECOVERY_ACTIVITY = new Set<ChatObservation['kind']>([
@@ -3778,12 +3795,17 @@ function noteRecoveryObservations(
   stored: number
 ): void {
   const meaningful = stored > 0 && observations.some((item) => MEANINGFUL_RECOVERY_ACTIVITY.has(item.kind));
+  const terminal = observations.some(
+    (item) => item.kind === 'assistant_message' && item.final === true && item.state === 'final'
+  );
   if (meaningful) {
     noteRecoveryActivity(conversationId);
-    // A terminal batch deleted the grant before it was recorded. Do not let its final prose
-    // reopen it; otherwise a perfectly completed answer becomes stale two minutes later.
-    if (activeUntil.has(conversationId)) grantActivity(conversationId);
+    const held = activeUntil.get(conversationId);
+    // The stable final reply is terminal authority even when reload destroyed the local turn
+    // id. Lesser prose/progress only renews an existing grant; it never invents one.
+    if (!terminal && held) grantActivity(conversationId, Date.now(), held.recoverWithoutOpenTurn);
   }
+  if (terminal) endActivity(conversationId);
 
   // A transport failure rendered inside an assistant turn is the page saying, in its own words,
   // that the answer it was producing is gone. That is true of any chat: an ordinary conversation
@@ -3792,11 +3814,21 @@ function noteRecoveryObservations(
   // recent attributed call is evidence about that failure, so neither may gate the repair.
   const now = Date.now();
   for (const item of observations) {
-    // This is the role fence. Top-level alerts and anything rendered under a user message are
-    // still recorded, but only the DOM adapter's assistant-turn classifier may set this bit.
+    // Two facts, from the two places that own them. Only the DOM adapter's transport-failure
+    // classifier may set `recoverable`, so an ordinary announcement or a user-row error is
+    // recorded and authorizes nothing; only the page's own live generation may name the turn,
+    // which is what keeps a banner still on screen from an earlier failure out of this.
     if (item.kind !== 'chat_error' || item.recoverable !== true || !item.turnId) continue;
     const episode = `assistant-error:${item.turnId}:${(item.text ?? '').slice(0, 240)}`;
-    if (queueBrowserRecovery(conversationId, episode, 'assistant-error', 0, now)) {
+    // How many turns this chat will have finished once the broken turn is over. The turn that
+    // just failed is still open here - its own end is the very next one to arrive - so counting
+    // only the ends already in hand would have the failure retire its own repair a few seconds
+    // later. Counting the open turn as spent makes the next end after it the first that means
+    // anything: a turn the chat actually got through, which is the one fact that says the page
+    // recovered without help.
+    const live = liveConversations().find((entry) => entry.conversationId === conversationId);
+    const endedTurns = (live?.endedTurns ?? 0) + (live?.activeTurnId ? 1 : 0);
+    if (queueBrowserRecovery(conversationId, episode, 'assistant-error', endedTurns, now)) {
       logInfo(`bridge: assistant transport failure — asking the browser to recover ${conversationId}`);
     }
     break;
@@ -3823,15 +3855,13 @@ function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
   let queued = false;
   const spent: string[] = [];
   const openTurn = new Map(liveConversations().map((entry) => [entry.conversationId, entry.activeTurnId]));
-  for (const [conversationId, until] of activeUntil) {
-    if (until > now) continue;
-    // The grant belongs to an open turn and to nothing else, so the recorder's own open turn is
-    // what decides this - never the ledger's clock alone. Two things stamp the ledger for a chat
-    // that has already finished: an attributed call whose request id was proved after its own
-    // `turn_end` (the recorder may spend REQUEST_ID_GRACE_MS on that join), and a reload whose
-    // recovered final answer closed the turn from a message rather than from a page `turn_end`.
-    // Acting on either reloads a completed answer two minutes after the user already had it.
-    if (!openTurn.get(conversationId)) {
+  for (const [conversationId, grant] of activeUntil) {
+    if (grant.until > now) continue;
+    // Normally the recorder's open turn is the eligibility fence, never the clock alone. The
+    // explicit exception is a call after an uncertain local end: the page lost lifecycle while
+    // the model demonstrably continued. A late attribution after `completed`/`stopped`, or a
+    // recovered stable final answer, carries no such authority and is forgotten here.
+    if (!openTurn.get(conversationId) && !grant.recoverWithoutOpenTurn) {
       forgetActivity(conversationId);
       // The episode is over with the turn it was about; an unattributed/no-tab repair for the
       // same chat is a different question and keeps its own lifecycle.
@@ -3844,9 +3874,9 @@ function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
       continue;
     }
     if (held) continue;
-    if (queueBrowserRecovery(conversationId, `silence:${until}`, 'silence', 0, now)) {
+    if (queueBrowserRecovery(conversationId, `silence:${grant.until}`, 'silence', 0, now)) {
       queued = true;
-      logInfo(`bridge: open chat silent for two minutes — asking the browser to reload ${conversationId} once`);
+      logInfo(`bridge: active chat silent for two minutes — asking the browser to reload ${conversationId} once`);
     }
   }
   return { queued, spent };
@@ -3885,7 +3915,7 @@ function repairCandidates(now = Date.now()): Array<{ conversationId: string; end
   // but not yet judged, which left that repair in flight forever and never released its slot.
   const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
   return [...activeUntil]
-    .filter(([, until]) => until > now)
+    .filter(([, grant]) => grant.until > now)
     .map(([conversationId]) => ({
       conversationId,
       endedTurns: live.get(conversationId)?.endedTurns ?? 0
@@ -3919,7 +3949,9 @@ function repairCandidates(now = Date.now()): Array<{ conversationId: string; end
 function retireSpentRepairs(): void {
   const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
   for (const [conversationId, repair] of repairsInFlight) {
-    if (repair.reason !== 'unattributed') continue;
+    // Both turn-scoped reasons, and only those. `silence` and `no-tab` are about a chat rather
+    // than a turn, and keep the activity-driven lifecycle above.
+    if (repair.reason !== 'unattributed' && repair.reason !== 'assistant-error') continue;
     const entry = live.get(conversationId);
     if (entry && entry.endedTurns > repair.endedTurns) repairsInFlight.delete(conversationId);
   }
@@ -3941,10 +3973,25 @@ function retireSpentRepairs(): void {
  */
 function noteCallAttribution(conversationId: string | null): void {
   if (conversationId) {
-    grantActivity(conversationId);
+    const live = liveConversations().find((entry) => entry.conversationId === conversationId);
+    const recoverWithoutOpenTurn =
+      !live?.activeTurnId &&
+      live?.lastTurnOutcome !== null &&
+      live?.lastTurnOutcome !== undefined &&
+      live.lastTurnOutcome !== 'completed' &&
+      live.lastTurnOutcome !== 'stopped';
+    grantActivity(conversationId, Date.now(), recoverWithoutOpenTurn);
     noteRecoveryActivity(conversationId);
     unattributedIncident?.proven.add(conversationId);
-    repairsInFlight.delete(conversationId);
+    // Scoped to the repair this fact is evidence about. An attributed call proves the request-id
+    // join, which is the whole of what an `unattributed` repair exists to restore. It proves
+    // nothing about the answer stream a page lost, and the live trace is why that distinction is
+    // load-bearing: fifteen attributed calls arrived while the page sat on "Connection
+    // interrupted. Waiting for the complete answer", each one deleting the reload that notice had
+    // just asked for. That repair is retired by its own turn ending - see `retireSpentRepairs`.
+    if (repairsInFlight.get(conversationId)?.reason !== 'assistant-error') {
+      repairsInFlight.delete(conversationId);
+    }
     return;
   }
   if (unattributedIncident) return;

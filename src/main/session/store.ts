@@ -240,6 +240,7 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     events: 0,
     userMessages: 0,
     toolCalls: 0,
+    lastToolCallAt: null,
     processExitNonzero: 0,
     toolRejected: 0,
     toolInternalErrors: 0,
@@ -622,6 +623,7 @@ async function rebuildSummaryFromHistory(
         events: rebuilt.events,
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
+        lastToolCallAt: rebuilt.lastToolCallAt,
         processExitNonzero: rebuilt.processExitNonzero,
         toolRejected: rebuilt.toolRejected,
         toolInternalErrors: rebuilt.toolInternalErrors,
@@ -671,9 +673,11 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     }
     if (checkpoint && historySeq === 0) {
       // Nothing to replay: stamp the empty legacy projection in place.
-      const summary = checkpoint.outcomeCountersMissing
-        ? { ...checkpoint.summary, errors: 0 }
-        : checkpoint.summary;
+      const summary = {
+        ...checkpoint.summary,
+        ...(checkpoint.outcomeCountersMissing ? { errors: 0 } : {}),
+        lastToolCallAt: null
+      };
       await writeSummary(summary, 0);
       return { summary, messages, historySeq: 0, reconciled: true };
     }
@@ -754,6 +758,7 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'user_message') summary.userMessages += 1;
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
+    summary.lastToolCallAt = Math.max(summary.lastToolCallAt ?? 0, event.time);
     const outcome = normalizedToolOutcome(event.call);
     if (outcome === 'process_exit_nonzero') summary.processExitNonzero += 1;
     if (outcome === 'tool_rejected') summary.toolRejected += 1;
@@ -901,6 +906,10 @@ export function upsertMessageEvent(
               // `final` is a compatibility mirror of state, not an independent truth.
               state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
               final: event.state === 'final' || event.final === true,
+              // Goal eligibility is an accepted fact about this stable reply, not a property a
+              // later sparse page snapshot may retract. This is what makes a 503/reload replay
+              // re-offer the same durable obligation instead of silently dropping it.
+              ...(previous.goalEligible === true ? { goalEligible: true } : {}),
               // A sparse re-observation of the same prose must not throw away the richer
               // representation we already captured. If the prose itself changed, omitting
               // HTML deliberately falls back to the new plain text instead of showing stale
@@ -1263,6 +1272,7 @@ export async function rewriteUnattributedToolCalls(
       events: 0,
       userMessages: 0,
       toolCalls: 0,
+      lastToolCallAt: null,
       processExitNonzero: 0,
       toolRejected: 0,
       toolInternalErrors: 0,
@@ -1319,6 +1329,12 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         processExitNonzero: publicSummary.processExitNonzero ?? 0,
         toolRejected: publicSummary.toolRejected ?? 0,
         toolInternalErrors: publicSummary.toolInternalErrors ?? 0,
+        // A three-minute display clock is not worth replaying every legacy session during the
+        // attachment-catalog scan. The next real tool call sets the exact value immediately.
+        lastToolCallAt:
+          typeof publicSummary.lastToolCallAt === 'number' && Number.isFinite(publicSummary.lastToolCallAt)
+            ? publicSummary.lastToolCallAt
+            : null,
         agents: Array.isArray(publicSummary.agents) ? publicSummary.agents : [],
         origin: publicSummary.origin ?? null,
         chatIds: Array.isArray(publicSummary.chatIds)

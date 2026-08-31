@@ -4449,10 +4449,12 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(ends).toHaveLength(1);
     expect(ends[0]!.outcome).toBe('failed');
     expect(ends[0]!.detail).toBe('Message delivery timed out. Please try again.');
+    // Announced above the thread rather than inside the turn, and recoverable all the same:
+    // the wording is the classifier, and the live generation above named the turn.
     expect(emitted(live.sent, 'chat_error').map((entry) => entry.event)).toContainEqual(
       expect.objectContaining({
         text: 'Message delivery timed out. Please try again.',
-        recoverable: false
+        recoverable: true
       })
     );
   });
@@ -5278,6 +5280,48 @@ describe('how a turn is recorded as having ended', () => {
     await settle();
 
     expect(emitted(live.sent, 'chat_error').map((entry) => entry.event.text)).toEqual(['Something went wrong.']);
+  });
+
+  /**
+   * The banner that could not name its own turn, and the reload it was refused.
+   *
+   * A send that dies before the model answers has no assistant turn to render into, so
+   * ChatGPT announces "Message delivery timed out" in a live region above the whole thread.
+   * That shape was recorded but marked unrecoverable, and the app's reload authority requires
+   * both a recognised failure and a turn - so the chat was recorded as failed and then left
+   * sitting on the error. The wording is what makes it recoverable; the page's own live
+   * generation is what names the turn.
+   */
+  it('gives a transport failure announced above the thread the turn it broke', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-1', []);
+    live.hook.observe();
+    await settle();
+    alertBanner(live.document, 'Message delivery timed out. Please try again.');
+    live.hook.observe();
+    await settle();
+
+    const [failure] = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    const [started] = emitted(live.sent, 'turn_start').map((entry) => entry.event);
+    expect(failure.recoverable).toBe(true);
+    expect(failure.turnId).toBe(started.turnId);
+  });
+
+  /** An announcement the classifier does not recognise stays evidence and nothing more. */
+  it('does not let an unrecognised announcement authorize a reload', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-1', []);
+    live.hook.observe();
+    await settle();
+    alertBanner(live.document, 'Conversation moved to the archive.');
+    live.hook.observe();
+    await settle();
+
+    const [failure] = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    expect(failure.text).toBe('Conversation moved to the archive.');
+    expect(failure.recoverable).not.toBe(true);
   });
 
   it('still reports one rendered occurrence only once, however often it is observed', async () => {

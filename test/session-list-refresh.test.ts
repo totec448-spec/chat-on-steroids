@@ -106,6 +106,7 @@ function summary(id: string, updatedAt: number, events: number): SessionSummary 
     events,
     userMessages: 0,
     toolCalls: 0,
+    lastToolCallAt: null,
     processExitNonzero: 0,
     toolRejected: 0,
     toolInternalErrors: 0,

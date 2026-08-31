@@ -385,6 +385,8 @@ export interface SessionSummary {
   events: number;
   userMessages: number;
   toolCalls: number;
+  /** Start time of the newest exact attributed tool call, independent of later page noise. */
+  lastToolCallAt: number | null;
   processExitNonzero: number;
   toolRejected: number;
   /** Connector/tool implementation failures; the tool reliability numerator. */
