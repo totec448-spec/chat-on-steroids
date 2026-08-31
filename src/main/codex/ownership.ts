@@ -15,6 +15,10 @@
 
 import { requestCorrelation } from '../session/correlation.js';
 import { unifiedExecManager } from './manager.js';
+import type { BackgroundExecState } from './unified-exec.js';
+
+/** Prevent one caller from indefinitely postponing already-completed command results. */
+export const MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION = 4;
 
 /** Owners, keyed by the process id `exec_command` handed back as `session_id`. */
 const owners = new Map<number, string | null>();
@@ -54,10 +58,15 @@ export function execOwner(processId: number): string | null {
   return owners.get(processId) ?? null;
 }
 
+/** One caller-scoped projection used by reminders, admission and runtime status. */
+export function backgroundExecObligations(conversationId: string | null | undefined): BackgroundExecState {
+  if (!conversationId) return { running: [], exitedUnread: [] };
+  return unifiedExecManager.backgroundState(processIdsOwnedBy(conversationId));
+}
+
 /** Same-conversation reminders for exited sessions that have not been polled yet. */
 export function backgroundExecRecoveryNotices(conversationId: string | null | undefined): string[] {
-  if (!conversationId) return [];
-  const exited = unifiedExecManager.exitedUnread(processIdsOwnedBy(conversationId));
+  const exited = backgroundExecObligations(conversationId).exitedUnread;
   if (exited.length === 0) return [];
   const notices = exited
     .slice(0, 3)

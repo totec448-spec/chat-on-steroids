@@ -48,8 +48,10 @@ import { composeCommandBatch, parseCommandBatchSections } from '../codex/command
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
 import { DEFAULT_TRUNCATION_POLICY, EXEC_OUTPUT_CEILING_POLICY, unifiedExecManager } from '../codex/manager.js';
 import {
+  backgroundExecObligations,
   execOwnershipDenied,
   forgetExecOwner,
+  MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
   noteExecOwner,
   provenConversation
 } from '../codex/ownership.js';
@@ -216,6 +218,19 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
     logInfo(`exec_command: filled in unset toolchain variables (${added.join(', ')})`);
   }
   return applyUnifiedExecEnv(env);
+}
+
+/** Resolve the exact caller once so exec admission and later ownership cannot disagree. */
+async function execConversation(tool: 'exec_command' | 'write_stdin'): Promise<string | null> {
+  let conversationId = provenConversation(currentCaller().requestId, currentCaller().conversationId);
+  const call = currentCall();
+  if (!conversationId && call?.caller.requestId) {
+    conversationId = await awaitFreshCallOrigin(tool, call.startedAt, IDENTITY_EVIDENCE_MS, {
+      requestId: call.caller.requestId
+    });
+    if (conversationId) call.caller.conversationId = conversationId;
+  }
+  return conversationId;
 }
 
 export function registerCoreTools(reg: SurfaceRegistrar): void {
@@ -709,16 +724,6 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // but make the deterministic/no-profile path the Windows default.
           const useLoginShell = input.login ?? process.platform !== 'win32';
           const command = deriveExecArgs(shell, boundCommand, useLoginShell);
-          const processId = unifiedExecManager.allocateProcessId();
-          // Process ids are deliberately small/reusable, while chat ownership lives in a
-          // separate registry from the Codex process manager. An exited session may be
-          // evicted by the manager without passing through write_stdin, so its old owner row
-          // can outlive the reservation. Clear that row at the *new allocation boundary*,
-          // before the child is inserted into the manager. Otherwise a recycled numeric id
-          // briefly authorizes the old chat to write/interrupt the new chat's process during
-          // this exec_command's initial yield, before noteExecOwner below publishes the new
-          // owner. No caller should own a brand-new id until this call actually returns it.
-          forgetExecOwner(processId);
           try {
             // Current Codex intercepts an explicit `apply_patch` shell invocation before spawning
             // the shell process. The parser is the port of apply-patch/src/invocation.rs and uses
@@ -726,38 +731,49 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             if (!isBatch) {
               const interceptedPatch = maybeParseApplyPatchForExec(command, dir.real);
               if (interceptedPatch.kind === 'correctness_error') {
-                unifiedExecManager.releaseProcessId(processId);
                 return fail(`apply_patch verification failed: ${interceptedPatch.error.message}`);
               }
               if (interceptedPatch.kind === 'body') {
-                try {
-                  const patchRun = await runParsedPatch(interceptedPatch.args, ctx.roots, dir);
-                  if (patchRun.result.isError || patchRun.content === null) return patchRun.result;
+                const patchRun = await runParsedPatch(interceptedPatch.args, ctx.roots, dir);
+                if (patchRun.result.isError || patchRun.content === null) return patchRun.result;
 
-                  // `exec_command.rs` converts a successful intercepted patch into an
-                  // ExecCommandToolOutput with zero wall time and no process/exit/chunk metadata.
-                  const output: ExecCommandToolOutput = {
-                    chunkId: '',
-                    wallTimeMs: 0,
-                    rawOutput: Buffer.from(patchRun.content, 'utf8'),
-                    truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
-                    maxOutputTokens: undefined,
-                    processId: null,
-                    exitCode: null,
-                    originalTokenCount: null,
-                    outputOmittedBytes: null
-                  };
-                  noteExec({ running: false, exitCode: null, timedOut: false, durationMs: 0 });
-                  noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
-                  return {
-                    content: [{ type: 'text' as const, text: execCommandResponseText(output) }],
-                    structuredContent: execCommandStructuredOutput(output)
-                  };
-                } finally {
-                  unifiedExecManager.releaseProcessId(processId);
-                }
+                // `exec_command.rs` converts a successful intercepted patch into an
+                // ExecCommandToolOutput with zero wall time and no process/exit/chunk metadata.
+                const output: ExecCommandToolOutput = {
+                  chunkId: '',
+                  wallTimeMs: 0,
+                  rawOutput: Buffer.from(patchRun.content, 'utf8'),
+                  truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
+                  maxOutputTokens: undefined,
+                  processId: null,
+                  exitCode: null,
+                  originalTokenCount: null,
+                  outputOmittedBytes: null
+                };
+                noteExec({ running: false, exitCode: null, timedOut: false, durationMs: 0 });
+                noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
+                return {
+                  content: [{ type: 'text' as const, text: execCommandResponseText(output) }],
+                  structuredContent: execCommandStructuredOutput(output)
+                };
               }
             }
+
+            const owner = await execConversation('exec_command');
+            const unread = backgroundExecObligations(owner).exitedUnread;
+            if (unread.length >= MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION) {
+              const sessionIds = unread.map((session) => session.processId).join(', ');
+              return fail(
+                `EXEC_RESULTS_UNREAD: ${unread.length} completed background results are still waiting for this conversation. ` +
+                  `Drain session IDs ${sessionIds} with write_stdin before starting another command. No child was spawned.`
+              );
+            }
+
+            const processId = unifiedExecManager.allocateProcessId();
+            // Process ids are deliberately small/reusable, while chat ownership lives in a
+            // separate registry. Clear any stale row at the allocation boundary so a recycled
+            // id cannot briefly authorize its previous chat before this call publishes the new owner.
+            forgetExecOwner(processId);
 
             const output = await unifiedExecManager.execCommand({
               command,
@@ -777,14 +793,6 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             if (output.processId === null) {
               forgetExecOwner(processId);
             } else {
-              let owner = provenConversation(currentCaller().requestId, currentCaller().conversationId);
-              const call = currentCall();
-              if (!owner && call?.caller.requestId) {
-                owner = await awaitFreshCallOrigin('exec_command', call.startedAt, IDENTITY_EVIDENCE_MS, {
-                  requestId: call.caller.requestId
-                });
-                if (owner) call.caller.conversationId = owner;
-              }
               noteExecOwner(output.processId, owner);
             }
             const responseText = execCommandResponseText(output);
@@ -869,14 +877,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // A session id is a small integer that means nothing outside the chat that was given
           // it, and every chat reaches the same manager here. Refuse only what is proven to
           // belong elsewhere; an unproven caller keeps working exactly as before.
-          let asking = provenConversation(currentCaller().requestId, currentCaller().conversationId);
-          const call = currentCall();
-          if (!asking && call?.caller.requestId) {
-            asking = await awaitFreshCallOrigin('write_stdin', call.startedAt, IDENTITY_EVIDENCE_MS, {
-              requestId: call.caller.requestId
-            });
-            if (asking) call.caller.conversationId = asking;
-          }
+          const asking = await execConversation('write_stdin');
           if (execOwnershipDenied(input.session_id, asking)) {
             return fail(
               `write_stdin failed: session ${input.session_id} is not proven to belong to this ChatGPT conversation. Start your own with exec_command or retry after the extension reconnects.`
@@ -908,7 +909,11 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             };
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            return fail(`write_stdin failed: ${message}`);
+            const retry =
+              error instanceof UnifiedExecError && error.kind === 'write_to_stdin'
+                ? ` Retry this same session_id (${input.session_id}); do not replace it with a new command.`
+                : '';
+            return fail(`write_stdin failed: ${message}${retry}`);
           }
         })
     );

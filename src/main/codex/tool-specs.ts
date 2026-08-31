@@ -27,8 +27,8 @@ export const WINDOWS_SHELL_GUIDANCE = `Windows safety rules:
 - When using \`Start-Process\` to launch a background helper or service, pass \`-WindowStyle Hidden\` unless the user explicitly asked for a visible interactive window. Use visible windows only for interactive tools the user needs to see or control.`;
 
 export const EXEC_COMMAND_DESCRIPTION = IS_WINDOWS
-  ? `Runs a command in a PTY, returning output or a session ID for ongoing interaction.\n\n${WINDOWS_SHELL_GUIDANCE}`
-  : 'Runs a command in a PTY, returning output or a session ID for ongoing interaction.';
+  ? `Runs a command in a PTY, returning output or a session ID for ongoing interaction. Every returned session ID must be polled with write_stdin until its terminal result is returned.\n\n${WINDOWS_SHELL_GUIDANCE}`
+  : 'Runs a command in a PTY, returning output or a session ID for ongoing interaction. Every returned session ID must be polled with write_stdin until its terminal result is returned.';
 
 /**
  * Codex's text is 'Shell command to execute.'; two measured additions.
@@ -81,7 +81,7 @@ export const EXEC_COMMAND_LOGIN_DESCRIPTION =
     : 'True runs the shell with -l/-i semantics; false disables them. Defaults to true.';
 
 export const WRITE_STDIN_DESCRIPTION =
-  'Writes characters to an existing unified exec session and returns recent output.';
+  'Writes characters to an existing unified exec session and returns recent output. Keep polling a returned session ID until its terminal result; after a transient wait failure, retry this same session ID rather than starting replacement work.';
 
 export const WRITE_STDIN_SESSION_ID_DESCRIPTION = 'Identifier of the running unified exec session.';
 
