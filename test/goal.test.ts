@@ -1671,6 +1671,56 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalPendingReplyFor('c-owed-until-typed')).toBeNull();
   });
 
+  /**
+   * A chat with no answer of its own follows the app's, and one with an answer keeps it.
+   *
+   * That inheritance is the whole design. Nothing anyone has ever opened changes behaviour on
+   * upgrade, the app-wide switch stays the default every new chat starts from, and a chat that
+   * has been told "not you" cannot be talked back into it by a later change somewhere else.
+   */
+  it('lets one chat answer the Goal switch for itself, and leaves the rest inheriting', async () => {
+    expect(goal.goalSwitchFor('c-switch-quiet')).toEqual({ enabled: true, mode: 'goal', own: false });
+
+    expect(await goal.setGoalSwitchNow('c-switch-loud', 'loop', true)).toEqual({ enabled: true, mode: 'loop' });
+    expect(goal.goalSwitchFor('c-switch-loud')).toEqual({ enabled: true, mode: 'loop', own: true });
+    expect(goal.goalDrivingMode('c-switch-loud')).toBe('loop');
+    // Its neighbour, and the app-wide setting the neighbour still follows, are untouched.
+    expect(goal.goalSwitchFor('c-switch-quiet')).toEqual({ enabled: true, mode: 'goal', own: false });
+    expect(goal.goalDrivingMode('c-switch-quiet')).toBe('goal');
+
+    // Turning off the mode that is *not* running changes nothing, exactly as the app-wide
+    // switch behaves: the two controls are one setting, and only the running one can be shut.
+    expect(await goal.setGoalSwitchNow('c-switch-loud', 'goal', false)).toEqual({ enabled: true, mode: 'loop' });
+    expect(await goal.setGoalSwitchNow('c-switch-loud', 'loop', false)).toEqual({ enabled: false, mode: 'loop' });
+    // Off stays off here while every other chat carries on — the thing the app-wide switch
+    // could never do, and the way an old chat is retired when it pops up again.
+    expect(goal.goalSwitchEnabledFor('c-switch-loud')).toBe(false);
+    expect(goal.goalSwitchEnabledFor('c-switch-quiet')).toBe(true);
+
+    // Mode survives being switched off, so turning Loop back on gives Loop back.
+    expect(await goal.setGoalSwitchNow('c-switch-loud', 'loop', true)).toEqual({ enabled: true, mode: 'loop' });
+  });
+
+  it('carries one chat\'s switch across a snapshot, a restore and a resume', async () => {
+    await goal.setGoalSwitchNow('c-switch-parent', 'loop', true);
+    const saved = goal.snapshotGoalSwitches();
+    goal.restoreGoalSwitches(null);
+    expect(goal.goalSwitchFor('c-switch-parent').own).toBe(false);
+
+    goal.restoreGoalSwitches(saved);
+    expect(goal.goalSwitchFor('c-switch-parent')).toEqual({ enabled: true, mode: 'loop', own: true });
+
+    // Compact & Resume replaces the conversation and the loop goes on running in its
+    // replacement; leaving the override behind would hand chat B back to the app-wide setting.
+    expect(goal.moveGoalSwitch('c-switch-parent', 'c-switch-child')).toBe(true);
+    expect(goal.goalSwitchFor('c-switch-parent').own).toBe(false);
+    expect(goal.goalSwitchFor('c-switch-child')).toEqual({ enabled: true, mode: 'loop', own: true });
+
+    // The app's own switch going off is the master stop and reaches every override there is.
+    goal.clearAllGoalSwitches();
+    expect(goal.goalSwitchFor('c-switch-child').own).toBe(false);
+  });
+
   it('moves the same objective to the replacement chat on resume', () => {
     goal.setGoalObjective('c-obj-parent', 'finish the release unattended');
 

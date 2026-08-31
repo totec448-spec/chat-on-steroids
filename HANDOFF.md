@@ -361,8 +361,9 @@ means anything if "first" is first in time; `listAllSessions()` returns newest-f
 
 `src/main/update.ts` is the one owner: GitHub releases API, `SHA256SUMS.txt` verified while the
 asset streams, `.part` renamed to the final file only on a digest match, NSIS `/S` per-user
-install on Windows and an AppImage self-replace by rename. DEB and macOS are deliberately manual
-(`latest` is reported, `stage` stays `idle`). `isNewer()` lives in `src/shared/types.ts` so main
+install on Windows and an AppImage self-replace by rename. DEB, macOS and any unpackaged run are
+deliberately manual (`latest` is reported, `stage` stays `idle`). The pass repeats every six
+hours, and `checkedAt` is what lets the UI say "up to date" rather than "nothing checked yet". `isNewer()` lives in `src/shared/types.ts` so main
 and renderer compare versions the same way, and the renderer only asks the user to reload the
 extension when the extension is *older* than the app. Regressions in `test/update.test.ts` and
 `test/renderer-state.test.ts`.

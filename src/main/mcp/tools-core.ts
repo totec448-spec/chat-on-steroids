@@ -52,6 +52,7 @@ import {
   execOwnershipDenied,
   forgetExecOwner,
   MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
+  noteExecAttended,
   noteExecOwner,
   provenConversation
 } from '../codex/ownership.js';
@@ -236,11 +237,19 @@ async function execConversation(tool: 'exec_command' | 'write_stdin'): Promise<s
 export function registerCoreTools(reg: SurfaceRegistrar): void {
   const { ctx, caps, exposedCaps } = reg;
   // Named from the live roots, never from a `/project` that may not exist: a worked example the
-  // model cannot act on costs a refused call and a retry.
+  // model cannot act on costs a refused call and a retry. What followed the root had the same
+  // problem and cost more of them. `/<root>/src/main.ts` is a project's shape, so it read as a
+  // promise that the root *is* the project — and an approved root is a folder somebody picked,
+  // routinely a parent holding several. Reading it that way turns every repo-relative path into
+  // `/<root>/AGENTS.md` for a file that lives a folder deeper, which was the single most
+  // repeated read failure in the recorded corpus. The relationship is the fact worth the bytes;
+  // the rest of the path the model already has, because it is the one it gives exec_command as
+  // `workdir`. No example is invented here, and the host path stays unsaid, so nothing in this
+  // sentence can be stale or unreachable.
   const virtualRoots = ctx.roots.map((root) => `/${root.name}`);
   const readPathDescription =
     virtualRoots.length > 0
-      ? `Paths inside the live approved roots: ${virtualRoots.join(', ')}. Example: ${virtualRoots[0]}/src/main.ts. ` +
+      ? `Paths inside the live approved roots: ${virtualRoots.join(', ')}. A root is an approved folder, usually a parent of the project rather than the project itself, so name every folder between the root and the file — the same path exec_command takes as workdir. Reading a root lists it one level deep. ` +
         'Absolute native paths copied from command output are also accepted when they resolve inside one of these roots; globs work in either spelling.'
       : 'Paths require an approved virtual root in the form /<root>/...; no root is currently approved. Globs are supported after a root is approved.';
 
@@ -883,6 +892,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               `write_stdin failed: session ${input.session_id} is not proven to belong to this ChatGPT conversation. Start your own with exec_command or retry after the extension reconnects.`
             );
           }
+          // Both sides of the wait. An empty poll blocks for seconds by design, and a caller
+          // sitting in one is attending its session rather than neglecting it.
+          noteExecAttended(input.session_id);
           try {
             const output = await unifiedExecManager.writeStdin({
               processId: input.session_id,
@@ -892,6 +904,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY
             });
             if (output.processId === null) forgetExecOwner(input.session_id);
+            else noteExecAttended(input.session_id);
             noteExec({
               ...(output.processId === null ? {} : { id: String(output.processId) }),
               running: output.processId !== null,

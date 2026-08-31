@@ -518,30 +518,59 @@ function pipelineStopCandidate(command: string): Token | null {
 }
 
 /**
- * Whether a cut pipeline's generator is a git command with no second reason to exit non-zero.
+ * The subcommand a `git …` generator names, when the generator is git and the name is usable.
  *
  * The subcommand must be the token straight after `git`. `git -C dir diff` reads the same to a
  * person and is refused here, because proving which token is the subcommand means knowing which
  * of git's own options take a value, and being wrong about that is how `git -c x=y --exit-code`
  * would slip through. Withholding the exemption from a form nobody recorded costs nothing.
  *
+ * Null when a predicate flag is present, because exit 1 is then the answer the caller asked for
+ * rather than an absence of output, and no caller of this may treat it as one.
+ *
  * Command-name lookup cannot be intercepted on this surface: exec.ts launches every exec_command
  * through `powershell -NoProfile`, so unlike the bare `rg` case there is no profile function that
  * could be answering to the name `git`.
  */
+function gitGeneratorSubcommand(command: string): string | null {
+  const statements = splitTopLevel(command, [';', '\n']);
+  const last = statements[statements.length - 1];
+  if (last === undefined) return null;
+  const generator = splitTopLevel(last, ['|'])[0];
+  if (generator === undefined) return null;
+  const tokens = tokenize(generator);
+  if (programName(tokens[0]) !== 'git') return null;
+  const subcommand = tokens[1];
+  if (subcommand === undefined) return null;
+  if (tokens.some((argument) => GIT_FLAGS_THAT_MAKE_THE_EXIT_MEAN_SOMETHING.test(argument.value))) return null;
+  return subcommand.value.toLowerCase();
+}
+
+/** Whether a cut pipeline's generator is a git command with no second reason to exit non-zero. */
 function cutPipelineGeneratorOnlyReports(command: string): boolean {
   const token = pipelineStopCandidate(command);
   if (token === null) return false;
   if (programName(token) !== 'git') return cutPipelineGeneratorIsProvenSearch(token);
+  const subcommand = gitGeneratorSubcommand(command);
+  return subcommand !== null && GIT_SUBCOMMANDS_THAT_ONLY_REPORT.has(subcommand);
+}
+
+/**
+ * Whether the first pipeline stage is the one whose status the shell reported.
+ *
+ * `statusDeterminingToken` walks in from the right and stops at the first stage that could
+ * have set the status itself, so a generator only decides when everything after it is one of
+ * PowerShell's own passive shapes. Asking this separately is what keeps a git-subcommand read
+ * off the generator honest: without it, `git grep foo | git diff --exit-code` would have its
+ * predicate failure filed as a search that found nothing.
+ */
+function generatorDecidesStatus(command: string): boolean {
   const statements = splitTopLevel(command, [';', '\n']);
-  const last = statements[statements.length - 1] as string;
-  const generator = splitTopLevel(last, ['|'])[0] as string;
-  const tokens = tokenize(generator);
-  const subcommand = tokens[1];
-  if (subcommand === undefined || !GIT_SUBCOMMANDS_THAT_ONLY_REPORT.has(subcommand.value.toLowerCase())) {
-    return false;
-  }
-  return !tokens.some((argument) => GIT_FLAGS_THAT_MAKE_THE_EXIT_MEAN_SOMETHING.test(argument.value));
+  const last = statements[statements.length - 1];
+  if (last === undefined) return false;
+  return splitTopLevel(last, ['|'])
+    .slice(1)
+    .every((segment) => stageIsPassive(segment.trim()));
 }
 
 /** A path-proven search generator whose own failures are visible in its output. */
@@ -604,6 +633,19 @@ export function nonZeroExitIsBenign(
   if (exitCode !== 1) return false;
   const token = statusDeterminingToken(command);
   const program = programName(token ?? undefined);
+  // `git grep` spends exit 1 on "found nothing" for the same reason ripgrep does, and is the
+  // spelling a model reaches for once it is already running git. It needs no path-qualified
+  // form to prove itself: `powershell -NoProfile` leaves no way for a profile function to be
+  // answering to the name `git`. It does need to be the stage that decided the status, and to
+  // have printed no diagnostic of its own — a bad pathspec is `fatal:` and exit 128, so this
+  // withholds nothing git actually produces, and costs nothing if git ever changes its mind.
+  if (program === 'git') {
+    return (
+      gitGeneratorSubcommand(command) === 'grep' &&
+      generatorDecidesStatus(command) &&
+      !/^\s*(?:fatal|error):/im.test(outputText)
+    );
+  }
   if (!NO_MATCH_MEANS_EXIT_1.has(program)) return false;
   // A bare command name is not proof of which implementation ran. PowerShell profiles can
   // define functions/aliases named `rg` and even `rg.exe`; cmd.exe searches the current
@@ -986,7 +1028,11 @@ export function benignExitNote(
       'to the end.'
     );
   }
-  const program = statusDeterminingProgram(command);
+  // Name the search the caller actually wrote. `git grep` decides its status as `git`, and a
+  // note reading "exit code 1 from `git`" would generalise to the git commands where 1 means
+  // something else entirely — which is the belief this note exists to prevent, not to spread.
+  const deciding = statusDeterminingProgram(command);
+  const program = deciding === 'git' ? `git ${gitGeneratorSubcommand(command) ?? ''}`.trim() : deciding;
   if (shellType !== 'powershell') {
     return (
       `Exit code 1 from \`${program}\` is a result, not a failure: this search program uses it ` +
@@ -1103,6 +1149,19 @@ function quoteArgument(value: string): string {
 }
 
 /**
+ * The expanded names, as a note can carry them.
+ *
+ * Naming them is what lets the caller check what the search actually ran against, and a
+ * hundred filenames on one line is not checkable — so past a dozen the note gives the count
+ * and the head. Only the note is shortened; the command received every name.
+ */
+const NAMES_SHOWN_IN_NOTE = 12;
+function listExpandedNames(names: readonly string[]): string {
+  if (names.length <= NAMES_SHOWN_IN_NOTE) return names.join(', ');
+  return `${names.slice(0, NAMES_SHOWN_IN_NOTE).join(', ')} … and ${names.length - NAMES_SHOWN_IN_NOTE} more`;
+}
+
+/**
  * One brace group of plain alternatives, e.g. `src/{main,test}/x`.
  *
  * Deliberately one group and nothing clever inside it. A brace group is also PowerShell's
@@ -1146,10 +1205,14 @@ function expandBraces(token: Token): string[] | null {
 /**
  * The most names one glob may turn into.
  *
- * A command line has a length limit and a wall of filenames is unreadable in a log. Past
- * this, failing with the hint beats a line nobody can check.
+ * The bound is the command line's length limit, and 48 was well under it: a test directory of
+ * 71 files made `test/*.test.ts` fall past this, and what the caller then got was not the hint
+ * but ripgrep's `os error 123` on a literal asterisk — the exact failure this expansion exists
+ * to remove. 128 quoted relative paths is a few KB against PowerShell's ~32 KB, so the limit
+ * now sits where the real constraint is rather than ahead of it. The wall-of-filenames problem
+ * was the *note's*, and `listExpandedNames` is where that belongs.
  */
-const MAX_EXPANDED_NAMES = 48;
+const MAX_EXPANDED_NAMES = 128;
 
 /** Lists one validated relative directory's immediate entry names for glob expansion. */
 export type DirectoryLister = (relativeDirectory?: string) => readonly string[];
@@ -1253,7 +1316,7 @@ function normalizeRipgrepSegment(
       out.push(...braced.map(quoteArgument));
       notes.push(
         `PowerShell has no brace expansion, so \`${token.value}\` reached ripgrep as one literal name. ` +
-          `It was expanded here to the ${braced.length} paths bash would have produced: ${braced.join(', ')}.`
+          `It was expanded here to the ${braced.length} paths bash would have produced: ${listExpandedNames(braced)}.`
       );
       continue;
     }
@@ -1264,7 +1327,7 @@ function normalizeRipgrepSegment(
         `PowerShell does not expand globs for native programs, so \`${token.value}\` was expanded here to ` +
           `${expanded.hits.length === 1 ? 'the one entry' : `the ${expanded.hits.length} entries`} of the ` +
           `${expanded.directory === '.' ? 'working directory' : `relative directory ${expanded.directory}`} ` +
-          `matching it: ${expanded.hits.join(', ')}. Sub-directories were not searched, exactly as ` +
+          `matching it: ${listExpandedNames(expanded.hits)}. Sub-directories were not searched, exactly as ` +
           `the glob asked; use \`-g '${token.value}'\` if a recursive match was what you meant.`
       );
       continue;

@@ -2346,7 +2346,7 @@ describe('the app-owned chronological stream', () => {
     expect(overwriteText(second)).not.toContain('Read recorder.ts');
   });
 
-  it('reconstructs exact orphan assistant/activity rows after a prematurely recorded turn end', async () => {
+  it('reconstructs exact orphan activity while leaving assistant rendering native', async () => {
     const brokenTurn = 'g-broken-interrupted';
     const brokenActivity = () => ({
       ok: true,
@@ -2379,6 +2379,9 @@ describe('the app-owned chronological stream', () => {
     live = await harness(undefined, { activity: brokenActivity });
     renderingOn();
     const section = assistantTurn(live.document, 'page-broken-interrupted', []);
+    prose(live.document, section, 'site-before-dropout', 'Before the dropout.');
+    prose(live.document, section, 'site-orphan-one', 'Still working after it.');
+    prose(live.document, section, 'site-orphan-two', 'And kept going.');
     await bindFiberTurns([{ section, turn: {
       turnId: 'page-broken-interrupted',
       calls: [{ messageId: 'fiber-broken-call', tool: 'read_file', order: 0, answered: true, requestId: 'wfr-after-broken-end' }],
@@ -2397,13 +2400,13 @@ describe('the app-owned chronological stream', () => {
     );
     expect(rows).toEqual([
       'Turn started',
-      'Before the dropout.',
-      'Still working after it.',
       'Read after the false end',
       'Inspected after the false end',
-      'And kept going.',
       'Turn interrupted'
     ]);
+    expect(section.textContent).toContain('Before the dropout.');
+    expect(section.textContent).toContain('Still working after it.');
+    expect(section.textContent).toContain('And kept going.');
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
   });
 
@@ -2436,10 +2439,8 @@ describe('the app-owned chronological stream', () => {
     await live.hook.pullActivity();
     live.hook.renderStreams();
 
-    const rows = overwriteRows(section, '.clf-stream-assistant_message .clf-stream-text').map((node) =>
-      (node.textContent || '').trim()
-    );
-    expect(rows).toEqual(['First canonical partial.', 'Second canonical partial.']);
+    expect(overwriteRows(section, '.clf-stream-assistant_message')).toEqual([]);
+    expect(native.textContent).toBe('Second canonical partial.');
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
   });
 
@@ -2484,10 +2485,7 @@ describe('the app-owned chronological stream', () => {
 
     expect(overwriteStream(section)).toBe(firstRoot);
     expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(1);
-    expect(overwriteRows(section, '.clf-stream-assistant_message .clf-stream-text').map((node) => node.textContent)).toEqual([
-      'First canonical partial.',
-      'Second canonical partial.'
-    ]);
+    expect(overwriteRows(section, '.clf-stream-assistant_message')).toEqual([]);
   });
 
   it('never hides native assistant prose when the local stream has the tool call but not that message yet', async () => {
@@ -2568,6 +2566,7 @@ describe('the app-owned chronological stream', () => {
     live = await harness(undefined, { activity });
     renderingOn();
     const section = assistantTurn(live.document, 'page-sticky-overwrite', []);
+    prose(live.document, section, 'site-sticky-one', 'First complete local snapshot');
     await bindFiberTurns([{ section, turn: {
       turnId: 'page-sticky-overwrite',
       messages: [{
@@ -2580,7 +2579,7 @@ describe('the app-owned chronological stream', () => {
     await live.hook.pullActivity();
     live.hook.renderStreams();
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
-    expect(overwriteText(section)).toContain('First complete local snapshot');
+    expect(section.textContent).toContain('First complete local snapshot');
 
     await bindFiberTurns([{ section, turn: {
       turnId: 'page-sticky-overwrite',
@@ -2592,7 +2591,7 @@ describe('the app-owned chronological stream', () => {
     live.hook.renderStreams();
 
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
-    expect(overwriteText(section)).toContain('First complete local snapshot');
+    expect(section.textContent).toContain('First complete local snapshot');
   });
 
   it('drops a stale overwrite immediately when Fiber exposes a new exact in-flight call', async () => {
@@ -2799,8 +2798,8 @@ describe('the app-owned chronological stream', () => {
     );
     expect(rows).toEqual(['Turn started', 'Listed approved folders', 'Listed open windows']);
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
-    expect(reasoning.getAttribute('data-clf-native-hidden')).toBeNull();
-    for (const block of blocksOf(section)) expect(block.getAttribute('data-clf-native-hidden')).toBeNull();
+    expect(reasoning.getAttribute('data-clf-native-hidden')).toBe('1');
+    for (const block of blocksOf(section)) expect(block.getAttribute('data-clf-native-hidden')).toBe('1');
   });
 
   it('replaces a recorded ChatGPT-native web row while leaving connector attribution separate', async () => {
@@ -2827,10 +2826,10 @@ describe('the app-owned chronological stream', () => {
 
     expect(overwriteStream(section)?.querySelector('.clf-stream-page_tool')?.textContent).toContain('Searched the web');
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
-    expect(blocksOf(section)[0]!.getAttribute('data-clf-native-hidden')).toBeNull();
+    expect(blocksOf(section)[0]!.getAttribute('data-clf-native-hidden')).toBe('1');
   });
 
-  it('keeps a settled turn app-owned and renders its final assistant message from the app feed', async () => {
+  it('keeps native code/document rendering and response actions while replacing settled activity', async () => {
     const settledActivity = () => ({
       ok: true,
       data: {
@@ -2864,8 +2863,21 @@ describe('the app-owned chronological stream', () => {
     reasoning.textContent = 'Checking the repository';
     const prose = live.document.createElement('div');
     prose.className = 'markdown';
-    prose.textContent = 'Here is the answer.';
-    section.append(reasoning, prose);
+    const pre = live.document.createElement('pre');
+    const code = live.document.createElement('code');
+    code.textContent = 'Here is the answer.';
+    pre.append(code);
+    const codeCopy = live.document.createElement('button');
+    codeCopy.textContent = 'Copy code';
+    let copied = false;
+    codeCopy.addEventListener('click', () => { copied = true; });
+    prose.append(pre, codeCopy);
+    const actions = live.document.createElement('div');
+    actions.setAttribute('aria-label', 'Response actions');
+    const responseCopy = live.document.createElement('button');
+    responseCopy.textContent = 'Copy response';
+    actions.append(responseCopy);
+    section.append(reasoning, prose, actions);
 
     await bindFiberTurns([{ section, turn: {
       turnId,
@@ -2873,10 +2885,13 @@ describe('the app-owned chronological stream', () => {
     } }]);
     live.hook.renderStreams();
     expect(section.getAttribute('data-clf-turn-replaced')).toBe('1');
-    expect(overwriteStream(section)?.querySelector('.clf-stream-assistant_message')?.textContent).toContain('Here is the answer.');
+    expect(overwriteStream(section)?.querySelector('.clf-stream-assistant_message')).toBeNull();
     expect(overwriteStream(section)?.querySelector('.clf-stream-turn_end')?.textContent).toContain('Turn completed');
-    // React's original answer is deliberately still mounted underneath the replacement.
-    expect(prose.textContent).toBe('Here is the answer.');
+    expect(prose.isConnected).toBe(true);
+    expect(code.isConnected).toBe(true);
+    expect(actions.isConnected).toBe(true);
+    codeCopy.click();
+    expect(copied).toBe(true);
   });
 
   it('aligns durable app turns to visible assistant turns after a page reload even when DOM ids differ', async () => {
@@ -2899,6 +2914,8 @@ describe('the app-owned chronological stream', () => {
     renderingOn();
     const first = assistantTurn(live.document, 'request-reused-x', []);
     const second = assistantTurn(live.document, 'request-reused-y', []);
+    prose(live.document, first, 'site-reload-one', 'First answer');
+    prose(live.document, second, 'site-reload-two', 'Second answer');
     await bindFiberTurns([
       { section: first, turn: { turnId: 'request-reused-x', messages: [{ messageId: 'site-reload-one', stable: true, rawText: 'First answer', renderedHtml: '' }] } },
       { section: second, turn: { turnId: 'request-reused-y', messages: [{ messageId: 'site-reload-two', stable: true, rawText: 'Second answer', renderedHtml: '' }] } }
@@ -2906,8 +2923,10 @@ describe('the app-owned chronological stream', () => {
     await live.hook.pullActivity();
     live.hook.renderStreams();
 
-    expect(overwriteStream(first)?.querySelector('.clf-stream-assistant_message')?.textContent).toContain('First answer');
-    expect(overwriteStream(second)?.querySelector('.clf-stream-assistant_message')?.textContent).toContain('Second answer');
+    expect(first.textContent).toContain('First answer');
+    expect(second.textContent).toContain('Second answer');
+    expect(overwriteRows(first, '.clf-stream-assistant_message')).toEqual([]);
+    expect(overwriteRows(second, '.clf-stream-assistant_message')).toEqual([]);
     expect(first.getAttribute('data-clf-turn-replaced')).toBe('1');
     expect(second.getAttribute('data-clf-turn-replaced')).toBe('1');
   });
@@ -3306,13 +3325,14 @@ describe('the app-owned chronological stream', () => {
 
     // Reload recovery is by the stable website message id, never by list position.
     const previous = assistantTurn(live.document, 'request-old', []);
+    prose(live.document, previous, 'site-old-answer', 'Previous answer');
     await bindFiberTurns([{ section: previous, turn: {
       turnId: 'request-old',
       messages: [{ messageId: 'site-old-answer', stable: true, rawText: 'Previous answer', renderedHtml: '' }]
     } }]);
     live.hook.observe();
     live.hook.renderStreams();
-    expect(overwriteStream(previous)?.querySelector('.clf-stream-assistant_message')?.textContent).toContain('Previous answer');
+    expect(previous.textContent).toContain('Previous answer');
 
     // The next user message and assistant section are on screen before /activity has had the
     // round trip needed to return this new turn_start. That gap must never make reload-only
@@ -3326,7 +3346,7 @@ describe('the app-owned chronological stream', () => {
     live.hook.observe();
     live.hook.renderStreams();
 
-    expect(overwriteStream(previous)?.querySelector('.clf-stream-assistant_message')?.textContent).toContain('Previous answer');
+    expect(previous.textContent).toContain('Previous answer');
     expect(overwriteStream(next)).toBeNull();
     expect(next.textContent).not.toContain('Previous answer');
   });
@@ -3379,7 +3399,7 @@ describe('the app-owned chronological stream', () => {
     expect(Boolean(root.compareDocumentPosition(user) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
-  it('keeps an older stream before the user while it updates, then mounts a truly later transcription after that user', async () => {
+  it('keeps an older activity root before the user, then mounts truly later activity after that user', async () => {
     const pageTurnId = 'request-reused-presentation-order';
     let phase: 'old' | 'old-updated' | 'new' = 'old';
     const orderedActivity = () => ({
@@ -3455,7 +3475,6 @@ describe('the app-owned chronological stream', () => {
     live.hook.renderStreams();
 
     expect(overwriteStream(section)).toBe(oldRoot);
-    expect(oldRoot.textContent).toContain('Older answer final transcription');
     expect(Boolean(oldRoot.compareDocumentPosition(user) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
 
     // React now reuses that same native section for the response caused by the newer user turn.
@@ -3473,13 +3492,10 @@ describe('the app-owned chronological stream', () => {
     }]);
     live.hook.renderStreams();
 
-    expect(oldRoot.textContent).toContain('Older answer final transcription');
-    expect(oldRoot.textContent).not.toContain('Truly later assistant transcription');
     expect(Boolean(oldRoot.compareDocumentPosition(user) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     const laterRoot = overwriteStream(section)!;
     expect(laterRoot).toBeTruthy();
     expect(laterRoot).not.toBe(oldRoot);
-    expect(laterRoot.textContent).toContain('Truly later assistant transcription');
     expect(Boolean(user.compareDocumentPosition(laterRoot) & live.window.Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(section.getAttribute('data-clf-stream-key')).not.toBe(oldKey);
   });
@@ -3518,18 +3534,19 @@ describe('the app-owned chronological stream', () => {
     const section = assistantTurn(live.document, turnId, []);
     await bindFiberRequest(section, 'wfr-app-stream');
     live.hook.renderStreams();
-    expect(overwriteStream(section)?.querySelector('.clf-when') ?? null).toBeNull();
+    const root = overwriteStream(section)!;
+    const before = root.dataset.clfSignature;
 
     // A render-signature change stands in for the Fiber/activity changes that arrive while
     // ChatGPT is virtualizing history. No root.replaceChildren is allowed during the gesture.
     live.window.dispatchEvent(new live.window.Event('wheel'));
     live.hook.setShowTimes(true);
     live.hook.renderStreams();
-    expect(overwriteStream(section)?.querySelector('.clf-when') ?? null).toBeNull();
+    expect(root.dataset.clfSignature).toBe(before);
 
     live.advance(live.hook.PRESENTATION_SCROLL_IDLE_MS + 1);
     live.hook.renderStreams();
-    expect(overwriteStream(section)?.querySelector('.clf-when') ?? null).not.toBeNull();
+    expect(root.dataset.clfSignature).not.toBe(before);
   });
 
   it('preserves a visible user-turn viewport anchor when idle Overwrite changes history height', async () => {
@@ -3704,6 +3721,7 @@ describe('where the page stream puts an event that was recorded late', () => {
     live = await harness(undefined, { activity });
     renderingOn();
     const section = assistantTurn(live.document, turnId, []);
+    prose(live.document, section, 'site-late-anchor', 'Final answer');
     await bindFiberTurns([{ section, turn: {
       turnId,
       messages: [{ messageId: 'site-late-anchor', stable: true, rawText: 'Final answer', renderedHtml: '' }]
@@ -3714,7 +3732,8 @@ describe('where the page stream puts an event that was recorded late', () => {
     const before = overwriteRows(section, '.clf-stream-row .clf-stream-text').map((node) =>
       (node.textContent || '').trim()
     );
-    expect(before).toEqual(['Turn started', 'Checking the repository', 'Writing it up', 'Final answer']);
+    expect(before).toEqual(['Turn started', 'Checking the repository', 'Writing it up']);
+    expect(section.textContent).toContain('Final answer');
 
     late = true;
     await live.hook.pullActivity();
@@ -3722,7 +3741,7 @@ describe('where the page stream puts an event that was recorded late', () => {
     const after = overwriteRows(section, '.clf-stream-row .clf-stream-text').map((node) =>
       (node.textContent || '').trim()
     );
-    expect(after).toEqual(['Turn started', 'Checking the repository', 'Read second.ts', 'Writing it up', 'Final answer']);
+    expect(after).toEqual(['Turn started', 'Checking the repository', 'Read second.ts', 'Writing it up']);
   });
 
 });
@@ -4624,8 +4643,9 @@ describe('a stop button that goes missing while the turn is still running', () =
     );
   });
 
-  it('marks ChatGPT’s exact assistant-turn interruption as recoverable without reloading from the page', async () => {
+  it('records an assistant-turn interruption under the local generation that owns the timeline', async () => {
     live = await harness();
+    startGenerating(live.document);
     const section = assistantTurn(live.document, 'turn-interrupted-assistant', []);
     const notice = live.document.createElement('div');
     notice.className = 'markdown';
@@ -4634,13 +4654,16 @@ describe('a stop button that goes missing while the turn is still running', () =
 
     live.hook.observe();
     await settle();
+    const opened = emitted(live.sent, 'turn_start')[0]!.event.turnId;
 
     expect(live.sent.some((message) => message.type === 'reload_owned_chat')).toBe(false);
     const errors = emitted(live.sent, 'chat_error').map((entry) => entry.event);
     expect(errors).toContainEqual(
       expect.objectContaining({
         text: 'Connection interrupted. Waiting for the complete answer',
-        turnId: 'turn-interrupted-assistant',
+        // ChatGPT's DOM turn id is not the recorder's generation id. Giving the former to
+        // chronology strands this row in its own group below every later event in the turn.
+        turnId: opened,
         recoverable: true
       })
     );
@@ -8865,7 +8888,7 @@ describe('the fresh chat the app opened', () => {
     expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
   });
 
-  it('tells the app it failed, once, and does not try again', async () => {
+  it('overwrites a New Chat autosaved draft and sends the worker bootstrap once', async () => {
     live = await harness(
       'https://chatgpt.com/?clf=cmd-9',
       {
@@ -8875,9 +8898,11 @@ describe('the fresh chat the app opened', () => {
         }),
         ack: () => ({ ok: true })
       },
-      // ChatGPT refuses the insertion: the composer already holds a draft.
       (document) => {
         document.querySelector('#prompt-textarea')!.textContent = 'a draft the user was writing';
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          document.querySelector('#prompt-textarea')!.textContent = '';
+        });
       }
     );
     await settle(200);
@@ -8887,14 +8912,11 @@ describe('the fresh chat the app opened', () => {
       await settle(200);
     }
 
-    // One attempt, one answer. The retry loop and the `working` acks that renewed a lease
-    // between attempts are gone: the page is opened for exactly one command, and what it
-    // reports is final. Calling `runCommand` again — a second startup tick, a re-render — is
-    // a no-op rather than a second redeem, because a repeat here would have been a second
-    // bootstrap typed into the same chat.
+    // The marked fresh tab belongs to this exact command, so ChatGPT's restored New Chat draft
+    // is stale page state rather than user work in an existing conversation. A second startup
+    // tick remains a no-op: replacing the draft is permission for one bootstrap, never two.
     const acks = live.sent.filter((message) => message.type === 'ack');
-    expect(acks.map((ack) => ack.status)).toEqual(['failed']);
-    expect(acks[0]!.error).toBe('the composer already holds something the user was writing');
+    expect(acks.map((ack) => ack.status)).toEqual(['sent']);
     expect(live.sent.filter((message) => message.type === 'redeem')).toHaveLength(1);
   });
 });
@@ -11254,6 +11276,7 @@ describe('the goal loop', () => {
     const box = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
     box.value = 'rewrite the parser in rust';
     box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
+    live.document.querySelector('#prompt-textarea')!.textContent = 'autosaved stale New Chat draft';
     (live.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement).click();
     await settle(800);
 

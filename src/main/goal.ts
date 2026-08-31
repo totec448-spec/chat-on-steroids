@@ -227,8 +227,8 @@ export function goalLoopPrompt(): string {
  * saved objective, with the standing switch off, is not a chat the user switched Loop on for —
  * and Loop is the mode that never stops by itself, so it is never entered by inheritance.
  */
-export function goalDrivingMode(): GoalMode {
-  const goal = getConfig().goal;
+export function goalDrivingMode(conversationId?: string): GoalMode {
+  const goal = conversationId ? goalSwitchFor(conversationId) : getConfig().goal;
   return goal.enabled && goal.mode === 'loop' ? 'loop' : 'goal';
 }
 
@@ -405,6 +405,20 @@ function persistGoalRepliesSoon(): void {
   writeDurableSoon(GOAL_REPLIES_STATE, snapshotGoalReplies());
 }
 
+/**
+ * Is a request for this chat's draft in flight right now?
+ *
+ * The one thing the app-side watchdog has to ask about the page before reloading it. A draft
+ * being written is not a stalled chat, it is a chat mid-answer, and reloading it throws away a
+ * request somebody is paying OpenRouter for. Deliberately only the two in-flight stages: a
+ * `ready` draft nobody types is exactly the stall the watchdog exists to break, and reloading
+ * it costs nothing because the obligation it was drafted for is still on file.
+ */
+export function goalDraftBusy(conversationId: string): boolean {
+  const stage = drafts.get(conversationId)?.stage;
+  return stage === 'sending' || stage === 'answering';
+}
+
 export function goalPendingReplyFor(
   conversationId: string
 ): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq'> | null {
@@ -416,6 +430,30 @@ export function goalPendingReplyFor(
   return reply?.state === 'pending'
     ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq }
     : null;
+}
+
+/**
+ * Every chat that still owes one Goal decision, newest acceptance first.
+ *
+ * `goalPendingReplyFor` answers for a page that has come to ask. This answers for the app,
+ * which has to notice the chats that never will — the reason it exists at all is that the only
+ * trigger for a Goal draft lives in the page, so a conversation whose document died between the
+ * final answer and the draft request owes work that nothing was left alive to collect.
+ */
+export function pendingGoalReplies(
+  now = Date.now()
+): Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number }> {
+  const owed: Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number }> = [];
+  for (const reply of goalReplies.values()) {
+    if (reply.state !== 'pending' || now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) continue;
+    owed.push({
+      conversationId: reply.conversationId,
+      sessionId: reply.sessionId,
+      replyId: reply.replyId,
+      acceptedAt: reply.acceptedAt
+    });
+  }
+  return owed.sort((a, b) => b.acceptedAt - a.acceptedAt);
 }
 
 /** Freezes Goal eligibility at the durable recorder boundary. */
@@ -440,7 +478,7 @@ export async function acceptGoalReplyNow(input: {
   const active =
     !input.blocked &&
     getConfig().sessions.record &&
-    (getConfig().goal.enabled || goalObjectiveFor(input.conversationId) !== '') &&
+    (goalSwitchEnabledFor(input.conversationId) || goalObjectiveFor(input.conversationId) !== '') &&
     (await getSecret('openRouterApiKey')) !== null;
   goalReplies.set(input.conversationId, {
     conversationId: input.conversationId,
@@ -581,6 +619,162 @@ export function moveGoalObjective(fromConversationId: string, toConversationId: 
   goalObjectives.delete(toConversationId);
   goalObjectives.set(toConversationId, objective);
   persistGoalObjectives();
+  return true;
+}
+
+/**
+ * One of the two switches, moved.
+ *
+ * Goal and Loop are the same setting seen from two controls, which is what makes them mutually
+ * exclusive without anything having to keep them in step: turning either one on names the mode
+ * and enables it, and turning one off only means anything while it is the one that is running.
+ * Switching a mode off therefore leaves `mode` where it was — it is a preference, not a state,
+ * and a user who turns Loop off and on again should get Loop back.
+ */
+export function applyGoalSwitch<T extends { enabled: boolean; mode: GoalMode }>(
+  goal: T,
+  which: 'goal' | 'loop' | null,
+  on: boolean | null
+): T {
+  if (which === null || on === null) return goal;
+  if (on) return { ...goal, enabled: true, mode: which };
+  return goal.enabled && goal.mode === which ? { ...goal, enabled: false } : goal;
+}
+
+/** Durable state file for per-chat Goal/Loop switches. */
+export const GOAL_SWITCHES_STATE = 'goal-switches';
+
+export interface GoalSwitchesSnapshot {
+  version: 1;
+  savedAt: number;
+  switches: Array<{ conversationId: string; enabled: boolean; mode: GoalMode; at: number }>;
+}
+
+/**
+ * One chat's own answer to "may the loop write here, and in which mode".
+ *
+ * The switch used to be one app-wide setting, which made it the wrong shape for the thing people
+ * actually do with it: leave a loop running in one chat while every other chat stays a chat.
+ * Turning it off to stop one runaway conversation stopped all of them, and turning it back on
+ * later re-armed every chat that had ever been left with an objective.
+ *
+ * A row here is an override and nothing else. A chat with no row follows the app-wide setting,
+ * so nothing that exists today changes meaning, and the first time somebody flips the switch
+ * from a chat's own composer that chat stops listening to the global one. That is also how an
+ * old conversation is retired: turning Goal off where it pops up writes `enabled: false` for
+ * that chat alone, and no later app-wide change can revive it.
+ */
+const goalSwitches = new Map<string, { enabled: boolean; mode: GoalMode; at: number }>();
+
+/**
+ * As many chats as anyone plausibly drives, and no more.
+ *
+ * The ledger is per conversation and never expires — an override is a decision, not an
+ * observation, so it may not quietly lapse the way a reply obligation does. The cap is what
+ * keeps that from being unbounded; the oldest decision is the one that goes.
+ */
+const MAX_GOAL_SWITCHES = 400;
+
+function boundGoalSwitches(): void {
+  if (goalSwitches.size <= MAX_GOAL_SWITCHES) return;
+  const oldestFirst = [...goalSwitches.entries()].sort((a, b) => a[1].at - b[1].at);
+  for (const [conversationId] of oldestFirst.slice(0, goalSwitches.size - MAX_GOAL_SWITCHES)) {
+    goalSwitches.delete(conversationId);
+  }
+}
+
+export function snapshotGoalSwitches(): GoalSwitchesSnapshot {
+  boundGoalSwitches();
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    switches: [...goalSwitches.entries()].map(([conversationId, row]) => ({ conversationId, ...row }))
+  };
+}
+
+export function restoreGoalSwitches(snapshot: GoalSwitchesSnapshot | null): void {
+  goalSwitches.clear();
+  if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.switches)) return;
+  for (const raw of snapshot.switches) {
+    if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
+    if (typeof raw.enabled !== 'boolean' || (raw.mode !== 'goal' && raw.mode !== 'loop')) continue;
+    const at = Number.isSafeInteger(raw.at) && raw.at > 0 ? raw.at : Date.now();
+    goalSwitches.set(raw.conversationId, { enabled: raw.enabled, mode: raw.mode, at });
+  }
+  boundGoalSwitches();
+}
+
+function persistGoalSwitches(): void {
+  writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
+}
+
+/** This chat's switch: its own override when it has one, otherwise the app-wide setting. */
+export function goalSwitchFor(conversationId: string): { enabled: boolean; mode: GoalMode; own: boolean } {
+  const own = goalSwitches.get(conversationId);
+  if (own) return { enabled: own.enabled, mode: own.mode, own: true };
+  const goal = getConfig().goal;
+  return { enabled: goal.enabled, mode: goal.mode, own: false };
+}
+
+/** Is the loop switched on for this chat — ignoring worker identity, which the bridge owns. */
+export function goalSwitchEnabledFor(conversationId: string): boolean {
+  return goalSwitchFor(conversationId).enabled;
+}
+
+/**
+ * Durable acceptance boundary for one chat's Goal/Loop switch.
+ *
+ * Same contract as `setGoalObjectiveNow`, for the same reason: the page is told the switch was
+ * saved, so the value must be on disk before that is said. A failed write restores the previous
+ * override exactly — including its absence, which is itself the meaningful state "this chat
+ * still follows the app-wide setting".
+ */
+export async function setGoalSwitchNow(
+  conversationId: string,
+  which: 'goal' | 'loop',
+  on: boolean
+): Promise<{ enabled: boolean; mode: GoalMode }> {
+  const before = goalSwitches.get(conversationId);
+  const next = applyGoalSwitch(goalSwitchFor(conversationId), which, on);
+  goalSwitches.set(conversationId, { enabled: next.enabled, mode: next.mode, at: Date.now() });
+  try {
+    await writeDurableNow(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
+    return { enabled: next.enabled, mode: next.mode };
+  } catch (error) {
+    goalSwitches.delete(conversationId);
+    if (before) goalSwitches.set(conversationId, before);
+    writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
+    throw error;
+  }
+}
+
+/**
+ * Puts every chat back under the app-wide setting.
+ *
+ * The one caller is the app's own switch being turned off, which is the master stop: see the
+ * note at that call. Nothing else may do this — an override is somebody's decision about one
+ * conversation, and discarding all of them is only defensible as the answer to a deliberate
+ * "stop everything".
+ */
+export function clearAllGoalSwitches(): void {
+  if (goalSwitches.size === 0) return;
+  goalSwitches.clear();
+  persistGoalSwitches();
+}
+
+/** Drops one chat's override, putting it back under the app-wide setting. */
+export function clearGoalSwitch(conversationId: string): void {
+  if (goalSwitches.delete(conversationId)) persistGoalSwitches();
+}
+
+/** Moves one chat-owned switch to the replacement conversation used by Compact & Resume. */
+export function moveGoalSwitch(fromConversationId: string, toConversationId: string): boolean {
+  if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return false;
+  const row = goalSwitches.get(fromConversationId);
+  if (!row) return false;
+  goalSwitches.delete(fromConversationId);
+  goalSwitches.set(toConversationId, row);
+  persistGoalSwitches();
   return true;
 }
 
@@ -729,6 +923,7 @@ export function resetGoalStateForTests(): void {
   drafts.clear();
   goalReplies.clear();
   goalObjectives.clear();
+  goalSwitches.clear();
   firstUserCache.clear();
   legacyCommittedResumeCache.clear();
   modelCache = null;
@@ -790,7 +985,7 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     systemPrompt: settings.prompt,
     objectiveSystemPrompt: settings.objectivePrompt,
     loopSystemPrompt: settings.loopPrompt,
-    mode: goalDrivingMode(),
+    mode: goalDrivingMode(input.conversationId),
     objective: goalObjectiveFor(input.conversationId),
     clientId,
     turnId: input.turnId,

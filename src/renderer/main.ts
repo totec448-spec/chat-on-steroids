@@ -655,8 +655,14 @@ function paintRoots(roots: AppState['config']['roots']): void {
 
 // ----------------------------------------------------------------- render
 
+/** How the one update sentence reads: nothing to do, something in progress, something wrong. */
+type UpdateTone = 'ok' | 'work' | 'bad';
+
+/** The update notification is news, and news is told once per window. */
+let announced = false;
+
 /**
- * One line for everything that is out of date, or no line at all.
+ * Everything this window knows about being current, as one sentence and one tone.
  *
  * Two facts feed it and this owns neither: what the update service found (state.update, which
  * reports a `latest` only when it is genuinely newer, so nothing here compares versions), and
@@ -664,28 +670,30 @@ function paintRoots(roots: AppState['config']['roots']): void {
  * no version worth reporting - a stale number from a browser that has since closed would nag
  * about nothing.
  *
- * `latest` set with a stage of `idle` is the deliberate case: a new version exists and this
- * installation - a Linux .deb, macOS, an architecture with no artifact - is not one the app can
- * update by itself. That is exactly when the button matters, so it is the only case that
- * offers one.
+ * Null is the one silence that is not an answer: GitHub has not replied yet in this run, so
+ * "up to date" would be a claim nobody has checked. That is what `checkedAt` is for.
+ *
+ * `notice` is the narrower question of whether the header bar carries the sentence at all. That
+ * bar is for what the user can act on - a version to fetch by hand, an extension to reload -
+ * while the Activity line reports every state, including the good one.
  */
-function paintUpdate(next: AppState): void {
-  const { bridge, update } = next;
+function updateSummary({ bridge, update }: AppState): { text: string; tone: UpdateTone; notice: boolean } | null {
   // Only an extension older than this app is the user's to fix. The other direction is an app
   // that has not caught up yet - normal while an update downloads - and telling that user to
   // load the bundled folder again would talk them into downgrading a working extension. The
-  // app-update line below already owns being behind, so there is nothing to add here.
-  const extension =
+  // app sentence already owns being behind.
+  const stale =
     bridge.present && bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion)
       ? bridge.extensionVersion
       : null;
-  const notice = $('updateNotice');
-  if (!update.latest && !extension) {
-    notice.hidden = true;
-    return;
-  }
+  if (!stale && !update.latest && update.stage === 'idle' && !update.checkedAt) return null;
+
   const lines: string[] = [];
+  let tone: UpdateTone = 'work';
   if (update.latest) {
+    // `latest` set with a stage of `idle` is the deliberate case: a new version exists and this
+    // installation - a Linux .deb, macOS, a development tree, an architecture with no artifact -
+    // is not one the app can update by itself. That is when the button matters.
     lines.push(
       update.stage === 'ready'
         ? `Chat On Steroids ${update.latest} is downloaded and installs the next time you start the app.`
@@ -695,16 +703,51 @@ function paintUpdate(next: AppState): void {
             ? `Chat On Steroids ${update.latest} could not be downloaded: ${update.error ?? 'the download stopped'}.`
             : `Chat On Steroids ${update.latest} is out. This installation has to be updated by hand.`
     );
+    if (update.stage === 'failed') tone = 'bad';
+  } else if (update.stage === 'failed') {
+    lines.push(`Could not check for a newer version: ${update.error ?? 'the check stopped'}.`);
+    tone = 'bad';
+  } else if (update.stage === 'checking') {
+    lines.push('Checking for a newer version…');
+  } else if (!stale) {
+    const extension = bridge.present && bridge.extensionVersion ? ` · extension ${bridge.extensionVersion}` : '';
+    lines.push(`Up to date! Chat On Steroids ${update.current}${extension}`);
+    tone = 'ok';
   }
-  if (extension) {
+  if (stale) {
     lines.push(
-      `The browser extension is ${extension} and this app is ${update.current}. ` +
+      `The browser extension is ${stale} and this app is ${update.current}. ` +
         'Load the extension folder again in Chrome.'
     );
+    tone = 'bad';
   }
-  $('updateText').textContent = lines.join(' ');
+  return { text: lines.join(' '), tone, notice: Boolean(update.latest || stale) };
+}
+
+/** The header bar, the Activity line and the one notification, from that single sentence. */
+function paintUpdate(next: AppState): void {
+  const summary = updateSummary(next);
+  const notice = $('updateNotice');
+  const line = $('updateLine');
+  if (!summary) {
+    notice.hidden = true;
+    line.hidden = true;
+    return;
+  }
+  const { update } = next;
+  $('updateText').textContent = summary.text;
   $<HTMLButtonElement>('updateGet').hidden = !update.latest || update.stage === 'downloading' || update.stage === 'ready';
-  notice.hidden = false;
+  notice.hidden = !summary.notice;
+  line.textContent = summary.text;
+  line.className = `upline${summary.tone === 'ok' ? ' is-ok' : summary.tone === 'bad' ? ' is-bad' : ''}`;
+  line.hidden = false;
+  // One notification per window, on the first answer that is an outcome rather than progress.
+  // The Activity line keeps the sentence afterwards, so repeating it as a toast on every state
+  // push would be the same news arriving over and over.
+  if (!announced && update.stage !== 'checking' && update.stage !== 'downloading') {
+    announced = true;
+    toast(summary.text);
+  }
 }
 
 function apply(next: AppState): void {

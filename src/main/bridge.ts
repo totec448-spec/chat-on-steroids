@@ -22,7 +22,7 @@
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
-import type { BridgeStatus, Config } from '../shared/types.js';
+import type { BridgeStatus } from '../shared/types.js';
 import { CHAT_SILENCE_MS, type SessionOrigin } from '../shared/session.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { getConfig, updateConfig } from './config.js';
@@ -30,16 +30,21 @@ import { getSecret, secureStorageStatus, setSecret } from './secrets.js';
 import {
   acceptGoalReplyNow,
   ackGoalDraftNow,
+  applyGoalSwitch,
   beginGoalDraft,
   discardPreparedGoalDraft,
   draftOpeningMessage,
   goalKeyPresent,
+  goalDraftBusy,
   goalObjectiveFor,
   goalPendingReplyFor,
+  goalSwitchFor,
   goalViewFor,
+  pendingGoalReplies,
   retireGoalDrafts,
   retireGoalDraftsFor,
   setGoalObjectiveNow,
+  setGoalSwitchNow,
   startGoalDraft
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
@@ -49,6 +54,7 @@ import {
   noteChatOrigin,
   recordAgentMessage,
   recordChatObservations,
+  recordProgress,
   restoreRecordedConversation,
   setCallAttributionListener,
   type ChatObservation,
@@ -862,25 +868,6 @@ function conversationId(value: unknown): string | null {
 }
 
 /**
- * One of the two switches, moved.
- *
- * Goal and Loop are the same setting seen from two controls, which is what makes them mutually
- * exclusive without anything having to keep them in step: turning either one on names the mode
- * and enables it, and turning one off only means anything while it is the one that is running.
- * Switching a mode off therefore leaves `mode` where it was — it is a preference, not a state,
- * and a user who turns Loop off and on again should get Loop back.
- */
-function applyGoalSwitch(
-  goal: Config['goal'],
-  which: 'goal' | 'loop' | null,
-  on: boolean | null
-): Config['goal'] {
-  if (which === null || on === null) return goal;
-  if (on) return { ...goal, enabled: true, mode: which };
-  return goal.enabled && goal.mode === which ? { ...goal, enabled: false } : goal;
-}
-
-/**
  * May the goal loop write the next message in this chat?
  *
  * The switch is one setting, but it is the *prime's* setting. A spawned worker already has
@@ -906,7 +893,7 @@ function goalWorkerChat(id: string): boolean {
 
 function goalEnabledFor(id: string): boolean {
   if (goalWorkerChat(id)) return false;
-  return getConfig().goal.enabled;
+  return goalSwitchFor(id).enabled;
 }
 
 /**
@@ -917,8 +904,8 @@ function goalEnabledFor(id: string): boolean {
  * poll can ever paint both switches on. A chat where the loop may not act reports the mode it
  * *would* run, which the page never draws — `enabled: false` already answered the question.
  */
-function goalModeFor(): 'goal' | 'loop' {
-  return getConfig().goal.mode;
+function goalModeFor(id?: string): 'goal' | 'loop' {
+  return id ? goalSwitchFor(id).mode : getConfig().goal.mode;
 }
 
 /**
@@ -933,7 +920,7 @@ function goalModeFor(): 'goal' | 'loop' {
  */
 function goalActiveFor(id: string): boolean {
   if (goalWorkerChat(id)) return false;
-  return getConfig().goal.enabled || goalObjectiveFor(id) !== '';
+  return goalSwitchFor(id).enabled || goalObjectiveFor(id) !== '';
 }
 
 // -------------------------------------------------------------------- routes
@@ -1066,7 +1053,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // repairUnattributedChat. Reporting first is what makes a pass that says nothing mean the
     // last repair did not happen. Null, which is almost always, costs this pass one request.
     const repaired = url.searchParams.get('repaired');
-    if (repaired) confirmRepair(repaired.slice(0, 64));
+    const repairFailed = url.searchParams.get('repairFailed');
+    const repairAction = url.searchParams.get('repairAction');
+    const action = repairAction === 'reloaded' || repairAction === 'reopened' ? repairAction : null;
+    if (repaired) {
+      await confirmRepair(repaired.slice(0, 64), action);
+    } else if (repairFailed) {
+      await failRepairAttempt(repairFailed.slice(0, 64), action);
+    }
     const revival = pendingBrowserRevival();
     return json(
       res,
@@ -1076,7 +1070,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         conversations: live,
         commands: commands.length,
         revival,
-        repair: takePendingRepair(),
+        // A failure report closes this request. Reissuing the repair in the same response would
+        // replace the visible failure with "Trying" before a renderer could ever observe it.
+        repair: repairFailed ? null : await takePendingRepair(),
+        nonDiscardableConversations: nonDiscardableAgentConversations(),
         recoveryMonitoring: browserRecoveryMonitoring()
       },
       origin
@@ -1321,7 +1318,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       else if (workerConversationGone(id)) {
         logInfo(`bridge: worker chat ${id} closed — its slot is detached, not ended, until it also goes quiet`);
       }
-      queueMissingAgentTab(id, closedMidTurn);
+      await queueMissingTab(id, closedMidTurn);
     }
     return json(res, 200, { ok: true }, origin);
   }
@@ -1364,7 +1361,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
               autoCompactReady: false,
               goal: {
                 enabled: false,
-                mode: goalModeFor(),
+                mode: goalModeFor(id),
                 hasKey: await goalKeyPresent(),
                 model: getConfig().goal.model,
                 objective: '',
@@ -1560,7 +1557,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // the panel above the composer streams — there is no second connection to hold open.
         goal: {
           enabled: goalEnabledFor(id),
-          mode: goalModeFor(),
+          mode: goalModeFor(id),
           hasKey: await goalKeyPresent(),
           model: getConfig().goal.model,
           // This chat's own goal, and never a worker's: the loop is off there whatever is
@@ -2113,22 +2110,46 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         origin
       );
     }
+    const which = goal !== null ? 'goal' : loop !== null ? 'loop' : null;
+    // Which switch this request is actually turning. A composer always knows its own chat, so
+    // a switch it sends is that chat's: the sheet is drawn beside one conversation and the
+    // person flipping it is answering about that conversation, not about every chat they have
+    // ever opened. Only a New Chat — no id yet, nothing to store an override against — still
+    // moves the app-wide setting, which is exactly where it should be set: it is the default
+    // every chat with no answer of its own inherits.
+    const scoped = which !== null && settingsConversation !== null;
     // Read inside the queued update rather than before it, so a settings change racing this
     // one cannot leave the comparison below looking at a config neither request ever wrote.
     let driving: 'goal' | 'loop' | null = null;
+    const before = scoped
+      ? (() => {
+          const held = goalSwitchFor(settingsConversation as string);
+          return held.enabled ? held.mode : null;
+        })()
+      : null;
     const next = await updateConfig((config) => {
       driving = config.goal.enabled ? config.goal.mode : null;
       return {
         ...config,
         compaction: auto === null ? config.compaction : { ...config.compaction, auto },
-        goal: applyGoalSwitch(config.goal, goal !== null ? 'goal' : loop !== null ? 'loop' : null, goal ?? loop)
+        goal: scoped ? config.goal : applyGoalSwitch(config.goal, which, goal ?? loop)
       };
     });
+    const chatSwitch = scoped
+      ? await setGoalSwitchNow(settingsConversation as string, which as 'goal' | 'loop', (goal ?? loop) as boolean)
+      : null;
     // Every change that takes authority away from work already in flight, not only switching
     // off: a draft started as a gate must not be typed after the user asked for a loop, and a
     // loop draft must not be typed after the user asked for a gate. Both are the same fact —
-    // the instruction this request was made under is no longer the one in force.
-    if (driving !== (next.goal.enabled ? next.goal.mode : null)) retireGoalDrafts();
+    // the instruction this request was made under is no longer the one in force. A chat-scoped
+    // change retires that chat's draft and nobody else's, because nobody else's instruction moved.
+    if (chatSwitch) {
+      if (before !== (chatSwitch.enabled ? chatSwitch.mode : null)) {
+        retireGoalDraftsFor(settingsConversation as string);
+      }
+    } else if (driving !== (next.goal.enabled ? next.goal.mode : null)) {
+      retireGoalDrafts();
+    }
     // The app's own settings screen is showing these two switches as well.
     changed();
     logInfo(
@@ -2138,7 +2159,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         loop === null ? '' : `Loop ${loop ? 'on' : 'off'}`
       ]
         .filter(Boolean)
-        .join(' and ')}`
+        .join(' and ')}${scoped ? ` for chat ${settingsConversation}` : ''}`
     );
     return json(
       res,
@@ -2146,8 +2167,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       {
         context: contextView(),
         goal: {
-          enabled: next.goal.enabled,
-          mode: next.goal.mode,
+          // What this chat's switch now says, which is the only answer its composer can draw.
+          enabled: chatSwitch ? chatSwitch.enabled : next.goal.enabled,
+          mode: chatSwitch ? chatSwitch.mode : next.goal.mode,
           hasKey: await goalKeyPresent(),
           model: next.goal.model
         }
@@ -2720,9 +2742,15 @@ async function durableQuiescence(conversationId: string, now: number): Promise<D
  */
 export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   const silent = inspectSilentChats(now);
-  const silenceChanged = silent.queued || silent.spent.length > 0;
+  // Beside the silence pass rather than inside it: they measure the same quiet from opposite
+  // ends of a turn — one an answer that never arrived, one an answer that arrived and was never
+  // picked up — and a chat can only ever be in one of those states.
+  const goalsQueued = inspectOwedGoals(now);
+  const silenceChanged = silent.queued || silent.spent.length > 0 || goalsQueued;
   const runId = currentRunId();
-  if (swarmTransferActive() || inFlightMcpRequests() > 0 || observationWritesInFlight > 0) return silent.queued;
+  if (swarmTransferActive() || inFlightMcpRequests() > 0 || observationWritesInFlight > 0) {
+    return silent.queued || goalsQueued;
+  }
 
   if (!runId) {
     finishSilentChats(silent.spent);
@@ -3040,6 +3068,10 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
       staleSwarmTimer.unref?.();
       // The recorder decides when a call is Unattributed; this owns what that is worth.
       setCallAttributionListener(noteCallAttribution);
+      // Arms the goal watchdog from here rather than from module load, so its install fence is
+      // the moment this process started serving — the earliest instant an obligation can have
+      // been accepted by *this* run.
+      goalWatchFloor = Date.now();
       bridgeRecovering = false;
       // Anything restored from the previous run goes out now rather than waiting for a
       // browser to come and ask.
@@ -3854,9 +3886,9 @@ let unattributedIncident: UnattributedIncident | null = null;
  *   `done`    it was carried out — that exact tab reloaded, or the chat reopened.
  *
  * Only `done` suppresses a further repair, because only `done` is an action whose effect there
- * is any point waiting to observe. A repair the browser could not carry out — no tab of that
- * chat, two of them, a reload that threw — must go back in the queue, or the one failure this
- * whole path exists for would be recorded as handled and never tried again.
+ * is any point waiting to observe. An explicitly failed or unconfirmed browser action must go
+ * back in the queue, or the one failure this path exists for would be recorded as handled and
+ * never tried again.
  *
  * `endedTurns` is how many turns the chat had already finished when this repair was filed, and
  * one more of them is what retires the entry: the broken turn is over. Without that, this map
@@ -3875,7 +3907,7 @@ interface Repair {
   state: 'queued' | 'handed' | 'done';
   /** Stable identity of the failure/inactivity episode. A new activity stamp mints a new one. */
   episode: string;
-  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence';
+  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal';
   /** Cooldown boundary. The browser is never asked before this instant. */
   notBefore: number;
   /**
@@ -3889,17 +3921,25 @@ interface Repair {
    * something this can insist on.
    */
   token: string;
+  /** One logical timeline row across every attempt and final outcome. */
+  progressId: string;
+  /** Durable first-snapshot anchor plus the newest text, used to avoid duplicate snapshots. */
+  progress?: { sessionId: string; seq: number; time: number; text: string };
 }
+
+/**
+ * Repairs that answer a question about one turn rather than about the chat.
+ *
+ * The distinction is what makes them retirable only by a *later* turn ending, and therefore
+ * what makes them the two that can outlive every fact about them: a page that dies on the
+ * broken turn never ends another one. `silence` and `no-tab` are about the conversation, are
+ * cleared by ordinary activity, and are not in this set.
+ */
+const TURN_SCOPED_REPAIRS: ReadonlySet<Repair['reason']> = new Set(['unattributed', 'assistant-error']);
 
 const repairsInFlight = new Map<string, Repair>();
 /** Last browser action per exact chat. One cooldown covers errors, silence and missing tabs. */
 const lastBrowserRecoveryAt = new Map<string, number>();
-
-function recoveryAgent(conversationId: string) {
-  const info = agentInfoForOwnedConversation(conversationId);
-  if (!info) return null;
-  return info.state === 'active' || info.state === 'detached' || info.state === 'waking' ? info : null;
-}
 
 /**
  * Queues one exact browser action for one inactivity/failure episode.
@@ -3915,20 +3955,28 @@ function queueBrowserRecovery(
   endedTurns = 0,
   now = Date.now()
 ): boolean {
-  if (
-    !getConfig().multiAgent.recoverAgentTabs &&
-    reason !== 'unattributed' &&
-    reason !== 'assistant-error' &&
-    reason !== 'silence'
-  )
-    return false;
   const held = repairsInFlight.get(conversationId);
   if (held?.episode === episode) return false;
-  if (held && held.state !== 'done') return false;
+  // Silence may take an entry away from a turn-scoped repair, and it has to be able to. Those
+  // are retired by a *later* turn ending, so a chat whose page died on the broken turn keeps
+  // one forever — and a permanent entry here used to mean permanent silence, because this
+  // guard read it as "a recovery is already running". Nothing was running. Silence asks the
+  // chat-level question instead — is this conversation alive at all — and it is the answer to
+  // a stuck turn-scoped repair, not something one may mute. Its reload does everything theirs
+  // would have done, so superseding loses no repair.
+  //
+  // Deliberately not extended to `no-tab`, which is chat-scoped like silence, is cleared by
+  // ordinary activity, and therefore cannot be the stuck kind. Letting silence past that one
+  // would only cancel its three-minute floor and reopen tabs faster than the floor allows.
+  const supersedes = reason === 'silence' && TURN_SCOPED_REPAIRS.has(held?.reason as Repair['reason']);
+  if (held && held.state !== 'done' && !supersedes) return false;
   // Silence already paid its complete two-minute inactivity boundary. Once genuine new activity
   // starts another episode, layering the unrelated browser-action floor on top delays the next
   // stuck-page recovery beyond its own contract. Error/no-tab repairs keep that shared floor.
-  const notBefore = reason === 'silence'
+  // `goal` is exempt for the same reason and a stronger one: it carries its own backoff, which
+  // after the opening step is already longer than the shared floor, so applying both would only
+  // move the user's stated schedule without changing what protects the page.
+  const notBefore = reason === 'silence' || reason === 'goal'
     ? now
     : Math.max(now, (lastBrowserRecoveryAt.get(conversationId) ?? 0) + BROWSER_RECOVERY_COOLDOWN_MS);
   repairsInFlight.set(conversationId, {
@@ -3937,7 +3985,8 @@ function queueBrowserRecovery(
     episode,
     reason,
     notBefore,
-    token: ''
+    token: '',
+    progressId: `browser-repair:${randomBytes(9).toString('base64url')}`
   });
   return true;
 }
@@ -3973,6 +4022,7 @@ function noteRecoveryObservations(
   // replayed/history rows explicitly do not.
   if (activity.meaningful) {
     noteRecoveryActivity(conversationId);
+    noteGoalWatchActivity(conversationId);
     // A current-turn interim can push an existing deadline; historical transcript/page rows
     // never enter this verdict and therefore cannot keep a confirmed reload alive.
     if (!activity.terminal && (activity.working || activeUntil.has(conversationId))) grantActivity(conversationId);
@@ -4007,9 +4057,23 @@ function noteRecoveryObservations(
   }
 }
 
+/** Exact live agent conversations whose existing Chrome tabs must remain loaded. */
+function nonDiscardableAgentConversations(): string[] {
+  return swarmState().agents
+    .filter(
+      (agent) =>
+        Boolean(agent.conversationId) &&
+        (agent.role === 'prime'
+          ? agent.state === 'active'
+          : agent.state === 'active' || agent.state === 'waking' || agent.state === 'detached')
+    )
+    .map((agent) => agent.conversationId as string)
+    .sort();
+}
+
 /** The active agent chats for which the browser must keep asking the app for recovery work. */
 function browserRecoveryMonitoring(): boolean {
-  if (repairsInFlight.size > 0 || activeUntil.size > 0) return true;
+  if (repairsInFlight.size > 0 || activeUntil.size > 0 || goalWatch.size > 0) return true;
   if (!getConfig().multiAgent.recoverAgentTabs) return false;
   return swarmState().agents.some(
     (agent) =>
@@ -4022,6 +4086,10 @@ function browserRecoveryMonitoring(): boolean {
  * Turns whose two-minute silence expired either receive their sole browser action or, once that
  * exact action was confirmed, become safe to abandon. Merely handing an action to Chrome is not
  * enough: an unconfirmed handout remains retryable through the existing receipt protocol.
+ *
+ * Deliberately not gated on the other repair reasons. This is the only check in the app that
+ * asks whether a conversation is still alive, so nothing scoped to one of its turns may switch
+ * it off — see the supersede rule in `queueBrowserRecovery`.
  */
 function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
   let queued = false;
@@ -4033,7 +4101,11 @@ function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
       spent.push(conversationId);
       continue;
     }
-    if (held) continue;
+    // A turn-scoped repair is a different question about a different subject, and is superseded
+    // below rather than obeyed here; reading one as "a recovery is already running" is what left
+    // a chat that had been dead for eighteen minutes unreloaded. Everything else in flight —
+    // silence's own action, or a no-tab reopen under its floor — is this path already acting.
+    if (held && !TURN_SCOPED_REPAIRS.has(held.reason)) continue;
     if (queueBrowserRecovery(conversationId, `silence:${until}`, 'silence', 0, now)) {
       queued = true;
       logInfo(`bridge: active chat silent for two minutes — asking the browser to reload ${conversationId} once`);
@@ -4050,14 +4122,160 @@ function finishSilentChats(conversationIds: readonly string[]): void {
   }
 }
 
-/** A final-tab close during one exact open turn is one no-tab recovery episode. */
-function queueMissingAgentTab(conversationId: string, closedMidTurn: boolean, now = Date.now()): void {
-  if (!closedMidTurn || !getConfig().multiAgent.recoverAgentTabs) return;
-  const agent = recoveryAgent(conversationId);
-  if (!agent || agent.state !== 'detached') return;
-  const detachedAt = agent.detachedAt ?? now;
-  if (queueBrowserRecovery(conversationId, `no-tab:${detachedAt}`, 'no-tab', 0, now)) {
-    logInfo(`multi-agent: ${agent.id} has no tab — asking the browser to open the exact chat once`);
+/**
+ * When a chat that owes a Goal decision is reloaded, measured from its last sign of life.
+ *
+ * The first number is the silence window over again, and deliberately the same one: two minutes
+ * with nothing arriving is this app's standing definition of a chat that has stopped, and a
+ * conversation the loop is driving does not get a different definition just because what stalled
+ * was the pickup rather than the turn. The rest is the retry schedule — two, five, ten, fifteen —
+ * so five reloads span a little over half an hour and then it stops for good.
+ *
+ * It stops for good on purpose. Every reload here is the app typing into somebody's browser
+ * about a reply that is already finished and already on screen; the case it rescues is a page
+ * that died between the answer and the pickup, which either comes back in the first half hour or
+ * is not coming back. An unbounded watchdog on a durable ledger is how you get a chat reloading
+ * itself at four in the morning.
+ */
+// Asserted non-empty: the opening gap is read unconditionally when a schedule is armed, and a
+// schedule with no first step would be a watchdog that never starts.
+const GOAL_WATCH_BACKOFF_MS = [2, 2, 5, 10, 15].map((minutes) => minutes * 60_000) as [number, ...number[]];
+
+/**
+ * One reload schedule per chat that still owes a Goal decision.
+ *
+ * `attempts` is spent, never refunded. Activity pushes the next attempt out — while tool calls
+ * keep arriving the chat is working, not stalled, and nothing here fires — but it does not buy
+ * more attempts, which is what makes the whole watchdog terminate no matter what the page does
+ * with the reload. That matters more than it looks: a reload produces page events, and a
+ * schedule that reset on them would be a chat reloading itself forever.
+ *
+ * The row is keyed to the exact `replyId` it was armed for. A newer final answer is a different
+ * obligation and gets its own schedule; a discharged one takes its schedule with it.
+ */
+const goalWatch = new Map<string, { replyId: string; dueAt: number; attempts: number }>();
+
+/**
+ * The instant this process began serving, and the fence under which no goal is ever revived.
+ *
+ * The obligation ledger is durable and keeps a row for twelve hours, which is right for the
+ * page-side resume it was built for — a replacement content script asking what it still owes —
+ * and quite wrong as a licence for the app to go and reload chats. Without this fence, installing
+ * this version would reload every conversation that had been left owing a decision since
+ * yesterday afternoon. Only work this run watched arrive is work this run acts on.
+ */
+let goalWatchFloor: number | null = null;
+
+/** Any sign of life pushes the next reload out by the gap this chat is currently on. */
+function noteGoalWatchActivity(conversationId: string): void {
+  const watch = goalWatch.get(conversationId);
+  if (!watch) return;
+  const gap = GOAL_WATCH_BACKOFF_MS[watch.attempts];
+  if (gap === undefined) return;
+  watch.dueAt = Date.now() + gap;
+}
+
+/**
+ * Reloads chats whose finished reply nothing ever came to collect.
+ *
+ * The Goal loop has exactly one trigger and it lives in the page: a content script sees a turn
+ * end and asks the app for a draft. That is the right place for it — only the page knows what is
+ * on screen — but it means the loop's liveness is the page's liveness, and a document that dies
+ * between the final answer and the request takes the whole loop down with it silently. The
+ * obligation is on file, correctly marked pending, and nobody is left alive to redeem it.
+ *
+ * So this is the other half: the app watching its own ledger. It asks nothing about turns and
+ * nothing about drafts, only whether a decision is owed and whether the chat has gone quiet, and
+ * its answer is the same reload the page would have got from any other recovery path. A reload
+ * republishes `goal.pending` to the replacement script, which asks for the draft the dead one
+ * never asked for — which is also why a goal that failed once retries: the next reload is a new
+ * request, and the obligation was never discharged by the failure.
+ */
+function inspectOwedGoals(now: number): boolean {
+  if (goalWatchFloor === null) return false;
+  const owed = new Map(pendingGoalReplies(now).map((reply) => [reply.conversationId, reply]));
+  // A schedule outlives neither its obligation nor its reply. Discharged, expired or superseded
+  // are the same fact here — this chat is no longer owed the decision this row was armed for —
+  // and the reload queued for it goes with it.
+  for (const [conversationId, watch] of goalWatch) {
+    if (owed.get(conversationId)?.replyId === watch.replyId) continue;
+    goalWatch.delete(conversationId);
+    if (repairsInFlight.get(conversationId)?.reason === 'goal') repairsInFlight.delete(conversationId);
+  }
+  let queued = false;
+  for (const reply of owed.values()) {
+    if (reply.acceptedAt < goalWatchFloor) continue;
+    // The same three questions the page asks itself before drafting. A switch turned off, a
+    // worker chat, or a chat whose objective was cleared is not a chat with a stalled pickup;
+    // it is one where the loop is not entitled to act, and reloading it would be this app
+    // restarting work the user stopped.
+    if (!goalActiveFor(reply.conversationId)) continue;
+    // Compact & Resume owns the chat while it runs: the handoff is being written, the
+    // conversation is about to be replaced, and the obligation travels to the replacement with
+    // everything else. Reloading mid-transaction is the one thing that could lose it.
+    if (continuationForSession(reply.sessionId)) continue;
+    let watch = goalWatch.get(reply.conversationId);
+    if (!watch) {
+      watch = { replyId: reply.replyId, attempts: 0, dueAt: reply.acceptedAt + GOAL_WATCH_BACKOFF_MS[0] };
+      goalWatch.set(reply.conversationId, watch);
+    }
+    if (watch.attempts >= GOAL_WATCH_BACKOFF_MS.length || now < watch.dueAt) continue;
+    // A draft already being written is the pickup happening. Treat it as the activity it is.
+    if (goalDraftBusy(reply.conversationId)) {
+      noteGoalWatchActivity(reply.conversationId);
+      continue;
+    }
+    const held = repairsInFlight.get(reply.conversationId);
+    // This watchdog's own carried-out reload is this watchdog's to retire; a spent repair filed
+    // by anything else is left where it is, and `queueBrowserRecovery` takes it from there.
+    if (held?.state === 'done' && held.reason === 'goal') repairsInFlight.delete(reply.conversationId);
+    else if (held && held.state !== 'done') continue;
+    if (!queueBrowserRecovery(reply.conversationId, `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) {
+      continue;
+    }
+    watch.attempts += 1;
+    watch.dueAt = now + (GOAL_WATCH_BACKOFF_MS[watch.attempts] ?? 0);
+    queued = true;
+    logInfo(
+      `bridge: goal reply uncollected in ${reply.conversationId} — reload ${watch.attempts} of ${GOAL_WATCH_BACKOFF_MS.length}`
+    );
+  }
+  return queued;
+}
+
+/**
+ * A final-tab close during one exact open turn is one no-tab recovery episode.
+ *
+ * Two kinds of chat qualify, for one reason: this app is owed the end of a turn that is still
+ * running on OpenAI's servers, and the page that was watching it is gone. For a Prime or Worker
+ * that turn is the run's, which is what `recoverAgentTabs` is a preference about. For any other
+ * chat the qualification is the one fact that makes it this app's business at all — it has
+ * proved at least one MCP call, so the turn still running is running against this connector. A
+ * chat that has never called a tool is the user's own browsing: closing it is not a failure, and
+ * reopening it would be this app helping itself to a tab nobody asked it to keep.
+ *
+ * The silence deadline would eventually reopen either of them, but only two minutes after the
+ * last sign of life. A closed tab is first-hand proof that the page is gone *now*, and acting on
+ * it is the whole difference between a chat that comes straight back and one the user watches
+ * fail to.
+ *
+ * The episode is stamped with the moment the page went, never with the chat's moving activity
+ * deadline. A detached chat goes on calling tools server-side, so a stamp that tracked activity
+ * would mint a fresh episode — and a second tab — out of the very work this repair exists to
+ * keep alive.
+ */
+async function queueMissingTab(conversationId: string, closedMidTurn: boolean, now = Date.now()): Promise<void> {
+  if (!closedMidTurn) return;
+  const agent = agentInfoForOwnedConversation(conversationId);
+  // Read after closeConversation() has ended the session, so `endedAt` is this exact close.
+  const session = await findSessionByConversation(conversationId);
+  const eligible = agent
+    ? agent.state === 'detached' && getConfig().multiAgent.recoverAgentTabs
+    : (session?.toolCalls ?? 0) > 0;
+  if (!eligible) return;
+  const wentAt = agent?.detachedAt ?? session?.endedAt ?? now;
+  if (queueBrowserRecovery(conversationId, `no-tab:${wentAt}`, 'no-tab', 0, now)) {
+    logInfo(`bridge: ${agent?.id ?? conversationId} has no tab — asking the browser to open the exact chat once`);
   }
 }
 
@@ -4119,7 +4337,7 @@ function retireSpentRepairs(): void {
   for (const [conversationId, repair] of repairsInFlight) {
     // Both turn-scoped reasons, and only those. `silence` and `no-tab` are about a chat rather
     // than a turn, and keep the activity-driven lifecycle above.
-    if (repair.reason !== 'unattributed' && repair.reason !== 'assistant-error') continue;
+    if (!TURN_SCOPED_REPAIRS.has(repair.reason)) continue;
     const entry = live.get(conversationId);
     if (entry && entry.endedTurns > repair.endedTurns) repairsInFlight.delete(conversationId);
   }
@@ -4165,6 +4383,7 @@ function noteCallAttribution(
     // when Chrome, the tab or a reload destroyed the page's local turn projection.
     grantActivity(conversationId);
     noteRecoveryActivity(conversationId);
+    noteGoalWatchActivity(conversationId);
     // Scoped to the repair this fact is evidence about. An attributed call proves the request-id
     // join, which is the whole of what an `unattributed` repair exists to restore. It proves
     // nothing about the answer stream a page lost, and the live trace is why that distinction is
@@ -4230,7 +4449,9 @@ function repairUnattributedChat(): void {
  * handed out again here. That is what keeps a repair the browser could not carry out from
  * being filed as one that worked.
  */
-function takePendingRepair(now = Date.now()): { conversationId: string; token: string; reason: Repair['reason'] } | null {
+async function takePendingRepair(
+  now = Date.now()
+): Promise<{ conversationId: string; token: string; reason: Repair['reason'] } | null> {
   retireSpentRepairs();
   // A handout the browser did not confirm goes back at the *end* of the queue. Re-queueing it
   // in place let the first entry win every pass, so one repair the browser could not carry out
@@ -4248,6 +4469,7 @@ function takePendingRepair(now = Date.now()): { conversationId: string; token: s
     // A fresh token every time it goes out. A handout that was not carried out is dead the
     // moment it is re-queued, so a receipt that arrives for it later cannot close anything.
     repair.token = randomBytes(9).toString('base64url');
+    await updateRepairProgress(conversationId, repair, `Trying to reload chat to recover ${repairReason(repair)}…`);
     return { conversationId, token: repair.token, reason: repair.reason };
   }
   return null;
@@ -4260,14 +4482,57 @@ function takePendingRepair(now = Date.now()): { conversationId: string; token: s
  * this app is no longer waiting on - an older turn's, or one already re-queued - matches
  * nothing and closes nothing, which is the only safe reading of it.
  */
-function confirmRepair(token: string): void {
+async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | null): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
       repair.state = 'done';
       lastBrowserRecoveryAt.set(conversationId, Date.now());
+      await updateRepairProgress(
+        conversationId,
+        repair,
+        `${action === 'reopened' ? 'Reopened' : 'Reloaded'} chat to recover ${repairReason(repair)}.`
+      );
       return;
     }
   }
+}
+
+/** An exact browser action failed; keep the episode queued and replace its one debug row. */
+async function failRepairAttempt(token: string, action: 'reloaded' | 'reopened' | null): Promise<void> {
+  for (const [conversationId, repair] of repairsInFlight) {
+    if (repair.state !== 'handed' || repair.token !== token) continue;
+    await updateRepairProgress(
+      conversationId,
+      repair,
+      `${action === 'reopened' ? 'Reopen' : 'Reload'} failed while recovering ${repairReason(repair)}; will retry.`
+    );
+    repair.state = 'queued';
+    repairsInFlight.delete(conversationId);
+    repairsInFlight.set(conversationId, repair);
+    return;
+  }
+}
+
+function repairReason(repair: Repair): string {
+  return {
+    unattributed: 'missing connector attribution',
+    'assistant-error': 'an interrupted response',
+    'no-tab': 'a missing browser tab',
+    silence: 'an unresponsive open turn',
+    goal: 'a goal reply nothing collected'
+  }[repair.reason];
+}
+
+/** Updates the repair's one app-owned timeline row, preserving its first position. */
+async function updateRepairProgress(conversationId: string, repair: Repair, text: string): Promise<void> {
+  if (repair.progress?.text === text) return;
+  const sessionId = repair.progress?.sessionId ?? (
+    await findSessionByConversation(conversationId, { requireUnique: true }).catch(() => null)
+  )?.id;
+  if (!sessionId) return;
+  const anchor = repair.progress ? { seq: repair.progress.seq, time: repair.progress.time } : undefined;
+  const recorded = await recordProgress(sessionId, repair.progressId, text, anchor);
+  if (recorded) repair.progress = { sessionId, ...recorded, text };
 }
 
 function clearUnattributedIncident(): void {
@@ -5100,6 +5365,11 @@ export function resetBridgeForTests(): void {
   bridgeShutdownRequested = false;
   clearUnattributedIncident();
   activeUntil.clear();
+  goalWatch.clear();
+  // Re-armed rather than cleared: the seam stands in for a process that has just started
+  // serving, which is exactly what the fence measures. Clearing it would leave the watchdog
+  // permanently off in every suite that starts the bridge once and resets between tests.
+  goalWatchFloor = Date.now();
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;

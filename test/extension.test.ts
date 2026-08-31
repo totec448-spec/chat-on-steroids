@@ -462,7 +462,7 @@ interface WorkerHarness {
   /** Registers the browser document that owns subsequent tab-scoped messages. */
   registerTab(tabId: number, documentId?: string): Promise<any>;
   /** Fires Chrome's tab-created lifecycle event, the way opening a link in a new tab does. */
-  createTab(tab: { id: number; url?: string; pendingUrl?: string }): Promise<void>;
+  createTab(tab: { id: number; url?: string; pendingUrl?: string; autoDiscardable?: boolean }): Promise<void>;
   tabsCreate: ReturnType<typeof vi.fn>;
   tabsQuery: ReturnType<typeof vi.fn>;
   tabsUpdate: ReturnType<typeof vi.fn>;
@@ -494,8 +494,10 @@ function loadWorker(options: {
   local: FakeStorageArea;
   session: FakeStorageArea;
   fetch?: (input: string, init?: Record<string, unknown>) => Promise<ReturnType<typeof response>>;
-  tabsGet?: (tabId: number) => Promise<{ id?: number; url?: string; pendingUrl?: string; status?: string }>;
-  tabsQuery?: () => Promise<Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string }>>;
+  tabsGet?: (tabId: number) => Promise<{ id?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean }>;
+  tabsQuery?: () => Promise<
+    Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean }>
+  >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
@@ -504,13 +506,20 @@ function loadWorker(options: {
   const tabUpdatedListeners: Array<(tabId: number, changeInfo: { url?: string; status?: string }) => void> = [];
   const installedListeners: Array<(details: { reason: string }) => void> = [];
   const alarmListeners: Array<(alarm: { name: string }) => void> = [];
-  const knownTabs = new Map<number, { id: number; windowId: number; url?: string; pendingUrl?: string }>();
+  const knownTabs = new Map<
+    number,
+    { id: number; windowId: number; url?: string; pendingUrl?: string; autoDiscardable?: boolean }
+  >();
   const tabsCreate = vi.fn(async ({ url }: { url?: string } = {}) => {
     knownTabs.set(99, { id: 99, windowId: 7, ...(url ? { url } : {}) });
     return { id: 99 };
   });
   const tabsQuery = vi.fn(options.tabsQuery ?? (async () => [...knownTabs.values()]));
-  const tabsUpdate = vi.fn(async (id: number) => ({ id, windowId: 7 }));
+  const tabsUpdate = vi.fn(async (id: number, properties: { autoDiscardable?: boolean } = {}) => {
+    const tab = knownTabs.get(id);
+    if (tab && typeof properties.autoDiscardable === 'boolean') tab.autoDiscardable = properties.autoDiscardable;
+    return { id, windowId: 7, ...properties };
+  });
   const tabsSendMessage = vi.fn(options.tabsSendMessage ?? (async () => ({ ok: true })));
   const tabsRemove = vi.fn(async () => undefined);
   const tabsReload = vi.fn(async () => undefined);
@@ -621,12 +630,13 @@ function loadWorker(options: {
       await new Promise((resolve) => setTimeout(resolve, 0));
       await new Promise((resolve) => setTimeout(resolve, 0));
     },
-    async createTab(tab: { id: number; url?: string; pendingUrl?: string }) {
+    async createTab(tab: { id: number; url?: string; pendingUrl?: string; autoDiscardable?: boolean }) {
       knownTabs.set(tab.id, {
         id: tab.id,
         windowId: 7,
         ...(tab.url ? { url: tab.url } : {}),
-        ...(tab.pendingUrl ? { pendingUrl: tab.pendingUrl } : {})
+        ...(tab.pendingUrl ? { pendingUrl: tab.pendingUrl } : {}),
+        autoDiscardable: tab.autoDiscardable ?? true
       });
       for (const fn of tabCreatedListeners) fn(tab);
       for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -689,7 +699,13 @@ function loadWorker(options: {
     },
     send(message, tabId = 1, documentId = documentFor(tabId)) {
       if (message.type === 'bind' && typeof message.conversationId === 'string') {
-        knownTabs.set(tabId, { id: tabId, windowId: 7, url: `https://chatgpt.com/c/${message.conversationId}` });
+        knownTabs.set(tabId, {
+          ...knownTabs.get(tabId),
+          id: tabId,
+          windowId: 7,
+          url: `https://chatgpt.com/c/${message.conversationId}`,
+          autoDiscardable: knownTabs.get(tabId)?.autoDiscardable ?? true
+        });
       }
       return new Promise((resolve, reject) => {
         try {
@@ -733,6 +749,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
    */
   function appWith(repair: string | null) {
     const asked: string[] = [];
+    const actions: string[] = [];
+    const failedActions: string[] = [];
     let outstanding = repair;
     let token = '';
     let minted = 0;
@@ -742,6 +760,13 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       if (url.pathname === '/closed') return response(200, { ok: true });
       if (url.pathname === '/status') {
         const repaired = url.searchParams.get('repaired');
+        const repairFailed = url.searchParams.get('repairFailed');
+        if (repairFailed) {
+          failedActions.push(url.searchParams.get('repairAction') || '');
+          asked.push(repairFailed === token ? `failed:${outstanding}` : `stale-failure:${repairFailed}`);
+          return response(200, { ok: true, repair: null });
+        }
+        if (repaired) actions.push(url.searchParams.get('repairAction') || '');
         asked.push(repaired ? (repaired === token ? `repaired:${outstanding}` : `stale:${repaired}`) : 'status');
         if (repaired && repaired === token) outstanding = null;
         if (!outstanding) return response(200, { ok: true, repair: null });
@@ -750,11 +775,11 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       }
       return response(404, {});
     });
-    return { fetch, asked, arm: (id: string) => { outstanding = id; } };
+    return { fetch, asked, actions, failedActions, arm: (id: string) => { outstanding = id; } };
   }
 
   it('reloads the exact tab holding the chat the app named, and reports it once', async () => {
-    const { fetch, asked } = appWith(CHAT);
+    const { fetch, asked, actions } = appWith(CHAT);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
     await worker.registerTab(21);
     await worker.send({ type: 'bind', conversationId: CHAT }, 21);
@@ -765,6 +790,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
     expect(worker.tabsReload).toHaveBeenCalledWith(21);
     expect(asked).toEqual(['status', `repaired:${CHAT}`]);
+    expect(actions).toEqual(['reloaded']);
 
     // Reported, so the app has nothing outstanding and nothing here repeats it.
     await worker.fireAlarm();
@@ -796,9 +822,9 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
   });
 
-  /** A reload that throws repaired nothing, so it is not reported and the next pass retries. */
+  /** A reload that throws reports that attempt as failed, then the next pass retries it. */
   it('retries a repair whose reload failed', async () => {
-    const { fetch, asked } = appWith(CHAT);
+    const { fetch, asked, failedActions } = appWith(CHAT);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
     await worker.registerTab(51);
     await worker.send({ type: 'bind', conversationId: CHAT }, 51);
@@ -806,16 +832,17 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
 
     await worker.fireAlarm();
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
-    expect(asked).toEqual(['status']);
+    expect(asked).toEqual(['status', `failed:${CHAT}`]);
+    expect(failedActions).toEqual(['reloaded']);
 
     await worker.fireAlarm();
     expect(worker.tabsReload).toHaveBeenCalledTimes(2);
-    expect(asked).toEqual(['status', 'status', `repaired:${CHAT}`]);
+    expect(asked).toEqual(['status', `failed:${CHAT}`, 'status', `repaired:${CHAT}`]);
   });
 
   /** A missing exact chat is opened once after the same fresh scan that prevents duplicates. */
   it('opens the exact chat when the scan proves this browser is not holding it', async () => {
-    const { fetch, asked } = appWith(OTHER);
+    const { fetch, asked, actions } = appWith(OTHER);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
     await worker.registerTab(41);
     await worker.send({ type: 'bind', conversationId: CHAT }, 41);
@@ -824,6 +851,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).not.toHaveBeenCalled();
     expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${OTHER}` });
     expect(asked).toEqual(['status', `repaired:${OTHER}`]);
+    expect(actions).toEqual(['reopened']);
   });
 
   it('opens an active agent chat in the same close transaction instead of losing its retry alarm', async () => {
@@ -924,6 +952,79 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     // And the cadence stops with the tab, rather than waking a worker forever.
     await worker.closeTab(61);
     expect(worker.alarmClear).toHaveBeenCalledWith('clf-bridge-drain');
+  });
+});
+
+describe('active agent tab discard protection', () => {
+  const paired = { port: 8765, token: 'paired-token' };
+  const CHAT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+  it('protects the exact live chat and restores only the tab policy it changed', async () => {
+    let live = true;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') {
+        return response(200, {
+          ok: true,
+          repair: null,
+          recoveryMonitoring: live,
+          nonDiscardableConversations: live ? [CHAT] : []
+        });
+      }
+      return response(404, {});
+    });
+    const session = new FakeStorageArea();
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session, fetch });
+    await worker.registerTab(81);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 81);
+
+    await worker.fireAlarm();
+    expect(worker.tabsUpdate).toHaveBeenCalledWith(81, { autoDiscardable: false });
+    expect(session.data.discardProtectedTabs).toEqual({ '81': true });
+
+    live = false;
+    const restarted = loadWorker({
+      local: new FakeStorageArea(paired),
+      session,
+      fetch,
+      tabsQuery: async () => [
+        { id: 81, windowId: 7, url: `https://chatgpt.com/c/${CHAT}`, autoDiscardable: false }
+      ]
+    });
+    await restarted.fireAlarm();
+    expect(restarted.tabsUpdate).toHaveBeenLastCalledWith(81, { autoDiscardable: true });
+    expect(session.data.discardProtectedTabs).toEqual({});
+  });
+
+  it('does not claim or restore a tab Chrome was already told not to discard', async () => {
+    let live = true;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') {
+        return response(200, {
+          ok: true,
+          repair: null,
+          recoveryMonitoring: live,
+          nonDiscardableConversations: live ? [CHAT] : []
+        });
+      }
+      return response(404, {});
+    });
+    const session = new FakeStorageArea();
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session, fetch });
+    await worker.createTab({ id: 82, url: `https://chatgpt.com/c/${CHAT}`, autoDiscardable: false });
+    await worker.registerTab(82);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 82);
+
+    await worker.fireAlarm();
+    expect(worker.tabsUpdate).not.toHaveBeenCalled();
+    expect(session.data.discardProtectedTabs).toEqual({});
+
+    live = false;
+    await worker.fireAlarm();
+    expect(worker.tabsUpdate).not.toHaveBeenCalled();
   });
 });
 

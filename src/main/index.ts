@@ -40,10 +40,13 @@ import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
   GOAL_REPLIES_STATE,
+  GOAL_SWITCHES_STATE,
   restoreGoalObjectives,
   restoreGoalReplies,
+  restoreGoalSwitches,
   type GoalObjectivesSnapshot,
-  type GoalRepliesSnapshot
+  type GoalRepliesSnapshot,
+  type GoalSwitchesSnapshot
 } from './goal.js';
 import {
   CONTINUATIONS_STATE,
@@ -53,7 +56,7 @@ import {
 } from './session/continuation.js';
 import { startSessionRetentionMaintenance } from './session/retention.js';
 import { runShutdownSequence } from './shutdown.js';
-import { applyStagedUpdate, checkForUpdates } from './update.js';
+import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { windowLayoutForWorkArea } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
 import {
@@ -241,6 +244,9 @@ void app.whenReady().then(async () => {
   const savedGoalObjectives = await readDurable<GoalObjectivesSnapshot>(GOAL_OBJECTIVES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalObjectives(savedGoalObjectives);
+  const savedGoalSwitches = await readDurable<GoalSwitchesSnapshot>(GOAL_SWITCHES_STATE);
+  if (windowActivation.isDisabled()) return;
+  restoreGoalSwitches(savedGoalSwitches);
   const savedGoalReplies = await readDurable<GoalRepliesSnapshot>(GOAL_REPLIES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalReplies(savedGoalReplies);
@@ -367,10 +373,11 @@ void app.whenReady().then(async () => {
 
   if (getConfig().ui.autoConnect) void connect();
 
-  // Once per app open, and never awaited: an unreachable GitHub, a slow download or a broken
-  // release must not delay a window that is already on screen. Everything it learns arrives
-  // through the ordinary state push, and every failure ends inside it.
-  void checkForUpdates();
+  // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
+  // window that is already on screen. Everything it learns arrives through the ordinary state
+  // push, every failure ends inside it, and its own timer keeps it running for a tray app that
+  // is never restarted.
+  startUpdateChecks();
 });
 
 app.on('before-quit', () => {

@@ -63,7 +63,7 @@ import {
   thawPrimeTransfer
 } from '../agents.js';
 import { clearChatWorkspace, moveChatWorkspace, workspaceForChat } from '../workspace.js';
-import { clearGoalObjective, goalObjectiveFor, moveGoalObjective } from '../goal.js';
+import { clearGoalObjective, clearGoalSwitch, goalObjectiveFor, goalSwitchFor, moveGoalObjective, moveGoalSwitch } from '../goal.js';
 import { writeDurableNow, writeDurableSoon } from '../durable.js';
 import { prepareHandoff, resumeBootstrapMatches } from './handoff.js';
 import { ensureHandoffRecorded, recordHandoff, rebindConversation } from './recorder.js';
@@ -492,6 +492,11 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
   } else {
     goalChanged = moveGoalObjective(fromConversationId, conversationId);
   }
+  // The chat's own Goal/Loop switch travels with its objective. A loop that was running in A
+  // is still running in B — the whole point of Compact & Resume is that the work continues —
+  // and leaving the override behind would silently hand B back to the app-wide setting.
+  if (goalSwitchFor(conversationId).own) clearGoalSwitch(fromConversationId);
+  else if (moveGoalSwitch(fromConversationId, conversationId)) goalChanged = true;
   // The recovery hook uses success semantics: replaying an already-repaired target returns true
   // by design. Here this boolean means "changed on this call" and drives a user-visible warning,
   // so an already-owned target must not be counted as a fresh broker mutation. Missing Goal or
@@ -882,6 +887,7 @@ function publishCommittedProjection(
   rebindConversation(entry.sessionId, entry.from, toConversationId);
   moveChatWorkspace(entry.from, toConversationId);
   moveGoalObjective(entry.from, toConversationId);
+  moveGoalSwitch(entry.from, toConversationId);
   if (swarm === 'frozen') {
     if (!commitPrimeTransfer(entry.from, toConversationId)) {
       // The frozen handover cannot expire. A miss here means the run ended outright while
@@ -1308,6 +1314,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
         rebindConversation(entry.sessionId, entry.from, entry.to);
         moveChatWorkspace(entry.from, entry.to);
         moveGoalObjective(entry.from, entry.to);
+        moveGoalSwitch(entry.from, entry.to);
         const repaired = recoveryHooks.repairPrimeTransfer?.(entry.from, entry.to) ?? false;
         if (!repaired) commitPrimeTransfer(entry.from, entry.to);
         entry.state = 'committed';

@@ -683,17 +683,9 @@
   display: none !important;
 }
 
-/* Overwrite is whole-turn ownership, not a selective relabel pass. ChatGPT's native
-   assistant subtree remains mounted for observation/React state, but every direct child is
-   visually removed. The app-owned stream is a sibling of the turn section so React cannot
-   drag it across the next user message when it transiently reorders/reuses native sections. */
-[data-clf-turn-replaced='1'] > :not(.clf-stream) {
-  display: none !important;
-}
-
 /* The reading column, not the thread.
  *
- * `replaceTurn` appends this to the turn's <article>, which is as wide as the whole thread
+ * `replaceActivity` mounts this beside the turn's <article>, which is as wide as the whole thread
  * pane; ChatGPT's own prose sits in a centred column inside it. Inheriting the article's
  * width made the app's rendering run edge to edge while the native turn above it stayed
  * narrow — the same conversation in two different measures. So take ChatGPT's own column
@@ -741,13 +733,11 @@
   overflow-wrap: anywhere;
 }
 
-.clf-stream-progress,
-.clf-stream-assistant_message {
+.clf-stream-progress {
   opacity: 1;
 }
 
-.clf-stream-progress .clf-stream-icon,
-.clf-stream-assistant_message .clf-stream-icon {
+.clf-stream-progress .clf-stream-icon {
   display: none;
 }
 
@@ -766,71 +756,6 @@
   opacity: 0.86;
 }
 
-.clf-stream-assistant_message {
-  display: block;
-  margin: 0.55rem 0 0.25rem;
-  font-size: 1rem;
-  line-height: 1.7;
-}
-
-.clf-stream-assistant_message .clf-stream-text {
-  display: block;
-  white-space: normal;
-  font-weight: 400;
-}
-
-.clf-stream-assistant_message .clf-stream-text > :first-child { margin-top: 0; }
-.clf-stream-assistant_message .clf-stream-text > :last-child { margin-bottom: 0; }
-.clf-stream-assistant_message .clf-stream-text p,
-.clf-stream-assistant_message .clf-stream-text ul,
-.clf-stream-assistant_message .clf-stream-text ol,
-.clf-stream-assistant_message .clf-stream-text blockquote,
-.clf-stream-assistant_message .clf-stream-text pre,
-.clf-stream-assistant_message .clf-stream-text table,
-.clf-stream-assistant_message .clf-stream-text h1,
-.clf-stream-assistant_message .clf-stream-text h2,
-.clf-stream-assistant_message .clf-stream-text h3,
-.clf-stream-assistant_message .clf-stream-text h4,
-.clf-stream-assistant_message .clf-stream-text h5,
-.clf-stream-assistant_message .clf-stream-text h6 { margin: 0.6em 0; }
-.clf-stream-assistant_message .clf-stream-text ul,
-.clf-stream-assistant_message .clf-stream-text ol { padding-left: 1.55em; }
-.clf-stream-assistant_message .clf-stream-text blockquote {
-  margin-left: 0;
-  padding-left: 0.8em;
-  border-left: 2px solid color-mix(in srgb, currentColor 20%, transparent);
-  opacity: 0.86;
-}
-.clf-stream-assistant_message .clf-stream-text code {
-  padding: 0.08em 0.28em;
-  border-radius: 0.3rem;
-  background: color-mix(in srgb, currentColor 7%, transparent);
-  font-size: 0.92em;
-}
-.clf-stream-assistant_message .clf-stream-text pre {
-  overflow: auto;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, currentColor 4%, transparent);
-  white-space: pre;
-}
-.clf-stream-assistant_message .clf-stream-text pre code { padding: 0; background: transparent; }
-.clf-stream-assistant_message .clf-stream-text table {
-  width: max-content;
-  min-width: 100%;
-  border-collapse: collapse;
-}
-.clf-stream-assistant_message .clf-stream-text th,
-.clf-stream-assistant_message .clf-stream-text td {
-  padding: 0.28rem 0.45rem;
-  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  text-align: left;
-  vertical-align: top;
-}
-
-.clf-stream-assistant_message .clf-agent,
-.clf-stream-assistant_message .clf-when,
 .clf-stream-progress .clf-when {
   display: none;
 }

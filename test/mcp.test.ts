@@ -39,11 +39,13 @@ import type { ToolOutcome } from '../src/shared/session.js';
 import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import {
+  backdateExecAttendanceForTests,
   backgroundExecObligations,
   execOwner,
   MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
   noteExecOwner,
-  resetExecOwnershipForTests
+  resetExecOwnershipForTests,
+  UNATTENDED_EXEC_NOTICE_MS
 } from '../src/main/codex/ownership.js';
 import { unifiedExecManager } from '../src/main/codex/manager.js';
 import { locateRipgrep } from '../src/main/ripgrep.js';
@@ -1760,6 +1762,17 @@ describe('sandbox enforcement through the tool layer', () => {
     // `/project` is nobody's root; it was a hardcoded example the model could not act on.
     expect(paths).not.toContain('/project');
 
+    // Nor may anything be invented *after* the root. `/workspace/src/main.ts` named a live
+    // root and was still a worked example the model could not act on, and a worse one than
+    // `/project`: a project-shaped suffix reads as a promise that the root is the project.
+    // An approved root is routinely a parent holding several, and reading it the other way
+    // is what produced `/<root>/AGENTS.md` for a file one folder deeper — the most repeated
+    // read failure in the recorded corpus. What replaces it is the relationship, not another
+    // path, so there is nothing left here that can go stale.
+    expect(paths).not.toMatch(/\/workspace\/\S+\.\w+/);
+    expect(paths).toContain('parent of the project');
+    expect(paths).toContain('workdir');
+
     // list_roots is retired, so no refusal may tell the model to call it. A native path outside
     // every root is the refusal that used to, and it must still name the roots that do exist.
     const refusal = textOf(
@@ -3283,6 +3296,79 @@ describe('exec sessions belong to the chat that opened them', () => {
 
     for (const sessionId of sessionIds.slice(1)) {
       await asChat(blockedRequest, 'write_stdin', { session_id: sessionId, chars: '' });
+    }
+  });
+
+  it('pings a live session left unpolled once, without blocking work or reaching another chat', async () => {
+    expect(prove('wfr_background_unattended', 'conv-background-unattended')).toBe('stored');
+    expect(prove('wfr_background_stranger', 'conv-background-stranger')).toBe('stored');
+    const started = await asChat('wfr_background_unattended', 'exec_command', {
+      cmd: IS_WINDOWS ? 'Start-Sleep -Seconds 30' : 'sleep 30',
+      workdir: '/workspace',
+      yield_time_ms: 250
+    });
+    const sessionId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+    expect(Number.isInteger(sessionId), textOf(started)).toBe(true);
+
+    try {
+      // Inside the threshold a live session is just work in progress, and says nothing.
+      const quiet = await asChat('wfr_background_unattended', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(quiet)).not.toContain(`Background session ${sessionId}`);
+
+      backdateExecAttendanceForTests(sessionId, UNATTENDED_EXEC_NOTICE_MS + 60_000);
+
+      const stranger = await asChat('wfr_background_stranger', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(stranger)).not.toContain(`Background session ${sessionId}`);
+
+      const pinged = await asChat('wfr_background_unattended', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(pinged)).toContain(`Background session ${sessionId} has been running unpolled for 3m`);
+      expect(textOf(pinged)).toContain(`write_stdin(session_id=${sessionId}, chars="")`);
+
+      // Once, and only once: a session that is supposed to run all turn must not nag all turn.
+      const again = await asChat('wfr_background_unattended', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(again)).not.toContain(`Background session ${sessionId}`);
+
+      // A reminder is not admission pressure. The session it names may be the point of the turn,
+      // so unlike a completed unread result it never spends the exec_command budget.
+      const admitted = await asChat('wfr_background_unattended', 'exec_command', {
+        cmd: IS_WINDOWS ? "Write-Output 'still-admitted'" : "printf '%s\n' still-admitted",
+        workdir: '/workspace',
+        yield_time_ms: 5_000
+      });
+      expect(failed(admitted), textOf(admitted)).toBe(false);
+      expect(textOf(admitted)).toContain('still-admitted');
+    } finally {
+      await unifiedExecManager.terminateProcess(sessionId);
+    }
+  });
+
+  it('restarts the unattended clock when the owner polls, rather than reminding it of what it just did', async () => {
+    expect(prove('wfr_background_attended', 'conv-background-attended')).toBe('stored');
+    const started = await asChat('wfr_background_attended', 'exec_command', {
+      cmd: IS_WINDOWS
+        ? "while ($true) { Write-Output 'tick'; Start-Sleep -Milliseconds 200 }"
+        : "while true; do printf '%s\n' tick; sleep 0.2; done",
+      workdir: '/workspace',
+      yield_time_ms: 250
+    });
+    const sessionId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+    expect(Number.isInteger(sessionId), textOf(started)).toBe(true);
+
+    try {
+      backdateExecAttendanceForTests(sessionId, UNATTENDED_EXEC_NOTICE_MS + 60_000);
+      const polled = await asChat('wfr_background_attended', 'write_stdin', {
+        session_id: sessionId,
+        chars: ''
+      });
+      expect(failed(polled), textOf(polled)).toBe(false);
+      expect(textOf(polled)).toContain('tick');
+      // The mark lands before the wait, so the poll cannot report the session it is attending.
+      expect(textOf(polled)).not.toContain('has been running unpolled');
+
+      const after = await asChat('wfr_background_attended', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(after)).not.toContain(`Background session ${sessionId}`);
+    } finally {
+      await unifiedExecManager.terminateProcess(sessionId);
     }
   });
 });

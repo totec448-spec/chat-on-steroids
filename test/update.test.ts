@@ -28,7 +28,8 @@ vi.mock('node:child_process', () => ({
 }));
 
 let userData = '';
-vi.mock('electron', () => ({ app: { getPath: () => userData } }));
+let packaged = true;
+vi.mock('electron', () => ({ app: { getPath: () => userData, get isPackaged() { return packaged; } } }));
 vi.mock('../src/main/logger.js', () => ({ logInfo: () => undefined, logWarn: () => undefined }));
 
 const { APP_VERSION } = await import('../src/main/version.js');
@@ -101,6 +102,7 @@ async function asPlatform(platform: string, appImage: string | undefined, run: (
 
 beforeEach(() => {
   userData = mkdtempSync(path.join(tmpdir(), 'cos-update-'));
+  packaged = true;
   spawned.length = 0;
   resetUpdateForTests();
 });
@@ -139,6 +141,24 @@ describe('which installations update themselves', () => {
     await applyStagedUpdate();
     expect(spawned).toEqual([]);
   });
+
+  /**
+   * A development tree is not an installation. It is permanently "behind" the moment a release
+   * ships, and staging for it would mean quitting `electron-vite dev` silently ran an NSIS
+   * installer over the maintainer's real per-user install.
+   */
+  it('never stages for an unpackaged run', async () => {
+    packaged = false;
+    expect(stagedArtifact('win32', 'x64')).toBeNull();
+
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'idle', error: null });
+    expect(asked).toEqual(['latest']);
+    await applyStagedUpdate();
+    expect(spawned).toEqual([]);
+  });
 });
 
 describe('finding a newer release', () => {
@@ -157,10 +177,17 @@ describe('finding a newer release', () => {
     expect(isNewer('1.9.9', '2.0.0')).toBe(false);
   });
 
+  /**
+   * `checkedAt` is the difference between "checked, nothing to install" and "has not asked yet",
+   * which are the same `{latest: null, stage: 'idle'}` record otherwise. The renderer says "up to
+   * date" on the strength of that timestamp, so a pass that never reached GitHub must not set it.
+   */
   it('reports nothing when the published release is the version already running', async () => {
     const { asked } = github({ version: APP_VERSION });
+    expect(updateStatus().checkedAt).toBeNull();
     await checkForUpdates();
     expect(updateStatus()).toMatchObject({ current: APP_VERSION, latest: null, stage: 'idle' });
+    expect(updateStatus().checkedAt).toBeGreaterThan(0);
     // It stopped at the release: no checksums, no artifact, nothing written.
     expect(asked).toEqual(['latest']);
     expect(readdirSync(userData)).toEqual([]);
@@ -249,7 +276,7 @@ describe('one pass at a time, and one more next time the app opens', () => {
   it('retries the next time the app opens after a check that could not reach GitHub', async () => {
     github({ fail: 'release' });
     await checkForUpdates();
-    expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed' });
+    expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed', checkedAt: null });
     expect(updateStatus().error).toContain('503');
 
     github();

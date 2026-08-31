@@ -98,7 +98,7 @@
   const ACTIVITY_MS = 2000;
   const IDLE_ACTIVITY_MS = 10_000;
   const HIDDEN_ACTIVITY_MS = 30_000;
-  /** Keep a previously proven full replacement through brief Fiber/feed disagreement. */
+  /** Keep previously proven activity ownership through brief Fiber/feed disagreement. */
   const REPLACEMENT_GRACE_MS = 8000;
   /**
    * User-driven scrolling and ChatGPT's historical virtualization happen in the same burst.
@@ -1969,16 +1969,27 @@
      * failure happening a second time. Errors rendered inside a turn carry that turn's id
      * as well, so two turns failing identically stay distinct even in the markdown case.
      */
-    const recordedTurn = turnId || (turn && turn.id) || '';
+    const fallbackTurn = turnId || (turn && turn.id) || '';
     for (const error of visibleErrors) {
       if (isStale(error.node)) continue;
-      const scope = error.turnId || '';
+      // The DOM adapter names ChatGPT's page turn. The recorder timeline is keyed by the
+      // local generation this document minted, so putting that page id on a live error leaves
+      // the row outside its turn group and chronology renders it after every later call. Resolve
+      // through the same node ownership used by messages/tools; a top-level banner belongs to
+      // the generation in which it first appeared.
+      const pageTurn = error.turn || (turn && sameTurn(error, turn) ? turn : null);
+      const recordedTurn =
+        localGenerationOf(pageTurn) ||
+        (!error.turnId ? errorFirstSeen.get(error.node) : null) ||
+        error.turnId ||
+        fallbackTurn;
+      const scope = recordedTurn || '';
       if (!unreportedError(error, scope)) continue;
       markErrorReported(error, scope);
       emit({
         kind: 'chat_error',
         text: error.text,
-        turnId: error.turnId || recordedTurn || undefined,
+        turnId: recordedTurn || undefined,
         recoverable: error.recoverable === true
       });
     }
@@ -4360,11 +4371,11 @@
   }
 
   /**
-   * True only when the local replacement contains every page-authored item we can identify.
+   * True only when local activity can be matched against every page-authored item we can identify.
    *
    * The native DOM stays visible on uncertainty. This is intentionally stricter than the old
    * renderer: an incomplete local transcript is useful in the app, but it is never sufficient
-   * evidence to hide the source transcript the user is currently reading.
+   * evidence to hide ChatGPT's native activity rows. Its answer DOM remains native either way.
    */
   /**
    * Whether Fiber has already exposed a connector call that the local replacement cannot show.
@@ -4421,69 +4432,6 @@
     return true;
   }
 
-  const RENDERED_TAGS = new Set([
-    'A', 'BLOCKQUOTE', 'BR', 'CODE', 'DEL', 'DIV', 'EM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
-    'HR', 'KBD', 'LI', 'MARK', 'OL', 'P', 'PRE', 'S', 'SPAN', 'STRONG', 'SUB', 'SUP', 'TABLE',
-    'TBODY', 'TD', 'TFOOT', 'TH', 'THEAD', 'TR', 'UL'
-  ]);
-  const DROP_RENDERED_TAGS = new Set([
-    'SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'FORM', 'INPUT', 'BUTTON',
-    'TEXTAREA', 'SELECT', 'OPTION', 'META', 'LINK'
-  ]);
-
-  function safeRenderedHref(value) {
-    const trimmed = String(value || '').trim();
-    if (trimmed.startsWith('#')) return trimmed;
-    try {
-      const url = new URL(trimmed);
-      return url.protocol === 'https:' || url.protocol === 'http:' || url.protocol === 'mailto:' ? trimmed : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /** Captured ChatGPT HTML is preserved semantically but treated as untrusted on replay. */
-  function appendRenderedHtml(target, html, fallback) {
-    if (!html) {
-      target.textContent = fallback || '';
-      return;
-    }
-    const template = document.createElement('template');
-    template.innerHTML = String(html).slice(0, 120000);
-    const visit = (parent) => {
-      for (const node of [...parent.childNodes]) {
-        if (!(node instanceof HTMLElement)) continue;
-        if (DROP_RENDERED_TAGS.has(node.tagName)) {
-          node.remove();
-          continue;
-        }
-        visit(node);
-        if (!RENDERED_TAGS.has(node.tagName)) {
-          node.replaceWith(...node.childNodes);
-          continue;
-        }
-        const href = node.tagName === 'A' ? safeRenderedHref(node.getAttribute('href')) : null;
-        const title = node.getAttribute('title');
-        const start = node.tagName === 'OL' ? node.getAttribute('start') : null;
-        const colSpan = node.tagName === 'TD' || node.tagName === 'TH' ? node.getAttribute('colspan') : null;
-        const rowSpan = node.tagName === 'TD' || node.tagName === 'TH' ? node.getAttribute('rowspan') : null;
-        for (const attribute of [...node.attributes]) node.removeAttribute(attribute.name);
-        if (href) {
-          node.setAttribute('href', href);
-          node.setAttribute('target', '_blank');
-          node.setAttribute('rel', 'noreferrer noopener');
-        }
-        if (title) node.setAttribute('title', title.slice(0, 500));
-        if (start && /^\d{1,6}$/.test(start)) node.setAttribute('start', start);
-        if (colSpan && /^\d{1,3}$/.test(colSpan)) node.setAttribute('colspan', colSpan);
-        if (rowSpan && /^\d{1,3}$/.test(rowSpan)) node.setAttribute('rowspan', rowSpan);
-      }
-    };
-    visit(template.content);
-    target.append(template.content);
-    if (!(target.textContent || '').trim() && fallback) target.textContent = fallback;
-  }
-
   function streamRow(entry) {
     const row = document.createElement('div');
     row.className = `clf-stream-row clf-stream-${entry.kind}`;
@@ -4504,7 +4452,7 @@
       row.append(who);
     }
 
-    const body = document.createElement(entry.kind === 'assistant_message' ? 'div' : 'span');
+    const body = document.createElement('span');
     body.className = 'clf-stream-text';
     if (entry.kind === 'tool_call') {
       body.textContent = entry.summary && entry.summary.title ? entry.summary.title : `Ran ${entry.tool || 'tool'}`;
@@ -4523,8 +4471,6 @@
     } else if (entry.kind === 'turn_end') {
       const outcome = entry.outcome ? String(entry.outcome).replace(/_/g, ' ') : 'completed';
       body.textContent = `Turn ${outcome}${entry.detail ? ` · ${entry.detail}` : ''}`;
-    } else if (entry.kind === 'assistant_message') {
-      appendRenderedHtml(body, entry.renderedHtml, entry.text || '');
     } else {
       body.textContent = entry.text || '';
     }
@@ -4648,9 +4594,9 @@
     // still has no route id (or after the route changed before observe() processed it).
     // Keeping the existing DOM untouched also preserves the harmless transient-null case.
     if (conversationId && CLF_DOM.conversationId() !== conversationId) return;
-    // The app owns presentation while Overwrite is on. ChatGPT's DOM stays alive underneath
-    // as the recorder's observation source, but it contributes zero visible ordering or
-    // prose: the local event stream is rendered exactly in the order the app returns it.
+    // Overwrite owns activity ordering, while ChatGPT remains the sole renderer for the answer,
+    // code/document blocks and response actions. Rebuilding that subtree from captured HTML lost
+    // React behavior and site-specific structure by construction.
     const enabled = renderStreamAllowed() && status.connected === true && status.paired === true;
     // Historical sections are mounted/unmounted *because* a user is moving the viewport.
     // Mutating those fresh mounts during the same wheel/touch/key burst changes document
@@ -4772,7 +4718,7 @@
         if (existing) existing.remove();
         if (streamKey) streamRootsByKey.delete(streamKey);
         for (const node of nodes) if (node && node.dataset) delete node.dataset.clfStreamKey;
-        CLF_DOM.replaceTurn(turn, null, false);
+        CLF_DOM.replaceActivity(turn, null, false);
         CLF_DOM.hideProgress(turn, false);
         for (const block of CLF_DOM.toolBlocks(turn)) block.removeAttribute('data-clf-native-hidden');
         continue;
@@ -4793,9 +4739,9 @@
       // carries right back on the page.
       if (streamKey && painted.has(streamKey)) {
         for (const node of nodes) if (node && node.dataset) node.dataset.clfStreamKey = streamKey;
-        CLF_DOM.hideProgress(turn, false);
-        for (const block of CLF_DOM.toolBlocks(turn)) block.removeAttribute('data-clf-native-hidden');
-        CLF_DOM.replaceTurn(turn, null, true);
+        CLF_DOM.hideProgress(turn, true);
+        for (const block of CLF_DOM.toolBlocks(turn)) block.setAttribute('data-clf-native-hidden', '1');
+        CLF_DOM.replaceActivity(turn, null, true);
         continue;
       }
 
@@ -4821,12 +4767,13 @@
         if (existing) existing.remove();
         if (streamKey) streamRootsByKey.delete(streamKey);
         for (const node of nodes) if (node && node.dataset) delete node.dataset.clfStreamKey;
-        CLF_DOM.replaceTurn(turn, null, false);
+        CLF_DOM.replaceActivity(turn, null, false);
         CLF_DOM.hideProgress(turn, false);
         for (const block of CLF_DOM.toolBlocks(turn)) block.removeAttribute('data-clf-native-hidden');
         continue;
       }
 
+      const activityRows = rendered.filter((entry) => entry.kind !== 'assistant_message');
       const root = existing || document.createElement('div');
       root.className = 'clf-stream';
       if (streamKey) {
@@ -4838,7 +4785,7 @@
       root.dataset.clfTurn = turn.id || (group && group.id) || localId || 'anchored';
       // Commentary text is part of the signature: one caption grows in place under the same
       // seq, so a signature made of seq and kind alone would never notice it had changed.
-      const signature = `${SHOW_TIMES ? 'times:1' : 'times:0'}|` + rendered
+      const signature = `${SHOW_TIMES ? 'times:1' : 'times:0'}|` + activityRows
         .map((entry) =>
           [
             entry.seq,
@@ -4856,14 +4803,14 @@
         .join('|');
       if (root.dataset.clfSignature !== signature) {
         root.dataset.clfSignature = signature;
-        root.replaceChildren(...rendered.map(streamRow));
+        root.replaceChildren(...activityRows.map(streamRow));
       }
       root.dataset.clfStrongKeys = JSON.stringify([...strongStreamIdentityKeys(rendered)]);
-      // Clear the old selective-hiding state from pre-1.7.4 renderers. The section marker
-      // below now owns visibility wholesale.
-      CLF_DOM.hideProgress(turn, false);
-      for (const block of CLF_DOM.toolBlocks(turn)) block.removeAttribute('data-clf-native-hidden');
-      CLF_DOM.replaceTurn(turn, root, true);
+      // Hide only the native activity that these exact rows replace. The assistant answer and
+      // its React-backed controls remain mounted, visible and interactive.
+      CLF_DOM.hideProgress(turn, true);
+      for (const block of CLF_DOM.toolBlocks(turn)) block.setAttribute('data-clf-native-hidden', '1');
+      CLF_DOM.replaceActivity(turn, root, true);
       if (streamKey) painted.add(streamKey);
     }
     // A virtualized historical turn can disappear from the DOM entirely while its sibling
@@ -5997,8 +5944,8 @@
       return;
     }
     setGoalPhase('sending');
-    if (!CLF_DOM.insertPrompt(opening)) {
-      setGoalPhase('sending', 'the message box was in use, so nothing was sent');
+    if (!CLF_DOM.insertPrompt(opening, true)) {
+      setGoalPhase('sending', 'ChatGPT would not replace the New Chat draft');
       return;
     }
     await sleep(200);
@@ -7767,8 +7714,9 @@
    *
    * On a conversation that does not exist yet — a worker's own chat, or the replacement for
    * a compacted session — or, for a revival, in the one existing chat the app named when it
-   * opened this page and nowhere else. Never over a composer the user has started typing
-   * into, and never in a chat this command did not name.
+   * opened this page and nowhere else. A marked fresh worker/resume page may replace ChatGPT's
+   * restored New Chat draft; an exact-chat revival still waits for a genuinely free composer.
+   * No command ever types in a chat it did not name.
    *
    * One page, one marker, one attempt, and every exit reports its outcome. This used to be
    * three in-page attempts driven off the one-second observation tick, with a periodic
@@ -8214,14 +8162,6 @@
     };
     if (await failIfRetargeted()) return;
 
-    // Fresh worker/resume commands still have the old one-shot draft rule. A revival never gets
-    // this far with a draft: its pre-redeem readiness wait preserves the user's text and waits
-    // for the exact chat to become safe without consuming browser ownership.
-    const existing = CLF_DOM.composer();
-    if (existing && (existing.textContent || '').trim()) {
-      return void (await fail('the composer already holds something the user was writing'));
-    }
-
     // The composer is the readiness signal. Page-level `readyState` says whether every
     // resource finished loading, not whether this editing host is usable, and waiting on it
     // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
@@ -8229,7 +8169,7 @@
     if (!readyComposer) return void (await fail('ChatGPT never exposed a usable composer for bootstrap'));
     if (await failIfRetargeted()) return;
 
-    if (!CLF_DOM.insertPrompt(boot.text)) return void (await fail('ChatGPT refused the inserted text'));
+    if (!CLF_DOM.insertPrompt(boot.text, true)) return void (await fail('ChatGPT refused the inserted text'));
     // Give synchronous React/input work one microtask turn to replace the editing host, then
     // re-prove the exact draft before the irreversible send. This used to sleep for 100 ms.
     // Long-hidden Chrome tabs throttle wall-clock timers, so that tiny "stability" delay became

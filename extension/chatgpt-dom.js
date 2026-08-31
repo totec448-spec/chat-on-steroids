@@ -1289,18 +1289,14 @@ var CLF_DOM = (() => {
   }
 
   /**
-   * Makes one assistant turn an app-owned surface without deleting any React-owned DOM.
+   * Mounts app-owned activity before one assistant turn without replacing ChatGPT's answer.
    *
-   * The recorder still needs ChatGPT's native subtree to exist so it can observe final
-   * prose, progress and lifecycle changes. The visible stream deliberately lives *beside*
-   * ChatGPT's turn sections, not inside one of them. React transiently moves/reuses assistant
-   * sections while mounting the next user turn; keeping our stream inside such a section made
-   * the already-correct assistant answer jump across the new user message for one paint before
-   * reconciliation put it back. A connected sibling stream therefore never follows a native
-   * section that React moves. Turning Overwrite off only removes markers/the sibling; React
-   * never has to reconstruct anything we destroyed.
+   * The live React subtree remains the one renderer for prose, code/document blocks and action
+   * buttons. Overwrite owns only activity rows, mounted as a sibling so React cannot move them
+   * across a later user message. Turning it off removes only the marker/sibling; ChatGPT never
+   * has to reconstruct anything we destroyed.
    */
-  function replaceTurn(turn, root, replaced) {
+  function replaceActivity(turn, root, replaced) {
     return safe(() => {
       const sections = turnNodes(turn);
       if (sections.length === 0) return false;
@@ -1310,19 +1306,24 @@ var CLF_DOM = (() => {
       }
       const embedded = Boolean(root && sections.some((section) => root.parentElement === section));
       if (replaced && root && (!root.isConnected || embedded)) {
-        const last = sections[sections.length - 1];
-        if (last && last.parentElement) last.parentElement.insertBefore(root, last.nextSibling);
+        const first = sections[0];
+        if (first && first.parentElement) first.parentElement.insertBefore(root, first);
       }
       return true;
     }, false);
   }
 
-  /** Types into the composer. Refuses if the user already has a draft there. */
-  function insertPrompt(value) {
+  /** Types into the composer; dedicated fresh-chat automation may replace an autosaved draft. */
+  function insertPrompt(value, replace = false) {
     return safe(() => {
       const box = composer();
       if (!box) return false;
-      if ((box.textContent || '').trim() !== '') return false;
+      if ((box.textContent || '').trim() !== '') {
+        if (!replace) return false;
+        box.focus();
+        box.replaceChildren();
+        box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+      }
       box.focus();
       // execCommand still produces the native editing path ChatGPT listens for. Newer
       // composer builds occasionally ignore its return value, so verify the DOM and
@@ -1463,7 +1464,7 @@ var CLF_DOM = (() => {
     firstUserMessage,
     turnMount,
     hideProgress,
-    replaceTurn,
+    replaceActivity,
     insertPrompt,
     clearPromptExact,
     send
