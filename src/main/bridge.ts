@@ -1002,6 +1002,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // last repair did not happen. Null, which is almost always, costs this pass one request.
     const repaired = url.searchParams.get('repaired');
     if (repaired) confirmRepair(repaired.slice(0, 64));
+    const revival = pendingBrowserRevival();
     return json(
       res,
       200,
@@ -1009,6 +1010,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ok: true,
         conversations: live,
         commands: commands.length,
+        revival,
         repair: takePendingRepair(),
         recoveryMonitoring: browserRecoveryMonitoring()
       },
@@ -1527,6 +1529,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // has just been reloaded into a turn already in flight adopts this instead of
         // minting a second id for the same run. See liveConversations().
         activeTurnId: live.activeTurnId ?? null,
+        // A revival names an existing worker conversation. The extension, which alone can
+        // inspect Chrome's real tab set, routes it to that tab before it considers opening one.
+        // Returning the same inert id here makes a live page the fast path; /status remains the
+        // service-worker/restart path. Redeem is still the exclusive ownership boundary.
+        revival: pendingBrowserRevival(),
         // Browser recovery is delivered by /status, whose service-worker caller can scan every
         // actual ChatGPT tab immediately before deciding exact reload vs exact open. Keeping it
         // out of this document-local feed also lets a dead content script be recovered.
@@ -3535,7 +3542,6 @@ export function queueWorkerRevival(
   const command = queue({ type: 'revive', agent, conversationId, runId, wake: wake.join(' ') });
   // Start the waking clock at broker admission, not only after a browser accepts the command.
   armDeadline(command);
-  deliver();
   return describe(command, null);
 }
 
@@ -3579,18 +3585,25 @@ export function chatUrl(conversationId: string): string {
   return `https://chatgpt.com/c/${encodeURIComponent(conversationId)}`;
 }
 
-/** Where the app sends the browser. The marker is an id, not a credential. */
-export function commandUrl(id: string, conversationId?: string | null): string {
+/** Where the app opens a fresh worker/resume chat. The marker is an id, not a credential. */
+export function commandUrl(id: string): string {
   // Both a query and a fragment: ChatGPT is a single-page app that rewrites its own URL
   // during boot, and which of the two survives has changed between builds. The content
   // script accepts either, and redeeming still requires the extension's bearer token —
   // so a copied link, a history entry or a synced tab is worth nothing on its own.
   const marker = `clf=${encodeURIComponent(id)}`;
-  // A continuation opens the worker's own conversation rather than a new one. The page
-  // still has to redeem the marker, and the command it gets back names this same
-  // conversation, so the two have to agree before anything is typed.
-  const base = conversationId ? chatUrl(conversationId) : 'https://chatgpt.com/';
-  return `${base}?${marker}#${marker}`;
+  return `https://chatgpt.com/?${marker}#${marker}`;
+}
+
+/** The one existing-chat command the extension may route after a fresh tab scan. */
+function pendingBrowserRevival(): { id: string; conversationId: string } | null {
+  tidyCommands();
+  const command = commands.find(
+    (entry) => entry.spec.type === 'revive' && entry.owner === null && !revivalDeliveryProven(entry)
+  );
+  return command && command.spec.type === 'revive'
+    ? { id: command.id, conversationId: command.spec.conversationId }
+    : null;
 }
 
 // -------------------------------------------------------- exact browser recovery
@@ -3748,7 +3761,12 @@ function queueBrowserRecovery(
   const held = repairsInFlight.get(conversationId);
   if (held?.episode === episode) return false;
   if (held && held.state !== 'done') return false;
-  const notBefore = Math.max(now, (lastBrowserRecoveryAt.get(conversationId) ?? 0) + BROWSER_RECOVERY_COOLDOWN_MS);
+  // Silence already paid its complete two-minute inactivity boundary. Once genuine new activity
+  // starts another episode, layering the unrelated browser-action floor on top delays the next
+  // stuck-page recovery beyond its own contract. Error/no-tab repairs keep that shared floor.
+  const notBefore = reason === 'silence'
+    ? now
+    : Math.max(now, (lastBrowserRecoveryAt.get(conversationId) ?? 0) + BROWSER_RECOVERY_COOLDOWN_MS);
   repairsInFlight.set(conversationId, {
     endedTurns,
     state: 'queued',
@@ -3798,12 +3816,18 @@ function noteRecoveryObservations(
   const terminal = observations.some(
     (item) => item.kind === 'assistant_message' && item.final === true && item.state === 'final'
   );
+  const interim = observations.some(
+    (item) => item.kind === 'assistant_message' && item.final !== true && item.state !== 'final'
+  );
   if (meaningful) {
     noteRecoveryActivity(conversationId);
     const held = activeUntil.get(conversationId);
     // The stable final reply is terminal authority even when reload destroyed the local turn
-    // id. Lesser prose/progress only renews an existing grant; it never invents one.
-    if (!terminal && held) grantActivity(conversationId, Date.now(), held.recoverWithoutOpenTurn);
+    // id. A real interim assistant update after reload is a new chat activity episode even when
+    // the replacement document could not reconstruct an open turn id; empty polling is not.
+    if (!terminal && (interim || held)) {
+      grantActivity(conversationId, Date.now(), interim ? true : held!.recoverWithoutOpenTurn);
+    }
   }
   if (terminal) endActivity(conversationId);
 
@@ -4102,10 +4126,9 @@ function clearUnattributedIncident(): void {
  * happened to open ChatGPT again". Delivery used to be pull-only: the app queued a command
  * and waited for some ChatGPT tab's content script to poll for it, which meant a browser
  * with no ChatGPT tab open — or no browser at all — was a queue that nothing drained, and
- * which tab picked the job up was whichever one happened to ask. Opening the target chat
- * directly makes the app the active party: it launches the browser if it is closed, creates
- * the tab if there is none, and the marker in the URL tells that one page which command it
- * is for, so no other tab and no global pending slot is involved.
+ * which tab picked the job up was whichever one happened to ask. Fresh worker/resume commands
+ * still open a new composer directly. A revival is different: it names an existing conversation,
+ * so the extension owns its fresh scan -> existing tab -> proven-broken/absent new tab decision.
  *
  * The poll route is gone with it, and so is the recovery it offered. One press opens one
  * chat; if that does not work, it fails and says so, rather than leaving a job in a queue
@@ -4134,20 +4157,14 @@ async function deliverOne(): Promise<void> {
   if (!(await persistCommandLease(command, null, claimedAt))) return;
   armDeadline(command);
   changed();
-  // A revival is the one command that must not open a fresh composer: it names the chat the
-  // worker already has, so the page lands on it and the marker it redeems names it back.
-  const url = commandUrl(command.id, command.spec.type === 'revive' ? command.spec.conversationId : null);
+  const url = commandUrl(command.id);
   // The recorder can see a brand-new ChatGPT conversation before that page's content script has
   // redeemed this command. Arm the session-transfer gate before the browser gets any chance to
   // create B, otherwise that early observation invents a shadow session for B and the real A→B
   // commit quite correctly refuses to overwrite it. The later durable redeem refreshes the same
   // gate; commit/abort/drop clears it through the continuation state machine.
   if (command.spec.type === 'resume') noteResumeOpening(command.spec.token);
-  logInfo(
-    command.spec.type === 'revive'
-      ? `bridge: reopening the ChatGPT chat of ${specKey(command.spec)}`
-      : `bridge: opening a fresh ChatGPT chat for ${specKey(command.spec)}`
-  );
+  logInfo(`bridge: opening a fresh ChatGPT chat for ${specKey(command.spec)}`);
   try {
     await openInBrowser(url);
   } catch (err) {
@@ -4168,10 +4185,6 @@ async function deliverOne(): Promise<void> {
  * the app (or a test run) open, and disarmed by `retire()` on every path that finishes a
  * command — so a command that succeeds costs one cleared timer and nothing else.
  */
-function waitingForRevivalReadiness(command: Command): boolean {
-  return command.spec.type === 'revive' && command.claimedAt !== null && command.owner === null;
-}
-
 function revivalDeliveryProven(command: Command): boolean {
   return (
     command.spec.type === 'revive' &&
@@ -4184,9 +4197,6 @@ function revivalDeliveryProven(command: Command): boolean {
     )
   );
 }
-
-const revivalNotDeliverable = (command: Command): boolean =>
-  waitingForRevivalReadiness(command) || revivalDeliveryProven(command);
 
 function commandDeadlineDelay(command: Command, now = Date.now()): number {
   // Revival is one absolute waking attempt. Redeeming the marked page must not renew it and leave
@@ -4482,12 +4492,10 @@ const isLeased = (command: Command): boolean => {
  */
 function nextDeliverable(): Command | null {
   if (commandLeaseWrites.size > 0) return null;
-  // A revival whose exact target page is still finishing its prior turn already had its browser
-  // open attempt. It must stay durable without monopolising the global browser-delivery slot:
-  // unrelated workers/resumes can still open their own marker-addressed pages while this one
-  // waits. A document-owned lease remains exclusive and still blocks the next irreversible send.
-  if (commands.some((command) => isLeased(command) && !revivalNotDeliverable(command))) return null;
-  return commands.find((command) => !revivalNotDeliverable(command)) ?? null;
+  // Revivals never enter the app's browser opener: only the extension can know whether the exact
+  // conversation is already open. They also must not block unrelated fresh worker/resume tabs.
+  if (commands.some((command) => command.spec.type !== 'revive' && isLeased(command))) return null;
+  return commands.find((command) => command.spec.type !== 'revive') ?? null;
 }
 
 /**

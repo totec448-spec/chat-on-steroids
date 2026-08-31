@@ -40,7 +40,7 @@ const MODEL_REQUEST_TIMEOUT_MS = 190_000;
 /** The reason a deadline aborts with, so it is a fact the caller can act on rather than prose. */
 const TIMED_OUT = 'the app took too long to answer';
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 9;
+const BRIDGE_PROTOCOL = 10;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -199,11 +199,9 @@ let terminalDocuments = {};
 /**
  * Command ids this browser has already delivered.
  *
- * All that is left of the delivery bookkeeping. There used to be an `opened` list beside it,
- * for a periodic alarm that opened tabs for commands nobody had delivered; the app opens the
- * chat itself, exactly once, and a command that does not get taken up fails rather than being
- * arranged for again. This one stays because a marked page that reloads must not type the
- * same bootstrap into a second conversation.
+ * Fresh worker/resume commands are app-opened; revivals are routed here after a fresh tab scan.
+ * This latch stays because a marked page that reloads must not type the same bootstrap into a
+ * second conversation.
  */
 let settled = [];
 /**
@@ -219,11 +217,6 @@ let settled = [];
 let deferredRevivals = [];
 /** One in-flight same-tab offer per deferred command in this MV3 worker lifetime. */
 const deferredRevivalOffers = new Map();
-/**
- * While the app-opened marked fallback exists, prefer the worker tab that already owned the
- * conversation. Browser-session only because numeric tab ids do not survive a browser restart.
- */
-let revivalPreferences = {};
 /** App says an active agent/recovery episode still needs the maintenance cadence. */
 let recoveryMonitoring = false;
 
@@ -258,7 +251,6 @@ async function loadOnce() {
     'terminalDocuments',
     'closeOutbox',
     'commandAckOutbox',
-    'revivalPreferences',
     'recoveryMonitoring',
     'delivery'
   ]);
@@ -283,10 +275,6 @@ async function loadOnce() {
     : Array.isArray(live.commandAckOutbox)
       ? live.commandAckOutbox.slice(-200)
       : [];
-  revivalPreferences =
-    live.revivalPreferences && typeof live.revivalPreferences === 'object' && !Array.isArray(live.revivalPreferences)
-      ? { ...live.revivalPreferences }
-      : {};
   recoveryMonitoring = live.recoveryMonitoring === true;
   if (live.delivery && typeof live.delivery === 'object' && !Array.isArray(live.delivery)) {
     delivery = { ...delivery, ...live.delivery };
@@ -312,7 +300,6 @@ function persistLive() {
         terminalDocuments,
         closeOutbox: closeOutbox.slice(-200),
         commandAckOutbox: commandAckOutbox.slice(-200),
-        revivalPreferences,
         recoveryMonitoring,
         delivery
       }),
@@ -832,6 +819,7 @@ function retryWanted() {
     journal.length > 0 ||
     closeOutbox.length > 0 ||
     commandAckOutbox.length > 0 ||
+    deferredRevivals.length > 0 ||
     Object.keys(tabConversations).length > 0 ||
     recoveryMonitoring
   );
@@ -1217,6 +1205,9 @@ async function rememberDeferredRevival(idValue, conversationValue) {
   const id = deferredRevivalId(idValue);
   const conversationId = cleanConversationId(conversationValue);
   if (!id || !conversationId) return false;
+  if (deferredRevivals.some((entry) => entry?.id === id && cleanConversationId(entry.conversationId) === conversationId)) {
+    return true;
+  }
   // There can only be one not-yet-redeemed wake for one existing conversation. Seeing a newer
   // marker for the same chat is app-side proof that an older extension-only recovery marker is
   // obsolete. Keeping both is worse than redundant: recoverDeferredRevivals() can put the old
@@ -1227,7 +1218,6 @@ async function rememberDeferredRevival(idValue, conversationValue) {
     .filter(Boolean);
   for (const retiredId of retiredIds) {
     deferredRevivalOffers.delete(retiredId);
-    delete revivalPreferences[retiredId];
   }
   deferredRevivals = [
     ...deferredRevivals.filter(
@@ -1240,70 +1230,6 @@ async function rememberDeferredRevival(idValue, conversationValue) {
   ].slice(-100);
   await persistLive();
   return true;
-}
-
-function revivalPreference(idValue) {
-  const id = deferredRevivalId(idValue);
-  const raw = id ? revivalPreferences[id] : null;
-  if (
-    !id ||
-    !raw ||
-    typeof raw !== 'object' ||
-    cleanConversationId(raw.conversationId) === null ||
-    !Number.isInteger(raw.fallbackTabId) ||
-    !Number.isInteger(raw.preferredTabId)
-  ) {
-    return null;
-  }
-  return raw;
-}
-
-async function rememberPreferredRevival(idValue, conversationValue, fallbackTabId, preferredTabId) {
-  await load();
-  const id = deferredRevivalId(idValue);
-  const conversationId = cleanConversationId(conversationValue);
-  if (!id || !conversationId || !Number.isInteger(fallbackTabId) || !Number.isInteger(preferredTabId)) return false;
-  const retiredIds = deferredRevivals
-    .filter((entry) => entry && entry.id !== id && cleanConversationId(entry.conversationId) === conversationId)
-    .map((entry) => deferredRevivalId(entry.id))
-    .filter(Boolean);
-  for (const retiredId of retiredIds) {
-    deferredRevivalOffers.delete(retiredId);
-    delete revivalPreferences[retiredId];
-  }
-  deferredRevivals = [
-    ...deferredRevivals.filter(
-      (entry) =>
-        entry &&
-        entry.id !== id &&
-        cleanConversationId(entry.conversationId) !== conversationId
-    ),
-    { id, conversationId, queuedAt: Date.now() }
-  ].slice(-100);
-  revivalPreferences[id] = { conversationId, fallbackTabId, preferredTabId };
-  await persistLive();
-  return true;
-}
-
-async function clearRevivalPreference(idValue) {
-  const id = deferredRevivalId(idValue);
-  if (!id || !Object.prototype.hasOwnProperty.call(revivalPreferences, id)) return false;
-  delete revivalPreferences[id];
-  await persistLive();
-  return true;
-}
-
-function clearRevivalPreferencesForTab(tabId) {
-  if (!Number.isInteger(tabId)) return false;
-  let changed = false;
-  for (const [id, raw] of Object.entries(revivalPreferences)) {
-    if (!raw || typeof raw !== 'object') continue;
-    if (raw.fallbackTabId === tabId || raw.preferredTabId === tabId) {
-      delete revivalPreferences[id];
-      changed = true;
-    }
-  }
-  return changed;
 }
 
 async function forgetDeferredRevival(idValue) {
@@ -1313,7 +1239,6 @@ async function forgetDeferredRevival(idValue) {
   const before = deferredRevivals.length;
   deferredRevivals = deferredRevivals.filter((entry) => entry && entry.id !== id);
   deferredRevivalOffers.delete(id);
-  delete revivalPreferences[id];
   if (deferredRevivals.length !== before) await persistLive();
   return deferredRevivals.length !== before;
 }
@@ -1594,7 +1519,7 @@ async function noteTabConversation(source, value) {
  * that is worth placing behind the app's per-chat cooldown.
  */
 async function maintain() {
-  if (Object.keys(tabConversations).length === 0 && !recoveryMonitoring) return;
+  if (Object.keys(tabConversations).length === 0 && !recoveryMonitoring && deferredRevivals.length === 0) return;
   const reply = await call('/status');
   if (!reply.ok || !reply.data) return;
   const monitoring = reply.data.recoveryMonitoring === true;
@@ -1602,6 +1527,7 @@ async function maintain() {
     recoveryMonitoring = monitoring;
     await persistLive().catch(() => undefined);
   }
+  if (await acceptBrowserRevival(reply.data.revival)) await recoverDeferredRevivals();
   const repair = (reply.ok && reply.data ? reply.data.repair : null) || null;
   const conversationId = cleanConversationId(repair && repair.conversationId);
   // Quoted back exactly as it arrived. It names the handout being answered, so that a receipt
@@ -2029,6 +1955,9 @@ const HANDLERS = {
       `&since=${Number(message.since) || 0}` +
       `&goalClient=${encodeURIComponent(String(source.tab))}`;
     const result = await call(`/activity${query}`);
+    if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevival(result.data.revival)) {
+      await recoverDeferredRevivals();
+    }
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
   /** Reinstall the least-trusted MAIN-world reader when a live content script loses it. */
@@ -2265,41 +2194,6 @@ const HANDLERS = {
     const id = deferredRevivalId(message.id);
     if (!id) return { ok: false, error: 'bad_command_id' };
     const senderTabId = Number.isInteger(source?.tab) ? source.tab : null;
-    const senderUrl = typeof _sender?.tab?.url === 'string' ? _sender.tab.url : '';
-    const senderPendingUrl = typeof _sender?.tab?.pendingUrl === 'string' ? _sender.tab.pendingUrl : '';
-    const knownPreference = revivalPreference(id);
-    const isFallback =
-      senderTabId !== null &&
-      (
-        knownPreference?.fallbackTabId === senderTabId ||
-        revivalReuseAttempted.get(senderTabId) === id ||
-        markerFromUrl(senderUrl) === id ||
-        markerFromUrl(senderPendingUrl) === id
-      );
-    if (isFallback && senderTabId !== null) {
-      let tabs = [];
-      try {
-        tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
-      } catch {
-        tabs = [];
-      }
-      const preferred = tabs.find(
-        (tab) =>
-          tab &&
-          typeof tab.id === 'number' &&
-          tab.id !== senderTabId &&
-          conversationForTab(tab) === conversationId
-      );
-      if (preferred) {
-        await rememberPreferredRevival(id, conversationId, senderTabId, preferred.id);
-        return { ok: true, deferred: true, preferredElsewhere: true };
-      }
-      if (knownPreference?.preferredTabId && knownPreference.preferredTabId !== senderTabId) {
-        // The preferred tab may be between query visibility and document registration. Keep the
-        // fallback fenced until a concrete lifecycle event proves that tab really left.
-        return { ok: true, deferred: true, preferredElsewhere: true };
-      }
-    }
     const remembered = await rememberDeferredRevival(id, conversationId);
     if (remembered && senderTabId !== null) deferredRevivalOffers.set(id, senderTabId);
     return remembered ? { ok: true, deferred: true } : { ok: false, error: 'bad_command_id' };
@@ -2370,98 +2264,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-/** The command marker the app puts in a URL it opens, from either the query or the fragment. */
-function markerFromUrl(value) {
-  try {
-    const url = new URL(String(value || ''));
-    const fromQuery = url.searchParams.get('clf');
-    if (fromQuery) return fromQuery;
-    const hash = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash;
-    return new URLSearchParams(hash).get('clf');
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Keeps a revival in the tab that chat is already open in.
- *
- * The app opens a URL; the browser makes a tab. That is the right answer for the two
- * commands that open a chat which does not exist yet, and the wrong one for the command that
- * names a chat the user may well be looking at right now: waking a worker would leave them
- * with the same conversation open twice, once per revival, which is exactly the pile of
- * ChatGPT tabs this whole design exists to avoid.
- *
- * So the marker is intercepted at the moment the tab is created — before it has navigated,
- * loaded ChatGPT, or run a content script — and, if that conversation is already open
- * somewhere, handed to the document that has it. Revival routing deliberately does not activate
- * or focus that existing tab: hidden/background delivery is part of the transport contract, and
- * visibility must not be required for the content document to redeem and submit the wake. The
- * empty tab the browser just made is closed again only after the existing document claims.
- *
- * A ping proves only that an existing recorder is alive. It does not prove command ownership:
- * while the service worker awaits that ping the newly opened `/c/<id>?clf=...` page can finish
- * loading and durably redeem the same command. The existing document must therefore redeem the
- * bridge lease itself and report `claimed:true` before the fallback is removed. Whichever page
- * wins that durable lease stays alive; a mere health reply can never kill the winner.
- */
-async function reuseOpenChatTab(openedTabId, conversation, commandId) {
-  await load();
-  let tabs = [];
-  try {
-    tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
-  } catch {
-    return false;
-  }
-  const existing = tabs.filter(
-    (tab) => tab && typeof tab.id === 'number' && tab.id !== openedTabId && conversationForTab(tab) === conversation
-  );
-  if (existing.length === 0) return false;
-  // Presence is enough to establish preference, even if that document is still starting and
-  // cannot answer a ping yet. Persisting this browser-session fence before probing prevents the
-  // marked fallback from winning merely because the already-open worker tab needed another render.
-  try {
-    await rememberPreferredRevival(commandId, conversation, openedTabId, existing[0].id);
-  } catch {
-    // If browser metadata itself cannot be persisted, keep the fallback alive. The content-side
-    // defer custody gate will retry before either document is allowed to redeem/send.
-  }
-  for (const candidate of existing) {
-    try {
-      const alive = await chrome.tabs.sendMessage(candidate.id, { type: 'clf-recorder-ping' });
-      if (!alive || alive.ok !== true || alive.recorderVersion !== PAGE_RECORDER_VERSION) continue;
-    } catch {
-      // Two copies of one chat can survive an extension reload differently. A dead first match
-      // must not hide a healthy second one and force a third duplicate to remain open.
-      continue;
-    }
-    let reply = null;
-    try {
-      reply = await chrome.tabs.sendMessage(candidate.id, {
-        type: 'clf-run-command',
-        id: commandId,
-        conversationId: conversation
-      });
-    } catch {
-      // It died after the ping but before it could acquire the lease. Try another already-open
-      // copy; if none can claim, the app-opened fallback remains the ordinary delivery path.
-      continue;
-    }
-    if (!reply || reply.ok !== true || reply.claimed !== true) continue;
-
-    // This document now owns the command durably. The marked fallback can no longer redeem it,
-    // so removing that tab cannot destroy the only owner or cause duplicate user-message sends.
-    try {
-      await chrome.tabs.remove(openedTabId);
-    } catch {
-      // The fallback may already have been closed by the user. Ownership is still safely here.
-    }
-    await clearRevivalPreference(commandId).catch(() => undefined);
-    return true;
-  }
-  return false;
-}
-
 /**
  * Best current conversation identity for one ChatGPT tab.
  *
@@ -2485,41 +2287,11 @@ function conversationForTab(tab) {
   return cleanConversationId(tabConversations[String(tab.id)]);
 }
 
-// Chrome may fire tabs.onCreated before either url or pendingUrl is populated, then publish
-// the real target on tabs.onUpdated. One marked revival gets exactly one reuse attempt per
-// tab+command: retrying on every loading/status update could hand the same command to the
-// existing document twice, while keying this only by tab id makes a long-lived worker tab's
-// *previous* revival look like fallback authority for every later wake.
-const revivalReuseAttempted = new Map();
-
-function maybeReuseRevivalTab(tabId, url) {
-  if (typeof tabId !== 'number') return false;
-  const conversation = conversationFromUrl(url);
-  const commandId = markerFromUrl(url);
-  // Only ever a marked URL naming a concrete conversation, which is only ever a revival.
-  if (!conversation || !commandId) return false;
-  if (revivalReuseAttempted.get(tabId) === commandId) return false;
-  revivalReuseAttempted.set(tabId, commandId);
-  void reuseOpenChatTab(tabId, conversation, commandId).catch(() => undefined);
-  return true;
-}
-
-// Guarded like every other listener registration here: an older Chrome, or a harness that
-// stubs only the tab APIs this extension used to need, must not fail to load the worker.
-if (chrome.tabs && chrome.tabs.onCreated && typeof chrome.tabs.onCreated.addListener === 'function') {
-  chrome.tabs.onCreated.addListener((tab) => {
-    const url = typeof tab?.pendingUrl === 'string' && tab.pendingUrl ? tab.pendingUrl : tab?.url;
-    maybeReuseRevivalTab(tab?.id, url);
-  });
-}
-
 // Document unload is not conversation lifetime. A real tab close is: reload keeps the
 // same tab id, while closing it wakes the service worker and retires only that tab's claim.
 chrome.tabs.onRemoved.addListener((id) => {
-  revivalReuseAttempted.delete(id);
   clearDeferredRevivalOffersForTab(id);
   void serializeTab(id, async () => {
-    if (clearRevivalPreferencesForTab(id)) await persistLive();
     const documentId = await markTerminal(id);
     return releaseTab(id, null, documentId);
   }).catch(() => undefined);
@@ -2532,12 +2304,10 @@ chrome.tabs.onRemoved.addListener((id) => {
 // by the content script when another concrete conversation id appears.
 chrome.tabs.onUpdated.addListener((id, changeInfo) => {
   if (!changeInfo) return;
-  if (typeof changeInfo.url === 'string') maybeReuseRevivalTab(id, changeInfo.url);
   const fullNavigation = changeInfo.status === 'loading';
   const leftChatGpt = typeof changeInfo.url === 'string' && !isChatGptUrl(changeInfo.url);
   if (!fullNavigation && !leftChatGpt) return;
   if (fullNavigation || leftChatGpt) clearDeferredRevivalOffersForTab(id);
-  if (leftChatGpt && clearRevivalPreferencesForTab(id)) void persistLive().catch(() => undefined);
   // A loading transition is a browser document boundary even when both URLs are ChatGPT.
   // SPA pushState does not emit it. The replacement document must register with its own
   // MessageSender.documentId before any identity-sensitive IPC is accepted.
@@ -2567,20 +2337,6 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
       }
       const documentId = typeof tabDocuments[key] === 'string' ? tabDocuments[key] : null;
       const targetConversation = conversationFromUrl(targetUrl);
-      if (targetConversation) {
-        let preferenceChanged = false;
-        for (const [commandId, raw] of Object.entries(revivalPreferences)) {
-          if (!raw || typeof raw !== 'object') continue;
-          if (
-            (raw.preferredTabId === id || raw.fallbackTabId === id) &&
-            cleanConversationId(raw.conversationId) !== targetConversation
-          ) {
-            delete revivalPreferences[commandId];
-            preferenceChanged = true;
-          }
-        }
-        if (preferenceChanged) await persistLive();
-      }
       if (knownConversation && targetConversation && targetConversation !== knownConversation && documentId) {
         // This is not an ambiguous reload: Chrome is replacing known chat A with concrete
         // chat B. Anything still provisional in A's dying document is too old/unbound to be
@@ -2650,15 +2406,7 @@ function offerDeferredRevivalToTab(entry, tab) {
         // A claimed response means this document crossed the durable bridge lease and remains
         // the sole owner until ACK. Every other response means this offer did not take custody;
         // allow a later document-registration/recovery signal to retry the same existing tab.
-        if (reply && reply.ok === true && reply.claimed === true) {
-          const preference = revivalPreference(id);
-          if (preference) {
-            if (tab.id === preference.preferredTabId) {
-              void chrome.tabs.remove(preference.fallbackTabId).catch(() => undefined);
-            }
-            void clearRevivalPreference(id).catch(() => undefined);
-          }
-        } else {
+        if (!reply || reply.ok !== true || reply.claimed !== true) {
           if (deferredRevivalOffers.get(id) === tab.id) deferredRevivalOffers.delete(id);
         }
       },
@@ -2681,13 +2429,21 @@ function deferredRevivalUrl(entry) {
   return url.toString();
 }
 
+/** Accepts only the inert app command identity; the browser still decides the target tab. */
+async function acceptBrowserRevival(raw) {
+  const id = deferredRevivalId(raw?.id);
+  const conversationId = cleanConversationId(raw?.conversationId);
+  return id && conversationId ? rememberDeferredRevival(id, conversationId) : false;
+}
+
 /**
  * Re-presents deferred revival markers after MV3/document/browser lifetime loss.
  *
  * There is deliberately no command text here and no local "sent" decision. An existing exact
- * conversation gets first chance to install the content-side readiness waiter; if no such tab
- * survived the browser restart, a marked exact-chat tab is recreated. Either path still has to
- * win `/commands/redeem`, so several recovery triggers cannot duplicate or cross-deliver text.
+ * conversation gets first chance to install the content-side readiness waiter. A marked exact
+ * chat is created only when the scan finds none, or a complete existing document cannot receive
+ * and cannot be repaired. Either path still has to win `/commands/redeem`, so several recovery
+ * triggers cannot duplicate or cross-deliver text.
  */
 function recoverDeferredRevivals() {
   if (deferredRecoveryWork) return deferredRecoveryWork;
@@ -2711,46 +2467,22 @@ function recoverDeferredRevivals() {
     }
 
     for (const entry of [...deferredRevivals]) {
-      const preference = revivalPreference(entry.id);
-      let exact = null;
-      if (preference) {
-        exact =
-          tabs.find(
-            (tab) =>
-              tab &&
-              typeof tab.id === 'number' &&
-              tab.id === preference.preferredTabId &&
-              conversationForTab(tab) === entry.conversationId
-          ) ?? null;
-        if (!exact) {
-          // A browser-session preference is stronger than the fallback's temporary visibility.
-          // Do not let recovery pick the marked duplicate just because the original exact tab is
-          // between URL publication and document registration. onRemoved / concrete navigation
-          // clears the preference if that tab genuinely ceases to be the target.
-          continue;
+      const exact = tabs
+        .filter((tab) => tab && typeof tab.id === 'number' && conversationForTab(tab) === entry.conversationId)
+        .sort((a, b) => a.id - b.id);
+      let routed = false;
+      let starting = false;
+      for (const tab of exact) {
+        if (await restoreChatgptTab(tab.id)) {
+          offerDeferredRevivalToTab(entry, tab);
+          routed = true;
+          break;
         }
-      } else {
-        exact =
-          tabs.find(
-            (tab) => tab && typeof tab.id === 'number' && conversationForTab(tab) === entry.conversationId
-          ) ?? null;
+        // A loading document is not proven broken. Let its registration or the next alarm retry
+        // the same tab; opening during this transient is the original duplication race.
+        if (tab.status !== 'complete') starting = true;
       }
-      if (exact) {
-        // Presence and readiness are separate. Even a temporarily dead/stale recorder means the
-        // exact worker tab exists, so never create another tab merely because sendMessage cannot
-        // answer yet. Probe readiness first so a startup race does not spray repeated run-command
-        // messages at a document that cannot receive them; registration/reload recovery retries
-        // the same tab, and only a current recorder receives the actual command once.
-        try {
-          const live = await chrome.tabs.sendMessage(exact.id, { type: 'clf-recorder-ping' });
-          if (live && live.ok === true && live.recorderVersion === PAGE_RECORDER_VERSION) {
-            offerDeferredRevivalToTab(entry, exact);
-          }
-        } catch {
-          // Exact tab still exists. Temporary receiver absence is readiness=false, never absence.
-        }
-        continue;
-      }
+      if (routed || starting) continue;
 
       const url = deferredRevivalUrl(entry);
       if (!url) continue;
@@ -2770,6 +2502,43 @@ function recoverDeferredRevivals() {
   return tracked;
 }
 
+async function restoreChatgptTab(id) {
+  try {
+    const live = await chrome.tabs.sendMessage(id, { type: 'clf-recorder-ping' });
+    if (live && live.ok === true && live.recorderVersion === PAGE_RECORDER_VERSION) {
+      // Healthy content.js does not prove the independently running MAIN-world helper is
+      // still present. Request-id ownership depends on fiber.js, and re-executing it is
+      // idempotent because the helper keeps one listener per protocol version.
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', files: ['fiber.js'] });
+      } catch {
+        // The tab can navigate between the ping and repair. Static injection covers it.
+      }
+      return true;
+    }
+  } catch {
+    // No receiver is the expected signature of an already-open tab whose isolated world
+    // was invalidated by an extension reload. Fall through to deterministic recovery.
+  }
+  try {
+    // Rebuild the isolated-world DOM adapter before the recorder that consumes it.
+    await chrome.scripting.executeScript({ target: { tabId: id }, files: ['chatgpt-dom.js'] });
+    // Keep the React/Fiber reader in ChatGPT's own world, exactly like the static manifest
+    // declaration. An older helper may still answer too; the nonce/version gate in
+    // content.js makes those replies harmless, and a future version bump rejects them.
+    await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', files: ['fiber.js'] });
+    await chrome.scripting.executeScript({ target: { tabId: id }, files: ['content.js'] });
+    await chrome.scripting.insertCSS({ target: { tabId: id }, files: ['overlay.css'] });
+    // Successful injection means this exact tab is recovering. Its document registration will
+    // re-run revival routing; opening a second tab during that handoff recreates the race.
+    return true;
+  } catch {
+    // A complete exact tab that cannot receive or be repaired is proven unusable. Revival may
+    // open one replacement; a loading tab is handled conservatively by the caller.
+    return false;
+  }
+}
+
 async function restoreOpenChatgptTabs() {
   let tabs = [];
   try {
@@ -2779,37 +2548,7 @@ async function restoreOpenChatgptTabs() {
   }
   for (const tab of tabs) {
     const id = tab && typeof tab.id === 'number' ? tab.id : null;
-    if (id === null) continue;
-    try {
-      const live = await chrome.tabs.sendMessage(id, { type: 'clf-recorder-ping' });
-      if (live && live.ok === true && live.recorderVersion === PAGE_RECORDER_VERSION) {
-        // Healthy content.js does not prove the independently running MAIN-world helper is
-        // still present. Request-id ownership depends on fiber.js, and re-executing it is
-        // idempotent because the helper keeps one listener per protocol version.
-        try {
-          await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', files: ['fiber.js'] });
-        } catch {
-          // The tab can navigate between the ping and repair. Static injection covers it.
-        }
-        continue;
-      }
-    } catch {
-      // No receiver is the expected signature of an already-open tab whose isolated world
-      // was invalidated by an extension reload. Fall through to deterministic recovery.
-    }
-    try {
-      // Rebuild the isolated-world DOM adapter before the recorder that consumes it.
-      await chrome.scripting.executeScript({ target: { tabId: id }, files: ['chatgpt-dom.js'] });
-      // Keep the React/Fiber reader in ChatGPT's own world, exactly like the static manifest
-      // declaration. An older helper may still answer too; the nonce/version gate in
-      // content.js makes those replies harmless, and a future version bump rejects them.
-      await chrome.scripting.executeScript({ target: { tabId: id }, world: 'MAIN', files: ['fiber.js'] });
-      await chrome.scripting.executeScript({ target: { tabId: id }, files: ['content.js'] });
-      await chrome.scripting.insertCSS({ target: { tabId: id }, files: ['overlay.css'] });
-    } catch {
-      // The tab can close or navigate between query and injection. Static content scripts
-      // cover the next eligible document, so there is nothing useful to retry here.
-    }
+    if (id !== null) await restoreChatgptTab(id);
   }
 }
 

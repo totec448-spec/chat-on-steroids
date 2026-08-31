@@ -229,6 +229,16 @@ async function waitForOpened(count = 1): Promise<void> {
   await vi.waitFor(() => expect(opened).toHaveLength(count));
 }
 
+async function waitForRevival(): Promise<{ id: string; conversationId: string }> {
+  let revival: { id: string; conversationId: string } | null = null;
+  await vi.waitFor(async () => {
+    const status = await request('GET', '/status');
+    revival = status.body.revival ?? null;
+    expect(revival).toMatchObject({ id: expect.any(String), conversationId: expect.any(String) });
+  });
+  return revival!;
+}
+
 /**
  * The one page the app opened, redeeming the one command it was opened for.
  *
@@ -1126,8 +1136,8 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId: options.workerConversation }, 'sleep before restore reconciliation');
     wake([{ to: 'worker-1', text: 'this browser-owned wake will expire before restart' }]);
-    await waitForOpened(2);
-    const revivalId = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id: revivalId } = await waitForRevival();
+    expect(opened).toHaveLength(1);
     const claimed = await request('POST', '/commands/redeem', {
       body: { id: revivalId, client: options.client, conversationId: options.workerConversation }
     });
@@ -1141,7 +1151,7 @@ describe('delivering a bootstrap', () => {
     // makes these tests about restore atomicity/publication rather than merely pruning one row.
     const resume = await compactedSession(options.resumeConversation, 'resume after restore reconciliation');
     const resumeCommand = queueResume(resume.sessionId, resume.token)!;
-    expect(opened).toHaveLength(2);
+    await waitForOpened(2);
     await flushDurable();
 
     const continuationSnapshot = await readDurable<ContinuationSnapshot>(CONTINUATIONS_STATE);
@@ -1811,7 +1821,7 @@ describe('delivering a bootstrap', () => {
    * names the same id back, and the browser has to say which conversation it typed into
    * before the broker will believe the worker is awake.
    */
-  it("opens the worker's own chat to wake it, and treats the typed message as an offer", async () => {
+  it("routes revival to the worker's own chat without opening a duplicate, and treats the typed message as an offer", async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
     const bootstrap = await redeem();
@@ -1823,12 +1833,10 @@ describe('delivering a bootstrap', () => {
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
 
     wake([{ to: 'worker-1', text: 'now do the second half' }]);
-    await waitForOpened(2);
-
-    // No fresh composer: the chat the worker already has, with the marker on it.
-    const url = new URL(opened[1]!);
-    expect(url.pathname).toBe(`/c/${conversationId}`);
-    const id = url.searchParams.get('clf')!;
+    const revival = await waitForRevival();
+    expect(revival.conversationId).toBe(conversationId);
+    expect(opened).toHaveLength(1);
+    const id = revival.id;
 
     // The page says which conversation it is showing, and only a revival for that exact
     // chat may be claimed from inside an existing conversation.
@@ -1891,8 +1899,8 @@ describe('delivering a bootstrap', () => {
     finishAgent({ conversationId }, 'the first half is done');
 
     wake([{ to: 'worker-1', text: 'now do the second half' }]);
-    await waitForOpened(2);
-    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id } = await waitForRevival();
+    expect(opened).toHaveLength(1);
     await request('POST', '/commands/redeem', { body: { id, client: 'tab-a', conversationId } });
     await request('POST', '/commands/ack', { body: { id, status: 'sent', conversationId, client: 'tab-a' } });
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
@@ -1904,7 +1912,7 @@ describe('delivering a bootstrap', () => {
     // The replay: exactly what a restart, or any staging pass, does with a still-waking worker.
     requestWorkerRevivals(['worker-1']);
     await flushDurable();
-    expect(opened).toHaveLength(2);
+    expect(opened).toHaveLength(1);
     const replayed = (await readDurable<any>('bridge-commands'))?.commands?.find((entry: any) => entry?.id === id);
     expect(replayed?.createdAt, 'the wake keeps its own absolute deadline').toBe(createdAt);
     expect(replayed?.owner, 'and the page that owns it keeps owning it').toBe('tab-a');
@@ -1914,7 +1922,10 @@ describe('delivering a bootstrap', () => {
     expect(noteAgentAlive(conversationId, 'call')?.revived).toBe(true);
     finishAgent({ conversationId }, 'the second half is done too');
     wake([{ to: 'worker-1', text: 'one more piece, please' }]);
-    await waitForOpened(3);
+    const replay = await waitForRevival();
+    // The command row is superseded in place; its new payload/lease is the new wake episode.
+    expect(replay.id).toBe(id);
+    expect(opened).toHaveLength(1);
     expect(Date.now() - createdAt).toBeLessThan(30_000);
   });
 
@@ -1929,8 +1940,7 @@ describe('delivering a bootstrap', () => {
     finishAgent({ conversationId }, 'the first half is done');
 
     wake([{ to: 'worker-1', text: 'now do the second half' }]);
-    await waitForOpened(2);
-    const first = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id: first } = await waitForRevival();
     const firstAt = Date.now();
     expect((await request('POST', '/commands/redeem', { body: { id: first, client: 'tab-a', conversationId } })).status).toBe(200);
     await request('POST', '/commands/ack', {
@@ -1942,12 +1952,10 @@ describe('delivering a bootstrap', () => {
     finishAgent({ conversationId }, 'the second half is done too');
 
     wake([{ to: 'worker-1', text: 'one more piece, please' }]);
-    await waitForOpened(3);
+    const { id: second } = await waitForRevival();
     // Still inside the first command's own deadline, which is the whole point.
     expect(Date.now() - firstAt).toBeLessThan(30_000);
-    expect(new URL(opened[2]!).pathname).toBe(`/c/${conversationId}`);
-
-    const second = new URL(opened[2]!).searchParams.get('clf')!;
+    expect(opened).toHaveLength(1);
     const claimed = await request('POST', '/commands/redeem', {
       body: { id: second, client: 'tab-b', conversationId }
     });
@@ -1970,8 +1978,7 @@ describe('delivering a bootstrap', () => {
       });
       finishAgent({ conversationId }, 'tool result is terminal but assistant prose is still streaming');
       wake([{ to: 'worker-1', text: 'continue after your final answer settles' }]);
-      await vi.waitFor(() => expect(opened).toHaveLength(2));
-      const id = new URL(opened[1]!).searchParams.get('clf')!;
+      const { id } = await waitForRevival();
       await flushDurable();
       const durable = await readDurable<any>('bridge-commands');
       const revive = durable?.commands?.find((entry: any) => entry?.id === id);
@@ -1984,14 +1991,14 @@ describe('delivering a bootstrap', () => {
       await vi.advanceTimersByTimeAsync(remaining - 1);
       expect(pendingCommands()).toContainEqual(expect.objectContaining({ id, what: 'revive:worker-1' }));
       expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({ state: 'waking' });
-      expect(opened).toHaveLength(2);
+      expect(opened).toHaveLength(1);
 
       await vi.advanceTimersByTimeAsync(1);
       await vi.runAllTicks();
       const worker = swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
       expect(worker).toMatchObject({ state: 'sleeping', revivable: true, pending: 1 });
       expect(pendingCommands().some((entry) => entry.id === id)).toBe(false);
-      expect(opened).toHaveLength(2);
+      expect(opened).toHaveLength(1);
     } finally {
       vi.useRealTimers();
     }
@@ -2007,8 +2014,7 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId }, 'the first half is done');
     wake([{ to: 'worker-1', text: 'one browser wake only' }]);
-    await waitForOpened(2);
-    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id } = await waitForRevival();
 
     // Before /redeem owns the wake, a proven call is the stronger fact: the old server-side turn
     // never really stopped. It takes the worker active and receives the queued text through the
@@ -2035,8 +2041,7 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId }, 'the first half is done');
     wake([{ to: 'worker-1', text: 'browser has the arbitration cut' }]);
-    await waitForOpened(2);
-    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id } = await waitForRevival();
 
     const claimed = await request('POST', '/commands/redeem', {
       body: { id, client: 'tab-browser-owner', conversationId }
@@ -2075,8 +2080,7 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId }, 'the first half is done');
     wake([{ to: 'worker-1', text: 'do not hand this out before the broker claim fsyncs' }]);
-    await waitForOpened(2);
-    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id } = await waitForRevival();
 
     let failOnce = true;
     onSwarmPersistNow(async (snapshot) => {
@@ -2120,8 +2124,7 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId }, 'the first half is done');
     wake([{ to: 'worker-1', text: 'this user message already reached ChatGPT' }]);
-    await waitForOpened(2);
-    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id } = await waitForRevival();
     const client = 'tab-lost-ack-response';
     const redeemed = await request('POST', '/commands/redeem', {
       body: { id, client, conversationId }
@@ -2176,8 +2179,7 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId }, 'reported, waiting for more');
     wake([{ to: 'worker-1', text: 'one more thing' }]);
-    await waitForOpened(2);
-    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id } = await waitForRevival();
     await request('POST', '/commands/redeem', { body: { id, client: 'tab-doomed', conversationId } });
 
     const primeBefore = swarmState().agents.find((agent) => agent.role === 'prime')!.pending;
@@ -2199,8 +2201,8 @@ describe('delivering a bootstrap', () => {
 
     // And it can simply be tried again, into the same chat.
     wake([{ to: 'worker-1', text: 'try that again' }]);
-    await waitForOpened(3);
-    expect(new URL(opened[2]!).pathname).toBe(`/c/${conversationId}`);
+    expect((await waitForRevival()).conversationId).toBe(conversationId);
+    expect(opened).toHaveLength(1);
   });
 
   it('expires an owner-null revival at thirty seconds with the same worker and inbox intact', async () => {
@@ -2215,8 +2217,7 @@ describe('delivering a bootstrap', () => {
       });
       finishAgent({ conversationId }, 'reported, waiting for more');
       wake([{ to: 'worker-1', text: 'stay queued if the page never redeems' }]);
-      await waitForOpened(2);
-      const id = new URL(opened[1]!).searchParams.get('clf')!;
+      const { id } = await waitForRevival();
 
       await vi.advanceTimersByTimeAsync(30_000);
       await vi.runAllTicks();
@@ -2241,8 +2242,7 @@ describe('delivering a bootstrap', () => {
       });
       finishAgent({ conversationId }, 'reported, waiting for more');
       wake([{ to: 'worker-1', text: 'document can own this only for the ACK deadline' }]);
-      await waitForOpened(2);
-      const id = new URL(opened[1]!).searchParams.get('clf')!;
+      const { id } = await waitForRevival();
 
       const claimed = await request('POST', '/commands/redeem', {
         body: { id, client: 'claimed-revival-document', conversationId }
@@ -2277,8 +2277,7 @@ describe('delivering a bootstrap', () => {
       });
       finishAgent({ conversationId }, 'reported, waiting for more');
       wake([{ to: 'worker-1', text: 'prove that the model reacted' }]);
-      await waitForOpened(2);
-      const id = new URL(opened[1]!).searchParams.get('clf')!;
+      const { id } = await waitForRevival();
 
       await vi.advanceTimersByTimeAsync(29_000);
       await request('POST', '/commands/redeem', {
@@ -2299,8 +2298,7 @@ describe('delivering a bootstrap', () => {
       // The accepted user message stays offered; a later explicit wake injects only genuinely
       // new prime work instead of duplicating text already present in the worker chat.
       wake([{ to: 'worker-1', text: 'genuinely new work after the silent wake' }]);
-      await waitForOpened(3);
-      const nextId = new URL(opened[2]!).searchParams.get('clf')!;
+      const { id: nextId } = await waitForRevival();
       const next = await request('POST', '/commands/redeem', {
         body: { id: nextId, client: 'later-explicit-wake', conversationId }
       });
@@ -2321,14 +2319,14 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId }, 'reported, waiting for more');
     wake([{ to: 'worker-1', text: 'expire this readiness wait on restart' }]);
-    await waitForOpened(2);
+    await waitForRevival();
     await flushDurable();
     const durable = await readDurable<any>('bridge-commands');
     const revive = durable?.commands?.find((entry: any) => entry?.spec?.type === 'revive');
     expect(revive).toBeTruthy();
     const id = revive.id as string;
     revive.createdAt = Date.now() - 30_001;
-    expect(revive.phase).toBe('leased');
+    expect(revive.phase).toBe('queued');
     expect(revive.owner).toBeNull();
     await writeDurableNow('bridge-commands', durable);
 
@@ -2469,8 +2467,7 @@ describe('delivering a bootstrap', () => {
     finishAgent({ conversationId }, 'sleep before the first wake');
 
     wake([{ to: 'worker-1', text: 'old wake whose transport will remain stale on disk' }]);
-    await waitForOpened(2);
-    const oldId = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id: oldId } = await waitForRevival();
     const oldRedeem = await request('POST', '/commands/redeem', {
       body: { id: oldId, client: 'old-revival-page', conversationId }
     });
@@ -2534,7 +2531,7 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId }, 'sleep before duplicate-row wake');
     wake([{ to: 'worker-1', text: 'new durable wake must survive its stale duplicate' }]);
-    await waitForOpened(2);
+    await waitForRevival();
     await flushDurable();
 
     const durable = await readDurable<any>('bridge-commands');
@@ -2575,8 +2572,7 @@ describe('delivering a bootstrap', () => {
     });
     finishAgent({ conversationId }, 'reported, waiting for more');
     wake([{ to: 'worker-1', text: 'wake up' }]);
-    await waitForOpened(2);
-    const id = new URL(opened[1]!).searchParams.get('clf')!;
+    const { id } = await waitForRevival();
     await request('POST', '/commands/redeem', { body: { id, client: 'tab-wandered' } });
 
     // The page redeemed before ChatGPT had finished routing it and typed somewhere else.
@@ -4170,6 +4166,61 @@ describe('unattributed activity recovery', () => {
     }
   });
 
+  it('re-arms the same chat only after real post-reload activity starts a new episode', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-reload-episode-one')]);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await sweepStaleSwarm(Date.now());
+      const first = await maintenance();
+      expect(chatOf(first)).toBe(OTHER);
+      expect(await maintenance(first!.token)).toBeNull();
+      await sweepStaleSwarm(Date.now());
+
+      // A confirmed reload alone is spent. A new exact call is the sole fact that starts episode 2.
+      await attributed(OTHER);
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS - 1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      expect(chatOf(await maintenance())).toBe(OTHER);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats a real interim assistant update after reload as a new active episode', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-reload-interim-one')]);
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await sweepStaleSwarm(Date.now());
+      const first = await maintenance();
+      expect(chatOf(first)).toBe(OTHER);
+      expect(await maintenance(first!.token)).toBeNull();
+      await sweepStaleSwarm(Date.now());
+
+      await events(OTHER, [{
+        kind: 'assistant_message',
+        time: Date.now(),
+        messageId: 'assistant-after-reload',
+        text: 'Continuing after reload',
+        state: 'streaming',
+        final: false
+      }]);
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(chatOf(await maintenance())).toBe(OTHER);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('moves the stale deadline on real assistant progress and removes it on a formal turn end', async () => {
     vi.useFakeTimers();
     try {
@@ -4503,8 +4554,8 @@ describe('restarting the bridge', () => {
     const port = await startBridge();
     expect(port).not.toBeNull();
     base = `http://127.0.0.1:${port}`;
-    await waitForOpened(1);
-    expect(new URL(opened[0]!).pathname).toBe(`/c/${conversationId}`);
+    expect((await waitForRevival()).conversationId).toBe(conversationId);
+    expect(opened).toEqual([]);
     expect(pendingCommands().map((command) => command.what)).toEqual(['revive:worker-1']);
   });
 
