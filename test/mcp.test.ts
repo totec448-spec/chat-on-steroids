@@ -38,7 +38,13 @@ import { DEFAULT_CAPABILITIES, type Capabilities, type Root } from '../src/share
 import type { ToolOutcome } from '../src/shared/session.js';
 import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
-import { execOwner, noteExecOwner, resetExecOwnershipForTests } from '../src/main/codex/ownership.js';
+import {
+  backgroundExecObligations,
+  execOwner,
+  MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
+  noteExecOwner,
+  resetExecOwnershipForTests
+} from '../src/main/codex/ownership.js';
 import { unifiedExecManager } from '../src/main/codex/manager.js';
 import { locateRipgrep } from '../src/main/ripgrep.js';
 import { IS_WINDOWS, makeTempDir, removeTempDir, writeTree } from './helpers.js';
@@ -3222,6 +3228,58 @@ describe('exec sessions belong to the chat that opened them', () => {
 
     const after = await asChat('wfr_background_owner', 'read', { paths: ['/workspace/src/app.ts'] });
     expect(textOf(after)).not.toContain(`Background session ${sessionId}`);
+  });
+
+  it('refuses new commands for the exact chat at the unread-result bound, then admits after a drain', async () => {
+    const conversationId = 'conv-background-admission';
+    const sessionIds: number[] = [];
+
+    for (let index = 0; index < MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION; index++) {
+      const requestId = `wfr_background_admission_${index}`;
+      expect(prove(requestId, conversationId)).toBe('stored');
+      const started = await asChat(requestId, 'exec_command', {
+        cmd: IS_WINDOWS
+          ? `Start-Sleep -Milliseconds 500; Write-Output 'owed-${index}'; exit ${index + 1}`
+          : `sleep 0.5; printf '%s\\n' owed-${index}; exit ${index + 1}`,
+        workdir: '/workspace',
+        yield_time_ms: 100
+      });
+      const sessionId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+      expect(Number.isInteger(sessionId), textOf(started)).toBe(true);
+      sessionIds.push(sessionId);
+    }
+
+    await vi.waitFor(
+      () => expect(backgroundExecObligations(conversationId).exitedUnread.map((row) => row.processId)).toEqual(
+        [...sessionIds].sort((left, right) => left - right)
+      ),
+      { timeout: 8_000, interval: 25 }
+    );
+
+    const blockedRequest = 'wfr_background_admission_blocked';
+    expect(prove(blockedRequest, conversationId)).toBe('stored');
+    const blocked = await asChat(blockedRequest, 'exec_command', {
+      cmd: IS_WINDOWS ? "Write-Output 'must-not-run'" : "printf '%s\\n' must-not-run",
+      workdir: '/workspace'
+    });
+    expect(failed(blocked)).toBe(true);
+    expect(textOf(blocked)).toContain('EXEC_RESULTS_UNREAD');
+    for (const sessionId of sessionIds) expect(textOf(blocked)).toContain(String(sessionId));
+
+    const drained = await asChat(blockedRequest, 'write_stdin', { session_id: sessionIds[0], chars: '' });
+    expect(textOf(drained)).toContain('owed-0');
+
+    const admitted = await asChat(blockedRequest, 'exec_command', {
+      cmd: IS_WINDOWS ? "Write-Output 'admitted-after-drain'" : "printf '%s\\n' admitted-after-drain",
+      workdir: '/workspace',
+      yield_time_ms: 5_000
+    });
+    expect(failed(admitted), textOf(admitted)).toBe(false);
+    expect(textOf(admitted)).toContain('admitted-after-drain');
+
+    for (const sessionId of sessionIds.slice(1)) {
+      await asChat(blockedRequest, 'write_stdin', { session_id: sessionId, chars: '' });
+    }
   });
 });
 
