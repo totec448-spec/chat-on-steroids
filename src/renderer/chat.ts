@@ -170,13 +170,13 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  */
 const TOOL_ACTIVE_MS = 3 * 60_000;
 
-/** Exact attributed calls keep any agent chat visibly active for three minutes. */
+/** Exact attributed calls keep any recorded chat visibly active for three minutes. */
 function recentToolActivity(summary: SessionSummary, now = Date.now()): boolean {
   return summary.lastToolCallAt !== null && now - summary.lastToolCallAt < TOOL_ACTIVE_MS;
 }
 
-/** Prime is working only from a live turn or the exact tool clock, never generic session noise. */
-function primeWorking(summary: SessionSummary): boolean {
+/** A chat is working only from a live turn or the exact tool clock, never generic session noise. */
+function sessionWorking(summary: SessionSummary): boolean {
   return summary.endedAt === null && (Boolean(summary.activeTurnId) || recentToolActivity(summary));
 }
 
@@ -205,10 +205,12 @@ function sessionBadges(summary: SessionSummary): Badge[] {
     : swarm?.agents.find(
         (entry) => entry.role === 'prime' && entry.conversationId === summary.conversationId
       );
-  // Prime owning the run is not Prime running a turn. Workers use their broker lifecycle;
-  // Prime's visible activity comes from what its chat has actually been doing.
-  if (agent && recentToolActivity(summary)) badges.push(AGENT_BADGE.active);
-  else if (agent && (agent.role !== 'prime' || primeWorking(summary))) badges.push(AGENT_BADGE[agent.state]);
+  // Owning a run is not the same as running a turn. Exact chat activity wins; only an idle
+  // worker falls back to its broker lifecycle label.
+  // Exact recorded tool activity belongs to the session, not to the renderer's current swarm
+  // projection. A parked/restarted run can lose its AgentView while the chat still makes calls.
+  if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
+  else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
   return badges;
 }
 

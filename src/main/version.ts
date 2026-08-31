@@ -50,5 +50,7 @@ export function extensionDownloadUrl(version = APP_VERSION): string {
  * 9 — automatic compaction no longer spends a separate pre-send `/compact/claim-auto` wire
  *     claim. The live page owns retryable preflight and the existing continuation transaction
  *     remains the only durable post-send authority.
+ * 10 — worker revival identity is returned by /status and /activity so the extension can scan
+ *      Chrome before routing to an existing exact conversation or opening one proven absent.
  */
-export const BRIDGE_PROTOCOL = 9;
+export const BRIDGE_PROTOCOL = 10;
