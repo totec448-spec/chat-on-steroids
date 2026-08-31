@@ -773,53 +773,99 @@ private struct ResolvedKey {
     let requiredFlags: CGEventFlags
 }
 
-private func currentLayoutKey(for logicalName: String) -> ResolvedKey? {
-    let source = TISCopyCurrentKeyboardLayoutInputSource().takeRetainedValue()
-    guard let rawData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
-    let data = unsafeBitCast(rawData, to: CFData.self)
-    guard let bytes = CFDataGetBytePtr(data) else { return nil }
-    let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
-    let modifierCandidates: [(carbon: UInt32, event: CGEventFlags)] = [
-        (0, []),
-        (UInt32(shiftKey >> 8), .maskShift),
-        (UInt32(optionKey >> 8), .maskAlternate),
-        (UInt32((shiftKey | optionKey) >> 8), [.maskShift, .maskAlternate])
-    ]
-
-    for candidate in modifierCandidates {
-        for rawCode in 0..<128 {
-            var deadKeyState: UInt32 = 0
-            var actualLength = 0
-            var characters = Array<UniChar>(repeating: 0, count: 8)
-            let status = characters.withUnsafeMutableBufferPointer { buffer in
-                UCKeyTranslate(
-                    layout,
-                    UInt16(rawCode),
-                    UInt16(kUCKeyActionDisplay),
-                    candidate.carbon,
-                    UInt32(LMGetKbdType()),
-                    OptionBits(kUCKeyTranslateNoDeadKeysMask),
-                    &deadKeyState,
-                    buffer.count,
-                    &actualLength,
-                    buffer.baseAddress!
-                )
-            }
-            guard status == noErr, actualLength > 0 else { continue }
-            let rendered = characters.withUnsafeBufferPointer {
-                String(utf16CodeUnits: $0.baseAddress!, count: Int(actualLength))
-            }
-            if rendered.lowercased() == logicalName.lowercased() {
-                return ResolvedKey(code: CGKeyCode(rawCode), requiredFlags: candidate.event)
-            }
-        }
-    }
-    return nil
+private struct KeyboardLayoutSnapshot {
+    let data: Data
+    let kbdType: UInt32
 }
 
-private func resolveKey(_ name: String) throws -> ResolvedKey {
+private final class KeyboardLayoutBox {
+    var snapshot: KeyboardLayoutSnapshot?
+}
+
+/**
+ * Reads the active key layout on the main queue.
+ *
+ * Text Services input-source lookups are main-queue-affine. Reached from anywhere else macOS
+ * does not return an error: `dispatch_assert_queue` fails and raises EXC_BREAKPOINT, taking
+ * the host process with it, below anything Swift or JS can catch. The addon is entered on a
+ * Node worker thread, so the hop belongs here rather than in every caller.
+ *
+ * Not `DispatchQueue.main.sync`: that deadlocks when already on main and waits forever when
+ * the main thread is busy, trading the crash for a hang. Running inline covers the first, the
+ * bounded wait covers the second. The layout bytes are copied because they belong to the input
+ * source, which is released when this returns; UCKeyTranslate then reads the copy off-main.
+ */
+private func currentKeyboardLayout() -> KeyboardLayoutSnapshot? {
+    func read() -> KeyboardLayoutSnapshot? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue() else { return nil }
+        guard let rawData = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let data = unsafeBitCast(rawData, to: CFData.self)
+        guard let bytes = CFDataGetBytePtr(data) else { return nil }
+        return KeyboardLayoutSnapshot(
+            data: Data(bytes: bytes, count: CFDataGetLength(data)),
+            kbdType: UInt32(LMGetKbdType())
+        )
+    }
+    if Thread.isMainThread { return read() }
+    let box = KeyboardLayoutBox()
+    let done = DispatchSemaphore(value: 0)
+    DispatchQueue.main.async {
+        box.snapshot = read()
+        done.signal()
+    }
+    guard done.wait(timeout: .now() + 2.0) == .success else { return nil }
+    return box.snapshot
+}
+
+private func currentLayoutKey(for logicalName: String, in snapshot: KeyboardLayoutSnapshot) -> ResolvedKey? {
+    return snapshot.data.withUnsafeBytes { raw -> ResolvedKey? in
+        guard let base = raw.baseAddress else { return nil }
+        let layout = base.assumingMemoryBound(to: UCKeyboardLayout.self)
+        let modifierCandidates: [(carbon: UInt32, event: CGEventFlags)] = [
+            (0, []),
+            (UInt32(shiftKey >> 8), .maskShift),
+            (UInt32(optionKey >> 8), .maskAlternate),
+            (UInt32((shiftKey | optionKey) >> 8), [.maskShift, .maskAlternate])
+        ]
+
+        for candidate in modifierCandidates {
+            for rawCode in 0..<128 {
+                var deadKeyState: UInt32 = 0
+                var actualLength = 0
+                var characters = Array<UniChar>(repeating: 0, count: 8)
+                let status = characters.withUnsafeMutableBufferPointer { buffer in
+                    UCKeyTranslate(
+                        layout,
+                        UInt16(rawCode),
+                        UInt16(kUCKeyActionDisplay),
+                        candidate.carbon,
+                        snapshot.kbdType,
+                        OptionBits(kUCKeyTranslateNoDeadKeysMask),
+                        &deadKeyState,
+                        buffer.count,
+                        &actualLength,
+                        buffer.baseAddress!
+                    )
+                }
+                guard status == noErr, actualLength > 0 else { continue }
+                let rendered = characters.withUnsafeBufferPointer {
+                    String(utf16CodeUnits: $0.baseAddress!, count: Int(actualLength))
+                }
+                if rendered.lowercased() == logicalName.lowercased() {
+                    return ResolvedKey(code: CGKeyCode(rawCode), requiredFlags: candidate.event)
+                }
+            }
+        }
+        return nil
+    }
+}
+
+private func resolveKey(_ name: String, in snapshot: KeyboardLayoutSnapshot?) throws -> ResolvedKey {
     if name.count == 1 {
-        guard let resolved = currentLayoutKey(for: name) else {
+        guard let snapshot else {
+            throw fail("INPUT_FAILED", "the active keyboard layout could not be read in time")
+        }
+        guard let resolved = currentLayoutKey(for: name, in: snapshot) else {
             throw fail("BAD_KEY", "active keyboard layout does not expose logical key \(name)")
         }
         return resolved
@@ -830,7 +876,10 @@ private func resolveKey(_ name: String) throws -> ResolvedKey {
 
 private func pressKeys(_ names: [String], targetWindow: CGWindowID? = nil) throws {
     let normalized = names.map(normalizedKeyName)
-    let resolved = try normalized.map(resolveKey)
+    // One snapshot for the whole chord, taken before any window authority is resolved: the
+    // existing revalidations still sit immediately before the events they guard.
+    let layout = normalized.contains { $0.count == 1 } ? currentKeyboardLayout() : nil
+    let resolved = try normalized.map { try resolveKey($0, in: layout) }
     let globalShortcut = isSystemShortcut(normalized)
     guard let source = CGEventSource(stateID: .privateState) else {
         throw fail("INPUT_FAILED", "could not create a keyboard event source")
