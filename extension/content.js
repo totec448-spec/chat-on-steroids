@@ -556,6 +556,12 @@
   const streamRootsByKey = new Map();
   /** Latest delivery seq for each canonical ChatGPT assistant message. */
   const streamMessageSeq = new Map();
+  /**
+   * One exact final website revision that has crossed the extension journal but has not yet
+   * returned from the app-owned activity feed. Until that happens Overwrite is still showing
+   * an older durable revision, so this is active presentation work even after generation ends.
+   */
+  let pendingPresentation = null;
   /** Stable user-message id → durable event position, used only to anchor page responses. */
   const userAnchorByMessage = new Map();
   let since = 0;
@@ -1122,6 +1128,7 @@
     }
     streamRootsByKey.clear();
     streamMessageSeq.clear();
+    pendingPresentation = null;
     userAnchorByMessage.clear();
     entries = [];
     streamEntries = [];
@@ -3112,6 +3119,13 @@
             ? { goalEligible: true }
             : {})
         });
+        if (state === 'final' && localOwner) {
+          pendingPresentation = { messageId: message.messageId, text: message.rawText };
+          // The page has produced a newer exact revision than the app-owned renderer can
+          // possibly hold. Reuse the one activity scheduler and bring its next pass forward;
+          // the exact feed acknowledgement below releases this obligation.
+          expediteActivityPull();
+        }
       }
     }
     // ChatGPT's own message model is stronger completion evidence than the renderer's Stop
@@ -4964,6 +4978,14 @@
           streamMessageSeq.set(messageId, seq);
           streamBySeq.set(seq, entry);
           streamAdded++;
+          if (
+            pendingPresentation &&
+            messageId === pendingPresentation.messageId &&
+            (entry.final === true || entry.state === 'final') &&
+            String(entry.text || '') === pendingPresentation.text
+          ) {
+            pendingPresentation = null;
+          }
           if (generating && isWork(entry)) exactTurnActivity = true;
           continue;
         }
@@ -5045,6 +5067,9 @@
       foldBootstrap();
       renderControl();
       injectStage();
+      // The activity snapshot is now authoritative and visible. Arm the next read before
+      // compaction or Goal side effects below can wait on the page for tens of seconds.
+      armNextActivityPull();
     } finally {
       pulling = false;
     }
@@ -8231,6 +8256,30 @@
   }
 
   let activityTimer = null;
+  function activityPullDelay(input = {}) {
+    const hidden = input.hidden === true;
+    if (input.drafting === true || input.presentationPending === true) return LIVE_ACTIVITY_MS;
+    if (input.generating === true) return hidden ? ACTIVITY_MS : LIVE_ACTIVITY_MS;
+    if (input.active === true) return ACTIVITY_MS;
+    return hidden ? HIDDEN_ACTIVITY_MS : IDLE_ACTIVITY_MS;
+  }
+
+  function currentActivityPullDelay() {
+    const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    const active = nativeBusy || Boolean(job && job.busy) || pendingTools > 0;
+    // A goal draft lives entirely on this feed — its streamed text is what the stage panel
+    // shows, and the finished message only arrives here — so it polls at the live cadence
+    // even in a hidden tab, which is exactly the tab this feature runs in.
+    const drafting = Boolean(goalDraft) || goalPhase === 'requesting' || goalPhase === 'drafting';
+    return activityPullDelay({
+      hidden,
+      generating,
+      active,
+      drafting,
+      presentationPending: Boolean(pendingPresentation)
+    });
+  }
+
   function scheduleActivityPull(delay = 0) {
     if (activityTimer !== null) return;
     activityTimer = setTimeout(async () => {
@@ -8241,12 +8290,6 @@
       } catch {
         // The next scheduled pass retries after worker/app recovery.
       }
-      const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-      const active = generating || nativeBusy || Boolean(job && job.busy) || pendingTools > 0;
-      // A goal draft lives entirely on this feed — its streamed text is what the stage panel
-      // shows, and the finished message only arrives here — so it polls at the live cadence
-      // even in a hidden tab, which is exactly the tab this feature runs in.
-      const drafting = Boolean(goalDraft) || goalPhase === 'requesting' || goalPhase === 'drafting';
       // Re-arming is a periodic loop, and periodic loops belong to the live page, exactly as
       // for every(): the harness stubs setInterval out so every() never ticks, and drives each
       // behaviour through the test hook instead. This pull re-arms with setTimeout rather than
@@ -8254,20 +8297,21 @@
       // its callback in a microtask, which turned one background poll into an unbroken
       // microtask chain that starved the event loop. The next test then waited forever for a
       // window 'load' event that no macrotask could ever deliver.
-      if (!TEST_MODE) {
-        scheduleActivityPull(
-          drafting
-            ? LIVE_ACTIVITY_MS
-            : hidden
-              ? HIDDEN_ACTIVITY_MS
-              : generating
-                ? LIVE_ACTIVITY_MS
-                : active
-                  ? ACTIVITY_MS
-                  : IDLE_ACTIVITY_MS
-        );
-      }
+      armNextActivityPull();
     }, Math.max(0, delay));
+  }
+
+  function armNextActivityPull() {
+    if (!TEST_MODE) scheduleActivityPull(currentActivityPullDelay());
+  }
+
+  function expediteActivityPull() {
+    if (TEST_MODE) return;
+    if (activityTimer !== null) {
+      clearTimeout(activityTimer);
+      activityTimer = null;
+    }
+    scheduleActivityPull(0);
   }
 
   // Re-attach immediately when React swaps the composer out, rather than up to a second
@@ -8539,6 +8583,8 @@
       injectControl,
       injectStage,
       pullActivity,
+      activityPullDelay,
+      currentActivityPullDelay,
       runCommand,
       startCompact,
       refreshFiber,

@@ -120,6 +120,8 @@ interface Hook {
   injectControl(): void;
   injectStage(): void;
   pullActivity(): Promise<void>;
+  activityPullDelay(input: Record<string, boolean>): number;
+  currentActivityPullDelay(): number;
   runCommand(): Promise<void>;
   startCompact(): Promise<void>;
   chronological<T extends { seq: number; time: number; kind: string; turnId?: string | null }>(entries: T[]): T[];
@@ -380,6 +382,20 @@ describe('one synchronous page snapshot per observer turn', () => {
     live.hook.observe();
 
     expect(reads).toBe(1);
+  });
+});
+
+describe('activity feed cadence', () => {
+  it('follows work state instead of treating every hidden tab as idle', async () => {
+    live = await harness();
+
+    expect(live.hook.activityPullDelay({ hidden: false })).toBe(10_000);
+    expect(live.hook.activityPullDelay({ hidden: true })).toBe(30_000);
+    expect(live.hook.activityPullDelay({ hidden: false, generating: true })).toBe(750);
+    expect(live.hook.activityPullDelay({ hidden: true, generating: true })).toBe(2_000);
+    expect(live.hook.activityPullDelay({ hidden: true, active: true })).toBe(2_000);
+    expect(live.hook.activityPullDelay({ hidden: true, drafting: true })).toBe(750);
+    expect(live.hook.activityPullDelay({ hidden: true, presentationPending: true })).toBe(750);
   });
 });
 
@@ -5187,6 +5203,64 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(ends[0]!.turnId).toBe('g-old-run-0-4');
     const afterFinal = emitted(live.sent, 'assistant_message').map((entry) => entry.event);
     expect(afterFinal.at(-1)).toMatchObject({ text: 'The recorder is fixed.', turnId: 'g-old-run-0-4', final: true });
+  });
+
+  it('keeps exact final delivery live until the app feed returns that revision', async () => {
+    let stream: Array<Record<string, unknown>> = [];
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: 'g-old-run-0-4', stream }) },
+      finishedDuringReload
+    );
+    await live.hook.pullActivity();
+
+    const settled = live.document.querySelector('[data-turn-id="turn-old"]') as HTMLElement;
+    await bindFiberTurns([{ section: settled, turn: {
+      turnId: 'turn-old',
+      endMessageId: 'reload-delivery-final',
+      messages: [{
+        messageId: 'reload-delivery-final',
+        rawMessageId: 'reload-delivery-final',
+        stable: true,
+        order: 1,
+        rawText: 'The exact finished answer.',
+        renderedHtml: '<p>The exact finished answer.</p>'
+      }]
+    } }]);
+    await live.hook.flush();
+    Object.defineProperty(live.document, 'visibilityState', { configurable: true, value: 'hidden' });
+
+    expect(live.hook.currentActivityPullDelay()).toBe(750);
+
+    stream = [{
+      seq: 1,
+      time: 1_700_000_000_001,
+      kind: 'assistant_message',
+      turnId: 'g-old-run-0-4',
+      messageId: 'reload-delivery-final',
+      text: 'The stale partial answer.',
+      renderedHtml: '<p>The stale partial answer.</p>',
+      state: 'streaming',
+      final: false
+    }];
+    await live.hook.pullActivity();
+
+    expect(live.hook.currentActivityPullDelay()).toBe(750);
+
+    stream = [{
+      seq: 2,
+      time: 1_700_000_000_002,
+      kind: 'assistant_message',
+      turnId: 'g-old-run-0-4',
+      messageId: 'reload-delivery-final',
+      text: 'The exact finished answer.',
+      renderedHtml: '<p>The exact finished answer.</p>',
+      state: 'final',
+      final: true
+    }];
+    await live.hook.pullActivity();
+
+    expect(live.hook.currentActivityPullDelay()).toBe(30_000);
   });
 });
 
