@@ -170,14 +170,18 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  */
 const TOOL_ACTIVE_MS = 3 * 60_000;
 
-/** Exact attributed calls keep any recorded chat visibly active for three minutes. */
+/** Exact calls stay active for three minutes unless a later stable model answer finished them. */
 function recentToolActivity(summary: SessionSummary, now = Date.now()): boolean {
-  return summary.lastToolCallAt !== null && now - summary.lastToolCallAt < TOOL_ACTIVE_MS;
+  return (
+    summary.lastToolCallAt !== null &&
+    summary.lastToolCallAt > (summary.lastAssistantFinalAt ?? 0) &&
+    now - summary.lastToolCallAt < TOOL_ACTIVE_MS
+  );
 }
 
-/** A chat is working only from a live turn or the exact tool clock, never generic session noise. */
+/** Reload-generated turn boundaries are not activity authority; exact calls and finals are. */
 function sessionWorking(summary: SessionSummary): boolean {
-  return summary.endedAt === null && (Boolean(summary.activeTurnId) || recentToolActivity(summary));
+  return summary.endedAt === null && recentToolActivity(summary);
 }
 
 function sessionBadges(summary: SessionSummary): Badge[] {
@@ -209,7 +213,9 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   // worker falls back to its broker lifecycle label.
   // Exact recorded tool activity belongs to the session, not to the renderer's current swarm
   // projection. A parked/restarted run can lose its AgentView while the chat still makes calls.
-  if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
+  const workerStopped = agent?.role === 'worker' && ['sleeping', 'finished', 'failed'].includes(agent.state);
+  if (workerStopped) badges.push(AGENT_BADGE[agent.state]);
+  else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
   return badges;
 }
@@ -391,8 +397,9 @@ function scheduleToolActivityExpiry(): void {
   const now = Date.now();
   let nearest = Number.POSITIVE_INFINITY;
   for (const summary of sessions) {
-    if (summary.lastToolCallAt === null) continue;
-    const expiry = summary.lastToolCallAt + TOOL_ACTIVE_MS;
+    const lastToolCallAt = summary.lastToolCallAt;
+    if (lastToolCallAt === null || !recentToolActivity(summary, now)) continue;
+    const expiry = lastToolCallAt + TOOL_ACTIVE_MS;
     if (expiry > now) nearest = Math.min(nearest, expiry);
   }
   if (!Number.isFinite(nearest)) return;

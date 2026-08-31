@@ -3512,8 +3512,11 @@ describe('unattributed activity recovery', () => {
    * works. The page paints the connector row before the request lands, which is one of the two
    * real orders and the one that needs no waiting.
    */
-  async function attributed(conversationId: string): Promise<void> {
+  async function attributed(conversationId: string, endsActivity = false, startedAt?: number): Promise<void> {
     const requestId = `wfr_repair_${++requests}`;
+    // This describe deliberately reuses conversation ids while fake time jumps backwards between
+    // tests. Keep default synthetic call starts monotonic; boundary tests pass their exact time.
+    const callStartedAt = startedAt ?? Date.now() + requests * CHAT_ACTIVE_MS * 4;
     await events(conversationId, [
       {
         kind: 'tool_evidence',
@@ -3527,8 +3530,9 @@ describe('unattributed activity recovery', () => {
       content: [{ type: 'text', text: 'ok' }],
       outcome: 'ok',
       durationMs: 1,
-      startedAt: Date.now(),
-      requestId
+      startedAt: callStartedAt,
+      requestId,
+      endsActivity
     });
   }
 
@@ -4102,6 +4106,7 @@ describe('unattributed activity recovery', () => {
       await pair();
       spawn({ workers: [{ task: 'hold the run open' }], caller: { conversationId: PRIME } });
       await events(PRIME, [openTurn('turn-prime-silent')]);
+      await attributed(PRIME);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS - 1);
       await sweepStaleSwarm(Date.now());
@@ -4148,6 +4153,7 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       await events(OTHER, [openTurn('turn-solo-silent')]);
+      await attributed(OTHER);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
       await sweepStaleSwarm(Date.now());
@@ -4166,11 +4172,46 @@ describe('unattributed activity recovery', () => {
     }
   });
 
+  it('opens an exact chat after calls continue while its Chrome tab is gone', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-closed-while-tools-run')]);
+      await request('POST', '/closed', { body: { conversationId: OTHER } });
+
+      // The model keeps running server-side after Chrome has gone. Exact attribution is the
+      // activity authority; absence of a browser-local activeTurnId must not discard it.
+      await attributed(OTHER);
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(chatOf(await maintenance())).toBe(OTHER);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('spends recovery immediately when an attributed worker finish report is recorded', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-explicit-finish')]);
+      await attributed(OTHER);
+      await attributed(OTHER, true);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('re-arms the same chat only after real post-reload activity starts a new episode', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       await events(OTHER, [openTurn('turn-reload-episode-one')]);
+      await attributed(OTHER);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
       await sweepStaleSwarm(Date.now());
@@ -4198,6 +4239,7 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       await events(OTHER, [openTurn('turn-reload-interim-one')]);
+      await attributed(OTHER);
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
       await sweepStaleSwarm(Date.now());
       const first = await maintenance();
@@ -4221,7 +4263,7 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('moves the stale deadline on real assistant progress and removes it on a formal turn end', async () => {
+  it('moves the stale deadline on real assistant progress and removes it on a stable final answer', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -4241,7 +4283,15 @@ describe('unattributed activity recovery', () => {
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
 
-      await events(OTHER, [endTurn('turn-solo-progress', 'completed')]);
+      await events(OTHER, [{
+        kind: 'assistant_message',
+        time: Date.now(),
+        messageId: 'assistant-solo-final',
+        turnId: 'turn-solo-progress',
+        text: 'Finished.',
+        state: 'final',
+        final: true
+      }]);
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
@@ -4251,21 +4301,29 @@ describe('unattributed activity recovery', () => {
   });
 
   /**
-   * A tool call is attributed after the turn that made it has already ended.
+   * A tool call is attributed after the final answer it belongs to is already stored.
    *
    * The recorder can spend up to REQUEST_ID_GRACE_MS proving one request id, so the page's
-   * `turn_end` regularly reaches this app before the call inside that turn is filed. The
-   * silence deadline belongs to an *open* turn, so a late attribution must not mint one for a
-   * chat that finished perfectly - that reloaded a completed answer two minutes after the user
-   * already had it.
+   * stable assistant message can reach this app before the call inside that answer is filed.
+   * The call's own start time must remain before that final boundary, regardless of recorder
+   * latency, or a completed answer gets reopened two minutes after the user already had it.
    */
-  it('never reloads a chat whose turn formally ended before its last call was attributed', async () => {
+  it('never reloads a chat whose stable final arrived before its last call was attributed', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       await events(OTHER, [openTurn('turn-solo-late-join')]);
-      await events(OTHER, [endTurn('turn-solo-late-join', 'completed')]);
-      await attributed(OTHER);
+      const finalAt = Date.now();
+      await events(OTHER, [{
+        kind: 'assistant_message',
+        time: finalAt,
+        messageId: 'assistant-solo-late-final',
+        turnId: 'turn-solo-late-join',
+        text: 'Complete.',
+        state: 'final',
+        final: true
+      }]);
+      await attributed(OTHER, false, finalAt);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
       await sweepStaleSwarm(Date.now());
@@ -4304,9 +4362,10 @@ describe('unattributed activity recovery', () => {
       await events(OTHER, [openTurn('turn-final-after-reload')]);
       await events(OTHER, [endTurn('turn-final-after-reload', 'unknown')]);
       await attributed(OTHER);
+      const finalAt = Date.now();
       await events(OTHER, [{
         kind: 'assistant_message',
-        time: Date.now(),
+        time: finalAt,
         messageId: 'assistant-final-after-reload',
         text: 'The complete answer is here.',
         state: 'final',
@@ -4314,7 +4373,7 @@ describe('unattributed activity recovery', () => {
       }]);
       // Correlation may settle after the page final, just as it can after a normal turn_end.
       // That late exact call must not resurrect a completed answer's reload clock.
-      await attributed(OTHER);
+      await attributed(OTHER, false, finalAt);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
       await sweepStaleSwarm(Date.now());
@@ -4343,6 +4402,7 @@ describe('unattributed activity recovery', () => {
         body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
       });
       await events(WORKER, [openTurn('turn-worker-pruned')]);
+      await attributed(WORKER);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
       await sweepStaleSwarm(Date.now());
@@ -4376,6 +4436,7 @@ describe('unattributed activity recovery', () => {
         body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
       });
       await events(WORKER, [openTurn('turn-worker-silent')]);
+      await attributed(WORKER);
       expect(getConfig().multiAgent.recoverAgentTabs).toBe(true);
       expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
       expect(liveConversations().find((entry) => entry.conversationId === WORKER)).toMatchObject({ generating: true });
@@ -4409,6 +4470,7 @@ describe('unattributed activity recovery', () => {
         body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
       });
       await events(WORKER, [openTurn('turn-worker-ceiling')]);
+      await attributed(WORKER);
       noteAgentContextTokens(WORKER, WORKER_CONTEXT_CEILING_TOKENS);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);

@@ -1066,6 +1066,8 @@ export interface ToolCallInput {
   requestId?: string | null;
   /** Exact conversation already proven for this request by the dispatcher, when available. */
   conversationId?: string | null;
+  /** A successful worker finish report is a hard activity boundary, not fresh work. */
+  endsActivity?: boolean;
 }
 
 /** Writing runs one at a time, so the log keeps call order. See recordToolCall. */
@@ -1237,7 +1239,13 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     });
     notifyChanged();
     try {
-      attributionListener?.(target.conversationId);
+      const filed = await getSession(sessionId);
+      attributionListener?.(
+        target.conversationId,
+        input.startedAt,
+        input.endsActivity === true,
+        filed?.lastAssistantFinalAt ?? null
+      );
     } catch (err) {
       logWarn(`call attribution listener failed: ${(err as Error).message}`);
     }
@@ -1273,10 +1281,14 @@ export function setAgentConversationLookup(lookup: (agent: string) => string | n
  * and which activity nobody claimed — and splitting them invites a second attribution clock
  * somewhere else. Nothing here decides what a verdict is worth; the bridge owns that.
  */
-let attributionListener: ((conversationId: string | null) => void) | null = null;
+let attributionListener:
+  | ((conversationId: string | null, startedAt: number, endsActivity: boolean, lastAssistantFinalAt: number | null) => void)
+  | null = null;
 
 export function setCallAttributionListener(
-  listen: ((conversationId: string | null) => void) | null
+  listen:
+    | ((conversationId: string | null, startedAt: number, endsActivity: boolean, lastAssistantFinalAt: number | null) => void)
+    | null
 ): void {
   attributionListener = listen;
 }

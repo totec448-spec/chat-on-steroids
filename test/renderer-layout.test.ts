@@ -126,7 +126,7 @@ describe('a session row', () => {
   it('does not call an idle prime active merely because it still owns the run', () => {
     expect(chatSource).toMatch(/else if \(agent && agent\.role !== 'prime'\)/);
     // Idle means idle: generic recording traffic cannot renew the exact tool clock.
-    expect(chatSource).toMatch(/summary\.lastToolCallAt !== null && now - summary\.lastToolCallAt < TOOL_ACTIVE_MS/);
+    expect(chatSource).toMatch(/summary\.lastToolCallAt > \(summary\.lastAssistantFinalAt \?\? 0\)/);
   });
 
   /**
@@ -134,10 +134,15 @@ describe('a session row', () => {
    * calling tools for minutes. Keying the badge on the open turn alone showed that chat - the
    * one a user most wants to see is still going - as idle.
    */
-  it('still calls a chat active while it records tool calls without an open turn', () => {
-    expect(chatSource).toMatch(/Boolean\(summary\.activeTurnId\) \|\| recentToolActivity\(summary\)/);
+  it('uses exact calls rather than reload-generated turn boundaries for visible activity', () => {
+    expect(chatSource).toMatch(/return summary\.endedAt === null && recentToolActivity\(summary\)/);
     expect(chatSource).toMatch(/if \(sessionWorking\(summary\)\) badges\.push\(AGENT_BADGE\.active\)/);
     expect(chatSource).toMatch(/scheduleToolActivityExpiry/);
+  });
+
+  it('lets a worker finish report override its still-recent finish tool call', () => {
+    expect(chatSource).toMatch(/\['sleeping', 'finished', 'failed'\]\.includes\(agent\.state\)/);
+    expect(chatSource).toMatch(/if \(workerStopped\) badges\.push\(AGENT_BADGE\[agent\.state\]\)/);
   });
 });
 
