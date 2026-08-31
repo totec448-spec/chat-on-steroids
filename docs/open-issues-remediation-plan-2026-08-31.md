@@ -1,7 +1,7 @@
 # Chat On Steroids — Architekturplan für den offenen GitHub-Issue-Pass
 
-Stand: 2026-08-31, nach erneutem GitHub-/Worktree-/PR-Audit  
-Audit-Snapshot des Arbeitsbaums: `rebuild/2.0.3-from-2.0.2` @ `73156d6`  
+Stand: 2026-08-31, nach erneutem GitHub-/Worktree-/PR-Audit und Simplification-/Efficiency-Pass  
+Audit-Snapshot des Arbeitsbaums: `rebuild/2.0.3-from-2.0.2` @ `1cb3b54`  
 Prinzip: **Quality >> Quantity**
 
 > Dieser Plan ist als direkte Arbeitsanweisung für Claude Code/Codex gedacht. Er soll nicht
@@ -47,6 +47,33 @@ Prinzip: **Quality >> Quantity**
     Refactor dürfen einen 2.0.3-Reliability-Cut nicht blockieren, nur weil sie ebenfalls offen sind.
     Ein bereits vollständig validierter Port kann mitgehen; unvollständige Plattformarbeit bekommt
     ihren eigenen Release-Gate statt den Reliability-Pass zu verwässern.
+13. **Jeder Batch hat ein Reduction-Budget, nicht nur ein Test-Budget.** Vorher/nachher mindestens
+    zählen: persistierte Felder, langlebige Maps/Sets, Timer/Alarms/Leases, Recovery-/Retry-Owner,
+    Hot-Path-Scans, model-facing Discovery-Bytes und betroffene LOC. Ein Reliability-Batch soll bei
+    gleicher Capability standardmäßig **weniger** langlebigen Zustand und weniger Recovery-Pfade
+    hinterlassen. Netto-Zuwachs braucht eine konkrete externe Invariante, die ohne neuen State nicht
+    modellierbar ist.
+14. **Bounded query means bounded work.** Ein Tool/UI-Call mit `limit` darf nicht zuerst alle
+    Sessions oder komplette Journale materialisieren. `limit: N` braucht eine Page-/Range-/Tail-
+    Primitive, deren CPU/I/O ebenfalls durch N bzw. einen expliziten Byte-/Session-Budget begrenzt
+    ist. Vollscan ist nur für ausdrücklich vollständige Search/Audit/Repair-Flows erlaubt und muss
+    resumable sein.
+15. **Retry ist ein Zustand des existierenden Owners, keine neue State-Machine.** Ein neuer Fehler-
+    Trigger darf höchstens einen bestehenden Command-/Turn-Recovery-Owner erneut schedulen. Keine
+    parallelen `setTimeout`-Ketten in App, Extension und Content; maximal ein `nextAttemptAt`/
+    existing sweep pro Operation.
+16. **Ein neuer Browser-/Platform-Backend muss Komplexität ersetzen.** #42 darf nicht dauerhaft
+    „persönlicher Browser + detached Chromium + Codex Browser“ als drei gleichberechtigte Wege
+    hinterlassen. Erst die minimale Custody-Grenze definieren; danach genau einen Primary Path und
+    einen bewusst zeitlich begrenzten Migrationspfad. Jeder zweite Backend-Pfad braucht ein explizites
+    Delete-/Deprecation-Ziel.
+17. **Caches/Indices sind keine kostenlosen Fixes.** Einen O(n)-Scan erst zentralisieren und messen.
+    Nur wenn er bei realistischen Bounds hot ist, einen abgeleiteten Index ergänzen; der Index darf
+    niemals neue Persistenz-/Ownership-Authority werden und muss aus der kanonischen Struktur in
+    einem Schritt rekonstruierbar sein.
+18. **Model-facing Bytes sind Produktkosten.** Shell-/OS-Hinweise, die bereits in Server-
+    Instructions stehen, nicht zusätzlich in jedes Tool-Schema kopieren. Bestehende Discovery-
+    Budgets werden nicht angehoben, um neue Prosa zu legitimieren; zuerst deduplizieren.
 
 ---
 
@@ -54,11 +81,11 @@ Prinzip: **Quality >> Quantity**
 
 ### 1.1 GitHub-Wahrheit: offene vs. inzwischen geschlossene Issues
 
-Der neueste `gh issue list --state open`-Audit ergibt **13 offene Issues**. Wichtig: #40 wurde
-**während dieses Audits** am 2026-08-31 gegen 01:10 CEST neu eröffnet; der Issue-Snapshot ist also
-bewusst zeitgestempelte Evidenz und muss vor Implementation erneut gelesen werden:
+Der neueste `gh issue list --state open`-Audit ergibt **15 offene Issues**. Seit dem vorigen Plan-
+Snapshot sind zusätzlich #41 und #42 offen. Der Issue-Snapshot ist bewusst zeitgestempelte Evidenz
+und muss vor Implementation erneut gelesen werden:
 
-`#2, #21, #22, #23, #26, #27, #29, #30, #31, #34, #35, #36, #40`.
+`#2, #21, #22, #23, #26, #27, #29, #30, #31, #34, #35, #36, #40, #41, #42`.
 
 Seit dem ersten Plan-Snapshot wurden zwei Issues abgeschlossen:
 
@@ -75,25 +102,24 @@ Der gemeinsam benutzte Checkout ist inzwischen von `origin/main` weiter divergie
 Audit gilt:
 
 ```text
-rebuild/2.0.3-from-2.0.2...origin/main [ahead 14, behind 6]
-73156d6 Keep a long goal where its reader scrolled it
-9c53248 Let a goal opening outlive the app's own model deadline
-fff2d7d Read a Project conversation route wherever a chat is named
-bae42d0 Recognise Project conversation routes as conversations
-69a2560 Scope the public-history privacy gate to the checked-out line
+rebuild/2.0.3-from-2.0.2...origin/main [ahead 20, behind 6]
+1cb3b54 fix final activity and missing-tab recovery
+162e974 fix browser revival and stale chat recovery
+2c6967a Make tunnel restarts single-owner
+324648d Keep hidden activity delivery live
+5463f17 Preserve unread exec results under capacity
+b15445a Checkpoint recovery and open-issue audit
 ```
 
 `origin/main` enthält inzwischen die Merges für #24, #25 und #33. Der lokale Branch enthält Teile
 derselben Verhaltensänderungen bereits unter anderen Hashes. **`behind 6` bedeutet deshalb nicht
 „sechs fehlende Produktfixes“.** Vor jeder Integration muss Verhalten statt Hash gezählt werden.
 
-Der Worktree ist außerdem aktuell **geteilt und dirty**; neben dieser untracked Plan-Datei liegen
-beim letzten Status-Snapshot fremde Änderungen in `docs/chatgpt-turn-signals.md`,
-`extension/chatgpt-dom.js`, `src/main/bridge.ts`, `src/renderer/chat.ts`, `test/bridge.test.ts`,
-`test/content-script.test.ts` und `test/renderer-layout.test.ts`. Die letzten beiden Renderer-Pfade
-sind sogar **während dieses Audits neu dirty geworden** — konkreter Beweis, dass der Shared Tree
-weiterlebt. Diese Änderungen gehören nicht diesem Plan-Edit und dürfen weder bereinigt noch
-überschrieben werden.
+Der Worktree bleibt **geteilt**. Beim letzten Status-Snapshot war außer der hier bewusst nicht
+angefassten untracked `docs/bug-audit-2026-08-31.md` kein fremder Source-Diff mehr sichtbar. Das ist
+kein Freibrief für destructive Git-Kommandos: der Shared Tree kann sich während eines langen Runs
+erneut ändern. Deshalb vor jedem Edit den konkreten Zielpfad nochmals gegen `git status`/`git diff`
+prüfen und nur eigene Hunks anfassen.
 
 PR #39 ist weiterhin offen und nicht Teil dieses HEAD. PR #19 / Merge `03acfba` ist Ancestor.
 
@@ -127,7 +153,10 @@ Release-History-Blocker und nicht der alte #24-Fehler „unrelated ref poisons a
 
 - Letztes veröffentlichtes Release ist weiterhin **v2.0.2**. Ein Fix in `main` ist daher noch kein
   Beweis, dass ein v2.0.2-Reporter ihn besitzt.
-- Issue-relevante offene PRs sind vor allem **#17** (#2), **#28** (#29) und **#39** (#21).
+- Issue-relevante offene PRs sind vor allem **#17** (#2), **#28** (#29) und **#39** (#21). **#43**
+  (Codex Desktop thread/activity bridge RFC) ist architektonisch benachbart, aber kein Browser-
+  Custody-Backend für #42 und darf nicht allein wegen ähnlicher „bridge“-Terminologie damit
+  verschmolzen werden.
 - Weitere offene Feature-PRs dürfen nicht still in den Reliability-Release gezogen werden. Vor dem
   Cut wird ihre Dateiüberlappung gegen die Issue-Batches geprüft; Konflikte werden isoliert statt
   durch einen großen Sammel-Merge gelöst.
@@ -148,19 +177,22 @@ aktuell vorhandenen Änderungen ihre bestehenden Regressionen nicht brechen.
 | #24 verify/history + AppImage flake | **CLOSED** | PR #37 in `origin/main`; lokale verhaltensäquivalente Änderung vorhanden | **Keine Produktarbeit mehr. Public-history-Blocker als separaten Release-Fakt behandeln.** |
 | #25 Project chats | **CLOSED** | PR #38 in `origin/main`; lokale verhaltensäquivalente Route-Fixes vorhanden | **Keine zweite Route-Implementation bauen; zentrale Parser-Lektion beibehalten.** |
 | #26 resume-shadow loop in v2.0.2 | Code-Fix bereits gemerged | PR #19 / `03acfba` | **Release verifizieren; danach den hot-poll Compatibility-Repair aus `/activity` löschen/auf bounded startup verschieben.** |
-| #27 10+ min generating stall | 2-min inactivity recovery vorhanden; 2026-08-31 zeigt ein separates klassifiziertes Transport-Error-Recovery-Loch im dirty Worktree | `0cd95f1`, `838f55c` + aktuelle uncommitted bridge/DOM regressions | **Eine one-shot browser-recovery authority behalten; error- und inactivity-evidence nur als zwei Trigger dafür. Erst nach Integration/live acceptance schließen.** |
+| #27 10+ min generating stall | 2-min inactivity recovery + klassifizierte Transport-Error-Recovery sind im aktuellen HEAD committed; Live-Akzeptanz bleibt offen | `b15445a`, danach Recovery-Härtung in `162e974` / `1cb3b54` | **Eine one-shot browser-recovery authority behalten; error- und inactivity-evidence nur als Trigger derselben Episode. Kein weiterer Watchdog; erst nach Live-Akzeptanz schließen.** |
 | #29 macOS Desktop boundary | Umfangreiche validierte Mac-Vertical-Slice existiert in CLEAN PR #28 | Electron → Worker → N-API → Swift dylib; arm64 live/CI evidence | **Vertical slice nicht mit spekulativem Vorab-Refactor blockieren; erst sicher mergen, danach kleinsten echten Driver-Seam aus zwei Backends extrahieren.** |
 | #30 autosaved New Chat draft blocks bootstrap | Safe failure/surfacing schon vorhanden; Opt-in fehlt | `insertPrompt()` + `runCommand()` + worker failure report | **Nur persistenten fresh-bootstrap Replace-Opt-in ergänzen; preserve default unverändert.** |
 | #31 persistent/self-verifying Secure Tunnel | Persistence größtenteils schon fertig | config/safe storage/per-surface request+tool timestamps + monotonic surface exposure | **Fingerprint der tatsächlich ausgelieferten `tools/list`-Shape pro Surface; #23-health nur projizieren; capability-bearing lokale URLs aus generischen Renderer-Facts entfernen.** |
 | #34 stale hidden worker output | **Lokal implementiert und getestet; Browser-Live-Akzeptanz bleibt offen** | lokaler Commit `324648d`; 382 Extension/Content-Tests | **Ein Scheduler entscheidet nach Arbeit; hidden generating/active läuft schnell, exact final delivery bleibt bis zum Feed-ACK live.** |
-| #35 explain waits/blocks | Noch kein einheitliches Modell | Zustände existieren verteilt; `.clf-stage` vorhanden | **Eine read-only Runtime-/Obligations-Projektion in bestehender Stage-UI; keine LLM-Statusmeldungen.** |
+| #35 explain waits/blocks | Noch kein einheitliches Modell | Zustände existieren bei ihren Ownern; `.clf-stage` vorhanden | **Genau einen pure `waitStatusFor(conversationId)`-Selector in bestehender Stage-UI; keine Runtime-Registry und keine LLM-Statusmeldungen.** |
 | #36 unread background exec results | **Lokal implementiert und getestet; Modell-Live-Akzeptanz bleibt offen** | lokaler Commit `5463f17`; 157 UnifiedExec/MCP-Tests | **LRU-Eviction gelöscht: Capacity ist Admission; exact-chat unread obligation begrenzt neue Starts und bleibt über `write_stdin` drainbar.** |
 | #40 Chrome Memory Saver suspends agent tabs | Neu offen; Background kennt Tab-Identity, aber projiziert aktive Execution nicht in Chrome discard policy; `onUpdated` ignoriert `discarded`/`frozen` | `extension/background.js` + Chrome `tabs.autoDiscardable`/`discarded`/`frozen` APIs | **Eine read-only browser-live-required Projektion; bestehende 30s maintenance cadence reconciled `autoDiscardable=false` nur für tatsächlich execution-relevante Tabs. Discard ≠ Freeze: keine erfundene Freeze-API/Heartbeat.** |
+| #41 message stream error auto-resume | Fehler-Evidenz existiert bereits; Gefahr ist eine zweite Retry-Maschine neben der vorhandenen stale-turn/browser recovery | Issue verlangt nur „detect error, prompt continue“; aktueller Bridge-/Content-Pfad besitzt bereits one-shot Recovery/Command-Custody | **Keinen neuen Retry-Subsystem bauen. Error ist ein weiterer Trigger in denselben conversation-scoped Recovery-Owner; gleiche Dedupe-/attempt identity, ein Budget, kein paralleler Timer.** |
+| #42 detached Chromium / CDP | Produktproblem ist real (Focus-Steal/User-Browser-Coupling); heutiger Browser-Launcher probiert mehrere Chromium-Kandidaten, besitzt aber keine explizite Installation/Profile-Custody | `src/main/browser.ts::preferredBrowserCandidates/openInPreferredBrowser`; Extension besitzt Tab-/Document-/Command-Custody; PR #43 ist kein Browser-Backend | **Einen app-owned CompanionTarget (executable + profile) auswählen statt Candidate-Fanout als Runtime-Fallback. Bestehende Extension/Bridge behalten; CDP nur für bewiesene Capability-Gaps.** |
 
 ### 2.1 Lokaler Implementierungsstand dieses Passes
 
-Dieser Pass implementiert bewusst nur drei Issues mit klarer Root-Cause und deterministischer
-lokaler Proof-Fläche: #36, #34 und #23. Er installiert, paketiert, pusht und schließt keine Issues.
+Seit dem ursprünglichen Checkpoint wurden mehrere Reliability-Pfade lokal weiter verändert. Dieser
+Plan-Edit installiert, paketiert, pusht und schließt weiterhin keine Issues; er reconciled den
+aktuellen HEAD und macht aus den bereits vorhandenen Fixes eine kleinere Zielarchitektur.
 
 - **#36:** Der globale UnifiedExec-Cap entfernt keine result-bearing Session mehr. Admission wird
   global und pro exakter Conversation verweigert, während `write_stdin` zum Drain offen bleibt.
@@ -172,15 +204,19 @@ lokaler Proof-Fläche: #36, #34 und #23. Er installiert, paketiert, pusht und sc
   und eine unbestätigte Beendigung startet bewusst keinen zweiten Tree. Metrics-Ausfall und ein
   fehlender `last_success` bleiben `connecting/unknown`; ein frischer Poll entfernt zusätzlich
   einen sticky historischen Diagnostics-Fehler.
+- **Browser revival/stale-chat recovery:** `162e974` ist ein positives Reduction-Beispiel: der
+  Commit änderte `extension/background.js`/Bridge/Tests und löschte dabei netto deutlich mehr Code
+  als er hinzufügte. Künftige Reliability-Batches sollen denselben Standard anstreben: eine stärkere
+  Ownership-Invariante ersetzt mehrere Fallbacks, statt sie zu ergänzen.
 
-Nicht implementiert wurden insbesondere #21, #22, #29, #30, #31, #35 und #40: ihre Architektur-
+Nicht implementiert wurden insbesondere #21, #22, #29, #30, #31, #35, #40, #41 und #42: ihre Architektur-
 oder Produktentscheidungen sind größer als dieser Reliability-Pass oder brauchen Browser-/Plattform-
 Live-Evidenz. Die bereits im Checkpoint vorhandenen #27-/Goal-/Tool-activity-Änderungen wurden als
 vorhanden erkannt und nicht als zweite Parallel-Implementation neu gebaut.
 
 ---
 
-## 3. Gemeinsame Architektur statt 13 Einzelfixes
+## 3. Gemeinsame Architektur statt Issue-by-Issue Hotfixes
 
 ### 3.1 Cluster A — Turn-Liveness, Outstanding Obligations und Browser-Custody strikt trennen (#27, #34, #35, #36, #40)
 
@@ -207,32 +243,30 @@ Nur echte Fortschritts-Evidenz verlängert diesen Grant. Insbesondere **nicht**:
 Sonst würde eine vergessene Background-Session genau den kaputten Prime-Turn für immer vor der
 one-shot Reload-Recovery schützen.
 
-Ebenso **nicht autoritativ** ist ein Renderer-only „working“-Badge. Der aktuell parallel dirty
-`src/renderer/chat.ts` experimentiert mit `PRIME_WORKING_MS` aus `SessionSummary.updatedAt`; das ist
-legitime Display-Heuristik, aber darf weder #27 Turn-Liveness, #35 konkrete Block-Gründe noch #40
-Browser-Protection treiben. Presentation clocks bleiben Presentation clocks.
+Ebenso **nicht autoritativ** ist ein Renderer-only „working“-Badge aus `SessionSummary.updatedAt`.
+Das ist legitime Display-Heuristik, darf aber weder #27 Turn-Liveness, #35 konkrete Block-Gründe
+noch #40 Browser-Protection treiben. Presentation clocks bleiben Presentation clocks.
 
-#### B. Outstanding Obligations werden **einmal** read-only zusammengesetzt
+#### B. Zwei Consumer brauchen zwei **enge pure Selector**, keine Runtime-Ontologie
 
-Nicht `conversationRuntimeView()` für #35 **und** `browserProtectedConversations()` für #40 als zwei
-separate Scans über Recorder/Broker/Exec/Commands implementieren. Beide fragen dieselben Facts nur
-für andere Projektionen ab. Eine pure App-layer Authority, sinngemäß:
+Der vorige Plan-Entwurf schlug ein generisches `RuntimeObligation[]` mit `kind`, `requiresBrowser`,
+`blocksExecAdmission` usw. vor. Das ist zwar read-only gedacht, aber als generische Zwischen-
+Ontologie unnötig: jeder neue Feature-Typ würde einen weiteren String-Kind + Flags hinzufügen und
+könnte langsam zu einer zweiten Lifecycle-Sprache neben den echten Ownern werden.
+
+Auch ein zentraler neun-Felder-Inspector wäre unnötige Abstraktion. #35 fragt „warum wartet dieser
+konkrete Chat?“; #40 braucht nur „welche Prime/Worker-Conversations sind execution-relevant?“.
+Deshalb zwei enge pure Queries an den jeweiligen Owner-Grenzen:
 
 ```ts
-type RuntimeObligation = {
-  kind: 'open-turn' | 'tool' | 'exec-running' | 'exec-unread' |
-        'worker-execution' | 'worker-wake' | 'continuation' |
-        'goal' | 'compact' | 'browser-command' | 'browser-recovery';
-  conversationId: string;
-  since?: number;
-  requiresBrowser: boolean;
-  blocksExecAdmission?: boolean;
-};
-
-conversationObligations(id): RuntimeObligation[]
+waitStatusFor(conversationId) -> one display reason | null
+protectedAgentConversations() -> Set<conversationId>
 ```
 
-komponiert nur vorhandene Owner:
+Beide besitzen/persistieren **nichts** und dürfen nur vorhandene Owner lesen. Es gibt keinen
+`RuntimeObligation`-Store, kein `kind`-Array, keine generische `requiresBrowser`-/Admission-Sprache.
+
+`waitStatusFor(id)` darf für genau diesen Chat lesen:
 
 - recorder open-turn proof;
 - continuation marker/checkpoint;
@@ -242,13 +276,8 @@ komponiert nur vorhandene Owner:
 - Goal / Compact job;
 - queued/handed browser command/recovery.
 
-Diese Liste **besitzt und persistiert nichts**. Verbraucher filtern/formatieren sie:
-
-1. #35 wählt deterministisch den höchsten belegten Statusgrund + `since` für `.clf-stage`;
-2. #40 filtert `requiresBrowser===true` und mappt erst in der Extension Conversation→exact Tab;
-3. #36 kann `exec-running`/`exec-unread` count/projection wiederverwenden; **die Admission-Entscheidung
-   selbst bleibt beim UnifiedExec manager/ownership owner**, nicht bei der UI-Liste;
-4. Activity response kann konkrete user-visible Waiting-/Blocked-Evidenz zeigen.
+und deterministisch **einen** höchsten belegten Display-Grund + `since` wählen. #36 liest seine
+Admission-Fakten weiterhin direkt aus UnifiedExec; kein UI-Selector wird Authority.
 
 #27 benutzt dagegen weiterhin nur die bestehende Turn-Liveness für Recovery. #34 ist ein lokales
 Scheduling-Problem: hidden **idle** darf langsam sein; hidden **working** oder ein Chat mit einer
@@ -257,32 +286,22 @@ exakt noch nicht round-tripped terminalen Assistant-Revision nicht.
 **Nicht tun:** `pendingReason` persistieren, Background-Prozess-Existenz als Activity-Heartbeat
 missbrauchen, einen zweiten stale-turn timer bauen oder Status als Transcript-Messages erzeugen.
 
-#### C. Browser-Live-Custody ist eine dritte, ebenfalls abgeleitete Frage (#40)
+#### C. Browser-Live-Custody bleibt für #40 **broker-scoped**
 
-„Dieser Chat arbeitet“ und „Chrome darf seinen Renderer automatisch wegwerfen“ sind nicht dieselbe
-Authority. Der App-Layer weiß, **welche Conversation gerade einen lebenden Browser-Dokumentpfad
-braucht**; nur die Extension weiß, **welcher konkrete Tab diese Conversation hält und welchen
-Lifecycle-State Chrome meldet**.
-
-Deshalb **keinen zweiten app-seitigen Scan**. `browserProtectedConversations` ist nur:
+„Dieser Chat arbeitet“ und „Chrome darf einen **aktiven Agent-Tab** automatisch wegwerfen“ sind
+nicht dieselbe Authority. Für Issue #40 reicht die vorhandene Broker-Topologie; sie muss nicht
+Recorder/Goal/Compact/Continuation mitscannen. `protectedAgentConversations()` ist nur:
 
 ```text
-distinct conversationId from conversationObligations(*)
-where requiresBrowser == true
+active Prime conversation
++ active/waking/detached Worker conversation ids
+-> distinct ids
 ```
 
-Die obligation composition setzt `requiresBrowser` für semantisch echte Browser-Bedürfnisse, z. B.
-offener Recorder-Turn (damit auch Lone Chat), bound Worker execution/wake, Browser-command/recovery,
-Continuation/Compact/Goal-Phasen, die konkret ein lebendes ChatGPT-Dokument brauchen. Ein Prime-/
-Worker-**Role-Label allein** reicht nicht. Sleeping/finished/failed History erzeugt keine Browser-
-Obligation. Ein `detached` Worker kann weiter semantische Arbeit besitzen, erzeugt aber erst wieder
-einen physikalischen Pin, wenn exakt dieser Chat als `tabConversations`-Mapping auftaucht.
-
-Wichtig: `activeUntil` ist **nicht** die Pin-Authority. Genau bei einer suspendierten Seite läuft
-dieser Stale-Turn-Grant mangels Fortschritts-Evidenz ab. Würde davon auch `autoDiscardable` abhängen,
-würden wir den Schutz in dem Moment entfernen, in dem Chrome ihn am dringendsten braucht.
-Dasselbe gilt für `PRIME_WORKING_MS`/`summary.updatedAt`: eine Renderer-Anzeige darf keine Browser-
-Side-Effect-Authority werden.
+Sleeping/finished/failed History erzeugt keinen Browser-Bedarf. Ein `detached` Worker erzeugt keinen
+neuen Tab; existiert aber exact derselbe Tab noch/erneut, darf die Extension ihn während der
+serverseitig möglichen Execution schützen. `activeUntil` und Renderer-Clocks sind ausdrücklich
+keine Pin-Authority.
 
 Die Extension reconciled diese gewünschte Conversation-Menge gegen ihre vorhandene
 `tabConversations`/Chrome-Tab-Authority. Sie braucht **keinen zweiten semantischen protected-tabs
@@ -324,6 +343,33 @@ fail-closed prüfen, dass B nicht Worker/anderem Prime gehört; nach dem Rebind 
 Prime-Projektion A→B aus dem committed Continuation-Fakt durchführen. Restart-Recovery liest dieselbe
 WAL statt eine volatile Transfer-Lease neu zu erfinden.
 
+**Noch tiefer:** Auch der generische `bridge-commands`-WAL darf `resume` danach nicht als zweite
+Transaktion behalten. Heute speichert Continuation bereits Token/Session/A→B/State/Handoff,
+Claimant und beide Send-Checkpoints; parallel speichert ein `CommandSpec {type:'resume', sessionId,
+token}` noch queued/leased owner/deadline/receipt. `sessionTokens` verbindet beide Welten zusätzlich.
+Das erzeugt resume-spezifische Restore-/Expiry-/Cancel-/ACK-Choreographie in `bridge.ts`, obwohl die
+Continuation bereits genau die externe Side-Effect-Grenze besitzt.
+
+Ziel nach dem ersten #21-Cut:
+
+1. Continuation erhält einen **inerten** `browserCommandId` als URL-/Redeem-Korrelation; niemals den
+   Continuation-Token selbst in die URL legen.
+2. Falls Dokument-Custody über Restart nötig ist, gehört `destinationOwner` direkt zur Continuation
+   und ist nur solange übernehmbar, wie `sendUnattempted(destinationSend)` beweist, dass noch nichts
+   dispatched wurde.
+3. `/commands/redeem` löst diesen id direkt zur Continuation auf; `claimContinuationNow()`/
+   Destination-Checkpoint ist der einzige Resume-Claim.
+4. Resume-ACK committed/aborted direkt gegen die Continuation. Deren terminaler State ist zugleich
+   die durable Receipt-Wahrheit; kein zweiter generic command receipt/TTL nötig.
+5. Danach `resume` aus `CommandSpec`, command restore/migration, `sessionTokens`, generic command
+   expiry/timer und resume-spezifische command-vs-continuation rollback/cancel branches löschen.
+
+`bridge-commands` bleibt danach nur für Worker bootstrap/revival, deren semantische Authority
+tatsächlich außerhalb der Continuation lebt. Dieser Schritt ist **nach** dem PrimeTransfer-Cut zu
+machen, nicht gleichzeitig: zuerst eine durable Authority etablieren, dann den Adapter-State
+löschen. Regressionen müssen lost ACK, document takeover before dispatch, crash after dispatch,
+cancel und restart aus der Continuation allein beweisen.
+
 PR #39 bleibt wertvolle Failure-/Regression-Evidenz, aber sein regelmäßiger `compactToken`-/`touchedAt`
 Heartbeat ist **nicht** die Zielarchitektur. Ein content-seitiger Guard „dieser Chat reconciled gerade
 seinen eigenen HANDOFF-Marker, also niemals auto-compacten“ ist sinnvoll als syntaktische
@@ -348,14 +394,25 @@ nicht aus Permissions oder einem Tool Call geraten: maßgeblich ist der Fingerpr
 von diesem Endpoint ausgelieferten `tools/list`-Shape**, beobachtet bei einem echten externen
 ChatGPT-Discovery-Request. Self-diagnostics dürfen diesen Beweis nicht fälschen.
 
-### 3.4 Cluster D — Portability boundaries (#22, #29)
+### 3.4 Cluster D — Genau ein CompanionTarget + echte Portability boundaries (#22, #29, #42)
 
 Firefox und macOS sind zwei verschiedene Ports und dürfen nicht in eine generische
 "PlatformFramework"-Abstraktion gepresst werden.
 
-- Firefox braucht eine **WebExtension runtime/manifest boundary**.
-- Browser automation braucht für Chrome/Firefox eine **single selected companion installation** als
-  Custody-Grenze; „Browser-Familie“ allein ist keine Identity.
+- Browser automation bekommt **eine** app-seitige `CompanionTarget`-Authority statt getrennte
+  „preferred browser“, „detached Chromium“ und „Firefox target“-Modelle. Minimal:
+
+  ```ts
+  CompanionTarget = { family, executable, profileSelector, installationId }
+  ```
+
+  `installationId` ist die gepaarte Extension-Instanz; executable/profileSelector sind nur deren
+  Launch-Route. Candidate discovery darf Setup helfen, aber nach Auswahl öffnet Runtime **genau
+  diesen** Target und fanoutet nicht bei jedem Worker/Resume über mehrere Browser.
+- #42 etabliert diese Custody zuerst mit einem app-owned Chromium-Profil; CDP ist kein Bestandteil
+  der Identity und kommt nur bei bewiesenem Capability-Gap hinzu.
+- Firefox braucht danach nur eine **WebExtension runtime/manifest boundary** plus einen Firefox-
+  Launch-Adapter für denselben `CompanionTarget`.
 - macOS braucht eine **Desktop native driver boundary**.
 
 Beide Grenzen sollen erst die tatsächlich unterschiedlichen Teile einschließen, nicht gemeinsame
@@ -371,6 +428,229 @@ aber nicht in denselben State.
 - Draft mutation: eine explizite `preserve`/`replace-fresh-bootstrap` Policy, nur nach gültiger
   command lease + fresh-chat fence.
 
+### 3.6 Cluster F — Broker-Persistenz und Session-I/O verkleinern, bevor neue Features darauf bauen
+
+Dieser Pass hat neben den Issue-Flows zwei strukturelle Kostenquellen bestätigt, die sonst jede
+weitere Reliability-Funktion teurer machen: mehrere durable Broker-Dateien für dieselbe Authority
+und model-facing Session-Queries, deren sichtbares `limit` nicht ihr I/O begrenzt.
+
+#### A. Retired-worker fences gehören in **denselben** Broker-Snapshot
+
+Heute persistiert `agents.ts` den Swarm und `retiredWorkers` separat. Deshalb existieren zwei
+debounced Sinks, zwei immediate Sinks und `persistAgentAuthorityNow()` muss erst die Retired-Datei
+und danach den Swarm schreiben, weil ein Crash zwischen beiden unterschiedliche Authority-Welten
+erzeugen kann. `index.ts`/`ipc.ts` müssen diese Zwei-Datei-Barriere mitverdrahten.
+
+Ziel:
+
+```text
+BrokerSnapshot = active/dormant owner histories + retiredWorkerFences
+```
+
+- ein immediate durable Write veröffentlicht eine Authority-Revision atomar;
+- `RetiredWorkersSnapshot`, `onRetiredWorkersPersist*`, `persistRetiredWorkersNow()` und die zweite
+  Durable-State-Datei danach löschen;
+- Upgrade liest die alte Datei **einmal**, merged noch lebende TTL-Fences in den neuen Snapshot und
+  schreibt sie nie wieder separat;
+- TTL bleibt eine Expiry des Fence-Fakts, nicht ein zweiter Broker-Lifecycle.
+
+Das reduziert Code **und** eliminiert eine reale Cross-file Crash-Ordering-Anforderung.
+
+#### B. Session-Tool-Limits müssen die Storage-Arbeit begrenzen
+
+`session action=search` ruft aktuell zuerst `listAllSessions()` auf. Mit Query scannt es bis zu
+`SEARCH_SCAN_SESSIONS = 100` Sessions und `searchOneSession()` materialisiert pro Session das ganze
+Journal via `readEvents()`. Das sichtbare Resultat ist auf 30 Rows/~3k Tokens begrenzt, die I/O-
+Kosten aber nicht entsprechend.
+
+In zwei kleinen Schritten statt eines neuen Search-Index-Subsystems:
+
+1. **No-query:** direkt `listSessionPage({cursor, limit: SEARCH_ROWS + 1})`; niemals alle Summaries
+   materialisieren, nur um die 30 neuesten auszugeben.
+2. **Query:** Store-seitig eine resumable bounded scan primitive verwenden/ergänzen, die höchstens
+   einen expliziten Session-/Byte-Budget pro Call liest und einen Cursor zurückgibt. Der Tool-Cursor
+   trägt dann `session + scan position`, sodass ein vollständiger Search über mehrere Calls exakt
+   fortsetzbar bleibt. Kein `readEvents(summary.id)` über unbounded JSONL innerhalb einer 100er-
+   Schleife.
+
+Keinen globalen Volltextindex bauen, solange reale Profile nicht beweisen, dass bounded journal
+scan unzureichend ist. Ein Index würde neue Migrations-, Repair- und Persistenzlogik kaufen.
+
+#### C. Correlation-Retention an Session-Retention koppeln, nicht an eine willkürliche 50k-LRU
+
+Der aktuelle HEAD hat den älteren „memory-only correlation“-Bug bereits verbessert: request-id
+ownership wird durable gespeichert und beim Start aus bounded recent history reconciled. Eine
+Invariante passt aber noch nicht zum Code-Kommentar „first proof is permanent“: `MAX_CORRELATIONS =
+50_000` kann eine weiterhin gültige proof row rein nach Registry-Größe evicten.
+
+Nicht den Cap einfach erhöhen. Entweder request-id ownership als sekundären Index der ohnehin
+durablen Session-Lebenszeit führen oder beim Session-Retention/Delete denselben Owner-Eintrag
+gezielt entfernen. Dann entfällt die unabhängige 50k-Eviction-Semantik. Bis zu dieser Konsolidierung
+den Cap als bekannte Correctness-Grenze behandeln und nicht als „permanent“ dokumentieren.
+
+#### D. Discovery-Bytes deduplizieren statt Budget erhöhen
+
+Der reproduzierte `mcp.test.ts`-Fall ist deterministisch environment-dependent: `exec_command`
+misst mit PowerShell 7 **3455 Bytes**, mit Windows PowerShell 5.1 **3572 Bytes** gegen `<3500`.
+Die zusätzlichen 117 Bytes sind die PS5-`&&`/`||`-Warnung im `cmd`-Schema; dieselbe Warnung steht
+bereits in den server instructions.
+
+Kleinster Fix: PS5-Sonderprosa aus `EXEC_COMMAND_CMD_DESCRIPTION` löschen und ausschließlich in den
+Instructions behalten. `<3500` unverändert lassen, Shell-Version-neutralität des Schemas testen.
+Kein PATH-spezifisches Budget und kein „+200 Bytes weil Windows“.
+
+Dasselbe Prinzip gilt für **Result-Bytes**: `exec_command` und `write_stdin` senden den potenziell
+großen Command-Output heute zweimal — einmal im MCP-Text `content`, ein zweites Mal als
+`structuredContent.output`. Für große Resultate bedeutet das nahezu doppeltes JSON/Wire-Volumen und
+einen zweiten `truncatedOutput()`-Formatierungsdurchlauf; interne Consumer brauchen aus
+`structuredContent` dagegen nur kleine Maschinen-Metadaten wie exit/session/chunk/wall-time.
+
+Darum `structuredContent` metadata-only machen:
+
+```text
+chunk_id, wall_time_seconds, exit_code, session_id, original_token_count
+```
+
+`output` aus `execCommandStructuredOutput()` und `unifiedExecOutputSchema` löschen; Model-Output hat
+genau **eine** Text-Authority. Wire-Regressions sollen bei z. B. 40 KiB Output beweisen, dass der Body
+nur einmal vorkommt und die serialisierte Response grob nahe 1× statt 2× Payload bleibt.
+
+Das verkleinert zugleich beide advertised exec output schemas. Den **gesamten** `outputSchema`
+erst dann entfernen, wenn echte MCP-Client-Kompatibilität beweist, dass kein externer Consumer die
+Metadata-Deklaration braucht; das ist optionaler zweiter Cut, nicht Voraussetzung für die sichere
+Payload-Deduplizierung.
+
+#### E. O(n)-Owner-Lookups erst messen, dann indexieren
+
+`dormantRunForWorkerConversation()`/`dormantAgentForConversation()` scannen heute `dormantRuns ×
+agents` und werden an mehreren Hot-Callsites verwendet. Das ist ein echter asymptotischer Geruch,
+aber typische Worker-Zahlen sind klein. Deshalb zuerst beide Lookups zu **einem** kanonischen Helper
+zusammenfassen und einen Benchmark/Counter mit realistischen 1/10/100 dormant histories ergänzen.
+Nur wenn das messbar hot ist, einen transienten conversation→owner Index einführen, der bei Restore
+in einem Pass aus `dormantRuns` gebaut wird; nie als zweite durable Datei.
+
+#### F. Revival-Redeem darf keine Zwei-Datei-Transaktion bleiben
+
+Der aktuelle Revival-Redeem publiziert **denselben Browser-Custody-Cut zweimal**: zuerst setzt der
+Broker `waking + revivable=false` und fsynct den Swarm, danach schreibt die Bridge den durable
+Command-Owner. Deshalb braucht `persistRevivalRedeem()` eine explizite Reihenfolge, Rollback des
+Broker-Claims und einen zweiten fsync bei Broker-Write-Fehlern. Das ist genau die Cross-owner-
+Transaction, die der Architekturplan sonst vermeiden will.
+
+Sauberere Zielgrenze:
+
+- Broker besitzt nur `sleeping -> waking -> active/sleeping/terminal` und Slot-Capacity.
+- Bridge-Command-Lease (`owner`, `claimedAt`) besitzt ausschließlich „ein Browser hat diesen Wake
+  vor Send exklusiv übernommen“.
+- `/commands/redeem` serialisiert weiterhin per Command, persistiert **nur** diese Lease und prüft
+  danach erneut, dass Worker/Conversation noch derselbe `waking`-Owner sind, bevor Payload rausgeht.
+- Ein später alter MCP-Call darf `waking -> active` nur übernehmen, solange keine durable Revival-
+  Lease für diese Conversation existiert. Diese Frage als schmalen Bridge→Broker-Selector/
+  callback stellen; nicht als zweites persistiertes Broker-Bit spiegeln.
+
+Danach `claimWorkerRevival()`, `rollbackWorkerRevivalClaim()`, `workerRevivalClaimed()`,
+`broker-not-durable`-Redeem-Branches und einen critical swarm fsync pro Redeem löschen.
+
+**`AgentInfo.revivable` separat reduzieren, nicht blind im selben Diff löschen.** Der aktuelle Code
+benutzt das Feld zusätzlich für sleeping/finished/failed compatibility und Restore-Reparatur. Erst
+nach dem Lease-Cut per Tests beweisen, dass die semantische Wiederverwendbarkeit vollständig aus
+`state + context ceiling + conversation binding` ableitbar ist. Wenn ja, `revivable` aus der durable
+Shape löschen und nur bei Bedarf als derived UI field projizieren. Keine Transport-Arbitration darf
+dieses UI/semantic Bit danach noch missbrauchen.
+
+#### G. Fiber-Dedupe darf bei langen Chats nicht periodisch alles vergessen
+
+`refreshFiber()` dedupliziert Calls, Assistant-Messages, native Activities und authored user times
+bereits über stabile Website-IDs. Danach werden aber alle vier Maps jeweils komplett gelöscht,
+sobald ihre Größe `> 4000` ist. Ein Chat, dessen geladener Fiber-Snapshot selbst über diesem Wert
+liegt, kann dadurch in eine deterministische Replay-Schleife geraten:
+
+```text
+scan >4000 ids -> dedupe maps clear -> next scan sees everything as new -> emits again -> clear -> …
+```
+
+Das vervielfacht gleichzeitig CPU, Browser-Journal-Writes und `/events`-Bytes. **Kein LRU/TTL als
+Gegenfix.** Die Keys sind ChatGPT-eigene stabile IDs und werden bei echtem Conversation-Wechsel
+bereits gelöscht.
+
+Kleinster Fix:
+
+1. zuerst die vier willkürlichen `> 4000 -> clear()`-Branches entfernen;
+2. Fixture mit >4k, besser 10k stabilen Message/Tool-IDs zweimal unverändert scannen;
+3. zweiter Scan muss **0 neue observations** erzeugen und Journal-/Transport-Größe flach bleiben;
+4. Heap/Map-Größe messen. Nur falls echte Memory-Evidenz einen Bound verlangt, pro Scan eine
+   `nextReported`-Map ausschließlich aus dem aktuellen Fiber-Snapshot aufbauen und am Ende ersetzen.
+   Das ist Snapshot-Retention, keine LRU-State-Machine.
+
+#### H. Den 15s Connectivity-Poll pro Tab in vorhandene Transport-Antworten falten
+
+`content.js` startet zusätzlich zu Observation + Activity einen `STATUS_MS = 15_000`-Interval.
+`checkStatus()` fragt den service worker, der `discover()` ausführt und bei Bedarf Provisioning/
+`/hello` anstößt. Named Chats machen ohnehin `/activity` mit 0.75–30s dynamischer Cadence; New Chat
+macht `settings_get`. Beide laufen bereits durch denselben `background.call()`-Pfad und beweisen
+damit App/Pairing/Disconnect-Status.
+
+Ziel: **keinen dritten periodischen Transport**.
+
+- erfolgreiche `activity`/`settings_get`-Antwort => connected + paired;
+- `app_not_found`, `not_paired`, `disconnected`, `incompatible_extension` aktualisieren dieselbe
+  lokale Status-Projektion aus der vorhandenen Antwort;
+- den `every(STATUS_MS, checkStatus)`-Interval löschen;
+- falls UI beim allerersten Render wirklich vor Activity/Settings einen Zustand braucht, genau
+  **einen** Startup-Status-Read erlauben, keinen Interval;
+- Popup-`status` bleibt eine explizite User-Abfrage und darf seine eigene aktuelle Discovery machen.
+
+Regression: app down→up, reconnect, explicit disconnect und incompatible extension müssen allein
+durch die bestehenden Activity/Settings-Transporte korrekt im Content-UI erscheinen. Danach in
+einem 5-Tab-Fixture beweisen, dass idle tabs keine zusätzlichen 15s Status-Messages mehr erzeugen.
+
+### 3.7 Cluster G — #41/#42: neue Browser-Issues müssen bestehende Recovery/Custody **vereinfachen**
+
+#### #41: erst prüfen, ob der aktuelle exact-chat Reload das gemeldete Problem bereits löst
+
+Der aktuelle HEAD klassifiziert ChatGPT-Transportfehler bereits im DOM, recorded `chat_error` mit
+`recoverable`, und alle Error-/Silence-/No-tab-Trigger konvergieren in `queueBrowserRecovery()` mit
+einem `repairsInFlight`-Owner und einer gemeinsamen Cooldown-/Receipt-Semantik. Das ist fast exakt
+die zugrunde liegende Capability, die #41 verlangt.
+
+Darum **kein** sofortiger „prompt continue“-Timer nach jedem Error. Ein verlorener Browser-Stream
+kann serverseitig noch weiterlaufen; ein zusätzlicher User-Turn würde dann Arbeit duplizieren.
+
+1. Reproduziere #41 gegen `1cb3b54`: Transportfehler → genau ein exact-chat reload → prüfe, ob der
+   ursprüngliche Turn nach Reload weiterläuft/settled.
+2. Wenn ja: #41 als durch bestehende Recovery behaviorally solved behandeln; nur Regression/Live-
+   Evidence ergänzen.
+3. Nur wenn Reload beweisbar in einem **idle/failed** Chat mit stabiler partieller Assistant-Antwort
+   endet und seitdem kein neuer User-Turn existiert, darf ein zweiter Recovery-Step denselben
+   Episode-/Receipt-Owner benutzen und genau **eine** minimale Continue-Nachricht senden.
+4. Dieser Step bekommt keinen eigenen Retry-Timer. Er ist eine weitere Phase desselben Repair-
+   Episodes; Success/new progress/manual user input beendet ihn.
+
+#### #42: Isolation zuerst durch Profile-Custody, CDP erst bei bewiesenem Capability-Gap
+
+Das Problem hinter #42 ist nicht „wir brauchen CDP“, sondern „Automation darf den persönlichen
+Browser/Fokus nicht besitzen“. Die bestehende Extension hat bereits Document-/Tab-/Command-Custody,
+durable ACKs, page injection und exact-chat routing. Ein zweiter CDP-State-Stack würde diese Regeln
+sonst noch einmal implementieren.
+
+Minimaler Vertical Slice:
+
+1. App-owned `companionProfileDir` + genau ein Chromium executable als explizite Custody-Identity.
+2. Diesen Chromium mit dem dedizierten `--user-data-dir` starten; Benutzer loggt ChatGPT/Extension
+   dort einmal ein. Browser-Bridge/Auth/commands bleiben unverändert.
+3. Zuerst **headed but non-user-owned** testen: kein Focus-Steal des persönlichen Browsers, exact
+   worker/revive/Compact flows bleiben dieselben.
+4. Danach Headless als Modus derselben Profile-Custody testen. Moderne Chrome-Headless-Ausführung
+   kann Extensions laden; das ist ein Deployment-/acceptance detail, keine neue App-Authority.
+5. CDP nur ergänzen, wenn eine benötigte Operation mit Extension + process launch nicht möglich
+   ist. Dann CDP auf lifecycle/navigation beschränken und **nicht** Conversation-/Command-Ownership
+   spiegeln.
+
+Chrome 136+ verlangt für Remote-Debugging ohnehin ein nicht-default `--user-data-dir`; das passt zur
+Isolationsgrenze und ist ein weiterer Grund, niemals das persönliche Default-Profil per CDP zu
+steuern. Chrome for Testing ist für Automation eine Option, aber eine zweite Distribution muss ihren
+Install-/Update-Nutzen gegen den zusätzlichen Packaging-Stack rechtfertigen.
+
 ---
 
 ## 4. Empfohlene Ausführungsreihenfolge
@@ -380,42 +660,66 @@ aber nicht in denselben State.
 1. Dirty Worktree inventarisieren und unangetastet lassen.
 2. `origin/main` gegen den lokalen Branch per `git cherry`/`range-diff` reconciliieren; #24/#25 als
    bereits CLOSED markieren, nicht erneut implementieren.
-3. Offene PRs #17/#28/#39 gegen die geplanten Dateien diffen; keine fremde Feature-Branch-Historie
-   blind in den Reliability-Branch ziehen.
+3. Offene PRs #17/#28/#39/#43 gegen die geplanten Dateien diffen; keine fremde Feature-Branch-
+   Historie blind in den Reliability-Branch ziehen. #43 nur dann als Dependency behandeln, wenn
+   #42 nachweislich denselben Browser-Process-Owner braucht — „bridge“ im Namen reicht nicht.
 4. #2 / PR #17 architecture-superseded entscheiden; wenn Maintainer zustimmt, ohne Produktcode
    schließen.
 
-### Batch 1 — Reliability hot path
+### Batch 1 — Authority-/I/O-Reduktion zuerst
 
-1. #21: Continuation als sole transaction, duplicate `PrimeTransfer`-Lease löschen, checkpoint-aware
+1. Broker-Authority atomar machen: `retiredWorkerFences` in den Swarm/Broker-Snapshot integrieren;
+   zweite Retired-WAL + doppelte Persist-Sinks/Barrier löschen.
+2. #21: Continuation als sole transaction, duplicate `PrimeTransfer`-Lease löschen, checkpoint-aware
    abandonment + recursive-auto-compact regression.
-2. #36: Background-exec obligations; zuerst verlustfreie Capacity-Semantik, dann per-conversation
-   Admission/Reminder.
-3. #40: browser-live-required projection + targeted Chrome discard protection; keine neue
-   Heartbeat-/Tab-Persistence-Schicht.
-4. #35: darauf aufbauende read-only mutable wait/status projection; bekannte browser `frozen`-
-   Evidence darf dort truthful als blocked/needs-user auftauchen.
-5. #34: hidden working/final-delivery cadence korrigieren, ohne einen zweiten Poll-Clock zu bauen.
-6. #27 gegen diese Architektur **und die aktuelle Transport-Error-Recovery** revalidieren; nur
-   schließen, wenn der ursprüngliche Stall live
-   entweder recovered oder als konkreter dependency state sichtbar wird.
-7. #26 bleibt release-gated: keine neue Transfer-Logik; nach 2.0.3-Live-Verifikation den legacy
-   resume-shadow hot-poll repair bounded machen/entfernen.
+3. Danach `resume` aus dem generischen `bridge-commands`-WAL entfernen und Redeem/ACK direkt auf
+   Continuation + inertem `browserCommandId` abbilden. Erst PrimeTransfer löschen, **dann** diesen
+   Adapter-State — nicht beide Authority-Migrationen in einem unreviewbaren Diff vermischen.
+4. **Im selben #21-Architekturpass** die #26 Compatibility-Reparatur aus `/activity` entfernen. Den exakt
+   positiven Legacy-Repair für ein Compatibility-Fenster einmal bounded beim Startup/Restore
+   reconciliieren; danach Hot-Poll-Caller löschen. Issue #26 bleibt trotzdem release-gated.
+5. MCP bytes: PS5-only `exec_command`-Schema-Prosa löschen **und** exec/write_stdin output nur einmal
+   als Text senden; `structuredContent` bleibt metadata-only. `<3500` Discovery-Budget unverändert.
+6. Session Tool: no-query auf `listSessionPage` umstellen; Query-Scan bounded/resumable machen, ohne
+   Volltextindex zu bauen.
+7. Content hot path: >4k Fiber-dedupe clear entfernen und 10k unchanged replay=0 beweisen.
+8. Per-tab Connectivity: 15s `checkStatus` interval in Activity/Settings-Transport falten.
 
-### Batch 2 — Tunnel correctness + setup
+**Batch-Gate:** Dieser Batch muss netto langlebige State-/Persistenzpfade löschen. Wenn danach mehr
+durable Dateien, Timer oder Recovery-Owner existieren als vorher, Architektur erneut prüfen.
 
-1. #23 Restart-/health state machine zuerst.
+### Batch 2 — Reliability hot path auf den reduzierten Ownern
+
+1. #36 ist lokal implementiert: Capacity/Admission nur revalidieren; keine zweite Obligation-
+   Registry bauen.
+2. #34 ist lokal implementiert: hidden working/final-delivery live/browser revalidieren; keinen
+   zweiten Poll-Clock ergänzen.
+3. #27 + #41 gemeinsam live reproduzieren. Bestehender `queueBrowserRecovery()` bleibt ein Owner;
+   Transport-Error, Silence und fehlender Tab sind Evidenz/Phasen desselben Repair-Episodes.
+4. #41 nur dann um einen one-shot Continue-Step erweitern, wenn exact reload nachweislich idle +
+   partial endet. Sonst **kein neuer Code**.
+5. #35: genau `waitStatusFor(conversationId)` als pure Display-Projektion; keine generische Runtime-
+   Registry/Inspector-Ontologie.
+6. #40: daraus targeted Chrome discard protection; keine neue Heartbeat-/Tab-Persistence-Schicht.
+
+### Batch 3 — Tunnel correctness + setup
+
+1. #23 ist lokal implementiert: single-owner Restart-/health state machine revalidieren.
 2. #31 UI/setup projection danach auf dieselbe autoritative Runtime setzen.
 
-### Batch 3 — Bootstrap und Portability
+### Batch 4 — Bootstrap, Browser-Isolation und Portability
 
-1. #30 explicit draft policy.
-2. #29 CLEAN Mac vertical slice reviewen/akzeptieren; **danach**, mit zwei realen Backends als
+1. #30 als **ein Boolean im authenticated command snapshot + bestehende Fences** implementieren;
+   keinen Composer-Policy-State-Machine-Layer bauen.
+2. #42 zuerst als dedicated Chromium profile mit bestehender Extension/Bridge vertical slicen;
+   CDP nur bei bewiesenem Capability-Gap.
+3. #29 CLEAN Mac vertical slice reviewen/akzeptieren; **danach**, mit zwei realen Backends als
    Evidenz, nur die kleinste echte Driver-Grenze extrahieren.
-3. #22 Firefox portability layer als eigenständigen Plattform-Gate; nicht unter 2.0.3-Zeitdruck
+4. #22 Firefox portability layer als eigenständigen Plattform-Gate; #42-Custody-Seam wiederverwenden,
+   aber keinen generischen Browser-Framework-Refactor vor zwei realen Backends. Nicht unter 2.0.3-Zeitdruck
    halb-validiert ausliefern.
 
-### Batch 4 — Release-/Close-Pass
+### Batch 5 — Release-/Close-Pass
 
 Nach den Implementierungsbatches alle Issue-Labels/PR-Verweise aktualisieren, Prime-only Live-
 Acceptance dokumentieren und nur die tatsächlich ausgelieferten/abgelehnten Issues schließen.
@@ -424,79 +728,15 @@ Acceptance dokumentieren und nur die tatsächlich ausgelieferten/abgelehnten Iss
 
 # 5. Issue-by-Issue Implementierungsplan
 
-## #24 — Local verify scans unrelated refs / AppImage suite timeout
+## Closed historical issues — keine Implementation mehr
 
-### Befund
+| Issue | Status | Was im Plan bleibt |
+|---|---|---|
+| #24 verify/history + AppImage contention | **CLOSED** | Nur S6.1 bleibt als separater Release-History-Gate; den alten Produktbug nicht wieder öffnen. |
+| #25 Project chats | **CLOSED** | Zentrale Conversation-Route-Parser als Regression behalten; keine zweite Project-Route-Implementation. |
 
-**Im aktuellen Baum bereits gefixt und lokal verifiziert.**
-
-PR #37 / Commit `69a2560` ändert:
-
-- Public-history scan von allen refs auf die checked-out `HEAD`-Linie;
-- annotierte relevante Tags werden nur berücksichtigt, wenn sie von `HEAD` erreichbar sind;
-- Packaging-Test lädt nicht mehr unnötig den schweren AppImage dependency graph.
-
-Lokale Regressionen: 26/26 grün.
-
-### Status / keine weitere Issue-Arbeit
-
-PR #37 ist inzwischen in `origin/main` gemerged und #24 ist **CLOSED / COMPLETED**. Diese Sektion
-bleibt nur als Nachweis dafür, warum der Fix architektonisch richtig war. Nicht rebasen, nicht erneut
-cherry-picken und nicht als offenen Batch behandeln. Vor Release lediglich prüfen, dass keine neuere
-Änderung wieder `git rev-list --all` als Privacy-Autorität eingeführt hat.
-
-### Separater Release-History-Blocker
-
-Der neue Testscope deckt #24 korrekt ab, aber `verify-public-history` kann auf diesem konkreten HEAD
-weiterhin **legitim** wegen unsafe author identity in echten HEAD-Ancestors (`9e27c0f`, `03acfba`)
-scheitern. Das nicht als #24-Regression behandeln und die Prüfung nicht lockern. Stattdessen den
-Release-History-Fall separat nach den Repo-/Release-Regeln bereinigen. Keine spontane History-
-Rewrite-Aktion im Issue-Fix.
-
-### Nicht tun
-
-- Kein höheres Vitest-Timeout.
-- Kein ignore für beliebige refs.
-- Keine Privacy-Prüfung abschwächen, die `HEAD` tatsächlich erreichen kann.
-
----
-
-## #25 — Project chats
-
-### Befund
-
-**Im aktuellen Baum behoben.** Der ursprüngliche Fehler war nicht MCP ownership selbst, sondern
-Conversation-Identity: mehrere Parser akzeptierten nur `/c/<id>`, Project-Chats laufen aber unter
-`/g/<project>/c/<id>`.
-
-Relevante Änderungen:
-
-- `bae42d0` / PR #38 führt `CLF_DOM.conversationFromPath()` ein und ersetzt root-only parsing.
-- `fff2d7d` zieht die Project-route-Erkennung auch dort durch, wo ein bereits benannter Chat für
-  Bootstrap/Revival gelesen wird.
-- `/share/c/...` bleibt absichtlich ausgeschlossen.
-
-`test/content-script.test.ts` ist im Audit 287/287 grün.
-
-### Status / keine zweite Route-Implementation
-
-PR #38 ist inzwischen in `origin/main` gemerged und #25 ist **CLOSED / COMPLETED**. Der lokale Branch
-enthält verhaltensäquivalente Änderungen bereits unter anderen Hashes. Vor dem Release nur noch:
-
-1. Mit `rg` sicherstellen, dass es **keine weitere unabhängige `^/c/` Conversation-ID-Regex** in
-   content/background/bootstrap code gibt.
-2. Live Prime-only smoke:
-   - normale `/c/<id>` chat;
-   - Project `/g/<project>/c/<id>` chat;
-   - frischer worker/resume in Project;
-   - `/share/c/<id>` wird nicht gebunden.
-
-### Definition of done
-
-Popup hat in Project chat eine echte app session; MCP caller identity ist proven; worker revive und
-resume target fences akzeptieren denselben Project conversation id.
-
----
+Diese Issues sind nur Herkunft für Regressionen. Ihr früherer Implementierungsverlauf gehört in Git,
+nicht in den aktiven Plan.
 
 ## #26 — repeated resume-shadow repair loop in released v2.0.2
 
@@ -521,10 +761,13 @@ Kein neuer Bugfix für den gemeldeten Loop.
 ### Danach Architektur-Schuld löschen
 
 Der Compatibility-Repair wird aktuell noch aus dem heißen `/activity`-Polling-Pfad aufgerufen.
-Sobald eine Release-Version mit dem eigentlichen Fix im Feld ist, diesen Presentation-Poll als
-Repair-Owner entfernen. Falls genau ein Compatibility-Fenster nötig bleibt, **ein bounded startup /
-attachment reconciliation pass** statt „bei jedem Activity-Poll nochmal prüfen“ verwenden. Danach
-die hot-path-Aufrufe und ihre Tests löschen.
+Das muss **nicht** bis nach Release warten, sobald #21 die Continuation-WAL zur einzigen Transfer-
+Authority macht: genau dann ist die positive Resume-Provenance beim Restore verfügbar. In demselben
+Batch den Presentation-Poll als Repair-Owner entfernen. Für ein Compatibility-Fenster den heutigen
+strikten positiven Repair-Beweis genau **einmal bounded beim Startup/Restore** über resume-origin
+Sessions ausführen; Function/Proof darf temporär bleiben, der `/activity`-Caller nicht. #26 selbst
+bleibt release-gated, weil das historische User-Problem erst in einem ausgelieferten Build als
+gelöst gilt.
 
 ---
 
@@ -678,665 +921,200 @@ Schritte:
 
 ## #34 — Background worker tabs show stale partial output
 
-### Reproduzierbarer Codegrund
+**Lokal gelandet:** `324648d` hält hidden working/final-delivery activity auf der schnellen bestehenden
+Cadence und behält die exact terminal assistant revision bis zum Feed-ACK. Keine neue Poll-Familie.
 
-`extension/content.js::scheduleActivityPull()` entscheidet derzeit sinngemäß:
+**Plan-Aktion:** keinen zweiten Fix bauen. Nur die bereits geschriebene Regression + Prime-only Live-
+Acceptance gegen hidden worker, final reply und foreground/background transition ausführen. Wenn Live
+scheitert, zuerst die eine Scheduler-Entscheidung korrigieren; keine zusätzliche Visibility-/Timer-
+State-Machine hinzufügen.
 
-```text
-drafting -> live cadence
-hidden   -> 30s
-generating -> live cadence
-active -> active cadence
-idle -> idle cadence
-```
-
-Damit gewinnt `document.visibilityState === hidden` sogar über `generating`. Das widerspricht dem
-eigentlichen Zweck der Throttling-Regel: hidden **idle** darf langsam sein, hidden **working** nicht.
-
-### Minimaler sauberer Fix
-
-Cadence nach Arbeitszustand priorisieren:
-
-```text
-drafting / exact terminal-delivery obligation -> LIVE_ACTIVITY_MS
-visible generating                            -> LIVE_ACTIVITY_MS
-hidden generating / other active work         -> ACTIVITY_MS (start here; prove if faster is needed)
-hidden idle                                    -> HIDDEN_ACTIVITY_MS
-visible idle                                   -> IDLE_ACTIVITY_MS
-```
-
-Nicht einfach `hidden` entfernen. Es bleibt eine gute Strom-/CPU-Optimierung für wirklich idle tabs.
-
-### Umsetzung
-
-1. In `scheduleActivityPull` die Priorität ändern.
-2. **`finalizing` nicht als frei gesetztes Flag einführen.** Die terminale Kante ist genau das
-   gemeldete Loch: `generating` kann bereits false sein, während Overwrite noch eine ältere Revision
-   zeigt. Stattdessen eine abgeleitete terminal-delivery obligation benutzen:
-   - Fiber/DOM kennt die finale stabile `{messageId, text/revision}`;
-   - die App-/Activity-Projektion hat genau diese Revision noch nicht zurückbestätigt;
-   - bis zur Gleichheit bleibt live cadence; danach ist die obligation weg.
-3. Wenn derselbe Fiber-`messageId` lokal bereits einen längeren finalen Text beweist als die stale
-   App-Revision, darf die UI die native finale Prosa sofort zeigen statt eine bekannte alte Revision
-   darüber zu halten; danach weiter pollen, bis die App konvergiert.
-4. `nativeBusy`, `job.busy`, `pendingTools` nur dort für active cadence benutzen, wo der Feed real
-   sichtbare Konvergenz liefert. Ein existierender Prozess ist kein final-delivery proof.
-5. Keine neue timer family und kein persistiertes `finalizing`.
-
-**#40-Crosscheck:** `hidden generating => 750ms forever` ist kein Qualitätsziel. Chrome Energy
-Saver friert gerade hidden, CPU-intensive Seiten; aggressiver Periodic Work kann die Eligibility
-verschlechtern. Für hidden generation daher zuerst bestehende Fiber/DOM-Ereignisse als unmittelbare
-Pull-Trigger nutzen und `ACTIVITY_MS` als Safety-Cadence testen. `LIVE_ACTIVITY_MS` ist für die kurze
-exact terminal-delivery obligation gerechtfertigt, bis die App exakt dieselbe finale Revision
-zurückliefert. Nur wenn Live-Acceptance beweist, dass 2s nicht reicht, enger werden.
-
-Zusätzlicher Scheduler-Race aus dem zweiten Review: `scheduleActivityPull()` armed den nächsten Pull
-erst **nach** `await pullActivity()`, während `pullActivity()` anschließend lange Side Effects wie
-`maybeAutoCompact()/startCompact()` abwarten kann. Ein aktiver Tab kann dadurch trotz korrekter
-Cadence-Auswahl zig Sekunden ohne neuen Pull bleiben. Fetch/apply und Side-Effect-Dispatch deshalb
-trennen: nach dem autoritativen Activity-Snapshot `pulling` freigeben + nächsten Pull armen; Compact-
-/Goal-Aktionen danach außerhalb des Poll-Clocks starten. Weiterhin **eine** Timer-Familie.
-
-Falls ein Prime-only Chromium-Live-Test danach beweist, dass Chrome auch den verkürzten
-`setTimeout` in hidden tabs so stark throttelt, dass aktive Arbeit weiterhin nicht konvergiert,
-**erst dann** die Scheduling-Custody für aktive/finalisierende Pulls in den Extension-Service-Worker
-verschieben. Auch dann nur ein Clock-Owner; keinen zweiten parallelen Polling-Loop im Content-Script
-stehen lassen. Ohne diesen Live-Beweis bleibt die reine Prioritätskorrektur der bevorzugte kleine
-Fix.
-
-### Regression
-
-`test/content-script.test.ts` mit fake timer / direktem pull:
-
-1. tab hidden + overwrite on;
-2. Activity feed liefert frühen Assistant-Snapshot;
-3. native/fiber final answer erscheint während hidden;
-4. generation terminalisiert;
-5. kein `visibilitychange`;
-6. overlay konvergiert innerhalb live/active cadence auf finalen Text;
-7. hidden idle bleibt 30s cadence.
-8. ein bewusst unresolved `startCompact()` nach einem erfolgreichen Activity-Snapshot verhindert
-   nicht, dass der nächste live Pull bereits ge-armed ist.
-
-### Live acceptance
-
-Prime-only: worker im Hintergrund fertig laufen lassen, ohne Tab zu fokussieren; parent/overlay muss
-den vollständigen finalen Text sehen.
-
----
+**Close-Gate:** Verhalten im ausgelieferten Build beweisen; commit/test allein schließt den Browser-
+Issue nicht.
 
 ## #40 — Prevent Chrome Memory Saver from suspending active Prime/Worker tabs
 
-### Verifizierter Root Cause
+### Root cause
 
-Neu während dieses Audits eröffnet. Der aktuelle Browser-Lifecycle-Code hat bereits eine starke
-Tab-/Document-Identity, aber **keine Policy-Projektion dafür, welche dieser Tabs gerade für laufende
-Execution unverzichtbar sind**:
+Die Extension besitzt bereits exact `tabConversations` + document custody, aber projiziert den
+Broker-Fakt „dieser Prime/Worker ist gerade execution-relevant“ nicht in Chrome
+`autoDiscardable`. Ein neues Keepalive-/Heartbeat-System ist dafür unnötig.
 
-- `extension/background.js::chrome.tabs.onUpdated` reagiert heute nur auf `status=loading` und URL-
-  Wechsel weg von ChatGPT;
-- `changeInfo.discarded` und `changeInfo.frozen` werden ignoriert;
-- `tabConversations` + document ownership leben korrekt in `storage.session` über MV3-worker sleeps;
-- der eine vorhandene `RETRY_ALARM`/`maintain()`-Loop läuft bereits alle 30s, solange ChatGPT-Tabs
-  gehalten werden. **Keinen zweiten Keepalive-/Memory-Saver-Timer hinzufügen.**
+### Kleinste Authority
 
-Chrome unterscheidet zwei externe Browserzustände, die der Fix ebenfalls unterscheiden muss:
-
-1. `autoDiscardable` / `discarded`: Chrome kann einen Hintergrund-Tab aus Memory unloaden. Die
-   Extension darf `autoDiscardable:false` setzen.
-2. `frozen`: seit Chrome 132 beobachtbar; die Seite bleibt im Speicher, aber Event Handler, Timer
-   und Promise-Fortsetzungen laufen nicht. `tabs.update()` hat **keine** `frozen:false`-Mutation.
-
-Darum ist `autoDiscardable:false` eine saubere **Discard-Protection**, aber kein erfundener Freeze-
-Opt-out. Kein Heartbeat kann eine eingefrorene Seite „am Leben halten“, weil genau dessen Timer dann
-nicht laufen.
-
-### Zielarchitektur: semantic need in app, physical tab custody in extension
-
-App-seitig eine pure Projection, z. B.:
+Issue #40 braucht **keinen allgemeinen Runtime-Inspector** und keinen Browser→App-Telemetriekanal.
+Der Broker kennt genau die Issue-Scope:
 
 ```ts
-browserProtectedConversations(): string[]
+protectedAgentConversations(): Set<string>
+  = active Prime
+  + active/waking/detached Workers with conversationId
 ```
 
-aus bestehenden Authorities zusammensetzen:
+Sleeping/finished/failed History ist nicht geschützt. `detached` erzeugt keinen Tab; wenn derselbe
+Chat aber physisch noch/erneut als exact `tabConversations`-Mapping existiert, darf Chrome ihn nicht
+automatisch wegwerfen, solange die Broker-Execution noch lebt.
 
-- jede Conversation mit einem formal offenen Recorder-Turn — damit gilt die Architektur auch für
-  einen normalen langen Lone-Chat, nicht nur für Swarms;
-- active Prime eines aktiven Run;
-- bound Worker mit execution obligation (`active`, `waking`, auch `detached` als semantischer
-  Wunsch: falls derselbe Chat gerade wieder als Tab auftaucht, wird er sofort geschützt; `detached`
-  allein erzeugt **keinen** neuen Tab);
-- sleeping/finished/failed History ausdrücklich nicht.
+Die Extension liest diese kleine Menge im **bestehenden maintenance exchange** und reconciled nur
+gegen ihre eigene Tab-Custody. Keine offene Recorder-Turn-Suche, kein Goal/Compact-Scan und keine
+zweite Runtime-Ontologie nur für Memory Saver.
 
-Diese Liste im **bestehenden `/status` maintenance exchange** ausliefern. Content-Script oder Seite
-dürfen ihren Agent-Status nicht selbst behaupten. Der heutige Exchange ist nur GET/app→browser; für
-`frozen`-Evidence wird er zu **einem bidirektionalen full-snapshot reconcile** erweitert statt einen
-zweiten Kanal/Poller zu bauen:
+### Reversible Browser-Side-Effect
 
-1. Background queried unmittelbar vor dem pass seine exact ChatGPT tabs.
-2. Ein authentifizierter `POST /status` (GET für kompatible Leser beibehalten) trägt einen bounded
-   Snapshot wie `{conversationId, discarded?, frozen?}` — nur für exact `tabConversations`.
-3. Bridge ersetzt damit **ephemeral** die browser-availability projection; keine WAL/Transcript-
-   Persistenz, kein per-event boolean merge, das stale true/false sammeln könnte.
-4. Dieselbe Antwort liefert `browserProtectedConversations` + bestehende repair/monitoring data.
-5. `onUpdated(discarded/frozen)` stößt denselben serialisierten maintenance owner sofort/zeitnah an;
-   es entsteht kein neuer timer family.
+Wenn ein exact gemappter geschützter Tab `autoDiscardable === true` ist:
 
-Background-seitig:
+1. `{tabId, conversationId}` in `storage.session` als **owned mutation** persistieren. Ein Eintrag
+   bedeutet bereits eindeutig „CoS sah vorher true und schuldet restore-to-true“; ein zusätzliches
+   `previousAutoDiscardable:true` trägt keine Information.
+2. Danach `chrome.tabs.update(tabId, {autoDiscardable:false})`.
+3. Nach dem await Tab+Conversation erneut prüfen; numeric tab ids allein sind keine Identity.
+4. Endet die Broker-Protection oder verlässt der Tab ChatGPT: nur einen CoS-owned Eintrag auf
+   `autoDiscardable:true` restaurieren und den Eintrag danach löschen.
+5. War der Wert schon `false`, besitzt CoS **nichts** und setzt später niemals blind `true`.
+6. `tabs.onRemoved`: owned row löschen; ein nicht existierender Tab braucht keinen Restore.
+7. MV3-worker restart lädt dieselbe browser-session-lokale Effect-Liste und reconciled im bereits
+   vorhandenen maintenance owner weiter. Kein neuer Timer.
 
-1. `maintain()` mappt nur exact `tabConversations` auf die gewünschte Conversation-Menge.
-2. Wenn ein exact Chat-Tab geschützt werden soll und `tab.autoDiscardable === true`:
-   - vor der Mutation `{tabId, conversationId, previousAutoDiscardable:true}` in einem kleinen
-     `storage.session` effect journal durable schreiben;
-   - erst danach `chrome.tabs.update(tabId, {autoDiscardable:false})`;
-   - nach await erneut prüfen, dass Tab + Conversation noch dieselbe sind, bevor weitere Side
-     Effects folgen.
-3. Wenn `autoDiscardable` bereits `false` war, **nichts besitzen/merken und später nichts auf true
-   zurücksetzen**. Das kann User-/Browser-/andere Policy gewesen sein.
-4. Wenn die semantische Protection endet, der Tab ChatGPT verlässt oder der Benutzer CoS explizit
-   disconnected:
-   - nur journal-owned Mutationen auf den gespeicherten prior value zurückstellen;
-   - Journal-Eintrag erst nach erfolgreicher Restore-Mutation löschen.
-5. MV3 service-worker restart lädt dieses effect journal + `tabConversations` aus derselben Browser-
-   Session und reconciled weiter. Numeric tab IDs werden **nicht** app-seitig persistiert.
-6. Ein transient unerreichbarer App-Status ist kein Beweis, dass Protection endete: dann aktuelle
-   Tab-Policy stehen lassen und beim nächsten bestehenden maintenance pass erneut reconciliieren.
-7. Jeder Journal-Eintrag enthält neben `tabId` auch die exact Conversation, deren Mutation er
-   schuldete. Vor **jeder** apply/restore-Mutation `tabs.get` + `conversationForTab` erneut prüfen;
-   ein navigierter oder wiederverwendeter numeric tab id darf niemals fremde Tab-Policy erben.
-8. `tabs.onRemoved`: Tab existiert nicht mehr, also journal-owned row löschen, **ohne** einen Restore
-   gegen einen nicht existierenden Tab zu versuchen.
+### `discarded` / `frozen` bleiben Extension-lokale Lifecycle-Evidence
 
-Das effect journal ist kein zweiter Owner für „wer arbeitet“; es beantwortet nur „welche Browser-
-Mutation schuldet CoS noch zurück?“.
+- `discarded=true` oder `frozen=true` sind **kein** Conversation-Close und dürfen weder
+  `releaseTab()` noch `/closed` noch Agent-Terminalisierung auslösen.
+- Chrome ohne `frozen`-Feld bleibt per Feature Detection kompatibel.
+- Es gibt **kein** `POST /status`, keine app-seitige `browserAvailability`-Projection und keinen
+  zweiten Reload-Owner. Die bestehende exact-chat `queueBrowserRecovery()`-Authority bleibt allein
+  zuständig, wenn die eigentliche Turn-Liveness später einen Repair verlangt.
+- Kein `tabs.update({frozen:false})` erfinden und keinen Tab automatisch foregrounden.
 
-### Discard/freeze events sind keine Conversation-Terminals
+### Minimal tests
 
-`onUpdated(changeInfo.discarded/frozen)` wird lifecycle-aware:
+- active Prime + active/waking/detached mapped Worker => exact mapped tabs non-discardable;
+- sleeping/finished/failed/unrelated tabs => unverändert;
+- preexisting `autoDiscardable=false` => kein owned row, kein späterer restore;
+- owned row durable vor `tabs.update(false)`; crash vor/nach update converged idempotent;
+- restore-to-true erfolgreich, crash vor row-delete => nächster reconcile bleibt idempotent;
+- navigation/reused tab id => keine Mutation ohne exact conversation recheck;
+- `discarded=true` / `frozen=true` => kein close/terminal/release und kein zweiter recovery owner;
+- 5+ tabs über mehrere maintenance passes => **ein** vorhandener cadence owner, kein zusätzlicher
+  Memory-Saver interval.
 
-- `discarded=true` oder `frozen=true` darf **niemals** `markTerminal()`, `releaseTab()` oder
-  `/closed` auslösen;
-- exact conversation ownership bleibt erhalten;
-- Chrome <132 / Browser ohne `frozen`-Feld wird per Feature Detection normal weiter unterstützt;
-- der bestehende stale-turn / `queueBrowserRecovery()`-Pfad bleibt die **einzige Reload-Authority**,
-  wenn ein formal offener Turn nachweislich keine Browser-Evidenz mehr liefert. Kein zweiter
-  „Memory Saver reload loop“.
+### Prime-only live acceptance
 
-Für `frozen=true` zusätzlich eine kleine **ephemere browser-availability observation** an den
-App-/Runtime-View liefern (im bestehenden maintenance/lifecycle exchange, kein neuer Poller). Diese
-Observation darf:
+1. `chrome://discards`: aktiver Prime/Worker-Tab zeigt `autoDiscardable=false`; unrelated ChatGPT
+   bleibt normal discardable.
+2. Worker/Prime beendet execution obligation => nur CoS-owned Mutation wird freigegeben.
+3. Manual Urgent Discard/Freeze erzeugt keinen Ownership-Verlust, Focus-Steal oder Reload-Storm;
+   bestehende Recovery bleibt at-most-once.
+4. Service-worker restart während Protection/Restore converged aus `storage.session`.
 
-- #35 truthful `Chrome suspended this active tab` / `needs_user` oder `blocked` zeigen;
-- Diagnostics erklären, warum Browser-Korrelation gerade fehlt;
-
-aber sie darf **nicht**:
-
-- Turn-Liveness verlängern;
-- Agent ownership ändern;
-- automatisch den Tab fokussieren (`active:true` würde dem User Fokus stehlen);
-- einen periodischen Reload- oder Keepalive-Loop starten.
-
-Wenn die bestehende one-shot recovery einen frozen/discarded Tab über denselben exact-chat path
-reloaden kann, das Prime-only gegen die aktuelle Chrome-Version verifizieren. Falls ein frozen Tab
-danach weiterhin frozen bleibt, ehrlich `needs_user: activate the tab` surfacen statt einen zweiten
-Recovery-Mechanismus zu erfinden. Eine dokumentierte Chrome-Site-Exception kann als User-Workaround
-für Memory Saver angeboten werden, ist aber keine App-Authority und kein verlässlicher allgemeiner
-Freeze-API-Ersatz.
-
-### Regressionen
-
-`test/extension.test.ts` / `test/bridge.test.ts`:
-
-- open ordinary non-swarm turn => exact mapped tab protected;
-- active Prime + active/waking worker => exact mapped tabs protected;
-- sleeping/finished/failed unrelated chats => unverändert;
-- `activeUntil` expires while recorder turn remains open => protection bleibt; stale-turn recovery
-  und discard policy sind zwei getrennte Facts;
-- preexisting `autoDiscardable=false` => CoS setzt/owned nichts und restauriert später **nicht** true;
-- owned true→false mutation => journal persistiert vor update; release restores true then deletes;
-- effect-boundary cut A: journal persistiert, worker stirbt **vor** `tabs.update(false)` => next
-  reconcile prüft exact tab/conversation/desired state und wendet höchstens dieselbe Mutation an;
-- cut B: `tabs.update(false)` erfolgreich, worker stirbt direkt danach => journal beweist CoS-
-  Ownership und erlaubt später genau den prior restore;
-- cut C: restore `tabs.update(prior)` erfolgreich, worker stirbt **vor** journal delete => next
-  reconcile erkennt current tab/conversation/desired state und konvergiert idempotent, ohne einen
-  falschen reused/navigated Tab zu mutieren;
-- navigation von protected ChatGPT-Tab zu anderer Site => prior value restauriert, bevor Ownership
-  wegfällt;
-- tab removal => journal row dropped without restore attempt;
-- transient `/status` outage => keine speculative unpin;
-- `discarded=true` / `frozen=true` => kein close/terminal/release;
-- Chrome<132 event shape ohne `frozen` => kein Fehler;
-- frozen observation erscheint in Runtime-/Diagnostics-Projection, aber setzt weder `activeUntil`
-  noch neue reload timers;
-- existing stale-turn repair bleibt at-most-once, auch wenn frozen/discarded evidence gleichzeitig
-  eintrifft.
-
-### Prime-only Live Acceptance
-
-1. `chrome://discards`: active CoS execution tab zeigt/behält `autoDiscardable=false`; unrelated
-   ChatGPT tab bleibt normal discardable.
-2. Worker/Prime beendet die relevante execution obligation => nur CoS-owned protection wird
-   freigegeben.
-3. Urgent Discard eines geschützten Testtabs als adversarial/manual Override: keine Ownership-
-   Löschung; bestehende reload/rebind architecture stellt denselben Chat wieder her.
-4. Chrome 132+ frozen test / Energy Saver: event wird erkannt und truthful surfaced; kein Focus-
-   Steal und kein Reload-Storm.
-5. Gleichzeitig #34 prüfen: hidden final output konvergiert, ohne dass CoS durch unnötig aggressive
-   Dauerpolling-CPU selbst Freeze-Eligibility erhöht.
-6. Full browser restart: `storage.session`-Journal ist erwartbar weg; app/broker truth schützt
-   wieder nur die nach Restart tatsächlich aktiven exact chats, idle/unrelated Tabs bleiben normal.
-
-### Nicht tun
-
-- `setInterval`/audio/WebSocket-Keepalive nur um Memory Saver „auszutricksen“.
-- alle `chatgpt.com` Tabs dauerhaft non-discardable machen.
-- site-wide Chrome Performance Settings ohne explizite User-Entscheidung verändern.
-- `frozen=false` imaginieren oder Tab automatisch foregrounden.
-- `discarded` als echten Tab-Close interpretieren.
-- auf release blind `autoDiscardable:true` setzen.
+**Nicht tun:** site-wide Performance-Settings ändern, alle ChatGPT-Tabs pinnen, audio/WebSocket/
+`setInterval`-Keepalive bauen oder frozen/discarded als neue app-seitige Lifecycle-State-Machine
+modellieren.
 
 ---
 
 ## #36 — Background exec results accumulate unread
 
-### Befund
+**Lokal gelandet:** `5463f17` entfernt result-bearing LRU-Eviction. Capacity ist Admission statt GC;
+`running`/`exitedUnread` bleiben conversation-owned und über `write_stdin` drainbar.
 
-Die **beabsichtigte** Datenintegritäts-Invariante ist richtig: ein nach dem initialen
-`exec_command` retained Resultat muss bis zum terminalen `write_stdin` erhalten bleiben. Der
-aktuelle Manager verletzt diese Invariante aber am globalen Capacity-Cap: `ensureProcessCapacity()`
-kann einen exited LRU über `releaseProcessId()` löschen, obwohl sein Resultat noch unread ist.
+**Plan-Aktion:** keine neue Queue/Obligation-Registry ergänzen. Revalidiere nur: global + per-chat
+Admission, unread result survives pressure, `write_stdin` bleibt erlaubt, und model-facing Failure-
+Taxonomie zählt process exit/rejection nicht als internen Tool-Defect.
 
-Der aktuelle Baum hat außerdem bereits model-facing Recovery-Hinweise (`backgroundExecRecoveryNotices`)
-und Regressionen, die einen unread result später erneut anbieten. Es fehlt aber ein **bounded
-admission rule**, die verhindert, dass ein Chat unbegrenzt weitere Background-Prozesse startet,
-obwohl mehrere fertige Resultate nicht gelesen wurden.
-
-Der Worker-Audit hat zusätzlich einen härteren Fehler gefunden: `ensureProcessCapacity()` kann beim
-globalen 64-Session-Cap einen exited LRU auswählen und über `releaseProcessId()` löschen. Ein nach
-dem ersten `exec_command` **retained exited** Prozess ist aber genau das unread Resultat, das noch von
-`write_stdin` konsumiert werden muss. Unter genügend Launches kann die heutige Capacity-Policy also
-den Output löschen, den `exitedUnread` eigentlich ausdrücklich schützen soll.
-
-### Architekturentscheidung
-
-Keine neue Queue. Die Autorität bleibt:
-
-```text
-UnifiedExec manager state
-  + exact conversation ownership registry
-  = BackgroundExecObligations(conversation)
-```
-
-Eine kleine pure Projektion liefert:
-
-```ts
-{
-  running: string[];
-  exitedUnread: string[];
-}
-```
-
-Diese Query soll als **eine** Ownership-Projektion, z. B.
-`backgroundExecStateForConversation(conversationId)`, an vier Stellen wiederverwendet werden:
-
-1. model-facing reminder;
-2. pre-spawn admission gate für **neue** `exec_command` background sessions;
-3. #35 wait/status surface.
-
-Der **globale** Manager braucht für Capacity keine Conversation-Ownership: jede exited Row, die nach
-dem initialen Call noch im Manager steht, ist per Definition result-bearing/unread. Ownership wird
-erst für caller-scoped Reminder/Admission/Status benötigt.
-
-### Umsetzung
-
-Dateien wahrscheinlich:
-
-- `src/main/codex/ownership.ts`
-- `src/main/mcp/kernel.ts`
-- UnifiedExec manager nur falls eine non-destructive query fehlt
-- `test/mcp.test.ts`
-- #35 UI/bridge files im späteren Batch
-
-Schritte:
-
-1. Existing `exitedUnread(processIdsOwnedBy(conversationId))` nicht duplizieren; zu einer einzigen
-   ownership-scoped obligation query machen.
-2. **Capacity-Safety zuerst:** exited-LRU-Eviction vollständig löschen. Bei 64 reservierten Sessions
-   wird die 65. Reservation verweigert; keine vorhandene Session wird als Nebenwirkung gelöscht.
-   Danach ungenutztes `lastUsed`-/Capacity-`interactionLock.tryLock`-Gerüst entfernen, sofern es nur
-   für die gelöschte Eviction existierte.
-3. Conservative per-chat completed-unread threshold als benannte Policy-Konstante definieren. `4`
-   ist eine sinnvolle Start-Hypothese aus externer Reproduktion, aber keine Architekturwahrheit;
-   gegen normale parallele Fan-out-Workloads testen und dokumentieren.
-4. Wenn threshold erreicht: **jeden neuen `exec_command`, der eine Session minten kann, vor Spawn
-   verweigern.** Die aktuelle API kann vor dem Spawn nicht wissen, ob der Command innerhalb des
-   Yield-Fensters foreground fertig wird oder eine retained Session zurückgibt. Keine neue
-   „no-retain“-API nur zur Umgehung des Gates bauen.
-5. Fehler nennt ausschließlich session ids des proven caller conversations und sagt explizit,
-   diese mit `write_stdin` zu drainen.
-6. `write_stdin` bleibt immer erlaubt, damit der Zustand lösbar ist.
-7. Tool descriptions für `exec_command`/`write_stdin` klar machen: **jede zurückgegebene
-   `session_id` ist eine Obligation bis zur terminalen Antwort**; bei transientem Wait-Fehler denselben
-   ID erneut pollen, nicht neue Arbeit starten.
-8. Running sessions zählen nicht als unread.
-9. `write_stdin` bleibt unabhängig vom Gate immer erlaubt und ist der primäre Weg, Capacity wieder
-   freizugeben.
-10. Transient `write_stdin` failure soll denselben session id als retry obligation nennen.
-
-### Regressionen
-
-- 0..threshold-1 unread => neue background session erlaubt + reminder.
-- threshold unread => kein child spawn.
-- drain one => admission wieder offen.
-- anderer conversation owner => weder ids sichtbar noch blockiert.
-- running != unread.
-- output bleibt bis consume erhalten.
-- globaler process capacity cap => unread exited row wird **nie** als LRU gelöscht; wenn alle
-  Kandidaten Obligations sind, neuer Spawn wird verweigert.
-
----
+**Close-Gate:** realer Prime/Worker flow mit unread background result beendet/erklärt den Turn ohne
+Datenverlust; danach Release-Evidence.
 
 ## #35 — Proactively explain when main chat is waiting/blocked
 
-### Befund
+### Kleinste Lösung
 
-Die Daten existieren, aber verteilt. Das Issue darf nicht dazu führen, dass ein LLM periodisch
-"still working" schreibt oder dass content.js einen zweiten Orchestrator bekommt.
+Kein Progress-State-System. `bridge.ts` berechnet für **eine** Conversation auf Nachfrage:
 
-### Ziel
+```ts
+waitStatusFor(conversationId) -> {kind, text, since?} | null
+```
 
-Keine neue Progress-State-Machine. Stattdessen die in Cluster 3.1 definierte **read-only
-`conversationRuntimeView(id)` / obligations projection** im App-Layer, die nur Fakten benennt, die
-CoS wirklich kennt. Turn-Liveness/Recovery bleibt separat bei `activeUntil` + recorder.
+Der Selector persistiert nichts und liest nur owner-native Facts, die bereits existieren: running /
+exited-unread UnifiedExec, konkrete Worker activity/wake, Continuation/Compact/Goal barrier und
+queued/handed browser recovery. Recorder/`activeUntil` bleiben alleinige Turn-Liveness-Authority.
 
-Priorität der Gründe sollte deterministisch sein, z. B.:
+Priorität bleibt klein und deterministisch:
 
-1. `needs_user` — expliziter, nicht automatisch lösbarer Zustand;
-2. `retrying` — bekannte backoff/recovery action;
-3. `blocked` — completed-unread exec threshold / continuation durable barrier;
-4. `waiting` — outstanding worker(s) / running background process;
-5. `working` — assistant turn actively progresses;
-6. unknown nur wenn es einen offenen Turn gibt, aber keine konkretere dependency.
+```text
+needs_user > retrying > blocked > waiting > working > unknown-open-turn
+```
 
-### Worker status
-
-Nicht behaupten, der Parent sei "blocked on worker 2", nur weil Worker 2 aktiv ist. Eine echte
-blocked-on-worker Aussage braucht eine Orchestrator-Evidenz, dass der Prime gerade auf Worker-
-Resultate wartet. Falls diese Evidenz heute nicht existiert, UI text bescheidener halten:
-
-`2 of 3 workers still running` statt `Prime is blocked on Worker 2`.
-
-### External/GitHub status
-
-Keinen generischen GitHub-CI-Tracker in CoS erfinden. Nur wenn ein externer Status über einen
-bereits autoritativen Tool/exec state bekannt ist, darf er konkret benannt werden. Sonst
-`Waiting for the current external operation…`.
+Dabei nie behaupten „Prime wartet auf Worker 2“, wenn nur `worker-2 active` bekannt ist. Ohne echte
+Dependency-Evidenz lautet die UI z. B. `2 workers still running`. Externe GitHub-/CI-Tracker werden
+nicht erfunden; nur bereits vorhandene Tool-/Exec-Fakten dürfen projiziert werden.
 
 ### UI
 
-Bestehende `.clf-stage` / `stageView()`-Fläche wiederverwenden. Sie zeigt heute Compact-job, sonst
-Goal; diese Projection dort als weitere abgeleitete View einordnen statt einen neuen Panel-State
-einzuführen. Eine Zeile, mutable, nicht model-visible.
+Bestehende `.clf-stage` / `stageView()` wiederverwenden: eine mutable, nicht model-visible Zeile.
+Kein neues Panel, keine Transcript-Messages, kein `pendingReason`-Store. Elapsed time darf aus
+`since` low-cadence gerendert werden.
 
-Show policy:
+### Minimal tests
 
-- sofort bei meaningful retry/needs-user transitions;
-- nach kurzer quiet threshold (ca. 2–5s) für normale waits;
-- beim nächsten echten Assistant-/tool progress sofort ausblenden/ersetzen;
-- elapsed time darf low-cadence neu gerendert werden, ohne neue Statusobjekte zu schreiben.
-
-### Tests
-
-- one/multiple worker activity;
-- worker failure;
-- background exec running;
-- background exec completed-unread threshold;
-- continuation awaiting durable boundary;
-- browser recovery queued/retrying;
+- running background exec / exited-unread threshold;
+- one/multiple workers + failure;
+- Continuation durable barrier;
+- exact browser recovery queued/retrying;
 - unknown open turn;
-- progress clears status.
+- echte neue progress evidence ersetzt/entfernt den Status;
+- Selector-Aufruf erzeugt **keinen** Broker/Recorder/Exec write.
 
-Konkrete voraussichtliche Dateien: `src/main/bridge.ts` für die Composition, `src/main/codex/ownership.ts`
-für den Exec-Teil, `src/main/multi-agent/agents.ts` oder den existierenden Broker nur falls eine
-read-only Worker-Projektion fehlt, und `extension/content.js::stageView()` für Rendering. Keine
-write-path Änderungen im Broker nur für UI.
-
-### Delete opportunity
-
-Nach Einführung der Projektion prüfen, ob der alte page-local 10-minute "No visible progress"-
-Text noch einen einzigartigen Nutzen hat. Wenn dieselbe Situation bereits durch app-owned stale-turn
-recovery + truthful progress status abgedeckt ist, den redundanten Diagnosepfad entfernen statt drei
-Warnmechanismen parallel zu behalten.
-
----
+Danach prüfen, ob der alte page-local 10-minute `No visible progress`-Diagnosepfad noch einzigartig
+ist. Wenn #27 recovery + diese konkrete Statuszeile denselben Fall vollständig erklären, den alten
+Warnpfad löschen statt drei Diagnosemechanismen zu behalten.
 
 ## #27 — Turn remains generating 10+ min after tool result
 
-### Befund
+**Aktueller Stand:** Der 2-min inactivity grant, receipt-tracked exact-chat recovery und die
+klassifizierte `chat_error` transport recovery sind im aktuellen HEAD committed. Alle Trigger
+konvergieren in `queueBrowserRecovery()`; `162e974`/`1cb3b54` härten stale-chat/missing-tab/final
+activity weiter. Das ist die Zielarchitektur, nicht ein weiterer 10-Minuten-Watchdog.
 
-Das gemeldete v2.0.2-Root-Verhalten ist im lokalen Branch **materiell verbessert**, aber nach dem
-2026-08-31-Live-Audit noch nicht closable:
+### Was noch offen ist
 
-- `CHAT_ACTIVE_MS = 2min` führt pro Conversation einen activity grant;
-- assistant text/native activity/errors/attributed calls verlängern ihn;
-- ein offener Turn, dessen Grant ausläuft, bekommt genau eine receipt-tracked browser recovery;
-- ein formal beendeter Turn wird explizit nicht reloaded;
-- Repair-Trigger konvergieren in `queueBrowserRecovery()` statt je eigene reload paths zu haben.
+Nur live Verhalten + Interaktion mit #36/#41:
 
-Das ist die richtige Basis. Einen weiteren 10-Minuten-Recovery-Timer hinzuzufügen wäre Regression.
+1. running Background Exec ist **keine** Liveness-Evidenz; ein echter attributed tool call ist es;
+2. exited-unread Exec wird über #36 drain/admission sichtbar und darf Recovery nicht künstlich
+   verhindern;
+3. offener Turn ohne echte Progress-Evidenz => genau ein inactivity Repair;
+4. klassifizierter Assistant-Transportfehler => derselbe Repair-Owner sofort, beliebiger Alert nie;
+5. während eines `assistant-error`-Repairs dürfen weitere attributed calls die queued Episode nicht
+   löschen;
+6. nach exact reload #41 prüfen: setzt derselbe ursprüngliche Turn fort, ist **kein** Continue-Prompt
+   nötig. Nur ein stabil idle/failed partial state darf die one-shot zweite Phase aus Cluster 3.7
+   aktivieren.
 
-Zusätzlich hat ein neuer Live-Fall eine getrennte Evidenzklasse sichtbar gemacht: ChatGPT kann einen
-sichtbaren Transport-Fehler (`role=alert`, z. B. delivery timeout) zeigen, während der Turn formal
-offen bleibt. Die aktuelle dirty Worktree-Änderung klassifiziert nur erkannte Transport-Banner und
-reicht sie mit dem live `turnId` an **dieselbe** `queueBrowserRecovery()`-Authority weiter. Das ist
-architektonisch richtig, aber noch uncommitted/unreleased. #27 deshalb nicht als „nur Acceptance“
-abhaken, bevor dieser Pfad integriert und live verifiziert ist.
+### Minimal regressions / close gate
 
-Wichtig: Ein bloß laufender Background-Prozess oder queued Agent-Message darf `activeUntil` **nicht**
-verlängern. Das ist keine ChatGPT-Fortschritts-Evidenz. Wenn ein echter Tool-Result/attributed call
-ankommt, verlängert dieser Call den Grant ohnehin über die bestehende Autorität.
+- active turn + silence threshold => exactly one queued/handed/done recovery;
+- recovery receipt lost/fails => retry derselben Episode, kein neuer Owner;
+- final answer oder manual stop vor threshold => no recovery;
+- transport failure + ongoing tool calls => repair bleibt bestehen;
+- ordinary hidden/ARIA alert => no recovery;
+- lone chat und worker chat verwenden denselben exact-chat recovery path;
+- Prime-only Live-Repro des ursprünglichen Stalls + Transport-Error-Fall auf installiertem Build.
 
-### Noch zu klären
-
-Der ursprüngliche Trigger hing mit long-running/background exec zusammen. Darum #27 erst nach #36
-und #35 abschließen:
-
-1. Wenn process noch läuft: Status muss truthful `waiting on background exec` zeigen und activity
-   darf nur durch echte progress evidence verlängert werden; die Prozess-Existenz selbst ist kein
-   Liveness-Heartbeat.
-2. Wenn process exited-unread ist: #36 muss den drain erzwingen/anzeigen.
-3. Wenn weder process noch page/model activity Fortschritt liefert und Turn formal offen bleibt:
-   bestehende 2-min one-shot recovery muss greifen.
-4. Wenn ein **klassifizierter** sichtbarer Transportfehler den offenen Turn beendet/strandet, darf
-   er dieselbe one-shot recovery sofort triggern. Ein beliebiger Alert darf das ausdrücklich nicht.
-
-### Regression matrix
-
-- async/background exec running > 2min mit legitimer owner activity;
-- exec exits und wird read;
-- exec exits unread;
-- tool call fertig, page bleibt ohne weitere evidence offen;
-- formal turn_end kurz vor expiry;
-- user Stop;
-- reload recovery succeeds;
-- reload recovery does not restore join => keine reload storm.
-- classified transport alert + live turn id => genau eine recovery;
-- unerkannter/unspezifischer alert => keine recovery;
-- transport error + inactivity expiry gleichzeitig => weiterhin nur ein receipt/reload owner.
-
-### Close-Kriterium
-
-Issue #27 schließen, wenn obige Matrix zeigt, dass jeder Zustand entweder:
-
-- nachweislich weiterarbeitet und sichtbar erklärt wird,
-- completed-unread drain verlangt,
-- oder einmal deterministisch recovered wird.
-
-Danach #27 schließen. Die aktuelle Transport-Error-Lücke ist ein zulässiger kleiner Code-Fix, aber
-sie darf nur einen neuen **Trigger** auf die bestehende Recovery-Authority setzen, keinen zweiten
-Watchdog/Reload-Pfad erzeugen.
-
----
+Kein Issue-Close nur wegen Unit-Tests; aber auch **keine neue Integration** mehr erfinden, solange die
+Live-Matrix keinen neuen Failure-Owner beweist.
 
 ## #23 — Tunnel supervisor false-offline / double-retry
 
-### Befund im aktuellen Code
+**Lokal gelandet:** `2c6967a` macht `ClientRun` zur Process-/Health-Generation. Nur `current === run`
+darf retire/restarten; Stop-Barriere verhindert überlappende Process-Trees; unbestätigte Health bleibt
+`unknown/connecting` statt erfunden `offline/healthy`.
 
-Einige gemeldete Punkte sind bereits besser als v2.0.2:
+**Plan-Aktion:** keinen zweiten Supervisor bauen. Focused lifecycle regression + real external tunnel
+smoke ausführen. Bei einem Fail die generation-owned transition reparieren und danach obsolete
+`done`/`proc !== child`-Guards löschen, statt neue Guards aufzuschichten.
 
-- bare `context deadline exceeded` steht nicht mehr als generischer `UNREACHABLE` classifier;
-- es gibt `UNREACHABLE_CONFIRM_MS` und poll-success evidence;
-- poll health / client health werden strukturiert gelesen.
-
-Aber die spezifische echte Control-Plane-Warnung `poll timed out` wird vom aktuellen
-`UNREACHABLE`-Regex ebenfalls nicht sauber erfasst (`poll failed` ist vorhanden, `poll timed out`
-nicht). Die Lösung ist **die spezifische Phrase ergänzen**, nicht wieder bare
-`context deadline exceeded` als Outage-Signal zuzulassen.
-
-Mindestens ein zentraler Race ist aber im aktuellen Code weiterhin direkt sichtbar:
-
-```text
-watch detects unready
-  -> await stopTree(child)
-     -> child 'exit' handler can call retry()
-  -> caller calls retry() again
-```
-
-Dasselbe Muster kann beim readiness timeout auftreten. Weitere im aktuellen Source bestätigte
-Probleme:
-
-- Startup kann nach einem fresh health refresh trotzdem über eine ältere `RECOVERY_QUIET`-
-  Complaint heuristisch offline projizieren;
-- fehlende/kaputte Metrics bzw. fehlendes `last_success` werden zu stark geraten statt als unknown
-  behandelt;
-- `lastHandshake` kann über eine Client-Generation hinweg weiterleben;
-- recovered outage reason/timestamp bleibt stale;
-- der Offline-Pfad kann neue Health-Snapshots unterdrücken, sodass die UI im alten Health-Bild
-  einfriert;
-- async watcher callbacks haben nach Awaits nicht überall eine eindeutige current-run/stop fence;
-- `diagnostics.ts` kann ein altes `tunnel_metadata_error` nach Route-Recovery weiter als aktuell
-  darstellen.
-
-Ein nicht in HEAD liegender Commit `b5b6239` enthält bereits mehrere sinnvolle Ansätze und einen
-deterministischen Lifecycle-Test. **Nicht cherry-picken:** der Commit ist groß/unrelated und löst
-auch nicht alle obigen Punkte. Nur die guten Invarianten/Testfixtures chirurgisch übernehmen.
-
-### Zielarchitektur: exactly one restart owner
-
-Keine zusätzliche `generation++`-Zahl neben den heutigen Globals bauen. **Der per-process Run-Record
-selbst ist die Generation.** Der heutige Code hält `child`, `lastError`, `lastUnreachable`,
-`unreachableReason`, outage-run, `lastHandshake`, `pollErrors`, `launchedAt`, `healthBase`, `health`
-und `shown` größtenteils supervisor-global. Genau deshalb muss jeder Launch Reset-Regeln erinnern und
-alte Async-Callbacks können auf neue State-Zellen schreiben.
-
-Bevorzugte Form, sinngemäß:
-
-```ts
-interface ClientRun {
-  proc: ChildProcess;
-  lastError: string;
-  lastUnreachable: number;
-  unreachableReason: string;
-  outage: UnreachableRun;
-  lastHandshake: number | null;
-  pollErrors: number;
-  launchedAt: number;
-  healthBase: string | null;
-  health: PollHealth | null;
-  shown: ...;
-}
-
-let current: ClientRun | null;
-```
-
-Invarianten:
-
-1. `launch()` erzeugt/publiziert **einen neuen `ClientRun`**. Reset-by-construction statt zehn
-   einzeln zurückgesetzter Globals.
-2. Line handlers, probes, timeout-/exit callbacks und `show*` schließen über genau diesen Run und
-   mutieren/reporten nur bei `current === run && !stopped`.
-3. `retire(run)` CASed `current` synchron auf `null` **vor** `stopTree(run.proc)`.
-4. `scheduleRestart(run, reason)` darf nur der Pfad ausführen, der dieses Retire-CAS gewonnen hat;
-   spätere `exit`/probe failures von A besitzen dann keinen Retry/backoff mehr.
-5. **Process overlap ist separat zu fencen:** ein abgelaufener Restart-delay darf kein neues Child
-   launchen, solange `stopTree(oldRun)` noch nicht wirklich abgeschlossen/gebounded retired ist.
-   Backoff-Timer und stop barrier werden sequenziert; es darf nie für dieselbe Supervisor-Instanz
-   zwei gleichzeitig owned child trees geben.
-6. `healthBase()` projiziert nur `current?.healthBase ?? null`; im Replacement-Gap ist der Wert
-   automatisch null statt stale A-Metadata.
-
-Supervisor-global bleiben nur echte processübergreifende Facts: `stopped`, Restart-Timer/backoff-
-Versuche und immutable opts/workDir. Alte parallele `proc !== child`/`done`/manual-reset guards danach
-löschen, soweit der Run-owner sie ersetzt.
-
-### Per-run health reset
-
-Beim neuen run zurücksetzen:
-
-- `lastHandshake` für die neue process generation;
-- `lastUnreachable` / reason;
-- complaint run;
-- health snapshot;
-- first-poll grace start;
-- shown state.
-
-Historische Daten für Logs dürfen separat angezeigt werden, dürfen aber nicht die neue run health
-entscheiden. Der `ClientRun` macht diese Trennung strukturell statt konventionell.
-
-Am besten eine einzige pure Route-Beobachtung (`PollHealth | null` bzw. ähnlich) pro Client-
-Generation verwenden. Fresh proof entscheidet „connected“; bestätigte stale/complaint evidence
-entscheidet „offline“; fehlende Daten bleiben unknown/connecting. Dieselbe Beobachtung soll
-Diagnostics und Runtime speisen, nicht zwei verschiedene Heuristiken.
-
-### Unknown != connected/offline
-
-Wenn `/metrics` nicht lesbar ist oder `last_success` fehlt:
-
-- nicht timestamp 0 erfinden;
-- nicht aufgrund bloßer Ruhe "connected" behaupten;
-- Runtime darf intern `unknown/connecting` bleiben, bis fresh proof da ist.
-
-Wenn die bestehende `ConnectionState` dafür keinen Wert hat, zuerst prüfen, ob `connecting-tunnel`
-die ehrliche Projektion ist. Kein neuer enum nur für kosmetische Genauigkeit.
-
-### Umsetzung
-
-Dateien:
-
-- `src/main/tunnel/index.ts`
-- `src/main/tunnel/health.ts`
-- `test/tunnel.test.ts`
-- eventuell `src/main/diagnostics.ts` nur für stale metadata projection
-
-Regressionen als echte supervisor transitions, nicht nur classifier unit tests:
-
-- one transient poll complaint + newer success => never user-visible offline;
-- distinctive `poll timed out` => control-plane complaint; bare unrelated `context deadline exceeded`
-  => keine Outage-Klassifikation;
-- local MCP timeout containing `context deadline exceeded` => no OpenAI outage;
-- supervisor stop => exactly one scheduled retry/backoff increment;
-- retry delay < künstlich verzögertes `stopTree(old)` => replacement startet erst nach old-tree
-  barrier; nie zwei child trees gleichzeitig alive;
-- old child exit after replacement => ignored;
-- new child cannot inherit old handshake freshness;
-- metrics unavailable => unknown/connecting, never guessed healthy;
-- recovery clears obsolete outage reason;
-- während confirmed offline weiter neue Health-Snapshots reporten; Status darf aktualisiert werden,
-  ohne die Outage zu leugnen;
-- stop during awaited probe => no late report/timer;
-- stale `tunnel_metadata_error` after recovered route not shown as current failure.
-- stale Run A probe/exit/log callback nach Start von B => keine report/retry/healthBase mutation;
-- zwei unabhängige Failure-Signale für A => genau ein Retire-CAS/Restart-Claim;
-- A retired, B noch nicht ready => `healthBase()` null; B startet ohne A handshake/outage/shown.
-
-### Delete opportunity
-
-Nach generation fencing alle ad-hoc `done`/`proc !== child` checks prüfen und die überflüssigen
-entfernen. Ziel ist weniger Restart-Zustand, nicht mehr.
-
----
+**Close-Gate:** transient poll failure, delayed old-child exit und concurrent failure signals erzeugen
+je genau einen Owner/Restart; real Core/Desktop connectivity bleibt stabil.
 
 ## #31 — Persistent and self-verifying Secure MCP Tunnel setup
 
@@ -1493,8 +1271,23 @@ damit bereits entschärft. Offen ist genau der gewünschte persistente unattende
 
 ### Architekturentscheidung
 
-**Nicht `insertPrompt()` global permissiver machen.** Stattdessen Composer mutation explizit
-policy-gesteuert machen.
+**Nicht `insertPrompt()` global permissiver machen und keine neue Composer-Policy-State-Machine
+bauen.** `deliverCommand()` hat vor dem Draft-Check bereits die wichtigen Identity-/Route-Fences:
+durable redeemed owner, fresh-vs-targeted route, exact marker/client und `stillOnTarget()`.
+
+Die gesamte neue Policy darf deshalb auf **einen** Wert schrumpfen:
+
+```ts
+BridgeCommand.replaceFreshDraft: boolean
+```
+
+Dieser Wert wird beim app-seitigen Command-Snapshot aus dem persistenten Setting eingefroren. Der
+Content-Script liest keine Config selbst und erfindet keine zweite Policy-Authority.
+
+**Nicht `insertPrompt()` global permissiver machen.** Am bereits existierenden Draft-Check darf
+replacement nur passieren, wenn `target === null`, `replaceFreshDraft === true` und
+`stillOnTarget()` weiterhin gilt. Danach bleiben die vorhandenen exact-content/route/marker checks
+vor Send unverändert.
 
 Beispiel:
 
@@ -1502,15 +1295,9 @@ Beispiel:
 writeComposer(value, mode: 'require-empty' | 'replace-existing')
 ```
 
-oder zwei klar benannte Funktionen. `replace-existing` darf nur erreicht werden, wenn alle
-folgenden Fences bereits bewiesen sind:
-
-1. authenticated bridge command erfolgreich redeemed;
-2. command type ist fresh `worker` oder fresh `resume`, nicht revival;
-3. command hat keinen target conversation id;
-4. page besitzt weiterhin exact command marker/client lease;
-5. `CLF_DOM.conversationId()` ist weiterhin null;
-6. persistent user setting `replaceFreshChatDraftsForBootstraps === true`.
+oder zwei klar benannte Funktionen. **Diese Fences nicht ein zweites Mal modellieren**: der bestehende
+`deliverCommand()`-Pfad beweist sie bereits. Der neue Branch braucht nur `fresh/no target + frozen
+opt-in + stillOnTarget()`; Revival/existing conversation erreichen ihn strukturell nicht.
 
 ### Setting
 
@@ -1537,7 +1324,8 @@ zweite Policy-Authority werden.
 ### Verhalten replace
 
 - `insertPrompt()` konservativ lassen; stattdessen eine explizite destructive DOM primitive
-  (`replacePromptExact`/shared composer writer) hinzufügen, die nur dieser fenced call site nutzt;
+  oder den vorhandenen composer writer um einen expliziten Replace-Modus ergänzen. `clearPromptExact`
+  besitzt bereits die native select-all/delete-Mechanik; **keine zweite Editor-Clear-Implementation**;
 - bestehende draft mit editor-native clear löschen;
 - verify empty;
 - bootstrap einsetzen;
@@ -1813,149 +1601,17 @@ Promise APIs. Baue nur eine dünne Boundary für echte Differenzen.
 
 ---
 
-## #2 — Power Agent tools
+## #2 — Power Agent tools: bewusst ohne Produktcode schließen
 
-### Befund
-
-PR #17 implementiert einen großen `power` composite tool mit `open_url`, `web_fetch`, app/process
-management, `system_exec` und system-wide filesystem access. `tools-power.ts` ist im aktuellen Baum
-nicht vorhanden; PR ist offen.
-
-### Quality >> Quantity Entscheidung
-
-**Issue als architecture-superseded schließen; PR #17 nicht mergen.** Das Proposal vermischt
-mehrere sehr verschiedene Fähigkeiten und
-dupliziert bestehende Autorität:
-
-- `system_exec` dupliziert `exec_command`;
-- `fs_system_*` dupliziert über command authority praktisch vorhandenen Host-Zugriff, umgeht aber
-  bewusst den approved-root mental/security model;
-- `process_list/kill` und `launch_app` sind mit command authority bereits erreichbar;
-- `open_url` ist eher Desktop/UI navigation als Core filesystem/terminal primitive;
-- `web_fetch` baut einen zweiten Network/HTML-fetch stack in einen lokalen MCP-Connector, obwohl
-  ChatGPT selbst Web-Fähigkeiten hat und dieser Connector bisher bewusst kleine lokale surfaces hat.
-
-Mehr Tool-Schemas oder ein 600+-Zeilen "Power" helper sind kein Gewinn, wenn die Fähigkeiten schon
-durch die vorhandene sicherheitsverständliche Primitive abgedeckt sind.
-
-Das ist inzwischen auch im aktuellen Test-/Architekturvertrag ausdrücklich sichtbar:
-`tools-core.ts` behandelt prozedurale Host-Aktionen als Komposition über Primitive; die MCP-
-Regressions halten den kleinen Surface-Budget bei **7 Core / 2 Desktop** und haben frühere
-`launch_app`/`open_url`/process-Sondertools bewusst retired.
-
-### Empfohlene Issue-Auflösung
-
-#2 mit kurzer Architekturbegründung schließen und PR #17 schließen. Falls `web_fetch` unabhängig
-wirklich einen einzigartigen Produktnutzen hat, **neues einzelnes Issue** eröffnen und dort zuerst
-beweisen, warum ChatGPT-Web/Skill/`exec_command`-Komposition nicht reicht. Die anderen Wünsche
-brauchen keinen neuen MCP-Surface:
-
-| Wunsch | Entscheidung |
-|---|---|
-| system_exec | **Reject:** `exec_command` ist die Autorität. |
-| fs_system_* | **Reject:** approved roots nicht durch parallele API unterlaufen. Wenn user wirklich host-wide command grants, kann command das bereits. |
-| launch_app | **No new tool:** über `exec_command` dokumentieren/recipe; Desktop tool nur falls später semantic app launch ohne shell ein Produktziel wird. |
-| process list/kill | **No new tool:** command recipe; kein permanenter schema cost. |
-| open_url | Nur separat erwägen, wenn browser focus/navigation als häufige sichere UX primitive nachweislich gebraucht wird. Dann eher Desktop `computer` action als neues Core tool. |
-| web_fetch | Nicht in #2 mergen. Nur als neues, separat begründetes Issue evaluieren. |
-
-### PR #17
-
-Schließen, nicht weiter aufblähen. Kein "weil schon implementiert" als Merge-Kriterium.
+PR #17 nicht mergen. `system_exec`, process/app helpers und system-wide filesystem duplizieren die
+vorhandene command/filesystem authority; der große Composite-Surface würde permanente Discovery- und
+Security-Kosten kaufen. `web_fetch` nur als separates Issue neu begründen, falls ein einzigartiger
+Produktnutzen bewiesen wird. Die ausführliche Capability-Aufzählung gehört in Issue/PR-Kommentare,
+nicht in diesen Ausführungsplan.
 
 ---
 
-## 6. PR-Entscheidungstabelle
-
-| PR | Empfehlung |
-|---|---|
-| #17 Power tools | **Schließen, nicht mergen.** Bestehende Primitive + 7-Core/2-Desktop-Surface-Budget sind die bewusst kleinere Architektur. |
-| #28 macOS Desktop | **Exact-head packaged Mac acceptance, dann Vertical Slice mergen.** Driver-Seam anschließend aus zwei realen Backends extrahieren; kein spekulativer Vorab-Großrefactor. |
-| #37 public-history / packaging | **Bereits gemerged; #24 CLOSED.** Nur Release-History-/workflow gate separat härten. |
-| #38 Project routes | **Bereits gemerged; #25 CLOSED.** Lokale verhaltensäquivalente Commits nicht doppelt anwenden. |
-| #39 long handoff auto-compaction | **Nicht as-is mergen.** Failure evidence/Regressionen übernehmen; Ziel ist WAL sole authority + checkpoint-aware replay/abandon und Delete der Broker-Transfer-Lease, nicht ein `/activity` heartbeat. PR entsprechend reworken oder superseden. |
-
----
-
-## 7. Vollständige Acceptance Matrix vor Issue-Close
-
-### Browser / conversation
-
-- root chat `/c/<id>`;
-- Project chat `/g/<project>/c/<id>`;
-- share route never owned;
-- fresh worker;
-- worker revive existing chat;
-- fresh resume;
-- hidden worker finishes without foreground wake;
-- autosaved draft preserve default;
-- autosaved draft replace opt-in;
-- SPA retarget during bootstrap;
-- manual Stop;
-- site transport error;
-- stale open turn one-shot recovery.
-
-### Compact & Resume
-
-- threshold crossing during active turn;
-- threshold already exceeded before current turn;
-- pre-dispatch `not-attempted` / `attempted-unresolved` abandonment ist bounded und replay-safe;
-- crash genau nach `dispatched-unresolved` => kein blindes Replay/Wall-clock-abort;
-- `sent(sourceMessageId)` handoff > 10min/>20min => exact marker bleibt authority, kein self-compact;
-- app process restart during live source handoff;
-- content document reload during live source handoff;
-- tab close/reopen mit serverseitigem HANDOFF marker;
-- full browser restart + marker/WAL reconciliation;
-- destination dispatch/reload folgt denselben no-replay fences;
-- no recursive self-compaction;
-- exact destination commit;
-- background exec owner A→B moves atomically/idempotently with committed continuation projection.
-
-### Unified exec
-
-- one background process running;
-- multiple parallel running;
-- exited unread below threshold;
-- exited unread at threshold;
-- drain releases gate;
-- global capacity pressure never evicts retained unread output;
-- full global cap => new reservation refused, every existing session id still drainable;
-- wrong conversation isolation;
-- A→B Compact & Resume => old A denied, new B can drain inherited live/unread exec sessions;
-- transient write_stdin failure/retry;
-- open turn + completed unread progress status.
-
-### Tunnel
-
-- startup first poll slow;
-- one transient timeout;
-- local MCP probe timeout;
-- true network outage > confirm window;
-- successful recovery;
-- unready local child restart;
-- child exit during supervisor stop;
-- old generation probe/exit completes after replacement => no report/retry/state mutation;
-- stop while probe pending;
-- app disconnect/reconnect;
-- app restart with saved stable tunnel id/key;
-- Core and Desktop evidence separate.
-- actual external per-surface `tools/list` fingerprint recorded; self-test/probe not counted;
-- changed emitted list + unchanged cached tool call => changed list still shown as unseen.
-
-### Platform
-
-- Windows current Desktop suite;
-- macOS arm64/x64 driver slice;
-- Firefox extension install/background lifecycle;
-- Firefox signed-XPI release/update path;
-- app-side exact-chat custody in selected Firefox companion browser;
-- bestehendes Chrome recorder/command/ownership behavior unverändert; #40 darf nur die **abgeleitete
-  discardability policy + lifecycle observation** ergänzen, nicht Tab-Identity neu definieren;
-- Chrome Memory Saver discard + Chrome 132+ frozen lifecycle getrennt akzeptieren.
-
----
-
-## 8. Required validation per implementation batch
+## 6. Canonical validation per implementation batch
 
 Validation läuft in Stufen. Ein späterer grüner Layer ersetzt keinen früheren Beweis.
 
@@ -1979,7 +1635,7 @@ zurückdrehen.
 - #21 checkpoint/replay/abandon + projection ownership;
 - #34 cadence + exact terminal-delivery obligation;
 - #36 manager-capacity retention + caller-scoped obligation/admission;
-- #40 pure browser-protected-conversation projection + reversible effect-journal reducer;
+- #40 pure `protectedAgentConversations()` + reversible effect-journal reducer;
 - #23 classifier/generation/health reduction;
 - #30 config/policy fences;
 - #31 serialized-list fingerprint + redaction;
@@ -1990,11 +1646,11 @@ zurückdrehen.
 - bridge ↔ continuation WAL/rebind/projection;
 - continuation commit ↔ exec-owner migration;
 - MCP kernel ↔ UnifiedExec ownership/admission;
-- app `/status` browser-protection projection ↔ extension `tabConversations` ↔ reversible
-  `autoDiscardable` mutation journal;
+- broker `protectedAgentConversations()` ↔ existing maintenance reply ↔ extension
+  `tabConversations` ↔ reversible `autoDiscardable` mutation journal;
 - fake-child tunnel supervisor lifecycle;
 - config → IPC/preload/renderer → authenticated BridgeCommand draft policy;
-- runtime obligations → `/activity` → `.clf-stage`.
+- `waitStatusFor(conversationId)` → existing `/activity` → `.clf-stage`.
 
 Assert explizit, dass dabei **kein zweiter persistenter Writer** für denselben Fakt entstanden ist.
 
@@ -2010,19 +1666,22 @@ Nicht pauschal „browser/app restart“ schreiben. Getrennt testen:
 6. SPA A→B→A;
 7. stale async completion nach owner/generation replacement.
 
-Für #21 jede Source-/Destination-Send-Grenze separat schneiden: vor dispatch replaybar, nach dispatch
-nie blind replaybar; committed-but-projection-not-published muss nach Restart reparierbar bleiben.
-Nicht nur eine „restart“-Testzeile: die Checkpoints `attempted-unresolved`, `dispatched-unresolved`
-und `sent(messageId)` als Cross-Product gegen mindestens **content reload, extension service-worker /
-Firefox event-page restart, tab close/reopen, full browser restart (storage.session stirbt), App-
-Restart (WAL restores) und SPA retarget** testen. Wo eine Dimension physikalisch nicht sinnvoll ist,
-explizit begründen statt sie still wegzulassen.
+Für #21 nicht jede Lebenszeit künstlich mit jedem Checkpoint kreuzen. Die kanonische Crash-Matrix
+beweist genau die **irreversiblen Grenzen**:
+
+1. pre-dispatch / `attempted-unresolved` + owner loss => replaybar/übernehmbar;
+2. `dispatched-unresolved` + process/document loss => nie blind replaybar;
+3. `sent(messageId)` + Ablauf der alten TTL + App restart => Marker/WAL reconciled weiter;
+4. committed rebind + crash vor Broker-/Exec-Projektion => idempotente projection repair.
+
+Zusätzliche content/service-worker/browser/SPA-Dimensionen nur dort ergänzen, wo ein anderer Owner
+oder eine andere Persistenz-Lebenszeit tatsächlich beteiligt ist. Testzahl ist kein Qualitätsziel.
 
 Für #40 die reversible Browser-Side-Effect-WAL an **drei** Commit-Grenzen schneiden:
 
 1. journal persisted → crash vor `tabs.update(false)`;
 2. `tabs.update(false)` erfolgreich → worker stirbt vor nächster reconciliation/bookkeeping;
-3. restore `tabs.update(prior)` erfolgreich → worker stirbt vor journal delete.
+3. restore `tabs.update({autoDiscardable:true})` erfolgreich → worker stirbt vor journal delete.
 
 Zusätzlich Full-Browser-Restart: `storage.session` verschwindet erwartbar; aktive exact chats werden
 aus App-/Broker-Truth neu geschützt, unrelated/user-preprotected tabs werden nicht blind mutiert.
@@ -2043,7 +1702,7 @@ Der Harness beweist **nicht** reale Chromium hidden-tab timer throttling.
 ### S5 — Prime-only live browser
 
 - Chrome hidden worker finalisiert ohne Focus;
-- #35 Runtime-View live: active workers, running Background Exec, completed-unread threshold und
+- #35 `waitStatusFor` live: active workers, running Background Exec, completed-unread threshold und
   queued browser recovery nacheinander erzeugen; `.clf-stage` zeigt nur wirklich bewiesene Facts,
   echte Progress-Evidence ersetzt/cleart die Zeile sofort. Ohne expliziten Wait-on-worker-Beweis
   muss die UI `N workers still running` o. ä. sagen, **nicht** `Prime blocked on Worker N`;
@@ -2155,14 +1814,14 @@ History-Blocker, nicht Grund, #24 wieder aufzureißen oder `verify-public-histor
 
 ---
 
-## 9. Definition of done für den gesamten offenen-Issue-Pass
+## 7. Definition of done für den gesamten offenen-Issue-Pass
 
 Der Pass ist erst fertig, wenn:
 
 1. unmittelbar vor dem finalen Handoff **`gh issue list --state open` erneut gezogen** wurde und
    jedes **zu diesem finalen Reconcile-Zeitpunkt offene** Issue einen eindeutigen Zustand hat:
    fixed+merged+released, consciously rejected/narrowed, oder mit einem reproduzierbaren
-   verbleibenden Blocker; der letzte Audit-Snapshot hatte 13 offene Issues, aber die Zahl ist keine
+   verbleibenden Blocker; der letzte Audit-Snapshot hatte **15** offene Issues, aber die Zahl ist keine
    dauerhafte Architekturkonstante;
 2. #27/#35/#36 nicht drei konkurrierende progress watchdogs erzeugt haben;
 3. #23/#31 dieselbe Tunnel-health authority verwenden;
@@ -2179,81 +1838,3 @@ Der Pass ist erst fertig, wenn:
     Ein ungelöster History-Blocker blockiert den Release; ein gelöster Blocker wird anschließend
     erneut full-history verifiziert;
 11. Prime-only live acceptance für die browserabhängigen Reliability-Pfade dokumentiert ist.
-
----
-
-## 10. Audit-/Iterationsprotokoll dieses Plans
-
-Dieser Stand ist **Iteration 4 nach erneutem GitHub-Reconcile + laufendem Drei-Worker-Adversarial-
-Review**.
-
-### Iteration 1 — Prime baseline
-
-- die damals 14 offenen Issues via `gh` inventarisiert;
-- aktuelle Branch-/PR-/Commit-Historie verglichen;
-- zentrale Codepfade gelesen;
-- focused suites lokal ausgeführt;
-- erster issue-by-issue Fixplan geschrieben.
-
-### Iteration 2 — exakt drei Read-only Sub-Agenten
-
-Es wurden genau drei Worker parallel benutzt, alle ohne Browser/Desktop und ohne Repo-Edits:
-
-1. **Runtime reliability:** #21, #26, #27, #34, #35, #36.
-2. **Platform/surfaces:** #2, #22, #29, #31.
-3. **Concrete bugs:** #23, #24, #25, #30.
-
-Sie verglichen Issues mit aktuellem Code, PR-/Commit-History und gezielten Tests. Wichtige
-Korrekturen zur ersten Fassung:
-
-- #21: vorhandene stable HANDOFF source-message identity als Lease-Beweis verwenden; keinen neuen
-  capture heartbeat state bauen.
-- #36: globaler Capacity-Code kann retained exited/unread Output evicten; Data-Integrity-Fix vor
-  UX/admission gate priorisieren.
-- #26: Bugfix ist da, aber hot `/activity` compatibility repair ist spätere Löschschuld.
-- #27: stale-turn root recovery ist bereits materiell gefixt; keine zweite Recovery bauen.
-- #31: Persistence ist weitgehend done; echter Rest ist per-surface evidence/schema UX plus
-  sensitive local-URL redaction.
-- #2: nicht „vielleicht kleiner mergen“, sondern als durch die Primitive-Architektur superseded
-  schließen.
-
-### Iteration 3 — Reduktions-/Konsistenzpass
-
-Der finale Plan trennt jetzt bewusst:
-
-- **Turn-Liveness** (besitzt Recovery) von **Outstanding Obligations** (read-only UI/model projection);
-- **Tunnel runtime truth** (#23) von **Setup projection** (#31);
-- **native Desktop mechanism** (#29) von shared Desktop policy;
-- **Browser manifest/runtime portability** (#22) von gemeinsamem Extension-Code;
-- **Conversation identity** (#25) von destructive composer policy (#30).
-
-Neue State-Machines wurden aus dem Plan gestrichen, wo bestehende Identität/Owner bereits genügen.
-Der Implementierer soll diesen Reduktionsstandard bei jedem Batch erneut anwenden: wenn eine
-vorgeschlagene neue Struktur nur einen vorhandenen Owner spiegelt, nicht bauen.
-
-### Iteration 4 — GitHub-/Worktree-Reconcile + zweite adversarial Runde
-
-Der erneute Audit hat den Plan materiell verändert:
-
-- GitHub hatte beim letzten Pull **13** offene Issues; #40 wurde mitten im Audit neu angelegt,
-  während #24/#25 bereits in `origin/main` gemerged und CLOSED sind. Darum finaler `gh`-Reconcile
-  statt hard-coded Issue-Count als DoD.
-- Branch-Divergenz wird als Verhalten-vs.-Git-Topologie behandelt; keine Hash-basierte Doppelarbeit.
-- #21 wurde von „bessere inactivity lease“ auf **sole Continuation transaction + delete duplicate
-  broker transfer lease + checkpoint-aware no-replay semantics** verschärft.
-- committed continuation muss neben recorder/workspace/goal/swarm auch **UnifiedExec ownership** A→B
-  publizieren/reparieren.
-- #34 braucht exact terminal-delivery obligation und darf den nächsten Poll nicht hinter langen
-  Compact-/Goal-Side-Effects blockieren.
-- #36 löscht globale exited-LRU-Eviction vollständig; Capacity ist Admission, nicht GC.
-- #31 fingerprintet nur die real an ChatGPT ausgelieferte `tools/list`-Shape; ein alter Tool Call
-  beweist keine neue Discovery.
-- #27 bleibt offen bis der neue klassifizierte Transport-Error-Trigger aus dem dirty Worktree
-  integriert + live akzeptiert ist; er benutzt dieselbe one-shot recovery authority.
-- #40 ergänzt eine dritte Runtime-Dimension: semantic browser-live need wird app-seitig abgeleitet,
-  physical tab protection + reversible `autoDiscardable` side effect gehören der Extension;
-  `discarded`/`frozen` sind Browser-Lifecycle-Evidence, keine Conversation-Terminals.
-- PR #28 wird als realer Mac Vertical Slice **vor** spekulativer Driver-Abstraktion behandelt.
-- Der Release-Audit fand einen zusätzlichen Infrastruktur-Blocker: Privacy-Verify in Actions läuft
-  heute auf shallow checkouts und kann deshalb falsch grün sein. Script + Workflows müssen fail-
-  closed/full-history werden, bevor ein Release-Green als Beweis zählt.
