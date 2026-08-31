@@ -112,6 +112,7 @@ let handoff: Handoff | null = null;
 let handoffFor: string | null = null;
 
 let listTimer: number | undefined;
+let toolActivityTimer: number | undefined;
 let sessionsLoadGeneration = 0;
 let detailLoadGeneration = 0;
 let handoffLoadGeneration = 0;
@@ -154,6 +155,31 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  * first badge is durable and comes from the session itself; the second is live and comes
  * from the swarm or the compaction currently reported by the app.
  */
+/**
+ * How long after its last exact attributed tool call an agent chat still reads as working.
+ *
+ * Prime owns the run for its whole life, so its agent state alone would light this badge
+ * permanently and say nothing. An open turn was the gate instead, which is exact but too
+ * narrow: when a page loses its answer stream the recorder has no open turn, while the model
+ * behind it goes on calling tools for minutes. That is a chat very much at work, shown as idle
+ * — and the moment a user most wants to see that it is still going.
+ *
+ * Deliberately a display window rather than the bridge's own two-minute activity grant. That
+ * clock decides when to reload a chat, and a number that answers "is this worth acting on"
+ * should not be the same number that answers "is this worth showing".
+ */
+const TOOL_ACTIVE_MS = 3 * 60_000;
+
+/** Exact attributed calls keep any agent chat visibly active for three minutes. */
+function recentToolActivity(summary: SessionSummary, now = Date.now()): boolean {
+  return summary.lastToolCallAt !== null && now - summary.lastToolCallAt < TOOL_ACTIVE_MS;
+}
+
+/** Prime is working only from a live turn or the exact tool clock, never generic session noise. */
+function primeWorking(summary: SessionSummary): boolean {
+  return summary.endedAt === null && (Boolean(summary.activeTurnId) || recentToolActivity(summary));
+}
+
 function sessionBadges(summary: SessionSummary): Badge[] {
   const badges: Badge[] = [];
   const origin = summary.origin;
@@ -180,8 +206,9 @@ function sessionBadges(summary: SessionSummary): Badge[] {
         (entry) => entry.role === 'prime' && entry.conversationId === summary.conversationId
       );
   // Prime owning the run is not Prime running a turn. Workers use their broker lifecycle;
-  // Prime's visible activity comes from the recorder's exact open-turn identity.
-  if (agent && (agent.role !== 'prime' || summary.activeTurnId)) badges.push(AGENT_BADGE[agent.state]);
+  // Prime's visible activity comes from what its chat has actually been doing.
+  if (agent && recentToolActivity(summary)) badges.push(AGENT_BADGE.active);
+  else if (agent && (agent.role !== 'prime' || primeWorking(summary))) badges.push(AGENT_BADGE[agent.state]);
   return badges;
 }
 
@@ -351,6 +378,23 @@ function paintSessions(): void {
   $('sessionsFoot').textContent = recording
     ? `${shown}${more}${activeId ? ' · one live now' : ''}`
     : `Recording is off · ${shown}${more}`;
+  scheduleToolActivityExpiry();
+}
+
+/** Repaint once at the nearest three-minute boundary; no polling clock is needed. */
+function scheduleToolActivityExpiry(): void {
+  window.clearTimeout(toolActivityTimer);
+  toolActivityTimer = undefined;
+  if (!visible) return;
+  const now = Date.now();
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const summary of sessions) {
+    if (summary.lastToolCallAt === null) continue;
+    const expiry = summary.lastToolCallAt + TOOL_ACTIVE_MS;
+    if (expiry > now) nearest = Math.min(nearest, expiry);
+  }
+  if (!Number.isFinite(nearest)) return;
+  toolActivityTimer = window.setTimeout(() => paintSessions(), Math.max(1, nearest - now + 1));
 }
 
 function canonicalMessageKey(event: SessionEvent): string | null {
@@ -1396,6 +1440,10 @@ export function chatApply(state: AppState, previous?: Config): void {
 export function chatVisible(next: boolean): void {
   visible = next;
   if (next) void refreshAll();
+  else {
+    window.clearTimeout(toolActivityTimer);
+    toolActivityTimer = undefined;
+  }
 }
 
 async function refreshAll(): Promise<void> {

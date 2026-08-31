@@ -3964,6 +3964,161 @@ describe('unattributed activity recovery', () => {
     expect(chatOf(await maintenance())).toBe(PRIME);
   });
 
+  /**
+   * The live 2026-08-31 failure: a send that never reached a model at all.
+   *
+   * ChatGPT paints "Message delivery timed out" as a live region above the thread, because
+   * the send died before there was an assistant turn to paint it in. The banner therefore
+   * names no turn of its own - the page's live generation names it - and for a while that
+   * shape was refused recovery outright. The app recorded the failure, marked the turn
+   * failed, and left the chat parked on the error until a human noticed.
+   */
+  it('reloads a chat parked on a transport failure the banner could not name itself', async () => {
+    await pair();
+    await events(OTHER, [openTurn('turn-solo-delivery')]);
+    await events(OTHER, [
+      {
+        kind: 'chat_error',
+        time: Date.now(),
+        text: 'Message delivery timed out. Please try again.',
+        // Supplied by the page's own live generation, exactly as content.js stamps it.
+        turnId: 'turn-solo-delivery',
+        recoverable: true
+      },
+      endTurn('turn-solo-delivery', 'failed')
+    ]);
+    expect(chatOf(await maintenance())).toBe(OTHER);
+  });
+
+  /**
+   * The live 2026-08-31 trace, and the reason nothing had ever been observed to reload.
+   *
+   * A worker's page lost its answer stream and printed "Connection interrupted. Waiting for the
+   * complete answer", while the model went on running server-side: fifteen connector calls in the
+   * four minutes that followed, every one of them attributed. Attribution proves the request-id
+   * join works. It says nothing whatever about the stream the page lost, which is the only thing
+   * this repair is about - so a repair filed against the broken turn must survive it.
+   *
+   * It did not. The repair was queued, and twenty seconds later the next tool call deleted it,
+   * long before the browser's own maintenance pass could collect it. A chat sick enough to need
+   * reloading is usually a chat still calling tools, so the reload was erased every time.
+   */
+  it('keeps a broken turn’s reload alive while that turn goes on calling tools', async () => {
+    await pair();
+    await events(OTHER, [openTurn('turn-interrupted')]);
+    await events(OTHER, [
+      {
+        kind: 'chat_error',
+        time: Date.now(),
+        text: 'Connection interrupted. Waiting for the complete answer',
+        turnId: 'turn-interrupted',
+        recoverable: true
+      }
+    ]);
+    await attributed(OTHER);
+    expect(chatOf(await maintenance())).toBe(OTHER);
+  });
+
+  /**
+   * Nor may the broken turn's own last breath count against it.
+   *
+   * The live worker-2 trace: "Message delivery timed out" at 01:13:00, the turn it broke ending
+   * failed at 01:13:04, and then nothing for six minutes while the model behind the dead stream
+   * went on calling tools. The failure and the ending arrive in separate batches, so the turn is
+   * still open when the repair is filed - and a repair retired by the next turn ending was
+   * retired by the ending of the very turn it was filed about, four seconds later.
+   *
+   * A repair for a broken turn is spent when the chat gets through a turn, not when it finishes
+   * dying.
+   */
+  it('keeps the reload alive when the turn it was filed about ends a moment later', async () => {
+    await pair();
+    await events(OTHER, [openTurn('turn-timed-out')]);
+    await events(OTHER, [
+      {
+        kind: 'chat_error',
+        time: Date.now(),
+        text: 'Message delivery timed out. Please try again.',
+        turnId: 'turn-timed-out',
+        recoverable: true
+      }
+    ]);
+    await events(OTHER, [endTurn('turn-timed-out', 'failed')]);
+    await attributed(OTHER);
+    expect(chatOf(await maintenance())).toBe(OTHER);
+  });
+
+  /**
+   * Nor may the wait itself be the window in which it is forgotten.
+   *
+   * The exact live shape: a tab closed and reopened spends this chat's browser action, so the
+   * transport failure a minute later is held behind the three-minute floor. Every tool call
+   * during that wait used to erase it, which made a held repair one that could never be handed
+   * out at all.
+   */
+  it('hands the repair out after the cooldown, however busy the chat was while it waited', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [openTurn('turn-worker-closed')]);
+      await request('POST', '/closed', { body: { conversationId: WORKER } });
+      const reopen = await maintenance();
+      expect(chatOf(reopen)).toBe(WORKER);
+      // Carried out. That spends the chat's action and starts its three-minute floor.
+      expect(await maintenance(reopen!.token)).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(90_000);
+      await events(WORKER, [openTurn('turn-worker-interrupted')]);
+      await events(WORKER, [
+        {
+          kind: 'chat_error',
+          time: Date.now(),
+          text: 'Connection interrupted. Waiting for the complete answer',
+          turnId: 'turn-worker-interrupted',
+          recoverable: true
+        }
+      ]);
+      // Still inside the floor, and the chat keeps working the whole way through it.
+      for (let call = 0; call < 6; call++) {
+        await vi.advanceTimersByTimeAsync(15_000);
+        await attributed(WORKER);
+        }
+      expect(chatOf(await maintenance())).toBe(WORKER);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Prime's own open turn is on the same silence clock as anybody else's.
+   *
+   * Prime is the chat a run is steered from, so it is the one whose stall nothing else is
+   * watching: no worker slot depends on it and no bootstrap is waiting on it.
+   */
+  it('reloads Prime once when its own open turn goes two minutes silent', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'hold the run open' }], caller: { conversationId: PRIME } });
+      await events(PRIME, [openTurn('turn-prime-silent')]);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS - 1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      expect(chatOf(await maintenance())).toBe(PRIME);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('can disable missing-tab and inactivity recovery without changing agent lifecycle', async () => {
     const previous = getConfig();
     expect(previous.multiAgent.recoverAgentTabs).toBe(true);
@@ -4059,6 +4214,55 @@ describe('unattributed activity recovery', () => {
       await pair();
       await events(OTHER, [openTurn('turn-solo-late-join')]);
       await events(OTHER, [endTurn('turn-solo-late-join', 'completed')]);
+      await attributed(OTHER);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The reported Prime trace: the page detached mid-generation and durably ended the local
+   * lifecycle as unknown. The model kept making calls whose exact request ids still proved this
+   * chat. Those calls are first-hand activity, not a late join to a completed answer, so their
+   * final two-minute silence must still recover the page once.
+   */
+  it('reloads a chat that keeps making attributed calls after its local turn ended unknown', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-lost-on-reload')]);
+      await events(OTHER, [endTurn('turn-lost-on-reload', 'unknown')]);
+      await attributed(OTHER);
+
+      await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(chatOf(await maintenance())).toBe(OTHER);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not reload an uncertain chat after its stable final answer arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-final-after-reload')]);
+      await events(OTHER, [endTurn('turn-final-after-reload', 'unknown')]);
+      await attributed(OTHER);
+      await events(OTHER, [{
+        kind: 'assistant_message',
+        time: Date.now(),
+        messageId: 'assistant-final-after-reload',
+        text: 'The complete answer is here.',
+        state: 'final',
+        final: true
+      }]);
+      // Correlation may settle after the page final, just as it can after a normal turn_end.
+      // That late exact call must not resurrect a completed answer's reload clock.
       await attributed(OTHER);
 
       await vi.advanceTimersByTimeAsync(CHAT_ACTIVE_MS * 2);
@@ -4505,6 +4709,89 @@ describe('the goal loop over the bridge', () => {
       model: 'deepseek/deepseek-v4-flash',
       draft: null
     });
+  });
+
+  it('turns a post-reload stable final answer into one durable Goal model call', async () => {
+    await pair();
+    const chat = 'cafe0051-0000-4000-8000-000000000051';
+    await request('POST', '/events', {
+      body: {
+        conversationId: chat,
+        events: [
+          { kind: 'user_message', time: Date.now(), text: 'finish the release', messageId: 'm-reload-goal' },
+          { kind: 'turn_start', time: Date.now(), turnId: 'g-before-page-reload' },
+          { kind: 'turn_end', time: Date.now(), turnId: 'g-before-page-reload', outcome: 'unknown' }
+        ]
+      }
+    });
+
+    const replyId = 'assistant-final-seen-after-reload';
+    const terminal = await request('POST', '/events', {
+      body: {
+        conversationId: chat,
+        events: [{
+          kind: 'assistant_message',
+          time: Date.now(),
+          messageId: replyId,
+          text: 'The requested release work is complete.',
+          state: 'final',
+          final: true
+        }]
+      }
+    });
+    expect(terminal.status).toBe(200);
+
+    const pending = (await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending;
+    expect(pending).toEqual({
+      replyId,
+      turnId: `reply:${replyId}`,
+      eventSeq: expect.any(Number)
+    });
+
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      calls++;
+      return Response.json({
+        choices: [{ message: { content: JSON.stringify({ action: 'stop', reply: '' }) } }]
+      });
+    }) as never;
+    try {
+      const drafted = await request('POST', '/goal/draft', {
+        body: {
+          conversationId: chat,
+          turnId: pending.turnId,
+          terminalRequired: true,
+          clientId: 'reloaded-goal-page'
+        }
+      });
+      expect(drafted.status).toBe(200);
+      await vi.waitFor(() => expect(calls).toBe(1));
+      const decided = (await request('GET', `/activity?conversationId=${chat}&goalClient=reloaded-goal-page`)).body.goal.draft;
+      expect(decided).toMatchObject({ stage: 'no-reply', turnId: pending.turnId });
+      expect((await request('POST', '/goal/ack', {
+        body: { conversationId: chat, token: decided.token, clientId: 'reloaded-goal-page' }
+      })).body.acknowledged).toBe(true);
+
+      // At-least-once page delivery of the same stable reply cannot mint another obligation.
+      expect((await request('POST', '/events', {
+        body: {
+          conversationId: chat,
+          events: [{
+            kind: 'assistant_message',
+            time: Date.now(),
+            messageId: replyId,
+            text: 'The requested release work is complete.',
+            state: 'final',
+            final: true
+          }]
+        }
+      })).status).toBe(200);
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).toBeNull();
+      expect(calls).toBe(1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   /**

@@ -83,6 +83,10 @@ interface LiveConversation {
   /** Every local turn boundary already made durable, so at-least-once browser replay is idempotent. */
   knownTurnStarts: Set<string>;
   knownTurnEnds: Set<string>;
+  /** Newest durable turn verdict, used only to interpret post-reload final/call evidence. */
+  lastTurnOutcome: TurnOutcome | null;
+  /** Start of that turn, so its final may predate a later detach/end while old finals cannot. */
+  lastTurnStartedAt: number | null;
   /** Visible ChatGPT-native activity rows, updated by the page's stable row identity. */
   pageTools: Map<string, ProgressRecord>;
 }
@@ -291,6 +295,7 @@ async function initializeSessionForConversation(
         openTurns: new Set<string>(),
         knownTurnStarts: new Set<string>(),
         knownTurnEnds: new Set<string>(),
+        lastTurnStartedAt: null,
         activeTurnId: null,
         activeTurnStartedAt: null,
         pageTools: new Map<string, ProgressRecord>()
@@ -323,6 +328,8 @@ async function initializeSessionForConversation(
     openTurns: history.openTurns,
     knownTurnStarts: history.knownTurnStarts,
     knownTurnEnds: history.knownTurnEnds,
+    lastTurnOutcome: summary.lastTurnOutcome,
+    lastTurnStartedAt: history.lastTurnStartedAt,
     pageTools: history.pageTools
   });
   if (!known) {
@@ -454,6 +461,8 @@ interface StoredHistory {
   knownTurnStarts: Set<string>;
   /** Every durable turn end, used to make at-least-once browser replay idempotent. */
   knownTurnEnds: Set<string>;
+  /** Durable start time of the newest turn that ended in the recovered tail. */
+  lastTurnStartedAt: number | null;
   /** Newest still-open local generation, so a reloaded page can adopt it after app restart. */
   activeTurnId: string | null;
   /** Durable start time of activeTurnId. */
@@ -477,6 +486,8 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
   const openTurns = new Set<string>();
   const knownTurnStarts = new Set<string>();
   const knownTurnEnds = new Set<string>();
+  let lastTurnEndedAt: number | null = null;
+  let lastTurnStartedAt: number | null = null;
   const turnStarts = new Map<string, number>();
   const pageTools = new Map<string, ProgressRecord>();
   try {
@@ -495,6 +506,10 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
         if (event.turnId) {
           knownTurnEnds.add(event.turnId);
           openTurns.delete(event.turnId);
+        }
+        if (lastTurnEndedAt === null || event.time >= lastTurnEndedAt) {
+          lastTurnEndedAt = event.time;
+          lastTurnStartedAt = event.turnId ? turnStarts.get(event.turnId) ?? null : null;
         }
       } else if (event.kind === 'page_tool' && event.messageId) {
         const held = pageTools.get(event.messageId);
@@ -526,7 +541,7 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
       activeTurnStartedAt = startedAt;
     }
   }
-  return { openTurns, knownTurnStarts, knownTurnEnds, activeTurnId, activeTurnStartedAt, pageTools };
+  return { openTurns, knownTurnStarts, knownTurnEnds, lastTurnStartedAt, activeTurnId, activeTurnStartedAt, pageTools };
 }
 
 async function ensureUnattributedSession(): Promise<string | null> {
@@ -590,13 +605,16 @@ export function liveConversations(): Array<{
    * only when a turn is actually over.
    */
   endedTurns: number;
+  /** Newest durable turn verdict; null when this chat has never reported an end. */
+  lastTurnOutcome: TurnOutcome | null;
 }> {
   return [...conversations.values()].map((entry) => ({
     conversationId: entry.conversationId,
     sessionId: entry.sessionId,
     generating: entry.turnStartedAt !== null,
     activeTurnId: entry.turnStartedAt !== null ? entry.turnId : null,
-    endedTurns: entry.knownTurnEnds.size
+    endedTurns: entry.knownTurnEnds.size,
+    lastTurnOutcome: entry.lastTurnOutcome
   }));
 }
 
@@ -1471,13 +1489,19 @@ async function recordChatObservationsNow(
   let firstUser: ChatObservation | undefined;
   let pageTitle: ChatObservation | undefined;
   const explicitEnds = new Set<string>();
+  const batchTurnStarts = new Map<string, number>();
+  let batchUncertainEndId: string | null = null;
   // This batch is hot while ChatGPT is streaming. Collect the three facts needed before the
   // write loop in one pass instead of find + find + filter + map (the latter two also allocated
   // an intermediate array for every batch).
   for (const item of observations) {
     if (!firstUser && item.kind === 'user_message') firstUser = item;
     if (!pageTitle && item.kind === 'conversation_title') pageTitle = item;
-    if (item.kind === 'turn_end' && item.turnId) explicitEnds.add(item.turnId);
+    if (item.kind === 'turn_start' && item.turnId) batchTurnStarts.set(item.turnId, item.time);
+    if (item.kind === 'turn_end' && item.turnId) {
+      explicitEnds.add(item.turnId);
+      if (item.outcome !== 'completed' && item.outcome !== 'stopped') batchUncertainEndId = item.turnId;
+    }
   }
   const sessionId = await sessionForConversation(
     conversationId,
@@ -1486,6 +1510,7 @@ async function recordChatObservationsNow(
   if (!sessionId) return { sessionId: null, stored: 0, goalCandidates: [] };
   const live = conversations.get(conversationId);
   let stored = 0;
+  let recoveredGoalSeen = false;
   const goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }> = [];
   // A cold/reloaded page can discover that a turn finished while the content script was
   // absent. There is then a new final assistant message but no live `generating -> false`
@@ -1541,6 +1566,30 @@ async function recordChatObservationsNow(
       case 'assistant_message': {
         if (!item.messageId) continue;
         const state = item.state ?? (item.final === true ? 'final' : 'streaming');
+        // A reload can destroy the document-local generation id after this recorder already
+        // made the only honest lifecycle verdict it could: unknown/failed/interrupted/stalled.
+        // A new stable final reply is stronger evidence about Goal than that lost id, but an
+        // old final seen merely by opening an idle chat is not. The prior uncertain boundary is
+        // therefore the exact fence; the stable reply id is the durable exactly-once identity.
+        const batchUncertainStartedAt = batchUncertainEndId
+          ? batchTurnStarts.get(batchUncertainEndId) ??
+            (live?.turnId === batchUncertainEndId ? live.turnStartedAt : null)
+          : null;
+        const priorUncertainStartedAt =
+          live?.turnStartedAt === null &&
+          live.lastTurnOutcome !== null &&
+          live.lastTurnOutcome !== 'completed' &&
+          live.lastTurnOutcome !== 'stopped'
+            ? live.lastTurnStartedAt
+            : null;
+        const uncertainTurnStartedAt = batchUncertainStartedAt ?? priorUncertainStartedAt;
+        const recoveredGoalEligible =
+          state === 'final' &&
+          !item.turnId &&
+          live !== undefined &&
+          uncertainTurnStartedAt !== null &&
+          item.time >= uncertainTurnStartedAt;
+        const goalEligible = item.goalEligible === true || recoveredGoalEligible;
         const written = await upsertMessageEvent(sessionId, {
           ...base,
           kind: 'assistant_message',
@@ -1553,20 +1602,25 @@ async function recordChatObservationsNow(
           messageId: item.messageId,
           state,
           final: state === 'final',
-          ...(item.goalEligible === true && state === 'final' ? { goalEligible: true } : {})
+          ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
         }, { preferTime: item.authoredTime === true });
         if (
-          item.goalEligible === true &&
-          state === 'final' &&
           written.event.kind === 'assistant_message' &&
-          written.event.messageId &&
-          written.event.turnId
+          written.event.goalEligible === true &&
+          state === 'final' &&
+          written.event.messageId
         ) {
           goalCandidates.push({
             replyId: written.event.messageId,
-            turnId: written.event.turnId,
+            turnId: written.event.turnId ?? `reply:${written.event.messageId}`.slice(0, 200),
             eventSeq: written.event.origin ?? written.event.seq
           });
+        }
+        if (recoveredGoalEligible && live) {
+          // This is an in-memory verdict for later call/reload decisions, not a fabricated
+          // turn_end. The canonical message keeps goalEligible monotonically, so an HTTP 503
+          // can still replay the same obligation even after this stronger final evidence wins.
+          recoveredGoalSeen = true;
         }
         if (!written.changed && item !== recoveredFinal) continue;
         if (item === recoveredFinal && item.turnId) {
@@ -1591,6 +1645,9 @@ async function recordChatObservationsNow(
             }
           }
           if (live) live.knownTurnEnds.add(item.turnId);
+          if (live) {
+            live.lastTurnOutcome = 'completed';
+          }
           stored++;
         }
         break;
@@ -1653,8 +1710,11 @@ async function recordChatObservationsNow(
         });
         // As above, durable journal state owns idempotency; in-memory state follows it.
         if (live) {
+          const endedStartedAt = live.turnId === item.turnId ? live.turnStartedAt : null;
           live.knownTurnEnds.add(item.turnId);
           live.openTurns.delete(item.turnId);
+          live.lastTurnOutcome = item.outcome ?? 'unknown';
+          live.lastTurnStartedAt = endedStartedAt;
           if (live.turnId === item.turnId) {
             live.turnStartedAt = null;
             live.turnId = null;
@@ -1664,6 +1724,7 @@ async function recordChatObservationsNow(
     }
     stored++;
   }
+  if (recoveredGoalSeen && live) live.lastTurnOutcome = 'completed';
   notifyChanged();
   return { sessionId, stored, goalCandidates };
 }
@@ -1819,6 +1880,8 @@ export function rebindConversation(sessionId: string, fromConversationId: string
     openTurns: new Set<string>(),
     knownTurnStarts: new Set<string>(),
     knownTurnEnds: new Set<string>(),
+    lastTurnOutcome: null,
+    lastTurnStartedAt: null,
     pageTools: new Map()
   });
   lastActiveSessionId = sessionId;
