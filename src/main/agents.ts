@@ -135,15 +135,6 @@ const MAX_CONTEXT_CHARS = 4000;
 const MAX_LABEL_CHARS = 60;
 
 /**
- * How long a Compact & Resume handover may stay open before the prime binding is released.
- *
- * The handover is the only window in which `primeConversationId` moves, so it is deliberately
- * short-lived: an unfinished one must not leave the run transferable to whatever chat opens
- * next, and an abandoned one must eventually let the prime's disappearance end the run.
- */
-export const TRANSFER_TTL_MS = 10 * 60_000;
-
-/**
  * How long a detached worker may make no proven tool call before the run puts it to sleep.
  *
  * The counterweight to {@link workerConversationGone} no longer being fatal. A closed tab is
@@ -284,10 +275,18 @@ interface Run {
    * Bookkeeping only: the authority is the session layer's continuation transaction, and
    * this just records that the prime chat is expected to go away right now.
    *
-   * `frozen` is what makes the commit safe. A handover expires while it is merely *open* —
-   * an abandoned one must not leave the run transferable forever — but the session layer
-   * freezes it before it starts the durable write, so time spent on disk can never turn a
-   * preflighted handover into an expired one and split the session from its swarm.
+   * It has no clock of its own. The continuation opens it, and the continuation ends it —
+   * by committing the move or by cancelling it when the continuation aborts — so it lives
+   * exactly as long as the transaction that owns it. An independent ten-minute deadline used
+   * to run alongside that transaction, and on 2026-09-01 it won the race: an automatic
+   * compaction whose handoff turn took eleven minutes reached its commit with a live
+   * continuation and an expired handover, the commit was refused, and the session was left
+   * stranded between chat A and chat B. Two clocks for one transaction is how that happens;
+   * there is one now.
+   *
+   * `frozen` marks the handover as committed-to: the session layer freezes it before it
+   * starts the durable write, so the run cannot be reactivated or otherwise moved out from
+   * under a commit that is already on disk.
    */
   transfer: PrimeTransfer | null;
   /**
@@ -329,6 +328,16 @@ interface DormantRun {
 }
 
 const dormantRuns = new Map<string, DormantRun>();
+/**
+ * How much parked history the broker keeps. Every dormant family is scanned on every
+ * unattributed call and, through hasDormantWorkerLeases(), turns each such call into a
+ * fifteen-second identity wait; by 2026-09-01 three days of runs had left twenty-nine
+ * families on disk, so every anonymous call waited on chats nobody would ever wake again.
+ * A family older than this, or beyond the newest MAX_DORMANT_RUNS, is dropped and its worker
+ * chats become ordinary retired leases; its prime spawns afresh if it ever comes back.
+ */
+const DORMANT_RUN_TTL_MS = 7 * 24 * 60 * 60_000;
+const MAX_DORMANT_RUNS = 16;
 
 /**
  * The earliest instant this process can honestly claim to have been watching a conversation.
@@ -598,26 +607,12 @@ function dormantRunForPrime(conversationId: string | null | undefined): DormantR
 }
 
 /**
- * Dormant worker ownership lookup by exact ChatGPT conversation.
+ * Dormant ownership lookup by exact ChatGPT conversation, prime or worker.
  *
- * Worker conversation ids are created by ChatGPT and bound exactly once, so a duplicate across
- * owners would indicate corrupted state. Fail closed by returning null rather than choosing an
- * arbitrary owner in that impossible shape.
+ * Conversation ids are bound exactly once, so a duplicate across owners would indicate
+ * corrupted state. Fail closed by returning null rather than choosing an arbitrary owner in
+ * that impossible shape.
  */
-function dormantRunForWorkerConversation(conversationId: string | null | undefined): DormantRun | null {
-  if (!conversationId) return null;
-  let found: DormantRun | null = null;
-  for (const dormant of dormantRuns.values()) {
-    const owns = [...dormant.agents.values()].some(
-      (agent) => agent.info.role === 'worker' && agent.info.conversationId === conversationId
-    );
-    if (!owns) continue;
-    if (found) return null;
-    found = dormant;
-  }
-  return found;
-}
-
 function dormantAgentForConversation(
   conversationId: string | null | undefined
 ): { owner: DormantRun; agent: Agent } | null {
@@ -648,8 +643,9 @@ function dormantAgentForConversation(
 function reactivateDormantRun(dormant: DormantRun): Run | null {
   if (run) return null;
   if (dormantRuns.get(dormant.primeConversationId) !== dormant) return null;
-  if (dormant.transfer && !transferExpired(dormant.transfer)) return null;
-  if (dormant.transfer && transferExpired(dormant.transfer)) dormant.transfer = null;
+  // A parked family with an open handover belongs to the continuation moving its prime; it
+  // comes back under the new prime chat when that commits, or here once it is cancelled.
+  if (dormant.transfer) return null;
   const prime = dormant.agents.get(PRIME_ID);
   if (!prime) return null;
   dormantRuns.delete(dormant.primeConversationId);
@@ -674,14 +670,25 @@ function reactivateDormantRun(dormant: DormantRun): Run | null {
 }
 
 /**
- * Kernel ingress hook: first-hand activity from a dormant prime/worker can reclaim its family
- * only while the global execution slot is free. The subsequent noteAgentAlive() call decides
- * whether a worker that was thought asleep is actually still running.
+ * Kernel ingress hook: a proven tool call from a parked *sleeping* worker reclaims its family
+ * while the global execution slot is free, so that the noteAgentAlive() call right after it
+ * can revive the worker the same way it would inside a live run.
+ *
+ * Inside a live run a sleeping worker that keeps calling is revived on the spot ("it never
+ * actually stopped"). Parking happens the moment the last worker is thought asleep, so the
+ * last worker of every run used to be refused WORKER_SLEEPING mid-turn for exactly the calls
+ * that would have revived any of its siblings — on 2026-09-01 six workers hit that. Whether a
+ * chat that is visibly running gets its tools must not depend on that bookkeeping accident.
+ *
+ * Nothing else reactivates here: a prime's ordinary calls, a finished or failed worker, or
+ * a family whose prime is mid-handover leave the slot alone, and a lookup never reactivates.
  */
 export function reactivateDormantRunForConversation(conversationId: string | null | undefined): boolean {
   if (run || !conversationId) return false;
-  const dormant = dormantRunForPrime(conversationId) ?? dormantRunForWorkerConversation(conversationId);
-  return dormant ? reactivateDormantRun(dormant) !== null : false;
+  const found = dormantAgentForConversation(conversationId);
+  if (!found || found.agent.info.role !== 'worker') return false;
+  if (found.agent.info.state !== 'sleeping' || !found.agent.info.revivable) return false;
+  return reactivateDormantRun(found.owner) !== null;
 }
 
 /**
@@ -978,7 +985,39 @@ function parkRun(reason: string): boolean {
   logInfo(
     `multi-agent: parked run ${current.runId} for conversation ${current.primeConversationId} — ${reason}`
   );
+  pruneDormantRuns();
   changed();
+  return true;
+}
+
+/**
+ * Drops parked families past DORMANT_RUN_TTL_MS or beyond MAX_DORMANT_RUNS, oldest parked
+ * first. A family whose prime is mid-handover is never dropped: the continuation owns it.
+ * Evicted worker chats keep the ordinary retired-worker fence so a stale tab cannot become an
+ * anonymous chat with tools the moment its history is forgotten.
+ */
+function pruneDormantRuns(now = Date.now()): boolean {
+  const candidates = [...dormantRuns.values()]
+    .filter((dormant) => !dormant.transfer)
+    .sort((a, b) => a.parkedAt - b.parkedAt);
+  const evict = candidates.filter(
+    (dormant, index) => now - dormant.parkedAt >= DORMANT_RUN_TTL_MS || candidates.length - index > MAX_DORMANT_RUNS
+  );
+  if (evict.length === 0) return false;
+  for (const dormant of evict) {
+    dormantRuns.delete(dormant.primeConversationId);
+    for (const agent of dormant.agents.values()) {
+      if (agent.info.role !== 'worker' || !agent.info.conversationId) continue;
+      retiredWorkers.set(agent.info.conversationId, {
+        id: agent.info.id,
+        conversationId: agent.info.conversationId,
+        reason: 'its parked worker history was dropped',
+        retiredAt: now
+      });
+    }
+    logInfo(`multi-agent: dropped the parked worker history of conversation ${dormant.primeConversationId}`);
+  }
+  retiredPersist?.();
   return true;
 }
 
@@ -2700,15 +2739,7 @@ export function currentRunId(): string | null {
 
 /** Whether Compact & Resume currently owns the prime binding transition. */
 export function swarmTransferActive(): boolean {
-  const transfer = run?.transfer ?? null;
-  if (!transfer) return false;
-  if (!transferExpired(transfer)) return true;
-  // An abandoned unfrozen handover is no longer authority after its existing 10-minute TTL.
-  // Clear it lazily here so it cannot turn into a permanent global swarm lock. Frozen commits
-  // never expire and transferExpired() already preserves that invariant.
-  if (run) run.transfer = null;
-  changed();
-  return false;
+  return Boolean(run?.transfer);
 }
 
 /**
@@ -2735,7 +2766,7 @@ export function swarmTransferActive(): boolean {
 export function primeConversationGone(conversationId: string): boolean {
   if (!run || run.primeConversationId !== conversationId) return false;
   // A handover in flight is the one case where the prime chat is *supposed* to go away.
-  if (run.transfer && !transferExpired(run.transfer)) return false;
+  if (run.transfer) return false;
   const prime = run.agents.get(PRIME_ID);
   // A terminal worker report is still part of the run until the prime has actually received
   // and acknowledged it. Ending the run merely because every worker is now terminal destroys
@@ -3014,10 +3045,6 @@ export function sleepSilentDetachedWorkers(now = Date.now()): FinishResult[] {
   return out;
 }
 
-/** A frozen handover never expires: it is mid-commit, and the commit must be able to finish. */
-const transferExpired = (transfer: { at: number; frozen: boolean }): boolean =>
-  !transfer.frozen && Date.now() - transfer.at > TRANSFER_TTL_MS;
-
 /**
  * Notes that the app's own Compact & Resume is moving this session to a new chat.
  *
@@ -3066,7 +3093,7 @@ export function cancelPrimeTransfer(conversationId: string): void {
  *                   to be inconsistent with.
  *
  * A freeze whose commit does not happen is released with {@link thawPrimeTransfer}, which
- * restarts the clock without abandoning the handover, so a retry is still possible.
+ * leaves the handover open, so a retry is still possible.
  */
 export function freezePrimeTransfer(fromConversationId: string): 'absent' | 'unavailable' | 'frozen' {
   const owner =
@@ -3075,23 +3102,21 @@ export function freezePrimeTransfer(fromConversationId: string): 'absent' | 'una
       : dormantRunForPrime(fromConversationId);
   if (!owner) return 'absent';
   const transfer = owner.transfer;
-  if (!transfer || transfer.from !== fromConversationId || transferExpired(transfer)) return 'unavailable';
+  if (!transfer || transfer.from !== fromConversationId) return 'unavailable';
   if (!owner.agents.has(PRIME_ID)) return 'unavailable';
   transfer.frozen = true;
   return 'frozen';
 }
 
-/** Undoes a freeze whose commit did not happen, leaving the handover open but expiring again. */
+/** Undoes a freeze whose commit did not happen, leaving the handover open. */
 export function thawPrimeTransfer(fromConversationId: string): void {
   if (run?.transfer?.from === fromConversationId) {
     run.transfer.frozen = false;
-    run.transfer.at = Date.now();
     return;
   }
   const dormant = dormantRunForPrime(fromConversationId);
   if (!dormant?.transfer || dormant.transfer.from !== fromConversationId) return;
   dormant.transfer.frozen = false;
-  dormant.transfer.at = Date.now();
 }
 
 /**
@@ -3171,6 +3196,37 @@ export function dormantWorkerNotice(conversationId: string | null | undefined): 
     `WORKER_SLEEPING: ${agent.info.id} belongs to the dormant worker history owned by its prime conversation. ` +
     'Nothing was run. Stay stopped until that prime sends a new agents message into this exact chat.'
   );
+}
+
+/**
+ * Worker chats whose tabs the browser may close, oldest first.
+ *
+ * A worker that has stopped — asleep, finished or failed — holds no slot and needs no page:
+ * a sleeping one is woken by opening its chat again, and a terminal one is never opened
+ * again. Its tab is pure cost, and by the end of a long run that cost is the machine: on
+ * 2026-09-01 thirteen workers left Chrome at thirty-four processes and five gigabytes with
+ * the prime still working. So all but the `keep` most recently used stopped worker chats
+ * are handed to the browser to close, across the active run and every parked family.
+ * Recency is the last thing that happened to the worker, so a chat the prime keeps coming
+ * back to stays open while ones it has moved on from go.
+ */
+export function closableWorkerConversations(keep: number): string[] {
+  const stopped: Array<{ conversationId: string; usedAt: number }> = [];
+  const families = run ? [run.agents, ...[...dormantRuns.values()].map((dormant) => dormant.agents)] : [...dormantRuns.values()].map((dormant) => dormant.agents);
+  for (const agents of families) {
+    for (const agent of agents.values()) {
+      const info = agent.info;
+      if (info.role !== 'worker' || !info.conversationId || unpublishedAgents.has(agent)) continue;
+      if (info.state !== 'sleeping' && info.state !== 'finished' && info.state !== 'failed') continue;
+      stopped.push({
+        conversationId: info.conversationId,
+        usedAt: Math.max(info.activatedAt ?? 0, info.sleptAt ?? 0, info.finishedAt ?? 0, info.lastSeenAt ?? 0)
+      });
+    }
+  }
+  stopped.sort((a, b) => a.usedAt - b.usedAt);
+  const surplus = Math.max(0, stopped.length - Math.max(0, keep));
+  return stopped.slice(0, surplus).map((entry) => entry.conversationId);
 }
 
 /** Any dormant worker conversation remains an identity fence, reusable or terminal. */
@@ -3746,6 +3802,8 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
         transfer: null
       });
     }
+    // Disk is the one place old history accumulates unchecked between parkings.
+    if (pruneDormantRuns()) repaired = true;
   }
 
   const hasActive =

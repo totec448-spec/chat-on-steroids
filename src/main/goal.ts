@@ -422,8 +422,12 @@ function persistGoalRepliesSoon(): void {
  * it costs nothing because the obligation it was drafted for is still on file.
  */
 export function goalDraftBusy(conversationId: string): boolean {
-  const stage = drafts.get(conversationId)?.stage;
-  return stage === 'sending' || stage === 'answering';
+  const draft = drafts.get(conversationId);
+  // An acknowledged draft is spent whatever stage it was in: run() returns early without
+  // settling the stage when the draft was retired mid-request, and reporting that as busy
+  // kept the owed-goal inspection from ever nudging the chat again.
+  if (!draft || draft.acknowledged) return false;
+  return draft.stage === 'sending' || draft.stage === 'answering';
 }
 
 export function goalPendingReplyFor(

@@ -6,7 +6,7 @@
  * ipcRenderer itself is never exposed.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppState, Capabilities, Config, Diagnosis, LogEntry } from '../shared/types.js';
 import type {
   Handoff,
@@ -67,6 +67,8 @@ const api = {
   getState: () => call<AppState>('state:get'),
   saveSettings: (patch: SettingsPatch, base: SettingsPatch) => call<AppState>('settings:save', { patch, base }),
   addRoot: () => call<AppState>('roots:add'),
+  /** A folder dropped on the window; only the preload can learn a dropped File's path. */
+  addRootPath: (file: File) => call<AppState>('roots:addPath', { path: webUtils.getPathForFile(file) }),
   removeRoot: (name: string) => call<AppState>('roots:remove', { name }),
   renameRoot: (name: string, newName: string) => call<AppState>('roots:rename', { name, newName }),
   setApiKey: (value: string) => call<AppState>('secret:set', { value }),

@@ -1,310 +1,211 @@
 <div align="center">
   <img src="extension/icons/icon128.png" width="88" alt="Chat On Steroids icon" />
   <h1>Chat On Steroids</h1>
-  <p><strong>Give ChatGPT a controlled bridge to your computer.</strong></p>
-  <p>Local files, commands, durable session history, Compact &amp; Resume, experimental worker chats, and optional Windows desktop control over MCP.</p>
+  <p><strong>ChatGPT, with hands on your computer.</strong></p>
+  <p>A local MCP server that gives ChatGPT the same tool shapes Codex uses: read, search, patch, run commands, drive a terminal. Plus worker chats, a session history that survives the context window, and a loop that keeps typing "keep going" so you don't have to.</p>
   <p>
-    <a href="../../releases/latest"><strong>Download</strong></a>
-    · <a href="#three-minute-setup">Setup</a>
-    · <a href="#permissions-and-security-boundaries">Security</a>
+    <a href="../../releases/latest"><strong>Download the latest release</strong></a>
+    · <a href="#quick-start">Quick start</a>
+    · <a href="#what-chatgpt-gets">Tools</a>
+    · <a href="#security-in-one-page">Security</a>
     · <a href="CHANGELOG.md">Changelog</a>
   </p>
 </div>
 
 <p align="center">
-  <img src="docs/images/app-home.jpg" width="68%" alt="Chat On Steroids Home screen" />
-  <img src="docs/images/extension-popup.jpg" width="23%" alt="Chat On Steroids Chrome extension" />
+  <img src="docs/images/app-home.jpg" width="68%" alt="Chat On Steroids home screen with permissions, folders and setup steps" />
+  <img src="docs/images/extension-popup.jpg" width="23%" alt="The companion Chrome extension popup" />
 </p>
 <p align="center">
-  <img src="docs/images/app-chat.jpg" width="92%" alt="Chat On Steroids session timeline" />
+  <img src="docs/images/app-chat.jpg" width="92%" alt="A recorded session timeline with real tool calls" />
 </p>
 
-Chat On Steroids is a Windows, macOS and Linux desktop app that exposes only the folders and capabilities you configure through a local MCP server. You keep using ChatGPT in the browser. The app is the permission boundary and local executor; the companion Chrome extension adds browser-side chat attribution, session capture, richer tool rows, Compact & Resume, and experimental multi-agent coordination. Screen/mouse/keyboard/clipboard automation remains Windows-only and is omitted from the macOS/Linux product surface.
+## Why this exists
+
+ChatGPT is a good engineer trapped in a text box. Developer mode lets it call MCP servers, but most servers give it one narrow API. This one gives it a workbench.
+
+- **Codex-grade tools.** `apply_patch`, `exec_command` and `write_stdin` are ports of the tool contracts OpenAI's Codex CLI uses, so the model already knows how to hold them. Multi-file patches are preflighted before anything is written. Commands run as real processes with interactive stdin, output budgets and background results it can collect later.
+- **Sub agents inside ChatGPT.** One prime chat can spawn worker chats, hand them tasks, read their reports and wake them again later. Workers are ordinary ChatGPT conversations in your own browser, brokered by the app, so you can watch every one of them.
+- **Sessions that outlive the context window.** Every tool call is recorded locally with its real result. When a chat gets heavy, Compact & Resume asks it for a handoff brief, opens a fresh chat and moves the same local session across. The new chat can query everything the old one did.
+- **Goal and Loop.** A second model reads each finished answer and writes the next user message, either until a stated goal is met or until you switch it off. Long unattended runs stop needing a human to type "continue".
+- **You stay the permission boundary.** Only the folders you approve are visible. Each capability is a switch. Read-only mode is a single kill switch. Nothing runs on this machine that you did not turn on.
+
+It runs in the tray, hosts no model of its own, and works with the ChatGPT you already use in the browser.
 
 ## Download
 
 | Platform | x64 | ARM64 |
 | --- | --- | --- |
-| **Windows** | [EXE](../../releases/latest/download/Chat-On-Steroids-Setup-x64.exe) | [EXE](../../releases/latest/download/Chat-On-Steroids-Setup-arm64.exe) |
+| **Windows** | [Installer](../../releases/latest/download/Chat-On-Steroids-Setup-x64.exe) | [Installer](../../releases/latest/download/Chat-On-Steroids-Setup-arm64.exe) |
 | **macOS** | [DMG](../../releases/latest/download/Chat-On-Steroids-macOS-x64.dmg) · [ZIP](../../releases/latest/download/Chat-On-Steroids-macOS-x64.zip) | [DMG](../../releases/latest/download/Chat-On-Steroids-macOS-arm64.dmg) · [ZIP](../../releases/latest/download/Chat-On-Steroids-macOS-arm64.zip) |
 | **Linux** | [AppImage](../../releases/latest/download/Chat-On-Steroids-Linux-x64.AppImage) · [DEB](../../releases/latest/download/Chat-On-Steroids-Linux-x64.deb) | [AppImage](../../releases/latest/download/Chat-On-Steroids-Linux-arm64.AppImage) · [DEB](../../releases/latest/download/Chat-On-Steroids-Linux-arm64.deb) |
 
-Every package is architecture-specific and carries matching Electron/native dependencies, `tunnel-client`, ripgrep and the Chrome extension. Windows uses a per-user-capable assisted installer; macOS ships DMG/ZIP; Linux ships AppImage and Debian packages. **On Debian/Ubuntu, prefer the DEB.** The portable AppImage uses electron-builder's static launcher; if the host disables unprivileged user namespaces, that launcher can fall back to starting Chromium with `--no-sandbox` so the app can still run. On such restrictive hosts, use the DEB when you do not want that AppImage fallback. In packaged builds **Open extension folder** points at a stable per-user copy of the bundled extension, so Chrome's **Load unpacked** path survives AppImage remounts and app upgrades. A standalone [extension zip](../../releases/latest/download/Chat-On-Steroids-Extension.zip) is attached too for manual installs.
+Every package ships with matching native dependencies, a pinned `tunnel-client`, ripgrep and the Chrome extension for that CPU. A standalone [extension zip](../../releases/latest/download/Chat-On-Steroids-Extension.zip) is attached for manual installs, and [`SHA256SUMS.txt`](../../releases/latest/download/SHA256SUMS.txt) lists every hash.
 
-Every release includes [`SHA256SUMS.txt`](../../releases/latest/download/SHA256SUMS.txt). Verify an installer before running it, then compare the printed hash with the matching line in that file:
+**Debian and Ubuntu: prefer the DEB.** The AppImage uses electron-builder's static launcher. On a host that disables unprivileged user namespaces, that launcher can fall back to starting Chromium with `--no-sandbox` so the app still opens. If you do not want that fallback, use the DEB.
 
-Windows PowerShell:
+**The builds are not publisher-signed yet**, and macOS builds are not notarized. SmartScreen, Gatekeeper or your browser will warn. Verify the hash first, then use the normal "run anyway" path, or [build from source](#building).
+
 ```powershell
-Get-FileHash .\Chat-On-Steroids-Setup-x64.exe -Algorithm SHA256
+Get-FileHash .\Chat-On-Steroids-Setup-x64.exe -Algorithm SHA256   # Windows
 ```
-
-macOS / Linux:
 ```sh
-shasum -a 256 Chat-On-Steroids-macOS-arm64.dmg   # macOS
-sha256sum Chat-On-Steroids-Linux-x64.AppImage   # Linux
+shasum -a 256 Chat-On-Steroids-macOS-arm64.dmg    # macOS
+sha256sum Chat-On-Steroids-Linux-x64.AppImage     # Linux
 ```
 
-### Beta, with real permissions
-
-> **Fresh installs start with the full Core capability set enabled and read-only mode off.** Review the Home permission panel before connecting ChatGPT. **Run commands** can execute arbitrary programs as your logged-in OS user. Windows also starts the optional Desktop permissions enabled; macOS/Linux do not expose Desktop automation at all.
->
-> Use a project folder, not your whole profile, drive or filesystem root. Work on code that is committed or backed up. Path containment is defence in depth, not a kernel sandbox. Release binaries are currently publisher-unsigned; OS/browser trust prompts are expected. See [Permissions and security boundaries](#permissions-and-security-boundaries) and [`SECURITY.md`](SECURITY.md).
-
-## What it adds
-
-| Area | What ChatGPT gets |
-| --- | --- |
-| Files | Bounded read/search plus preflighted multi-file text patches inside approved roots |
-| Commands | Native shell processes and interactive terminal sessions, when enabled |
-| Desktop | **Windows only:** screenshots, window/control inspection, mouse, keyboard and clipboard permissions |
-| Sessions | Local durable history, real tool-call evidence and Compact & Resume |
-| Workers | Experimental prime/worker chats with deterministic local routing |
-| Goal loop | Optional: a second model writes your next message until the goal is met (needs an OpenRouter key) |
-| Loop | The same loop with no stopping condition: it answers every finished turn until you switch it off |
-
-The app has no replacement chat UI and does not host a model. It runs quietly in the system tray/menu bar and bridges ChatGPT to capabilities on the computer you already use.
+> **This is a beta with real permissions.** A fresh install starts with the full Core capability set on, read-only mode off, multi-agent mode on with two workers, and, on Windows, the Desktop permissions on. Review the Home panel before you connect ChatGPT. `exec_command` runs programs as your logged-in user. Approve a project folder, not your home directory, and work on code that is committed somewhere.
 
 ## Requirements
 
-- **Windows 10/11**, **macOS 12 Monterey or newer**, or a modern desktop **Linux** distribution, on x64 or ARM64 matching the downloaded build.
-- **Chrome 116+** if you want session attribution, Compact & Resume, Overwrite, or worker chats.
-- **Linux:** a working Secret Service/keyring backend such as GNOME Keyring or KWallet when you use stored API keys or the companion extension. Electron's unencrypted `basic_text` fallback is deliberately refused.
-- A ChatGPT workspace where **Developer mode** and custom MCP apps are available on the web. OpenAI currently documents full MCP support, including write/modify actions, as a **beta rollout for Business, Enterprise and Edu**; **Pro** can connect custom MCPs for read/fetch only. Business developer mode is admin/owner controlled, while Enterprise/Edu can additionally use workspace permissions/RBAC. Availability, policy and UI can change, so check OpenAI's current [Developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt) documentation if your workspace differs.
+- **Windows 10/11**, **macOS 12 Monterey or newer**, or a current desktop **Linux**, on x64 or ARM64 matching the build you downloaded.
+- **Chrome 116 or newer** for the companion extension. Without it you still get the MCP tools, but not session attribution, Compact & Resume, worker chats or the Goal loop.
+- **Linux:** a Secret Service keyring such as GNOME Keyring or KWallet. The app refuses Electron's unencrypted `basic_text` fallback for stored keys.
+- A ChatGPT workspace with **Developer mode** and custom MCP apps. OpenAI currently documents full MCP support, including write actions, as a beta for Business, Enterprise and Edu, with Pro limited to read and fetch. Business needs an admin to enable it. Check OpenAI's [Developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt) page if your workspace looks different.
+- An **OpenRouter API key** only if you want Goal or Loop. Everything else works without one.
 
-Use a normal ChatGPT conversation with the custom app enabled. OpenAI's built-in **Agent mode** currently does not use custom apps; Chat On Steroids' experimental worker chats are a separate browser-augmentation feature.
+Use a normal ChatGPT conversation with the custom app enabled. OpenAI's built-in Agent mode does not use custom apps.
 
-The recommended connection uses OpenAI's Secure MCP Tunnel. Release builds bundle a pinned, checksum-verified [`tunnel-client`](https://github.com/openai/tunnel-client/releases) for the installer's CPU architecture. An **explicit binary path you configure** wins; otherwise the bundled tested copy wins, with `PATH` / normal install locations used only as fallback. Cloudflare and self-hosted HTTPS tunnels remain available as alternatives.
+## Quick start
 
-## Three-minute setup
+1. Install the build for your CPU and open Chat On Steroids. It lives in the tray or menu bar.
+2. On **Home**, review the permissions and approve a project folder. Press **Add**, or drop the folder onto the Folders card.
+3. Create an OpenAI Secure MCP Tunnel and a restricted API key, then press **Connect**. Details below.
+4. In ChatGPT on the web, enable Developer mode and create the **Core** app from the tunnel. On Windows, create the **Desktop** app too if you left screen and input control on.
+5. Press **Open extension folder**, open `chrome://extensions`, enable Developer mode, choose **Load unpacked** and select that folder. Pairing is automatic.
 
-1. Install the build for your CPU and open Chat On Steroids.
-2. **Review permissions**, then approve one or more project folders.
-3. Create an OpenAI Secure MCP Tunnel and a restricted API key with **Tunnels: Read** and **Use**.
-4. In ChatGPT on the web, enable Developer mode and create the Core app. On Windows, create the Desktop app too if you enabled screen/control/clipboard permissions. Your workspace admin may need to grant or enable Developer mode first.
-5. In Chat On Steroids, press **Open extension folder**. In `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder. Pairing is automatic.
+The Setup tab marks each hop done only once the app has actually seen traffic on it.
 
-The Setup tab tracks each hop and only marks it complete once that side of the chain has actually been observed.
+### OpenAI Secure MCP Tunnel (recommended)
 
-### OpenAI Secure MCP Tunnel
-
-1. In [Platform → Tunnels](https://platform.openai.com/settings/organization/tunnels), create a tunnel in the **same workspace you use in ChatGPT** and copy its ID (`tunnel_…`).
+1. In [Platform → Tunnels](https://platform.openai.com/settings/organization/tunnels), create a tunnel in the same workspace you use in ChatGPT and copy its id (`tunnel_…`).
 2. In [Platform → API keys](https://platform.openai.com/settings/organization/api-keys), create a **Restricted** key with only **Tunnels: Read** and **Tunnels: Use**.
 3. Paste both into the Setup tab and press **Connect**.
-4. In ChatGPT on the web, enable Developer mode from **Settings → Apps → Advanced settings**, or from the workspace Apps area. Business workspaces require an admin/owner; Enterprise/Edu may also require RBAC access from an admin.
-5. Create a custom app, choose **Tunnel**, select the tunnel, review the discovered actions, and publish/enable it as your workspace requires.
+4. In ChatGPT, enable Developer mode under **Settings → Apps → Advanced settings** and create a custom app of type **Tunnel**. Review the discovered actions and enable it.
 
-For OpenAI tunnels, Core and the optional **Windows-only** Desktop surface use separate tunnel IDs because ChatGPT addresses each custom app as one endpoint.
+Core and the Windows-only Desktop surface use separate tunnel ids, because ChatGPT treats each custom app as one endpoint. Release builds bundle a checksum-verified `tunnel-client`; a path you set explicitly wins over it, and `PATH` is only a fallback.
 
-### Cloudflare quick tunnel
+### Other tunnels
 
-Press **Connect**, copy the URL the app shows, and use it as the MCP server URL when creating the custom app in ChatGPT. The URL is public and its random path is the capability secret, so treat the complete URL like a password. It changes when the app restarts.
+**Cloudflare quick tunnel:** press **Connect**, copy the URL and use it as the MCP server URL in ChatGPT. The random path in that URL is the secret. It changes on every restart.
 
-### Run your own tunnel
+**Your own HTTPS tunnel:** point it at the loopback URL the app shows and give ChatGPT the public equivalent, secret path included.
 
-Point your own HTTPS tunnel at the loopback URL shown by the app and give ChatGPT the public equivalent, including the secret path.
+After changing permissions, refresh or recreate the custom app in ChatGPT and start a new conversation. ChatGPT caches the action list it reviewed, and the app does not pretend to hot-patch a cached schema.
 
-After changing permissions or tool shape, refresh/review the custom app in ChatGPT, or recreate it if your workspace does not expose a refresh action, then start a new conversation. ChatGPT can retain the previously reviewed action set, so the desktop app does not pretend it can hot-rewrite an already cached schema.
+## What ChatGPT gets
 
-### Experimental browser augmentation and OpenAI terms
-
-The MCP connector uses ChatGPT's documented Developer mode and Secure MCP Tunnel path. The **companion extension is different**: it observes ChatGPT's web UI, records browser-rendered conversation state locally, and the experimental worker feature opens and seeds additional ChatGPT tabs. Those browser-augmentation paths are experimental and are **not a documented public ChatGPT automation API**. Depending on the account and workflow, OpenAI terms and policies around automated extraction, rate limits, access controls, safeguards and permitted use may apply. **Review the agreement that governs your account before using the extension or multi-agent mode.** Do not use these features to scrape or bulk-extract ChatGPT data, evade limits or confirmations, or bypass access and safety controls. See OpenAI's [Terms and policies](https://openai.com/policies/), [Services Agreement](https://openai.com/policies/services-agreement/) and current [Developer mode documentation](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt).
-
-### Unsigned release builds
-
-Release binaries are not yet publisher-signed, and macOS builds are unnotarized, so Windows SmartScreen, macOS Gatekeeper or your browser may warn about an unverified download. Apple-silicon Mach-O files can contain ad-hoc signatures required by the platform; those do not identify a publisher. Verify the SHA-256 first. On Windows, **More info → Run anyway** is the SmartScreen path; on macOS use the normal system-approved open flow only after verifying the file. If you do not want to run an unverified binary, [build from source](#building) instead.
-
-## Permissions and security boundaries
-
-Fresh installs intentionally start the **Core** surface fully enabled: file/search/write permissions, command execution, session recording and experimental multi-agent mode are on; read-only mode is off. Windows additionally enables the optional Desktop permissions. macOS/Linux force those Desktop capabilities off at runtime while preserving any stored Windows choices in a config moved between machines. Existing installs otherwise keep their stored choices.
-
-The important boundaries are simple:
-
-- **File tools are limited to approved folders.** Paths are validated and canonicalised before access. This is application-level containment, not an OS or VM sandbox; same-user filesystem races remain possible.
-- **Commands are not folder-sandboxed.** `exec_command` starts in an approved folder but then runs with your normal logged-in user privileges and can reach anything that account can reach.
-- **Desktop control is Windows-only and not folder-scoped.** Screen capture, mouse/keyboard input and clipboard access apply to the Windows desktop when their permissions are enabled.
-- **The MCP server is loopback-only.** A random secret path protects each local connector. ChatGPT reaches it through the tunnel you configure; treat any complete public tunnel URL as a secret.
-- **Secrets use Electron `safeStorage`**: DPAPI on Windows, Keychain on macOS, and a desktop secret store such as libsecret/KWallet on Linux. The app refuses Linux's unencrypted `basic_text` fallback and explains how to enable a keyring.
-- **The browser bridge is separate and loopback-only.** It exists for the companion extension and does not expose file, command or settings routes.
-
-Read-only mode is the fast kill switch for local mutation: it disables file writes, command execution, desktop control and clipboard writes while leaving read-only capabilities available. See [`SECURITY.md`](SECURITY.md) for reporting and scope.
-
-## Connectors and tools
-
-Chat On Steroids publishes Core everywhere and an additional Desktop app on Windows:
-
-| Connector | Purpose | Current tool names |
+| Connector | Tools | What they do |
 | --- | --- | --- |
-| **Core** | Approved files, search, patches, terminal, session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` |
-| **Desktop** | **Windows only:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
+| **Core** (all platforms) | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` | Bounded reads and search inside approved folders, preflighted multi-file patches, shell commands and interactive terminals, lookups into the recorded session, and worker chat control |
+| **Desktop** (Windows only) | `observe`, `computer` | Screenshots, window and control inspection, mouse, keyboard and clipboard |
 
-Core declares eight possible names but exposes at most seven at once because `find` is the no-shell search fallback and is mutually exclusive with the command pair. Desktop is optional and Windows-only. Revoking a permission takes effect immediately even if ChatGPT still shows a schema cached earlier; refresh the app in ChatGPT and start a new chat when you change the exposed tool shape.
+Core exposes at most seven tools at once: `find` is the no-shell search fallback and steps aside when commands are enabled. Revoking a permission takes effect immediately, even while ChatGPT still shows the old schema. The full contract lives in [`docs/tool-surface.md`](docs/tool-surface.md).
 
-The public tool contract and permission mapping live in [`docs/tool-surface.md`](docs/tool-surface.md).
+Every call is answered with a structured outcome the model can act on. A refused call says why and what to do next, whether that is a missing permission, a folder outside the approved roots, unread background results it has to collect first, or a chat that lost its identity.
 
-## Session recording and the extension
+## Sessions and the extension
 
-Session recording is **on by default for new installs** and can be disabled. It stores the local history needed for the Chat timeline and `session` lookup under the app's per-user data directory: `%APPDATA%\chat-on-steroids\sessions\` on Windows, `~/Library/Application Support/chat-on-steroids/sessions/` on macOS, and `${XDG_CONFIG_HOME:-~/.config}/chat-on-steroids/sessions/` on Linux. The small Activity log is separate, capped, redacted and memory-only. Session retention defaults to 30 days.
+Recording is on by default and can be switched off. The app keeps a durable local history of every conversation the extension can see: the messages, each tool call, and the real result the app returned. That history feeds the Chat timeline in the app and the `session` tool, so ChatGPT can search what it did last week instead of guessing. Retention defaults to 30 days. Data lives under the app's per-user directory: `%APPDATA%\chat-on-steroids\sessions\` on Windows, `~/Library/Application Support/chat-on-steroids/sessions/` on macOS, `${XDG_CONFIG_HOME:-~/.config}/chat-on-steroids/sessions/` on Linux.
 
-The bundled Chrome extension adds browser-side conversation identity, page-visible transcript capture, richer tool rows, Compact & Resume, and worker-tab coordination. It runs only on `chatgpt.com` / `chat.openai.com` plus the app's loopback bridge ports. App and extension versions move together, so after updating the app, use **Reload** for the unpacked extension in `chrome://extensions`.
+The extension runs only on `chatgpt.com` and `chat.openai.com` plus the app's loopback bridge. It proves which conversation made each MCP call, captures the visible transcript, draws richer tool rows in the chat, and coordinates worker tabs. App and extension are versioned together: after updating the app, press **Reload** on the unpacked extension.
+
+### The sheet beside the composer
+
+<p align="center">
+  <img src="docs/images/composer-sheet.png" width="62%" alt="The sheet next to the ChatGPT composer: an Auto-compaction toggle, an Off / Goal / Loop slider, an add task line and a Compact and resume now button" />
+</p>
+
+One gear next to the ChatGPT composer holds the per-chat controls: automatic compaction, the Off / Goal / Loop slider, a task for this chat, and a manual Compact & resume. In a worker chat these are locked, because a worker's prime already drives it.
 
 ### Compact & Resume
 
-For long recorded sessions, the app estimates context pressure locally. Fresh installs warn around **400k estimated tokens**, use **533k** as the limit marker, and enable automatic compaction at 400k. These are local estimates, not ChatGPT's private context counter.
+The app estimates context pressure locally. Fresh installs warn at about 400k estimated tokens, mark 533k as the ceiling, and compact automatically at 400k. These are local estimates, not ChatGPT's own counter.
 
-Compact & Resume asks the current chat to write a handoff, stores it locally, opens a fresh ChatGPT conversation and rebinds the **same local session** to it. Each source and replacement send has a durable pre-send checkpoint tied to a marked ChatGPT message, so refreshing, closing or restarting the browser/app does not make a document-local capture the owner and cannot submit either prompt twice. Manual and automatic compaction use this same transaction. The original session remains intact if the handoff cannot be completed.
+Compact & Resume asks the current chat for a handoff brief, stores it, opens a fresh conversation and rebinds the same local session to it. While the brief is being written the old chat is refused every tool, so a turn that will not stop cannot keep changing the machine the brief describes. Both sends carry durable checkpoints tied to marked ChatGPT messages, so a refresh, a closed tab or an app restart cannot submit either prompt twice or lose the session between the two chats. If the handoff cannot complete, the original session stays where it was. Goal, task and worker history all move with it.
 
-<p align="center">
-  <img src="docs/images/composer-gear-sheet.png" width="52%" alt="Gear sheet beside the ChatGPT composer; in worker chats Auto-compaction and Goal are locked off and Compact and Resume is unavailable" />
-</p>
+### Goal and Loop
 
-### The goal loop (optional, off by default)
+Long jobs are mostly you typing "carry on" for an hour. **Goal** hands that to a second model: after every finished answer it reads the conversation and either writes your next message or decides the job is done. The shipped prompt is deliberately eager. It keeps going while anything you asked for is missing, promised rather than done, or answered with a question, and it refuses to invent work you never asked for.
 
-Long tasks are mostly you typing "carry on" for an hour. With the goal loop on, a second model
-reads each answer ChatGPT finishes. The shipped prompt is deliberately eager: it keeps going while
-any concrete task or question you actually asked for is not yet clearly completed or answered,
-including requested checklist items the latest answer simply omitted. It stops only when ChatGPT
-clearly presents the whole request as done and all requested questions as answered. That explicit
-all-done claim is still authoritative, so the second model does not invent extra testing, polish
-or follow-up after a genuinely finished task.
+**Loop** is the same machinery with the exit removed. Every finished turn gets a reply, and the only thing that ends it is the slider going back to Off. Its prompt spends most of its length on what a model that must always speak gets wrong: it restates the whole job instead of circling one detail, and when everything looks done it asks for another pass that verifies, hardens and tests. The app enforces the no-stop rule too. The model is sent a response schema without a stop action, an answer that tries anyway is asked again, and a third refusal fails the turn rather than typing something the model never wrote.
 
-It runs only when a turn has genuinely finished. The strongest signal is ChatGPT's exact Fiber
-`end_turn` evidence for the current response. When that bit is missing, the extension stays
-conservative: Stop must remain gone through the four-second settle window, the answer and tool
-rail must be quiet, no connector call may still be unanswered, and a fresh completed-message
-action must belong to the exact terminal assistant section. Hidden tabs do not depend on a
-throttled debounce timer to notice the final Stop removal. A message sent into a turn that is
-still working would read as a correction to it, so ambiguous/interim states stay open.
+**Add a task** gives one chat a specific goal in your own words. The loop drives toward that text, quotes it back when ChatGPT quietly narrows the job, and stops when it is reached. In a new chat the task also writes the first message. Tasks are per chat and durable: they survive reopening, and Compact & Resume carries them to the replacement chat.
 
-**Loop: the same loop, with no way to stop.** Goal ends when it decides the job is done, and
-that judgement is the part that goes wrong on a long unattended run — one over-confident "all
-done" from ChatGPT and the run is over. **Loop** is the same machinery with that decision
-removed: every finished turn gets a message back, and the only thing that ends the run is the
-Loop switch going off again. Goal and Loop are the two positions of one setting, so exactly one
-of them can be on and turning either on turns the other off. It uses its own editable prompt,
-which spends most of its length on the two things a model that must always speak gets wrong: it
-tells it to come back to the whole job and restate the requirements rather than circling one
-detail, and, when everything looks finished, to say so and ask for another pass — verify it
-runs, harden what was rushed, cover what is untested — instead of inventing new work. It works
-with or without a specific goal. The guarantee is enforced by the app as well as the prompt: the
-model is sent a response schema with no stop in it, an answer that tries to stop anyway is asked
-again, and if it still refuses the turn fails *retryably* rather than typing a sentence the model
-never wrote.
+The loop only fires when a turn has really ended, judged from ChatGPT's own end-of-turn evidence with a conservative fallback when that is missing. A turn you stopped by hand is left alone. Only your messages and ChatGPT's final answers leave the machine; tool calls, their results and the commentary in between never do.
 
-**Give one chat a specific goal.** The gear beside the composer has an **add specific goal**
-line under the two switches. Write what the chat has to reach, press Save, and the same loop
-prompts towards that goal until it is reached, then stops without forgetting the goal text. A
-goal is enough on its own: you do not have to turn the standing switch on as well. In a **New
-Chat** it also writes the first message, so a goal is all you have to type. Goals are durable and
-per-chat: reopening an old finished chat restores its goal in the UI without automatically
-starting stale work, and **Compact & Resume transfers the same goal to the replacement chat** so
-an unattended chain can keep pursuing it across multiple resumptions. The goal stays until you
-clear or replace it. A worker chat spawned by an agent run cannot be given one — its prime already
-writes its messages, and the sheet says so.
+It needs an OpenRouter key, stored encrypted and used only by the app. Model, reasoning level and the three editable prompts live under **Chat → Settings**, each with a one-click restore. This spends credit on every finished turn and sends messages without asking each time. Switch it off when you are not watching.
 
-The loop also answers a turn ChatGPT cut short by itself, not only one it finished cleanly. A
-turn you stopped by hand is still left alone: you are about to type something yourself.
+### Multi-agent mode
 
-What is sent is only your messages and ChatGPT's final answers. Tool calls, their results and
-the commentary a turn produces while it works never leave the machine; a recorded session holds
-file contents and command output, and none of that belongs in a chat message.
+One prime chat can open up to eight worker chats (two by default; three at once reliably trips ChatGPT's rate limit) and exchange brokered messages with them through the `agents` tool. Workers cannot talk to each other.
 
-It needs an **OpenRouter API key**, which is stored encrypted alongside the app's other secrets
-and never reaches the browser: the request is made by the app. Set the key, model, reasoning level
-and the three editable system prompts — the gate, the goal driver and the loop — under
-**Chat → Settings**; each prompt editor includes a one-click restore to its shipped default. The model picker lists OpenRouter's catalogue newest first,
-twenty at a time. Both switches are also on the gear beside the ChatGPT composer, together
-with automatic compaction. A finished or failed Goal status stays visible above the composer for the
-finished turn, can be dismissed immediately with its top-right ×, and clears automatically when
-you send the next prompt, open New Chat or switch conversations.
+Workers are reusable conversations. When one reports its result it goes to sleep, frees its slot and keeps its full chat. Messaging it again wakes the same conversation: the extension focuses the tab if it is still open, or the app reopens the stored `/c/…` URL and types the new instruction there. A worker that keeps calling tools after the app thought it asleep is simply revived, because a chat that is visibly working is not asleep. At about 400k recorded tokens a worker becomes non-revivable after its next stop. Workers never compact themselves. Stopped worker tabs beyond the few most recently used are closed to keep Chrome's memory in check.
 
-Goal decisions use OpenRouter strict JSON Schema with parameter-aware provider routing,
-reasoning excluded from the returned response, and Response Healing for malformed JSON. The app
-validates the result again locally: wrapped `NO_REPLY`, tokenizer markers such as
-`<|begin_of_sentence|>`, reasoning tags, malformed schemas and empty normalized replies stop or
-fail closed and are never typed into ChatGPT.
+Each prime owns its worker history. If the last worker sleeps, the run is parked and another chat can start its own workers; the original prime still sees its full history in `agents action=status`, can spawn fresh workers, and can wake old ones when the execution slot is free. Turning multi-agent off pauses execution and keeps that history. **Clear swarm** is what discards it.
 
-This spends your OpenRouter credit on every finished turn, and it sends messages to ChatGPT
-without asking each time. Turn it off when you are not watching. The terms note in
-[Experimental browser augmentation and OpenAI terms](#experimental-browser-augmentation-and-openai-terms)
-applies here too.
+Identity is fail-closed. Spawning, messaging and every other identity-sensitive action needs the extension to prove which conversation made the call. A chat used from somewhere the extension cannot see, such as the phone app, still gets the ordinary Core tools but not agent control.
 
-### Multi-agent mode (experimental)
+### Blocking a chat
 
-Fresh installs currently enable multi-agent mode with **two workers** by default; the hard maximum is eight. One prime chat can open worker chats and exchange brokered messages with them. Workers cannot message each other directly.
+A wedged ChatGPT page can leave a turn running with no working Stop button while the model keeps calling tools. The app cannot end that turn, but it can take its tools away. **Block** in the Chat tab refuses every call from that conversation with a message telling the model to abandon the task and answer, and the turn ends itself. It is not a cancel, and it applies only to calls whose owner is proven.
 
-Workers are **reusable conversations**, not disposable one-shot tabs. When a worker reports its
-result, or the app durably observes that its turn has naturally settled, it normally goes to
-sleep and frees its worker slot while keeping the full ChatGPT conversation. Messaging that
-sleeping worker wakes the same conversation again. If its tab is still open the extension reuses
-and focuses that exact tab; if it was closed, the app reopens the stored `/c/<conversation>` and
-types the prime's new instruction there as an ordinary user message. Waking consumes a free slot
-and is refused before anything is queued or typed when no slot is available. At roughly 400k
-recorded context tokens a worker becomes non-revivable after its next stop instead of being
-reused indefinitely.
+## Security in one page
 
-Worker chats **never Compact & Resume themselves**: automatic compaction is disabled for them and
-the manual Compact & Resume action is unavailable. Reaching 400k does not interrupt or replace the
-worker conversation; it may finish the live task and receive messages normally, then its next stop
-becomes permanent and the same chat remains only as non-revivable history.
+- **File tools stay inside approved folders.** Paths are validated and canonicalised first. This is application-level containment, not an OS sandbox; same-user filesystem races remain possible.
+- **Commands are not folder-sandboxed.** They start in an approved folder and then run with your normal user privileges.
+- **Desktop control is Windows-only and not folder-scoped.** When enabled, it applies to the whole desktop.
+- **The MCP server is loopback-only** behind a random secret path. ChatGPT reaches it through the tunnel you configure. Treat any public tunnel URL as a password.
+- **The browser bridge is loopback-only and separate.** It exists for the extension and exposes no file, command or settings routes.
+- **Secrets use Electron `safeStorage`:** DPAPI on Windows, Keychain on macOS, libsecret or KWallet on Linux.
+- **Read-only mode** disables file writes, command execution, desktop control and clipboard writes in one switch.
 
-Sleeping workers belong to the **prime conversation's durable worker history**, not to a global
-swarm lock. If the last working worker goes to sleep, that active run is parked immediately and
-another ChatGPT conversation may start its own workers. The original prime still sees its own full
-history in `agents action=status`, including sleeping and permanently non-revivable rows, can spawn
-a fresh `worker-N` without reviving an older sleeper, and can later wake any reusable old worker in
-its exact original chat once the global execution slot is free. Friendly ids such as `worker-1`
-are scoped to that prime history, so two primes may each retain their own `worker-1` without
-sharing identity or workspace. **Compact & Resume moves that complete worker history and revival
-authority from the parent chat to its resumed child.** Explicitly clearing the swarm is the action
-that discards that retained ownership. Turning Multi-agent **off is only an execution pause**:
-queued browser work is withdrawn and active workers are parked, but every prime-owned worker
-history stays durable across disabled app restarts and is available again after re-enable.
+Report vulnerabilities privately per [`SECURITY.md`](SECURITY.md).
 
-Agent identity is deliberately fail-closed. `spawn`, worker messaging and other identity-sensitive
-operations require the companion extension to prove which ChatGPT conversation made the MCP call.
-If the same chat is being used from a client the extension cannot observe, such as a phone app,
-ordinary Core tools can still work but multi-agent control is refused rather than guessed.
+### The extension and OpenAI's terms
 
-This is experimental browser automation, and parallel chats can edit the same files or spend account limits quickly. Use it only on work you can recover, keep worker ownership explicit, and turn the feature off when you do not want ChatGPT tabs opened or coordinated automatically. The terms note in [Experimental browser augmentation and OpenAI terms](#experimental-browser-augmentation-and-openai-terms) applies here.
+The MCP connector uses ChatGPT's documented Developer mode and Secure MCP Tunnel path. The extension is different: it observes ChatGPT's web UI, records rendered conversation state locally, and multi-agent mode opens and types into extra ChatGPT tabs. None of that is a documented public automation API. Depending on your account, OpenAI's [terms and policies](https://openai.com/policies/) on automated access, rate limits and permitted use may apply. Read the agreement that governs your account before using the extension or multi-agent mode, and do not use these features to scrape ChatGPT, evade limits or bypass safety controls.
 
 ## Troubleshooting
 
-- **Tools missing or still visible after a permission change:** refresh/review the custom app in ChatGPT, or recreate it if needed, then start a new conversation so it discovers the current schema.
-- **Extension says app not found:** session recording or multi-agent mode must be on for the browser bridge to run; then reopen the extension popup.
+- **Tools missing or stale after a permission change:** refresh or recreate the custom app in ChatGPT and start a new conversation.
+- **Extension says app not found:** recording or multi-agent mode must be on for the bridge to run. Then reopen the popup.
 - **Extension version mismatch:** reload the unpacked extension after every app update.
-- **`agents` says `UNIDENTIFIED_CALLER`:** open/use that same ChatGPT conversation in the paired desktop browser so the extension can observe its connector request id. The app intentionally will not infer agent identity from the active tab or timing.
-- **OS/browser warning about an unverified app:** expected for the unsigned beta. Verify `SHA256SUMS.txt` before overriding an OS trust prompt.
-- **Linux says secure credential storage is unavailable:** start/unlock GNOME Keyring, KWallet or another Secret Service provider, then restart the app. The insecure Electron `basic_text` fallback is intentionally rejected.
-- **Tunnel unavailable:** use Advanced settings to point at an explicit `tunnel-client` / `cloudflared` executable, or use the bundled copy from the release build.
-
-## Contributing
-
-Bug reports, feature requests and PRs are welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Security issues go through [`SECURITY.md`](SECURITY.md), privately rather than in an issue or PR. Release history is in [`CHANGELOG.md`](CHANGELOG.md).
+- **`agents` says `UNIDENTIFIED_CALLER`:** use that conversation in the paired browser so the extension can observe its request id. The app will not guess identity from the active tab.
+- **`COMPACTION_IN_PROGRESS` in a chat:** that chat is being handed off. Let it write the brief; work continues in the replacement.
+- **OS warning about an unverified app:** expected for the unsigned beta. Verify `SHA256SUMS.txt` before overriding.
+- **Linux says secure credential storage is unavailable:** unlock GNOME Keyring or KWallet and restart the app.
+- **Tunnel unavailable:** point Advanced settings at an explicit `tunnel-client` or `cloudflared`, or use the bundled copy.
 
 ## Development
 
 ```sh
 npm ci
 npm run dev        # run the app with hot reload
-npm run verify     # the same gate CI runs
+npm run verify     # typecheck, tests and the privacy gate; the same gate CI runs
 ```
+
+Read [`AGENTS.md`](AGENTS.md) before changing anything. It is the design record: what each invariant is, which incident produced it, and which test guards it.
 
 ## Building
 
 ```sh
-npm run dist:x64          # Windows x64 EXE
-npm run dist:arm64        # Windows ARM64 EXE
+npm run dist:x64          # Windows x64
+npm run dist:arm64        # Windows ARM64
 npm run dist:mac:x64      # macOS Intel DMG + ZIP
 npm run dist:mac:arm64    # macOS Apple Silicon DMG + ZIP
 npm run dist:linux:x64    # Linux x64 AppImage + DEB
 npm run dist:linux:arm64  # Linux ARM64 AppImage + DEB
 ```
 
-Run platform packaging on that operating system; the reusable release workflow does exactly that on native Windows/macOS/Linux x64/ARM64 runners. Packaging pins and verifies the target-specific tunnel/ripgrep assets, stages matching native dependencies, builds the platform artifacts, and runs the packaged-runtime smoke test. A final **assemble** job downloads all six package jobs, builds the standalone extension ZIP, generates `SHA256SUMS.txt`, and uploads one release-candidate artifact ready for publication.
+Package on the target operating system. The release workflow runs on native Windows, macOS and Linux runners for both CPUs, pins and verifies the tunnel and ripgrep assets, stages matching native dependencies, smoke-tests the packaged runtime, and assembles one release candidate with the extension zip and `SHA256SUMS.txt`.
+
+## Contributing
+
+Bug reports, feature requests and PRs are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Release history is in [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Licence
 
-MIT — see [`LICENSE`](LICENSE).
+MIT. See [`LICENSE`](LICENSE).
 
-Not affiliated with, endorsed by, or connected to OpenAI. "ChatGPT" is a trademark of
-OpenAI; it is used here only to describe what this tool interoperates with.
+Not affiliated with, endorsed by, or connected to OpenAI. "ChatGPT" and "Codex" are trademarks of OpenAI, used here only to describe what this tool works with.

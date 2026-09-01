@@ -1585,8 +1585,12 @@ risks differ:
   while the durable destination send checkpoint still proves **pre-dispatch**. Once dispatch is
   ambiguous/possible, no second click is authorized. Its outer authority is the continuation's
   existing **10-minute TTL**, not an invitation clock.
-- **Revive:** browser send/ACK is one wake attempt and the broker's `waking` reservation is capped at
-  **30s**. A `sent` ACK does not renew that deadline; exact worker liveness must still arrive.
+- **Revive:** browser send/ACK is one wake attempt. The broker's `waking` reservation is capped at
+  **`REVIVAL_DEADLINE_MS` (90s) from the wake** until the browser proves delivery, and at
+  **`REVIVAL_ACTIVITY_MS` (90s + `DETACHED_SILENCE_MS`)** once it has — the same silence budget a
+  working worker gets before it is judged asleep. A `sent` ACK moves the deadline exactly once;
+  exact worker liveness must still arrive. The old flat 30 s ran out while woken workers were still
+  reading, reported them unwakeable to the prime, and parked runs whose workers were working.
 - **Restored stale transport rows:** the broad command TTL bounds forgotten control records, but it
   never extends a semantic worker/continuation/revival lifetime.
 
@@ -1658,6 +1662,33 @@ chat A owns session S
   → publish/complete     recorder mapping, workspace/Goal/swarm projections + WAL completion
   → B continues session S
 ```
+
+**The continuation is the only clock over the swarm handover.** `openContinuationNow` begins the
+prime transfer, and only the continuation's commit or abort ends it; `agents.ts` keeps no deadline
+of its own for it. The independent ten-minute `TRANSFER_TTL_MS` that used to run beside the
+transaction expired under a live automatic continuation whose handoff turn took eleven minutes
+(2026-09-01), the commit was refused, and the session was stranded between A and B. Do not
+reintroduce a second clock; if a handover must end, end the continuation.
+
+**Chat A gets no tool while its handoff is being asked for.** From the moment the marked source
+prompt is submitted (`sourceSend` dispatched or sent) until the commit makes A `superseded`,
+`kernel.ts::dispatchTracked` refuses every call from A with `COMPACTION_IN_PROGRESS_REFUSAL`
+(`continuation.ts::compactingConversation()`), which tells the model to write the brief now. The
+page's stop-and-settle barrier is not a guarantee: ChatGPT's Stop control can vanish while the
+server-side turn goes on calling tools under the same request id, and a zero in-flight count read
+between two calls is not an ended turn. The refusal is what makes a lingering turn harmless and
+what gets the brief written in seconds instead of after the turn's remaining task.
+
+**An asked-for automatic handover has a deadline; an intended one has none.** An automatic ticket
+waits on the WAL without a clock while the chat is working, because the chat may be mid-turn for
+hours before it is safe to ask. From the moment the brief request is on its way (`askedAt`, stamped
+at the first `sourceSend` dispatch or state change past `awaiting-summary`), chat A is refused every
+tool, so a handover the model never finishes would fence A for good; `AUTOMATIC_HANDOVER_TTL_MS`
+(six hours from `askedAt`) aborts it instead and the chat's next working turn opens a fresh
+ticket. A record from before the field existed starts that clock at the restart that loads it.
+Manual continuations keep their ten-minute clock from opening. A `committed` record whose session
+has since moved on again (a later handover out of B) stays committed on restore: the first move
+was real, and aborting it would un-supersede A.
 
 **Must hold.** If preflight or the durable session rebind fails, **A keeps the session**. Once
 session metadata durably says B owns S, the semantic move has happened even if the process crashes
@@ -1847,7 +1878,7 @@ High-value transition symbols inside `agents.ts`:
 | browser takes wake custody before text escapes | `claimWorkerRevival()`; flips the waking row from broker-revivable to browser-owned wake custody |
 | ChatGPT accepted the revived user message | `noteWorkerRevived()`; records delivered message ids but deliberately leaves state `waking` |
 | wake fails/30s expires | `failWorkerRevival()` → `sleeping` with the queued prime message still owed |
-| parked prime history becomes live again | `reactivateDormantRunForConversation()` → private `reactivateDormantRun()`; identity lookup alone never reactivates it |
+| parked prime history becomes live again | `reactivateDormantRunForConversation()` (kernel ingress, parked sleeping worker's proven call only) → private `reactivateDormantRun()`; identity lookup alone never reactivates it |
 
 These functions are downstream of the staged production mutations in `tools-core.ts`; do not call
 the convenience broker wrappers and assume their browser/durability ordering is the MCP contract.
@@ -1880,7 +1911,19 @@ their exact ChatGPT conversation bindings, queued prime reports and monotonicall
 its own same-named `worker-1`, without seeing or mutating the first prime's history. Caller-scoped
 `status` always returns the history owned by that prime, even while somebody else owns the active
 execution slot. A dormant prime may spawn a fresh worker without reviving a sleeper; waking an old
-worker reactivates that owner's history only when the global execution slot is free. Explicit
+worker reactivates that owner's history only when the global execution slot is free. So does a
+proven tool call from a parked *sleeping, revivable* worker: `kernel.ts::dispatchTracked` calls
+`reactivateDormantRunForConversation()` before `noteAgentAlive()`, which then revives the worker
+exactly as it would inside a live run ("it never actually stopped"). Parking happens the moment
+the last worker is thought asleep, so without this the last worker of every run was refused
+`WORKER_SLEEPING` mid-turn for the very calls that revive any of its siblings (six workers on
+2026-09-01). A finished/failed worker, a prime's own calls, a family mid-handover, and a family
+whose slot another prime owns never reactivate; those keep the `WORKER_SLEEPING`/`WORKER_ENDED`
+fences. Parked history is bounded: `pruneDormantRuns()` (on every park and on restore) drops
+families older than `DORMANT_RUN_TTL_MS` (seven days) or beyond the newest `MAX_DORMANT_RUNS`
+(sixteen), never one with an open transfer, and turns their worker chats into ordinary
+retired-worker leases — every family is scanned per unattributed call and makes it wait the
+identity-evidence window, and three days of runs had left twenty-nine on disk. Explicit
 swarm clear is different from parking: it retires the worker conversation fences and discards the
 retained histories. Turning Multi-agent **off is not Clear**: it stops/withdraws live execution,
 parks the owner history, and keeps that history durable through disabled app restarts so re-enable
@@ -1894,7 +1937,18 @@ can still show and revive the exact old worker conversations.
 marker lives in `storage.session`; when the conversation stops qualifying or the tab closes, the
 service worker restores `autoDiscardable:true` only for markers it owns. A tab already protected by
 the user/browser is never claimed and therefore never “restored” behind their back. Sleeping and
-terminal workers are not protected. This keeps live agent pages resident; it does not prove a turn
+terminal workers are not protected.
+
+**Tab closing is the same kind of derived policy.** `bridge.ts::closableAgentConversations()`
+projects `closableConversations` on `/status`: the source chat of every committed Compact &
+Resume (`continuation.ts::supersededSourceConversations()`) plus stopped worker chats beyond the
+`maxWorkers + 2` most recently used (`agents.ts::closableWorkerConversations()`), never a
+protected chat. `background.js::maintain()` closes exact matching tabs with `chrome.tabs.remove`,
+skipping the tab that is active in its window — the one in front of the user is theirs. Closing a
+sleeping worker's tab loses nothing: a revival reopens its chat. This is what keeps a long run
+from accumulating one resident ChatGPT tab per worker it ever spawned.
+
+This keeps live agent pages resident; it does not prove a turn
 active, revive a worker or authorize a browser repair.
 
 **Waking is messaging.** `agents action=message` to a sleeping worker reserves a free slot
@@ -1922,7 +1976,8 @@ prime message → broker sleeping→waking + queued inbox row → immediate dura
 ```
 
 No free slot means the send-to-sleeper is refused outright — no inbox row is accepted and nothing
-is typed. A failed browser send or the **30-second** revival deadline puts the worker back to
+is typed. A failed browser send or the revival deadline (`REVIVAL_DEADLINE_MS` undelivered,
+`REVIVAL_ACTIVITY_MS` after a proven delivery) puts the worker back to
 `sleeping`, returns the slot and leaves the prime's row queued for a later explicit wake. A
 successful browser `sent` ACK is stronger than an ordinary offer because ChatGPT accepted the user
 message, but it is **not** proof the worker reacted: the revive command remains leased and the

@@ -603,6 +603,18 @@
   }
   /** Stable user-message id → durable event position, used only to anchor page responses. */
   const userAnchorByMessage = new Map();
+  /**
+   * The newest user message this document has already opened a turn for.
+   *
+   * A send opens exactly one turn, but the durable anchor that would say so arrives with the
+   * app's next activity reply, and until it does the message is newest, unanchored, and read
+   * as freshly authored on every observation. Each of those closed the turn just opened as
+   * "replaced by a new user message" and opened the next one: thirty turns a second apart
+   * for one send on 2026-09-01, in the prime and in every worker, and a real turn whose
+   * calls were placed under whichever of them was open at the time. The answer is one fact
+   * this document does hold about its own doing: which send it has already acted on.
+   */
+  let openedUserMessageId = null;
   let since = 0;
   let entries = [];
   let streamEntries = [];
@@ -653,7 +665,16 @@
   function rememberUserSend() {
     const text = sendText(CLF_DOM.composer()?.textContent);
     if (!text) return;
-    userSendReceipt = { text, conversationId: CLF_DOM.conversationId(), at: Date.now() };
+    let previousMessageId = null;
+    for (const message of CLF_DOM.messages()) {
+      if (message.role === 'user' && message.id && message.text) previousMessageId = message.id;
+    }
+    userSendReceipt = {
+      text,
+      conversationId: CLF_DOM.conversationId(),
+      previousMessageId,
+      at: Date.now()
+    };
   }
   document.addEventListener('click', (event) => {
     const button = CLF_DOM.sendButton?.();
@@ -1255,6 +1276,7 @@
     streamMessageSeq.clear();
     pendingPresentation = null;
     userAnchorByMessage.clear();
+    openedUserMessageId = null;
     entries = [];
     streamEntries = [];
     streamRequestTurnOwners.clear();
@@ -1604,15 +1626,31 @@
      * difference; zero-anchor chats require the exact recent submitted text as well.
      */
     const authoredNow = (message) => {
-      if (message.id !== newestUserId || userAnchorByMessage.has(message.id)) return false;
-      if (userAnchorByMessage.size > 0) return true;
+      if (message.id !== newestUserId) return false;
+      if (message.id === openedUserMessageId) return false;
       const receipt = userSendReceipt;
-      if (!receipt || Date.now() - receipt.at > USER_SEND_RECEIPT_MS) return false;
-      const conversationId = CLF_DOM.conversationId();
-      if (receipt.conversationId && receipt.conversationId !== conversationId) return false;
-      if (receipt.text !== sendText(message.text)) return false;
-      userSendReceipt = null;
-      return true;
+      if (receipt) {
+        if (Date.now() - receipt.at > USER_SEND_RECEIPT_MS) {
+          userSendReceipt = null;
+        } else {
+          const conversationId = CLF_DOM.conversationId();
+          const sameConversation = !receipt.conversationId || receipt.conversationId === conversationId;
+          const newIdentity = !receipt.previousMessageId || receipt.previousMessageId !== message.id;
+          if (sameConversation && newIdentity && receipt.text === sendText(message.text)) {
+            userSendReceipt = null;
+            return true;
+          }
+        }
+      }
+      // Transcript custody and send custody are different facts. Fiber may publish this exact
+      // stable user object before the DOM exposes its id, and `/activity` may return that
+      // canonical row before the rendered bubble catches up. Once that happens the message is
+      // already a durable anchor, but the matching composer receipt above still owns the one
+      // unanswered question: did this message start the live turn? Only after giving that
+      // receipt first refusal does an existing anchor mean "history".
+      if (userAnchorByMessage.has(message.id)) return false;
+      if (userAnchorByMessage.size > 0) return true;
+      return false;
     };
     for (const message of rendered) {
       if (!message.id || !message.text) continue;
@@ -1622,7 +1660,16 @@
       if (retiredMessages.has(message.id) || isStale(message.node)) continue;
       if (message.role === 'user') {
         const key = occurrenceKey(message.id, message.text);
-        if (seenMessages.has(key)) continue;
+        // Dedupe answers "have we journalled this row?"; authoredNow answers "did this row
+        // cross the send boundary?" The boundary is intentionally evaluated first. Fiber can
+        // journal the canonical row first, but that must not consume the later DOM proof which
+        // opens the local generation. Re-emitting the transcript would duplicate it, so a seen
+        // row contributes only the boundary here.
+        const justAuthored = authoredNow(message);
+        if (seenMessages.has(key)) {
+          if (justAuthored) newUserMessage = message.id;
+          continue;
+        }
         // Presentation is not enough to commit a continuation, but it is enough to stop this
         // exact marked message from escaping as ordinary session history while Fiber supplies
         // the stable ChatGPT-authored identity. This is the reload path after the URL command
@@ -1633,7 +1680,6 @@
           commandJournalGate = true;
         }
         markSeen(key);
-        const justAuthored = authoredNow(message);
         if (justAuthored) newUserMessage = message.id;
         emit({
           kind: 'user_message',
@@ -1906,6 +1952,7 @@
     // turn a previous document opened arrives by adoptOpenTurn() from the app's `activeTurnId`,
     // which is adoption and not opening — no second `turn_start` for one generation.
     if (newUserMessage && !generating) {
+      openedUserMessageId = newUserMessage;
       generating = true;
       quietSince = 0;
       quietTurn = null;
@@ -2933,6 +2980,30 @@
         }
       }
     }
+    // A destination Resume has a second exact owner that is even more fundamental than this
+    // document's local generation: the *durably accepted* continuation marker and the answer
+    // turn it opened. Resolve and commit that relation before filtering foreign Fiber ids. The
+    // replacement route may already be B while the adjacent answer branch still carries the
+    // provisional thread ChatGPT used before B was named; filtering first destroys the request
+    // id that can join the call to B. A marker-shaped string alone is never authority: the app
+    // must accept the exact destination message first, or the provisional answer is discarded.
+    const newestUser = [...CLF_DOM.messages()].reverse().find((message) => message.role === 'user');
+    const currentContinuationMarker = String(newestUser?.text || '').match(CONTINUATION_MARKER);
+    let committedResumeOwner = null;
+    if (currentContinuationMarker?.[1] === 'RESUME') {
+      const resumeEntry = markedContinuationTurns(answer.turns).find(
+        ([, marked]) => marked.kind === 'RESUME' && marked.token === currentContinuationMarker[2]
+      );
+      if (resumeEntry) {
+        const resumeProof = continuationReconciliationKey(resumeEntry[0], resumeEntry[1], askedConversation);
+        const reconciliation = reconcileContinuationMarkers([resumeEntry]);
+        if (reconciliation) await reconciliation;
+        if (epoch !== askedEpoch || conversationId !== askedConversation) return false;
+        if (askedConversation && CLF_DOM.conversationId() !== askedConversation) return false;
+        if (reconciledContinuations.has(resumeProof)) committedResumeOwner = resumeEntry[1];
+      }
+    }
+    if (committedResumeOwner?.answer) ownedPageTurn = committedResumeOwner.answer;
     if (askedConversation) {
       // Validate ownership per Fiber object, not per scan.
       //
@@ -2946,8 +3017,9 @@
       //
       // The URL is already pinned across the async round-trip above. A descriptor carrying a
       // different concrete conversation id is individually stale and is discarded, with one
-      // narrow exception: the newest turn already bound to this document's live generation may
-      // still carry the fresh chat's provisional client thread. That turn is retained only so
+      // narrow exception: an exact turn owner established above — either this document's local
+      // generation or the answer to the current server-authored Resume marker — may still carry
+      // the fresh chat's provisional client thread. That turn is retained only so
       // confirmLiveRequestOwners() can perform the explicit request-id -> real-route handshake;
       // historical mismatches are still discarded. An absent/non-concrete id keeps the old
       // conservative behaviour. No clock, active-tab or tool-name fallback enters the decision.
@@ -3010,17 +3082,14 @@
     // generation is currently bound to may inherit `turnId`; historical/reused matches still
     // prove the conversation made the call, but carry no durable turn id.
     const activeLocalTurnId = exactOwner?.localTurnId || null;
-    // ChatGPT represents a continuation prompt and its reply as adjacent Fiber turns. The
-    // durable local generation was opened by that exact newest marked user message, so its
-    // assistant/tool owner is `answerTurnFor(...)`, not the otherwise-empty prompt turn. This
-    // is the same relation summary capture already trusts; reusing it closes the local turn,
-    // stamps its partial/final revisions, and keeps chronology at the insertion point.
-    if (activeLocalTurnId && markedTurns.length > 0) {
-      const newestUser = [...CLF_DOM.messages()].reverse().find((message) => message.role === 'user');
-      const marker = String(newestUser?.text || '').match(CONTINUATION_MARKER);
-      const markedOwner = marker
-        ? markedTurns.find(([, marked]) => marked.kind === marker[1] && marked.token === marker[2])?.[1]
-        : null;
+    // For local chronology, map the generation to the adjacent continuation answer too. Unlike
+    // request identity above this still requires a real local turn id: even a committed Resume
+    // proves which chat made a request, not that this document successfully journalled turn_start.
+    if (activeLocalTurnId && currentContinuationMarker && markedTurns.length > 0) {
+      const markedOwner = markedTurns.find(
+        ([, marked]) =>
+          marked.kind === currentContinuationMarker[1] && marked.token === currentContinuationMarker[2]
+      )?.[1];
       if (markedOwner?.answer) ownedPageTurn = markedOwner.answer;
     }
     const activeTurnIndex =
@@ -7304,6 +7373,12 @@
     // that says "Finishing local tools…" about an app that is not listening. A couple of
     // retries covers a dropped answer; past that, refuse because "could not verify zero" is
     // not the same fact as zero.
+    // Zero here is a reading, not a proof: a turn that Stop did not actually end keeps
+    // calling tools with pauses between them, and on 2026-09-01 the handoff prompt went into
+    // exactly such a turn, which then worked for eleven more minutes before writing the
+    // brief. What makes that harmless is not this barrier but the app: from the moment the
+    // marked prompt is submitted it refuses every local call from this chat until the move
+    // is over, so nothing a lingering turn does can change the machine the brief describes.
     let unanswered = 0;
     let unavailable = false;
     const settled = await waitUntil(async () => {
@@ -7485,9 +7560,8 @@
   }
 
   /** Finds a unique ChatGPT-authored marked user message and the exact turn it opened. */
-  function markedContinuationTurns() {
+  function markedContinuationTurns(turns = [...fiberTurns.values()]) {
     const found = new Map();
-    const turns = [...fiberTurns.values()];
     for (let index = 0; index < turns.length; index++) {
       const turn = turns[index];
       for (const message of turn.messages || []) {
@@ -7568,17 +7642,27 @@
     return true;
   }
 
+  const continuationReconciliationKey = (key, marked, ownerConversation = conversationId) =>
+    `${key}\u0000${ownerConversation || ''}\u0000${marked.messageId || ''}`;
+
   function reconcileContinuationMarkers(markedTurns = markedContinuationTurns()) {
     if (markedTurns.length === 0) return null;
     return (async () => {
       for (const [key, marked] of markedTurns) {
-        if (reconciledContinuations.has(key) || continuationReconciliations.has(key)) continue;
+        const ownerConversation = conversationId;
+        const proofKey = continuationReconciliationKey(key, marked, ownerConversation);
+        if (reconciledContinuations.has(proofKey) || continuationReconciliations.has(proofKey)) continue;
         const work = reconcileContinuationMarker(key, marked)
           .then((done) => {
-            if (done) reconciledContinuations.add(key);
+            if (
+              done &&
+              ownerConversation &&
+              conversationId === ownerConversation &&
+              CLF_DOM.conversationId() === ownerConversation
+            ) reconciledContinuations.add(proofKey);
           })
-          .finally(() => continuationReconciliations.delete(key));
-        continuationReconciliations.set(key, work);
+          .finally(() => continuationReconciliations.delete(proofKey));
+        continuationReconciliations.set(proofKey, work);
         await work;
       }
     })();

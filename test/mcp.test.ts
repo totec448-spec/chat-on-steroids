@@ -41,6 +41,14 @@ import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContex
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import { resetBlockedChatsForTests, setChatBlocked } from '../src/main/session/blocked-chats.js';
 import {
+  abortContinuation,
+  attachSummary,
+  dispatchContinuationSourceSendNow,
+  beginContinuationSourceSendNow,
+  openContinuationNow,
+  resetContinuationsForTests
+} from '../src/main/session/continuation.js';
+import {
   backdateExecAttendanceForTests,
   backgroundExecObligations,
   execOwner,
@@ -3171,6 +3179,44 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(failed(stale)).toBe(true);
     expect(textOf(stale)).toContain('CONVERSATION_SUPERSEDED');
     expect(textOf(stale)).toContain('no local tool was run');
+  });
+
+  it('refuses every tool from a chat whose handoff brief has been asked for, until the move is over', async () => {
+    resetContinuationsForTests();
+    const chatA = '6a97199d-9e70-83eb-be87-01a743616cda';
+    const chatB = '6a973cc2-2d84-83ec-9d84-b5a5a6f2a2ce';
+    const summary = await createSession({ title: 'compacting owner', conversationId: chatA });
+    expect(prove('wfr_compact_a', chatA, summary.id)).toBe('stored');
+
+    // A filed ticket alone changes nothing: the page may still be stopping the turn.
+    const opened = await openContinuationNow(summary.id, chatA, true);
+    const beforePrompt = await asChat('wfr_compact_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(beforePrompt), textOf(beforePrompt)).toBe(false);
+
+    // The marked prompt is submitted. From here on the chat's calls are refused — whether the
+    // turn Stop was clicked on really ended or, as on 2026-09-01, went on calling tools.
+    expect((await beginContinuationSourceSendNow(opened.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(opened.token)).toBe(true);
+    const duringHandoff = await asChat('wfr_compact_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(duringHandoff)).toBe(true);
+    expect(textOf(duringHandoff)).toContain('COMPACTION_IN_PROGRESS');
+    expect(textOf(duringHandoff)).toMatch(/no local tool was run/i);
+    expect(textOf(duringHandoff)).toMatch(/write that brief now/i);
+
+    // Still refused once the brief is stored and the replacement chat is on its way.
+    await attachSummary(opened.token, 'SUMMARY\n'.repeat(40));
+    const afterBrief = await asChat('wfr_compact_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(afterBrief)).toContain('COMPACTION_IN_PROGRESS');
+
+    // The commit hands the refusal over to the superseded attachment for good.
+    expect(await rebindSession(summary.id, chatA, chatB)).toBe(true);
+    expect(prove('wfr_compact_b', chatB, summary.id)).toBe('stored');
+    abortContinuation(opened.token, 'the test moved the session by hand');
+    const stale = await asChat('wfr_compact_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(stale)).toBe(true);
+    expect(textOf(stale)).toContain('CONVERSATION_SUPERSEDED');
+    const fresh = await asChat('wfr_compact_b', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(fresh), textOf(fresh)).toBe(false);
   });
 
   it('does not let a stale owner inherit a recycled process id during the new exec yield', async () => {

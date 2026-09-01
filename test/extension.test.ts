@@ -496,7 +496,7 @@ function loadWorker(options: {
   fetch?: (input: string, init?: Record<string, unknown>) => Promise<ReturnType<typeof response>>;
   tabsGet?: (tabId: number) => Promise<{ id?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean }>;
   tabsQuery?: () => Promise<
-    Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean }>
+    Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean }>
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
 }): WorkerHarness {
@@ -995,6 +995,44 @@ describe('active agent tab discard protection', () => {
     await restarted.fireAlarm();
     expect(restarted.tabsUpdate).toHaveBeenLastCalledWith(81, { autoDiscardable: true });
     expect(session.data.discardProtectedTabs).toEqual({});
+  });
+
+  it('closes the tabs of chats the app has finished with, except the one in front of the user', async () => {
+    const OLD_WORKER = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+    const COMPACTED = 'cccccccc-dddd-4eee-8fff-000000000000';
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/status') {
+        return response(200, {
+          ok: true,
+          repairs: [],
+          recoveryMonitoring: true,
+          nonDiscardableConversations: [CHAT],
+          closableConversations: [OLD_WORKER, COMPACTED]
+        });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch,
+      tabsQuery: async () => [
+        { id: 91, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` },
+        { id: 92, windowId: 7, url: `https://chatgpt.com/c/${OLD_WORKER}` },
+        // Compacted, but the user is looking at it: left alone until they move on.
+        { id: 93, windowId: 7, url: `https://chatgpt.com/c/${COMPACTED}`, active: true },
+        { id: 94, windowId: 8, url: `https://chatgpt.com/c/${COMPACTED}` }
+      ]
+    });
+    await worker.registerTab(91);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 91);
+
+    await worker.fireAlarm();
+    expect(worker.tabsRemove.mock.calls.map((call) => call[0]).sort()).toEqual([92, 94]);
+    // The live prime chat is still protected, never closed.
+    expect(worker.tabsUpdate).toHaveBeenCalledWith(91, { autoDiscardable: false });
   });
 
   it('does not claim or restore a tab Chrome was already told not to discard', async () => {

@@ -31,6 +31,7 @@ const fixture = vi.hoisted(() => {
       ...events,
       pid: 10_000 + children.length,
       exitCode: null,
+      signalCode: null,
       stdout: emitter(),
       stderr: emitter(),
       kill: vi.fn()
@@ -139,6 +140,33 @@ describe('OpenAI tunnel process ownership', () => {
     await handle.stop();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(fixture.children).toHaveLength(2);
+  });
+
+  it('does not wait on a client that already died by signal before starting its replacement', async () => {
+    vi.useFakeTimers();
+    const reports: any[] = [];
+    const handle = await startTunnel({
+      localUrl: 'http://127.0.0.1:1234/secret',
+      settings,
+      apiKey: 'sk-tunnel-test',
+      report: (report) => reports.push(report)
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    const first = fixture.children[0];
+
+    // Killed by a signal: exitCode stays null and signalCode says why. There is nothing left
+    // to stop, so the stop barrier must not be entered — with the old exitCode-only check it
+    // was, and a held termination kept the replacement from ever being launched.
+    first.signalCode = 'SIGKILL';
+    fixture.termination.held = true;
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(reports.some((report) => String(report.detail).includes('Reconnecting in'))).toBe(true);
+    expect(fixture.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fixture.children).toHaveLength(2);
+
+    fixture.termination.held = false;
+    await handle.stop();
   });
 
   it('starts a replacement with no inherited health address, handshake, or outage verdict', async () => {

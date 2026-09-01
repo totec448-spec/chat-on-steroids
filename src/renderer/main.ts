@@ -1347,6 +1347,20 @@ async function addFolder(): Promise<void> {
   if (next) apply(next);
 }
 
+/** Whether a drag carries files at all, which is the only kind the Folders card accepts. */
+function dragHasFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+/** Every dropped entry is offered as a folder; the main process says no to anything else. */
+async function dropFolders(event: DragEvent): Promise<void> {
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  for (const file of files) {
+    const next = await run(api.addRootPath(file));
+    if (next) apply(next);
+  }
+}
+
 async function toggleConnection(): Promise<void> {
   if (!state) return;
   // Mirrors the button label exactly, so a click always does what it says.
@@ -1417,6 +1431,28 @@ $('readOnlyBtn').addEventListener('click', () => {
 
 $('addFolder').addEventListener('click', () => void addFolder());
 $('wizAddFolder').addEventListener('click', () => void addFolder());
+
+// Dropping a file anywhere on an Electron window otherwise navigates the whole window to
+// it. Only the Folders card accepts drops, and everything else swallows them.
+window.addEventListener('dragover', (event) => event.preventDefault());
+window.addEventListener('drop', (event) => event.preventDefault());
+{
+  const card = $('foldersCard');
+  card.addEventListener('dragover', (event) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'link';
+    card.classList.add('drop-target');
+  });
+  card.addEventListener('dragleave', (event) => {
+    if (!card.contains(event.relatedTarget as Node | null)) card.classList.remove('drop-target');
+  });
+  card.addEventListener('drop', (event) => {
+    event.preventDefault();
+    card.classList.remove('drop-target');
+    if (dragHasFiles(event)) void dropFolders(event);
+  });
+}
 
 $('wizExpand').addEventListener('click', () => {
   showAllSteps = !showAllSteps;

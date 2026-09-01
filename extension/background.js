@@ -1588,12 +1588,36 @@ async function maintain() {
       .filter(Boolean)
   );
   const protectionWork = nonDiscardable.size > 0 || Object.keys(discardProtectedTabs).length > 0;
-  if (!protectionWork && repairs.length === 0) return clearRetryIfIdle();
+  // Chats the app has finished with: compacted source chats and stopped worker chats beyond
+  // the ones the prime is likely to come back to. Their tabs are memory and nothing else.
+  const closable = new Set(
+    (Array.isArray(reply.data.closableConversations) ? reply.data.closableConversations : [])
+      .map(cleanConversationId)
+      .filter((conversationId) => conversationId && !nonDiscardable.has(conversationId))
+  );
+  if (!protectionWork && closable.size === 0 && repairs.length === 0) return clearRetryIfIdle();
   let tabs = [];
   try {
     tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
   } catch {
     return;
+  }
+  if (closable.size > 0) {
+    const remaining = [];
+    for (const tab of tabs) {
+      // The tab in front of the user is theirs to close, whatever the app thinks of the chat.
+      if (!Number.isInteger(tab && tab.id) || tab.active === true || !closable.has(conversationForTab(tab))) {
+        remaining.push(tab);
+        continue;
+      }
+      try {
+        await chrome.tabs.remove(tab.id);
+      } catch {
+        // Already gone, or Chrome refused; onRemoved or the next pass reconciles it.
+        remaining.push(tab);
+      }
+    }
+    tabs = remaining;
   }
   if (protectionWork) {
     let changed = false;

@@ -687,6 +687,29 @@ describe('the reply', () => {
   });
 
   /** The loop's stopping condition, and the whole reason it can be left running. */
+  it('stops calling a draft busy once the page retired it mid-request', async () => {
+    const id = 'c-retired-mid-request';
+    const sessionId = await seed(id);
+    let release: (() => void) | null = null;
+    globalThis.fetch = (async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return decision('continue', 'carry on');
+    }) as never;
+
+    goal.startGoalDraft({ sessionId, conversationId: id, turnId: 'g-1' });
+    expect(goal.goalDraftBusy(id)).toBe(true);
+    // Retired while the request is still out: run() returns without settling the stage. The
+    // owed-goal inspection asks this question to decide whether to nudge the chat again, and
+    // "busy forever" meant it never did.
+    expect(goal.retireGoalDraftsFor(id)).toBe(true);
+    expect(goal.goalDraftBusy(id)).toBe(false);
+    (release as (() => void) | null)?.();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(goal.goalDraftBusy(id)).toBe(false);
+  });
+
   it('sends nothing when the model says the goal is met', async () => {
     const sessionId = await seed('c-done');
     globalThis.fetch = (async () => stream([delta('NO_REPLY'), 'data: [DONE]\n'])) as never;
