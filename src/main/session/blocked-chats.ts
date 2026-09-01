@@ -16,12 +16,17 @@
  * at and nothing the same chat did a second later.
  *
  * The block is therefore exact-identity only, and deliberately so: it refuses a call whose
- * proven owner is blocked and never a call whose owner is merely unknown. There is no window
- * in which that costs anything — the user blocks a chat they can already see making attributed
- * calls in the app, which means its request id is already proven and every later call in that
- * turn resolves from the registry without waiting. Guessing here would refuse an innocent
- * chat's file read to punish a different chat's turn, which is the trade this whole codebase
- * refuses to make everywhere else.
+ * proven owner is blocked and never a call whose owner is merely unknown. Guessing here would
+ * refuse an innocent chat's file read to punish a different chat's turn, which is the trade this
+ * whole codebase refuses to make everywhere else.
+ *
+ * What that costs, and where it was originally got wrong: "the user blocks a chat whose request
+ * id is already proven" is true of the turn the user was looking at and of nothing after it. A
+ * new turn brings a new request id, and a wedged page — the whole reason this exists — is the
+ * page least able to report one promptly. Enforcement that only read already-proven identity
+ * therefore let a blocked chat keep running tools that the recorder, which does wait for late
+ * evidence, then filed under that same blocked chat. Waiting for the exact request-id mate is
+ * not guessing, so the enforcement gate in kernel.ts waits exactly as long as attribution does.
  *
  * Blocks are durable and released only by the user. A restart is not a reason to hand a rogue
  * turn its tools back; the turn can outlive the app.
@@ -88,6 +93,17 @@ export async function restoreBlockedChats(): Promise<void> {
     if (!validConversationId(conversationId)) continue;
     blocked.set(conversationId, typeof blockedAt === 'number' && Number.isFinite(blockedAt) ? blockedAt : Date.now());
   }
+}
+
+/**
+ * Whether any block exists at all.
+ *
+ * The kernel's cheap way to ask whether it is worth resolving a call's identity before deciding
+ * — see the block gate in kernel.ts. An install with no blocked chat pays one map read per call
+ * and never waits on the browser for this.
+ */
+export function anyChatBlocked(): boolean {
+  return blocked.size > 0;
 }
 
 /** Exact lookup. An unproven caller has no conversation and is therefore never blocked. */

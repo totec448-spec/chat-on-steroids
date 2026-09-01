@@ -59,5 +59,9 @@ export function extensionDownloadUrl(version = APP_VERSION): string {
  *      Goal/Loop switch, which is the only way to tell an Off somebody chose in the composer
  *      from an Off merely inherited from the app-wide setting — without it a 10 extension goes
  *      on letting a saved goal speak over the user's Off.
+ *
+ * 12 — `/status` answers with `repairs`, every repair now due, in place of the single `repair`.
+ *      An 11 peer reads the new field as absent and quietly stops repairing anything at all,
+ *      which is exactly the silent failure this fence exists to turn into a 426.
  */
-export const BRIDGE_PROTOCOL = 11;
+export const BRIDGE_PROTOCOL = 12;

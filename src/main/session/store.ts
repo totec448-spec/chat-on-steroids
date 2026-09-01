@@ -1744,6 +1744,52 @@ export async function findSessionByConversation(
 }
 
 /**
+ * Has this ChatGPT conversation already been replaced inside any durable session lineage?
+ *
+ * This is intentionally independent of current attachment. Opening an old source chat after
+ * Compact & Resume may create a new recording epoch for genuinely new user activity there, but
+ * it must never restore automation authority that the successful A->B handoff retired. The
+ * lineage is the durable fact: if any retained session contains A while being attached to a
+ * different conversation, A is historical for browser recovery, Goal and Loop forever.
+ */
+export async function conversationWasSuperseded(conversationId: string): Promise<boolean> {
+  if (!conversationId) return false;
+  const catalog = await ensureAttachmentCatalog();
+  const sessionIds = new Set(catalog.historical.get(conversationId) ?? []);
+  for (const [id, entry] of open) {
+    if (entry.summary.chatIds.includes(conversationId)) sessionIds.add(id);
+  }
+  for (const id of sessionIds) {
+    const summary = open.get(id)?.summary ?? catalog.summaries.get(id) ?? null;
+    if (summary?.chatIds.includes(conversationId) && summary.conversationId !== conversationId) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether one ChatGPT frontend is still the session's executable attachment.
+ *
+ * Historical `chatIds` are transcript lineage, not continuing authority. Compact & Resume
+ * deliberately keeps A there so old messages remain readable, while `conversationId` moves to
+ * B. Every caller that has to decide whether new work from A is still admissible uses this one
+ * store-owned verdict rather than reinterpreting lineage for itself.
+ */
+export async function conversationAttachment(
+  conversationId: string,
+  sessionId: string | null = null
+): Promise<'current' | 'superseded' | 'unknown'> {
+  if (!conversationId) return 'unknown';
+  if (sessionId) {
+    const exact = await getSession(sessionId);
+    if (!exact || !exact.chatIds.includes(conversationId)) return 'unknown';
+    return exact.conversationId === conversationId ? 'current' : 'superseded';
+  }
+  const current = await findSessionByConversation(conversationId, { requireUnique: true });
+  if (current) return 'current';
+  return (await conversationWasSuperseded(conversationId)) ? 'superseded' : 'unknown';
+}
+
+/**
  * Filesystem time of the newest durable mutation belonging to a session.
  *
  * Session event timestamps describe when an action happened, not when it finally reached

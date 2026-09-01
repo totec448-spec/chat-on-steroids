@@ -21,6 +21,7 @@ import {
   noteChatOrigin,
   recordChatObservations,
   recordToolCall,
+  repairDeterministicAttribution,
   rebindConversation,
   resetRecorderForTests,
   sessionForConversation,
@@ -2138,7 +2139,7 @@ describe('naming the chats this app opened', () => {
     expect((await getSession(originalSessionId))?.endedAt).not.toBeNull();
   });
 
-  it('pins a late pre-transfer request to its original session epoch even after the old conversation starts a fresh session', async () => {
+  it('isolates a late request from retired A even after the old conversation starts a fresh recording epoch', async () => {
     const oldConversation = 'conv-worker-before-transfer';
     const newConversation = 'conv-worker-after-transfer';
     const oldRequest = 'wfr_worker_before_transfer';
@@ -2165,8 +2166,8 @@ describe('naming the chats this app opened', () => {
     const staleSessionId = stale.sessionId!;
     expect(staleSessionId).not.toBe(originalSessionId);
 
-    // A request proved before the transfer stays pinned to the exact old session epoch even
-    // though live broker context is now contradictory and the old conversation has a new epoch.
+    // Exact proof preserves forensic identity, but it is not execution authority after A was
+    // replaced. The call stays out of both B's live history and the stale tab's fresh epoch.
     await recordToolCall({
       tool: 'read',
       args: { paths: ['/project/old.ts'] },
@@ -2179,9 +2180,29 @@ describe('naming the chats this app opened', () => {
     });
     const originalCalls = await readEvents(originalSessionId, { kinds: ['tool_call'] });
     const staleCallsBefore = await readEvents(staleSessionId, { kinds: ['tool_call'] });
-    expect(originalCalls).toHaveLength(1);
+    expect(originalCalls).toHaveLength(0);
     expect(staleCallsBefore).toHaveLength(0);
-    expect(originalCalls[0]?.kind === 'tool_call' && originalCalls[0].agent).toBe('worker-1');
+    const buckets = (await listSessions()).filter((entry) => entry.title === 'Unattributed activity');
+    let isolated: Extract<SessionEvent, { kind: 'tool_call' }> | undefined;
+    let isolatedBucketId = '';
+    for (const bucket of buckets) {
+      const calls = await readEvents(bucket.id, { kinds: ['tool_call'] });
+      const match = calls.find(
+        (event): event is Extract<SessionEvent, { kind: 'tool_call' }> =>
+          event.kind === 'tool_call' && event.call.requestId === oldRequest
+      );
+      if (!match) continue;
+      isolated = match;
+      isolatedBucketId = bucket.id;
+      break;
+    }
+    expect(isolated?.call.attributionMethod).toBe('superseded');
+    await repairDeterministicAttribution();
+    expect(
+      (await readEvents(isolatedBucketId, { kinds: ['tool_call'] })).some(
+        (event) => event.kind === 'tool_call' && event.call.requestId === oldRequest
+      )
+    ).toBe(true);
 
     // This must not be implemented as "historical session always wins": a genuinely new
     // request first proved in the stale tab's new epoch belongs to that new epoch.

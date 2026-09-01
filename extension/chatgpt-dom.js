@@ -451,6 +451,11 @@ var CLF_DOM = (() => {
     return safe(() => document.querySelector(STOP), null);
   }
 
+  /** The page-owned Send control, exposed so content.js can witness an actual submission. */
+  function sendButton() {
+    return safe(() => document.querySelector(SEND), null);
+  }
+
   /**
    * The live progress line of a turn.
    *
@@ -1442,6 +1447,7 @@ var CLF_DOM = (() => {
     sectionSignature,
     generating,
     stopButton,
+    sendButton,
     progressLine,
     progressItems,
     interrupted,

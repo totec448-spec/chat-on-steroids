@@ -140,7 +140,14 @@ export type ToolOutcome = 'ok' | 'process_exit_nonzero' | 'tool_rejected' | 'too
  * than guessed into somebody's history. The extension refuses to rewrite ChatGPT's UI for
  * an inferred call.
  */
-export type CallAttribution = 'request_id' | 'unattributed' | 'turn' | 'agent' | 'generation' | 'inferred';
+export type CallAttribution =
+  | 'request_id'
+  | 'unattributed'
+  | 'superseded'
+  | 'turn'
+  | 'agent'
+  | 'generation'
+  | 'inferred';
 
 /**
  * What each grade of attribution actually rests on, in the words shown to the user.
@@ -164,6 +171,7 @@ export type CallAttribution = 'request_id' | 'unattributed' | 'turn' | 'agent' |
 export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
   request_id: 'exact request id',
   unattributed: 'request id not resolved',
+  superseded: 'retired conversation',
   agent: 'agent key',
   turn: 'tool block on the page',
   generation: 'the only chat generating',
@@ -178,8 +186,8 @@ export interface ToolCallRecord {
   requestId: string | null;
   /** Conversation proven by that request id, or null when ownership was unresolved. */
   conversationId: string | null;
-  /** New 1.8 calls use only these two deterministic outcomes. */
-  attributionMethod: 'request_id' | 'unattributed';
+  /** Deterministic placement outcome for current, unresolved, or deliberately retired callers. */
+  attributionMethod: 'request_id' | 'unattributed' | 'superseded';
   /** Exact arguments as JSON. Cut inline past the cap, with the whole text in an asset. */
   args: StoredText;
   result: StoredText;

@@ -38,7 +38,9 @@ import {
   MAX_USER_MESSAGE_CHARS,
   MAX_ASSET_BYTES,
   appendEvent,
+  conversationAttachment,
   createSession,
+  conversationWasSuperseded,
   deleteSession,
   endSession,
   findSessionByConversation,
@@ -643,8 +645,13 @@ export function evidenceWindow(production: number): number {
  * This wait is request-specific: only the identical normalized x-request-id can satisfy it.
  * Chrome-off or missing evidence ends in Unattributed activity rather than a tool, time or
  * generation guess.
+ *
+ * Exported because it is also the depth to which *enforcement* has to resolve identity. Any
+ * rule that refuses a call by conversation — the user's chat block — must not settle for less
+ * evidence than the timeline the user is looking at will settle for, or the app ends up showing
+ * a call attributed to a chat whose calls it claims to be refusing. See kernel.ts.
  */
-const REQUEST_ID_GRACE_MS = evidenceWindow(20_000);
+export const REQUEST_ID_GRACE_MS = evidenceWindow(20_000);
 
 /**
  * Late exact request-id evidence can arrive after a call already fell into Unattributed.
@@ -840,6 +847,12 @@ export async function repairDeterministicAttribution(): Promise<{ sessions: numb
     >();
     const unknown: Extract<SessionEvent, { kind: 'tool_call' }>[] = [];
     for (const event of tools) {
+      // A superseded request is already fully attributed and deliberately isolated here.
+      // Replaying the same correlation must never turn retired execution into live history.
+      if (event.call.attributionMethod === 'superseded' || event.call.attribution === 'superseded') {
+        unknown.push(event);
+        continue;
+      }
       const requestId = event.call.requestId;
       const correlation = requestId ? requestCorrelation(requestId) : null;
       if (!correlation) {
@@ -1066,6 +1079,8 @@ export interface ToolCallInput {
   requestId?: string | null;
   /** Exact conversation already proven for this request by the dispatcher, when available. */
   conversationId?: string | null;
+  /** Durable local session principal carried by the exact request correlation, when available. */
+  sessionId?: string | null;
   /** A successful worker finish report is a hard activity boundary, not fresh work. */
   endsActivity?: boolean;
 }
@@ -1103,7 +1118,9 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
     const correlation = input.requestId ? requestCorrelation(input.requestId) : null;
     const target: Target = {
       conversationId: input.conversationId,
-      sessionId: correlation?.conversationId === input.conversationId ? correlation.sessionId : null,
+      sessionId:
+        input.sessionId ??
+        (correlation?.conversationId === input.conversationId ? correlation.sessionId : null),
       attribution: 'request_id',
       turnId: live?.turnId ?? null
     };
@@ -1171,6 +1188,17 @@ export async function flushRecorder(): Promise<void> {
 async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolCallRecord | null> {
   if (!recordingEnabled()) return null;
   try {
+    // Exact request evidence proves who called; it does not keep a replaced frontend
+    // executable. A remains part of the durable transcript after A -> B, but any *new* call
+    // from A is an incident, not new history in B's live context. Preserve the proof on the
+    // row while routing it to the one non-chat stream, and make that verdict terminal so the
+    // ordinary late-correlation repair cannot put it back later.
+    if (
+      target.conversationId &&
+      (await conversationAttachment(target.conversationId, target.sessionId)) === 'superseded'
+    ) {
+      target = { ...target, attribution: 'superseded', turnId: null };
+    }
     const evidence = input.evidence ?? currentCall()?.evidence ?? emptyEvidence();
     const sessionId = await targetSession(target);
     if (!sessionId) return null;
@@ -1219,7 +1247,12 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       attribution: target.attribution,
       requestId: input.requestId ?? null,
       conversationId: target.conversationId,
-      attributionMethod: target.conversationId && input.requestId ? 'request_id' : 'unattributed',
+      attributionMethod:
+        target.attribution === 'superseded'
+          ? 'superseded'
+          : target.conversationId && input.requestId
+            ? 'request_id'
+            : 'unattributed',
       args: await storeText(sessionId, safeJson(redactArgs(input.tool, input.args)), MAX_TOOL_ARGS_CHARS),
       result: await storeText(sessionId, resultText, MAX_TOOL_RESULT_CHARS),
       outcome: input.outcome,
@@ -1240,8 +1273,14 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     notifyChanged();
     try {
       const filed = await getSession(sessionId);
+      const currentConversation =
+        target.conversationId !== null &&
+        filed?.conversationId === target.conversationId &&
+        !(await conversationWasSuperseded(target.conversationId));
       attributionListener?.(
         target.conversationId,
+        sessionId,
+        currentConversation,
         input.startedAt,
         input.endsActivity === true,
         filed?.lastAssistantFinalAt ?? null
@@ -1282,12 +1321,26 @@ export function setAgentConversationLookup(lookup: (agent: string) => string | n
  * somewhere else. Nothing here decides what a verdict is worth; the bridge owns that.
  */
 let attributionListener:
-  | ((conversationId: string | null, startedAt: number, endsActivity: boolean, lastAssistantFinalAt: number | null) => void)
+  | ((
+      conversationId: string | null,
+      sessionId: string,
+      currentConversation: boolean,
+      startedAt: number,
+      endsActivity: boolean,
+      lastAssistantFinalAt: number | null
+    ) => void)
   | null = null;
 
 export function setCallAttributionListener(
   listen:
-    | ((conversationId: string | null, startedAt: number, endsActivity: boolean, lastAssistantFinalAt: number | null) => void)
+    | ((
+        conversationId: string | null,
+        sessionId: string,
+        currentConversation: boolean,
+        startedAt: number,
+        endsActivity: boolean,
+        lastAssistantFinalAt: number | null
+      ) => void)
     | null
 ): void {
   attributionListener = listen;
@@ -1323,6 +1376,7 @@ function agentConversation(agent: string): string | null {
  * into the other's raw history, and nothing downstream could tell that had happened.
  */
 async function targetSession(target: Target): Promise<string | null> {
+  if (target.attribution === 'superseded') return ensureUnattributedSession();
   if (target.conversationId) {
     if (target.sessionId) {
       const exact = await getSession(target.sessionId);

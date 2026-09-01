@@ -545,7 +545,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       blocked: blockedChatIds(),
       pressure: sessions.map((summary) => ({
         id: summary.id,
-        ...tokenPressure(summary.estimatedTokens, config.sessions.advisoryTokens, config.sessions.limitTokens)
+        // Pressure belongs to the currently attached ChatGPT context. `estimatedTokens` is
+        // deliberately lifetime history and therefore never resets across Compact & Resume;
+        // using it here made a fresh B look fuller than the A it had just replaced.
+        ...tokenPressure(summary.contextTokens, config.sessions.advisoryTokens, config.sessions.limitTokens)
       }))
     };
   });

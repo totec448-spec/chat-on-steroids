@@ -1854,10 +1854,18 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalObjectiveFor('c-obj-child')).toBe('finish the release unattended');
   });
 
-  it('trims and bounds what it stores, and reports back what it stored', () => {
+  /**
+   * A goal is a brief somebody writes, and it used to be cut at 4,000 characters — silently,
+   * because the sheet reported back what was stored and the reader had no reason to count.
+   * A long brief is now stored whole; the request that carries it is bounded by the same
+   * body limit as every other route, which is a transport rule rather than a rule about
+   * what a goal may say.
+   */
+  it('trims what it stores, keeps a long brief whole, and reports back what it stored', () => {
     expect(goal.setGoalObjective('c-obj-trim', '   finish the docs   ')).toBe('finish the docs');
     expect(goal.goalObjectiveFor('c-obj-trim')).toBe('finish the docs');
-    expect(goal.setGoalObjective('c-obj-trim', 'x'.repeat(9_000))).toHaveLength(4_000);
+    expect(goal.setGoalObjective('c-obj-trim', 'x'.repeat(9_000))).toHaveLength(9_000);
+    expect(goal.goalObjectiveFor('c-obj-trim')).toHaveLength(9_000);
     expect(goal.setGoalObjective('c-obj-trim', '  ')).toBe('');
     expect(goal.goalObjectiveFor('c-obj-trim')).toBe('');
   });

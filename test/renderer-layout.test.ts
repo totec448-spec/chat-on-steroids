@@ -148,6 +148,13 @@ describe('a session row', () => {
 });
 
 describe('the session-row chat actions', () => {
+  it('renders current-chat pressure separately from the session lifetime total', () => {
+    expect(chatSource).toContain('compactNumber(summary.contextTokens)');
+    expect(chatSource).toContain('compactNumber(summary.estimatedTokens)');
+    expect(chatSource).toContain('across the full recorded session');
+    expect(chatSource).toContain('rough current-chat context tokens');
+  });
+
   it('reserves all three top-right hit targets instead of laying the timestamp underneath them', () => {
     expect(rule('.sess-action')).toContain('position: absolute');
     expect(rule('.sess-top em')).toContain('margin-right: 84px');
@@ -163,6 +170,26 @@ describe('the session-row chat actions', () => {
   it('keeps a block visible without hovering, because it is state and not just an action', () => {
     expect(rule('.sess-action')).toContain('opacity: 0');
     expect(rule('.sess-block.is-blocked')).toContain('opacity: 1');
+  });
+
+  /**
+   * The Unattributed row is the one row with no chat to block, and it was the one row with no
+   * way to stop what it was showing. The switch that governs it is app-wide by necessity — the
+   * whole point of the row is that the app cannot say which chat these calls came from — so the
+   * button presses the settings checkbox rather than writing a second copy of that state.
+   */
+  it('blocks the Unattributed row through the one switch that can answer for it', () => {
+    expect(chatSource).toMatch(
+      /if \(summary\.conversationId === null\)[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)/
+    );
+    expect(chatSource).toMatch(
+      /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/
+    );
+    expect(chatSource).toMatch(/unattributedBlocked\(\)[\s\S]{0,200}allowUnattributedCalls === false/);
+    // Same word and same tone as a blocked chat: one state, read the same way down the list.
+    expect(chatSource).toMatch(/unattributedBlocked\(\)[\s\S]{0,120}text: 'blocked', tone: 'is-failed'/);
+    // And the row says what it is, on its own line, because no other row needs explaining.
+    expect(rule('.sess-note')).toContain('font-size: 11px');
   });
 });
 

@@ -43,6 +43,7 @@ const {
   setBrowserOpener,
   shutdownBridge,
   STALE_SWARM_MS,
+  BROWSER_PLACEMENT_MS,
   CHAT_SILENCE_MS,
   COMMAND_DEADLINE_MS,
   WORKER_BOOTSTRAP_LIMIT_MS,
@@ -69,6 +70,7 @@ const { createSession, deleteSession, findSessionByConversation, getSession, ini
   '../src/main/session/store.js'
 );
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
+const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const {
   CONTINUATIONS_STATE,
   abortContinuation,
@@ -934,6 +936,44 @@ describe('activity feed', () => {
     expect(reply.body.sessionId).toBeNull();
   });
 
+  /**
+   * A chat ChatGPT has only just named, which the recorder has not attached to yet.
+   *
+   * The feed is empty then, and it used to answer with no goal at all — so the sheet above a
+   * New Chat opened on a loop read the reply as "nothing is driving this chat" the moment its
+   * id landed: the slider fell to Off, the task the user had just written vanished from it,
+   * and it said an API key was missing while the model that wrote the opening message was
+   * still streaming. None of that is a fact about the recorder. The switch, the task and the
+   * draft are keyed by conversation and durable, so they are answered from the first poll.
+   */
+  it('answers what drives a chat before the recorder has attached to it', async () => {
+    await pair();
+    const chat = 'cafe0044-0000-4000-8000-000000000044';
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false, mode: 'goal' } });
+    await writeDurableNow(GOAL_SWITCHES_STATE, null);
+
+    // Exactly what a New Chat's opening does: the goal is bound as a loop before anything
+    // this chat says has been recorded.
+    const saved = await request('POST', '/goal/objective', {
+      body: { conversationId: chat, text: 'one cycle stop', mode: 'loop' }
+    });
+    expect(saved.status).toBe(200);
+
+    const feed = await request('GET', `/activity?conversationId=${chat}`);
+    expect(feed.status).toBe(200);
+    expect(feed.body.sessionId).toBeNull();
+    expect(feed.body.entries).toEqual([]);
+    expect(feed.body.goal).toMatchObject({
+      enabled: true,
+      own: true,
+      mode: 'loop',
+      objective: 'one cycle stop',
+      blocked: ''
+    });
+    // The app-wide default is still off: this chat answers for itself and says so.
+    expect(getConfig().goal.enabled).toBe(false);
+  });
+
   it('pages by sequence number so the extension never re-reads what it has', async () => {
     await pair();
     const conversationId = '12121212-3434-5656-7878-909090909090';
@@ -1191,7 +1231,7 @@ describe('automatic compaction', () => {
 
       const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
         await sweepStaleSwarm(Date.now());
-        return (await request('GET', '/status')).body.repair ?? null;
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
       };
       await vi.advanceTimersByTimeAsync(15 * 60_000 - 1);
       expect(await takeRepair()).toBeNull();
@@ -3358,6 +3398,104 @@ describe('delivering a bootstrap', () => {
   });
 });
 
+// ------------------------------------------------- which browser opens chat B
+
+/**
+ * Two Chrome instances, and the one thing the operating system cannot be told.
+ *
+ * The user had two Chrome instances open. A chat finished in the background one, Compact &
+ * Resume captured its brief, and the app asked the OS to open chat B — which resolved to the
+ * foreground instance, because that is what handing `chrome.exe` a URL does. The summary was
+ * typed into a chat in a browser this extension was not loaded in, so nothing redeemed the
+ * command and the handoff ended up connected to nothing at all.
+ *
+ * Nothing on the OS side can fix it: no argument names a window, and an extension cannot say
+ * which instance it is. But the capture request comes from chat A's own page, so the reply to
+ * it can hand that browser the successor to open — and a tab that browser creates is in A's
+ * window by construction, in a browser that has the extension by construction.
+ */
+describe('which browser opens the replacement chat', () => {
+  const HOME = 'c0c0c0c0-1111-4222-8333-000000000b01';
+
+  /** The real capture path: A's page files the ticket and then hands over its brief. */
+  async function captureFrom(conversationId: string): Promise<Reply> {
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [
+          { kind: 'user_message', time: Date.now(), text: 'build the site', messageId: `m-${conversationId}` }
+        ]
+      }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId } });
+    const token = filed.body.token as string;
+    expect(token, 'no continuation was opened, so there is no brief to capture').toBeTruthy();
+    return request('POST', '/compact', {
+      body: { conversationId, token, summary: `carry on
+
+${SAMPLE_BRIEF}` }
+    });
+  }
+
+  it('answers the capture with the chat to open instead of opening it through the OS', async () => {
+    await pair();
+    const stored = await captureFrom(HOME);
+
+    expect(stored.body.stored).toBe(true);
+    expect(stored.body.placement).toEqual({ id: stored.body.commandId });
+    // The whole point: this app did not ask the operating system where its own chat should go.
+    expect(opened).toEqual([]);
+    expect(pendingCommands()).toEqual([
+      { id: stored.body.commandId, what: expect.stringContaining('resume:'), lastError: null }
+    ]);
+  });
+
+  it('spends the placement on the reply that carries it, so one handoff is one tab', async () => {
+    await pair();
+    const stored = await captureFrom(HOME);
+    expect(stored.body.placement).not.toBeNull();
+
+    // A's own feed is the recovery route for a capture reply that never reached the page. It
+    // must not hand out a second copy of an offer the page already has.
+    const feed = await request('GET', `/activity?conversationId=${HOME}`);
+    expect(feed.body.placement).toBeNull();
+  });
+
+  /**
+   * A resume with no page waiting to be told still opens the way it always did.
+   *
+   * The automatic pickup and restart recovery both queue a resume with nothing in flight from
+   * chat A — its tab may have been closed for an hour. Holding the OS opener back for those
+   * would trade a wrong window for no window at all.
+   */
+  it('opens through the OS when no page is asking for the handoff', async () => {
+    await pair();
+    const { sessionId, token } = await compactedSession('c0c0c0c0-1111-4222-8333-000000000b02', 'carry on');
+    const command = queueResume(sessionId, token)!;
+
+    await waitForOpened(1);
+    expect(opened).toEqual([commandUrl(command.id)]);
+  });
+
+  it('falls back to the OS when the browser it was handed to never opens the tab', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const stored = await captureFrom(HOME);
+      expect(stored.body.placement).not.toBeNull();
+      expect(opened).toEqual([]);
+
+      // The page took the offer and died before it could create the tab — a window closing, an
+      // extension too old to understand the field. Nothing redeems, so the command is opened
+      // the old way well inside its own ninety-second deadline rather than expiring unopened.
+      await vi.advanceTimersByTimeAsync(BROWSER_PLACEMENT_MS + 1);
+      expect(opened).toEqual([commandUrl(stored.body.commandId as string)]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 // ----------------------------------------------------------------- delivery
 
 /**
@@ -3813,16 +3951,32 @@ describe('unattributed activity recovery', () => {
    * `repaired` is the token the app minted for a previous handout, never a conversation id.
    * That is the fence, and being able to quote the wrong one is what a test here needs.
    */
-  async function maintenance(
+  async function maintenanceBatch(
     repaired?: string,
     repairAction?: 'reloaded' | 'reopened'
-  ): Promise<{ conversationId: string; token: string; reason: string } | null> {
+  ): Promise<Array<{ conversationId: string; token: string; reason: string }>> {
     const path = repaired
       ? `/status?repaired=${encodeURIComponent(repaired)}${repairAction ? `&repairAction=${repairAction}` : ''}`
       : '/status';
     const reply = await request('GET', path);
     expect(reply.status).toBe(200);
-    return reply.body.repair ?? null;
+    return reply.body.repairs ?? [];
+  }
+
+  /**
+   * The one chat a pass was handed, for the tests whose subject is a single failure.
+   *
+   * Deliberately strict about the count: a pass that names two chats where the test expects one
+   * is a batching bug, and quietly returning the first would hide it behind an assertion that
+   * still passes.
+   */
+  async function maintenance(
+    repaired?: string,
+    repairAction?: 'reloaded' | 'reopened'
+  ): Promise<{ conversationId: string; token: string; reason: string } | null> {
+    const batch = await maintenanceBatch(repaired, repairAction);
+    expect(batch.length).toBeLessThanOrEqual(1);
+    return batch[0] ?? null;
   }
 
   /** The chat a pass was told to repair. */
@@ -3832,14 +3986,16 @@ describe('unattributed activity recovery', () => {
   const reopened = (conversationId: string): string[] =>
     opened.filter((url) => url === `https://chatgpt.com/c/${conversationId}`);
 
-  it('waits exactly one minute, then hands the browser that one chat to reload', async () => {
+  it('waits fifteen seconds on a lone suspect, then hands the browser that one chat to reload', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       await events(PRIME, [openTurn('turn-live')]);
       await unattributed();
 
-      await vi.advanceTimersByTimeAsync(59_999);
+      // One suspect is nobody to be told apart from, so the wait is not a discrimination budget
+      // at all - it is the round trip the identity notice promises the model for its retry.
+      await vi.advanceTimersByTimeAsync(14_999);
       expect(await maintenance()).toBeNull();
 
       await vi.advanceTimersByTimeAsync(1);
@@ -3882,7 +4038,7 @@ describe('unattributed activity recovery', () => {
         `/status?repairFailed=${encodeURIComponent(handout!.token)}&repairAction=reloaded`
       );
       expect(failed.status).toBe(200);
-      expect(failed.body.repair).toBeNull();
+      expect(failed.body.repairs).toEqual([]);
       expect(foldProgress(await snapshots()).map((event) => event.kind === 'progress' ? event.message.text : '')).toEqual([
         'Reload failed while recovering missing connector attribution; will retry.'
       ]);
@@ -3990,11 +4146,19 @@ describe('unattributed activity recovery', () => {
       expect(await maintenance()).toBeNull();
       expect(reopened(PRIME)).toEqual([]);
 
-      // A call that attributes is the proof the join is back, and the only thing that makes the
-      // chat repairable again. The next break in it is a different failure and gets its reload.
+      // An attributed call proves the reload worked, which is a reason not to need another one
+      // - never a reason to be handed one. The turn's single reload stays spent.
       await attributed(PRIME);
       await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
       await events(PRIME, [openTurn('turn-later')]);
+      await unattributed();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await maintenance()).toBeNull();
+
+      // A turn the chat actually got through is the one fact that releases the budget, because
+      // it is the one fact that says the failure this reload answered is over. The next break
+      // after it is a different failure and gets its own reload.
+      await events(PRIME, [endTurn('turn-later', 'completed'), openTurn('turn-fresh')]);
       await unattributed();
       await vi.advanceTimersByTimeAsync(60_000);
       expect(chatOf(await maintenance())).toBe(PRIME);
@@ -4049,10 +4213,10 @@ describe('unattributed activity recovery', () => {
 
       await vi.advanceTimersByTimeAsync(10_000);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(49_999);
+      await vi.advanceTimersByTimeAsync(4_999);
       expect(await maintenance()).toBeNull();
 
-      // A minute after the *first* one, not seventy seconds after it or a minute after the last.
+      // A rung after the *first* one, not twenty-five seconds after it or a rung after the last.
       await vi.advanceTimersByTimeAsync(1);
       expect(chatOf(await maintenance())).toBe(PRIME);
     } finally {
@@ -4112,8 +4276,15 @@ describe('unattributed activity recovery', () => {
       // Two chats are generating and neither has proved its join, so both are broken until one
       // of them shows otherwise. Standing down here is what left a whole swarm that lost the
       // same evidence path at once with no repair at all.
-      await vi.advanceTimersByTimeAsync(60_000);
-      const handed = [chatOf(await maintenance()), chatOf(await maintenance())].sort();
+      //
+      // Two suspects is also a rung up from one: there is now somebody to be told apart from.
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(await maintenanceBatch()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+
+      // Both in the one pass. The browser's alarm has a thirty-second floor, so handing these
+      // out one per pass would put a minute between two failures that happened together.
+      const handed = (await maintenanceBatch()).map((entry) => entry.conversationId).sort();
       expect(handed).toEqual([PRIME, OTHER].sort());
     } finally {
       vi.useRealTimers();
@@ -4327,6 +4498,101 @@ describe('unattributed activity recovery', () => {
     expect(chatOf(await maintenance())).toBe(OTHER);
   });
 
+  it('isolates a late call from a handoff source without restoring that old chat', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const from = 'efefefef-1111-2222-3333-444444444401';
+      const to = 'efefefef-1111-2222-3333-444444444402';
+      const requestId = 'wfr_historical_after_handoff';
+      const opened = await events(from, [
+        { kind: 'user_message', time: Date.now(), text: 'audit everything', messageId: 'm-historical-source' },
+        openTurn('turn-historical-source'),
+        {
+          kind: 'tool_evidence',
+          time: Date.now(),
+          calls: [{ messageId: 'call-historical-source', tool: 'read', order: 0, answered: false, requestId }]
+        }
+      ]);
+      const sessionId = opened.body.sessionId as string;
+      const continuation = await openContinuationNow(sessionId, from);
+      expect(await attachSummary(continuation.token, SAMPLE_BRIEF)).not.toBeNull();
+      await claimContinuationNow(continuation.token, 'historical-recovery-test');
+      expect(await commitContinuation(continuation.token, to)).toBe(true);
+
+      // Exact request proof preserves which retired frontend called; it does not grant A new
+      // execution/history authority after S moved to B. The refusal is isolated and cannot
+      // push either A's recovery clock or B's current-context activity forward.
+      const late = await recordToolCall({
+        tool: 'read',
+        args: { paths: ['/project/late.ts'] },
+        content: [{ type: 'text', text: 'late but exact' }],
+        outcome: 'ok',
+        durationMs: 1,
+        startedAt: Date.now() + 1,
+        requestId
+      });
+      expect(late).toMatchObject({
+        conversationId: from,
+        attribution: 'superseded',
+        attributionMethod: 'superseded'
+      });
+      expect(await getSession(sessionId)).toMatchObject({ conversationId: to, toolCalls: 0 });
+
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS * 3);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      expect(reopened(from)).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * And the half that matters to the session: after the commit, B is the chat recovery is about.
+   *
+   * A repair names a conversation, and Compact & Resume changes which conversation the session
+   * is. Every ledger this app keeps is keyed by chat id, so the question is not academic: if the
+   * old id stayed the subject, a session would come out of a compaction with its reloads pointed
+   * at a page nobody is looking at, and the chat actually doing the work would have no recovery
+   * at all. The recorder drops A on rebind and the store moves `conversationId` to B, so the
+   * suspect set can only ever contain B - and it contains B as soon as B says it is working,
+   * with no repair, no grant and no spent budget inherited from A.
+   */
+  it('moves recovery onto the chat a compaction resumed into', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const from = 'efefefef-1111-2222-3333-444444444411';
+      const to = 'efefefef-1111-2222-3333-444444444412';
+      const opened = await events(from, [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-resume-recovery' },
+        openTurn('turn-resume-source')
+      ]);
+      const sessionId = opened.body.sessionId as string;
+
+      // A is mid-turn and unattributed, so it is a suspect right up to the commit.
+      await unattributed();
+      const continuation = await openContinuationNow(sessionId, from);
+      expect(await attachSummary(continuation.token, SAMPLE_BRIEF)).not.toBeNull();
+      await claimContinuationNow(continuation.token, 'resume-recovery-test');
+      expect(await commitContinuation(continuation.token, to)).toBe(true);
+
+      // The deadline A was waiting on arrives, and there is nothing left to serve it to. A queued
+      // repair is dropped for want of authority; A's activity grant goes with it.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(await maintenanceBatch()).toEqual([]);
+
+      // B says it is working, which is the first thing about B this app has ever been told.
+      await events(to, [openTurn('turn-resume-target')]);
+      await unattributed();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(chatOf(await maintenance())).toBe(to);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   /**
    * Nor may the broken turn's own last breath count against it.
    *
@@ -4370,6 +4636,65 @@ describe('unattributed activity recovery', () => {
    * can answer, so it supersedes the entry rather than obeying it — including the browser floor
    * that entry is waiting behind, which silence has never been subject to.
    */
+  /**
+   * The one chat this app may never reload, however broken it looks.
+   *
+   * A block is the user taking the app's hands off a conversation, and a recovery is a hand
+   * going back on: the two-minute silence watch is a reload, and no-tab is a whole new tab for a
+   * chat whose every tool call is already being refused. Live, that is what put a rogue turn's
+   * page back on screen minutes after it was blocked.
+   *
+   * The silence itself is still spent, not merely skipped, because a chat waiting for a reload
+   * that is never coming would otherwise stay measured-silent in the ledger for good.
+   */
+  it('never reloads or reopens a chat the user blocked, however long it stays silent', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-blocked')]);
+      setChatBlocked(OTHER, true);
+
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      expect(reopened(OTHER)).toEqual([]);
+
+      // And it stays that way: silence cannot re-arm what it already spent on abandoning.
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS * 5);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      expect(reopened(OTHER)).toEqual([]);
+    } finally {
+      resetBlockedChatsForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The queue outlives the decision that filled it, so the block has to be read at handout too:
+   * a repair filed a minute before the user pressed Block would otherwise still be carried out.
+   */
+  it('drops a queued repair for a chat blocked after it was filed', async () => {
+    await pair();
+    await events(OTHER, [openTurn('turn-queued-then-blocked')]);
+    await events(OTHER, [
+      {
+        kind: 'chat_error',
+        time: Date.now(),
+        text: 'Message delivery timed out. Please try again.',
+        turnId: 'turn-queued-then-blocked',
+        recoverable: true
+      }
+    ]);
+    setChatBlocked(OTHER, true);
+    try {
+      expect(await maintenance()).toBeNull();
+      expect(reopened(OTHER)).toEqual([]);
+    } finally {
+      resetBlockedChatsForTests();
+    }
+  });
+
   it('reloads a silent chat over a turn repair that can no longer retire', async () => {
     vi.useFakeTimers();
     try {
@@ -5297,6 +5622,55 @@ describe('the goal loop over the bridge', () => {
     resetGoalStateForTests();
   });
 
+  it('retires a handoff source from Goal and Loop, including the app watchdog', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const from = 'cafe0091-0000-4000-8000-000000000091';
+      const to = 'cafe0092-0000-4000-8000-000000000092';
+      const recorded = await request('POST', '/events', {
+        body: {
+          conversationId: from,
+          events: [
+            { kind: 'user_message', time: Date.now(), text: 'continue until done', messageId: 'm-retired-goal' },
+            { kind: 'turn_start', time: Date.now(), turnId: 'g-retired-goal' },
+            { kind: 'turn_end', time: Date.now(), turnId: 'g-retired-goal', outcome: 'completed' },
+            {
+              kind: 'assistant_message',
+              time: Date.now(),
+              messageId: 'a-retired-goal',
+              text: 'Ready to continue.',
+              state: 'final',
+              final: true,
+              goalEligible: true,
+              activeNow: true
+            }
+          ]
+        }
+      });
+      const sessionId = recorded.body.sessionId as string;
+      const continuation = await openContinuationNow(sessionId, from);
+      expect(await attachSummary(continuation.token, SAMPLE_BRIEF)).not.toBeNull();
+      await claimContinuationNow(continuation.token, 'retired-goal-test');
+      expect(await commitContinuation(continuation.token, to)).toBe(true);
+
+      const oldFeed = await request('GET', `/activity?conversationId=${from}`);
+      expect(oldFeed.body.goal).toMatchObject({ enabled: false, own: true, blocked: 'continued', pending: null });
+      expect((await request('POST', '/goal/draft', {
+        body: { conversationId: from, turnId: 'g-retired-goal', terminalRequired: true, clientId: 'old-page' }
+      })).body.error).toBe('conversation_superseded');
+      expect((await request('POST', '/settings', {
+        body: { conversationId: from, loop: true }
+      })).body.error).toBe('conversation_superseded');
+
+      await vi.advanceTimersByTimeAsync(40 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('repairs Goal onto the exact pre-fix resume-shadow chat and can draft there', async () => {
     await pair();
     const from = 'cafe0031-0000-4000-8000-000000000031';
@@ -6173,7 +6547,7 @@ describe('the goal loop over the bridge', () => {
 
       const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
         await sweepStaleSwarm(Date.now());
-        return (await request('GET', '/status')).body.repair ?? null;
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
       };
 
       // The page owns the first two minutes. Nothing is wrong with a chat whose script is
@@ -6264,7 +6638,7 @@ describe('the goal loop over the bridge', () => {
 
       await vi.advanceTimersByTimeAsync(40 * 60_000);
       await sweepStaleSwarm(Date.now());
-      expect((await request('GET', '/status')).body.repair ?? null).toBeNull();
+      expect((await request('GET', '/status')).body.repairs).toEqual([]);
     } finally {
       vi.useRealTimers();
     }
