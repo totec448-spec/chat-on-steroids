@@ -1348,7 +1348,7 @@ var CLF_DOM = (() => {
     }, false);
   }
 
-  async function send() {
+  async function send(acceptanceTimeoutMs = 3000) {
     try {
       const box = composer();
       if (!box) return false;
@@ -1408,7 +1408,7 @@ var CLF_DOM = (() => {
           characterData: true,
           attributes: true
         });
-        timer = setTimeout(() => finish(false), 3000);
+        timer = setTimeout(() => finish(false), acceptanceTimeoutMs);
 
         try {
           const button = document.querySelector(SEND);

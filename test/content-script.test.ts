@@ -8891,6 +8891,56 @@ describe('the fresh chat the app opened', () => {
     expect(live.sent.some((message) => message.type === 'ack' && message.status === 'sent')).toBe(false);
   });
 
+  it('keeps one worker bootstrap send alive when ChatGPT accepts it just after the ordinary send window', async () => {
+    let sends = 0;
+    live = await harness(
+      'https://chatgpt.com/',
+      {
+        redeem: () => ({
+          ok: true,
+          command: {
+            id: 'cmd-late-accept',
+            type: 'worker',
+            text: 'Wait for page-owned acceptance evidence without sending twice.',
+            agent: 'worker-1'
+          }
+        }),
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          sends++;
+          dom.window.setTimeout(() => {
+            document.querySelector('#prompt-textarea')!.textContent = '';
+            dom.reconfigure({ url: 'https://chatgpt.com/c/31313131-4242-5353-6464-757575757575?clf=cmd-late-accept' });
+          }, 3_200);
+        });
+      }
+    );
+
+    // The harness normally makes content-script sleeps instantaneous. This case is specifically
+    // about the real acceptance interval, so restore wall-clock timers only for this one command.
+    const instantTimeout = live.window.setTimeout;
+    live.window.setTimeout = ((fn: TimerHandler, ms?: number, ...args: any[]) =>
+      globalThis.setTimeout(fn as (...inner: any[]) => void, ms, ...args)) as unknown as typeof live.window.setTimeout;
+    live.dom.reconfigure({ url: 'https://chatgpt.com/?clf=cmd-late-accept' });
+    try {
+      await live.hook.runCommand();
+    } finally {
+      live.window.setTimeout = instantTimeout;
+    }
+    await settle(200);
+
+    expect(sends).toBe(1);
+    expect(live.sent.filter((message) => message.type === 'ack')).toEqual([
+      expect.objectContaining({
+        id: 'cmd-late-accept',
+        status: 'sent',
+        conversationId: '31313131-4242-5353-6464-757575757575',
+        agent: 'worker-1'
+      })
+    ]);
+  });
   it('types nothing when the marker is stale', async () => {
     live = await harness('https://chatgpt.com/?clf=cmd-old', {
       redeem: () => ({ ok: true, command: null, gone: true })

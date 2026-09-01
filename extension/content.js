@@ -8398,7 +8398,12 @@
         return;
       }
     }
-    if (!(await CLF_DOM.send())) {
+    // A click can be accepted by ChatGPT after the DOM has stayed unchanged for several seconds.
+    // Treat that interval as ambiguity, not rejection: keep observing the same one click rather
+    // than terminalising the worker and leaving a real, later-accepted chat orphaned. The bridge
+    // itself owns a 90s command deadline; 30s leaves room for fresh-chat identity discovery while
+    // still bounding a true no-op send locally. No retry or second click is performed here.
+    if (!(await CLF_DOM.send(30_000))) {
       CLF_DOM.clearPromptExact(boot.text);
       if (boot.type === 'resume') return;
       return void (await fail('ChatGPT did not accept the bootstrap send'));
