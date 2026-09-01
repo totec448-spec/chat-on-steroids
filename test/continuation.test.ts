@@ -77,7 +77,7 @@ const {
   resetGoalStateForTests,
   setGoalObjective
 } = await import('../src/main/goal.js');
-const { makeTempDir, removeTempDir, SAMPLE_BRIEF } = await import('./helpers.js');
+const { faultGate, makeTempDir, removeTempDir, SAMPLE_BRIEF } = await import('./helpers.js');
 
 let dir: string;
 
@@ -289,19 +289,18 @@ describe('claiming', () => {
     const { sessionId, token } = await readyContinuation();
     await claimContinuationNow(token, 'tab-1');
 
-    // Hold the durable write open, so the commit is provably mid-flight.
-    let release = (): void => undefined;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    // Hold the durable write open, so the commit is provably mid-flight. The explicit failpoint
+    // replaces a scheduler guess: the assertion cannot run until rebindSession itself says the
+    // crash boundary has been reached.
+    const durableWrite = faultGate();
     const real = store.rebindSession;
     const spy = vi.spyOn(store, 'rebindSession').mockImplementation(async (...args) => {
-      await held;
+      await durableWrite.hold();
       return real(...args);
     });
 
     const commit = commitContinuation(token, CHAT_B);
-    await Promise.resolve();
+    await durableWrite.reached;
     expect(continuationForSession(sessionId)?.state).toBe('committing');
 
     // The retrying claimant wants its brief; what it must not get is the state put back to
@@ -311,7 +310,7 @@ describe('claiming', () => {
     const second = await commitContinuation(token, 'chat-c');
     expect(second).toBe(false);
 
-    release();
+    durableWrite.release();
     expect(await commit).toBe(true);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(await attachedChat(sessionId)).toBe(CHAT_B);

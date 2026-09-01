@@ -72,3 +72,45 @@ export const SAMPLE_BRIEF = [
   '',
   'DO NOT — do not touch the extension protocol version; the user ruled that out.'
 ].join('\n');
+
+/**
+ * Deterministic failpoint for crash/restart tests.
+ *
+ * Production work calls `hold()` at the exact durability/lifecycle boundary under test. The test
+ * awaits `reached` before inspecting the mid-flight state, then calls `release()` to let the same
+ * operation continue. No sleeps or scheduler guesses are involved, and release is idempotent so
+ * cleanup can safely call it again from `finally`.
+ */
+export function faultGate(): {
+  reached: Promise<void>;
+  hold(): Promise<void>;
+  release(): void;
+  isReleased(): boolean;
+} {
+  let markReached!: () => void;
+  let unblock!: () => void;
+  let reachedOnce = false;
+  let released = false;
+  const reached = new Promise<void>((resolve) => {
+    markReached = resolve;
+  });
+  const blocked = new Promise<void>((resolve) => {
+    unblock = resolve;
+  });
+  return {
+    reached,
+    async hold() {
+      if (!reachedOnce) {
+        reachedOnce = true;
+        markReached();
+      }
+      await blocked;
+    },
+    release() {
+      if (released) return;
+      released = true;
+      unblock();
+    },
+    isReleased: () => released
+  };
+}
