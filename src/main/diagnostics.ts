@@ -126,6 +126,20 @@ export function describeRoute(
   };
 }
 
+/** A fresh completed poll supersedes the client's sticky last-error field. */
+export function metadataErrorIsCurrent(
+  error: string | null,
+  health: PollHealth | null,
+  nowMs = Date.now()
+): boolean {
+  if (!error) return false;
+  return (
+    health?.lastSuccessMs === null ||
+    health?.lastSuccessMs === undefined ||
+    nowMs - health.lastSuccessMs > POLL_FRESH_MS
+  );
+}
+
 /** Runs an initialize + tools/list against our own loopback endpoint. */
 async function checkLocalServer(url: string): Promise<Check> {
   const init = await fetchJson(url, {
@@ -308,12 +322,12 @@ export async function runDiagnostics(): Promise<Diagnosis> {
             ? 'The tunnel did not report a probe result for the main channel.'
             : `Probe of the local MCP server: ${client.probe}.`
       });
-      if (client.metadataError) {
+      if (metadataErrorIsCurrent(client.metadataError, health)) {
         checks.push({
           name: 'Last tunnel error',
           status: 'fail',
           ok: false,
-          detail: client.metadataError.slice(0, 300)
+          detail: (client.metadataError ?? '').slice(0, 300)
         });
       }
     }
