@@ -81,8 +81,10 @@ import {
   agentForOwnedConversation,
   bindConversation,
   claimWorkerRevival,
+  closableWorkerConversations,
   currentRunId,
   failAgent,
+  DETACHED_SILENCE_MS,
   failWorkerRevival,
   finishWorkerConversation,
   noteWorkerRevived,
@@ -123,6 +125,7 @@ import {
   continuationByToken,
   continuationForSession,
   pendingAutomaticContinuations,
+  supersededSourceConversations,
   dispatchContinuationDestinationSendNow,
   dispatchContinuationSourceSendNow,
   openContinuationNow,
@@ -207,7 +210,27 @@ export const COMMAND_DEADLINE_MS = 90_000;
 const WORKER_BOOTSTRAP_RETRY_MS = 60_000;
 export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
 /** A worker may occupy the broker's `waking` state for one short, absolute attempt. */
-const REVIVAL_DEADLINE_MS = 30_000;
+/**
+ * How long the browser has to prove it typed a wake into a sleeping worker's chat.
+ *
+ * The browser learns about a revival on its next `/status` pass, whose alarm has a
+ * thirty-second floor, then has to focus or reopen the tab and type — and several wakes
+ * from one prime message go one at a time. At thirty seconds the third of three was being
+ * dropped as "waiting too long" while the text was on its way into the chat.
+ */
+export const REVIVAL_DEADLINE_MS = COMMAND_DEADLINE_MS;
+/**
+ * How long a delivered wake may go without the worker's first exact tool call.
+ *
+ * Delivery proves the text is in the chat; it does not prove the model has read it, and a
+ * worker carrying a large context routinely thinks for a minute before its first call. So a
+ * delivered wake gets the same silence budget a working worker gets before it is judged
+ * asleep. The old thirty seconds ran out while the woken model was still reading: the app
+ * told the prime "could not be woken", put the worker back to sleep, parked the run when
+ * that was the last slot, and then refused the worker's first call as a dormant chat — after
+ * which the prime re-sent the work, spawned replacements, and told everyone to stop.
+ */
+export const REVIVAL_ACTIVITY_MS = REVIVAL_DEADLINE_MS + DETACHED_SILENCE_MS;
 /**
  * Past this age an ordinary bootstrap/restored command is stale, not pending. Worker revivals
  * use the shorter deadline above because their slot is already reserved while they are waking.
@@ -1100,6 +1123,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // replace the visible failure with "Trying" before a renderer could ever observe it.
         repairs: repairFailed ? [] : await takePendingRepairs(),
         nonDiscardableConversations: nonDiscardableAgentConversations(),
+        closableConversations: closableAgentConversations(),
         recoveryMonitoring: browserRecoveryMonitoring()
       },
       origin
@@ -1770,7 +1794,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (result.status === 'retryable') {
         return json(res, 503, { error: 'resume_commit_retryable', retryable: true }, origin);
       }
-      if (result.status === 'rejected') return json(res, 409, { error: 'resume_commit_rejected', message: result.reason }, origin);
+      if (result.status === 'rejected') {
+        if (await abortRejectedResume(checkpointToken, result.reason)) {
+          const refused = commands.find(
+            (candidate) => candidate.spec.type === 'resume' && candidate.spec.token === checkpointToken
+          );
+          if (refused) retire(refused, 'the session layer refused the marked replacement message');
+        }
+        return json(res, 409, { error: 'resume_commit_rejected', message: result.reason }, origin);
+      }
       const command = commands.find(
         (candidate) => candidate.spec.type === 'resume' && candidate.spec.token === checkpointToken
       );
@@ -4076,6 +4108,27 @@ export function commandUrl(id: string): string {
   return `https://chatgpt.com/?${marker}#${marker}`;
 }
 
+/**
+ * Ends a continuation whose commit the session layer refused for good.
+ *
+ * The ACK route already does this; the marked-message route did not, and returned the 409
+ * with the continuation left `claimed` and carrying the refusal as its error. Nothing retries
+ * a claimed continuation on its own, an automatic one never expires, and chat A's control
+ * reads "opening the new chat" off that record — so the 2026-09-01 refusal left A behind
+ * that overlay indefinitely and B unbound, calling tools as nobody. A refusal is final: the
+ * session stays in A and A is told so. Only a commit that is already durable is left alone.
+ */
+async function abortRejectedResume(token: string, reason: string): Promise<boolean> {
+  const state = continuationByToken(token);
+  if (!state || state.state === 'committing' || state.state === 'committed' || state.state === 'aborted') return false;
+  try {
+    return await abortContinuationNow(token, reason);
+  } catch (err) {
+    logWarn(`bridge: could not durably abort the refused resume ${state.sessionId} — ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
 /** The one existing-chat command the extension may route after a fresh tab scan. */
 function pendingBrowserRevival(): {
   id: string;
@@ -4615,6 +4668,21 @@ function nonDiscardableAgentConversations(): string[] {
     .sort();
 }
 
+/**
+ * Chats whose tabs the browser should close: the source chat of every finished Compact &
+ * Resume, and stopped worker chats beyond the worker limit plus two — enough for the prime to
+ * come back to its recent workers without keeping every chat it ever spawned resident. A
+ * revival opens a closed sleeping worker's chat again, so nothing is lost by closing it; a
+ * chat that is protected from discard is never on this list.
+ */
+function closableAgentConversations(): string[] {
+  const protectedChats = new Set(nonDiscardableAgentConversations());
+  const keep = getConfig().multiAgent.maxWorkers + 2;
+  return [...new Set([...supersededSourceConversations(), ...closableWorkerConversations(keep)])]
+    .filter((conversationId) => !protectedChats.has(conversationId))
+    .sort();
+}
+
 /** The active agent chats for which the browser must keep asking the app for recovery work. */
 function browserRecoveryMonitoring(): boolean {
   if (repairsInFlight.size > 0 || activeUntil.size > 0 || goalWatch.size > 0 || compactionWatch.size > 0) return true;
@@ -4657,7 +4725,7 @@ function inspectSilentChats(now: number): {
       continue;
     }
     const held = repairsInFlight.get(conversationId);
-    if (held?.state === 'done') {
+    if (held?.state === 'done' && !TURN_SCOPED_REPAIRS.has(held.reason)) {
       spent.push(conversationId);
       continue;
     }
@@ -5504,10 +5572,17 @@ function revivalDeliveryProven(command: Command): boolean {
   );
 }
 
+/**
+ * When this revival stops being a wake attempt. Absolute from the wake, never renewed by a
+ * redeem, so a page that never types cannot keep a worker `waking` forever; a proven
+ * delivery moves it to the longer budget and nothing else does.
+ */
+function revivalDeadlineAt(command: Command): number {
+  return command.createdAt + (revivalDeliveryProven(command) ? REVIVAL_ACTIVITY_MS : REVIVAL_DEADLINE_MS);
+}
+
 function commandDeadlineDelay(command: Command, now = Date.now()): number {
-  // Revival is one absolute waking attempt. Redeeming the marked page must not renew it and leave
-  // a worker occupying `waking` indefinitely when the page never sends or reports valid activity.
-  if (command.spec.type === 'revive') return command.createdAt + REVIVAL_DEADLINE_MS - now;
+  if (command.spec.type === 'revive') return revivalDeadlineAt(command) - now;
   if (command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic) {
     // One checkpoint, not a failure trigger. Expiry releases only this browser transport;
     // the auto-compaction ticket remains and the next 15-minute pickup may open it again.
@@ -5576,6 +5651,15 @@ function rearmRetainedCommandDeadlines(): void {
 function expire(command: Command): void {
   if (!commands.includes(command)) return;
   const spec = command.spec;
+  // A wake's deadline moves once when its delivery is proven, and the timer armed at the wake
+  // does not know that. Re-arm for the remainder rather than end a worker that is reading.
+  if (spec.type === 'revive') {
+    const remaining = commandDeadlineDelay(command);
+    if (remaining > 0) {
+      armDeadline(command, remaining);
+      return;
+    }
+  }
   if (spec.type === 'resume') {
     const continuation = continuationByToken(spec.token);
     if (continuation?.state === 'committed' && continuation.to) {
@@ -5848,7 +5932,7 @@ function tidyCommands(): void {
     const automaticResume =
       command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic === true;
     const stale = command.spec.type === 'revive'
-      ? now - command.createdAt >= REVIVAL_DEADLINE_MS
+      ? now >= revivalDeadlineAt(command)
       : !automaticResume && now - command.createdAt > COMMAND_TTL_MS;
     if (stale) {
       drop(command, 'it has been waiting too long to still be what the user expects');
@@ -6152,8 +6236,10 @@ function planCommandRestore(
   for (const { raw, spec, createdAt } of durableCandidates.values()) {
     if (spec.type === 'resume') resumeTokens.push({ sessionId: spec.sessionId, token: spec.token });
     const persistedLeased = version !== 1 && raw.phase === 'leased';
+    // The broker cannot yet say whether a restored wake was delivered, so disk rows get the
+    // longer budget here; the deadline re-armed below applies the exact one.
     const stale = spec.type === 'revive'
-      ? now - createdAt >= REVIVAL_DEADLINE_MS
+      ? now - createdAt >= REVIVAL_ACTIVITY_MS
       : now - createdAt > COMMAND_TTL_MS;
     if (stale) {
       if (spec.type === 'revive') expiredRevivals.push({ id: raw.id!, spec });
@@ -6186,10 +6272,7 @@ function planCommandRestore(
   // for its key were discarded above before expiry was considered.
   const expiredRetainedRevivalIds = new Set<string>();
   for (const command of plannedCommands) {
-    if (
-      command.spec.type !== 'revive' ||
-      now - command.createdAt < REVIVAL_DEADLINE_MS
-    ) continue;
+    if (command.spec.type !== 'revive' || now < revivalDeadlineAt(command)) continue;
     expiredRevivals.push({ id: command.id, spec: command.spec });
     expiredRetainedRevivalIds.add(command.id);
   }

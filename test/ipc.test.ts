@@ -397,6 +397,28 @@ describe('settings writes from more than one UI', () => {
 });
 
 describe('root namespace invariants', () => {
+  it('approves a dropped folder path exactly like the picker, and refuses a dropped file', async () => {
+    const { promises: fs } = await import('node:fs');
+    const path = await import('node:path');
+    await saveConfig({ ...defaultConfig(), roots: [] });
+    const folder = path.join(dir, 'dropped-project');
+    await fs.mkdir(folder, { recursive: true });
+    const file = path.join(dir, 'dropped-file.txt');
+    await fs.writeFile(file, 'not a folder');
+    const addPath = (payload: unknown): Promise<any> => handlers.get('roots:addPath')!(null, payload) as Promise<any>;
+
+    const added = await addPath({ path: folder });
+    expect(added.ok).toBe(true);
+    expect(getConfig().roots.map((root) => root.name)).toEqual(['dropped-project']);
+
+    // The drop zone is not a second, weaker approval path: the same validation applies.
+    const refused = await addPath({ path: file });
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/not a folder/i);
+    expect((await addPath({ path: '' })).ok).toBe(false);
+    expect(getConfig().roots).toHaveLength(1);
+  });
+
   it('refuses a live rename into the reserved /skills namespace', async () => {
     const base = defaultConfig();
     await saveConfig({

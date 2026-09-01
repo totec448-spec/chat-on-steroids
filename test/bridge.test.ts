@@ -46,6 +46,8 @@ const {
   BROWSER_PLACEMENT_MS,
   CHAT_SILENCE_MS,
   COMMAND_DEADLINE_MS,
+  REVIVAL_ACTIVITY_MS,
+  REVIVAL_DEADLINE_MS,
   WORKER_BOOTSTRAP_LIMIT_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
@@ -1493,6 +1495,35 @@ describe('delivering a bootstrap', () => {
     expect((await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-4' } })).status).toBe(409);
   });
 
+  it('aborts a resume whose commit the session layer refused, so chat A is not left waiting on it', async () => {
+    // 2026-09-01: the marked replacement message committed, the session layer refused the
+    // commit, and the 409 went back with the continuation still `claimed`. Nothing retries a
+    // claimed continuation, an automatic one never expires, and chat A's control reads its
+    // state off that record — so A sat behind "opening the new chat" and B, never bound,
+    // called tools as nobody. A refusal is final: the session stays in A and A is told.
+    await pair();
+    const chatA = 'a1a1a1a1-2222-4333-8444-555555555555';
+    const chatB = 'b1b1b1b1-2222-4333-8444-555555555555';
+    spawn({ workers: [{ task: 'keep a swarm bound to A' }], caller: { conversationId: chatA } });
+    const { sessionId, token } = await compactedSession(chatA, 'the brief for the refused move');
+    const command = queueResume(sessionId, token)!;
+    expect((await redeem(command.id, 'tab-b')).text).toContain('the brief for the refused move');
+    expect((await request('POST', '/compact', { body: { token, destinationAttempt: true } })).body.allowed).toBe(true);
+    expect((await request('POST', '/compact', { body: { token, destinationDispatch: true } })).body.armed).toBe(true);
+    // The handover is gone while the continuation is live: the swarm preflight will refuse.
+    cancelPrimeTransfer(chatA);
+
+    const reply = await request('POST', '/compact', {
+      body: { conversationId: chatB, token, destinationMessageId: 'm-b-marked-resume' }
+    });
+    expect(reply.status).toBe(409);
+    expect(reply.body.error).toBe('resume_commit_rejected');
+    expect(continuationByToken(token)?.state).toBe('aborted');
+    expect(continuationByToken(token)?.error).toMatch(/handover/);
+    expect((await getSession(sessionId))?.conversationId).toBe(chatA);
+    expect(pendingCommands().some((entry) => entry.id === command.id)).toBe(false);
+  });
+
   /**
    * The name the fresh chat ends up with.
    *
@@ -2101,7 +2132,7 @@ describe('delivering a bootstrap', () => {
     expect(claimed.body.command.text).not.toContain('now do the second half');
   });
 
-  it('releases an unredeemed worker after exactly thirty seconds of waking', async () => {
+  it('releases an unredeemed worker at exactly the revival deadline', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -2118,7 +2149,7 @@ describe('delivering a bootstrap', () => {
       const durable = await readDurable<any>('bridge-commands');
       const revive = durable?.commands?.find((entry: any) => entry?.id === id);
       expect(revive).toBeTruthy();
-      const remaining = 30_000 - (Date.now() - revive.createdAt);
+      const remaining = REVIVAL_DEADLINE_MS - (Date.now() - revive.createdAt);
       expect(remaining).toBeGreaterThan(1);
 
       // Content deliberately has not redeemed: the page is still rendering the assistant turn.
@@ -2340,7 +2371,7 @@ describe('delivering a bootstrap', () => {
     expect(opened).toHaveLength(1);
   });
 
-  it('expires an owner-null revival at thirty seconds with the same worker and inbox intact', async () => {
+  it('expires an owner-null revival at the revival deadline with the same worker and inbox intact', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -2354,7 +2385,7 @@ describe('delivering a bootstrap', () => {
       wake([{ to: 'worker-1', text: 'stay queued if the page never redeems' }]);
       const { id } = await waitForRevival();
 
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(REVIVAL_DEADLINE_MS);
       await vi.runAllTicks();
       const worker = swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
       expect(worker).toMatchObject({ state: 'sleeping', revivable: true, pending: 1 });
@@ -2365,7 +2396,7 @@ describe('delivering a bootstrap', () => {
     }
   });
 
-  it('does not renew the absolute thirty-second waking deadline when a document redeems', async () => {
+  it('does not renew the absolute waking deadline when a document redeems', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -2388,7 +2419,7 @@ describe('delivering a bootstrap', () => {
         revivable: false
       });
 
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(REVIVAL_DEADLINE_MS);
       await vi.runAllTicks();
       const worker = swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
       expect(worker.state).toBe('sleeping');
@@ -2400,7 +2431,7 @@ describe('delivering a bootstrap', () => {
     }
   });
 
-  it('keeps a sent revival waking until exact worker activity and does not renew its deadline', async () => {
+  it('gives a delivered revival the silence budget of a working worker, and no more', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -2414,7 +2445,7 @@ describe('delivering a bootstrap', () => {
       wake([{ to: 'worker-1', text: 'prove that the model reacted' }]);
       const { id } = await waitForRevival();
 
-      await vi.advanceTimersByTimeAsync(29_000);
+      await vi.advanceTimersByTimeAsync(REVIVAL_DEADLINE_MS - 1_000);
       await request('POST', '/commands/redeem', {
         body: { id, client: 'delivered-without-liveness', conversationId }
       });
@@ -2424,7 +2455,15 @@ describe('delivering a bootstrap', () => {
       expect(ack.body).toMatchObject({ committed: true });
       expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
 
-      await vi.advanceTimersByTimeAsync(1_000);
+      // The text is in the chat; the model reading it is what the rest of the budget is for.
+      // 2026-09-01: three woken workers were still thinking when the old thirty seconds ran
+      // out, and were reported unwakeable while their chats were visibly working.
+      await vi.advanceTimersByTimeAsync(REVIVAL_ACTIVITY_MS - REVIVAL_DEADLINE_MS - 1_000);
+      await vi.runAllTicks();
+      expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+      expect(pendingCommands().some((entry) => entry.id === id)).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(2_000);
       await vi.runAllTicks();
       const worker = swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')!;
       expect(worker).toMatchObject({ state: 'sleeping', revivable: true, pending: 1 });
@@ -2460,7 +2499,7 @@ describe('delivering a bootstrap', () => {
     const revive = durable?.commands?.find((entry: any) => entry?.spec?.type === 'revive');
     expect(revive).toBeTruthy();
     const id = revive.id as string;
-    revive.createdAt = Date.now() - 30_001;
+    revive.createdAt = Date.now() - REVIVAL_ACTIVITY_MS - 1;
     expect(revive.phase).toBe('queued');
     expect(revive.owner).toBeNull();
     await writeDurableNow('bridge-commands', durable);

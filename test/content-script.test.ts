@@ -1708,13 +1708,14 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
       new live.window.Event('submit', { bubbles: true })
     );
     composer.textContent = '';
-    userTurn(live.document, 'opening-send', 'start the repository audit');
     assistantTurn(live.document, 'opening-answer', []);
 
-    // This is the live regression's ordering. An SPA identity pull scans Fiber while DOM
-    // ingestion is gated. Fiber can already see the stable user message; if it publishes that
-    // visible row itself, it marks the occurrence seen before the normal DOM pass can use the
-    // same stable id as the send receipt that opens the turn.
+    // This is the live regression's actual ordering. Fiber can expose the stable authored user
+    // object before the rendered bubble has a usable DOM identity. It therefore journals the
+    // user message first. The app may even return that exact message as a durable anchor before
+    // the DOM catches up. Neither fact is evidence that the *send boundary* was already handled:
+    // the composer receipt still has to open exactly one local generation when the same stable
+    // message finally becomes renderable.
     await replyFiber([], [{
       turnId: 'opening-answer',
       conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
@@ -1731,14 +1732,130 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
       activities: []
     }]);
     await live.hook.flush();
+
+    live.reply.set('activity', () => ({
+      ok: true,
+      data: {
+        entries: [],
+        stream: [],
+        userAnchors: [{ seq: 1, time: 1_787_165_090_500, messageId: 'm-opening-send' }],
+        nextSince: 0,
+        pendingTools: 0,
+        activeTurnId: null
+      }
+    }));
+    await live.hook.pullActivity();
+
+    userTurn(live.document, 'opening-send', 'start the repository audit');
     live.hook.observe();
     await settle();
     await live.hook.flush();
 
+    // Transcript custody stayed with the first Fiber observation: the DOM pass must not emit a
+    // duplicate just to express lifecycle. The separate boundary still opens one generation.
     expect(emitted(live.sent, 'user_message').map((entry) => entry.event)).toEqual([
-      expect.objectContaining({ messageId: 'm-opening-send', authoredNow: true })
+      expect.objectContaining({ messageId: 'm-opening-send', authoredTime: true })
     ]);
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
+  it('keeps a follow-up send boundary when Fiber and the app anchor the new row before the DOM does', async () => {
+    live = await harness();
+    userTurn(live.document, 'prior-question', 'the recorded question', { sent: false });
+    live.reply.set('activity', () => ({
+      ok: true,
+      data: {
+        entries: [],
+        stream: [],
+        userAnchors: [{ seq: 1, time: 1_700_000_000_000, messageId: 'm-prior-question' }],
+        nextSince: 0,
+        pendingTools: 0,
+        activeTurnId: null
+      }
+    }));
+    await live.hook.pullActivity();
+
+    const composer = live.document.querySelector('#prompt-textarea')!;
+    composer.textContent = 'the new follow-up';
+    live.document.querySelector('#composer-form')!.dispatchEvent(
+      new live.window.Event('submit', { bubbles: true })
+    );
+    composer.textContent = '';
+    assistantTurn(live.document, 'follow-up-answer', []);
+
+    await replyFiber([], [{
+      turnId: 'follow-up-answer',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      calls: [],
+      messages: [{
+        messageId: 'm-new-follow-up',
+        rawMessageId: 'm-new-follow-up',
+        role: 'user',
+        stable: true,
+        createTime: 1_787_165_091_000,
+        rawText: 'the new follow-up',
+        renderedHtml: ''
+      }],
+      activities: []
+    }]);
+    await live.hook.flush();
+
+    live.reply.set('activity', () => ({
+      ok: true,
+      data: {
+        entries: [],
+        stream: [],
+        userAnchors: [
+          { seq: 1, time: 1_700_000_000_000, messageId: 'm-prior-question' },
+          { seq: 2, time: 1_787_165_091_000, messageId: 'm-new-follow-up' }
+        ],
+        nextSince: 0,
+        pendingTools: 0,
+        activeTurnId: null
+      }
+    }));
+    await live.hook.pullActivity();
+
+    userTurn(live.document, 'new-follow-up', 'the new follow-up');
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'user_message').filter((entry) => entry.event.messageId === 'm-new-follow-up')).toHaveLength(1);
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
+  it('does not spend a send receipt on the already-rendered latest message when no new send landed', async () => {
+    live = await harness();
+    userTurn(live.document, 'existing-latest', 'repeat these exact words', { sent: false });
+    live.reply.set('activity', () => ({
+      ok: true,
+      data: {
+        entries: [],
+        stream: [],
+        userAnchors: [{ seq: 1, time: 1_700_000_000_000, messageId: 'm-existing-latest' }],
+        nextSince: 0,
+        pendingTools: 0,
+        activeTurnId: null
+      }
+    }));
+    await live.hook.pullActivity();
+
+    // The user tries to send identical text, but ChatGPT never creates a new user object. The
+    // receipt must not reinterpret the already-anchored row as the new turn merely because the
+    // text matches. rememberUserSend() snapshots the pre-send message identity for this fence.
+    const composer = live.document.querySelector('#prompt-textarea')!;
+    composer.textContent = 'repeat these exact words';
+    live.document.querySelector('#composer-form')!.dispatchEvent(
+      new live.window.Event('submit', { bubbles: true })
+    );
+    composer.textContent = '';
+
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'turn_start')).toEqual([]);
   });
 
   it('opens the turn a multi-paragraph send started, though the composer stitched its blank line away', async () => {
@@ -4449,6 +4566,42 @@ describe('a stop button that goes missing while the turn is still running', () =
     });
   });
 
+  it('opens one turn for one send however many observations pass before the app anchors it', async () => {
+    // 2026-09-01: the anchor for a freshly sent message arrives with the app's next activity
+    // reply, and until it did every observation read the newest user message as freshly
+    // authored — closing the turn just opened as "replaced" and opening the next one, once a
+    // second, thirty times for one send, in the prime and in every worker. The shape that
+    // does it: the app already anchors an older message, and the new one is still unanchored.
+    live = await harness(undefined, {
+      activity: () => ({
+        ok: true,
+        data: {
+          entries: [],
+          stream: [],
+          nextSince: 0,
+          pendingTools: 0,
+          userAnchors: [{ seq: 1, time: 1_787_165_090_500, messageId: 'm-older-user' }]
+        }
+      })
+    });
+    userTurn(live.document, 'older-user', 'the question before', { sent: false });
+    await live.hook.pullActivity();
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+
+    // The send: rendered, and not yet anchored by the app.
+    userTurn(live.document, 'storm-user', 'now the follow-up', { sent: false });
+    startGenerating(live.document, { send: false });
+    for (let tick = 0; tick < 12; tick++) {
+      live.hook.observe();
+      await settle();
+    }
+
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+  });
+
   it('splits two user turns even when the old stop disappears and the new stop appears between observations', async () => {
     live = await harness();
     startGenerating(live.document);
@@ -6363,6 +6516,157 @@ describe('evidence from the page context', () => {
         calls: [expect.objectContaining({ requestId, messageId: 'resumed-call' })]
       })
     ]);
+  });
+
+  it('binds a resumed request from the continuation marker even when the local turn never opened', async () => {
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const provisionalThread = '11111111-2222-3333-4444-555555555555';
+    const token = 'JXIuSUNfIFE5hNDG40d9Fw';
+    const requestId = 'ad15030a-dcba-41e9-b5e7-7c251eb6dc38';
+    const prompt = `[[CLF-RESUME:${token}]]\n\nContinue the previous ChatGPT session.`;
+    live.reply.set('compact', () => ({ ok: true, data: {} }));
+    live.reply.set('correlate', () => ({
+      ok: true,
+      data: { conversationId, sessionId: '2026-09-01-7b3c26c2', confirmed: [requestId], complete: true }
+    }));
+
+    // This is the second 2026-09-01 live failure. The durable continuation already committed
+    // B -> C, but C's local generation never opened. ChatGPT's marked resume prompt carried C's
+    // real route while the adjacent assistant/tool turn still carried its provisional thread.
+    // The exact continuation relation is enough to own that answer; request identity must not
+    // depend on the separate DOM-generation bookkeeping recovering first.
+    userTurn(live.document, 'resume-marker', prompt, { sent: false });
+    await replyFiber([], [
+      {
+        turnId: 'resume-marker',
+        conversationId,
+        calls: [],
+        messages: [{
+          role: 'user',
+          stable: true,
+          rawText: prompt,
+          rawMessageId: 'resume-marker-message',
+          messageId: 'resume-marker-message'
+        }]
+      },
+      {
+        turnId: 'resume-answer',
+        conversationId: provisionalThread,
+        calls: [{
+          messageId: 'resumed-agents-call',
+          tool: 'agents',
+          order: 0,
+          answered: false,
+          requestId,
+          createTime: 1_700_000_001
+        }],
+        requests: [{ requestId, messageId: 'resumed-agents-call', createTime: 1_700_000_001 }],
+        messages: []
+      }
+    ]);
+    await settle();
+    await live.hook.flush();
+
+    expect(live.sent.filter((message) => message.type === 'correlate')).toEqual([
+      expect.objectContaining({
+        conversationId,
+        calls: [expect.objectContaining({ requestId, messageId: 'resumed-agents-call' })]
+      })
+    ]);
+    const commitAt = live.sent.findIndex(
+      (message) => message.type === 'compact' && message.destinationMessageId === 'resume-marker-message'
+    );
+    const correlateAt = live.sent.findIndex((message) => message.type === 'correlate');
+    expect(commitAt).toBeGreaterThanOrEqual(0);
+    expect(correlateAt).toBeGreaterThan(commitAt);
+
+    // The proof is for this destination message in this destination chat, not for the token
+    // everywhere this document may navigate later. Leave the old marked DOM mounted, move the
+    // SPA route, and make the app reject that same marker in the new chat: the cached C proof
+    // must not authorize D's request-id handshake.
+    const otherConversation = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+    live.reply.set('compact', () => ({ ok: false, error: 'destination_message_conflict' }));
+    live.window.history.pushState({}, '', `/c/${otherConversation}`);
+    live.hook.observe();
+    await settle();
+    await replyFiber([], [
+      {
+        turnId: 'resume-marker',
+        conversationId,
+        calls: [],
+        messages: [{
+          role: 'user',
+          stable: true,
+          rawText: prompt,
+          rawMessageId: 'resume-marker-message',
+          messageId: 'resume-marker-message'
+        }]
+      },
+      {
+        turnId: 'resume-answer',
+        conversationId: provisionalThread,
+        calls: [{
+          messageId: 'resumed-agents-call',
+          tool: 'agents',
+          order: 0,
+          answered: false,
+          requestId,
+          createTime: 1_700_000_001
+        }],
+        requests: [{ requestId, messageId: 'resumed-agents-call', createTime: 1_700_000_001 }],
+        messages: []
+      }
+    ]);
+    await settle();
+    expect(live.sent.filter((message) => message.type === 'correlate')).toHaveLength(1);
+  });
+
+  it('does not let an uncommitted Resume marker authorize a provisional request owner', async () => {
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const provisionalThread = '11111111-2222-3333-4444-555555555555';
+    const token = 'staleResumeToken_1234567890';
+    const requestId = 'resume_marker_must_be_durable';
+    const prompt = `[[CLF-RESUME:${token}]]\n\nContinue the previous ChatGPT session.`;
+    live.reply.set('compact', () => ({ ok: false, error: 'destination_message_conflict' }));
+    live.reply.set('correlate', () => ({
+      ok: true,
+      data: { conversationId, confirmed: [requestId], complete: true }
+    }));
+
+    userTurn(live.document, 'stale-resume-marker', prompt, { sent: false });
+    await replyFiber([], [
+      {
+        turnId: 'stale-resume-marker',
+        conversationId,
+        calls: [],
+        messages: [{
+          role: 'user',
+          stable: true,
+          rawText: prompt,
+          rawMessageId: 'stale-resume-marker-message',
+          messageId: 'stale-resume-marker-message'
+        }]
+      },
+      {
+        turnId: 'stale-resume-answer',
+        conversationId: provisionalThread,
+        calls: [{
+          messageId: 'stale-resume-call',
+          tool: 'agents',
+          order: 0,
+          answered: false,
+          requestId,
+          createTime: 1_700_000_001
+        }],
+        requests: [{ requestId, messageId: 'stale-resume-call', createTime: 1_700_000_001 }],
+        messages: []
+      }
+    ]);
+    await settle();
+
+    expect(live.sent.filter((message) => message.type === 'correlate')).toEqual([]);
   });
 
   it('confirms a live request when the virtualized renderer published no data-turn-id', async () => {

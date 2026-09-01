@@ -42,6 +42,7 @@ import {
   acknowledgeOffers,
   acknowledgeOffersForConversation,
   dormantWorkerNotice,
+  reactivateDormantRunForConversation,
   endedWorkerNotice,
   hasDormantWorkerLeases,
   sleepSilentDetachedWorkers,
@@ -79,6 +80,7 @@ import {
 } from '../session/recorder.js';
 import { requestCorrelation } from '../session/correlation.js';
 import { BLOCKED_CHAT_REFUSAL, anyChatBlocked, isChatBlocked } from '../session/blocked-chats.js';
+import { anyContinuationOpen, compactingConversation } from '../session/continuation.js';
 import { backgroundExecRecoveryNotices } from '../codex/ownership.js';
 import { unattributedRepairEta } from '../bridge.js';
 import { conversationAttachment, readOverflowText } from '../session/store.js';
@@ -447,6 +449,20 @@ async function dispatch(
   );
 }
 
+/**
+ * Refused to a chat whose session is being compacted into a fresh chat.
+ *
+ * The brief is the whole point of that window and the one thing the model is asked for, so
+ * the refusal is written to steer a turn that is still busy with its old task straight into
+ * writing it — and to make a chat with an unstoppable turn harmless, since nothing it calls
+ * now can change the machine the brief describes.
+ */
+export const COMPACTION_IN_PROGRESS_REFUSAL =
+  'COMPACTION_IN_PROGRESS: this chat is being compacted into a fresh chat, and no local tool was run. ' +
+  'Nothing will run here until the handoff is done. Make no further tool calls of any kind. The latest ' +
+  'user message asks for the handoff brief: write that brief now, as plain text, and then stop. ' +
+  'Work continues in the replacement chat.';
+
 async function dispatchTracked(
   context: CallContext,
   name: string,
@@ -519,7 +535,9 @@ async function dispatchTracked(
   // proven — every later call of a turn — resolves from the registry without waiting at all.
   // Unproven still means unblocked, as everywhere else here; what changes is that "unproven"
   // now means the page never proved it, not that the page had not proved it yet.
-  if (!context.caller.conversationId && anyChatBlocked() && requestId) {
+  //
+  // A chat being compacted is refused on the same terms, so it waits on the same terms.
+  if (!context.caller.conversationId && (anyChatBlocked() || anyContinuationOpen()) && requestId) {
     setCallerConversation(
       context,
       await awaitFreshCallOrigin(name, startedAt, REQUEST_ID_GRACE_MS, { requestId })
@@ -538,6 +556,14 @@ async function dispatchTracked(
   // A superseded frontend is durable historical identity, not liveness. Letting its refused
   // call pass through the broker bookkeeping used to revive the very worker/chat the store had
   // just retired, which kept the session card on "active" after A -> B.
+  //
+  // Before any of that: a proven call from a worker whose family was parked when it was
+  // thought asleep takes the free execution slot back for that family, so the liveness
+  // bookkeeping below sees the same run it would have seen had the parking not happened. A
+  // chat the user stopped from the app is refused below anyway and reclaims nothing.
+  if (!supersededConversation && !isFinish && !isChatBlocked(context.caller.conversationId)) {
+    reactivateDormantRunForConversation(context.caller.conversationId);
+  }
   const quietWorkers = supersededConversation ? [] : sleepSilentDetachedWorkers();
   for (const quiet of quietWorkers) {
     if (quiet.report) await recordAgentMessage(quiet.report, 'sent');
@@ -590,6 +616,17 @@ async function dispatchTracked(
   // from the page and stopped it here instead, so it applies to every tool on every surface,
   // `agents` finish included. A blocked chat has nothing left to finish.
   const blockedChat = isChatBlocked(context.caller.conversationId);
+  // A chat whose session is on its way to a fresh chat. Compact & Resume interrupts the turn
+  // from the page and waits for the app's in-flight count to reach zero, but neither is a
+  // fact about the model: ChatGPT's Stop control can vanish while the server-side turn goes
+  // on calling tools, and a count of zero between two calls is not a turn that has ended. On
+  // 2026-09-01 that is exactly what happened — the "stopped" turn kept calling tools, the
+  // handoff prompt was typed into it, and the model spent eleven more minutes on its task,
+  // applying patches, before it got round to the brief. So the refusal lives here, where
+  // every call passes: from the moment the continuation is filed until its commit hands the
+  // chat over to `superseded`, chat A gets no tool at all, and each refusal tells the model
+  // the only thing it can usefully do is write the brief.
+  const compacting = !blockedChat && compactingConversation(context.caller.conversationId) !== null;
   const allowUnattributed = getConfig().multiAgent.allowUnattributedCalls;
   const retiredLeaseAmbiguous =
     !allowUnattributed && hasRetiredWorkerLeases() && !context.caller.conversationId;
@@ -602,6 +639,8 @@ async function dispatchTracked(
   const result = await runInCallContext(context, () =>
       blockedChat
         ? Promise.resolve(fail(BLOCKED_CHAT_REFUSAL))
+        : compacting
+        ? Promise.resolve(fail(COMPACTION_IN_PROGRESS_REFUSAL))
         : supersededConversation
         ? Promise.resolve(
             fail(

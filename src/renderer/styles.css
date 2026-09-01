@@ -335,6 +335,11 @@ main {
   overflow: hidden;
 }
 
+.card.drop-target {
+  outline: 2px dashed var(--line);
+  outline-offset: -6px;
+}
+
 .card > h2 {
   display: flex;
   align-items: center;

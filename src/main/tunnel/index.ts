@@ -58,10 +58,13 @@ export class TunnelError extends Error {}
 export const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
 
 /** Terminates an owned tunnel tree and waits for the child handle to observe exit. */
+/** A child that died by signal has a null exitCode and a signalCode; it is just as gone. */
+const exited = (child: ChildProcess): boolean => child.exitCode !== null || child.signalCode !== null;
+
 async function stopTree(child: ChildProcess | null, timeoutMs = 3_000): Promise<boolean> {
-  if (!child || child.pid === undefined || child.exitCode !== null) return true;
+  if (!child || child.pid === undefined || exited(child)) return true;
   const closed = new Promise<boolean>((resolve) => {
-    if (child.exitCode !== null) resolve(true);
+    if (exited(child)) resolve(true);
     else child.once('close', () => resolve(true));
   });
   await terminateProcessTree(child.pid).catch(() => {

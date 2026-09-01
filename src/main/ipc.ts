@@ -382,6 +382,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     return buildState();
   });
 
+  /** Approves one folder by path. The picker dialog and the drop zone both end here. */
+  const approveRoot = async (folderPath: string): Promise<AppState> => {
+    let addedName = '';
+    await updateConfig(async (config) => {
+      const real = await validateNewRoot(folderPath, config.roots);
+      const name = uniqueRootName(real, config.roots);
+      addedName = name;
+      return { ...config, roots: [...config.roots, { name, path: real }] };
+    });
+    logInfo(`approved folder /${addedName}`);
+    return buildState();
+  };
+
   handle('roots:add', async () => {
     const window = getWindow();
     if (!window) throw new Error('No window');
@@ -390,16 +403,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       properties: ['openDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
+    return approveRoot(result.filePaths[0]);
+  });
 
-    let addedName = '';
-    await updateConfig(async (config) => {
-      const real = await validateNewRoot(result.filePaths[0]!, config.roots);
-      const name = uniqueRootName(real, config.roots);
-      addedName = name;
-      return { ...config, roots: [...config.roots, { name, path: real }] };
-    });
-    logInfo(`approved folder /${addedName}`);
-    return buildState();
+  // A folder dropped onto the Folders card. The renderer never sees a system path itself:
+  // the preload turns the dropped File into one, and the same validation the dialog goes
+  // through decides whether it is a folder this app may approve at all.
+  handle('roots:addPath', async (payload) => {
+    const { path: folderPath } = z.object({ path: z.string().min(1).max(4096) }).parse(payload);
+    return approveRoot(folderPath);
   });
 
   handle('roots:remove', async (payload) => {

@@ -86,6 +86,18 @@ import {
  */
 export const CONTINUATION_TTL_MS = 10 * 60_000;
 
+/**
+ * How long an automatic handover may run once it has actually been asked for.
+ *
+ * An auto-compaction ticket has no clock while it is only intended: the chat may be mid-turn
+ * for hours before it is safe to ask for the brief. But from the moment the brief request is
+ * on its way, the source chat is refused every tool until the handover lands in the new chat,
+ * so a handover the model never finishes must not fence that chat for good. Six hours is far
+ * beyond any real handover (the one on 2026-09-01 took eleven minutes) and short enough that
+ * the chat gets its tools back the same day; its next working turn opens a fresh ticket.
+ */
+export const AUTOMATIC_HANDOVER_TTL_MS = 6 * 60 * 60_000;
+
 export type ContinuationState =
   /** Waiting for ChatGPT's final answer to the compaction turn. */
   | 'awaiting-summary'
@@ -141,6 +153,8 @@ interface Continuation {
   openedAt: number;
   /** Auto-compaction ticket: survives page/retry clocks until commit or explicit Off/cancel. */
   automatic: boolean;
+  /** When the brief request first went on its way; the automatic clock starts here. */
+  askedAt: number | null;
   state: ContinuationState;
   /** The brief, once captured. Handed to whoever opens chat B, and to nothing else. */
   summary: string;
@@ -182,6 +196,8 @@ interface ContinuationRecord {
   openedAt: number;
   /** Absent in records written before durable auto-compaction tickets existed. */
   automatic?: boolean;
+  /** Absent in records written before automatic handovers had a deadline. */
+  askedAt?: number | null;
   state: ContinuationState;
   summary: string;
   handoffId: string | null;
@@ -208,6 +224,7 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     to: entry.to,
     openedAt: entry.openedAt,
     automatic: entry.automatic,
+    askedAt: entry.askedAt,
     state: entry.state,
     summary: entry.summary.slice(0, 512 * 1024),
     handoffId: entry.handoffId,
@@ -267,6 +284,9 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
     ? { ...record.destinationSend }
     : { state: 'not-attempted', conversationId: null, messageId: null };
   entry.error = record.error;
+  if (entry.askedAt === null && handoffAsked(entry)) {
+    entry.askedAt = typeof record.askedAt === 'number' && Number.isFinite(record.askedAt) ? record.askedAt : Date.now();
+  }
 }
 
 async function transitionNow(
@@ -340,10 +360,24 @@ const view = (entry: Continuation): ContinuationView => ({
   destinationSend: { ...entry.destinationSend }
 });
 
+/** Whether the brief has been asked for: the request is on its way, went out, or was answered. */
+const handoffAsked = (entry: Continuation): boolean =>
+  entry.state !== 'awaiting-summary' ||
+  entry.sourceSend.state === 'dispatched-unresolved' ||
+  entry.sourceSend.state === 'sent';
+
+/**
+ * Whether a nonterminal continuation has outlived its wait. A manual one gets
+ * CONTINUATION_TTL_MS from opening; an automatic one has no clock until it is asked for and
+ * AUTOMATIC_HANDOVER_TTL_MS from then.
+ */
+const expired = (entry: Continuation, now = Date.now()): boolean =>
+  entry.automatic
+    ? entry.askedAt !== null && now - entry.askedAt >= AUTOMATIC_HANDOVER_TTL_MS
+    : now - entry.openedAt >= CONTINUATION_TTL_MS;
+
 const isOpen = (entry: Continuation): boolean =>
-  entry.state !== 'committed' &&
-  entry.state !== 'aborted' &&
-  (entry.automatic || Date.now() - entry.openedAt < CONTINUATION_TTL_MS);
+  entry.state !== 'committed' && entry.state !== 'aborted' && !expired(entry);
 
 function sweep(): void {
   for (const entry of [...byToken.values()]) {
@@ -359,8 +393,11 @@ function sweep(): void {
       if (Date.now() - entry.openedAt > CONTINUATION_TTL_MS * 2) byToken.delete(entry.token);
       continue;
     }
-    if (!entry.automatic && Date.now() - entry.openedAt >= CONTINUATION_TTL_MS) {
-      abortContinuation(entry.token, 'it took too long and was given up on');
+    if (expired(entry)) {
+      abortContinuation(
+        entry.token,
+        entry.automatic ? 'the handover never landed and was given up on' : 'it took too long and was given up on'
+      );
     }
   }
 }
@@ -378,6 +415,52 @@ export function continuationByToken(token: string): ContinuationView | null {
   sweep();
   const entry = byToken.get(token);
   return entry ? view(entry) : null;
+}
+
+/**
+ * The continuation that has already asked this chat for its handoff brief, if there is one.
+ *
+ * From the moment the marked prompt is submitted until the durable commit lands, whatever
+ * chat A does is history the brief cannot describe — the brief is being written, or is
+ * written — so the kernel refuses A's local tool calls while this returns non-null, and after
+ * the commit the store's `superseded` attachment takes over that refusal for good. A filed
+ * ticket whose prompt has not been submitted yet does not count: the page may still be
+ * stopping the turn or draining local calls, and an automatic ticket that could not proceed
+ * waits on the WAL for its next pickup with the chat working normally in between.
+ */
+export function compactingConversation(conversationId: string | null | undefined): ContinuationView | null {
+  if (!conversationId) return null;
+  sweep();
+  for (const entry of byToken.values()) {
+    if (entry.from !== conversationId || !isOpen(entry)) continue;
+    if (handoffAsked(entry)) return view(entry);
+  }
+  return null;
+}
+
+/** Whether any chat is currently being compacted — the cheap gate in front of the above. */
+export function anyContinuationOpen(): boolean {
+  for (const entry of byToken.values()) {
+    if (isOpen(entry)) return true;
+  }
+  return false;
+}
+
+/**
+ * Source chats that Compact & Resume has finished replacing.
+ *
+ * Once the commit is durable the old chat is history: its session lives in the replacement,
+ * its calls are refused as superseded, and the tab it is still open in only costs memory.
+ * Listed for as long as the committed record is retained, so the browser closes it once and
+ * a chat the user reopens later on purpose is left alone.
+ */
+export function supersededSourceConversations(): string[] {
+  sweep();
+  const out = new Set<string>();
+  for (const entry of byToken.values()) {
+    if (entry.state === 'committed' && entry.to && entry.to !== entry.from) out.add(entry.from);
+  }
+  return [...out].sort();
 }
 
 /** Auto-compaction tickets still owed a real A -> B commit. */
@@ -543,6 +626,7 @@ function makeContinuation(sessionId: string, fromConversationId: string, automat
     from: fromConversationId,
     openedAt: Date.now(),
     automatic,
+    askedAt: null,
     state: 'awaiting-summary',
     summary: '',
     handoffId: null,
@@ -725,13 +809,19 @@ export async function bindContinuationDestinationMessageNow(
   if (!conversationId || !messageId || conversationId.length > 256 || messageId.length > 200) return false;
   return withCheckpointLock(token, async () => {
     const entry = byToken.get(token);
-    if (!entry || !isOpen(entry) || !entry.handoffId || conversationId === entry.from) return false;
+    if (!entry || !entry.handoffId || conversationId === entry.from) return false;
+    // Exact destination identity remains a proof after the transaction commits. A content
+    // script can reload after B was durably attached but before it correlated the first tool
+    // request; making `isOpen()` the first gate turned that harmless reload into an identity
+    // dead-end even though the WAL still holds the exact B + message id pair. Re-reading the
+    // already-sent checkpoint is idempotent and cannot move or reopen anything.
     if (entry.destinationSend.state === 'sent') {
       return (
         entry.destinationSend.conversationId === conversationId &&
         entry.destinationSend.messageId === messageId
       );
     }
+    if (!isOpen(entry)) return false;
     if (entry.destinationSend.state !== 'dispatched-unresolved') return false;
     await transitionNow(entry, (current) => ({
       ...current,
@@ -1014,7 +1104,7 @@ async function reconcileCommitting(entry: Continuation, toConversationId: string
 
   const swarm = freezePrimeTransfer(entry.from);
   if (swarm === 'unavailable') {
-    const reason = 'the swarm handover expired, so the session stayed in the current chat';
+    const reason = 'no swarm handover is open for this chat, so the session stayed in the current chat';
     const rolledBack = await rollbackCommitting(entry, reason);
     if (rolledBack) {
       logWarn(`continuation ${entry.token.slice(0, 8)} refused: no usable prime handover from ${entry.from}`);
@@ -1249,6 +1339,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       to: typeof raw.to === 'string' && raw.to ? raw.to : null,
       openedAt: raw.openedAt,
       automatic: raw.automatic === true,
+      askedAt: null,
       state: raw.state,
       summary: typeof raw.summary === 'string' ? raw.summary.slice(0, 512 * 1024) : '',
       handoffId: typeof raw.handoffId === 'string' ? raw.handoffId : null,
@@ -1285,11 +1376,12 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
           : { state: 'not-attempted', conversationId: null, messageId: null },
       error: typeof raw.error === 'string' ? raw.error : null
     };
-    const waitingExpired =
-      !entry.automatic &&
-      entry.state !== 'committed' &&
-      entry.state !== 'aborted' &&
-      now - entry.openedAt >= CONTINUATION_TTL_MS;
+    if (handoffAsked(entry)) {
+      // A record from before the automatic deadline existed starts its clock at this
+      // restart: this process has watched the handover for exactly no time.
+      entry.askedAt = typeof raw.askedAt === 'number' && Number.isFinite(raw.askedAt) ? raw.askedAt : now;
+    }
+    const waitingExpired = entry.state !== 'committed' && entry.state !== 'aborted' && expired(entry, now);
     if (entry.handoffId) {
       try {
         entry.handoff = await readHandoff(entry.sessionId, entry.handoffId);
@@ -1359,6 +1451,12 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
           entry.error = 'Recovered before the durable session move; the continuation can be retried.';
           beginPrimeTransfer(entry.from);
         }
+      } else if (entry.state === 'committed') {
+        // The commit landed durably before this restart; the session has since moved on
+        // again (a later handover out of chat B), which does not make the first move less
+        // real. Keep the record so the source chat stays superseded instead of aborting a
+        // finished transaction and cancelling a transfer that had already committed.
+        logInfo(`continuation ${entry.token.slice(0, 8)} stays committed although its session moved on again`);
       } else {
         entry.state = 'aborted';
         entry.error = 'Recovery found an unexpected session attachment and refused to guess a chat.';
