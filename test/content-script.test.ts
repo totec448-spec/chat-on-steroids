@@ -5683,6 +5683,77 @@ describe('how a turn is recorded as having ended', () => {
     expect(failure.turnId).toBe(started.turnId);
   });
 
+  it('does not turn ordinary assistant prose into an error because it quotes transport-failure wording', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'turn-explaining-an-error', []);
+    prose(
+      live.document,
+      section,
+      'assistant-explanation',
+      'I found the earlier failure. The page showed “Connection interrupted. Waiting for the complete answer”, then recovered and kept working.'
+    );
+
+    live.hook.observe();
+    await settle();
+
+    expect(emitted(live.sent, 'chat_error')).toEqual([]);
+  });
+
+  it('never publishes a page turn id as the recorder turn id when an old in-turn error has no local owner', async () => {
+    live = await harness();
+    const historical = assistantTurn(live.document, 'page-turn-from-history', []);
+    prose(
+      live.document,
+      historical,
+      'historical-transport-error',
+      'Connection interrupted. Waiting for the complete answer'
+    );
+
+    startGenerating(live.document);
+    assistantTurn(live.document, 'page-turn-live-now', []);
+    live.hook.observe();
+    await settle();
+
+    const [failure] = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    const [started] = emitted(live.sent, 'turn_start').map((entry) => entry.event);
+    expect(started.turnId).not.toBe('page-turn-from-history');
+    expect(failure.turnId).toBeUndefined();
+  });
+
+  it('does not let a reused page turn id make an old error belong to the current local generation', async () => {
+    live = await harness();
+    const reusedPageTurn = 'page-turn-reused-by-chatgpt';
+    const historical = assistantTurn(live.document, reusedPageTurn, []);
+    prose(
+      live.document,
+      historical,
+      'historical-reused-error',
+      'Connection interrupted. Waiting for the complete answer'
+    );
+
+    // First observe the old section as history. ChatGPT later reuses the same data-turn-id for
+    // a genuinely new response; CLF_DOM.turns() deliberately groups equal ids for tool-row
+    // accounting, so ownership must come from the exact section node rather than that group.
+    live.hook.observe();
+    await settle();
+    startGenerating(live.document);
+    const current = assistantTurn(live.document, reusedPageTurn, []);
+    prose(live.document, current, 'current-answer', 'The new turn completed normally.');
+    live.hook.observe();
+    await settle();
+
+    const [started] = emitted(live.sent, 'turn_start').map((entry) => entry.event);
+    const errors = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.turnId).toBeUndefined();
+    expect(errors[0]!.turnId).not.toBe(started.turnId);
+
+    await endTurn();
+    const ends = emitted(live.sent, 'turn_end').map((entry) => entry.event);
+    expect(ends.at(-1)).toEqual(expect.objectContaining({ turnId: started.turnId, outcome: 'completed' }));
+  });
+
   /** An announcement the classifier does not recognise stays evidence and nothing more. */
   it('does not let an unrecognised announcement authorize a reload', async () => {
     live = await harness();
