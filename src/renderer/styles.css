@@ -542,6 +542,10 @@ main {
   min-width: 0;
 }
 
+.runtime-progress.is-working .ico { color: var(--blue); }
+.runtime-progress.is-waiting .ico { color: var(--amber); }
+.runtime-progress.is-blocked .ico { color: var(--red); }
+
 /* ------------------------------------------------------------- permissions */
 
 .perm + .perm {

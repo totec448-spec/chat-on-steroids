@@ -482,6 +482,8 @@ export interface AppState {
   bundledTunnelVersion: string | null;
   bridge: BridgeStatus;
   update: UpdateStatus;
+  /** Derived only from app-owned runtime facts; never model-generated. */
+  progress: import('./progress.js').RuntimeProgress;
 }
 
 export const DEFAULT_CAPABILITIES: Capabilities = {

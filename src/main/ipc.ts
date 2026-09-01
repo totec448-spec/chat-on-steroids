@@ -32,6 +32,7 @@ import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
 import {
   bridgeStatus,
   cancelWorkerCommands,
+  pendingCommands,
   chatUrl,
   onBridgeChange,
   startBridge,
@@ -62,6 +63,7 @@ import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
 import { openInPreferredBrowser } from './browser.js';
 import { onUpdateChange, updateStatus } from './update.js';
+import { deriveRuntimeProgress } from '../shared/progress.js';
 
 /** The only URLs the renderer may ask the OS to open. */
 const ALLOWED_LINKS = new Set([
@@ -262,9 +264,10 @@ function resolvedBinary(config: Config): string | null {
 
 async function buildState(): Promise<AppState> {
   const config = getConfig();
+  const status = getStatus();
   return {
     config,
-    status: getStatus(),
+    status,
     platform: hostPlatformInfo(),
     secureStorage: await secureStorageStatus(),
     hasApiKey: await hasSecret('openaiApiKey'),
@@ -272,7 +275,8 @@ async function buildState(): Promise<AppState> {
     resolvedBinary: resolvedBinary(config),
     bundledTunnelVersion: bundledVersion(),
     bridge: await bridgeStatus(),
-    update: updateStatus()
+    update: updateStatus(),
+    progress: deriveRuntimeProgress({ connectionState: status.state, pendingCommands: pendingCommands(), swarm: swarmState() })
   };
 }
 

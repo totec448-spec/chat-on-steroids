@@ -750,6 +750,17 @@ function paintUpdate(next: AppState): void {
   }
 }
 
+function paintRuntimeProgress(next: AppState): void {
+  const notice = $('runtimeProgress');
+  const progress = next.progress;
+  if (!progress || progress.kind === 'idle') {
+    notice.hidden = true;
+    return;
+  }
+  notice.className = `notice runtime-progress is-${progress.kind}`;
+  $('runtimeProgressText').textContent = progress.detail ? `${progress.summary} · ${progress.detail}` : progress.summary;
+  notice.hidden = false;
+}
 function apply(next: AppState): void {
   const previousState = state;
   state = next;
@@ -792,6 +803,8 @@ function apply(next: AppState): void {
 
   // ---- out of date, app or extension
   paintUpdate(next);
+
+  paintRuntimeProgress(next);
 
   // ---- health numbers and facts
   paintClock();
