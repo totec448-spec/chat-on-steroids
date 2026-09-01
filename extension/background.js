@@ -1489,6 +1489,19 @@ function cleanConversationId(value) {
   return /^[0-9a-f-]{8,64}$/i.test(id) ? id : null;
 }
 
+/**
+ * The mode a goal was written under, as a body fragment or nothing at all.
+ *
+ * Two words are legal and everything else is silently absent rather than passed on, because
+ * the app pins whatever arrives here as a durable per-chat switch. Absent is a real answer:
+ * it means "this page named no mode", which leaves the standing switch deciding exactly as
+ * it did before the two buttons existed.
+ */
+function goalMode(message) {
+  const mode = message && typeof message.mode === 'string' ? message.mode : '';
+  return mode === 'goal' || mode === 'loop' ? { mode } : {};
+}
+
 /** Records a tab's current conversation without writing storage on every poll. */
 async function noteTabConversation(source, value) {
   const id = source && Number.isInteger(source.tab) ? source.tab : null;
@@ -2056,6 +2069,8 @@ const HANDLERS = {
         conversationId: message.conversationId,
         resume: message.resume !== false,
         cancel: message.cancel === true,
+        ticket: message.ticket === true,
+        automatic: message.automatic === true,
         // The capture. `token` names the transaction the page was given when it marked the
         // compaction turn, and `summary` is that turn's own answer. Both are forwarded
         // verbatim and only together: the app refuses a brief whose token does not name an
@@ -2067,11 +2082,17 @@ const HANDLERS = {
         ...(typeof message.token === 'string' && message.sourceAttempt === true
           ? { token: message.token, sourceAttempt: true }
           : {}),
+        ...(typeof message.token === 'string' && message.sourceDispatch === true
+          ? { token: message.token, sourceDispatch: true }
+          : {}),
         ...(typeof message.token === 'string' && typeof message.sourceMessageId === 'string'
           ? { token: message.token, sourceMessageId: message.sourceMessageId }
           : {}),
         ...(typeof message.token === 'string' && message.destinationAttempt === true
           ? { token: message.token, destinationAttempt: true }
+          : {}),
+        ...(typeof message.token === 'string' && message.destinationDispatch === true
+          ? { token: message.token, destinationDispatch: true }
           : {}),
         ...(typeof message.token === 'string' && typeof message.destinationMessageId === 'string'
           ? { token: message.token, destinationMessageId: message.destinationMessageId }
@@ -2167,6 +2188,11 @@ const HANDLERS = {
    *
    * The text is the user's own and goes straight through; the app bounds and trims it and
    * answers with what it actually stored, which is what the sheet then draws.
+   *
+   * `mode` is the button the goal was written under — "add specific goal" or "add specific
+   * loop" — and the app pins it as this chat's own switch in the same write. Only those two
+   * words cross; anything else is dropped rather than passed on, so a malformed sheet cannot
+   * put a third mode into a durable file.
    */
   async goal_objective(message, _sender, source) {
     await load();
@@ -2177,7 +2203,7 @@ const HANDLERS = {
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
     const result = await call('/goal/objective', {
       method: 'POST',
-      body: JSON.stringify({ conversationId, text: String(message.text || '') })
+      body: JSON.stringify({ conversationId, text: String(message.text || ''), ...goalMode(message) })
     });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
@@ -2194,7 +2220,7 @@ const HANDLERS = {
     const result = await call('/goal/open', {
       method: 'POST',
       timeoutMs: MODEL_REQUEST_TIMEOUT_MS,
-      body: JSON.stringify({ text: String(message.text || '') })
+      body: JSON.stringify({ text: String(message.text || ''), ...goalMode(message) })
     });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },

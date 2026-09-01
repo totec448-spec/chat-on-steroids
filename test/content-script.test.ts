@@ -89,13 +89,17 @@ interface Hook {
   settingsView(input: Record<string, unknown>): {
     tip: string;
     rows: Array<{ key: string; label: string; note: string; on: boolean; warn: boolean; disabled?: boolean }>;
-    /** The specific goal this chat is being driven towards, and the affordance that sets it. */
+    /** The specific goal this chat is being driven towards, and the affordances that set it. */
     objective: {
       text: string;
       editing: boolean;
-      label: string;
+      /** Which link opened the editor, and therefore the mode Save will write. */
+      mode: string;
       summary: string;
-      hint: string;
+      /** The mode this chat is actually being driven in — see goalDrivingMode() in the app. */
+      driving: string;
+      /** One per mode: writing the goal is where the mode is chosen. */
+      actions: Array<{ mode: string; label: string; hint: string }>;
       available: boolean;
       unavailable: string;
     };
@@ -123,7 +127,7 @@ interface Hook {
   activityPullDelay(input: Record<string, boolean>): number;
   currentActivityPullDelay(): number;
   runCommand(): Promise<void>;
-  startCompact(): Promise<void>;
+  startCompact(automatic?: boolean): Promise<void>;
   chronological<T extends { seq: number; time: number; kind: string; turnId?: string | null }>(entries: T[]): T[];
   streamTurnGroups(
     entries: Array<{ seq: number; time: number; kind: string; turnId?: string | null }>
@@ -344,6 +348,7 @@ const startedCompactions = (harness: Harness): any[] =>
   harness.sent.filter(
     (message) =>
       message.type === 'compact' &&
+      !message.ticket &&
       !message.cancel &&
       !message.summary &&
       !message.sourceAttempt &&
@@ -7529,18 +7534,18 @@ describe('the Compact & resume control', () => {
     });
     live.hook.injectControl();
     startGenerating(live.document); // and nothing ever clears it
+    live.document.querySelector('[data-testid="stop-button"]')?.addEventListener('click', (event) => event.preventDefault());
     const sends = watchSend(live.document);
 
     await live.hook.startCompact();
 
-    // Never typed, never sent — and no app-side request to withdraw, because stopping the
-    // turn now happens *before* asking. The request is what makes the app take its copy of
-    // the recording, so a conversation that will not hold still never gets that far, and
-    // there is no window in which a late save_handoff could save a brief and open a chat
-    // for a run that gave up.
+    // Never typed and never sent. The only app request is the durable ticket filed before
+    // the fallible page barrier, so a later 15-minute pickup can try this same work again.
     expect(composerText(live.document)).toBe('');
     expect(sends()).toBe(0);
-    expect(live.sent.filter((message) => message.type === 'compact')).toEqual([]);
+    expect(live.sent.filter((message) => message.type === 'compact')).toEqual([
+      expect.objectContaining({ ticket: true, automatic: false })
+    ]);
     expect(live.document.querySelector('.clf-pill-text')!.textContent).toContain('would not stop');
   });
 
@@ -7568,6 +7573,38 @@ describe('the Compact & resume control', () => {
     expect(sends()).toBe(0);
     const compacts = live.sent.filter((message) => message.type === 'compact');
     expect(compacts[compacts.length - 1]).toMatchObject({ cancel: true });
+  });
+
+  it('keeps an automatic ticket open when a page-side composer error happens before Send', async () => {
+    const automaticJob = {
+      sessionId: 's-auto-page-error',
+      stage: 'handoff-pending',
+      automatic: true,
+      busy: true,
+      handoffId: null,
+      error: null
+    };
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null } }),
+      compact: () => ({
+        ok: true,
+        data: {
+          started: true,
+          token: 'tok-auto-page-error',
+          prompt: 'write the automatic handoff brief',
+          job: automaticJob
+        }
+      })
+    });
+    live.hook.injectControl();
+    live.document.querySelector('#prompt-textarea')!.textContent = 'draft that makes prompt insertion fail';
+
+    await live.hook.startCompact(true);
+
+    const compacts = live.sent.filter((message) => message.type === 'compact');
+    expect(compacts[0]).toMatchObject({ ticket: true, automatic: true });
+    expect(compacts.some((message) => message.cancel === true)).toBe(false);
+    expect(live.document.querySelector('.clf-pill-text')!.textContent).toContain('clear the message box');
   });
 
   it('does not submit a compaction prompt after the composer changes during its pre-send wait', async () => {
@@ -11296,6 +11333,143 @@ describe('the goal loop', () => {
     expect(bound[0]).toMatchObject({ conversationId: CHAT, text: 'rewrite the parser in rust' });
   });
 
+  it('retries a rate-limited New Chat opening and sends the successful answer once', async () => {
+    let attempts = 0;
+    live = await harness('https://chatgpt.com/', {
+      settings_get: () => ({
+        ok: true,
+        data: {
+          context: { auto: false, threshold: 400_000, warn: 400_000, limit: 533_000 },
+          goal: { enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' }
+        }
+      }),
+      goal_open: () => {
+        attempts += 1;
+        return attempts === 1
+          ? {
+              ok: false,
+              status: 502,
+              data: { error: 'rate_limited: Provider returned error', retryable: true }
+            }
+          : { ok: true, data: { reply: 'rewrite the parser in rust', model: MODEL } };
+      }
+    });
+    await live.hook.pullActivity();
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      startGenerating(live!.document);
+    });
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+    (live.document.querySelector('.clf-menu-goal-link') as HTMLButtonElement).click();
+    const box = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    box.value = 'rewrite the parser in rust';
+    box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
+
+    (live.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement).click();
+    await settle(800);
+
+    expect(attempts).toBe(2);
+    expect(sends()).toBe(1);
+    expect(composerText(live.document)).toBe('rewrite the parser in rust');
+  });
+
+  /**
+   * The run that was lost, from the composer it was started in.
+   *
+   * A goal written on the New Chat page starts the chat immediately, but the mode it ran in
+   * used to be read from the standing switch — which is off by default, so it ran as a Goal
+   * and was free to decide it had finished. Two turns and nineteen minutes into an unattended
+   * two-hour run, it did. The mode now leaves this page with the goal: on the opening request,
+   * which has no chat to read a switch from, and again on the bind that names the chat.
+   */
+  it('opens a New Chat as a loop when the loop link wrote the goal', async () => {
+    live = await harness('https://chatgpt.com/', {
+      settings_get: () => ({
+        ok: true,
+        data: {
+          context: { auto: false, threshold: 400_000, warn: 400_000, limit: 533_000 },
+          // Exactly the configuration the lost run had: switched off, with `loop` remembered
+          // as a preference that nothing reads while `enabled` is false.
+          goal: { enabled: false, mode: 'loop', hasKey: true, model: MODEL, objective: '', blocked: '' }
+        }
+      }),
+      goal_open: () => ({ ok: true, data: { reply: 'build the voxel sandbox', model: MODEL } })
+    });
+    await live.hook.pullActivity();
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      startGenerating(live!.document);
+    });
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+
+    // Above a New Chat the two switches are gone — they move the app-wide default there,
+    // having no chat to belong to, and reading as this chat's mode is what caused the loss.
+    expect(live.document.querySelectorAll('.clf-menu-row[data-clf-row="loop"]')).toHaveLength(0);
+    const loop = live.document.querySelector('.clf-menu-goal-link[data-clf-goal-mode="loop"]') as HTMLButtonElement;
+    expect(loop, 'the New Chat sheet offered no way to add a loop').not.toBeNull();
+    expect(loop.textContent).toContain('add specific loop');
+    loop.click();
+
+    const box = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    box.value = 'build the voxel sandbox';
+    box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
+    // The Save button says which of the two it is about to do, because that is the last thing
+    // read before the run starts and the two outcomes are "may stop" and "may not".
+    const save = live.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement;
+    expect(save.textContent).toBe('Save as loop');
+    save.click();
+    await settle(800);
+
+    expect(live.sent.filter((message) => message.type === 'goal_open')).toMatchObject([
+      { text: 'build the voxel sandbox', mode: 'loop' }
+    ]);
+
+    live.window.history.replaceState({}, '', `/c/${CHAT}`);
+    live.hook.observe();
+    await settle();
+    expect(live.sent.filter((message) => message.type === 'goal_objective')).toMatchObject([
+      { conversationId: CHAT, text: 'build the voxel sandbox', mode: 'loop' }
+    ]);
+  });
+
+  /**
+   * Leaving a chat for the ChatGPT home page, which is a route change and not a reload.
+   *
+   * This tab deliberately keeps the conversation id across an id-less route — a blank route is
+   * also ordinary React churn, and dropping the chat on it was its own bug — so a sheet drawn
+   * from that id keeps offering the previous chat's switches, and its goal, above a composer
+   * that belongs to no chat at all. The route is the authority for what this sheet is about,
+   * and it has to be read on every repaint rather than once when the page loaded.
+   */
+  it('redraws the sheet for a New Chat when the route leaves a chat, without a reload', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      settings_get: () => ({
+        ok: true,
+        data: {
+          context: { auto: false, threshold: 400_000, warn: 400_000, limit: 533_000 },
+          goal: { enabled: false, mode: 'loop', hasKey: true, model: MODEL, objective: '', blocked: '' }
+        }
+      })
+    });
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+    // In a chat, both switches are there: they are the only way to drive a chat that carries
+    // no goal, and the only way to switch a running loop back off.
+    expect(live.document.querySelectorAll('.clf-menu-row[data-clf-row="loop"]')).toHaveLength(1);
+
+    live.window.history.replaceState({}, '', '/');
+    live.hook.observe();
+    live.hook.renderControl();
+
+    expect(live.document.querySelectorAll('.clf-menu-row[data-clf-row="goal"]')).toHaveLength(0);
+    expect(live.document.querySelectorAll('.clf-menu-row[data-clf-row="loop"]')).toHaveLength(0);
+    expect(
+      [...live.document.querySelectorAll('.clf-menu-goal-link')].map((node) => node.getAttribute('data-clf-goal-mode'))
+    ).toEqual(['goal', 'loop']);
+  });
+
   /**
    * A goal is a sentence somebody writes, and this sheet repaints itself on the activity
    * poll's cadence — every repaint is a full rebuild. Both halves of that were broken: Save
@@ -11372,11 +11546,12 @@ describe('the goal loop', () => {
    * chat cannot have one has to be legible.
    */
   describe('the settings sheet', () => {
-    const sheet = (goal: Record<string, unknown>) =>
+    const sheet = (goal: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
       live!.hook.settingsView({
         context: { auto: true, threshold: 400_000 },
         goal,
-        compact: { action: 'start', hint: '' }
+        compact: { action: 'start', hint: '' },
+        ...extra
       });
 
     /** The sheet is pure, so one live script is enough to read every shape out of it. */
@@ -11387,7 +11562,11 @@ describe('the goal loop', () => {
     it('offers a specific goal under the switch, and shows the one a chat already has', async () => {
       await open();
       const empty = sheet({ enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' });
-      expect(empty.objective).toMatchObject({ label: 'add specific goal', summary: '', available: true });
+      expect(empty.objective).toMatchObject({ summary: '', available: true });
+      expect(empty.objective.actions.map((action) => action.label)).toEqual([
+        'add specific goal',
+        'add specific loop'
+      ]);
 
       const set = sheet({
         enabled: false,
@@ -11397,7 +11576,6 @@ describe('the goal loop', () => {
         blocked: ''
       });
       expect(set.objective).toMatchObject({
-        label: 'change the goal',
         summary: 'port the module and make the suite green',
         available: true
       });
@@ -11405,6 +11583,75 @@ describe('the goal loop', () => {
       // get to should have to find and flip a second switch before it does anything.
       expect(set.tip).toContain('Goal on');
       expect(set.rows[1]!.note).toContain('on for this chat’s own goal');
+    });
+
+    /**
+     * The run that was lost, as the sheet sees it.
+     *
+     * A goal written with the standing switch off drives as a Goal — it is allowed to decide
+     * the job is finished — and that is exactly what happened to a two-hour unattended run
+     * started from "add specific goal" by somebody who wanted a loop. The sheet has to say
+     * which of the two a chat is actually in, and offer the other one by name.
+     */
+    it('names the mode a chat is being driven in, and offers the other one', async () => {
+      await open();
+      const carried = {
+        enabled: false,
+        hasKey: true,
+        model: MODEL,
+        objective: 'build the voxel sandbox',
+        blocked: ''
+      };
+      // The switch is off, so this is a Goal run whatever the app-wide mode preference says.
+      expect(sheet(carried).objective.driving).toBe('goal');
+      expect(sheet(carried).objective.actions.map((action) => action.label)).toEqual([
+        'change the goal',
+        'run it as a loop'
+      ]);
+      // Mode alone is not enabled: an off switch never makes this a loop, which is the
+      // inheritance rule goalDrivingMode() enforces in the app.
+      expect(sheet({ ...carried, mode: 'loop' }).objective.driving).toBe('goal');
+
+      const looping = sheet({ ...carried, enabled: true, mode: 'loop' });
+      expect(looping.objective.driving).toBe('loop');
+      expect(looping.objective.actions.map((action) => action.label)).toEqual([
+        'run it as a goal',
+        'change the loop'
+      ]);
+      expect(looping.tip).toContain('never stops on its own');
+    });
+
+    /**
+     * Above a New Chat the two switches move the app-wide default, because there is no chat
+     * for them to belong to — while the goal written in the same sheet starts a chat under
+     * whatever that default happens to say. Two scopes reading as one control is how the run
+     * above was started in the wrong mode, so the switches are not drawn there at all.
+     */
+    it('drops the two switches above a New Chat and offers both modes instead', async () => {
+      await open();
+      const fresh = sheet({ enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' }, {
+        scope: 'new'
+      });
+      expect(fresh.rows.map((row) => row.key)).toEqual(['autoCompact']);
+      expect(fresh.objective.actions.map((action) => action.mode)).toEqual(['goal', 'loop']);
+      expect(fresh.tip).toContain('Add a goal or a loop to start this chat');
+      // And in a chat they stay, because they are the only way to drive one that carries no
+      // goal of its own — and the only way to switch a running loop back off.
+      const inChat = sheet({ enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' });
+      expect(inChat.rows.map((row) => row.key)).toEqual(['autoCompact', 'goal', 'loop']);
+      expect(inChat.objective.actions).toHaveLength(2);
+    });
+
+    /** Which link opened the editor is what Save is about to do, so the view has to carry it. */
+    it('carries the mode the editor was opened in', async () => {
+      await open();
+      const goal = { enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' };
+      expect(sheet(goal, { editing: true, editingMode: 'loop' }).objective).toMatchObject({
+        editing: true,
+        mode: 'loop'
+      });
+      // Anything that is not the word "loop" is a goal, never a third state.
+      expect(sheet(goal, { editing: true, editingMode: 'nonsense' }).objective.mode).toBe('goal');
     });
 
     /**

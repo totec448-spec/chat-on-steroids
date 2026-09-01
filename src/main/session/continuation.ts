@@ -139,6 +139,8 @@ interface Continuation {
   /** Chat A: where the session is attached until the commit lands. */
   from: string;
   openedAt: number;
+  /** Auto-compaction ticket: survives page/retry clocks until commit or explicit Off/cancel. */
+  automatic: boolean;
   state: ContinuationState;
   /** The brief, once captured. Handed to whoever opens chat B, and to nothing else. */
   summary: string;
@@ -178,6 +180,8 @@ interface ContinuationRecord {
   from: string;
   to: string | null;
   openedAt: number;
+  /** Absent in records written before durable auto-compaction tickets existed. */
+  automatic?: boolean;
   state: ContinuationState;
   summary: string;
   handoffId: string | null;
@@ -203,6 +207,7 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     from: entry.from,
     to: entry.to,
     openedAt: entry.openedAt,
+    automatic: entry.automatic,
     state: entry.state,
     summary: entry.summary.slice(0, 512 * 1024),
     handoffId: entry.handoffId,
@@ -248,6 +253,7 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   // waiting out a window that is already over.
   if (record.state === 'committed' || record.state === 'aborted') endResumeClaim(entry.token);
   entry.to = record.to;
+  entry.automatic = record.automatic === true;
   entry.state = record.state;
   entry.summary = record.summary;
   entry.handoffId = record.handoffId;
@@ -315,6 +321,7 @@ export interface ContinuationView {
   handoffId: string | null;
   error: string | null;
   openedAt: number;
+  automatic: boolean;
   sourceSend: ContinuationSendCheckpoint;
   destinationSend: ContinuationDestinationCheckpoint;
 }
@@ -328,12 +335,15 @@ const view = (entry: Continuation): ContinuationView => ({
   handoffId: entry.handoffId,
   error: entry.error,
   openedAt: entry.openedAt,
+  automatic: entry.automatic,
   sourceSend: { ...entry.sourceSend },
   destinationSend: { ...entry.destinationSend }
 });
 
 const isOpen = (entry: Continuation): boolean =>
-  entry.state !== 'committed' && entry.state !== 'aborted' && Date.now() - entry.openedAt < CONTINUATION_TTL_MS;
+  entry.state !== 'committed' &&
+  entry.state !== 'aborted' &&
+  (entry.automatic || Date.now() - entry.openedAt < CONTINUATION_TTL_MS);
 
 function sweep(): void {
   for (const entry of [...byToken.values()]) {
@@ -349,7 +359,7 @@ function sweep(): void {
       if (Date.now() - entry.openedAt > CONTINUATION_TTL_MS * 2) byToken.delete(entry.token);
       continue;
     }
-    if (Date.now() - entry.openedAt >= CONTINUATION_TTL_MS) {
+    if (!entry.automatic && Date.now() - entry.openedAt >= CONTINUATION_TTL_MS) {
       abortContinuation(entry.token, 'it took too long and was given up on');
     }
   }
@@ -368,6 +378,12 @@ export function continuationByToken(token: string): ContinuationView | null {
   sweep();
   const entry = byToken.get(token);
   return entry ? view(entry) : null;
+}
+
+/** Auto-compaction tickets still owed a real A -> B commit. */
+export function pendingAutomaticContinuations(): ContinuationView[] {
+  sweep();
+  return [...byToken.values()].filter((entry) => entry.automatic && isOpen(entry)).map(view);
 }
 
 /**
@@ -520,12 +536,13 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
  * one already running. That is deliberate — the previous design let each press become its
  * own handoff and its own fresh tab.
  */
-function makeContinuation(sessionId: string, fromConversationId: string): Continuation {
+function makeContinuation(sessionId: string, fromConversationId: string, automatic: boolean): Continuation {
   return {
     token: randomBytes(16).toString('base64url'),
     sessionId,
     from: fromConversationId,
     openedAt: Date.now(),
+    automatic,
     state: 'awaiting-summary',
     summary: '',
     handoffId: null,
@@ -542,7 +559,8 @@ function makeContinuation(sessionId: string, fromConversationId: string): Contin
 /** Durable open used before the bridge hands the one-shot compaction prompt to a page. */
 export async function openContinuationNow(
   sessionId: string,
-  fromConversationId: string
+  fromConversationId: string,
+  automatic = false
 ): Promise<ContinuationView> {
   sweep();
   const existing = [...byToken.values()].find((entry) => entry.sessionId === sessionId && isOpen(entry));
@@ -553,7 +571,7 @@ export async function openContinuationNow(
   const work = (async (): Promise<ContinuationView> => {
     const again = [...byToken.values()].find((entry) => entry.sessionId === sessionId && isOpen(entry));
     if (again) return view(again);
-    const entry = makeContinuation(sessionId, fromConversationId);
+    const entry = makeContinuation(sessionId, fromConversationId, automatic);
     try {
       await writeDurableNow(CONTINUATIONS_STATE, snapshotWith(entry.token, durableRecord(entry)));
     } catch (err) {
@@ -1219,7 +1237,8 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       raw.from.length === 0 || raw.from.length > 256 ||
       !validStates.has(raw.state) ||
       !Number.isFinite(raw.openedAt) ||
-      now - raw.openedAt >= CONTINUATION_TTL_MS * 2
+      ((raw.state === 'committed' || raw.state === 'aborted') && now - raw.openedAt >= CONTINUATION_TTL_MS * 2) ||
+      (raw.automatic !== true && now - raw.openedAt >= CONTINUATION_TTL_MS * 2)
     ) {
       continue;
     }
@@ -1229,6 +1248,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       from: raw.from,
       to: typeof raw.to === 'string' && raw.to ? raw.to : null,
       openedAt: raw.openedAt,
+      automatic: raw.automatic === true,
       state: raw.state,
       summary: typeof raw.summary === 'string' ? raw.summary.slice(0, 512 * 1024) : '',
       handoffId: typeof raw.handoffId === 'string' ? raw.handoffId : null,
@@ -1266,7 +1286,10 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       error: typeof raw.error === 'string' ? raw.error : null
     };
     const waitingExpired =
-      entry.state !== 'committed' && entry.state !== 'aborted' && now - entry.openedAt >= CONTINUATION_TTL_MS;
+      !entry.automatic &&
+      entry.state !== 'committed' &&
+      entry.state !== 'aborted' &&
+      now - entry.openedAt >= CONTINUATION_TTL_MS;
     if (entry.handoffId) {
       try {
         entry.handoff = await readHandoff(entry.sessionId, entry.handoffId);

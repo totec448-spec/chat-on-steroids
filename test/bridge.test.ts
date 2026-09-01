@@ -56,7 +56,11 @@ const {
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const {
   GOAL_OBJECTIVES_STATE,
+  GOAL_REPLIES_STATE,
+  GOAL_SWITCHES_STATE,
+  goalDrivingMode,
   goalObjectiveFor,
+  goalSwitchFor,
   humanReply,
   resetGoalStateForTests,
   setGoalObjective
@@ -72,6 +76,7 @@ const {
   claimContinuationNow,
   commitContinuation,
   continuationByToken,
+  continuationForSession,
   openContinuationNow,
   setContinuationRecoveryHooks,
   restoreContinuations
@@ -1138,6 +1143,72 @@ describe('automatic compaction', () => {
       // use. Its conversation remains its agent identity.
       expect(pendingCommands().some((command) => command.what.startsWith('resume:'))).toBe(false);
     });
+  });
+
+  it('files an automatic ticket before page work, cancels it on Auto Off, and does not refile on On', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac05';
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'keep the long run going', messageId: 'm-auto-ticket' }]
+      }
+    });
+    const session = await findSessionByConversation(conversationId, { requireUnique: true });
+    expect(session).not.toBeNull();
+
+    const filed = await request('POST', '/compact', {
+      body: { conversationId, ticket: true, automatic: true }
+    });
+    expect(filed.status).toBe(202);
+    expect(filed.body).toMatchObject({ filed: true, prompt: null });
+    const token = filed.body.token as string;
+    expect(continuationByToken(token)).toMatchObject({ automatic: true, state: 'awaiting-summary' });
+
+    const off = await request('POST', '/settings', { body: { conversationId, autoCompact: false } });
+    expect(off.status).toBe(200);
+    expect(continuationByToken(token)?.state).toBe('aborted');
+
+    expect((await request('POST', '/settings', { body: { conversationId, autoCompact: true } })).status).toBe(200);
+    expect(continuationForSession(session!.id)).toBeNull();
+  });
+
+  it('reloads one automatic ticket at 15-minute checkpoints without failing it', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac06';
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [{ kind: 'user_message', time: Date.now(), text: 'generate the huge handoff', messageId: 'm-auto-watch' }]
+        }
+      });
+      const filed = await request('POST', '/compact', {
+        body: { conversationId, ticket: true, automatic: true }
+      });
+      const token = filed.body.token as string;
+
+      const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repair ?? null;
+      };
+      await vi.advanceTimersByTimeAsync(15 * 60_000 - 1);
+      expect(await takeRepair()).toBeNull();
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(attempt === 0 ? 1 : 15 * 60_000);
+        const handout = await takeRepair();
+        expect(handout).toMatchObject({ conversationId, reason: 'compaction' });
+        await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`);
+      }
+
+      await vi.advanceTimersByTimeAsync(2 * 60 * 60_000);
+      expect(await takeRepair()).toBeNull();
+      expect(continuationByToken(token)).toMatchObject({ automatic: true, state: 'awaiting-summary' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -5782,6 +5853,73 @@ describe('the goal loop over the bridge', () => {
   });
 
   /**
+   * The run that was lost, and the reason the goal now carries its mode.
+   *
+   * A goal saved from the sheet armed the loop but said nothing about *which* loop, so the
+   * mode was read from the standing switch — off, therefore Goal, therefore allowed to stop.
+   * An unattended run started that way ended at its second turn on one "looks done" from the
+   * gate, two minutes after an identical chat with the Loop switch on had been started by
+   * hand. The mode the goal was written in is now pinned as that chat's own switch, in the
+   * same request, so nothing between the save and the first draft can answer it differently.
+   */
+  it('pins the mode a goal was written in as that chat’s own switch', async () => {
+    await pair();
+    const chat = 'cafe0022-0000-4000-8000-000000000022';
+    await saveConfig({
+      ...defaultConfig(),
+      sessions: { ...defaultConfig().sessions, record: true },
+      // The exact configuration the lost run had: switched off, with `loop` sitting there as a
+      // remembered preference that nothing reads while `enabled` is false.
+      goal: { ...defaultConfig().goal, enabled: false, mode: 'loop' }
+    });
+    await request('POST', '/events', {
+      body: {
+        conversationId: chat,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'build the sandbox', messageId: 'm-goal-mode' }]
+      }
+    });
+    await writeDurableNow(GOAL_SWITCHES_STATE, null);
+
+    // Without a mode, nothing changes: the standing switch still decides, and it says Goal.
+    await request('POST', '/goal/objective', { body: { conversationId: chat, text: 'build the voxel sandbox' } });
+    expect(goalSwitchFor(chat).own).toBe(false);
+    expect(goalDrivingMode(chat)).toBe('goal');
+
+    const looped = await request('POST', '/goal/objective', {
+      body: { conversationId: chat, text: 'build the voxel sandbox', mode: 'loop' }
+    });
+    expect(looped.status).toBe(200);
+    // Answered back rather than assumed, because the sheet draws the mode from this reply.
+    expect(looped.body).toMatchObject({ objective: 'build the voxel sandbox', enabled: true, mode: 'loop' });
+    expect(goalDrivingMode(chat)).toBe('loop');
+    // Durable before the response was written, on the same terms as the goal itself: a mode
+    // that survives only in memory is a mode a restart turns back into a Goal that may stop.
+    expect(
+      await readDurable<{ switches: Array<{ conversationId: string; enabled: boolean; mode: string }> }>(GOAL_SWITCHES_STATE)
+    ).toMatchObject({
+      switches: [expect.objectContaining({ conversationId: chat, enabled: true, mode: 'loop' })]
+    });
+    // The app-wide default is untouched: this was one chat's decision, made in one chat's sheet.
+    expect(getConfig().goal.enabled).toBe(false);
+
+    // The same request is how a mode is changed, without going near the switches.
+    const backToGoal = await request('POST', '/goal/objective', {
+      body: { conversationId: chat, text: 'build the voxel sandbox', mode: 'goal' }
+    });
+    expect(backToGoal.body).toMatchObject({ enabled: true, mode: 'goal' });
+    expect(goalDrivingMode(chat)).toBe('goal');
+
+    // And clearing the goal ends the run it named. Writing the goal is what switched this
+    // chat on, so deleting it has to switch it back off — otherwise the chat keeps being
+    // prompted with no finish line left to say what for.
+    const cleared = await request('POST', '/goal/objective', {
+      body: { conversationId: chat, text: '', mode: 'goal' }
+    });
+    expect(cleared.body).toMatchObject({ objective: '', enabled: false });
+    expect(goalSwitchFor(chat)).toMatchObject({ enabled: false, own: true });
+  });
+
+  /**
    * The switch belongs to the chat it was flipped in.
    *
    * It used to be one app-wide setting reachable from every composer, which is the wrong shape
@@ -5838,6 +5976,43 @@ describe('the goal loop over the bridge', () => {
         expect.objectContaining({ conversationId: driven, enabled: false }),
         expect.objectContaining({ conversationId: other, enabled: true, mode: 'loop' })
       ])
+    });
+  });
+
+  it('makes Goal Off a durable ticket cancel and On a fresh pickup of the same final', async () => {
+    await pair();
+    const chat = 'cafe0076-0000-4000-8000-000000000076';
+    await request('POST', '/events', {
+      body: {
+        conversationId: chat,
+        events: [
+          { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-switch-ticket' },
+          {
+            kind: 'assistant_message',
+            time: Date.now(),
+            messageId: 'a-switch-ticket',
+            text: 'Finished this pass.',
+            state: 'final',
+            final: true,
+            goalEligible: true,
+            activeNow: true
+          }
+        ]
+      }
+    });
+    expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).toMatchObject({
+      replyId: 'a-switch-ticket'
+    });
+
+    expect((await request('POST', '/settings', { body: { conversationId: chat, goal: false } })).status).toBe(200);
+    expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).toBeNull();
+    expect(await readDurable<{ replies: Array<{ conversationId: string; state: string }> }>(GOAL_REPLIES_STATE)).toMatchObject({
+      replies: expect.arrayContaining([expect.objectContaining({ conversationId: chat, state: 'handled' })])
+    });
+
+    expect((await request('POST', '/settings', { body: { conversationId: chat, goal: true } })).status).toBe(200);
+    expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).toMatchObject({
+      replyId: 'a-switch-ticket'
     });
   });
 
@@ -6133,6 +6308,24 @@ describe('the goal loop over the bridge', () => {
       const keyless = await request('POST', '/goal/open', { body: { text: 'ship it' } });
       expect(keyless.status).toBe(409);
       expect(keyless.body.error).toBe('no_api_key');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('marks a rate-limited New Chat opening as retryable', async () => {
+    await pair();
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      Response.json({ error: { message: 'Provider returned error' } }, { status: 429 })) as never;
+
+    try {
+      const opened = await request('POST', '/goal/open', { body: { text: 'rewrite the parser in rust' } });
+      expect(opened.status).toBe(502);
+      expect(opened.body).toEqual({
+        error: 'rate_limited: Provider returned error',
+        retryable: true
+      });
     } finally {
       globalThis.fetch = realFetch;
     }

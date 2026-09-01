@@ -669,6 +669,15 @@
    * "same chat has just learned its own id" branch in observe().
    */
   let pendingObjective = '';
+  /**
+   * The mode that goal was written in, waiting across the same gap.
+   *
+   * It has to travel with the text and cannot be re-derived at the other end: the chat this
+   * is about to become has no switch of its own yet, so anything asking "goal or loop?" once
+   * the id arrives would be asking the app-wide default — which is exactly the answer that
+   * turned an unattended Loop into a Goal that stopped at the second turn.
+   */
+  let pendingObjectiveMode = 'goal';
   // Whether the opening message written from that goal actually reached ChatGPT. Only a sent
   // one survives the conversation reset below, because only a sent one is the reason the id
   // this tab is about to adopt exists at all.
@@ -1180,6 +1189,7 @@
     // A specific goal belongs to the chat it was written for. Carrying a pending one into a
     // different conversation would attach it to whichever chat happened to be opened next.
     pendingObjective = '';
+    pendingObjectiveMode = 'goal';
     pendingObjectiveSent = false;
     objectiveBusy = false;
     objectiveError = '';
@@ -1628,6 +1638,9 @@
       // ChatGPT counts; an abandoned attempt is dropped with everything else.
       const abandonedOpening = Boolean(pendingObjective) && !pendingObjectiveSent;
       const carried = pendingObjectiveSent ? pendingObjective : '';
+      // Read here, with the text, because resetConversation() below clears both and the mode
+      // is the half that cannot be reconstructed afterwards from anything on this page.
+      const carriedMode = pendingObjectiveMode === 'loop' ? 'loop' : 'goal';
       if (conversationId) {
         // A genuine move to another *identified* chat: close the old one out and start
         // clean. The order matters — what the old chat left on screen is retired before
@@ -1653,6 +1666,7 @@
         void bindConversation(id);
         if (abandonedOpening) {
           pendingObjective = '';
+          pendingObjectiveMode = 'goal';
           pendingObjectiveSent = false;
           goalConfig = null;
           goalDraft = null;
@@ -1667,12 +1681,20 @@
       // it up from the next turn onwards. See pendingObjective.
       if (carried) {
         pendingObjective = '';
+        pendingObjectiveMode = 'goal';
         pendingObjectiveSent = false;
-        void ask({ type: 'goal_objective', conversationId: id, text: carried }).then((reply) => {
+        // The mode goes with it, and this is the only request that can carry it: from here on
+        // the chat has an id, and anything that asks the app which mode to use gets the
+        // standing switch's answer rather than the one the user actually chose.
+        void ask({ type: 'goal_objective', conversationId: id, text: carried, mode: carriedMode }).then((reply) => {
           if (!alive || conversationId !== id) return;
           if (reply && reply.ok === true) {
             const stored = reply.data && typeof reply.data.objective === 'string' ? reply.data.objective : carried;
-            goalConfig = { ...(goalConfig || {}), objective: stored };
+            const switched =
+              reply.data && typeof reply.data.mode === 'string' && typeof reply.data.enabled === 'boolean'
+                ? { enabled: reply.data.enabled, mode: reply.data.mode }
+                : null;
+            goalConfig = { ...(goalConfig || {}), ...(switched || {}), objective: stored };
           } else {
             objectiveError = replyError(reply) || 'the goal could not be saved to this chat';
           }
@@ -4858,7 +4880,14 @@
       if (!alive || CLF_DOM.conversationId() || !reply || reply.ok !== true || !reply.data) return;
       context = readContext(reply.data.context) || context;
       if (reply.data.goal && typeof reply.data.goal === 'object') {
-        goalConfig = { ...reply.data.goal, objective: pendingObjective };
+        goalConfig = {
+          ...reply.data.goal,
+          objective: pendingObjective,
+          // A goal held here is a chat being opened right now, and the mode it was opened in
+          // is this tab's to state: the app answered with the app-wide switch, which has no
+          // opinion about a conversation that does not exist yet.
+          ...(pendingObjective ? { enabled: true, mode: pendingObjectiveMode } : {})
+        };
       }
       renderControl();
       renderMenu();
@@ -5099,6 +5128,13 @@
       };
     }
 
+    if (job && job.busy && error && !phase) {
+      // The ticket is alive but this page's checkpoint failed. Say the failure without
+      // declaring the durable job failed; a later generation/reload may pick it up, and the
+      // only immediate action offered here is the explicit cancel that closes the ticket.
+      return { mode: 'error', label: 'Paused', hint: error, action: 'cancel' };
+    }
+
     if (job && job.busy) {
       if (job.stage === 'opening') {
         return { mode: 'busy', label: 'Opening…', hint: 'Handoff saved, opening the fresh chat', action: 'cancel' };
@@ -5180,9 +5216,19 @@
    *
    * `context` and `goal` both come from the app on every poll, so this never reports a
    * setting from memory — a change made in the app's own window shows up here within a tick.
+   *
+   * `scope` is which of the two composers this sheet is sitting above, and it is the route's
+   * answer rather than the id this tab is holding — see composerChat(). Above a New Chat the
+   * two switches are gone: they move the app-wide default there, having no chat to belong to,
+   * while the goal written in the same sheet starts a chat immediately. Those two scopes read
+   * as one control and are not, which is how an unattended run got started as a Goal by
+   * somebody who had come to the sheet to start a Loop.
    */
   function settingsView(input) {
-    const { context, goal, compact, editing } = input;
+    const { context, goal, compact, editing, editingMode, scope } = input;
+    // A composer with no chat behind it yet. Everything conversation-scoped is absent here by
+    // construction, and the two switches are not conversation-scoped, which is the point.
+    const fresh = scope === 'new';
     // `context.auto` is the global preference. Worker chats are a role-level exception: their
     // conversation id is the worker identity, so Compact & Resume is never available there.
     // Keep the sheet truthful even if a generic /settings refresh races the worker-scoped
@@ -5203,6 +5249,12 @@
     // Either half is enough to make the loop run here, which is why the summary line says
     // "on" for a chat that has a goal even while the standing switch is off.
     const running = (goalOn || loopOn || Boolean(objective)) && hasKey && !blocked;
+    // Which instruction would actually drive this chat, which is not the same question as
+    // which switch is on. A chat that runs only because it carries a goal, with the standing
+    // switch off, is driven as a Goal and may therefore stop. This mirrors goalDrivingMode()
+    // in src/main/goal.ts exactly, and it is what the two links below are labelled from — a
+    // sheet that named the mode differently from the app would be worse than naming none.
+    const driving = loopOn ? 'loop' : 'goal';
     return {
       // Two short lines rather than a sentence: this is read while reaching for something
       // else, and the only questions it answers are "is it on" and "at what point".
@@ -5210,17 +5262,23 @@
         auto ? `Auto-compaction on${from ? `, ${from}` : ''}` : 'Auto-compaction off',
         blocked === 'worker'
           ? 'Goal off — the prime writes this chat'
-          : loopOn
-            ? hasKey
-              ? 'Loop on — never stops on its own'
-              : 'Loop on — no API key'
-            : objective
-              ? 'Goal on — chasing this chat’s goal'
-              : goalOn
-                ? hasKey
-                  ? 'Goal on'
-                  : 'Goal on — no API key'
-                : 'Goal and Loop off'
+          : fresh
+            ? !hasKey
+              ? 'No API key — Goal and Loop unavailable'
+              : objective
+                ? 'Opening this chat on its goal'
+                : 'Add a goal or a loop to start this chat'
+            : loopOn
+              ? hasKey
+                ? 'Loop on — never stops on its own'
+                : 'Loop on — no API key'
+              : objective
+                ? 'Goal on — chasing this chat’s goal'
+                : goalOn
+                  ? hasKey
+                    ? 'Goal on'
+                    : 'Goal on — no API key'
+                  : 'Goal and Loop off'
       ].join('\n'),
       rows: [
         {
@@ -5286,23 +5344,50 @@
           warn: !hasKey || blocked === 'worker',
           disabled: blocked === 'worker'
         }
-      ],
+        // Above a New Chat there is no chat for a switch to belong to, so these two moved the
+        // app-wide default while the goal written beside them started a chat under whatever
+        // that default happened to say. Two controls, two scopes, one apparent decision. The
+        // links below are the whole decision there, and they carry their mode with them.
+      ].filter((row) => !fresh || row.key === 'autoCompact'),
       /**
-       * The specific goal, under the pair of switches it belongs to.
+       * The specific goal, and the mode it is written in.
        *
-       * A link rather than a third switch, because it is not a mode — it is a piece of text,
-       * and until there is one there is nothing to be on. Saving one is what turns it on.
-       * Goal chases it and stops when it is reached; Loop chases it and never stops.
+       * Not a third switch, because it is not a mode — it is a piece of text, and until there
+       * is one there is nothing to be on. Saving one is what turns it on, and *which* link
+       * saved it is what decides whether the run may stop: Goal chases it and stops when it is
+       * reached, Loop chases it and never stops. That is why there are two links rather than
+       * one plus a switch to remember afterwards — the choice is made in the act of writing
+       * the goal, in the same sheet, and no other state can quietly answer it differently.
        */
       objective: {
         text: objective,
         editing: Boolean(editing),
-        label: objective ? 'change the goal' : 'add specific goal',
-        /** Shown instead of the link once a goal exists, so it can be read without opening it. */
+        /** Which link opened the editor, and therefore what Save is about to do. */
+        mode: editingMode === 'loop' ? 'loop' : 'goal',
+        /** Shown instead of the links once a goal exists, so it can be read without opening it. */
         summary: objective ? clampLine(objective, 120) : '',
-        hint: objective
-          ? 'Replace or clear the goal this chat is being driven towards.'
-          : 'Write what this chat has to reach. The loop then prompts until it is reached.',
+        /** The mode this chat is being driven in right now, so the links can say what changes. */
+        driving,
+        actions: [
+          {
+            mode: 'goal',
+            label: !objective ? 'add specific goal' : driving === 'goal' ? 'change the goal' : 'run it as a goal',
+            hint: !objective
+              ? 'Write what this chat has to reach. It then prompts until it is reached, and stops there.'
+              : driving === 'goal'
+                ? 'Replace or clear the goal this chat is being driven towards.'
+                : 'Keep this goal, but let the run stop once it is reached.'
+          },
+          {
+            mode: 'loop',
+            label: !objective ? 'add specific loop' : driving === 'loop' ? 'change the loop' : 'run it as a loop',
+            hint: !objective
+              ? 'Write what this chat has to reach. It then prompts for ever — nothing but the Loop switch ends it.'
+              : driving === 'loop'
+                ? 'Replace or clear the goal this loop is being driven towards.'
+                : 'Keep this goal, and never stop on it — only the Loop switch ends the run.'
+          }
+        ],
         available: hasKey && !blocked,
         unavailable:
           blocked === 'worker'
@@ -5533,10 +5618,10 @@
     // what lets an old 500k conversation be opened and read without being compacted.
     if (!generating && !appActiveTurnId && !CLF_DOM.generating()) return;
 
-    // The continuation transaction is the durable post-barrier authority. A pre-barrier error
-    // stays local to this generation, blocking poll-driven retry churn; the next real generation
-    // clears it and may try again instead of permanently stranding an over-limit chat.
-    await startCompact();
+    // The continuation transaction is already the durable ticket. A page/barrier error stays
+    // local to this document, blocking poll-driven retry churn; the app's 15-minute checkpoint
+    // reloads this exact chat and lets the replacement page collect the same transaction.
+    await startCompact(true);
   }
 
   /** Local phases of a ChatGPT-native compaction, as the button says them. */
@@ -5769,11 +5854,23 @@
   }
 
   function menuView() {
+    // The route, not the id this tab is still holding. Clicking New Chat leaves that id in
+    // place on purpose (see composerChat), so a sheet drawn from it would keep offering the
+    // previous chat's switches — and its goal — above a composer that belongs to no chat at
+    // all. `moving` counts as a chat: the switches are drawn, and saving into it is refused
+    // by name rather than by silently writing somewhere.
+    const where = composerChat();
+    const fresh = where.state === 'new';
     return settingsView({
       context,
-      goal: goalConfig,
+      // Above a New Chat the only goal that exists is the one this tab is holding until
+      // ChatGPT issues an id. Layered here as well as in pullSettings so the sheet is right
+      // on the frame the route changes, rather than one activity poll later.
+      goal: fresh && goalConfig ? { ...goalConfig, objective: pendingObjective, blocked: '' } : goalConfig,
       compact: currentState(),
-      editing: menuEditing
+      editing: menuEditing,
+      editingMode: menuMode,
+      scope: fresh ? 'new' : 'chat'
     });
   }
 
@@ -5786,10 +5883,19 @@
    */
   let menuEditing = false;
   let menuDraft = '';
+  /**
+   * Which of the two links opened the editor, and therefore what Save will do.
+   *
+   * Held beside the draft rather than read back off the sheet for the same reason the draft
+   * is: renderMenu() rebuilds this sheet from scratch on every activity poll, and the mode is
+   * the half of this decision that cannot be recovered from the text.
+   */
+  let menuMode = 'goal';
 
-  function openObjectiveEditor(current) {
+  function openObjectiveEditor(current, mode) {
     menuEditing = true;
     menuDraft = current;
+    menuMode = mode === 'loop' ? 'loop' : 'goal';
     objectiveError = '';
     renderMenu();
     const box = menuNode && menuNode.querySelector('[data-clf-goal-input]');
@@ -5813,9 +5919,15 @@
    * chat already under way they should not have to wait for a turn that may never come. So
    * saving is also a start signal, and the two shapes it takes are the two shapes a chat can
    * be in: one that ChatGPT has named, and one that it has not.
+   *
+   * `mode` travels with the text, all the way to the durable per-chat switch the app writes
+   * before it stores the goal. It is not a preference being recorded on the side: it is the
+   * difference between a run that may decide it is finished and one that may not, and the
+   * only place that decision is unambiguously present is the button that was pressed.
    */
-  async function saveObjective(text) {
+  async function saveObjective(text, mode) {
     if (objectiveBusy) return;
+    const which = mode === 'loop' ? 'loop' : 'goal';
     const goal = String(text || '').trim().slice(0, MAX_OBJECTIVE_CHARS);
     objectiveBusy = true;
     objectiveError = '';
@@ -5834,19 +5946,26 @@
         // id that the goal is then bound to. See the pendingObjective binding in observe().
         if (!goal) {
           pendingObjective = '';
+          pendingObjectiveMode = 'goal';
           pendingObjectiveSent = false;
           return;
         }
-        await openWithObjective(goal);
+        await openWithObjective(goal, which);
         return;
       }
-      const reply = await ask({ type: 'goal_objective', conversationId: where.id, text: goal });
+      const reply = await ask({ type: 'goal_objective', conversationId: where.id, text: goal, mode: which });
       if (!reply || reply.ok !== true) {
         objectiveError = replyError(reply) || 'the app did not answer';
         return;
       }
       const stored = reply.data && typeof reply.data.objective === 'string' ? reply.data.objective : goal;
-      goalConfig = { ...(goalConfig || {}), objective: stored };
+      // The switch the app just pinned, taken from its answer rather than assumed from the
+      // button: what the sheet draws is what was actually written down.
+      const switched =
+        reply.data && typeof reply.data.mode === 'string' && typeof reply.data.enabled === 'boolean'
+          ? { enabled: reply.data.enabled, mode: reply.data.mode }
+          : null;
+      goalConfig = { ...(goalConfig || {}), ...(switched || {}), objective: stored };
       menuEditing = false;
       menuDraft = '';
       if (!stored) return;
@@ -5897,12 +6016,20 @@
     return reply.status === 0 && reply.error !== 'app_not_found';
   }
 
-  async function openWithObjective(goal) {
+  async function openWithObjective(goal, mode) {
     pendingObjective = goal;
+    pendingObjectiveMode = mode === 'loop' ? 'loop' : 'goal';
     pendingObjectiveSent = false;
     // Enough of a config for the panel to draw: the model comes back with the reply, so
-    // until then it says "the model", which is what modelLabel('') is for.
-    goalConfig = { ...(goalConfig || { enabled: true, hasKey: true, model: '' }), objective: goal };
+    // until then it says "the model", which is what modelLabel('') is for. The mode is this
+    // tab's own claim until the app answers with what it stored — drawn from the button that
+    // was pressed rather than from the standing switch, which is what the whole change is for.
+    goalConfig = {
+      ...(goalConfig || { hasKey: true, model: '' }),
+      enabled: true,
+      mode: pendingObjectiveMode,
+      objective: goal
+    };
     menuEditing = false;
     menuDraft = '';
     closeMenu();
@@ -5919,7 +6046,9 @@
         await sleep(1_000 * attempt);
         if (!alive || composerChat().state !== 'new') break;
       }
-      reply = await ask({ type: 'goal_open', text: goal });
+      // The mode as well, because there is no chat yet to hold a switch: this request is the
+      // only thing that knows which instruction the opening message is being written under.
+      reply = await ask({ type: 'goal_open', text: goal, mode: pendingObjectiveMode });
       if (!alive || (reply && reply.ok === true) || !openRetryable(reply)) break;
     }
     if (!alive || composerChat().state !== 'new') {
@@ -5927,6 +6056,7 @@
       // unrelated existing chat the user selected while generation was in flight, so discard the
       // pending ownership claim rather than letting a later observer bind it there.
       pendingObjective = '';
+      pendingObjectiveMode = 'goal';
       pendingObjectiveSent = false;
       goalConfig = null;
       setGoalPhase('');
@@ -6013,10 +6143,11 @@
         });
       }
       root.append(line);
-      // Under the pair, not between them: the goal text is what either mode is pointed at,
-      // so it belongs below both switches rather than wedged between Goal and Loop.
-      if (row.key === 'loop') root.append(buildObjective(view.objective));
     }
+    // Under the switches rather than between them: the goal text is what either mode is
+    // pointed at. Outside the loop, because above a New Chat there are no switches to hang
+    // it off and it is then the only thing in the sheet that can start anything.
+    root.append(buildObjective(view.objective));
 
     const act = document.createElement('button');
     act.type = 'button';
@@ -6054,11 +6185,13 @@
   }
 
   /**
-   * The specific goal, under the switch: a line of text and a way to change it.
+   * The specific goal, and the two modes it can be written in.
    *
-   * Closed it is one link, because most of the time there is no goal and the sheet should
-   * not grow a paragraph to say so. Open it is a box, a Save and a Cancel — and a Clear once
-   * there is something to clear, since the only other way to end a goal is to reach it.
+   * Closed it is two links, because most of the time there is no goal and the sheet should
+   * not grow a paragraph to say so — and because the mode is the decision, so it belongs on
+   * the control that opens the editor rather than on a switch somewhere else in the sheet
+   * that has to be remembered afterwards. Open it is a box, a Save that names the mode it is
+   * about to save in, a Cancel, and a Clear once there is something to clear.
    */
   function buildObjective(objective) {
     const box = document.createElement('div');
@@ -6080,25 +6213,41 @@
         text.textContent = objective.summary;
         box.append(text);
       }
-      const link = document.createElement('button');
-      link.type = 'button';
-      link.className = 'clf-menu-goal-link';
-      link.disabled = objectiveBusy || menuBusy;
-      link.setAttribute('data-clf-tip', objective.hint);
-      const plus = document.createElement('span');
-      plus.className = 'clf-menu-goal-plus';
-      plus.textContent = objective.summary ? '✎' : '+';
-      plus.setAttribute('aria-hidden', 'true');
-      const word = document.createElement('span');
-      word.textContent = objectiveBusy ? 'working…' : objectiveError || objective.label;
-      if (objectiveError) word.dataset.clfWarn = '1';
-      link.append(word, plus);
-      link.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        openObjectiveEditor(objective.text);
-      });
-      box.append(link);
+      // The failure belongs to the sheet, not to one of the two links: a save that was
+      // refused was made in one mode and would read as that mode's own problem.
+      if (objectiveError) {
+        const failure = document.createElement('span');
+        failure.className = 'clf-menu-goal-note';
+        failure.dataset.clfWarn = '1';
+        failure.textContent = objectiveError;
+        box.append(failure);
+      }
+      // One row, because the two are alternatives rather than a list: stacked, the second one
+      // reads as a further setting under the first instead of the other half of one choice.
+      const links = document.createElement('div');
+      links.className = 'clf-menu-goal-links';
+      for (const action of objective.actions) {
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'clf-menu-goal-link';
+        link.dataset.clfGoalMode = action.mode;
+        link.disabled = objectiveBusy || menuBusy;
+        link.setAttribute('data-clf-tip', action.hint);
+        const plus = document.createElement('span');
+        plus.className = 'clf-menu-goal-plus';
+        plus.textContent = objective.summary ? '✎' : '+';
+        plus.setAttribute('aria-hidden', 'true');
+        const word = document.createElement('span');
+        word.textContent = objectiveBusy ? 'working…' : action.label;
+        link.append(word, plus);
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openObjectiveEditor(objective.text, action.mode);
+        });
+        links.append(link);
+      }
+      box.append(links);
       return box;
     }
 
@@ -6115,7 +6264,7 @@
       // genuinely needs paragraphs still has shift+enter.
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
-        void saveObjective(input.value);
+        void saveObjective(input.value, objective.mode);
       }
     });
     box.append(input);
@@ -6125,12 +6274,15 @@
     const save = document.createElement('button');
     save.type = 'button';
     save.className = 'clf-menu-goal-save';
-    save.textContent = objectiveBusy ? 'Saving…' : 'Save';
+    save.dataset.clfGoalMode = objective.mode;
+    // Named, not just "Save". This button is the moment the mode is decided, and the two
+    // outcomes are a run that may stop and a run that may not.
+    save.textContent = objectiveBusy ? 'Saving…' : objective.mode === 'loop' ? 'Save as loop' : 'Save as goal';
     save.disabled = objectiveBusy || !menuDraft.trim();
     save.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      void saveObjective(menuDraft);
+      void saveObjective(menuDraft, objective.mode);
     });
     const cancel = document.createElement('button');
     cancel.type = 'button';
@@ -6158,7 +6310,10 @@
       clear.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        void saveObjective('');
+        // The mode goes with the clear as well. Writing the goal switched this chat's mode
+        // on; deleting it has to switch that same mode back off, or the chat keeps being
+        // prompted with no finish line left anywhere to describe what for.
+        void saveObjective('', objective.driving);
       });
       buttons.append(clear);
     }
@@ -6658,7 +6813,7 @@
     stagePanel.body.hidden = view.body === '';
   }
 
-  async function startCompact() {
+  async function startCompact(automatic = false) {
     const forId = conversationId;
     const forEpoch = epoch;
     const current = () =>
@@ -6719,6 +6874,23 @@
       renderMenu();
       return;
     }
+
+    // The ticket precedes every fallible page barrier. A reload after this 202 can therefore
+    // resume the same work, while the app still hands out no prompt until this page has proved
+    // the chat stopped and its local calls settled. `automatic` lets Auto Off cancel only work
+    // the threshold created, never a manual Compact & Resume press.
+    const filed = await ask({ type: 'compact', conversationId: forId, ticket: true, automatic });
+    if (!current()) return;
+    if (!filed || filed.ok !== true || !filed.data) {
+      pressedAt = 0;
+      nativeBusy = false;
+      nativePhase = '';
+      localError = replyError(filed) || 'The compaction ticket could not be stored.';
+      renderControl();
+      void pullActivity();
+      return;
+    }
+    if (filed.data.job) job = filed.data.job;
 
     // The barrier, before the request rather than after it.
     //
@@ -6789,14 +6961,10 @@
    */
   async function maybeResumePendingCompaction(forId = conversationId, forEpoch = epoch) {
     const source = job && job.stage === 'handoff-pending' ? job.sourceSend : null;
-    if (!source || nativeBusy) return;
+    if (!source || nativeBusy || localError) return;
     if (source.state !== 'not-attempted' && source.state !== 'attempted-unresolved') return;
-    const current = () =>
-      alive && conversationId === forId && epoch === forEpoch && CLF_DOM.conversationId() === forId;
-    const reply = await ask({ type: 'compact', conversationId: forId, resume: true });
-    if (!current() || !reply || reply.ok !== true || !reply.data || !reply.data.prompt) return;
-    nativeBusy = true;
-    await runNativeCompaction(String(reply.data.prompt), String(reply.data.token || ''), forId, forEpoch);
+    if (!alive || conversationId !== forId || epoch !== forEpoch || CLF_DOM.conversationId() !== forId) return;
+    await startCompact(job.automatic === true);
   }
 
   /**
@@ -6878,14 +7046,21 @@
       epoch === forEpoch &&
       CLF_DOM.conversationId() === forId;
     let attemptCrossed = false;
+    const automaticTicket = job && job.automatic === true;
     const abandonBeforeSend = async (why) => {
       if (!current()) return;
       nativeBusy = false;
       nativePhase = '';
       pressedAt = 0;
       localError = why;
-      job = null;
-      await ask({ type: 'compact', conversationId: forId, cancel: true }).catch(() => undefined);
+      // A page/DOM failure is not a verdict on an automatic ticket. Keep it on the
+      // continuation WAL so the next 15-minute reload can collect the same work. A manual
+      // press keeps its historical immediate-abort behaviour; the user is still present and
+      // can retry it without leaving an invisible job behind.
+      if (!automaticTicket) {
+        job = null;
+        await ask({ type: 'compact', conversationId: forId, cancel: true }).catch(() => undefined);
+      }
       if (!current()) return;
       renderControl();
       void pullActivity();
