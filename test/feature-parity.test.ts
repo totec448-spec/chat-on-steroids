@@ -22,7 +22,7 @@ describe('portable browser-backed feature parity', () => {
       expect(config.multiAgent).toEqual({
         enabled: true,
         maxWorkers: 2,
-        allowUnattributedCalls: false,
+        allowUnattributedCalls: true,
         recoverAgentTabs: true
       });
       expect(browserExtensionRequired(config)).toBe(true);

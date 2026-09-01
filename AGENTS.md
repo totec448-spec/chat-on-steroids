@@ -1,12 +1,10 @@
 # Chat On Steroids — the agent map
 
-Quality>> quantity. User wants less new code and delete more old code. Don't bloat the codebase, make it shorter and better and more maintainable Everytime you work on it. It should shrink not ballon.
-
-**User hates a growing codebase. Quality >> quantity.** New findings should improve the underlying
-decision and replace/delete obsolete logic, not stack another fallback, watcher, state machine, or
-special case on top. Prefer less code, fewer branches, one deterministic source of truth, and reuse
-of existing mechanisms. Every change should make the system smaller, simpler, and easier to reason
-about where practical. Do not spam fixes into the codebase; fix the decision from the ground up.
+**QUALITY >> QUANTITY. Delete before adding.** Improve the underlying decision/ownership structure
+and replace obsolete logic; never stack a fallback, watcher, state machine or special case around a
+bad invariant. Prefer one deterministic source of truth, fewer branches and reuse of existing
+mechanisms. Every change should make the affected system smaller, simpler and easier to reason about
+where practical. Fix problems from the ground up; do not grow the codebase to hide them.
 
 **No build-up: rewrite the affected subsystem with the new feature/invariant in mind.** Do not keep
 the old architecture and bolt a new path beside it merely because that is the smallest diff. When a
@@ -167,7 +165,9 @@ terminal dependency. Desktop automation remains explicitly Windows-only.
 Fresh-install defaults from `config.ts` — **all Core tool permissions on**, **read-only off**,
 **recording on**, session advisory/limit **400k/533k** estimated tokens, **auto-compaction on
 at 400k and level-based with live-work gating**, **multi-agent on** with `maxWorkers` 2 (hard max 8).
-Fresh multi-agent also starts with `allowUnattributedCalls=false` and `recoverAgentTabs=true`.
+Fresh multi-agent also starts with `allowUnattributedCalls=true` and `recoverAgentTabs=true`.
+That `true` is `FIRST_LAUNCH_MULTI_AGENT` only; `DEFAULT_MULTI_AGENT` — the schema/migration
+baseline that fills the field in when an older config never wrote it — stays `false`.
 Fresh installs also start with **zero approved roots**: enabled permissions are not usable
 filesystem/command authority until the user approves a root, and `connection.ts` refuses to
 publish a root-requiring Core surface until one exists. The limit is
@@ -205,6 +205,12 @@ Do not "restore" these from an older document:
   `mcp/instructions.ts` still contains legacy wording that a finished worker must always be
   replaced, treat that as instruction drift against `agents.ts`/`tools-core.ts` and their tests,
   not as the lifecycle authority.
+- `mcp/instructions.ts::coreInstructions()` also still carries a root example shaped like
+  `${firstRoot}/src/main.ts`. That silently assumes the approved root *is* the project. Live Core
+  tool contracts in `tools-core.ts` are the authority: an approved root is often the **parent** of
+  the project, so every intermediate folder remains explicit (`/totec/chatgpt-local-files/...`,
+  not `/totec/src/...`). There is no model-visible `list_roots` fallback that makes the old example
+  safe; fix the instruction text/tests rather than teaching tools to guess a missing project level.
 - Goal currently continues **completed final answers only**. Older README/working-note wording that
   says an `interrupted` turn is automatically continued is stale against `content.js::GOAL_CONTINUABLE`.
 - The older prose comment near `config.ts` auto-compaction defaults still calls the trigger
@@ -212,6 +218,50 @@ Do not "restore" these from an older document:
   **level above threshold + live work**, with no durable one-shot edge. Likewise, a background.js
   comment that implies browser recovery closes duplicate tabs is stale: recovery deterministically
   elects/reloads one exact tab but does not own duplicate-tab cleanup.
+- A separate `background.js` maintenance comment still says an unattributed repair is armed after
+  twenty seconds. That mixes two different clocks. Live authority is conditional: a call carrying an
+  unresolved request id may wait up to the recorder's **20-second request-id grace**; a call with no
+  request id has no ownership proof to await and lands Unattributed immediately. Either resulting
+  **Unattributed verdict** then starts `bridge.ts::UNATTRIBUTED_REPAIR_MS`, a separate **60-second
+  incident** before repair candidates are queued. The extension's 30-second alarm is only the MV3
+  wake-up floor for collecting already-decided work; it is not either recovery deadline. Several
+  `content.js` comments still carry old recorder timings: the Fiber request-id note says **15s**,
+  `streamTurnGroups()` says **5s**, and the compaction `TOOL_SETTLE_MS` rationale says **15s**. Live
+  authority is `recorder.ts::REQUEST_ID_GRACE_MS = evidenceWindow(20_000)`. That last comment also
+  predates the running-vs-settling split: Compact & Resume waits app-reported **running local tools**,
+  not the recorder's attribution tail. Treat all three as comment drift, not alternate timers.
+- `multiAgent.recoverAgentTabs` is narrower than several old labels imply. The stale
+  `shared/types.ts` prose, renderer “Recover inactive agent tabs” help text and one bridge-test title
+  describe silence/inactivity recovery as if this flag owned it. Production authority is
+  `bridge.ts::queueMissingTab()` / `browserRecoveryMonitoring()`: the flag gates **currently-owned
+  detached-agent no-tab resurrection only**. Existing queued repair, semantic-turn silence, unattributed, assistant-error,
+  Goal watch and ordinary non-agent no-tab recovery continue independently.
+- `bridge.ts` still has two misleading comments near the live recovery/command structures. The
+  `lastBrowserRecoveryAt` comment says one cooldown covers errors, silence and missing tabs, but
+  `queueBrowserRecovery()` explicitly gives `silence` and `goal` no cooldown and applies the 3m floor
+  only to `unattributed` / `assistant-error` / `no-tab`. `Command.owner` also says a restored command
+  has no waiting page and is memory-only; live `DurableCommandRecord` serializes/restores exact
+  `owner` + `claimedAt` for valid leases. Trust the record/restore code and tests, not those comments.
+- Goal source comments have two current semantic drifts too. `goal.ts` still says a per-chat Off row
+  can never be revived by any later app-wide change, but deliberate app-wide master-Off clears those
+  rows. `bridge.ts::inspectOwedGoals()` still says a pending Goal reply “travels to the replacement”
+  during Compact & Resume; production moves objective + chat switch only and currently leaves the
+  reply row on A. Treat both comments as stale against the mechanisms documented below.
+- `test/update.test.ts` still contains prose that the next retry schedule is only “the next time the
+  app opens”. Production `update.ts::startUpdateChecks()` now runs an immediate pass plus an
+  unreferenced six-hour schedule. The existing update tests cover pass/staging semantics but not that
+  timer lifetime; do not regress production to satisfy the old comment.
+- `codex/ownership.ts::moveExecConversationOwners(A,B)` currently has **no production caller**; only
+  its isolated test exercises it. Compact & Resume therefore does **not** move a live/background exec
+  session's conversation-keyed authority from A to B, and B's proven `write_stdin(session_id=...)`
+  is refused by `execOwnershipDenied()`. But wiring the orphan helper is still one layer too shallow:
+  `RequestCorrelation` already carries the durable local `sessionId` that survives A→B, while
+  `ownership.ts` currently throws that stable principal away and keys proven processes to the
+  replaceable conversation id. Root-fix proven Exec custody to that durable session principal and
+  resolve later `write_stdin` callers to the same principal; anonymous/unproven sessions remain their
+  separate non-adoptable bucket. Then C&R needs **no exec-owner move at all** and this helper/test can
+  be deleted. Add an end-to-end C&R→`write_stdin` regression against the stable principal, not an
+  adoption path in continuation or `write_stdin`.
 
 ## 4. Repository map
 
@@ -228,7 +278,7 @@ src/main/secrets.ts           Electron safeStorage-backed secret storage
 src/main/logger.ts            redacted RAM-only operational log (not the session store)
 src/main/durable.ts           small named JSON state files under userData/state
 src/main/diagnostics.ts       the UI self-test chain, hop by hop
-src/main/update.ts            one-pass GitHub release check/download; apply only on ordinary quit
+src/main/update.ts            process-lifetime updater: startup + 6h checks, one in-flight pass; apply only on ordinary quit
 src/main/browser.ts           Chrome/Chromium discovery + preferred-browser opener for orchestration/session chat URLs
 src/main/window-lifecycle.ts  single-instance/bootstrap/activation lifetime gates
 src/main/window-layout.ts     work-area-bounded BrowserWindow geometry
@@ -264,7 +314,7 @@ src/main/codex/unified-exec.ts        exec_command / write_stdin runtime
 src/main/codex/unified-exec-constants.ts  yield deadlines, buffer and token policy
 src/main/codex/exec-output.ts model-facing exec serialization
 src/main/codex/shell.ts       host shell selection, quoting, launch
-src/main/codex/ownership.ts   terminal-session caller ownership
+src/main/codex/ownership.ts   exec-session caller ownership + background obligation/attendance projection
 src/main/codex/manager.ts     the one process-manager lifetime shared by exec/write_stdin
 src/main/codex/command-batch.ts sequential same-shell `cmds` framing + per-command exit parsing
 src/main/codex/head-tail-buffer.ts bounded output head+tail retention, omission accounting
@@ -342,10 +392,11 @@ durable or externally re-observable fact can reconstruct it.
 | request→conversation proof | `session/correlation.ts` | durable named state | only exact request-id evidence is authoritative for modern attribution; every other placement is explicitly weaker/legacy and never a substitute for identity-sensitive routing |
 | local session identity | `session/store.ts` | `sessions/<id>/meta.json` + `events.jsonl` + canonical shards/assets/handoffs | ChatGPT conversation id is a frontend binding; Compact & Resume moves it, never copies the local session |
 | canonical authored message identity | `store.ts` + `shared/session.ts` | one replaceable `messages/*.json` shard per logical id | streaming revisions replace the same logical message; event chronology keeps the original anchor/seq |
-| page/native mutable activity identity | `shared/session.ts::foldProgress` + store origins | append snapshots, folded on read | newest content stays at the earliest logical position; unknown identity is never guessed into a fold |
+| mutable timeline progress/activity identity | `shared/session.ts::foldProgress` + recorder/store origins | append snapshots from page/native **or app-owned** progress, folded on read by namespaced `progressId` / page-tool `messageId` | newest content stays at the earliest logical position; unknown identity is never guessed into a fold; app recovery status uses this same mechanism rather than a parallel status store |
 | session retention | `session/retention.ts` | process timer, current config read each sweep | startup prune + one coarse six-hour sweep; retention applies to existing history even with recording off |
 | model-facing session cursor | `mcp/session-tool.ts` | opaque cursor carried by the caller | cursors pin snapshot/filter/range/open-message checkpoints; stale boundaries fail explicitly rather than silently skipping/repeating history |
 | browser pairing / presence | `extension/background.js` + `bridge.ts` | token/intent in extension `storage.local` and app secret store; presence memory-only/re-observed | pairing token never reaches content/page; “browser absent” and “one chat absent” are different facts |
+| shared broken-page recovery | `bridge.ts` `activeUntil` + `repairsInFlight` + `unattributedIncident` + `goalWatch` | **process memory**, not a recovery WAL; handout tokens/cooldowns/episode ids are ephemeral and re-earned from live evidence | restart must not resurrect an old browser action merely because it was once queued. A durable Goal reply obligation is separate truth and may cause a new Goal watch after this run observes/accepts eligible work; the old repair token itself never survives as authority |
 | browser observation custody | `extension/background.js` journal | `storage.session` until app `/events` accepts it | content-script success means “journal owns it”, not “app stored it”; an acknowledged observation must never vanish on worker suspension |
 | real conversation lifetime in a tab | `extension/background.js` tab registry | `storage.session` | document reload/pagehide is not conversation close; tab removal/navigation away decides closure |
 | active agent tab discard policy | `agents.ts` live state projected by `bridge.ts`; applied by `extension/background.js` | exact conversation ids derived per `/status`; extension-owned tab ids in `storage.session` | active Prime and active/waking/detached Worker tabs are non-auto-discardable; sleeping/terminal chats restore only policy this extension changed |
@@ -358,12 +409,14 @@ durable or externally re-observable fact can reconstruct it.
 | worker slot accounting | `agents.ts::occupiesSlot` | derived from broker state | sleeping workers free slots; waking reserves one before the browser acts; terminal rows never revive |
 | agent message delivery | `agents.ts` | durable broker queue | at-least-once until authenticated acknowledgement; `offered` is not `delivered`; revival-delivered user messages are never re-offered in tool results |
 | per-chat workspace | `workspace.ts` | memory derived/learned from proven identity + roots, moved with ownership | convenience state only; never authorization; missing trustworthy workspace fails instead of choosing the first root |
-| terminal session custody | `codex/ownership.ts` + singleton manager | process lifetime | terminal id belongs to proven caller; another chat/worker cannot poll or write it |
+| exec session custody | `codex/ownership.ts` + singleton manager | process lifetime | running or exited-unread session id belongs to its proven caller; another chat/worker cannot poll or write it |
 | background exec obligations | `codex/ownership.ts::backgroundExecObligations` + `UnifiedExecProcessManager::backgroundState` | retained process rows until the owner reads/releases them | completed unread output is data owed to that conversation, never GC fodder; four unread completed results block that conversation from spawning another child before any process is started |
 | Compact & Resume transaction | `session/continuation.ts` | durable continuation WAL + session metadata commit | one local session, one open continuation per session, one claimant/commit; source keeps ownership until durable rebind lands |
 | source/destination send ambiguity | continuation send checkpoints | durable `not-attempted` / `attempted-unresolved` / `dispatched-unresolved` / resolved message identity | pre-dispatch ambiguity is replayable; post-dispatch ambiguity is **not** permission to click again; ChatGPT's marked message resolves it |
 | resume shadow suppression | `session/resume-gate.ts` | short memory claim bounded to 60s | recorder waits briefly for the already-authoritative continuation instead of inventing a second local session for the replacement chat |
+| resumed first-answer Goal provenance | `content.js` `resumeGoalPending` / `maybeRecoverResumeGoalTurn()` | tab-local `sessionStorage` (`clf-resume-goal-v1`) + live memory only | armed only by this document's real resume bootstrap plus acknowledged A→B continuation; waits for B's post-commit Goal policy, can recover exactly that one completed first answer, then is consumed. It is provenance for the page trigger, never continuation/session/Goal authority |
 | Goal objective | `goal.ts` objective ledger | durable per-conversation named state | chat-local finish line; moved by Compact & Resume; restore alone never starts work |
+| Goal / Loop chat switch | `goal.ts` `goal-switches` ledger | durable per-conversation `{enabled, mode, at}`, bounded to 400 decisions; absence inherits app-wide config | exact-chat stop/mode choice survives reload/restart and moves with Compact & Resume; an existing row outranks ordinary app-wide changes. Deliberate app-wide **On→Off** is the master stop and clears all rows, so a later global On again reaches chats whose overrides were intentionally discarded |
 | Goal terminal reply obligation | `goal.ts` reply ledger | durable, one row per conversation, TTL + cap | the recorder freezes whether a stable final reply still requires one Goal decision before page races/reloads can lose it |
 | Goal draft | `goal.ts` draft map | memory; tied to durable obligation | at most one draft per conversation/turn; browser client owns acknowledgement; only `ready` text may be typed and `no-reply` is a real terminal decision |
 | renderer authority | `ipc.ts` + preload allowlist | process lifetime | renderer never receives generic Node/invoke authority; async reads paint only when their selection/generation still matches |
@@ -374,7 +427,7 @@ durable or externally re-observable fact can reconstruct it.
 | command output budget | `head-tail-buffer.ts` + `truncate.ts` + `exec-output.ts` | per process/result | collection cap and model-visible truncation are different bounds; preserve head+tail and explicitly count omitted middle bytes/tokens |
 | Desktop frame/ref identity | `computer/index.ts` | bounded process caches | physical coordinates are meaningful only against the captured frame/window geometry; semantic refs are meaningful only against their UIA snapshot |
 | extension install path | `extension-path.ts` | stable `userData/extension` for packaged builds | stage/fingerprint/rename/rollback; Chrome never points at an AppImage's temporary mount or a half-copied update |
-| app update | `update.ts` | one process pass; verified file under `userData/updates`, but **staged status is process memory only** | check/download never blocks startup; SHA-256 from release manifest is mandatory; install is handed off only during ordinary shutdown. A crash/restart does not rediscover the old staged file — next start checks/downloads again |
+| app update | `update.ts` | process lifetime: startup check + unreferenced six-hour schedule, with at most one in-flight pass; verified file under `userData/updates`, but **staged status is process memory only** | check/download never blocks startup; SHA-256 from release manifest is mandatory; install is handed off only during ordinary shutdown. A crash/restart does not rediscover the old staged file — next start checks/downloads again |
 | tunnel-client run ownership | `tunnel/index.ts::ClientRun` + `current` | one process-generation object at a time; old child may exist only while `retirement` joins its teardown | every callback checks `current === run`; `restart()` is the CAS-like ownership cut, clears current before retirement, and only the retirement owner may schedule the successor |
 | app-window lifetime | `window-lifecycle.ts` | process lifetime | only the single-instance lock owner touches shared userData; activation is gated until bootstrap/security/IPC are ready and permanently disabled once quit begins |
 
@@ -400,16 +453,18 @@ first?**
 | Mechanism | Start here | Then follow |
 | --- | --- | --- |
 | app bootstrap / restart order | `index.ts` `app.whenReady().then(...)` | Goal/correlation restore → retired workers/swarm → continuations → IPC/window → bridge/retention/connection/update; quit starts at the `will-quit` handler and enters `shutdown.ts` |
-| MCP request identity | `mcp/inbound.ts::requestIdFromHeader()` | `correlation.ts::observeRequestCorrelation()` / `requestCorrelation()` → `kernel.ts` caller/workspace guards → `recorder.ts::recordToolCall()` |
+| MCP request identity | ingress: `mcp/inbound.ts::requestIdFromHeader()` → `kernel.ts::callerConversation()` / `recorder.ts::awaitFreshCallOrigin()`; browser proof publication: `recorder.ts::noteCallEvidence()` | `correlation.ts::observeRequestCorrelations()` writes exact URL/Fiber-agreed ownership; `requestCorrelation()` is then read by caller/workspace guards → `recordToolCall()`. The MCP request never creates its own ownership proof |
 | live browser request-id ownership handshake | `content.js::confirmLiveRequestOwners()` | background `correlate()` → bridge POST `/correlations` → recorder exact call evidence → correlation registry read-back/`confirmed[]` |
-| broken ChatGPT page auto-recovery | `bridge.ts::queueBrowserRecovery()` | producers: `grantActivity()` / `noteRecoveryObservations()` / `noteCallAttribution()` / `repairUnattributedChat()` / `queueMissingTab()` → `takePendingRepair()` → `background.js::maintain()` → `confirmRepair()` |
+| broken ChatGPT page auto-recovery | all evidence converges on `bridge.ts::queueBrowserRecovery()` | silence: `armSilenceSweep()` → `inspectSilentChats()`; assistant-error: `noteRecoveryObservations()`; unattributed: `noteCallAttribution(null)` → `repairUnattributedChat()`; no-tab: `queueMissingTab()`; Goal: `inspectOwedGoals()` → current `takePendingRepair()` → `background.js::maintain()` → `confirmRepair()` / `failRepairAttempt()` |
 | Goal / Loop after a final answer | bridge POST `/events` durable `acceptGoalReplyNow()` + `content.js::noteGoalTurn()` | `watchGoalTurn()` → `/goal/draft` → `goal.ts::startGoalDraft(...deferStart:true)` → `beginGoalDraft()` / `requestDrivingDecision()` → `content.js::maybeSendGoalReply()` |
 | automatic compaction | `store.ts::autoCompactionReady()` + bridge `chatIsWorking()`/worker fence + `content.js::maybeAutoCompact()` | `startCompact()` → `stopAndSettle()` → bridge `/compact` → `continuation.ts::openContinuationNow()` / `transitionNow()` / `commitContinuationResult()` |
 | Compact & Resume restart recovery | `continuation.ts::restoreContinuations()` | session metadata ownership → `commitContinuationResult()`/projection repair; browser send ambiguity is resolved by the continuation's durable source/destination send checkpoints |
+| resumed first answer missed by Goal | `content.js::rememberResumeGoalPending()` / `bindResumeGoalTurn()` | `maybeRecoverResumeGoalTurn()` → exact single resume-user-turn + final/Fiber proof → ordinary `noteGoalTurn()`; synthetic `g-resume-<commandId>` is only a stable local turn id when no observed generation id exists |
 | worker lifecycle | `tools-core.ts` `agents` action dispatch | `agents.ts::stageSpawn()` / `stageMessages()` / `stageFinishAgent()` → `persistCriticalSwarmNow()` → staged commit/rollback → bridge worker/revive commands → `background.js::recoverDeferredRevivals()` → exact page liveness back into `agents.ts` |
-| browser command delivery | semantic producers `bridge.ts::queueWorkerBootstrap()` / `queueWorkerRevival()` / `queueResume()` | durable command owner/lease → `/commands/redeem` / `/commands/ack` → `background.js::redeemCommand()` / `ackCommand()` → content send → receipt/recovery in `restoreCommands()`; private `queue()` is storage plumbing, not the semantic entrypoint |
+| browser command delivery | worker producers `bridge.ts::queueWorkerBootstrap()` / `queueWorkerRevival()`; **resume production** is bridge POST `/compact` after `continuation.ts::attachSummary()` → private `queueResumeCommand()` | durable command owner/lease → `/commands/redeem` / `/commands/ack` → `background.js::redeemCommand()` / `ackCommand()` → content send → receipt/recovery in `restoreCommands()`; exported `queueResume()` is a test/older-caller convenience wrapper, and private generic `queue()` is storage plumbing — neither is the semantic resume entrypoint |
 | extension document/conversation identity | `background.js::authorizeDocument()` / `registerDocument()` / `ownsDocument()` | `noteTabConversation()` + `chatgpt-dom.js::conversationFromPath()` / `conversationId()`; React-only evidence begins at `fiber.js::scan()` |
 | page observation commit | bridge POST `/events` | exact lost-worker-ACK recovery + `noteAgentAlive()` → `recorder.ts::recordChatObservations()` → durable Goal reply obligation → browser-recovery activity → context ceiling → staged/durable worker final → HTTP 200 lets extension journal retire the batch |
+| Overwrite / native ChatGPT presentation | `content.js::renderStreams()` | `websiteRenderForTurn()` + `completeReplacementForTurn()` + `hasUnrepresentedFiberCall()` → `chatgpt-dom.js::replaceActivity()` / `hideProgress()`; exact Fiber/page identities decide whether local activity is complete enough to replace native activity, while ChatGPT always keeps answer/code/actions |
 | session evidence / mutable website messages | `store.ts::appendEvent()` / `upsertMessageEvent()` | `recorder.ts` attribution/repair → canonical message shards + rebuildable `meta.json` projection |
 | background terminal result custody | `codex/ownership.ts::backgroundExecObligations()` / exec-session owner map | `tools-core.ts::execConversation()` resolves caller for admission → `UnifiedExecProcessManager::backgroundState()` → owner drains/releases via `write_stdin` |
 | connector connect/disconnect/settings | `connection.ts::enqueueLifecycle()` | `connectImpl()` → Core MCP/tunnel → `startDesktopTunnel()`; settings enter `applySettingsImpl()`, ordinary stop enters `disconnectImpl()`, final stop enters `shutdownConnection()` |
@@ -428,7 +483,7 @@ later fallback/UI symptom merely because its function name contains the error th
 single-instance lock
   → only the lock owner may touch userData/bootstrap state
   → init config/secrets/session/durable paths → load + validate config
-  → restore Goal objective/reply ledgers
+  → restore Goal objective → per-chat switch → reply-obligation ledgers
   → restore request correlations BEFORE bridge traffic can race in
   → wire recorder↔agent identity callbacks + preferred-browser opener
   → wire swarm persistence sinks even if multi-agent currently off
@@ -441,7 +496,7 @@ single-instance lock
   → start bridge if recording OR multi-agent
   → start session-retention maintenance independently of recording admission
   → auto-connect MCP/tunnel if configured
-  → fire one non-blocking update check/download pass
+  → start non-blocking updater lifetime: immediate pass + unreferenced six-hour recheck schedule
 ```
 
 The **window activation gate** is a real lifetime boundary, not UI polish. Electron may deliver
@@ -517,8 +572,10 @@ chooses assets, hashes bytes or decides install eligibility.
 - Linux **DEB** is package-manager-owned; macOS is unsigned/unnotarized by current release policy.
   Both may show a newer-version notice but do not silently self-replace.
 - An unpackaged run (`npm run dev`, a working tree) is told what is published and stages nothing.
-- A failed check/download/apply leaves the running version fully usable. The next scheduled pass
-  or app start checks again; there is no retry state machine inside the same run.
+- A failed check/download leaves the running version fully usable and the next six-hour pass (or
+  restart) checks again. Apply happens only inside ordinary shutdown: `applyStagedUpdate()` consumes
+  the in-memory staged row before handoff, so an apply failure has no same-run retry and the next app
+  start performs a fresh check. There is no retry state machine around either path.
 - Update network waits are bounded at the owner: latest-release/checksum HTTP uses a 15-second
   ceiling, while the artifact download may take up to 10 minutes. Expiry is just a failed one-pass
   check/stage; it does not start a same-run retry daemon or force an app restart.
@@ -747,6 +804,16 @@ The local execution wrapper adds several mechanisms around that port. They are n
   fifth unread completed result with `EXEC_RESULTS_UNREAD`; the user/model must drain those exact
   session ids through `write_stdin`. Capacity is therefore **admission, not garbage collection**:
   never recover room by deleting output the owning conversation has not observed.
+- **A still-running background command gets one caller-scoped attendance reminder, not a watchdog.**
+  `ownership.ts::noteExecOwner()` starts its attendance clock and `noteExecAttended()` refreshes it
+  around `write_stdin`; after `UNATTENDED_EXEC_NOTICE_MS = 120s`,
+  `backgroundExecRecoveryNotices()` may append one "running unpolled" reminder for that exact owned
+  session to the next MCP result delivered to the same conversation. `kernel.ts::
+  withBackgroundExecRecovery()` is the single consuming path — merely inspecting runtime state must
+  not spend the notice. A live dev server/tail does **not** consume the four-result unread admission
+  budget and is never killed or auto-polled by this mechanism. Once the live-session reminder was
+  delivered it does not nag again; if the process later exits, the separate `exitedUnread` reminder
+  repeats on later calls until the owning chat actually drains the terminal output.
 
 **`apply_patch`.** Model syntax is Codex V4A. MCP cannot expose a true freeform tool, so
 the raw patch rides inside the `patch` string while the grammar lives in the description.
@@ -830,7 +897,8 @@ no workspace, or refusal for identity-sensitive work. Guessing is worse than los
 attribution: it routes commands, files, messages and history into the *wrong* chat.
 
 `multiAgent.allowUnattributedCalls` relaxes only the **ambiguity fences**, not exact ownership.
-With the default `false`, `mcp/kernel.ts` refuses an unidentified call when a retired-worker lease
+Set to `false` — the migration baseline, and any install where the user turned it off —
+`mcp/kernel.ts` refuses an unidentified call when a retired-worker lease
 could own it, a dormant-worker lease could own it, or an active swarm needs exact workspace/terminal
 identity. `needsWorkspaceIdentity()` makes relative `read`/`find`, every `apply_patch`, and
 swarm/defaulted/relative `exec_command` identity-sensitive. Turning the setting on permits those
@@ -939,9 +1007,11 @@ raising a UI budget is not permission to remove the durable-store or transport b
 
 ### Attribution has one wait, then a first-class Unattributed landing
 
-For a tool call whose request-id owner is not yet in the registry, `recorder.ts` waits the current
-**20-second `REQUEST_ID_GRACE_MS`** for the browser's exact evidence. It does not delay every later
-write behind one global timer: calls start their attribution waits independently, but each call
+For a tool call that **has a request id** whose owner is not yet in the registry, `recorder.ts` waits
+the current **20-second `REQUEST_ID_GRACE_MS`** for the browser's exact evidence. A headerless/no-id
+call has no exact ownership proof to wait for and proceeds directly to the Unattributed verdict. The
+grace does not delay every later write behind one global timer: calls with unresolved ids start their
+attribution waits independently, but each call
 synchronously reserves its eventual position on `recordChain`, so invocation order is preserved
 when the waits resolve at different times. Already-proven calls skip the wait but not the ordered
 write/quit-flush discipline.
@@ -1099,6 +1169,25 @@ Turn closing is deliberately asymmetric:
 - a genuinely newer authored user message is a hard boundary for the previous turn, while page
   unload/`closeConversation` alone never invents its outcome.
 
+The concrete page clocks matter because they define what the recovery layer is allowed to infer.
+`TURN_SETTLE_MS = 4000`: Stop first disappearing starts that quiet window, Stop returning cancels
+it with the same local generation intact, and `unknown` **never** becomes terminal merely because
+four seconds elapsed. Manual Stop closes immediately. Independently, a Fiber descriptor whose exact
+active turn exposes `endMessageId`/`end_turn:true` is stronger than a stale Stop control and may
+close that exact local generation immediately; if the page outcome was otherwise still `unknown`,
+that model-backed terminal proof supplies `completed`. The visible `data-interrupted` marker alone is
+only an outcome candidate, not a terminal boundary, because ChatGPT transiently uses it between
+tool/reasoning phases.
+
+`STALL_MS = 10m` is likewise observation, not browser action. While ChatGPT still reports the turn
+as generating, ten minutes without visible progress emits one app-visible `chat_error` and lets
+`endOutcome()` classify a proven terminal boundary as `stalled`; that synthetic stall notice is not
+marked recoverable and `content.js` does **not** reload the page. Reload/open authority stays in the
+shared bridge→service-worker recovery machine. After any turn ends, `FIBER_SETTLE_MS = 90s` is only
+a ceiling for late request-id/owner evidence: the content script keeps scanning the just-settled turn
+while exact call ownership is incomplete and stops early as soon as the required Fiber evidence is
+complete. It is not a 90-second delay before turn completion and not another recovery timer.
+
 This is the conceptual reason **partial vs final** bugs are identity bugs. Commentary/progress,
 native tool rails and final assistant answer are different semantic objects even when the DOM
 renders them close together. Stable message/turn identity comes from ChatGPT's model/Fiber evidence
@@ -1109,6 +1198,28 @@ props minus a denylist), never tool argument values, validates the exact CLF con
 names, and fails closed on unfamiliar React shapes. Its `postMessage` output is
 page-controlled evidence useful for joining page to local truth — **never a credential**.
 Its protocol version and the content-side expectations move together.
+
+**Overwrite owns activity ordering, not the assistant answer.** `content.js::renderStreams()` no
+longer rebuilds ChatGPT's answer subtree from captured HTML. ChatGPT remains the sole renderer for
+assistant prose, code/document blocks and response actions; the companion mounts one sibling stream
+containing only app-owned activity rows and hides only the native progress/tool rows that stream
+proves it fully replaces. `websiteRenderForTurn()` joins a visible Fiber turn to durable activity by
+exact ChatGPT message/thought/request identities — never by time, DOM position or a tail guess — and
+`completeReplacementForTurn()` requires every page-authored object the Fiber descriptor names to be
+represented before native activity is hidden. A connector call without request identity, a missing
+assistant/thought row, contradictory explicit turn ownership, or no usable Fiber descriptor leaves
+that turn native rather than showing a partial local reconstruction.
+
+Presentation identity is deliberately stricter than a remembered DOM attribute. React may reuse an
+assistant section for the next response, so `priorStreamRootCompatible()` keeps an old sibling root
+only when current stable **message/activity** ids overlap the root's stored strong ids; request ids
+are excluded because ChatGPT can reuse them across retries/turns. `hasUnrepresentedFiberCall()` also
+breaks the short replacement grace immediately when Fiber already exposes a new call the app stream
+cannot show. Otherwise a recently complete root may survive one brief feed/Fiber race to prevent
+visible native↔synthetic flicker. During active user scrolling the repaint is frozen, and the next
+pass restores a visible turn's viewport anchor after layout changes. These are presentation guards,
+not alternate identity or recorder fallbacks; durable session data is never rewritten to make the
+render fit.
 
 The `/activity` reader is also a small liveness scheduler, not a fixed poll. `content.js::
 activityPullDelay()` chooses 750 ms for visible generation/Goal drafting/final-presentation debt,
@@ -1122,11 +1233,20 @@ another hidden-tab timer/watch loop.
 
 The service worker's document model is also **current implementation, not an aspirational one**.
 Today `background.js` still carries separate `tabDocuments`, `tabEpochs`, bounded
-`retiredDocuments` and speculative `terminalDocuments`; `authorizeDocument()` can adopt a new
-non-retired document and terminal prediction can later be proven wrong by Chrome tab state. Do not
-document or implement against a hypothetical collapsed owner record until the code/tests actually
-move together. Irreversible browser actions always re-check the current `sender.documentId`/epoch;
-body-supplied document identity is never authority.
+`retiredDocuments` (last 8 per tab) and speculative `terminalDocuments`, all in `storage.session`.
+Authority begins with Chrome's `MessageSender.documentId`, never a body field. A retired sender is
+`stale_document`; the exact current document may advance `tabEpochs` but a lower epoch is
+`stale_navigation`; `ownsDocument()` additionally refuses retired/terminal senders. A different
+non-retired sender can be adopted by `authorizeDocument()` itself — `register_document` is **not**
+the sole replacement path in today's code — while `registerDocument()` is the one bypass-authorized
+bootstrap that can adopt fresh-reload provisional journal evidence before retiring the old current
+document. `onUpdated(status='loading')` marks the current document terminal speculatively but keeps
+the conversation binding across ChatGPT→ChatGPT reload/navigation; real leave/tab removal releases
+the chat. A current terminal sender gets `tab_closed` unless `terminalPredictionWrong()` positively
+re-reads the same Chrome tab as ChatGPT, no longer loading, with no `pendingUrl`, and the sender still
+current; only then is the false terminal stamp cleared. Do not document or implement against a
+hypothetical collapsed owner record until code/tests move together. Irreversible browser actions
+always re-check this current document+epoch authority.
 
 **Extension reload recovery is health-based, not install-event-based.** An unpacked extension reload
 can leave the old isolated-world JavaScript globals alive while invalidating its `chrome.runtime`,
@@ -1162,12 +1282,16 @@ it with `/hello`, silently provisions a bearer token with `/pair`, then uses aut
 routes: `/status`, `/correlations`, `/events`, `/closed`, `/activity`, `/compact`,
 `/goal/draft`, `/goal/ack`, `/goal/objective`, `/goal/open`, `/settings` (GET and POST),
 `/commands/redeem`, `/commands/ack`. `/settings` is the one deliberately tiny config-write
-surface available to the page: its POST accepts `compaction.auto` plus exactly one of the
-**Goal** / **Loop** switch booleans. Those two controls project onto the single persisted
-`goal.enabled + goal.mode` setting through `bridge.ts::applyGoalSwitch()`; they are mutually
-exclusive by construction, not two independent feature flags. None grants filesystem/process/
-Desktop reach. GET exists for the one composer with no conversation to read `/activity` for:
-a New Chat.
+surface available to the page: its POST accepts the flat boolean `autoCompact`, optionally one flat
+`goal` **or** `loop` boolean (never both), plus optional `conversationId` for chat scoping.
+`goal.ts::applyGoalSwitch()` is the pure pair reducer, not a
+bridge-owned policy function. With a concrete `conversationId`, the bridge persists the result via
+`goal.ts::setGoalSwitchNow()` into that chat's `goal-switches` row; only a New Chat with no concrete
+id changes the app-wide `config.goal` default. Goal and Loop are therefore mutually exclusive by
+construction, not two independent feature flags, and a page-local stop does not silently rewrite
+every other chat. `/goal/objective` and `/goal/open` accept the same two words as an optional
+`mode`, which is the *other* way that per-chat switch is written — see "A chat's own goal". None grants filesystem/process/Desktop reach. GET exists for the one composer
+with no conversation to read `/activity` for: a New Chat.
 
 **Must hold.** The token never enters the ChatGPT page — the service worker holds it in
 extension-owned state and the app keeps its counterpart out of config and log surfaces. The
@@ -1220,15 +1344,17 @@ earliest deadline across all chats, so a 30-second maintenance tick cannot silen
 half-minute to the contract. Expiry queues one receipt-tracked browser recovery for an ordinary
 chat, Prime or Worker alike; a confirmed one-shot repair is not repeated for the same episode.
 
-Unattributed recovery is separate evidence feeding the same queue. One recorder verdict that a
-call finished the request-id grace **without** ownership opens a 60-second
+Unattributed recovery is separate evidence feeding the same queue. One recorder verdict that a call
+is **Unattributed** opens a 60-second
 `unattributedIncident`; later attributed calls add their exact conversations to the incident's
 `proven` set. At expiry, `repairUnattributedChat()` looks only at chats this app can still prove are
 mid-turn (`repairCandidates()`), excludes those that proved their join, and queues one recovery for
 each remaining broken chat. It does not choose "the one likely chat", and agent role is not an
 eligibility gate. A recoverable page transport error similarly queues an `assistant-error` repair
-for that exact turn even while attributed MCP calls continue server-side; a final-tab close queues
-`no-tab` for the chat whose page just went, agent or not. The extension owns the final **reload
+for the reported nonempty turn identity — normally the owning local generation, subject to the
+current fallback/authority gap below — even while attributed MCP calls continue server-side. An **eligible mid-turn**
+final-tab close may queue `no-tab`: a still-owned detached agent is gated by `recoverAgentTabs`, while
+an ordinary chat must already have durable `toolCalls>0`. The extension owns the final **reload
 existing exact tab vs open exact conversation** choice at action time, so stale app-side tab guesses
 cannot create a duplicate.
 
@@ -1237,12 +1363,17 @@ visible ChatGPT errors, but only `transportFailure()`-classified delivery/stream
 receive `recoverable:true`. Hidden/live-region noise and CLF-owned surfaces are ignored; a generic
 visible alert may still enter the transcript as an error without granting browser-repair authority.
 When matching transport text lives inside an assistant turn, `content.js` resolves ChatGPT's page
-turn back to the **local generation id** that owns recorder chronology (`localGenerationOf()`); a
-top-level banner is scoped to the local generation in which its node first appeared. The page turn
-id itself is not a recorder turn id and must not be copied into chronology just because both are
-called “turn”. The page therefore never says “some error exists, reload”; it reports evidence,
-and `bridge.ts::noteRecoveryObservations()` is allowed to queue `assistant-error` only from that
-narrow recoverable + current-turn combination.
+turn back to the **local generation id** that owns recorder chronology (`localGenerationOf()`) when
+that ownership is available; a top-level banner prefers the local generation in which its node first
+appeared. **Current code still has a weaker fallback:** when neither proof exists,
+`content.js` may emit the page's `error.turnId` (or the current fallback turn id). The page turn id is
+not intrinsically a recorder generation id even though both are called “turn”. Correspondingly,
+`bridge.ts::noteRecoveryObservations()` currently checks only `chat_error + recoverable:true +
+nonempty turnId`; it does **not** compare that id to the recorder's current `activeTurnId` before
+queueing `assistant-error`. The normal live path is therefore well-scoped by content-side ownership,
+but a newly observed historical visible transport failure after reload is not independently fenced
+at the bridge. Treat that as a current authority gap to fix at the source boundary, not as license to
+add another reload fallback or to document a current-turn guarantee the code does not enforce.
 
 The five recovery reasons are intentionally different **evidence**, but not different action
 machines:
@@ -1250,9 +1381,9 @@ machines:
 | Reason | Who is allowed to create it | What proves the episode over |
 | --- | --- | --- |
 | `silence` | `inspectSilentChats()` after the semantic-turn `activeUntil` deadline expires | meaningful new current-turn activity before handoff cancels it; after a confirmed browser action the one-shot is spent and the stale sweep releases any worker consequence |
-| `unattributed` | `repairUnattributedChat()` after the recorder opened one 60s post-grace incident and this exact mid-turn chat never joined the incident's `proven` set | an attributed call proves the request-id join works, or a later completed turn advances `endedTurns` |
-| `assistant-error` | `noteRecoveryObservations()` only from a current-turn `chat_error` that `chatgpt-dom.js` classified `recoverable:true` | the browser carries the repair out, or the chat subsequently completes a **later** turn; the broken turn's own end is deliberately pre-counted and does not cancel the repair. Ordinary server-side attributed calls also do not cancel it because they prove attribution, not page-stream health |
-| `no-tab` | `queueMissingTab()` for a final tab that closed mid-turn: an exact agent already `detached` (under `recoverAgentTabs`), or any other chat whose session has recorded at least one tool call | page/turn activity after reopening, or the normal agent lifecycle decision |
+| `unattributed` | `repairUnattributedChat()` after the recorder opened one 60s post-grace incident and this exact mid-turn chat never joined the incident's `proven` set | an attributed call proves the request-id join works, or a **later turn ends** and advances outcome-agnostic `endedTurns` |
+| `assistant-error` | `noteRecoveryObservations()` from a `chat_error` with `recoverable:true` + nonempty `turnId`; content normally supplies the owning local generation, but the bridge currently has no independent current-`activeTurnId` comparison | the browser carries the repair out, or a **later turn ends** and advances outcome-agnostic `endedTurns`; the broken turn's own end is deliberately pre-counted and does not cancel the repair. Ordinary server-side attributed calls also do not cancel it because they prove attribution, not page-stream health |
+| `no-tab` | `queueMissingTab()` for a final tab that closed mid-turn: a conversation that is **still owned** as a detached agent (under `recoverAgentTabs`), or otherwise an ordinary chat whose session has recorded at least one tool call | page/turn activity after reopening, or the normal agent lifecycle decision |
 | `goal` | `inspectOwedGoals()` when a `goal-replies` obligation this run accepted is still `pending` and its chat has been quiet for the current backoff step | the obligation is discharged, expired or superseded by a newer reply — or the five-step schedule runs out |
 
 `silence` and `goal` are **chat**-scoped; `unattributed` and `assistant-error` are **turn**-scoped
@@ -1264,6 +1395,21 @@ ignores a held turn-scoped repair and **supersedes** it in `queueBrowserRecovery
 everything the stuck one would have done. It deliberately does not supersede `no-tab`, which is
 chat-scoped, is cleared by ordinary activity, and so cannot be the stuck kind — superseding it would
 only cancel the three-minute reopen floor.
+
+There is one **current manual-Stop hole** in that turn-scoped rule. An `assistant-error` queued while
+the broken turn is still open snapshots `endedTurns + 1`, `noteRecoveryActivity()` refuses to clear
+assistant-error, and `retireSpentRepairs()` knows only whether the counter later became `>` that
+snapshot. If the user explicitly Stops that same broken turn before Chrome acts, its own end merely
+reaches equality, so the already-queued repair can still reload afterward. There is no terminal
+outcome in the repair-retirement decision today. The same hole exists **inside one accepted batch**:
+recorder state applies the matching `turn_end(stopped)` first, then `noteRecoveryObservations()` scans
+that batch's recoverable `chat_error` and can queue a brand-new repair after terminal cleanup already
+ran. The repair must retain the assistant-error's exact **source turn id** as cancellation evidence
+(while keeping `endedTurns` as the post-reload spending mechanism), and a matching
+`turn_end(stopped)` must veto it whether it arrived before or in the same batch as the error.
+Failed/interrupted completion remains repairable. That veto remains meaningful until the browser
+crosses the pre-action claim described below; after an action is atomically claimed, Stop cannot
+retroactively un-send a reload already authorized. Do not add a content-side anti-reload flag.
 
 The shared `lastBrowserRecoveryAt` floor is three minutes for error/no-tab/unattributed actions,
 but **`silence` and `goal` bypass it**: those episodes already paid their own complete inactivity
@@ -1281,27 +1427,91 @@ the moment the page went (`detachedAt`, else the session's `endedAt`), never wit
 mint a fresh episode — and a second tab — out of the very work the repair exists to keep alive.
 
 `multiAgent.recoverAgentTabs` is **not** a master “broken-site recovery” switch. Turning it off
-blocks the agent-specific `no-tab` path for an exact detached Prime/Worker. It does **not** suppress
+blocks the agent-specific `no-tab` path for a conversation that is **still owned** as a detached
+Prime/Worker when `queueMissingTab()` runs. `/closed` first lets `primeConversationGone()` /
+`workerConversationGone()` update broker ownership and only then classifies no-tab recovery; if a
+Prime with no reusable workers/reports is removed from the run at that point, the same conversation
+falls through the ordinary-chat branch and may qualify from durable `toolCalls>0` even with
+`recoverAgentTabs=false`. It does **not** suppress
 `silence`, `unattributed`, or `assistant-error` for any chat, and it does not suppress `no-tab` for a
 non-agent chat whose durable session already proves this connector participated via at least one
 tool call. Pending repairs and `activeUntil` keep `recoveryMonitoring` alive independently of that
 preference; the setting controls agent-tab resurrection, not the shared broken-page engine.
 
-`takePendingRepair()` is the handoff protocol. A `handed` repair with no matching confirmation is
+There is also a **current premature-custody bug** in repair cancellation. `/status` changes one repair
+to `handed` **before** the service worker has even scanned current tabs, but
+`noteRecoveryActivity()` can then delete handed `silence` / `no-tab` / `goal` repairs and the
+attributed-call path can delete a handed `unattributed` repair. Nothing tells the browser that its
+already-issued token disappeared, so it may still reload/open and return a receipt the app now treats
+as stale. Manual Stop has the same physical race. The root is that discovery and action custody are
+currently the same read.
+
+`takePendingRepair()` is the current handoff protocol. A `handed` repair with no matching confirmation is
 put back at the **end** of the queue on the next maintenance pass so one impossible action cannot
 starve other broken chats. Each handout mints a fresh token; `/status?repaired=<token>` is the only
 fact that moves that exact handout to `done`. Conversation id alone is not a receipt because a late
 receipt from an older broken turn must not close a newer repair for the same chat.
 
+The recovery text visible in the local timeline is **projection of that same repair**, not another
+watcher. Each queued episode owns one stable `progressId`; `updateRepairProgress()` first records
+"Trying to reload…" through `recorder.ts::recordProgress()` and then replaces that same logical
+progress row, preserving its original
+position, with either the confirmed Reload/Reopen result or the retryable action failure. The repair
+token still owns correctness. A progress row is observability only and can be absent when no unique
+session can be proven; it never authorizes, confirms or suppresses a browser action.
+
 The browser half is `background.js::maintain()`. It calls `/status`, scans **actual current ChatGPT
-tabs immediately before acting**, and matches both ordinary `/c/<id>` and Project
-`/g/<project>/c/<id>` routes. If at least one exact tab exists it reloads one deterministically,
+tabs immediately before acting**, and `conversationForTab()` resolves identity in one strict order:
+concrete current `/c/<id>` or Project `/g/<project>/c/<id>` wins, then a concrete `pendingUrl`; only
+while all exposed URLs are still ChatGPT-origin but temporarily root/id-less may the durable
+`tabConversations[tabId]` binding stand in. A concrete non-ChatGPT URL returns null and a concrete
+different chat always beats stale registry state. If at least one exact tab exists it reloads one deterministically,
 preferring the tab already bound in `tabConversations` and otherwise the lowest tab id; if none
-exists it opens exactly `https://chatgpt.com/c/<id>`. Failure to query/reload/open sends no receipt,
-so the app keeps the handout retryable. The MV3 worker re-arms one 30-second Chrome alarm while
-`recoveryMonitoring`/journal/revival work exists; that alarm is a browser-wakeup floor, **not a
-second repair policy**. Never move tab election into `bridge.ts` or add a parallel reload timer in
-the page — the service worker is the only place with action-time tab truth.
+exists it opens exactly `https://chatgpt.com/c/<id>`. A **tab-query** failure produces no receipt,
+leaving the handed token unconfirmed so the next maintenance pass requeues it; a
+`chrome.tabs.reload()` / `chrome.tabs.create()` exception sends the explicit negative receipt
+`repairFailed=<token>&repairAction=reloaded|reopened`, which `failRepairAttempt()` records and
+requeues immediately. Only a completed browser action sends `repaired=<token>`. The MV3 worker's
+single 30-second alarm is broader than recovery state: `retryWanted()` keeps it armed for journal,
+close-outbox, command-ACK, deferred-revival, **any registered ChatGPT tab**, extension-owned discard
+protection, or `recoveryMonitoring`. Open tabs matter because this alarm is the only periodic wake
+that can ask the app whether a new silence/assistant-error repair appeared while the worker slept;
+the alarm is a browser-wakeup floor, **not a second repair policy**. Final-tab close is faster:
+`releaseTab()` drains `/closed` custody and, when that delivery succeeds, calls `maintain()`
+immediately so a newly queued `no-tab` repair can be collected in the same lifecycle path rather
+than waiting for the alarm. Never move tab election into `bridge.ts` or add a parallel reload timer
+in the page — the service worker is the only place with action-time tab truth.
+
+That action path also has a **current double-handout race**. `maintain()` has no in-flight lock, both
+the periodic alarm and `releaseTab()` can enter it, and each `/status` call requeues any prior
+`handed` repair before minting a fresh token. Two overlapping passes can therefore receive the same
+episode under T1/T2 and both act. Do not fix these three races independently. Replace the premature
+take-on-`/status` boundary with one **peek → atomic pre-action claim** inside the existing repair state
+machine: status may expose the queued candidate so the service worker can inspect real tabs, but
+`queued → handed` and the action token are granted only by a compare-and-set claim of the **exact
+peeked `(conversationId, episode)`** immediately before `chrome.tabs.reload/create`, and only if that
+same episode is still queued/live. The token is minted by the successful claim, not by the peek.
+Stop/activity/attribution may
+cancel while queued; only one concurrent maintainer can win the claim. **The whole `maintain()` owner
+must also be single-flight/coalesced.** A success or explicit negative receipt resolves the claimed
+attempt immediately; if the service-worker lifetime dies and no receipt arrives, only the *next
+serialized maintenance pass* may put that still-unconfirmed claim back in the queue. Serializing the
+owner is what prevents that lost-receipt recovery from requeueing another pass while the first is
+still between claim and browser action. This removes the need for a parallel cancellation channel,
+browser-side action dedupe or a second recovery owner. Regress same-batch Stop+error,
+Stop/activity between peek and claim, concurrent alarm+close entry, and a claimed action whose receipt
+is lost across the MV3 lifetime.
+
+One current bridge regression encodes the pre-fix assumption and must move with this invariant:
+`bridge.test.ts` **“does not let a receipt from a spent repair close the repair of a later broken
+turn”** retires a token already handed by `/status` before its receipt arrives. Keep the valuable
+late-receipt fence, but split two facts the current test conflates: page/turn activity may not replace
+a **claimed** episode with a different episode, while a later serialized maintenance pass may
+explicitly requeue that **same still-unconfirmed episode** to recover a lost receipt. Only that retry
+transition may stale the old token before a receipt; a different broken turn does not get to do so.
+Nearby turn-repair tests happen to illustrate retirement with a later **completed** turn; their prose
+is not the contract. Production `endedTurns` counts every accepted named `turn_end` regardless of
+`completed|stopped|failed|interrupted|stalled`, as the table above states.
 
 **Tests.** `bridge.test.ts`, `extension.test.ts`.
 
@@ -1315,7 +1525,7 @@ broker / continuation accepts semantic intent
   → bridge.ts persists CommandSpec in bridge-commands
   → fresh worker/resume: app opens preferred Chrome/Chromium (browser.ts), URL carries only marker
     exact-chat revive: extension service worker elects/reuses/opens the bound worker chat instead
-  → submit-ready content document asks service worker to redeem marker
+  → eligible/current content document asks service worker to redeem marker
   → POST /commands/redeem atomically establishes queued→leased owner
   → bridge returns exact text + target fence for that still-live command
   → content verifies fresh-vs-exact-chat precondition, types and waits for ChatGPT acceptance
@@ -1351,6 +1561,16 @@ resume takeover while the continuation still proves no dispatch. After an irreve
 the service-worker ACK outbox is custody: the page may disappear and the app still eventually
 learns the outcome. App receipts make a repeated ACK idempotent across app restart.
 
+Fresh worker/resume delivery and exact-chat revival deliberately have different **draft ownership**.
+A fresh command first proves the app-marked page is still a New Chat, then
+`chatgpt-dom.js::insertPrompt(text, true)` may replace ChatGPT-restored/autosaved stale New-Chat draft
+state; after insertion content re-reads the entire whitespace-normalized composer and aborts if the
+user changed it before Send. Revival never gets that overwrite privilege: before redeem,
+`revivalSubmitReady()` requires the exact worker conversation plus `composerSubmitReady()`, whose
+native-page half includes an **empty** connected/editable composer and no Stop/generation control.
+Thus “replace stale draft” is fresh-chat bootstrap ownership, not a generic convenience for commands
+to overwrite whatever is in an existing chat.
+
 Revive redeem has one deliberate **ordered cross-file** exception to the generic “lease is atomic”
 shorthand above: broker wake custody is persisted first (`claimWorkerRevival` + critical swarm
 snapshot), then the exact bridge command page-owner lease is persisted, and only after **both**
@@ -1376,9 +1596,10 @@ only in a browser that can host the extension. It tries the next compatible exec
 of an earlier candidate fails; `index.ts` uses the system default only as a last-resort warning
 path, not as proof the command can be redeemed.
 
-That default-browser fallback is **orchestration-only**. `index.ts::setBrowserOpener()` falls back
-to Electron `shell.openExternal()` for worker/resume URLs so the user at least sees the generated
-ChatGPT target when no compatible Chromium can be launched, with an explicit warning that command
+That default-browser fallback is **orchestration-only**. `bridge.ts::setBrowserOpener()` is the
+injection point; `index.ts` wires it to preferred Chromium first and Electron `shell.openExternal()`
+as the warning fallback for worker/resume URLs so the user at least sees the generated ChatGPT
+target when no compatible Chromium can be launched, with an explicit warning that command
 redemption requires the extension. Chats **Open Chat** does not use that fallback: IPC calls
 `openInPreferredBrowser()` directly and returns “Chrome or Chromium was not found” rather than
 opening an arbitrary default browser that cannot host the companion extension. Do not merge these
@@ -1414,6 +1635,15 @@ chat never fires merely because it sits above the threshold, a transient pre-sen
 failure may retry on a later turn, and the continuation transaction is the sole durable
 authority once either prompt crosses its semantic send boundary. Browser documents,
 `sessionStorage`, local generation ids and command leases are never semantic ownership.
+
+One projection seam is still duplicated in current source. Normal commit funnels through
+`publishCommittedProjection()`, but `restoreContinuations()`'s “session already durably belongs to B”
+branch manually repeats recorder/workspace/Goal/swarm projection instead of calling that routine.
+Quality-first repair is to make **one committed-projection owner** serve normal commit and durable-B
+restore for facts that genuinely are continuation projections. Exec ownership is **not** one of
+those once its underlying identity is fixed: proven processes should be keyed to the durable local
+session principal, making them stable across A→B and making `moveExecConversationOwners()` obsolete.
+Do not patch `write_stdin` to adopt B after denial or add a resume-only exec recovery path.
 
 Before that transaction is even opened, `content.js::startCompact()` re-fetches `/activity` and
 requires the app to positively confirm this exact chat is not a worker. That check happens **before
@@ -1469,9 +1699,13 @@ Unicode/whitespace normalization would turn provenance into fuzzy matching.
 **Restore decides from durable ownership, never from the remembered phase.** For a restored
 `committing` continuation, if session metadata already points to B, the durable move landed and
 recovery repairs provenance/recorder/workspace/Goal/swarm projection. If it still points to A,
-recovery may perform/retry the authorized move. If a third conversation owns the session, recovery
-aborts rather than stealing it. Open/claimed continuations retain their original ten-minute
-lifetime across restart; restart does not grant a fresh TTL.
+startup does **not** perform `rebindSession(A→B)` itself: if the original ten-minute lifetime has
+expired it aborts, otherwise it thaws/re-arms Prime transfer, rolls the continuation back to
+`claimed` (when a claimant still exists) or `awaiting-chat`, clears `to`, and lets the later
+claim/command retry cross `commitContinuationResult()` and the durable rebind barrier again. If a
+third conversation owns the session, recovery aborts rather than stealing it. Open/claimed
+continuations retain their original ten-minute lifetime across restart; restart does not grant a
+fresh TTL.
 
 `resume-gate.ts` is deliberately tiny and temporary. It is armed **before** opening B and again
 when a claimed continuation is restored, for at most 60 seconds, so recorder events already sitting
@@ -1481,18 +1715,42 @@ authority, and expiry favors visible recoverable shadow state over blocking unre
 forever.
 
 One **legacy compatibility repair is still live and must not be mistaken for the normal design**:
-`continuation.ts::repairPrimeFromResumeShadow()`. `/activity` invokes it for a non-worker chat that
-currently lacks a Goal objective, because older installed builds could create replacement B as a
-small `origin.kind='resume'` recorder session *before* the real continuation transferred A's
-workspace/Goal/prime projections. The repair is positive-proof-only: B must durably name source
-session S, S must still own A, the target may not be worker-owned, and B's authored history must
-contain the exact resume bootstrap derived from S's matching collision WAL or newest still-
-uncommitted handoff. It re-reads broker ownership after all filesystem awaits, then moves only the
-missing workspace/Goal/broker projections. **It does not rebind or delete B's shadow recorder
-session.** This path exists to heal pre-fix damage; new Compact & Resume logic must use the
-continuation transaction + resume gate instead of adding callers or broadening this repair.
+`continuation.ts::repairPrimeFromResumeShadow()`. There are currently two compatibility callers:
+bridge `/activity` invokes it for a non-worker chat that lacks a Goal objective, and
+`tools-core.ts::callerNow()` invokes it after exact `agents` caller identity is proved but before
+broker membership is evaluated. Older installed builds could create replacement B as a small
+`origin.kind='resume'` recorder session *before* the real continuation transferred A's
+workspace/Goal/prime projections, so either reopening B or making an exact agents call from B can
+heal that historical split. The repair is positive-proof-only: B must durably name source session
+S, S must still own A, the target may not be worker-owned, and B's authored history must contain the
+exact resume bootstrap derived from S's matching collision WAL or newest still-uncommitted handoff.
+It re-reads broker ownership after all filesystem awaits, then moves only the missing
+workspace/Goal/broker projections. **It does not rebind or delete B's shadow recorder session.**
+These hot-path calls are legacy damage repair, not the current continuation design; new Compact &
+Resume logic must use the continuation transaction + resume gate instead of adding callers or
+broadening this compatibility path.
 
-**Tests.** `continuation.test.ts`, `resume.test.ts`.
+There is a separate **current** bridge from Resume into Goal that solves a page-observation race
+without becoming durable chat authority. After this document genuinely sends a `resume` bootstrap
+and the app ACKs the continuation into concrete B, `content.js::rememberResumeGoalPending()` stores
+`{conversationId, commandId, optional turnId}` in tab `sessionStorage` under
+`clf-resume-goal-v1`; `bindResumeGoalTurn()` attaches the real local generation when one was
+observed. This covers hidden/throttled B completing its entire first answer before the isolated
+world ever saw a live generation, and the smaller race where the generation ended before B's moved
+Goal config arrived. `maybeRecoverResumeGoalTurn()` waits for **post-commit `/activity` policy**,
+requires exactly the single resume user turn, refuses busy/unusable/nonterminal state, and accepts
+only a genuinely completed answer (ordinary terminal outcome or exact Fiber `endMessageId` with
+answered calls). It then enters the normal `noteGoalTurn()` path, using the bound local turn id or
+stable `g-resume-<commandId>` only when no live generation id ever existed. A manual second user
+turn, navigation away, an already-owned Goal draft/turn, unusable Goal policy, or successful claim
+consumes the hint. Reopening old resumed history therefore cannot synthesize fresh Goal work. The
+sessionStorage row is same-tab provenance across content-script reload, nothing more; continuation,
+session metadata and the durable Goal reply ledger remain the authorities.
+
+**Tests.** `continuation.test.ts`, `resume.test.ts`. Current integration coverage repeatedly proves
+objective A→B projection/recovery, while per-chat switch movement is only unit-covered by Goal tests;
+there is no dedicated continuation/restart regression for `moveGoalSwitch()` yet. Add that contract
+when touching this projection rather than assuming the parallel objective tests cover it.
 
 ## 16. Multi-agent — `agents.ts`
 
@@ -1519,8 +1777,8 @@ the model received it. Never delete a message merely because it was offered.
 | --- | --- | --- | --- |
 | `invited` | worker row accepted/durable; fresh worker bootstrap has not yet bound a real ChatGPT conversation | yes | extension binds exact conversation → `active`; bootstrap failure → `failed` |
 | `active` | worker conversation is bound and may be running/receiving MCP work | yes | browser view disappears → `detached`; natural/explicit stop → `sleeping` or ceiling-driven `finished`; hard failure → `failed` |
-| `detached` | browser view is gone but the server-side ChatGPT turn may still be alive | yes | exact call/page evidence → `active`; durable quiescence after detach → `sleeping`/`finished` |
-| `waking` | prime message to a sleeper crossed broker durability and reserved a slot; browser revival is in flight | yes | exact worker liveness → `active`; 30s revival failure/timeout → `sleeping` |
+| `detached` | browser view is gone but the server-side ChatGPT turn may still be alive | yes | **page/new-turn** evidence may prove the browser side exists again → `active`; an exact MCP call only refreshes server-side liveness and deliberately stays `detached`; durable quiescence after detach → `sleeping`/`finished` |
+| `waking` | prime message to a sleeper crossed broker durability and reserved a slot; browser revival is in flight | yes | **before browser custody**, exact call/genuinely newer turn may prove the wake unnecessary; **after redeem/send custody**, only a subsequent exact authenticated MCP call with delivered-revival evidence proves `active`; 30s revival failure/timeout → `sleeping` |
 | `sleeping` | worker stopped normally, exact conversation/history retained, revivable below ceiling | **no** | prime message reserves a slot → `waking`; late exact new-turn evidence may reactivate |
 | `finished` | terminal context-ceiling retirement | no | never |
 | `failed` | terminal failure/fence | no | never as ordinary reuse; recovery code may canonicalize only from positive authority |
@@ -1535,8 +1793,8 @@ High-value transition symbols inside `agents.ts`:
 | --- | --- |
 | fresh exact worker chat binds `invited → active` | `bindConversation()` → private `activateWorker()` |
 | browser view disappears `active → detached` | `workerConversationGone()` |
-| exact authenticated call/newer turn proves worker live again | `noteAgentAlive()`; this is the positive-evidence path back to `active` |
-| stopped worker becomes reusable/terminal | private `sleepAgent()` via `sleepWorkerConversation()` / `sleepWorker()`; context ceiling turns the same stop into `finished` |
+| exact authenticated evidence proves worker live again | `noteAgentAlive()` is source-sensitive: page/newer-turn evidence can clear `detached`; an exact call from a detached worker proves only server-side liveness and leaves it detached. A post-redeem call is separately the proof that completes `waking → active` |
+| stopped worker becomes reusable/terminal | browser final: bridge `/events` → `stageWorkerConversationFinish()`; maintenance paths that already know the id use `sleepWorker()` or `sleepSilentDetachedWorkers()` → private `sleepAgent()`; context ceiling turns the same stop into `finished`. Exported `sleepWorkerConversation()` currently has no production caller and is not a jump-point |
 | detached worker ages out | `sleepSilentDetachedWorkers()`; the four-minute detached silence belongs here, not to browser tab code |
 | pending wake projection | `pendingWorkerRevivals()` |
 | browser takes wake custody before text escapes | `claimWorkerRevival()`; flips the waking row from broker-revivable to browser-owned wake custody |
@@ -1581,6 +1839,17 @@ retained histories. Turning Multi-agent **off is not Clear**: it stops/withdraws
 parks the owner history, and keeps that history durable through disabled app restarts so re-enable
 can still show and revive the exact old worker conversations.
 
+**Chrome auto-discard protection is a derived browser policy, never agent liveness.**
+`bridge.ts::nonDiscardableAgentConversations()` projects only the active Prime plus Workers in
+`active|waking|detached` through `/status`. `background.js::maintain()` applies
+`chrome.tabs.update({autoDiscardable:false})` to exact matching tabs and records a tab id in
+`discardProtectedTabs` **only when this extension changed Chrome's policy itself**. That ownership
+marker lives in `storage.session`; when the conversation stops qualifying or the tab closes, the
+service worker restores `autoDiscardable:true` only for markers it owns. A tab already protected by
+the user/browser is never claimed and therefore never “restored” behind their back. Sleeping and
+terminal workers are not protected. This keeps live agent pages resident; it does not prove a turn
+active, revive a worker or authorize a browser repair.
+
 **Waking is messaging.** `agents action=message` to a sleeping worker reserves a free slot
 inside the same durable barrier that queues the message, and only after that commit does the
 browser get asked for anything. The bridge then creates a durable `revive` command naming the
@@ -1597,12 +1866,12 @@ prime message → broker sleeping→waking + queued inbox row → immediate dura
   → background.js persists/replays `deferredRevivals` and queries Chrome's current ChatGPT tabs
   → sort every exact-conversation tab by tab id and try `restoreChatgptTab()` deterministically
        → first repairable exact tab gets the marker
-       → an exact tab still loading blocks fallback and is retried later
-       → only when no exact tab is usable/starting, create ONE `/c/<id>?clf=<command>#clf=<command>` fallback
+       → an exact tab still loading blocks replacement and is retried later
+       → only positive proof that no exact tab is usable/starting authorizes ONE replacement `/c/<id>?clf=<command>#clf=<command>`
   → content waits for a submit-ready current document and recorder-flush fence
   → content redeems the bridge command, receives the exact text, types a genuine user message
   → irreversible send ACK enters service-worker custody
-  → broker keeps the worker `waking` until exact authenticated worker liveness/new-turn evidence
+  → broker keeps the worker `waking` until a subsequent exact authenticated MCP call proves the delivered wake
 ```
 
 No free slot means the send-to-sleeper is refused outright — no inbox row is accepted and nothing
@@ -1616,15 +1885,27 @@ Duplicate exact worker tabs are therefore **not** resolved by guessing one curre
 are not an automatic hard refusal either. `background.js::recoverDeferredRevivals()` owns the
 deterministic election; `restoreChatgptTab()` first health-pings the existing content script and
 repairs its Fiber helper, otherwise re-injects DOM/Fiber/content/CSS into that exact tab. Only an
-unrecoverable exact tab permits the one fresh fallback; a merely loading exact tab means “wait”, not
+unrecoverable/no-usable exact-tab result permits the one authorized replacement branch; a merely
+loading exact tab means “wait”, not
 “open another”. `/commands/redeem` remains the final one-page lease authority even if Chrome still
 contains duplicate views of the same conversation.
+
+There is one **current fail-open hole in that election**. `recoverDeferredRevivals()` catches a
+`chrome.tabs.query()` failure by assigning `tabs=[]`; the loop then interprets “browser truth was
+unavailable” as “no exact tab exists” and may create the one replacement, duplicating a worker that
+was actually open. `maintain()` already gets this boundary right for recovery and simply returns on
+query failure. Revival must do the same: leave the durable deferred marker pending/retryable and open
+nothing until a real tab scan proves absence. Do not add duplicate cleanup after the fact. The old
+comments in `extension.test.ts` that say “the app opens the marked chat” are stale too — production
+tab election/opening is service-worker-owned as described above.
 
 Once `/commands/redeem` gives the browser custody of a wake, a late call from the worker is no
 longer allowed to reinterpret that exact wake as unnecessary. Conversely, before redeem, exact
 worker liveness may prove the old turn never stopped and cancel the inferred sleep. **Positive
 identity/liveness outranks inferred lifecycle.** A mere open sleeping page is not enough; an exact
-authenticated call or a genuinely newer turn is.
+authenticated call or a genuinely newer turn is enough only in that pre-custody arbitration window.
+After browser custody, page/new-turn evidence deliberately cannot complete the wake; the broker waits
+for an exact authenticated MCP call tied to the delivered revival before moving `waking → active`.
 
 **The context ceiling is what makes an otherwise normal stop permanently `finished`.** A worker becomes terminally `finished` when its chat
 reaches `WORKER_CONTEXT_CEILING_TOKENS` (400k), measured from the app's own durable session
@@ -1634,6 +1915,16 @@ automatically or manually: the worker conversation is the agent identity, so no 
 open a replacement worker chat. Because workers outlive their tabs and their
 prime's tab, closing the prime chat pauses the run instead of ending it: the user comes back,
 the prime resumes, and the same workers are still there.
+
+That ceiling is revalidated on the **model-facing agents entrypoint**, not only by browser
+telemetry. `tools-core.ts::measureSleepingWorkers()` runs before `agents message` may wake a sleeper
+**and before `agents status` returns state**. It re-reads each sleeping worker's exact durable
+session `contextTokens`, feeds that into `agents.ts::noteAgentContextTokens()`, then requires
+`persistCriticalSwarmNow()` to cross disk before the result is published. A worker whose chat grew
+past 400k while the app was down can therefore become `finished` during what looks like a status
+read. `status` is not semantically read-only at this boundary: it is the production remeasurement
+that makes revocation of revival authority survive restart. If that critical swarm write fails, the
+agents call fails rather than reporting the worker revivable after failing to durably revoke it.
 
 This does not make `finished` the only terminal state: `failed` is the separate hard-failure fence
 for a bootstrap/transport/broker failure that cannot safely remain revivable. Both are terminal to
@@ -1656,19 +1947,35 @@ the same complete worker history to the child conversation or move nothing.
 
 **Goal + Loop.** `goal.ts` is one OpenRouter engine with two standing modes and one optional
 per-chat objective. It sends only authored user messages and final assistant answers to the
-provider; tool rows, native progress and hidden reasoning stay out of that transcript. The fresh
-baseline is **off**, mode **`goal`**, model **`z-ai/glm-5.3`**, reasoning `default`; existing user
-selections remain verbatim. `shared/types.ts::GoalSettings` is the contract and
+provider; tool rows, native progress and hidden reasoning stay out of that transcript. That provider
+view comes from the **local canonical recording**, not the live page. `goal.ts::
+conversationMessages()` keeps final assistant revisions only, coalesces duplicate legacy final
+snapshots by stable message id, clips each row to 12k chars and bounds the final context to 120
+messages / 120k chars. A saturated tail is not allowed to forget what the conversation is for:
+before filling newest history backwards it reserves the actual first user request and the newest
+**committed** Compact & Resume bootstrap reconstructed from durable handoff provenance. Uncommitted
+or stale handoffs never become a model-context anchor merely because matching text is visible. The
+fresh baseline is **off**, mode **`goal`**, model **`z-ai/glm-5.3`**, reasoning `default`; existing
+user selections remain verbatim. `shared/types.ts::GoalSettings` is the contract and
 `config.ts::DEFAULT_GOAL` is the fresh/repair default.
 
 The standing switches are **one setting**, not two booleans: `goal.enabled` says whether the
-OpenRouter driver is armed and `goal.mode` is `'goal' | 'loop'`. `bridge.ts::applyGoalSwitch()` is
-the only page-side mode transition: turning one on enables that exact mode; turning the currently
-running one off disables the driver but leaves the preferred `mode` remembered. A worker chat is
+OpenRouter driver is armed and `goal.mode` is `'goal' | 'loop'`. `goal.ts::applyGoalSwitch()` is
+the pure mode transition used by both bridge-scoped and app-wide writes: turning one on enables that
+exact mode; turning the currently running one off disables the driver but leaves the preferred
+`mode` remembered. The bridge owns whether that reducer is applied to a concrete chat override or
+the New Chat/global default; the reducer does not own routing. A worker chat is
 always excluded by `goalWorkerChat()` because its user turns already belong to the prime. A chat
 with a stored objective is active even when the standing switch is off, but then
 `goal.ts::goalDrivingMode()` deliberately falls back to **Goal**, never inherits Loop: a mode that
-cannot stop must be an explicit standing choice.
+cannot stop must be an explicit choice. "Explicit" means the switch **or** the mode the goal was
+written under — the sheet's two links post `mode` with the goal and the bridge pins it as that
+chat's own switch in the same request. That second door exists because the first one cost a run:
+a goal saved from the New Chat sheet starts the chat immediately, the standing switch there is the
+app-wide default rather than anything about this chat, and an unattended run started from "add
+specific goal" ended two turns in on one "looks done" from the gate. Never widen the fallback to
+inherit Loop instead; the fix is that the choice travels with the goal, not that a missing choice
+guesses.
 
 There are **three** editable persisted instructions, all bounded at config/IPC:
 
@@ -1689,8 +1996,33 @@ cannot push the operative instruction entirely out of recency. Local validation 
 wrapped control tokens, malformed schema/reasoning payloads or an empty cleaned reply fail closed
 before `humanReply()` or the browser sees sendable text.
 
-An untouched persisted copy of any superseded shipped Goal default migrates to the current default;
-customized text stays exact. Changing a prompt/mode retires incompatible drafts so one in-flight
+All three read the requirements out of the user's own words and never out of ChatGPT's account of
+them: in a long transcript that account is the nearer text and always the narrower one, because it
+describes what got built rather than what was asked for. The driver and the Loop instruction say so
+outright, tell the model to re-read the whole goal before every message, and explicitly license a
+long, concrete message — the user's register governs how it writes, never how much of the
+requirement it carries, and a bare "keep going" is named as a wasted turn. Loop alone may escalate,
+since it is the only mode still talking after the job is done: each pass asks for more depth on the
+same requirements. That licence is also the only way it can leave the job entirely, so the
+direction is pinned in the wording — deeper into the user's brief, never sideways into a second
+project. Keep both properties if you rewrite these; a loop that drifts off the brief burns the
+whole night it was left running for.
+
+The Goal **model picker** has its own narrow secret/network boundary. Renderer code never receives
+the OpenRouter key and never fetches the catalogue directly: IPC `goal:models` accepts only a bounded
+offset, fixes the page size at 20, and calls `goal.ts::listGoalModels()`. The main-process catalogue
+loader uses a 30-second request ceiling, 8 MiB response bound and 5,000-model parse cap, sorts newest
+releases first, and caches for five minutes **scoped to a SHA-256 fingerprint of the current API
+key** (or the public/no-key bucket). A key change therefore cannot reuse a restricted catalogue from
+the previous credential. `renderer/chat.ts::loadGoalModels()` / `paintGoalModels()` /
+`maybePageGoalModels()` own scroll-paged presentation only; load failure leaves the user's current
+model selection untouched.
+
+An untouched persisted copy of any superseded shipped Goal default migrates to the current
+default; customized text stays exact. That holds for all three, each with its own list in
+`shared/goal.ts` and all three walked by `config.ts::adoptCurrentGoalPrompt()` — for a while only
+the gate had one, which would have stranded every existing install on a superseded driver or Loop
+instruction the moment those constants moved. Ship a prompt change and its list entry together. Changing a prompt/mode retires incompatible drafts so one in-flight
 decision never mixes old and new policy. Terminal Goal/Loop cards persist only as presentation for
 the exact finished turn; dismissal and navigation are conversation-scoped and async paint stays
 navigation-epoch fenced.
@@ -1700,17 +2032,86 @@ navigation-epoch fenced.
 pair is the **default a chat inherits when it has no row of its own**. A composer always knows its
 conversation, so `/settings` with a `conversationId` writes that chat's override and never the
 app-wide setting; only a New Chat (no id yet) moves the global default. This is what makes a runaway
-loop stoppable without stopping every other chat, and it is how an old conversation is retired: turn
-Goal off where it pops up and no later app-wide change can revive that one. The app's own settings
-switch going **off** is the master stop and calls `clearAllGoalSwitches()`; turning it on
-deliberately does not reach into a chat that has said no. Compact & Resume moves the override A→B
-beside the objective, so a loop goes on running in the replacement chat.
+loop stoppable without stopping every other chat: while its override exists, ordinary global config
+changes do not rewrite it. The app's own settings switch making an explicit **enabled→disabled**
+transition is different: it is the master “stop everything” action and `ipc.ts` calls
+`clearAllGoalSwitches()`, intentionally putting every chat back under the now-off global default.
+Turning the app-wide setting on does not itself delete/overwrite rows that still exist, but after a
+master-Off has cleared them a later On naturally applies to those chats again. Compact & Resume moves
+an existing override A→B beside the objective, so a running loop keeps its exact per-chat choice in
+the replacement chat.
+
+There is one **current durability asymmetry** here; do not document it away or add a recovery layer
+around it. A composer-scoped switch crosses `goal.ts::setGoalSwitchNow()` and awaits
+`writeDurableNow(goal-switches)` before the page is told success. The renderer's app-wide master-Off
+first durably saves `config.json`, then calls synchronous `clearAllGoalSwitches()`, whose persistence
+is only the 300 ms debounced `writeDurableSoon()` path. Clean shutdown drains that debounce via
+`flushDurable()`, but an abrupt process loss in the gap can restart with global Goal Off **and old
+per-chat enabled overrides restored**; `goalSwitchFor()` currently prefers an own row even while the
+global default is off. This is one logical policy mutation split across two durable owners. The root
+fix is to put the standing-switch authority — **global default plus per-chat overrides** — behind one
+Goal-owned durable mutation/acceptance owner so master-Off is one committed state transition, not two
+files that must be guessed back together. Neither half may become restart-authoritative by itself.
+Do not paper over a torn transition with startup cleanup, another stop flag or a watchdog.
+
+Draft retirement has the same **acceptance-boundary problem plus a scope bug**, and it is not limited
+to renderer settings. Renderer `settings:save` durably commits `config.json` before synchronous
+`retireGoalDrafts()`; replacing the OpenRouter credential durably writes the new encrypted secret
+before the same retirement. Browser-scoped `/goal/objective` and `/settings` do the equivalent thing
+for one chat: `setGoalObjectiveNow()` / `setGoalSwitchNow()` first make the new chat policy durable,
+then `retireGoalDraftsFor()` changes its reply ledger only through the debounced writer. A hard loss
+in any of those gaps can therefore restore a **new policy/key with an old pending obligation**.
+Separately, renderer global-default enabled/mode changes **and** unscoped New-Chat `/settings` changes
+call `retireGoalDrafts()` for **every** chat,
+even a conversation whose own `goal-switches` row leaves its effective mode unchanged. The unaffected
+set is broader than overrides: an objective-driven chat whose standing switch is off deliberately
+drives in Goal mode, so changing only the remembered global mode also leaves its effective draft
+policy unchanged. Raw `config.goal` before/after is therefore not a retirement scope.
+
+The deeper bug is that `retireGoalDrafts*()` currently conflates two different decisions:
+**invalidate this in-memory provider attempt** and **semantically discharge/supersede this durable
+reply obligation**. Split those concepts at the Goal owner. A draft is frozen to one conversation's
+effective mode/objective/model/prompt/reasoning/credential and must be aborted when that effective
+instruction changes; an unrelated global default must not touch an overriding chat. But aborting an
+attempt does **not** by itself mean the final assistant reply was answered: repairing a key/model or
+other provider setting must be able to leave the same obligation pending for a fresh attempt. Only a
+policy operation that explicitly means “this existing reply is no longer owed a Goal decision” may
+mark it handled/superseded, and then that ledger transition must cross the **same durable acceptance
+boundary** as the policy change that decided it. App-wide enabled→off is the deliberate master-stop
+case. Do not repair torn stores with replay daemons, startup cleanup or blanket tombstone rewrites.
+
+There is a separate **current runtime-gate hole when recording is off**. `config.ts` forces the
+app-wide `config.goal.enabled=false` when `sessions.record=false`, but durable per-chat switches and
+objectives remain independent. `bridge.ts::goalEnabledFor()` / `goalActiveFor()` do not check
+recording; when the bridge remains alive for another owner such as Multi-agent, `/activity` can
+therefore still project an actionable objective/override, and
+`content.js::goalUsable()` can request `/goal/draft` against an already-recorded session. Inside
+`acceptGoalReplyNow()` the same call is simultaneously classified `handled` because
+`sessions.record=false`, yet `beginGoalDraft()` still starts provider work. The privacy/runtime
+invariant is simpler: **Goal may not act at all while recording is off**, whatever per-chat policy is
+stored. Put that condition in the one effective Goal-runtime gate used by projection, draft routes and
+watchdog; keep the stored objective/switch as dormant user state rather than clearing it or adding
+page-side special cases.
 
 **A chat's own goal.** The composer control exists in a New Chat too (`content.js::injectControl`),
 because a goal written there may become that chat's first user message; compaction remains
-unavailable until a real conversation exists. `/goal/objective` stores one objective per exact
-conversation in the durable `goal-objectives` ledger, separate from global config. Reopening a chat
-restores the text but never creates a new draft from an old finished turn. `bridge.ts::goalActiveFor()`
+unavailable until a real conversation exists. The sheet offers the goal as **two** links — "add
+specific goal" and "add specific loop" — and which one opened the editor is the mode posted with
+the text. Above a New Chat those links are the whole control: `content.js::settingsView()` drops
+the Goal and Loop switch rows there (`scope: 'new'`, taken from `composerChat()`, i.e. the route
+and never the id this tab is still holding), because a switch with no chat to belong to moves the
+app-wide default while the goal beside it starts a chat — two scopes reading as one decision. In a
+real chat both switches stay: they are the only way to drive a chat carrying no goal, and the only
+way to switch a running loop off. `/goal/objective` stores one objective per exact conversation in
+the durable `goal-objectives` ledger, separate from global config, and when the page named a mode
+it writes that chat's `goal-switches` row **first**, so no poll ever sees a goal whose mode the
+standing switch could still answer for. Clearing the goal with a mode switches that chat off again:
+writing the goal is what armed it. Production POST
+acceptance goes through `goal.ts::setGoalObjectiveNow()`, which crosses the immediate durable write
+before the bridge reports success. The similarly named synchronous `setGoalObjective()` is a
+convenience/test path with only debounced persistence; do not use it as the browser acceptance
+boundary. Reopening a chat restores the text but never creates a new draft from an old finished
+turn. `bridge.ts::goalActiveFor()`
 arms that chat from either the standing switch or the objective; the worker fence overrides both.
 With an objective, Goal uses the explicit finish line instead of the generic continuation gate.
 Loop keeps looping but is given the same objective as context — **Loop does not declare success and
@@ -1722,6 +2123,10 @@ projection repair as session/workspace/swarm state.
 `/goal/open` covers the one moment with no conversation id yet. It does not persist an anonymous
 objective or stream a draft into nowhere: the page awaits the opening message, sends it through the
 real composer, then binds the objective once ChatGPT creates the concrete conversation.
+Transient provider/opening failures carry the same Goal-owned `retryable` classification as an
+ordinary draft; the page retries the bounded opening attempt only while it still proves the same
+empty New Chat. Settled key/account/model failures and a model refusing to write the opening remain
+terminal, and no app-side retry continues after the page navigates away.
 This is the one extension→app request allowed to outlive the ordinary 10-second bridge request
 deadline: `background.js` gives it `MODEL_REQUEST_TIMEOUT_MS = 190s`, deliberately just beyond
 `goal.ts`'s own 180-second OpenRouter request ceiling. A local request timeout returns a retryable
@@ -1754,7 +2159,9 @@ content.js::finishGeneration
   → /goal/draft
   → bridge validates exact chat/client + durable pending reply
   → goal.ts::startGoalDraft() freezes mode/model/prompts/objective for this turn
-  → beginGoalDraft() → requestDrivingDecision() → OpenRouter stream
+  → beginGoalDraft() → requestDrivingDecision() → requestGoalDecision()
+       → OpenRouter non-streaming strict JSON-schema completion (`stream:false`)
+       → response-healing + `provider.require_parameters` → bounded `readGoalCompletion()`
   → /activity returns sending/answering/ready|no-reply|failed
   → content.js::maybeSendGoalReply()
        ready: reserve composer → send genuine user message → remember spent token → /goal/ack
@@ -1768,7 +2175,11 @@ whether acting is still safe** because only it can see navigation, a newer gener
 typed composer text and current ChatGPT liveness. Provider retries therefore do not live in a
 background retry daemon. `requestDrivingDecision()` internally retries only Loop's invalid attempt
 to stop, up to `LOOP_ATTEMPTS = 3`; ordinary transient provider failures return to the page as
-`retryable` and are retried only while the same exact turn is still current.
+`retryable` and are retried only while the same exact turn is still current. The current provider
+contract is deliberately **non-streaming** because OpenRouter response healing requires a complete
+structured response. The retained SSE parser/`answering` publication path is compatibility for
+legacy streaming-shaped responses, not the production request mode and not a reason to reintroduce
+streaming Goal decisions.
 
 Goal/Loop share three durable ledgers and one memory draft map:
 
@@ -1781,8 +2192,39 @@ Goal/Loop share three durable ledgers and one memory draft map:
   so page reload/app restart cannot lose a terminal answer that was owed one Goal decision. The
   ledger is bounded to 200 conversations and 12 hours from `acceptedAt`; that prevents restoration
   from turning an old finished chat into a standing invitation to type tomorrow.
+
+The Goal ledgers have a separate **current semantic-mutation serialization hole**. `durable.ts`
+serializes file publication, but `setGoalObjectiveNow()`, `setGoalSwitchNow()` and especially
+`acceptGoalReplyNow()` mutate shared in-memory maps, capture whole-ledger snapshots, await
+`writeDurableNow()`, then roll back on failure **without a Goal-side mutation queue**. Two different
+chats can therefore overlap: B can capture A's staged-but-not-yet-accepted value in its successful
+snapshot, while A later fails and queues a rollback snapshot; a crash between those publications can
+resurrect an operation A was told failed. `acceptGoalReplyNow()` is stronger still because its
+failure rollback clears/rebuilds the whole reply map. File-write serialization is not semantic
+transaction serialization. The root fix is one **serialized copy-on-write mutation owner per Goal
+ledger**: derive `next` from the latest committed live ledger, write `next` first for an immediate
+acceptance boundary, and publish it to readers only after that write succeeds. Failure then leaves the
+old live state untouched — no rollback path exists to race. Debounced moves/clears must enter the same
+ordering so an older snapshot cannot overtake a newer accepted one. Regress “A write fails while B
+succeeds” and prove neither rejected state becomes temporarily actionable nor either caller's final
+state overwrites the other.
+
+There is a **current provisional-row restore bug** inside that ledger. `/goal/draft` may have to
+freeze the semantic obligation before Fiber/recorder exposes the stable assistant id, so it durably
+writes `replyId='turn:<localTurnId>'` with `eventSeq=0`. A later stable candidate upgrades that same
+row while preserving its original `acceptedAt` and `pending|handled` state. But
+`restoreGoalReplies()` currently rejects every snapshot row with `eventSeq < 1`. A restart before the
+stable-id upgrade therefore drops either a **pending** obligation or an already-**handled**
+provisional tombstone; in the handled case a later replayed stable final can be accepted as fresh and
+potentially trigger duplicate Goal continuation. The invariant is that provisional identity is a
+real durable phase until strengthened. Restore must accept `eventSeq===0` **only** for the exact
+provisional shape `replyId === 'turn:' + turnId`, preserve its original `acceptedAt` + state, and let
+the existing stable-id upgrade strengthen that same row. Regression-test both pending and handled
+restart cases; never recover by scanning rendered history for "the latest answer".
 The Goal loop has exactly one trigger and it lives in the page: a content script sees a turn end and
-asks for a draft. `bridge.ts::inspectOwedGoals()` is the app-side half of that, and the reason it
+asks for a draft. `bridge.ts::inspectOwedGoals()` is the app-side half of that; it consumes
+`goal.ts::pendingGoalReplies()` and uses `goalDraftBusy()` only to distinguish an in-flight pickup
+from a stalled one. The reason it
 exists is that page liveness *is* loop liveness — a document that dies between the final answer and
 the request leaves an obligation correctly `pending` with nobody alive to redeem it, which is exactly
 what the live prime trace showed (reply at 21:56:46, the app first heard a Goal was owed at 22:00:33
@@ -1798,10 +2240,31 @@ quiet, then 2/5/10/15 — and then stops for good. Load-bearing details:
   content script asking what it still owes and quite wrong as a licence to reload yesterday's chats.
 - A `sending`/`answering` draft counts as the pickup happening; a `ready` draft nobody types does
   not. An open continuation for the obligation's session suppresses the watchdog entirely, because
-  Compact & Resume is mid-transaction and the obligation travels to the replacement with everything
-  else. `goalActiveFor()` still gates it, so a switched-off or worker chat is never reloaded.
+  Compact & Resume currently owns that session while the transaction is in flight. **Do not infer a
+  Goal-reply migration from that suppression.** `continuation.ts::publishCommittedProjection()`
+  explicitly moves the Goal objective and per-chat switch A→B, but there is currently no
+  reply-ledger projection: `goal-replies` remains keyed by A. That is not neutral after commit.
+  `continuationForSession()` stops suppressing a committed transaction; if A now inherits app-wide
+  Goal On, `inspectOwedGoals()` can spend its bounded reload schedule reopening historical A even
+  though the session has durably moved to B and `/goal/draft` can no longer resolve A as its current
+  conversation. The semantic fix is **supersession, not migration**: by the time the continuation
+  commits, the resume bootstrap is already the genuine next user message that made the old A reply
+  no longer the turn awaiting a user decision, while B's first assistant answer has its own exact
+  `resumeGoalPending` provenance. Make source-A reply supersession an idempotent part of the same
+  committed projection used by normal commit and durable-B recovery. Do not teach the Goal watchdog
+  or browser opener to special-case historical A. Regress that commit leaves no A Goal repair and
+  that B's first answer still gets exactly its ordinary/recovered Goal edge.
 - A failed draft leaves the obligation `pending` by design (`ackGoalDraft` discharges only on
-  `ready`/`no-reply`), so the next reload is a fresh attempt at a goal that failed once.
+  `ready`/`no-reply`), but **not every failure is immediately retryable**. For transient/provider
+  failures outside `SETTLED_FAILURE`, the page ACKs that failed attempt and a same-turn
+  `startGoalDraft()` may create a fresh attempt; this is the path the page retries after 15 seconds
+  while the exact turn is still safe to act on. Settled account/settings failures
+  (`auth_rejected`, `out_of_credit`, `unknown_model`, `no_api_key`, `no_conversation`,
+  `no_objective`) return `retryable:false` and the acknowledged same-turn request keeps returning
+  that failed draft instead of paying the provider again. The durable reply obligation remains
+  pending in both cases. After the draft payload's 10-minute TTL, `expireDraftPayload()` clears the
+  payload/error but preserves the idempotency tombstone; a later request may then become a fresh
+  attempt, still against the same undischarged obligation.
 
 - `drafts`: current OpenRouter work, one per conversation, frozen with its selected mode/prompt at
   creation; stage `sending|answering|ready|no-reply|failed`. In Goal mode `ready` and `no-reply` are
@@ -2108,7 +2571,7 @@ count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating 
 | `feature-parity` | public capability/tool surface stays synchronized across declarations |
 | `fiber` | MAIN-world React extraction and its allowlist |
 | `fsops` | bounded text/image/file helpers |
-| `goal-resume-handoff` | Goal objective/reply continuity across Compact & Resume |
+| `goal-resume-handoff` | Goal provider-context continuity from **committed resume handoff provenance**; aborted/stale/legacy provenance must not become a false context anchor |
 | `goal` | the goal loop's prompt, privacy boundary, one-draft rule, OpenRouter failures |
 | `ipc` | main<->renderer boundary and payload validation |
 | `mcp` | surfaces, handlers, integration — the widest suite |
@@ -2137,7 +2600,7 @@ count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating 
 | `tray-image`, `window-*` | platform-native shell geometry/icon/tray/lifecycle invariants |
 | `tunnel`, `tunnel-lifecycle`, `tunnel-locate` | error classification, process lifecycle, binary discovery, poll metrics, outage confirmation and route self-test |
 | `unified-exec-mutex` | process-manager serialization / terminal concurrency invariants |
-| `update` | one-pass update eligibility, checksum staging and quit-time handoff |
+| `update` | per-pass update eligibility/checksum staging + process-lifetime startup/6h scheduling and quit-time handoff |
 | `workspace` | per-chat/agent workspace learning and keying |
 
 ### Delegating to workers

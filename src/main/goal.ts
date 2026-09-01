@@ -93,6 +93,11 @@ const REQUEST_TIMEOUT_MS = 180_000;
  * still the one being answered. This is what that loop reads, published as `retryable`.
  */
 const SETTLED_FAILURE = /^(?:auth_rejected|out_of_credit|unknown_model|no_api_key|no_conversation|no_objective)(?:$|:)/;
+
+/** One failure classification shared by ordinary drafts and the conversation-less opening request. */
+function retryableGoalFailure(error: string): boolean {
+  return !SETTLED_FAILURE.test(error);
+}
 /** The catalogue is UI data; a dead provider must not leave the picker request hanging forever. */
 const MODEL_LIST_TIMEOUT_MS = 30_000;
 /** A single SSE record should be tiny; this still leaves ample room around the 12k reply cap. */
@@ -799,7 +804,7 @@ function view(draft: GoalDraft): GoalDraftView {
     // is history, and a page that polls again must not find a message to type a second time.
     reply: draft.stage === 'ready' && !draft.acknowledged ? draft.reply : '',
     error: draft.error,
-    retryable: draft.stage === 'failed' && !SETTLED_FAILURE.test(draft.error ?? '')
+    retryable: draft.stage === 'failed' && retryableGoalFailure(draft.error ?? '')
   };
 }
 
@@ -915,6 +920,46 @@ export function retireGoalDraftsFor(conversationId: string): boolean {
   draft.text = '';
   draft.reply = '';
   handleGoalReply(conversationId);
+  return true;
+}
+
+/**
+ * Applies one chat switch to the durable Goal obligation, not merely to its current draft.
+ *
+ * Off means there is no ticket left for a replacement page to collect. On means the newest
+ * stable reply already accepted by the recorder is owed again, even when that reply finished
+ * while the switch was off. The handled row remains as the stable-message tombstone while Off;
+ * re-arming that exact row is safer and smaller than scanning rendered transcript history.
+ *
+ * The provider draft is retired before the ledger write. If persistence fails, restoring the
+ * old row leaves the reply safely retryable but can never let the now-revoked text reach the
+ * composer. A later page simply drafts it again from the same durable reply identity.
+ */
+export async function setGoalReplyActiveNow(conversationId: string, active: boolean): Promise<boolean> {
+  const before = goalReplies.get(conversationId);
+  const draft = drafts.get(conversationId);
+  if (draft) {
+    draft.acknowledged = true;
+    draft.abort?.abort();
+    if (draft.settledAt === 0) draft.settledAt = Date.now();
+    draft.text = '';
+    draft.reply = '';
+    drafts.delete(conversationId);
+  }
+  if (!before) return Boolean(draft);
+
+  const previous = { ...before };
+  before.state = active ? 'pending' : 'handled';
+  // A deliberate On is a new pickup episode for the same stable final reply. It gets the
+  // recovery schedule from now, not from when that answer happened under an Off switch.
+  if (active) before.acceptedAt = Date.now();
+  try {
+    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  } catch (error) {
+    goalReplies.set(conversationId, previous);
+    persistGoalRepliesSoon();
+    throw error;
+  }
   return true;
 }
 
@@ -1249,12 +1294,19 @@ async function run(draft: GoalDraft): Promise<void> {
  *
  * It is deliberately not idempotent, because there is nothing yet to key idempotency to. The
  * page holds that end: one save, one call, and the result goes into an empty composer. It also
- * holds the retry: a failure here goes back to whoever pressed the button, with the reason, and
- * pressing it again is the second attempt — which is why this path needs none of its own.
+ * holds the retry: this function classifies transient failures with the same authority as an
+ * ordinary draft, and the page rechecks that it is still the same empty New Chat before asking
+ * again. Provider work never retries in the background after the page has moved elsewhere.
+ *
+ * `named` is the mode the user chose while writing the goal, for the one case where the mode
+ * cannot be read from a chat: there is no chat yet. Without it this drafted the opening under
+ * the standing switch, which is how a run started from "add specific loop" could open — and
+ * then continue — as a Goal.
  */
 export async function draftOpeningMessage(
-  objective: string
-): Promise<{ reply: string; model: string } | { error: string }> {
+  objective: string,
+  named: GoalMode | null = null
+): Promise<{ reply: string; model: string } | { error: string; retryable?: boolean }> {
   const goal = objective.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
   if (!goal) return { error: 'no_objective' };
   const key = await getSecret('openRouterApiKey');
@@ -1263,7 +1315,7 @@ export async function draftOpeningMessage(
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const mode = goalDrivingMode();
+    const mode = named ?? goalDrivingMode();
     const decision = await requestDrivingDecision({
       key,
       model,
@@ -1276,8 +1328,12 @@ export async function draftOpeningMessage(
       trailer: mode === 'loop' ? GOAL_LOOP_TRAILER : GOAL_OBJECTIVE_TRAILER,
       signal: abort.signal
     });
-    if (decision.action === 'http') return { error: decision.error };
-    if (decision.action === 'invalid') return { error: decision.error };
+    if (decision.action === 'http') {
+      return { error: decision.error, retryable: retryableGoalFailure(decision.error) };
+    }
+    if (decision.action === 'invalid') {
+      return { error: decision.error, retryable: retryableGoalFailure(decision.error) };
+    }
     // Stopping before the first word has been said is the model refusing the goal rather
     // than meeting it, and an empty opening message would leave somebody looking at a chat
     // that never started with nothing on screen to say why.
@@ -1286,7 +1342,8 @@ export async function draftOpeningMessage(
     return { reply: humanReply(decision.reply), model };
   } catch (err) {
     const detail = (err as Error).message;
-    return { error: abort.signal.aborted ? 'timeout_or_cancelled' : `request_failed: ${detail}` };
+    const error = abort.signal.aborted ? 'timeout_or_cancelled' : `request_failed: ${detail}`;
+    return { error, retryable: retryableGoalFailure(error) };
   } finally {
     clearTimeout(timer);
   }

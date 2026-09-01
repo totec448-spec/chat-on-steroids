@@ -783,6 +783,26 @@ describe('the swarm handover', () => {
     expect(primeConversationGone(CHAT_A)).toBe(false);
     expect(swarmRunning()).toBe(true);
   });
+
+  it('keeps an automatic ticket open past ordinary continuation deadlines and restart', async () => {
+    vi.useFakeTimers();
+    const summary = await createSession({ title: 'durable auto ticket', conversationId: CHAT_A });
+    const opened = await openContinuationNow(summary.id, CHAT_A, true);
+    const saved = snapshotContinuations();
+
+    vi.setSystemTime(Date.now() + CONTINUATION_TTL_MS * 6);
+    expect(continuationByToken(opened.token)).toMatchObject({
+      state: 'awaiting-summary',
+      automatic: true
+    });
+
+    resetContinuationsForTests();
+    await restoreContinuations(saved);
+    expect(continuationByToken(opened.token)).toMatchObject({
+      state: 'awaiting-summary',
+      automatic: true
+    });
+  });
 });
 
 describe('restart lifetime recovery', () => {

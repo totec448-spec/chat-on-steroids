@@ -1041,6 +1041,18 @@
   overflow-wrap: anywhere;
 }
 
+/* The two modes a goal can be written in, side by side because they are one choice rather
+   than two settings. Wraps rather than compressing: the labels change with what the chat is
+   already doing ("change the goal", "run it as a loop"), and a truncated one of those is a
+   sentence that means something else. */
+.clf-menu-goal-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px 8px;
+}
+
 .clf-menu-goal-link {
   display: flex;
   align-items: center;
@@ -1148,8 +1160,9 @@
   overflow-wrap: anywhere;
 }
 
-.clf-menu-goal-note[data-clf-warn='1'],
-.clf-menu-goal-link [data-clf-warn='1'] {
+/* A failed save is a note above the links now, not a label inside one of them: with two
+   links, an error worn by one of them reads as that mode's own problem. */
+.clf-menu-goal-note[data-clf-warn='1'] {
   color: color-mix(in srgb, currentColor 45%, #f59e0b);
   opacity: 1;
 }

@@ -1052,6 +1052,33 @@ describe('worker settings authority', () => {
     expect(posted).toEqual([{ autoCompact: false, conversationId: CHAT }]);
   });
 
+  it('forwards compaction ticket and both irreversible dispatch checkpoints', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { ok: true });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(44);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 44);
+    const token = '0123456789abcdef0123456789abcdef';
+
+    await worker.send({ type: 'compact', conversationId: CHAT, ticket: true, automatic: true }, 44);
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
+    await worker.send({ type: 'compact', conversationId: CHAT, token, destinationDispatch: true }, 44);
+
+    expect(posted).toEqual([
+      expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
+      expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
+      expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
+    ]);
+  });
+
   it('refuses a settings write that names a different conversation than the source tab owns', async () => {
     const fetch = vi.fn(async (input: string) => {
       const url = new URL(input);
@@ -1068,6 +1095,45 @@ describe('worker settings authority', () => {
       error: 'stale_conversation'
     });
     expect(fetch.mock.calls.some(([input]) => new URL(String(input)).pathname === '/settings')).toBe(false);
+  });
+
+  /**
+   * The mode a goal was written in, which the app turns into a durable per-chat switch.
+   *
+   * Both halves matter. It has to cross — a goal written with "add specific loop" that arrives
+   * without its mode is answered by the standing switch, which is how an unattended run meant
+   * to be endless stopped at its second turn. And only these two words may cross, because what
+   * arrives here is written to disk and then decides whether a run is allowed to end at all.
+   */
+  it('passes the goal mode through, and only ever the two words that are modes', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/goal/objective') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { objective: 'build the sandbox', enabled: true, mode: 'loop' });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(44);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 44);
+
+    const looped = await worker.send(
+      { type: 'goal_objective', conversationId: CHAT, text: 'build the sandbox', mode: 'loop' },
+      44
+    );
+    expect(looped).toMatchObject({ ok: true, data: { enabled: true, mode: 'loop' } });
+    expect(posted.at(-1)).toEqual({ conversationId: CHAT, text: 'build the sandbox', mode: 'loop' });
+
+    // Anything else is absent rather than forwarded, which leaves the standing switch deciding
+    // exactly as it did before the two buttons existed — a state the app already handles.
+    await worker.send({ type: 'goal_objective', conversationId: CHAT, text: 'build the sandbox', mode: 'endless' }, 44);
+    expect(posted.at(-1)).toEqual({ conversationId: CHAT, text: 'build the sandbox' });
+
+    await worker.send({ type: 'goal_objective', conversationId: CHAT, text: 'build the sandbox' }, 44);
+    expect(posted.at(-1)).toEqual({ conversationId: CHAT, text: 'build the sandbox' });
   });
 });
 

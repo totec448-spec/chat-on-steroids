@@ -114,18 +114,44 @@ describe('the instruction the goal model is given', () => {
   });
 
   /**
-   * The five worked examples are the part that fixes a small model reading the role wrong,
-   * so their presence is a contract rather than decoration. Both prompts carry five, and
-   * both cover the two decisions that actually go wrong: stopping when the job is done, and
-   * refusing to invent work that was never requested.
+   * The worked examples are the part that fixes a small model reading the role wrong, so their
+   * presence is a contract rather than decoration. Both prompts carry at least five, and both
+   * cover the two decisions that actually go wrong: stopping when the job is done, and refusing
+   * to invent work that was never requested. The driver carries a sixth as well, for the case
+   * that has no equivalent in the gate — a goal ChatGPT quietly narrowed and then reported done.
    */
   it('teaches both jobs by example, including when not to speak', () => {
-    for (const prompt of [goal.goalSystemPrompt(), goal.goalObjectivePrompt()]) {
-      expect(prompt).toContain('Five examples.');
+    const prompts = [
+      { prompt: goal.goalSystemPrompt(), counted: 'Five examples.' },
+      { prompt: goal.goalObjectivePrompt(), counted: 'Six examples.' }
+    ];
+    for (const { prompt, counted } of prompts) {
+      expect(prompt).toContain(counted);
       for (const n of [1, 2, 3, 4, 5]) expect(prompt).toContain(`\n${n}. `);
       // At least one example must end in silence, or the model only ever learns to talk.
       expect(prompt).toContain('You answer: NO_REPLY');
     }
+  });
+
+  /**
+   * The rule written against a lost overnight run.
+   *
+   * Both instructions that can be handed a saved goal sit in a context where ChatGPT's own
+   * restatement of the job is far nearer than the goal itself, and that restatement is always
+   * the narrower of the two — it describes what was built, not what was asked for. So each has
+   * to say which one wins, and each has to license a message long enough to actually carry the
+   * requirement rather than compressing it back down to "keep going".
+   */
+  it('makes the saved goal the requirements and lets the message be long enough to carry them', () => {
+    for (const prompt of [goal.goalObjectivePrompt(), goal.goalLoopPrompt()]) {
+      expect(prompt).toContain('Read the whole goal again before every message you write');
+      expect(prompt).toContain('account of the job is not the job');
+      expect(prompt).toContain('Say what you want in full');
+      expect(prompt).toContain('Length is not a problem here');
+    }
+    // Which of the two wins is stated in each one's own vocabulary.
+    expect(goal.goalObjectivePrompt()).toContain('the goal wins');
+    expect(goal.goalLoopPrompt()).toContain('the requirements win');
   });
 
   /**
@@ -1371,7 +1397,7 @@ describe('a chat driven towards a specific goal', () => {
     expect(box.seen.filter((message) => message.role !== 'system')).toEqual([
       { role: 'user', content: 'start on the port' }
     ]);
-    expect(box.seen.at(-1)!.content).toContain('name the parts of the goal that are still not done');
+    expect(box.seen.at(-1)!.content).toContain('the parts of the goal that are still not done');
   });
 
   /**
@@ -1543,6 +1569,39 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.snapshotGoalReplies().replies).toContainEqual(
       expect.objectContaining({ replyId: 'assistant-message-disabled', state: 'handled' })
     );
+  });
+
+  it('durably cancels a pending ticket on Off and re-arms that stable final on On', async () => {
+    const conversationId = 'c-reply-switch-rearm';
+    await goal.acceptGoalReplyNow({
+      conversationId,
+      sessionId: 'session-reply-switch-rearm',
+      replyId: 'assistant-message-switch-rearm',
+      turnId: 'g-switch-rearm',
+      eventSeq: 14,
+      blocked: false
+    });
+    expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({
+      replyId: 'assistant-message-switch-rearm'
+    });
+
+    expect(await goal.setGoalReplyActiveNow(conversationId, false)).toBe(true);
+    expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    const off = goal.snapshotGoalReplies();
+    expect(off.replies).toContainEqual(
+      expect.objectContaining({ conversationId, replyId: 'assistant-message-switch-rearm', state: 'handled' })
+    );
+
+    // Model the reload boundary: Off is in the durable ledger, not only in the old page.
+    goal.resetGoalStateForTests();
+    goal.restoreGoalReplies(off);
+    expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+
+    expect(await goal.setGoalReplyActiveNow(conversationId, true)).toBe(true);
+    expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({
+      replyId: 'assistant-message-switch-rearm',
+      turnId: 'g-switch-rearm'
+    });
   });
 
   /**
@@ -1804,6 +1863,36 @@ describe('opening a chat on a goal', () => {
     expect(await goal.draftOpeningMessage('finish it')).toEqual({ error: 'nothing_to_open_with' });
     expect(await goal.draftOpeningMessage('   ')).toEqual({ error: 'no_objective' });
   });
+
+  /**
+   * The mode the sheet chose, for the one message that has no chat to read a switch from.
+   *
+   * A New Chat has no conversation and therefore no per-chat switch, so this used to draft
+   * under the app-wide setting — which is how a run started from "add specific loop" could be
+   * opened, and then continued, as a Goal that was free to decide it was finished.
+   */
+  it('opens under the mode it was given rather than the standing switch', async () => {
+    await saveConfig({
+      ...defaultConfig(),
+      goal: { ...defaultConfig().goal, model: 'deepseek/deepseek-v4-flash', enabled: false, mode: 'goal' }
+    });
+    let sent: Record<string, unknown> = {};
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      sent = JSON.parse(String(init.body)) as Record<string, unknown>;
+      return decision('continue', 'start with the chunk mesher');
+    }) as never;
+
+    await goal.draftOpeningMessage('build the voxel sandbox', 'loop');
+
+    const messages = sent['messages'] as Array<{ role: string; content: string }>;
+    expect(messages[0]!.content).toContain('You have exactly one move');
+    // The schema goes with the instruction: in loop mode the enum has no way to spell a stop,
+    // so the mode is enforced at the wire as well as asked for in words.
+    expect(JSON.stringify(sent['response_format'])).toContain('always continue');
+    // And the closing reminder is the loop's, which is where a model that only read the last
+    // thing it was shown is told that stopping is not one of its moves.
+    expect(messages.at(-1)!.content).toContain('stopping, silence and NO_REPLY do not exist here');
+  });
 });
 /**
  * Loop mode: Goal with the stop taken away.
@@ -1861,6 +1950,19 @@ describe('the loop that never stops', () => {
     // The two failure modes a must-always-speak model actually has, both named.
     expect(prompt).toContain('Come back to the whole thing often');
     expect(prompt).toContain('"Looks done" is a reason to raise the bar, never a reason to stop');
+  });
+
+  /**
+   * Loop is the only mode allowed to ask for more than the user wrote down, because it is the
+   * only one that must still be talking after the job is finished. That licence is also the
+   * one way it can wander off the job entirely, so the direction is pinned: deeper into the
+   * same requirements, never sideways into a second project.
+   */
+  it('escalates by going deeper into the same requirements, not by finding a new job', () => {
+    const prompt = goal.goalLoopPrompt();
+    expect(prompt).toContain('Every pass raises the bar on the same requirements');
+    expect(prompt).toContain('Asking for more is not the same as asking for something else');
+    expect(prompt).toContain('Iterate the process; never change the subject');
   });
 
   it('sends the loop instruction, its own trailer, and a schema with no stop in it', async () => {

@@ -28,6 +28,8 @@ import {
   DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS,
+  SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS,
+  SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS,
   SUPERSEDED_GOAL_SYSTEM_PROMPTS
 } from '../shared/goal.js';
 import { logError } from './logger.js';
@@ -147,7 +149,19 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
   CAPABILITIES.map((capability) => [capability, true])
 ) as Capabilities;
-const FIRST_LAUNCH_MULTI_AGENT: MultiAgentSettings = { ...DEFAULT_MULTI_AGENT, enabled: true };
+// Unattributed calls start permitted on a fresh install for the same reason recording does:
+// the ambiguity fences refuse work when the extension cannot *prove* the caller, and a new
+// install is exactly where that evidence path is least likely to be healthy yet. Off, the
+// first thing a user sees is CALLER_IDENTITY_REQUIRED; on, the work runs and its activity is
+// still labelled Unattributed rather than guessed onto a chat. This relaxes only the fences —
+// a positively known dormant/retired/ended worker is refused either way. `DEFAULT_MULTI_AGENT`
+// keeps `false` so an upgrade never relaxes an older config merely because the field was
+// absent when that config was written.
+const FIRST_LAUNCH_MULTI_AGENT: MultiAgentSettings = {
+  ...DEFAULT_MULTI_AGENT,
+  enabled: true,
+  allowUnattributedCalls: true
+};
 
 const rootSchema = z.object({
   name: z
@@ -400,15 +414,23 @@ function enforceFeatureDependencies(config: Config): Config {
 /**
  * Moves any exactly-as-shipped Goal prompt, from any past version, onto the current default.
  *
- * The prompt is editable and persisted, so changing the source constant alone would leave an
- * existing untouched install on the old behaviour forever. Exact equality is the fence: any
- * user customization, even a one-character change, is preserved verbatim. The list is walked
- * rather than compared against one predecessor, so an install that skipped a release still
- * migrates instead of being stranded on a default two generations old.
+ * All three prompts — the gate, the driver and the loop — are editable and persisted, so
+ * changing a source constant alone would leave an existing untouched install on the old
+ * behaviour forever. Exact equality is the fence: any user customization, even a one-character
+ * change, is preserved verbatim. Each list is walked rather than compared against one
+ * predecessor, so an install that skipped a release still migrates instead of being stranded on
+ * a default two generations old.
  */
 function adoptCurrentGoalPrompt(config: Config): Config {
-  if (!SUPERSEDED_GOAL_SYSTEM_PROMPTS.includes(config.goal.prompt)) return config;
-  return { ...config, goal: { ...config.goal, prompt: DEFAULT_GOAL_SYSTEM_PROMPT } };
+  const goal = { ...config.goal };
+  if (SUPERSEDED_GOAL_SYSTEM_PROMPTS.includes(goal.prompt)) goal.prompt = DEFAULT_GOAL_SYSTEM_PROMPT;
+  if (SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS.includes(goal.objectivePrompt)) {
+    goal.objectivePrompt = DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT;
+  }
+  if (SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS.includes(goal.loopPrompt)) {
+    goal.loopPrompt = DEFAULT_GOAL_LOOP_SYSTEM_PROMPT;
+  }
+  return { ...config, goal };
 }
 
 let configPath = '';

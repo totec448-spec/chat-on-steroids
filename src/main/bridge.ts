@@ -42,7 +42,7 @@ import {
   goalViewFor,
   pendingGoalReplies,
   retireGoalDrafts,
-  retireGoalDraftsFor,
+  setGoalReplyActiveNow,
   setGoalObjectiveNow,
   setGoalSwitchNow,
   startGoalDraft
@@ -118,6 +118,7 @@ import {
   CONTINUATION_TTL_MS,
   continuationByToken,
   continuationForSession,
+  pendingAutomaticContinuations,
   dispatchContinuationDestinationSendNow,
   dispatchContinuationSourceSendNow,
   openContinuationNow,
@@ -1603,8 +1604,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   /**
    * Compact & Resume, all of it, in one route.
    *
-   * Three shapes, because it is one button with one transaction behind it:
+   * Four shapes, because it is one button with one transaction behind it:
    *
+   *   ticket  — `{conversationId, ticket:true, automatic}`: durably open the transaction
+   *             before any fallible page barrier, without handing out the prompt yet.
    *   open    — `{conversationId}`: start the continuation and hand back the prompt the page
    *             injects, plus the token every later step quotes.
    *   capture — `{conversationId, token, summary}`: the page watched the compaction turn
@@ -1736,6 +1739,39 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         return json(res, 503, { error: 'resume_cancel_not_durable', retryable: true, sessionId }, origin);
       }
       return json(res, 200, { cancelled, sessionId, job: resumeJobFor(sessionId) }, origin);
+    }
+
+    // File the ticket before the browser interrupts or settles anything. This endpoint does
+    // not hand out the prompt: a page that dies after this durable 202 leaves work to collect,
+    // while a page that survives must still pass the existing stop/tool barrier below and ask
+    // again. `automatic` is authority for the Off switch and for no other behaviour.
+    if (body['ticket'] === true) {
+      const existing = continuationForSession(sessionId);
+      let opened = existing;
+      if (!opened) {
+        try {
+          opened = await openContinuationNow(sessionId, id, body['automatic'] === true);
+        } catch (err) {
+          logWarn(`bridge: could not durably file Compact & Resume for ${sessionId} — ${err instanceof Error ? err.message : String(err)}`);
+          return json(res, 503, { error: 'continuation_not_durable', retryable: true, sessionId }, origin);
+        }
+      }
+      rememberToken(sessionId, opened.token);
+      changed();
+      return json(
+        res,
+        202,
+        {
+          started: !existing,
+          filed: true,
+          sessionId,
+          token: opened.token,
+          sourceSend: opened.sourceSend,
+          prompt: null,
+          job: resumeJobFor(sessionId)
+        },
+        origin
+      );
     }
 
     // The capture. The page is the only party that can tell which output belongs to the
@@ -1998,6 +2034,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
    * Whatever is in flight for this chat is retired on the way through, because a draft is
    * frozen with the goal it was started under: without this, saving a new goal would still
    * type the old one's message into the chat one last time.
+   *
+   * A goal may name its own mode, and when it does that naming is authoritative for this
+   * chat. The reason is a run that was lost: a goal written from the New Chat sheet starts
+   * the chat immediately, but the mode it ran in was still read from the standing switch —
+   * off, therefore Goal — so a two-hour unattended run ended at the second turn on one
+   * "looks done" from the gate. The intent lives in the control the user pressed, so the
+   * mode is pinned as this chat's own switch here, in the same request, before the goal
+   * exists to be acted on. Clearing the goal turns that switch back off: the two were
+   * written together and a bare mode left switched on would keep prompting a chat whose
+   * finish line the user has just deleted.
    */
   if (route === '/goal/objective' && req.method === 'POST') {
     let body: Record<string, unknown>;
@@ -2015,10 +2061,51 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (goalWorkerChat(id)) return json(res, 409, { error: 'goal_worker_chat' }, origin);
     const text = typeof body['text'] === 'string' ? body['text'] : '';
     if (text.length > MAX_GOAL_OBJECTIVE_CHARS * 2) return tooLarge(res, origin);
+    const named = body['mode'] === 'goal' || body['mode'] === 'loop' ? (body['mode'] as 'goal' | 'loop') : null;
+    let chatSwitch: { enabled: boolean; mode: 'goal' | 'loop' } | null = null;
+    if (named) {
+      const held = goalSwitchFor(id);
+      // A goal being written names the mode; a goal being cleared ends whichever mode this
+      // chat is actually running in, which is not necessarily the one whose editor cleared it.
+      const on = text.trim().length > 0;
+      const which = on ? named : held.enabled ? held.mode : named;
+      try {
+        // Before the goal, never after. A goal that exists for even one poll without the mode
+        // it was written in is a goal the standing switch can answer for — the exact hole this
+        // pinning closes.
+        chatSwitch = await setGoalSwitchNow(id, which, on);
+      } catch (err) {
+        logWarn(`bridge: the ${which} switch for ${id} is not durable yet — ${err instanceof Error ? err.message : String(err)}`);
+        return json(res, 503, { error: 'goal_switch_not_durable', retryable: true }, origin);
+      }
+    }
     const objective = await setGoalObjectiveNow(id, text);
-    retireGoalDraftsFor(id);
-    logInfo(objective ? `bridge: chat ${id} was given a specific goal` : `bridge: the specific goal for chat ${id} was cleared`);
-    return json(res, 200, { objective }, origin);
+    try {
+      await setGoalReplyActiveNow(
+        id,
+        goalActiveFor(id) && getConfig().sessions.record && (await goalKeyPresent())
+      );
+      forgetGoalWatch(id);
+    } catch (err) {
+      logWarn(`bridge: Goal ticket for ${id} did not follow its objective — ${err instanceof Error ? err.message : String(err)}`);
+      return json(res, 503, { error: 'goal_ticket_not_durable', retryable: true }, origin);
+    }
+    logInfo(
+      objective
+        ? `bridge: chat ${id} was given a specific goal${chatSwitch ? ` as ${chatSwitch.mode}` : ''}`
+        : `bridge: the specific goal for chat ${id} was cleared`
+    );
+    return json(
+      res,
+      200,
+      {
+        objective,
+        // What the chat's switch says now, so the sheet draws the mode the goal was saved in
+        // rather than waiting a poll for it. Absent when the page named none.
+        ...(chatSwitch ? { enabled: chatSwitch.enabled, mode: chatSwitch.mode } : {})
+      },
+      origin
+    );
   }
 
   /**
@@ -2028,6 +2115,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
    * one only when a message is sent, and the message being asked for is that one. So this
    * route holds nothing, streams nothing and is answered in place: the page waits for it,
    * types it, and comes back to /goal/objective with the real id once ChatGPT has issued it.
+   *
+   * The mode comes with it for the same reason it cannot be stored: there is no conversation
+   * to hold a switch, so the choice the user made in the sheet is the only thing that knows
+   * which instruction this opening is being written under.
    */
   if (route === '/goal/open' && req.method === 'POST') {
     let body: Record<string, unknown>;
@@ -2041,8 +2132,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (text.length > MAX_GOAL_OBJECTIVE_CHARS * 2) return tooLarge(res, origin);
     if (!text.trim()) return json(res, 400, { error: 'no_objective' }, origin);
     if (!(await goalKeyPresent())) return json(res, 409, { error: 'no_api_key' }, origin);
-    const drafted = await draftOpeningMessage(text);
-    if ('error' in drafted) return json(res, 502, { error: drafted.error }, origin);
+    const opening = body['mode'] === 'goal' || body['mode'] === 'loop' ? (body['mode'] as 'goal' | 'loop') : null;
+    const drafted = await draftOpeningMessage(text, opening);
+    if ('error' in drafted) return json(res, 502, drafted, origin);
     return json(res, 200, drafted, origin);
   }
 
@@ -2138,14 +2230,37 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const chatSwitch = scoped
       ? await setGoalSwitchNow(settingsConversation as string, which as 'goal' | 'loop', (goal ?? loop) as boolean)
       : null;
+    if (auto === false) {
+      try {
+        await cancelAutomaticResumesNow();
+      } catch (err) {
+        logWarn(`bridge: Auto Off could not durably cancel its compaction ticket(s) — ${err instanceof Error ? err.message : String(err)}`);
+        return json(res, 503, { error: 'auto_compaction_cancel_not_durable', retryable: true }, origin);
+      }
+    }
     // Every change that takes authority away from work already in flight, not only switching
     // off: a draft started as a gate must not be typed after the user asked for a loop, and a
     // loop draft must not be typed after the user asked for a gate. Both are the same fact —
     // the instruction this request was made under is no longer the one in force. A chat-scoped
     // change retires that chat's draft and nobody else's, because nobody else's instruction moved.
     if (chatSwitch) {
-      if (before !== (chatSwitch.enabled ? chatSwitch.mode : null)) {
-        retireGoalDraftsFor(settingsConversation as string);
+      // `chatSwitch.mode === which` also covers retrying the same POST after the ticket write
+      // failed but the separate switch file landed. The second request must repair the ticket
+      // instead of deciding there is no transition left to perform.
+      if (before !== (chatSwitch.enabled ? chatSwitch.mode : null) || chatSwitch.mode === which) {
+        const chatId = settingsConversation as string;
+        try {
+          // The switch and the ticket are one user decision. Off durably closes the pickup;
+          // On (including Goal <-> Loop) re-arms the latest stable final under the new mode.
+          await setGoalReplyActiveNow(
+            chatId,
+            chatSwitch.enabled && getConfig().sessions.record && (await goalKeyPresent())
+          );
+          forgetGoalWatch(chatId);
+        } catch (err) {
+          logWarn(`bridge: Goal ticket for ${chatId} did not follow its switch — ${err instanceof Error ? err.message : String(err)}`);
+          return json(res, 503, { error: 'goal_ticket_not_durable', retryable: true }, origin);
+        }
       }
     } else if (driving !== (next.goal.enabled ? next.goal.mode : null)) {
       retireGoalDrafts();
@@ -2746,10 +2861,11 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   // ends of a turn — one an answer that never arrived, one an answer that arrived and was never
   // picked up — and a chat can only ever be in one of those states.
   const goalsQueued = inspectOwedGoals(now);
-  const silenceChanged = silent.queued || silent.spent.length > 0 || goalsQueued;
+  const compactionsQueued = inspectOwedCompactions(now);
+  const silenceChanged = silent.queued || silent.spent.length > 0 || goalsQueued || compactionsQueued;
   const runId = currentRunId();
   if (swarmTransferActive() || inFlightMcpRequests() > 0 || observationWritesInFlight > 0) {
-    return silent.queued || goalsQueued;
+    return silent.queued || goalsQueued || compactionsQueued;
   }
 
   if (!runId) {
@@ -3072,6 +3188,7 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
       // the moment this process started serving — the earliest instant an obligation can have
       // been accepted by *this* run.
       goalWatchFloor = Date.now();
+      compactionWatchFloor = goalWatchFloor;
       bridgeRecovering = false;
       // Anything restored from the previous run goes out now rather than waiting for a
       // browser to come and ask.
@@ -3492,6 +3609,8 @@ export interface ResumeJobView {
   token: string;
   stage: ResumeStage;
   startedAt: number;
+  /** True only for a threshold-triggered ticket; Auto Off may cancel only these. */
+  automatic: boolean;
   /** True while the button must stay disabled. */
   busy: boolean;
   handoffId: string | null;
@@ -3548,6 +3667,7 @@ export function resumeJobFor(sessionId: string): ResumeJobView | null {
     token: entry.token,
     stage,
     startedAt: entry.openedAt,
+    automatic: entry.automatic,
     busy: RUNNING_STAGES.has(stage),
     handoffId: entry.handoffId,
     sourceSend: entry.sourceSend,
@@ -3642,6 +3762,17 @@ export async function cancelResumeNow(sessionId: string): Promise<boolean> {
   if (!aborted && entry?.state !== 'aborted' && !queued) return false;
   changed();
   return true;
+}
+
+/** Auto Off owns only threshold-created tickets; manual Compact & Resume remains explicit. */
+async function cancelAutomaticResumesNow(): Promise<number> {
+  let cancelled = 0;
+  for (const entry of pendingAutomaticContinuations()) {
+    if (await cancelResumeNow(entry.sessionId)) cancelled += 1;
+    compactionWatch.delete(entry.from);
+    if (repairsInFlight.get(entry.from)?.reason === 'compaction') repairsInFlight.delete(entry.from);
+  }
+  return cancelled;
 }
 
 /**
@@ -3907,7 +4038,7 @@ interface Repair {
   state: 'queued' | 'handed' | 'done';
   /** Stable identity of the failure/inactivity episode. A new activity stamp mints a new one. */
   episode: string;
-  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal';
+  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal' | 'compaction';
   /** Cooldown boundary. The browser is never asked before this instant. */
   notBefore: number;
   /**
@@ -3938,7 +4069,7 @@ interface Repair {
 const TURN_SCOPED_REPAIRS: ReadonlySet<Repair['reason']> = new Set(['unattributed', 'assistant-error']);
 
 const repairsInFlight = new Map<string, Repair>();
-/** Last browser action per exact chat. One cooldown covers errors, silence and missing tabs. */
+/** Last browser action per exact chat. Error/no-tab recovery shares a cooldown; owned schedules do not. */
 const lastBrowserRecoveryAt = new Map<string, number>();
 
 /**
@@ -3946,7 +4077,8 @@ const lastBrowserRecoveryAt = new Map<string, number>();
  *
  * Every trigger converges here. A second reason while an action is already pending is the same
  * recovery, not another reload. Once carried out it stays spent until new activity changes the
- * episode key; the three-minute floor then protects even two genuinely distinct failures.
+ * episode key; the three-minute floor then protects distinct error/no-tab failures. Silence,
+ * Goal and compaction carry their own schedules and therefore bypass that unrelated floor.
  */
 function queueBrowserRecovery(
   conversationId: string,
@@ -3976,7 +4108,7 @@ function queueBrowserRecovery(
   // `goal` is exempt for the same reason and a stronger one: it carries its own backoff, which
   // after the opening step is already longer than the shared floor, so applying both would only
   // move the user's stated schedule without changing what protects the page.
-  const notBefore = reason === 'silence' || reason === 'goal'
+  const notBefore = reason === 'silence' || reason === 'goal' || reason === 'compaction'
     ? now
     : Math.max(now, (lastBrowserRecoveryAt.get(conversationId) ?? 0) + BROWSER_RECOVERY_COOLDOWN_MS);
   repairsInFlight.set(conversationId, {
@@ -4041,6 +4173,10 @@ function noteRecoveryObservations(
     // recorded and authorizes nothing; only the page's own live generation may name the turn,
     // which is what keeps a banner still on screen from an earlier failure out of this.
     if (item.kind !== 'chat_error' || item.recoverable !== true || !item.turnId) continue;
+    // Auto-compaction owns this chat's recovery clock until its ticket commits or is cancelled.
+    // A native error inside a ten-minute handoff is not permission for the ordinary two-minute
+    // response watchdog to cut across the user's explicit fifteen-minute pickup interval.
+    if (pendingAutomaticContinuations().some((entry) => entry.from === conversationId)) break;
     const episode = `assistant-error:${item.turnId}:${(item.text ?? '').slice(0, 240)}`;
     // How many turns this chat will have finished once the broken turn is over. The turn that
     // just failed is still open here - its own end is the very next one to arrive - so counting
@@ -4073,7 +4209,7 @@ function nonDiscardableAgentConversations(): string[] {
 
 /** The active agent chats for which the browser must keep asking the app for recovery work. */
 function browserRecoveryMonitoring(): boolean {
-  if (repairsInFlight.size > 0 || activeUntil.size > 0 || goalWatch.size > 0) return true;
+  if (repairsInFlight.size > 0 || activeUntil.size > 0 || goalWatch.size > 0 || compactionWatch.size > 0) return true;
   if (!getConfig().multiAgent.recoverAgentTabs) return false;
   return swarmState().agents.some(
     (agent) =>
@@ -4094,7 +4230,9 @@ function browserRecoveryMonitoring(): boolean {
 function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
   let queued = false;
   const spent: string[] = [];
+  const compacting = new Set(pendingAutomaticContinuations().map((entry) => entry.from));
   for (const [conversationId, until] of activeUntil) {
+    if (compacting.has(conversationId)) continue;
     if (until > now) continue;
     const held = repairsInFlight.get(conversationId);
     if (held?.state === 'done') {
@@ -4156,6 +4294,22 @@ const GOAL_WATCH_BACKOFF_MS = [2, 2, 5, 10, 15].map((minutes) => minutes * 60_00
 const goalWatch = new Map<string, { replyId: string; dueAt: number; attempts: number }>();
 
 /**
+ * The source page gets the first attempt; these are its three remaining pickups. Fifteen
+ * minutes is deliberate: a very large handoff can still be legitimately generating then.
+ * Page activity never pushes this deadline — the checkpoint reloads the same exact chat and
+ * lets its stable marker recover output that is already generated or still generating.
+ */
+const COMPACTION_PICKUP_MS = 15 * 60_000;
+const COMPACTION_RELOADS = 3;
+const compactionWatch = new Map<string, { token: string; dueAt: number; attempts: number }>();
+
+/** A switch change retires both the schedule and any queued reload for its former ticket. */
+function forgetGoalWatch(conversationId: string): void {
+  goalWatch.delete(conversationId);
+  if (repairsInFlight.get(conversationId)?.reason === 'goal') repairsInFlight.delete(conversationId);
+}
+
+/**
  * The instant this process began serving, and the fence under which no goal is ever revived.
  *
  * The obligation ledger is durable and keeps a row for twelve hours, which is right for the
@@ -4165,6 +4319,7 @@ const goalWatch = new Map<string, { replyId: string; dueAt: number; attempts: nu
  * yesterday afternoon. Only work this run watched arrive is work this run acts on.
  */
 let goalWatchFloor: number | null = null;
+let compactionWatchFloor: number | null = null;
 
 /** Any sign of life pushes the next reload out by the gap this chat is currently on. */
 function noteGoalWatchActivity(conversationId: string): void {
@@ -4238,6 +4393,67 @@ function inspectOwedGoals(now: number): boolean {
     queued = true;
     logInfo(
       `bridge: goal reply uncollected in ${reply.conversationId} — reload ${watch.attempts} of ${GOAL_WATCH_BACKOFF_MS.length}`
+    );
+  }
+  return queued;
+}
+
+/**
+ * Gives durable auto-compaction tickets their bounded browser pickups.
+ *
+ * The ticket has no failure clock. Three unsuccessful checkpoints merely exhaust automatic
+ * browser actions; the continuation remains collectable by any later page until Auto Off,
+ * explicit cancel, or the marked bootstrap's durable commit in chat B.
+ */
+function inspectOwedCompactions(now: number): boolean {
+  if (compactionWatchFloor === null) return false;
+  const owed = new Map(pendingAutomaticContinuations().map((entry) => [entry.from, entry]));
+  for (const [conversationId, watch] of compactionWatch) {
+    if (owed.get(conversationId)?.token === watch.token) continue;
+    compactionWatch.delete(conversationId);
+    if (repairsInFlight.get(conversationId)?.reason === 'compaction') repairsInFlight.delete(conversationId);
+  }
+
+  let queued = false;
+  for (const entry of owed.values()) {
+    if (entry.openedAt < compactionWatchFloor) continue;
+    let watch = compactionWatch.get(entry.from);
+    if (!watch) {
+      watch = { token: entry.token, attempts: 0, dueAt: entry.openedAt + COMPACTION_PICKUP_MS };
+      compactionWatch.set(entry.from, watch);
+    }
+    if (watch.attempts >= COMPACTION_RELOADS || now < watch.dueAt) continue;
+
+    let acted = false;
+    if (entry.state === 'awaiting-summary') {
+      const held = repairsInFlight.get(entry.from);
+      if (held?.state === 'done' && held.reason === 'compaction') repairsInFlight.delete(entry.from);
+      else if (held && held.state !== 'done') continue;
+      acted = queueBrowserRecovery(
+        entry.from,
+        `compaction:${entry.token}:${watch.attempts}`,
+        'compaction',
+        0,
+        now
+      );
+    } else if (
+      (entry.state === 'awaiting-chat' || entry.state === 'claimed') &&
+      sendUnattempted(entry.destinationSend) &&
+      !commands.some((command) => command.spec.type === 'resume' && command.spec.token === entry.token)
+    ) {
+      // The brief exists but its fresh-chat transport failed before Send. The destination
+      // checkpoint proves opening this same ticket again cannot duplicate the bootstrap.
+      queueResumeCommand(entry.sessionId, entry.token);
+      void deliver();
+      acted = true;
+    }
+    if (!acted) continue;
+
+    watch.attempts += 1;
+    watch.dueAt = now + COMPACTION_PICKUP_MS;
+    queued = true;
+    logInfo(
+      `bridge: auto-compaction ticket ${entry.token.slice(0, 8)} pickup ${watch.attempts + 1} of ${COMPACTION_RELOADS + 1}`
     );
   }
   return queued;
@@ -4519,7 +4735,8 @@ function repairReason(repair: Repair): string {
     'assistant-error': 'an interrupted response',
     'no-tab': 'a missing browser tab',
     silence: 'an unresponsive open turn',
-    goal: 'a goal reply nothing collected'
+    goal: 'a goal reply nothing collected',
+    compaction: 'an uncollected compaction ticket'
   }[repair.reason];
 }
 
@@ -4625,6 +4842,11 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
   // Revival is one absolute waking attempt. Redeeming the marked page must not renew it and leave
   // a worker occupying `waking` indefinitely when the page never sends or reports valid activity.
   if (command.spec.type === 'revive') return command.createdAt + REVIVAL_DEADLINE_MS - now;
+  if (command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic) {
+    // One checkpoint, not a failure trigger. Expiry releases only this browser transport;
+    // the auto-compaction ticket remains and the next 15-minute pickup may open it again.
+    return (command.claimedAt ?? command.createdAt) + COMPACTION_PICKUP_MS - now;
+  }
   if (command.spec.type === 'resume' && command.owner !== null) {
     const continuation = continuationByToken(command.spec.token);
     if (continuation?.state === 'claimed') return continuation.openedAt + CONTINUATION_TTL_MS - now;
@@ -4659,8 +4881,10 @@ function rearmRetainedCommandDeadlines(): void {
   for (const command of commands) {
     // Worker bootstraps join revivals in being clocked before anyone claims them: their limit is
     // absolute from the invitation, so a restart must not hand a restored one an unbounded wait.
+    const automaticResume =
+      command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic === true;
     if (
-      (command.claimedAt === null && command.spec.type !== 'revive' && command.spec.type !== 'worker') ||
+      (command.claimedAt === null && command.spec.type !== 'revive' && command.spec.type !== 'worker' && !automaticResume) ||
       command.timer
     )
       continue;
@@ -4674,13 +4898,14 @@ function rearmRetainedCommandDeadlines(): void {
 /**
  * The deadline passed. Decide what actually happened, then end it either way.
  *
- * Two of the three outcomes are quiet successes that simply have no acknowledgement of
+ * Two ordinary outcomes are quiet successes that simply have no acknowledgement of
  * their own: a worker whose chat was bound is done being a command, and a command already
  * gone has nothing left to end. The third is the failure this design chose over retrying —
  * the tab never redeemed, or redeemed and never typed, or typed into a chat it never named
- * — and `drop()` is what makes it safe: the continuation is aborted and its session stays
+ * — and `drop()` is what makes it safe: a manual continuation is aborted and its session stays
  * where it is, or the worker slot is failed so the prime stops waiting on a chat that does
- * not exist. Nothing is left pending for a later sweep to find.
+ * not exist. An automatic continuation is the deliberate exception: only its expired browser
+ * transport is released, leaving the ticket for its next 15-minute pickup.
  */
 function expire(command: Command): void {
   if (!commands.includes(command)) return;
@@ -4847,6 +5072,19 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
 
 function drop(command: Command, why: string): boolean {
   if (!commands.includes(command)) return false;
+  const automaticEntry = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
+  const automaticResume =
+    automaticEntry?.automatic === true && automaticEntry.state !== 'committing' && automaticEntry.state !== 'committed';
+  if (automaticResume) {
+    if (command.timer) clearTimeout(command.timer);
+    command.timer = null;
+    commands = commands.filter((entry) => entry !== command);
+    logWarn(`bridge: released ${specKey(command.spec)} browser attempt without closing its ticket — ${why}`);
+    changed();
+    persistCommands();
+    scheduleDeliver();
+    return true;
+  }
   const needsBrokerFence = command.spec.type === 'worker' || command.spec.type === 'revive';
   if (needsBrokerFence) commandRetirementsAwaitingBroker.set(command.id, command);
   // A resume whose replacement chat never opened has to end its transaction too, or the
@@ -4937,9 +5175,11 @@ function tidyCommands(): void {
       retire(command, 'its worker is bound and running');
       continue;
     }
+    const automaticResume =
+      command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic === true;
     const stale = command.spec.type === 'revive'
       ? now - command.createdAt >= REVIVAL_DEADLINE_MS
-      : now - command.createdAt > COMMAND_TTL_MS;
+      : !automaticResume && now - command.createdAt > COMMAND_TTL_MS;
     if (stale) {
       drop(command, 'it has been waiting too long to still be what the user expects');
     }
@@ -5366,10 +5606,12 @@ export function resetBridgeForTests(): void {
   clearUnattributedIncident();
   activeUntil.clear();
   goalWatch.clear();
+  compactionWatch.clear();
   // Re-armed rather than cleared: the seam stands in for a process that has just started
   // serving, which is exactly what the fence measures. Clearing it would leave the watchdog
   // permanently off in every suite that starts the bridge once and resets between tests.
   goalWatchFloor = Date.now();
+  compactionWatchFloor = goalWatchFloor;
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;

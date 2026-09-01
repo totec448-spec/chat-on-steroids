@@ -320,6 +320,8 @@ describe('shipped defaults', () => {
       expect(enabled, capability).toBe(expectedFreshCapability(capability, process.platform));
     }
     expect(loaded.multiAgent.enabled).toBe(true);
+    expect(loaded.multiAgent.allowUnattributedCalls).toBe(true);
+    expect(loaded.multiAgent.recoverAgentTabs).toBe(true);
   });
 
   it.each(['win32', 'darwin', 'linux'] as const)(
@@ -332,7 +334,7 @@ describe('shipped defaults', () => {
       }
       expect(config.multiAgent.enabled).toBe(true);
       expect(config.multiAgent.maxWorkers).toBe(2);
-      expect(config.multiAgent.allowUnattributedCalls).toBe(false);
+      expect(config.multiAgent.allowUnattributedCalls).toBe(true);
       expect(config.multiAgent.recoverAgentTabs).toBe(true);
     }
   );
@@ -380,6 +382,28 @@ describe('shipped defaults', () => {
     const { sessions: _dropped, ...withoutSessions } = before;
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(withoutSessions), 'utf8');
     expect((await loadConfig()).sessions.record).toBe(true);
+  });
+
+  /**
+   * Save, close, reopen. The unattributed switch is on out of the box, so the only way to
+   * see it off is to have turned it off — and that choice has to survive the next launch
+   * rather than being handed back the fresh-install default on load.
+   */
+  it('keeps either unattributed choice across a save and reload', async () => {
+    const config = defaultConfig();
+    expect(config.multiAgent.allowUnattributedCalls).toBe(true);
+
+    await saveConfig({
+      ...config,
+      multiAgent: { ...config.multiAgent, allowUnattributedCalls: false }
+    });
+    expect((await loadConfig()).multiAgent.allowUnattributedCalls).toBe(false);
+
+    await saveConfig({
+      ...config,
+      multiAgent: { ...config.multiAgent, allowUnattributedCalls: true }
+    });
+    expect((await loadConfig()).multiAgent.allowUnattributedCalls).toBe(true);
   });
 });
 
@@ -469,6 +493,53 @@ describe('the goal loop settings', () => {
       );
       expect((await loadConfig()).goal.prompt).toBe(defaultConfig().goal.prompt);
     }
+  });
+
+  /**
+   * The driver and the loop are persisted and editable exactly as the gate is.
+   *
+   * They were migrated by nothing at all until the requirements rewrite, so an install holding
+   * either one verbatim would have kept a superseded instruction forever while the shipped
+   * constant moved on — the same stranding the gate's list exists to prevent.
+   */
+  it('upgrades an untouched driver and loop prompt too, not only the gate', async () => {
+    const { SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS, SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS } =
+      await import('../src/shared/goal.js');
+    const config = defaultConfig();
+
+    for (const superseded of SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS) {
+      await fs.writeFile(
+        path.join(dir, 'config.json'),
+        JSON.stringify({ ...config, goal: { ...config.goal, objectivePrompt: superseded } }),
+        'utf8'
+      );
+      expect((await loadConfig()).goal.objectivePrompt).toBe(defaultConfig().goal.objectivePrompt);
+    }
+
+    for (const superseded of SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS) {
+      await fs.writeFile(
+        path.join(dir, 'config.json'),
+        JSON.stringify({ ...config, goal: { ...config.goal, loopPrompt: superseded } }),
+        'utf8'
+      );
+      expect((await loadConfig()).goal.loopPrompt).toBe(defaultConfig().goal.loopPrompt);
+    }
+  });
+
+  it('keeps a customized driver or loop prompt that merely starts like a shipped one', async () => {
+    const { SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS, SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS } =
+      await import('../src/shared/goal.js');
+    const config = defaultConfig();
+    const objectivePrompt = `${SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS[0]}\ncustom sentence`;
+    const loopPrompt = `${SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS[0]}\ncustom sentence`;
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, goal: { ...config.goal, objectivePrompt, loopPrompt } }),
+      'utf8'
+    );
+    const loaded = await loadConfig();
+    expect(loaded.goal.objectivePrompt).toBe(objectivePrompt);
+    expect(loaded.goal.loopPrompt).toBe(loopPrompt);
   });
 
   it('repairs a blank goal driver prompt to its shipped default', async () => {
