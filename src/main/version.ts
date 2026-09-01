@@ -52,5 +52,12 @@ export function extensionDownloadUrl(version = APP_VERSION): string {
  *     remains the only durable post-send authority.
  * 10 — worker revival identity is returned by /status and /activity so the extension can scan
  *      Chrome before routing to an existing exact conversation or opening one proven absent.
+ * 11 — two additions to the goal projection, both of which a 10 peer reads as absent and then
+ *      acts wrongly on rather than loudly. `pending.acceptedAt` names the pickup episode, so a
+ *      stable final reply deliberately re-armed by an Off -> On is a new claim rather than the
+ *      turn id the page has already spent. `own` says whether this chat has moved its own
+ *      Goal/Loop switch, which is the only way to tell an Off somebody chose in the composer
+ *      from an Off merely inherited from the app-wide setting — without it a 10 extension goes
+ *      on letting a saved goal speak over the user's Off.
  */
-export const BRIDGE_PROTOCOL = 10;
+export const BRIDGE_PROTOCOL = 11;

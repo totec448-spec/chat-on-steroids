@@ -317,8 +317,8 @@ const drafts = new Map<string, GoalDraft>();
  * Local generation ids are deliberately not the identity here: ChatGPT remints them after a
  * reload and can replay several start/end pairs for one authored reply. replyId is the
  * canonical assistant message id already used by the session store; eventSeq only orders
- * genuinely newer replies. A handled row is retained so enabling Goal later never replays
- * history that was accepted while it was off.
+ * genuinely newer replies. A handled row is retained so history never replays on its own;
+ * only an explicit later activation may turn that exact tombstone into a fresh pickup.
  */
 interface GoalReplyObligation {
   conversationId: string;
@@ -337,10 +337,10 @@ const goalReplies = new Map<string, GoalReplyObligation>();
  * How long one reply may wait for its Goal decision, and how many chats may be waiting.
  *
  * The obligation is durable so a reload, a crashed page or an app restart cannot lose a
- * finished reply the loop still owes an answer to. It is *not* a standing invitation: a row
- * that outlives this window is retired unanswered, because typing into a chat somebody left
- * a day ago is the failure this whole subsystem is careful about, and the page-side trigger
- * has always refused to manufacture Goal work from an old finished turn.
+ * finished reply the loop still owes an answer to. It is *not* a standing invitation: a pickup
+ * that outlives this window becomes handled, because typing into a chat somebody left a day
+ * ago is the failure this whole subsystem is careful about. The stable identity remains only
+ * so a later deliberate activation can safely ask for it again without scanning page history.
  *
  * The cap is the second half of the same statement. One row per conversation is written for
  * every final assistant reply this app records, each one fsynced before its HTTP 200, so an
@@ -349,10 +349,13 @@ const goalReplies = new Map<string, GoalReplyObligation>();
 const GOAL_REPLY_TTL_MS = 12 * 60 * 60_000;
 const MAX_GOAL_REPLIES = 200;
 
-/** Drops rows this app may no longer act on, newest kept. Returns the surviving ledger. */
+/** Retires expired pickups and caps the stable-final ledger to its newest conversations. */
 function boundGoalReplies(now: number): void {
-  for (const [conversationId, reply] of goalReplies) {
-    if (now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) goalReplies.delete(conversationId);
+  for (const reply of goalReplies.values()) {
+    // Expiry revokes automatic pickup authority; it does not erase the exact final assistant
+    // identity. A later deliberate On may re-arm that tombstone, while leaving it handled here
+    // prevents a stale page or watchdog from collecting it on its own.
+    if (reply.state === 'pending' && now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) reply.state = 'handled';
   }
   if (goalReplies.size <= MAX_GOAL_REPLIES) return;
   const oldestFirst = [...goalReplies.values()].sort((a, b) => a.acceptedAt - b.acceptedAt);
@@ -426,14 +429,14 @@ export function goalDraftBusy(conversationId: string): boolean {
 
 export function goalPendingReplyFor(
   conversationId: string
-): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq'> | null {
+): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq' | 'acceptedAt'> | null {
   const reply = goalReplies.get(conversationId);
   // Expiry is read here as well as pruned on write, because the ledger is only pruned when
   // something writes to it. A chat reopened after the window must not be offered work the
   // next prune would have thrown away.
   if (reply && Date.now() - reply.acceptedAt >= GOAL_REPLY_TTL_MS) return null;
   return reply?.state === 'pending'
-    ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq }
+    ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq, acceptedAt: reply.acceptedAt }
     : null;
 }
 
@@ -952,7 +955,7 @@ export async function setGoalReplyActiveNow(conversationId: string, active: bool
   before.state = active ? 'pending' : 'handled';
   // A deliberate On is a new pickup episode for the same stable final reply. It gets the
   // recovery schedule from now, not from when that answer happened under an Off switch.
-  if (active) before.acceptedAt = Date.now();
+  if (active) before.acceptedAt = Math.max(Date.now(), previous.acceptedAt + 1);
   try {
     await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
   } catch (error) {

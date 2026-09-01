@@ -5436,7 +5436,8 @@ describe('the goal loop over the bridge', () => {
       expect(failed.pending).toEqual({
         replyId: `turn:${turnId}`,
         turnId,
-        eventSeq: 0
+        eventSeq: 0,
+        acceptedAt: expect.any(Number)
       });
       expect((await request('POST', '/goal/ack', {
         body: { conversationId: chat, token: failed.draft.token, clientId: 'page-before-reload' }
@@ -5449,7 +5450,8 @@ describe('the goal loop over the bridge', () => {
       expect(afterReload.pending).toEqual({
         replyId: `turn:${turnId}`,
         turnId,
-        eventSeq: 0
+        eventSeq: 0,
+        acceptedAt: expect.any(Number)
       });
     } finally {
       globalThis.fetch = realFetch;
@@ -5490,7 +5492,8 @@ describe('the goal loop over the bridge', () => {
     expect(pending).toEqual({
       replyId,
       turnId: `reply:${replyId}`,
-      eventSeq: expect.any(Number)
+      eventSeq: expect.any(Number),
+      acceptedAt: expect.any(Number)
     });
 
     let calls = 0;
