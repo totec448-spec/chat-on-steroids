@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { findPreferredBrowser, openInPreferredBrowser, preferredBrowserCandidates } from '../src/main/browser.js';
+import {
+  companionBrowserTarget,
+  findPreferredBrowser,
+  openInCompanionBrowser,
+  openInPreferredBrowser,
+  preferredBrowserCandidates
+} from '../src/main/browser.js';
 
 describe('browser-backed ChatGPT commands', () => {
   it('prefers the normal per-user Chrome install on Windows', () => {
@@ -122,5 +128,43 @@ describe('browser-backed ChatGPT commands', () => {
     expect(opened).toBe(flatpakChrome);
     expect(calls).toEqual([{ command: flatpakChrome, args: [url], cwd: '/var/lib/flatpak/exports/bin' }]);
     expect(calls[0]?.args).not.toContain('--no-sandbox');
+  });
+
+  it('pins browser-backed automation to one executable and one app-owned profile', () => {
+    const env = { PATH: '/first:/second' };
+    const candidates = preferredBrowserCandidates('linux', env, '/home/example');
+    const first = candidates[0]!;
+    const second = candidates.find((candidate) => candidate.startsWith('/second/'))!;
+
+    expect(
+      companionBrowserTarget('/home/example/.config/chat-on-steroids', {
+        platform: 'linux',
+        env,
+        home: '/home/example',
+        usable: (candidate) => candidate === first || candidate === second
+      })
+    ).toEqual({
+      executable: first,
+      profileDir: '/home/example/.config/chat-on-steroids/agent-browser'
+    });
+  });
+
+  it('does not fan out to another browser when the companion custody target fails to launch', async () => {
+    const attempts: string[] = [];
+    const target = {
+      executable: '/first/google-chrome',
+      profileDir: '/home/example/.config/chat-on-steroids/agent-browser'
+    };
+
+    await expect(
+      openInCompanionBrowser('https://chatgpt.com/?clf=worker-marker', target, async (command, args) => {
+        attempts.push(`${command}\0${args.join('\0')}`);
+        throw new Error('companion profile failed to launch');
+      })
+    ).rejects.toThrow('companion profile failed to launch');
+
+    expect(attempts).toEqual([
+      '/first/google-chrome\0--user-data-dir=/home/example/.config/chat-on-steroids/agent-browser\0--no-first-run\0--no-default-browser-check\0--disable-default-apps\0https://chatgpt.com/?clf=worker-marker'
+    ]);
   });
 });

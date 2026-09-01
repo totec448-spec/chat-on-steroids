@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { launchCommand } from './exec.js';
+import { companionBrowserArgs, companionBrowserProfile } from './detached-browser.js';
 
 type Exists = (candidate: string) => boolean;
 type Launch = typeof launchCommand;
@@ -14,6 +15,11 @@ export interface PreferredBrowserOpenOptions {
   usable?: Exists;
   /** Test seam for launch failure/retry ordering. */
   launch?: Launch;
+}
+
+export interface CompanionBrowserTarget {
+  executable: string;
+  profileDir: string;
 }
 
 function isExecutableBrowser(candidate: string, platform: NodeJS.Platform): boolean {
@@ -125,6 +131,39 @@ export function findPreferredBrowser(
     if (exists(candidate)) return candidate;
   }
   return null;
+}
+
+/**
+ * Chooses the single browser/profile pair that owns browser-backed automation for this app run.
+ * Discovery may inspect several installed Chromium candidates, but command delivery never fans out
+ * between them: once selected, this pair is the custody identity until the app restarts.
+ */
+export function companionBrowserTarget(
+  userDataDir: string,
+  options: Omit<PreferredBrowserOpenOptions, 'launch'> = {}
+): CompanionBrowserTarget | null {
+  const platform = options.platform ?? process.platform;
+  const env = options.env ?? process.env;
+  const executable = findPreferredBrowser(platform, env, options.home, options.usable);
+  if (!executable) return null;
+  return {
+    executable,
+    profileDir: companionBrowserProfile(userDataDir, platform)
+  };
+}
+
+/** Launches exactly the selected companion target; failure never falls through to another browser. */
+export async function openInCompanionBrowser(
+  url: string,
+  target: CompanionBrowserTarget,
+  launch: Launch = launchCommand
+): Promise<string> {
+  await launch(
+    target.executable,
+    companionBrowserArgs({ profileDir: target.profileDir, initialUrl: url }),
+    path.dirname(target.executable)
+  );
+  return target.executable;
 }
 
 /**

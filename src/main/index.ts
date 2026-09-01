@@ -3,7 +3,7 @@
  */
 
 import path from 'node:path';
-import { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session, shell } from 'electron';
+import { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session } from 'electron';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
@@ -58,7 +58,7 @@ import { startSessionRetentionMaintenance } from './session/retention.js';
 import { runShutdownSequence } from './shutdown.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { windowLayoutForWorkArea } from './window-layout.js';
-import { openInPreferredBrowser } from './browser.js';
+import { companionBrowserTarget, openInCompanionBrowser } from './browser.js';
 import {
   createWindowActivationGate,
   ownsAppRuntime,
@@ -231,6 +231,7 @@ void app.whenReady().then(async () => {
   // primary that was told to quit before ready, must never touch the primary's shared userData.
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
   const userData = app.getPath('userData');
+  const companionTarget = companionBrowserTarget(userData);
   initConfigPath(userData);
   initSecretsPath(userData);
   initSessionStore(userData);
@@ -262,23 +263,13 @@ void app.whenReady().then(async () => {
   // decides whether a previous run has been abandoned partly from which ChatGPT tabs are
   // open, and without this it can only answer "I cannot see" — which it treats, on
   // purpose, as a reason to leave the existing run alone.
-  // How a fresh chat actually opens. The app asks the OS to open the ChatGPT URL, which
-  // launches the browser if it is closed and creates the tab if there is none — the two
-  // cases the old "wait for a ChatGPT tab to poll us" delivery could never handle. Wired
-  // before any restored command is delivered, so a resume queued yesterday opens as soon
-  // as the bridge starts rather than waiting for the user to visit ChatGPT.
+  // Browser-backed orchestration owns one Chromium profile, separate from the user's personal
+  // browser. Existing extension/bridge custody still owns commands and conversation identity; the
+  // launcher only opens the exact URL inside that one selected profile. Never fall back to the
+  // personal default browser, because doing so would silently surrender the isolation boundary.
   setBrowserOpener(async (url) => {
-    try {
-      const browser = await openInPreferredBrowser(url);
-      if (browser) return;
-    } catch (error) {
-      logWarn(`could not open ChatGPT in the preferred Chromium browser: ${(error as Error).message}`);
-    }
-    logWarn(
-      'Chrome/Chromium was not found for a browser-backed worker/resume command; falling back to the default browser. ' +
-        'If that browser does not have the Chat On Steroids extension loaded, open the generated ChatGPT URL in Chrome instead.'
-    );
-    await shell.openExternal(url);
+    if (!companionTarget) throw new Error('Chrome or Chromium was not found for the companion browser');
+    await openInCompanionBrowser(url, companionTarget);
   });
 
   // Persistence is a process-lifetime dependency of the broker, not a feature-toggle
