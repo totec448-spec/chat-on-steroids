@@ -49,6 +49,7 @@ import {
   readHandoff
 } from './session/store.js';
 import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
+import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
 import {
   clearAgent,
   onSwarmChange,
@@ -538,6 +539,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       total: page.total,
       nextCursor: page.nextCursor,
       activeId: activeSessionId(),
+      // Live policy, not session history: a block is keyed by ChatGPT conversation and does
+      // not belong in any session's meta.json. It rides the list for the same reason
+      // `activeId` and `pressure` do — one paint, one round trip.
+      blocked: blockedChatIds(),
       pressure: sessions.map((summary) => ({
         id: summary.id,
         ...tokenPressure(summary.estimatedTokens, config.sessions.advisoryTokens, config.sessions.limitTokens)
@@ -582,6 +587,32 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     return true;
   });
 
+  /**
+   * Blocks or releases the ChatGPT conversation this session is attached to.
+   *
+   * The renderer names a session, never a conversation, for the same reason `sessions:openChat`
+   * does: the stored conversation id is re-read and validated here, so a renderer-supplied id
+   * can neither invent a conversation nor block one it is not looking at. A session with no
+   * conversation has no rogue turn to stop and is refused rather than silently ignored.
+   */
+  handle('sessions:block', async (payload) => {
+    const { id, blocked } = z
+      .object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), blocked: z.boolean() })
+      .parse(payload);
+    const summary = await getSession(id);
+    const conversationId = summary?.conversationId;
+    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
+      throw new Error('This session has no valid ChatGPT conversation');
+    }
+    setChatBlocked(conversationId, blocked);
+    logInfo(
+      blocked
+        ? `conversation ${conversationId} blocked; its tool calls are refused until it is released`
+        : `conversation ${conversationId} released; its tool calls run again`
+    );
+    return blockedChatIds();
+  });
+
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     // Detach first. The recorder maps live ChatGPT conversations to session ids, so
@@ -589,6 +620,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     // longer existed — the events went to a resurrected half-session with no summary.
     // Forgetting the mapping makes the next observation open a fresh session instead.
     const detached = forgetSession(id);
+    // Release first. The block button lives on this row, so a block left behind by the row's
+    // deletion would refuse that conversation's tools with nothing left in the app that could
+    // ever release it.
+    const summary = await getSession(id);
+    if (summary?.conversationId) setChatBlocked(summary.conversationId, false);
     await deleteSession(id);
     logInfo(
       detached.length > 0

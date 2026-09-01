@@ -105,6 +105,14 @@ let detailFor: string | null = null;
 let detailCursor: number | null = null;
 /** The last swarm the app reported, so the header can summarise it without the log. */
 let swarm: SwarmState | null = null;
+/**
+ * ChatGPT conversations the user has blocked from using local tools.
+ *
+ * Live policy the main process owns, keyed by conversation rather than by session, and pushed
+ * with every session list. The renderer only ever mirrors it — pressing the button asks the
+ * main process and repaints from the answer it gets back.
+ */
+let blockedChats = new Set<string>();
 /** Badges the list is currently drawn with. See repaintBadges. */
 let badgeKey = '';
 
@@ -192,6 +200,9 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   // The one session that is not a chat. Saying so on the row is what stops it reading
   // as a chat that mysteriously lost its name.
   if (summary.conversationId === null) return [{ text: 'not a chat', tone: '' }];
+  // First, and in the failure tone: a blocked chat is the one state on this row that says the
+  // app is actively refusing work, and the user came to the list to find it at a glance.
+  if (blockedChats.has(summary.conversationId)) badges.push({ text: 'blocked', tone: 'is-failed' });
   if (origin?.kind === 'worker') badges.push({ text: origin.agentId ?? 'worker', tone: '' });
   else if (origin?.kind === 'resume') badges.push({ text: 'resumed', tone: '' });
   else if (summary.agents.includes('prime')) badges.push({ text: 'prime', tone: '' });
@@ -267,6 +278,23 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 
   const actions: HTMLButtonElement[] = [];
   if (summary.conversationId) {
+    // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
+    // here can — it takes this chat's tools away, and a model whose every call is refused with
+    // an instruction to stop finishes its turn on its own.
+    const blocked = blockedChats.has(summary.conversationId);
+    const block = document.createElement('button');
+    block.className = `btn sess-action sess-block${blocked ? ' is-blocked' : ''}`;
+    block.type = 'button';
+    block.title = blocked
+      ? 'Release this chat: its tool calls run again'
+      : 'Block this chat: every tool call it makes is refused and it is told to stop';
+    block.append(icon(blocked ? 'i-play' : 'i-ban'));
+    block.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void toggleSessionBlock(summary.id, !blocked);
+    });
+    actions.push(block);
+
     const open = document.createElement('button');
     open.className = 'btn sess-action sess-open';
     open.type = 'button';
@@ -281,6 +309,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 
   row.append(top, sub, bar, ...actions, remove);
   return row;
+}
+
+async function toggleSessionBlock(id: string, blocked: boolean): Promise<void> {
+  const next = await run(api.setSessionBlocked(id, blocked));
+  if (next === null) return;
+  blockedChats = new Set(next);
+  paintSessions();
 }
 
 async function deleteSession(id: string): Promise<void> {
@@ -333,6 +368,9 @@ async function loadSessions(): Promise<void> {
   }
   sessionTotal = typeof list.total === 'number' ? list.total : list.sessions.length;
   activeId = list.activeId;
+  // Whole-set replacement on every page, older pages included: a block belongs to a
+  // conversation, not to whichever page happened to carry its row.
+  blockedChats = new Set(list.blocked);
   if (loadedOlderSessions) {
     for (const entry of list.pressure) pressure.set(entry.id, entry);
   } else {
@@ -359,6 +397,7 @@ async function loadMoreSessions(): Promise<void> {
     loadedOlderSessions = true;
     sessionTotal = page.total;
     sessionPageCursor = page.nextCursor;
+    blockedChats = new Set(page.blocked);
     for (const entry of page.pressure) pressure.set(entry.id, entry);
     paintSessions();
   } finally {
@@ -1350,7 +1389,7 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalPromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalPrompt').value = DEFAULT_GOAL_SYSTEM_PROMPT;
     await save();
-    toast('Goal prompt restored to default');
+    toast('Goal prompt (no task) restored to default');
   });
   $<HTMLTextAreaElement>('goalObjectivePrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalObjectivePromptEdit').addEventListener('click', () => {
@@ -1362,7 +1401,7 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalObjectivePromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalObjectivePrompt').value = DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT;
     await save();
-    toast('Goal driver prompt restored to default');
+    toast('Goal prompt (with a task) restored to default');
   });
   $<HTMLTextAreaElement>('goalLoopPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalLoopPromptEdit').addEventListener('click', () => {

@@ -594,6 +594,57 @@ describe('session IPC contracts', () => {
     );
   });
 
+  it('blocks and releases the stored conversation, and never a renderer-supplied one', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const conversationId = 'aaaaaaaa-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'rogue chat', conversationId });
+
+    const blocked = (await handlers.get('sessions:block')!(null, { id: session.id, blocked: true })) as any;
+    expect(blocked.ok, blocked.error).toBe(true);
+    expect(blocked.data).toEqual([conversationId]);
+    expect(isChatBlocked(conversationId)).toBe(true);
+
+    const released = (await handlers.get('sessions:block')!(null, { id: session.id, blocked: false })) as any;
+    expect(released.ok, released.error).toBe(true);
+    expect(released.data).toEqual([]);
+    expect(isChatBlocked(conversationId)).toBe(false);
+
+    // The renderer names a session; it can neither name a conversation nor block a session
+    // that has none — the same boundary `sessions:openChat` holds.
+    const unattributed = await createSession({ title: 'no conversation', conversationId: null });
+    const refused = (await handlers.get('sessions:block')!(null, { id: unattributed.id, blocked: true })) as any;
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
+    resetBlockedChatsForTests();
+  });
+
+  it('releases a block when the row that carries its button is deleted', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const conversationId = 'bbbbbbbb-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'blocked then deleted', conversationId });
+    await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
+    expect(isChatBlocked(conversationId)).toBe(true);
+
+    const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+    expect(deleted.ok, deleted.error).toBe(true);
+    // Otherwise the conversation stays refused with nothing left in the app to release it.
+    expect(isChatBlocked(conversationId)).toBe(false);
+  });
+
+  it('reports the blocked set with every session list, so one paint marks every row', async () => {
+    const { resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const conversationId = 'cccccccc-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'listed while blocked', conversationId });
+
+    expect((await sessionList()).data.blocked).toEqual([]);
+    await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
+    expect((await sessionList()).data.blocked).toEqual([conversationId]);
+    resetBlockedChatsForTests();
+  });
+
   it('opens only the stored conversation URL in Chrome', async () => {
     const session = await createSession({
       title: 'open me',

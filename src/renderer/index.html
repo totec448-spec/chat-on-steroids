@@ -48,6 +48,8 @@
           <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l1 12.5h9L17.5 7" />
         </g>
         <g id="i-x"><path d="M6 6l12 12M18 6 6 18" /></g>
+        <g id="i-ban"><circle cx="12" cy="12" r="8" /><path d="M6.3 6.3 17.7 17.7" /></g>
+        <g id="i-play"><path d="M8 5.5 18.5 12 8 18.5Z" /></g>
         <g id="i-key"><circle cx="8" cy="12" r="3.5" /><path d="M11.5 12H20M17 12v3M20 12v2.5" /></g>
         <g id="i-sun">
           <circle cx="12" cy="12" r="4" />
@@ -628,14 +630,14 @@
 
                   <div class="setting">
                     <span class="setting-text">
-                      <b>System prompt</b>
-                      <em>Used in chats with no goal of their own. The Goal model reads what you already asked for in the chat and keeps ChatGPT going until it is done.</em>
+                      <b>Goal prompt, no task</b>
+                      <em>Used while Goal is on in a chat that carries no task of its own. There is no goal to hand over, so the model reads the requirements out of your own messages in the chat, keeps ChatGPT going against them, and answers NO_REPLY once they are all met.</em>
                     </span>
                     <button class="btn" id="goalPromptEdit" type="button">Edit prompt</button>
                   </div>
 
                   <div class="field goal-prompt" id="goalPromptPanel" hidden>
-                    <label for="goalPrompt">Goal system prompt</label>
+                    <label for="goalPrompt">Goal prompt, no task</label>
                     <textarea id="goalPrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
                     <div class="step-actions">
@@ -645,14 +647,14 @@
 
                   <div class="setting">
                     <span class="setting-text">
-                      <b>Goal prompt</b>
-                      <em>Used instead of the above once a chat carries its own goal. Drives ChatGPT towards that goal and writes the opening message of a new chat.</em>
+                      <b>Goal prompt, with a task</b>
+                      <em>Used instead of the above once a chat carries a task of its own. The task itself is sent word for word underneath this prompt on every single turn — it is the requirements, and ChatGPT's account of them does not count. Stops once the task is completely done. This is also the prompt that writes the opening message of a chat you start from a task.</em>
                     </span>
                     <button class="btn" id="goalObjectivePromptEdit" type="button">Edit prompt</button>
                   </div>
 
                   <div class="field goal-prompt" id="goalObjectivePromptPanel" hidden>
-                    <label for="goalObjectivePrompt">Goal driver prompt</label>
+                    <label for="goalObjectivePrompt">Goal prompt, with a task</label>
                     <textarea id="goalObjectivePrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
                     <div class="step-actions">
@@ -663,13 +665,13 @@
                   <div class="setting">
                     <span class="setting-text">
                       <b>Loop prompt</b>
-                      <em>Used instead of both of the above while Loop is on. Never stops: it writes a message every turn, with or without a goal of its own.</em>
+                      <em>Used instead of both of the above whenever Loop is on — one prompt for both cases, because Loop never stops and so never has to decide whether the job is done. A task, if the chat has one, is sent underneath it exactly as above; without one the job is read out of your messages. A message goes out every turn until you switch Loop off.</em>
                     </span>
                     <button class="btn" id="goalLoopPromptEdit" type="button">Edit prompt</button>
                   </div>
 
                   <div class="field goal-prompt" id="goalLoopPromptPanel" hidden>
-                    <label for="goalLoopPrompt">Loop system prompt</label>
+                    <label for="goalLoopPrompt">Loop prompt</label>
                     <textarea id="goalLoopPrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. There is no stop response here - the app refuses one and asks again.</p>
                     <div class="step-actions">

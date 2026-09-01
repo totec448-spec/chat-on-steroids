@@ -328,6 +328,7 @@ src/main/codex/apply-patch/*  V4A parser / matcher / runtime / shell interceptio
 src/main/session/store.ts     durable sessions, messages, assets, handoffs
 src/main/session/recorder.ts  merges MCP truth with browser observations
 src/main/session/correlation.ts  requestId → conversationId proof registry
+src/main/session/blocked-chats.ts  user-blocked conversations; the app's only stop for a rogue turn
 src/main/session/continuation.ts transactional Compact & Resume rebind
 src/main/session/resume-gate.ts tiny pre-commit gate preventing resume shadow sessions
 src/main/session/handoff.ts   validates/prepares the brief; continuation publishes it
@@ -390,6 +391,7 @@ durable or externally re-observable fact can reconstruct it.
 | one MCP request identity | `mcp/inbound.ts` | request lifetime in AsyncLocalStorage | normalize `x-request-id` before any higher-level routing |
 | one in-flight call's mutable evidence | `mcp/call-context.ts` | request lifetime | tool outcome/changes/assets/caller travel with the call; wider “settling” lifetime includes attribution + recording after the handler returned |
 | request→conversation proof | `session/correlation.ts` | durable named state | only exact request-id evidence is authoritative for modern attribution; every other placement is explicitly weaker/legacy and never a substitute for identity-sensitive routing |
+| user-blocked conversations | `session/blocked-chats.ts` | durable named state, released only by the user | the only stop this app can make on a rogue ChatGPT turn. Stored per **conversation**, matched through the existing exact request-id proof, and enforced on nothing else: a call with no proven owner is never blocked |
 | local session identity | `session/store.ts` | `sessions/<id>/meta.json` + `events.jsonl` + canonical shards/assets/handoffs | ChatGPT conversation id is a frontend binding; Compact & Resume moves it, never copies the local session |
 | canonical authored message identity | `store.ts` + `shared/session.ts` | one replaceable `messages/*.json` shard per logical id | streaming revisions replace the same logical message; event chronology keeps the original anchor/seq |
 | mutable timeline progress/activity identity | `shared/session.ts::foldProgress` + recorder/store origins | append snapshots from page/native **or app-owned** progress, folded on read by namespaced `progressId` / page-tool `messageId` | newest content stays at the earliest logical position; unknown identity is never guessed into a fold; app recovery status uses this same mechanism rather than a parallel status store |
@@ -939,8 +941,44 @@ Agent routing is *downstream* of this. Do not start there.
   debounced independently from attributed JSONL, startup reconciles recorded proof even when a
   non-empty snapshot already exists.
 
+### 11.1 Block Chat — the one stop this app can make
+
+A wedged ChatGPT page can leave a turn running with no working Stop control: the model keeps
+issuing connector calls, the user cannot see the turn's messages and cannot cancel it, and every
+one of those calls arrives here correctly attributed. **The app does not try to end that turn** —
+nothing it can reach owns it. It owns whether the turn touches this machine, and refusing every
+tool is enough: `kernel.ts` returns `BLOCKED_CHAT_REFUSAL` (`CHAT_BLOCKED: …`), which tells the
+model to abandon the task, make no further tool calls and answer, so the turn ends itself.
+
+`session/blocked-chats.ts` is a durable set of **conversation ids**, released only by the user.
+Conversation, not request id, because `correlation.ts` already proves `requestId →
+conversationId` and one ChatGPT turn issues all of its connector calls under one request id: a
+list of request ids would ban the turn the user was looking at and nothing the same chat did a
+second later.
+
+- The refusal is the **first** branch of the dispatch chain in `kernel.ts::dispatchTracked`, above
+  every worker-lifecycle verdict, and applies to every tool on every surface — `agents` finish
+  included. A blocked chat has nothing left to finish.
+- It is **exact-identity only**, and never waits for evidence. It refuses a call whose *proven*
+  owner is blocked and never one whose owner is merely unknown. That costs nothing: the user
+  blocks a chat they can already watch making attributed calls, so its request id is proven and
+  every later call in that turn resolves from the registry immediately. Do not "strengthen" this
+  into blocking unattributed calls — that refuses an innocent chat's read to punish a different
+  chat's turn.
+- It survives restart, because the turn can. It is released by the user's own press, or by
+  deleting the session whose row carries that button (`ipc.ts::sessions:delete`) — otherwise a
+  block could outlive the only UI able to lift it.
+
+Renderer: `chat.ts::sessionRow()` draws the toggle beside Open Chat, and `sessionBadges()` marks
+the row `blocked`. The blocked set rides `sessions:list` as live policy — it is keyed by
+conversation and must never be written into a session's `meta.json`. Preload exposes only
+`setSessionBlocked(id, blocked)`; `ipc.ts` re-reads and validates that session's stored
+conversation id, exactly as `sessions:openChat` does, so the renderer can never name a
+conversation of its own.
+
 **Tests.** `correlation.test.ts`, `mcp-inbound.test.ts`, `fiber.test.ts`,
-`content-script.test.ts`, `swarm.test.ts`.
+`content-script.test.ts`, `swarm.test.ts`, `blocked-chats.test.ts`, `mcp.test.ts`
+("blocked chats"), `ipc.test.ts`.
 
 ## 12. Session recording — `recorder.ts`, `store.ts`
 
@@ -2546,6 +2584,7 @@ count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating 
 | Suite | Covers |
 | --- | --- |
 | `agents` | broker rules, prime/worker identity, at-least-once messaging |
+| `blocked-chats` | user block/release, durability across restart, and the refusal's stop wording |
 | `bridge` | extension<->app HTTP bridge, routes, auth, orchestration |
 | `browser` | Chrome/Chromium candidate ordering and launch fallback for orchestration URLs |
 | `call-context` | running vs settling vs widest MCP-request lifetime accounting |

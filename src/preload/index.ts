@@ -42,6 +42,8 @@ export interface GoalModelPage {
 export interface SessionList {
   sessions: SessionSummary[];
   activeId: string | null;
+  /** ChatGPT conversation ids the user has blocked from using local tools. */
+  blocked: string[];
   pressure: Array<TokenPressure & { id: string }>;
   /** Total retained sessions, not merely the current IPC page. */
   total: number;
@@ -88,6 +90,10 @@ const api = {
   getSession: (id: string, options?: { from?: number; limit?: number }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
+  // Stops a chat this app cannot stop in the page: every tool call it has already been proved
+  // to own is refused until it is released. Returns the whole blocked set, so one press
+  // repaints without a second read.
+  setSessionBlocked: (id: string, blocked: boolean) => call<string[]>('sessions:block', { id, blocked }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 
