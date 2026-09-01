@@ -131,6 +131,19 @@ beforeEach(() => {
 const PRIME_CHAT = 'c-prime';
 const prime: Caller = { conversationId: PRIME_CHAT };
 
+/**
+ * A read of `/anything` that actually reached the sandbox and was refused on roots.
+ *
+ * The wording is platform-shaped and both spellings have to be here. On Windows `/anything`
+ * is a virtual path whose first segment names no approved root, so `sandbox.ts` answers
+ * `Unknown root "/anything"`. On macOS and Linux the same string is a native absolute path,
+ * which takes the containment branch instead and answers that it is not inside an approved
+ * folder. Matching only the Windows half asserts the host, not the behaviour — the point of
+ * these assertions is that the call ran and failed honestly about roots rather than being
+ * stopped at the identity fence.
+ */
+const REFUSED_ON_ROOTS = /unknown root|not found|not inside an approved folder/i;
+
 interface StartedSwarm {
   prime: Caller;
   spawned: Array<{ id: string; task: string }>;
@@ -2043,7 +2056,7 @@ describe('through the MCP endpoint', () => {
     await setEnabled(true);
     expect(text).toContain('WORKER_SLEEPING');
     expect(text).toContain('Nothing was run');
-    expect(text).not.toMatch(/unknown root|not found/i);
+    expect(text).not.toMatch(REFUSED_ON_ROOTS);
     expect(identify({ conversationId: 'c-prime-b' }).id).toBe(PRIME_ID);
   });
 
@@ -2058,7 +2071,7 @@ describe('through the MCP endpoint', () => {
     await setEnabled(true, 3, true);
     const anonymous = await callTool('read', { paths: ['/anything'] });
     expect(anonymous).not.toContain('CALLER_IDENTITY_REQUIRED');
-    expect(anonymous).toMatch(/unknown root|not found/i);
+    expect(anonymous).toMatch(REFUSED_ON_ROOTS);
 
     const requestId = 'wfr_retired_worker_allow_unattributed';
     await recordChatObservations('c-retired-worker-policy', [
