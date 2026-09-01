@@ -93,16 +93,26 @@ interface Hook {
     objective: {
       text: string;
       editing: boolean;
-      /** Which link opened the editor, and therefore the mode Save will write. */
+      /** The mode Save will write: the slider in a chat, the link that was pressed above a New Chat. */
       mode: string;
+      /** Whether Save may fire at all — Off is not a mode a task can be written into. */
+      savable: boolean;
       summary: string;
       /** The mode this chat is actually being driven in — see goalDrivingMode() in the app. */
       driving: string;
-      /** One per mode: writing the goal is where the mode is chosen. */
-      actions: Array<{ mode: string; label: string; hint: string }>;
+      /** One in a chat; two above a New Chat, where writing the goal chooses the mode. */
+      actions: Array<{ mode: string; label: string; hint: string; disabled?: boolean }>;
       available: boolean;
       unavailable: string;
     };
+    /** Off | Goal | Loop as one control. Absent above a New Chat, which has no chat to set. */
+    mode: {
+      value: string;
+      options: Array<{ value: string; label: string; hint: string }>;
+      note: string;
+      warn: boolean;
+      disabled: boolean;
+    } | null;
     action: { label: string; hint: string; action: string };
   };
   toggleMenu(): void;
@@ -6955,7 +6965,7 @@ describe('the Compact & resume control', () => {
    * old action is the last row of the sheet, so nothing that used to be reachable stopped
    * being reachable.
    */
-  it('opens a settings sheet with every switch and the compaction action', async () => {
+  it('opens a settings sheet with the switch, the mode slider and the compaction action', async () => {
     live = await harness();
     live.hook.injectControl();
     live.hook.toggleMenu();
@@ -6964,10 +6974,16 @@ describe('the Compact & resume control', () => {
     expect(menu, 'the gear opened nothing').not.toBeNull();
     expect(menu.hidden).toBe(false);
     expect([...menu.querySelectorAll('.clf-menu-row')].map((row) => (row as HTMLElement).dataset.clfRow)).toEqual([
-      'autoCompact',
-      'goal',
-      'loop'
+      'autoCompact'
     ]);
+    // Goal and Loop are one setting, so they are one control: three stops, one of them true.
+    const track = menu.querySelector('.clf-menu-mode-track') as HTMLElement;
+    expect([...track.querySelectorAll('.clf-menu-mode-option')].map((stop) => stop.textContent)).toEqual([
+      'Off',
+      'Goal',
+      'Loop'
+    ]);
+    expect(track.dataset.clfValue).toBe('off');
     expect(menu.querySelector('.clf-menu-action')!.textContent).toBe('Compact & resume now');
 
     live.hook.closeMenu();
@@ -7133,16 +7149,17 @@ describe('the Compact & resume control', () => {
   });
 
   /**
-   * Goal and Loop are one setting behind two switches, and this sheet reads it as one value.
+   * Goal and Loop are one setting, and the slider is one handle, so it reads one value.
    *
-   * That is what makes it impossible to paint both of them on: there is nothing to keep in
-   * step, only a mode to read. The click sends the switch that moved, the app decides, and the
-   * answer is what repaints the pair.
+   * That is what makes it impossible to say both: there is nothing to keep in step, only a
+   * position to read. The click sends the switch that moved, the app decides, and the answer
+   * is what moves the handle.
    */
-  it('sends the Loop switch on its own and never draws both switches on', async () => {
+  it('sends one switch per stop of the mode slider and never marks two stops', async () => {
     // The app owns the mode, so the stub does too: the write moves it and every later poll
     // reports the moved value, exactly as the real pair of endpoints does.
     let mode = 'loop';
+    let enabled = true;
     live = await harness(undefined, {
       activity: () => ({
         ok: true,
@@ -7152,17 +7169,25 @@ describe('the Compact & resume control', () => {
           nextSince: 0,
           pendingTools: 0,
           job: null,
-          goal: { enabled: true, mode, hasKey: true, model: 'deepseek/deepseek-v4-flash', draft: null }
+          goal: { enabled, own: true, mode, hasKey: true, model: 'deepseek/deepseek-v4-flash', draft: null }
         }
       })
     });
     live.reply.set('settings_set', (message: Record<string, unknown>) => {
-      mode = message['goal'] === true ? 'goal' : message['loop'] === true ? 'loop' : mode;
+      if (message['goal'] === true) {
+        enabled = true;
+        mode = 'goal';
+      } else if (message['loop'] === true) {
+        enabled = true;
+        mode = 'loop';
+      } else if (message['goal'] === false || message['loop'] === false) {
+        enabled = false;
+      }
       return {
         ok: true,
         data: {
           context: { auto: false, threshold: 300_000, warn: 300_000, limit: 400_000 },
-          goal: { enabled: true, mode, hasKey: true, model: 'deepseek/deepseek-v4-flash' }
+          goal: { enabled, own: true, mode, hasKey: true, model: 'deepseek/deepseek-v4-flash' }
         }
       };
     });
@@ -7170,27 +7195,38 @@ describe('the Compact & resume control', () => {
     live.hook.injectControl();
     live.hook.toggleMenu();
 
-    const loopRow = live.document.querySelector('[data-clf-row="loop"]') as HTMLButtonElement;
-    const goalRow = live.document.querySelector('[data-clf-row="goal"]') as HTMLButtonElement;
-    expect(loopRow.getAttribute('aria-checked')).toBe('true');
-    expect(goalRow.getAttribute('aria-checked')).toBe('false');
+    const stops = () =>
+      [...live!.document.querySelectorAll('.clf-menu-mode-option')].map(
+        (stop) => `${(stop as HTMLElement).dataset.clfMode}:${stop.getAttribute('aria-checked')}`
+      );
+    expect(stops()).toEqual(['off:false', 'goal:false', 'loop:true']);
 
-    // Turning Goal on is what turns Loop off — one write, carrying one switch.
-    goalRow.click();
+    // Moving to Goal is what turns Loop off — one write, carrying one switch.
+    (live.document.querySelector('.clf-menu-mode-option[data-clf-mode="goal"]') as HTMLButtonElement).click();
     await settle();
-    const writes = live.sent.filter((message) => message.type === 'settings_set');
+    let writes = live.sent.filter((message) => message.type === 'settings_set');
     expect(writes).toHaveLength(1);
     expect(writes[0]).toMatchObject({ goal: true });
     expect(writes[0]).not.toHaveProperty('loop');
+    expect(stops()).toEqual(['off:false', 'goal:true', 'loop:false']);
 
-    const afterGoal = live.document.querySelector('[data-clf-row="goal"]') as HTMLButtonElement;
-    const afterLoop = live.document.querySelector('[data-clf-row="loop"]') as HTMLButtonElement;
-    expect(afterGoal.getAttribute('aria-checked')).toBe('true');
-    expect(afterLoop.getAttribute('aria-checked')).toBe('false');
+    // Off is the stop the two switches never had a button for: it turns off whichever one the
+    // slider is actually sitting on, and it is a write about this chat like the other two.
+    (live.document.querySelector('.clf-menu-mode-option[data-clf-mode="off"]') as HTMLButtonElement).click();
+    await settle();
+    writes = live.sent.filter((message) => message.type === 'settings_set');
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toMatchObject({ goal: false });
+    expect(stops()).toEqual(['off:true', 'goal:false', 'loop:false']);
+
+    // The stop it is already at is not a change, so it is not a write.
+    (live.document.querySelector('.clf-menu-mode-option[data-clf-mode="off"]') as HTMLButtonElement).click();
+    await settle();
+    expect(live.sent.filter((message) => message.type === 'settings_set')).toHaveLength(2);
   });
 
   /** The missing credential is said where the switch is, in the words the app uses. */
-  it('says an OpenRouter key is needed before the goal switch can do anything', async () => {
+  it('says an OpenRouter key is needed before the mode slider can do anything', async () => {
     live = await harness(undefined, {
       activity: () => ({
         ok: true,
@@ -7208,11 +7244,9 @@ describe('the Compact & resume control', () => {
     live.hook.injectControl();
     live.hook.toggleMenu();
 
-    const goal = live.document.querySelector('[data-clf-row="goal"]')!;
-    expect(goal.querySelector('.clf-menu-note')!.textContent).toBe(
-      'OpenRouter API key essential for goal feature'
-    );
-    expect((goal.querySelector('.clf-menu-note') as HTMLElement).dataset.clfWarn).toBe('1');
+    const note = live.document.querySelector('.clf-menu-mode-note') as HTMLElement;
+    expect(note.textContent).toBe('OpenRouter key required');
+    expect(note.dataset.clfWarn).toBe('1');
     // The hover line says the same thing in one breath.
     expect(live.document.querySelector('.clf-compact-btn')!.getAttribute('data-clf-tip')).toContain(
       'Goal on — no API key'
@@ -11491,9 +11525,9 @@ describe('the goal loop', () => {
     live.hook.injectControl();
     live.hook.toggleMenu();
 
-    // Above a New Chat the two switches are gone — they move the app-wide default there,
+    // Above a New Chat the mode slider is gone — it would move the app-wide default there,
     // having no chat to belong to, and reading as this chat's mode is what caused the loss.
-    expect(live.document.querySelectorAll('.clf-menu-row[data-clf-row="loop"]')).toHaveLength(0);
+    expect(live.document.querySelectorAll('.clf-menu-mode')).toHaveLength(0);
     const loop = live.document.querySelector('.clf-menu-goal-link[data-clf-goal-mode="loop"]') as HTMLButtonElement;
     expect(loop, 'the New Chat sheet offered no way to add a loop').not.toBeNull();
     expect(loop.textContent).toContain('add specific loop');
@@ -11543,19 +11577,129 @@ describe('the goal loop', () => {
     });
     live.hook.injectControl();
     live.hook.toggleMenu();
-    // In a chat, both switches are there: they are the only way to drive a chat that carries
-    // no goal, and the only way to switch a running loop back off.
-    expect(live.document.querySelectorAll('.clf-menu-row[data-clf-row="loop"]')).toHaveLength(1);
+    // In a chat the slider is there: it is the only way to drive a chat that carries no goal,
+    // and the only way to switch a running loop back off.
+    expect(live.document.querySelectorAll('.clf-menu-mode')).toHaveLength(1);
 
     live.window.history.replaceState({}, '', '/');
     live.hook.observe();
     live.hook.renderControl();
 
-    expect(live.document.querySelectorAll('.clf-menu-row[data-clf-row="goal"]')).toHaveLength(0);
-    expect(live.document.querySelectorAll('.clf-menu-row[data-clf-row="loop"]')).toHaveLength(0);
+    expect(live.document.querySelectorAll('.clf-menu-mode')).toHaveLength(0);
     expect(
       [...live.document.querySelectorAll('.clf-menu-goal-link')].map((node) => node.getAttribute('data-clf-goal-mode'))
     ).toEqual(['goal', 'loop']);
+  });
+
+  /**
+   * Moving the handle while the editor is open, which is the one way a save could reach past Off.
+   *
+   * The editor deliberately survives a repaint, and the slider repaints the sheet under it. So
+   * the mode the Save button is holding has to follow the handle rather than the link that
+   * opened it: an editor opened on Goal and saved after a move to Loop would have written a
+   * Goal and moved the slider back, and saved after a move to Off would have switched the chat
+   * on again behind the control that had just turned it off. The typed sentence is kept
+   * throughout — Off makes Save inert, it does not throw the writing away.
+   */
+  it('follows the mode slider with an open editor, and will not save into Off', async () => {
+    let enabled = true;
+    let mode = 'goal';
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({
+        ok: true,
+        data: {
+          entries: [],
+          stream: [],
+          nextSince: 0,
+          pendingTools: 0,
+          job: null,
+          // A task already written down, so the editor's Clear is on the row as well: it is
+          // an edit like the other two and has to answer to the slider the same way.
+          goal: { enabled, own: true, mode, hasKey: true, model: MODEL, objective: 'ship the port', blocked: '' }
+        }
+      })
+    });
+    live.reply.set('settings_set', (message: Record<string, unknown>) => {
+      if (message['goal'] === true) {
+        enabled = true;
+        mode = 'goal';
+      } else if (message['loop'] === true) {
+        enabled = true;
+        mode = 'loop';
+      } else if (message['goal'] === false || message['loop'] === false) {
+        enabled = false;
+      }
+      return {
+        ok: true,
+        data: {
+          context: { auto: false, threshold: 300_000, warn: 300_000, limit: 400_000 },
+          goal: { enabled, own: true, mode, hasKey: true, model: MODEL }
+        }
+      };
+    });
+    await live.hook.pullActivity();
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+
+    (live.document.querySelector('.clf-menu-goal-link') as HTMLButtonElement).click();
+    const box = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    box.value = 'port the module';
+    box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
+    const save = () => live!.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement;
+    expect(save().textContent).toBe('Save as goal');
+    expect(save().disabled).toBe(false);
+
+    // Moved to Loop mid-sentence: the same words, saved the other way.
+    (live.document.querySelector('.clf-menu-mode-option[data-clf-mode="loop"]') as HTMLButtonElement).click();
+    await settle();
+    expect((live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement).value).toBe('port the module');
+    expect(save().textContent).toBe('Save as loop');
+    expect(save().disabled).toBe(false);
+
+    // And to Off, where there is nothing to save into. The sentence stays; the button does not fire.
+    (live.document.querySelector('.clf-menu-mode-option[data-clf-mode="off"]') as HTMLButtonElement).click();
+    await settle();
+    expect((live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement).value).toBe('port the module');
+    expect(save().disabled).toBe(true);
+    save().click();
+    await settle();
+    expect(live.sent.filter((message) => message.type === 'goal_objective')).toEqual([]);
+    // Clear is the same act with the text left out, so Off stops it too — otherwise the one
+    // reachable edit at Off would be the one that deletes the task.
+    const clear = live.document.querySelector('.clf-menu-goal-clear') as HTMLButtonElement;
+    expect(clear.disabled).toBe(true);
+    clear.click();
+    await settle();
+    expect(live.sent.filter((message) => message.type === 'goal_objective')).toEqual([]);
+    // A disabled button hears no pointer, so the reason has to hang on the row around it.
+    expect(
+      (live.document.querySelector('.clf-menu-goal-buttons') as HTMLElement).getAttribute('data-clf-tip')
+    ).toBe('Pick Goal or Loop above first — Off writes nothing.');
+
+    // Back on, and it saves as the mode the handle is at now.
+    (live.document.querySelector('.clf-menu-mode-option[data-clf-mode="loop"]') as HTMLButtonElement).click();
+    await settle();
+    expect(save().disabled).toBe(false);
+    expect((live.document.querySelector('.clf-menu-goal-clear') as HTMLButtonElement).disabled).toBe(false);
+    expect(live.document.querySelector('.clf-menu-goal-buttons')!.hasAttribute('data-clf-tip')).toBe(false);
+    save().click();
+    await settle();
+    expect(live.sent.filter((message) => message.type === 'goal_objective')).toMatchObject([
+      { conversationId: CHAT, text: 'port the module', mode: 'loop' }
+    ]);
+
+    // Closed again, and back at Off: the link is dead and the row it sits in says why, so the
+    // explanation is not sealed inside a control that cannot be hovered.
+    (live.document.querySelector('.clf-menu-goal-cancel') as HTMLButtonElement).click();
+    (live.document.querySelector('.clf-menu-mode-option[data-clf-mode="off"]') as HTMLButtonElement).click();
+    await settle();
+    const link = live.document.querySelector('.clf-menu-goal-link') as HTMLButtonElement;
+    expect(link.disabled).toBe(true);
+    expect(link.hasAttribute('data-clf-tip')).toBe(false);
+    expect(
+      (live.document.querySelector('.clf-menu-goal-links') as HTMLElement).getAttribute('data-clf-tip')
+    ).toBe('Pick Goal or Loop above first — Off writes nothing.');
   });
 
   /**
@@ -11647,14 +11791,20 @@ describe('the goal loop', () => {
       live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
     }
 
-    it('offers a specific goal under the switch, and shows the one a chat already has', async () => {
+    it('offers one task under the slider, and shows the one a chat already has', async () => {
       await open();
+      // A chat with nothing set is at Off, and Off has no task to write: the slider names the
+      // mode now, so a task saved from here would have to invent one.
       const empty = sheet({ enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' });
       expect(empty.objective).toMatchObject({ summary: '', available: true });
-      expect(empty.objective.actions.map((action) => action.label)).toEqual([
-        'add specific goal',
-        'add specific loop'
-      ]);
+      expect(empty.mode!.value).toBe('off');
+      expect(empty.objective.actions.map((action) => action.label)).toEqual(['add task']);
+      expect(empty.objective.actions[0]!.disabled).toBe(true);
+
+      // On Goal the same one link is live, and it saves into the mode the slider is at.
+      const armed = sheet({ enabled: true, mode: 'goal', hasKey: true, model: MODEL, objective: '', blocked: '' });
+      expect(armed.mode!.value).toBe('goal');
+      expect(armed.objective.actions[0]).toMatchObject({ label: 'add task', mode: 'goal', disabled: false });
 
       const set = sheet({
         enabled: false,
@@ -11667,10 +11817,41 @@ describe('the goal loop', () => {
         summary: 'port the module and make the suite green',
         available: true
       });
-      // A goal is enough on its own: nobody who has just written down where a chat has to
-      // get to should have to find and flip a second switch before it does anything.
+      // A goal is enough on its own, in a chat that has never moved its own switch: nobody who
+      // has just written down where a chat has to get to should have to find a second switch.
       expect(set.tip).toContain('Goal on');
-      expect(set.rows[1]!.note).toContain('on for this chat’s own goal');
+      expect(set.mode!.value).toBe('goal');
+      expect(set.mode!.note).toBe('replies until goal reached');
+      expect(set.objective.actions.map((action) => action.label)).toEqual(['edit task']);
+    });
+
+    /**
+     * Off is a stop like the other two, and it has to mean off.
+     *
+     * A saved goal speaks for a chat that has never answered for itself — that is what makes
+     * "add specific goal" one decision rather than two. It does not outrank the chat's own
+     * answer, or the Off somebody just chose would leave the loop running with no control left
+     * anywhere in the sheet that claimed to have stopped it.
+     */
+    it('lets a chat that answered for itself sit at Off with its task still written down', async () => {
+      await open();
+      const carried = {
+        enabled: false,
+        hasKey: true,
+        model: MODEL,
+        objective: 'build the voxel sandbox',
+        blocked: ''
+      };
+      // Inherited off: the goal still speaks, so this chat is running as a Goal.
+      expect(sheet(carried).mode!.value).toBe('goal');
+      // Its own off: the slider is at Off, the task is still on show, and nothing may edit it
+      // until a mode is chosen to write it in.
+      const stopped = sheet({ ...carried, own: true });
+      expect(stopped.mode!.value).toBe('off');
+      expect(stopped.mode!.note).toBe('no replies written here');
+      expect(stopped.objective.summary).toBe('build the voxel sandbox');
+      expect(stopped.objective.actions[0]).toMatchObject({ label: 'edit task', disabled: true });
+      expect(stopped.tip).toContain('Goal and Loop off');
     });
 
     /**
@@ -11681,7 +11862,7 @@ describe('the goal loop', () => {
      * started from "add specific goal" by somebody who wanted a loop. The sheet has to say
      * which of the two a chat is actually in, and offer the other one by name.
      */
-    it('names the mode a chat is being driven in, and offers the other one', async () => {
+    it('names the mode a chat is being driven in, and edits the task without duplicating mode controls', async () => {
       await open();
       const carried = {
         enabled: false,
@@ -11692,20 +11873,22 @@ describe('the goal loop', () => {
       };
       // The switch is off, so this is a Goal run whatever the app-wide mode preference says.
       expect(sheet(carried).objective.driving).toBe('goal');
-      expect(sheet(carried).objective.actions.map((action) => action.label)).toEqual([
-        'change the goal',
-        'run it as a loop'
-      ]);
+      expect(sheet(carried).mode!.value).toBe('goal');
+      expect(sheet(carried).objective.actions.map((action) => action.label)).toEqual(['edit task']);
+      expect(sheet(carried).objective.actions[0]!.mode).toBe('goal');
       // Mode alone is not enabled: an off switch never makes this a loop, which is the
       // inheritance rule goalDrivingMode() enforces in the app.
       expect(sheet({ ...carried, mode: 'loop' }).objective.driving).toBe('goal');
 
       const looping = sheet({ ...carried, enabled: true, mode: 'loop' });
       expect(looping.objective.driving).toBe('loop');
-      expect(looping.objective.actions.map((action) => action.label)).toEqual([
-        'run it as a goal',
-        'change the loop'
-      ]);
+      expect(looping.mode!.value).toBe('loop');
+      // The same one task, read the other way: sliding between the two modes changes how it
+      // runs and never what it says.
+      expect(looping.objective.summary).toBe('build the voxel sandbox');
+      expect(looping.objective.actions.map((action) => action.label)).toEqual(['edit task']);
+      expect(looping.objective.actions[0]!.mode).toBe('loop');
+      expect(looping.mode!.note).toBe('replies for ever');
       expect(looping.tip).toContain('never stops on its own');
     });
 
@@ -11715,31 +11898,62 @@ describe('the goal loop', () => {
      * whatever that default happens to say. Two scopes reading as one control is how the run
      * above was started in the wrong mode, so the switches are not drawn there at all.
      */
-    it('drops the two switches above a New Chat and offers both modes instead', async () => {
+    it('drops the mode slider above a New Chat and offers both modes as links instead', async () => {
       await open();
       const fresh = sheet({ enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' }, {
         scope: 'new'
       });
       expect(fresh.rows.map((row) => row.key)).toEqual(['autoCompact']);
+      expect(fresh.mode).toBeNull();
       expect(fresh.objective.actions.map((action) => action.mode)).toEqual(['goal', 'loop']);
+      expect(fresh.objective.actions.map((action) => action.label)).toEqual([
+        'add specific goal',
+        'add specific loop'
+      ]);
       expect(fresh.tip).toContain('Add a goal or a loop to start this chat');
-      // And in a chat they stay, because they are the only way to drive one that carries no
-      // goal of its own — and the only way to switch a running loop back off.
+      // And in a chat the slider stays, because it is the only way to drive one that carries
+      // no goal of its own — and the only way to switch a running loop back off.
       const inChat = sheet({ enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' });
-      expect(inChat.rows.map((row) => row.key)).toEqual(['autoCompact', 'goal', 'loop']);
-      expect(inChat.objective.actions).toHaveLength(2);
+      expect(inChat.rows.map((row) => row.key)).toEqual(['autoCompact']);
+      expect(inChat.mode!.options.map((option) => option.value)).toEqual(['off', 'goal', 'loop']);
+      expect(inChat.objective.actions).toHaveLength(1);
     });
 
-    /** Which link opened the editor is what Save is about to do, so the view has to carry it. */
-    it('carries the mode the editor was opened in', async () => {
+    /** Above a New Chat the link that opened the editor is what Save does, so the view carries it. */
+    it('carries the mode the editor was opened in above a New Chat', async () => {
       await open();
       const goal = { enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' };
-      expect(sheet(goal, { editing: true, editingMode: 'loop' }).objective).toMatchObject({
+      expect(sheet(goal, { editing: true, editingMode: 'loop', scope: 'new' }).objective).toMatchObject({
         editing: true,
-        mode: 'loop'
+        mode: 'loop',
+        savable: true
       });
       // Anything that is not the word "loop" is a goal, never a third state.
-      expect(sheet(goal, { editing: true, editingMode: 'nonsense' }).objective.mode).toBe('goal');
+      expect(sheet(goal, { editing: true, editingMode: 'nonsense', scope: 'new' }).objective.mode).toBe('goal');
+    });
+
+    /**
+     * The one way a save could have reached past an Off.
+     *
+     * The editor survives a repaint — it has to, or an activity poll would eat a half-written
+     * sentence — and the slider repaints the sheet under it. So an editor opened on Goal was
+     * still holding "save as goal" after the handle had been moved to Off, and pressing it
+     * would have switched the chat back on behind the control that had just turned it off.
+     * In a chat the slider owns this, and at Off there is nothing to save into.
+     */
+    it('keeps an open editor pointed at the slider, and lets it save nothing at Off', async () => {
+      await open();
+      const goal = { enabled: true, own: true, mode: 'goal', hasKey: true, model: MODEL, objective: '', blocked: '' };
+      // Opened from the one link, which was a goal link. Moving the handle re-points it.
+      expect(sheet(goal, { editing: true, editingMode: 'goal' }).objective).toMatchObject({
+        mode: 'goal',
+        savable: true
+      });
+      expect(sheet({ ...goal, mode: 'loop' }, { editing: true, editingMode: 'goal' }).objective).toMatchObject({
+        mode: 'loop',
+        savable: true
+      });
+      expect(sheet({ ...goal, enabled: false }, { editing: true, editingMode: 'loop' }).objective.savable).toBe(false);
     });
 
     /**
@@ -11750,8 +11964,7 @@ describe('the goal loop', () => {
     it('says why a worker chat cannot be given a goal', async () => {
       await open();
       const view = sheet({ enabled: true, hasKey: true, model: MODEL, objective: '', blocked: 'worker' });
-      expect(view.rows[1]!.note).toBe('off here: the prime agent writes this worker’s messages');
-      expect(view.rows[1]!.warn).toBe(true);
+      expect(view.mode).toMatchObject({ value: 'off', note: 'the prime writes here', warn: true, disabled: true });
       expect(view.tip).toContain('the prime writes this chat');
       expect(view.objective).toMatchObject({
         available: false,
@@ -11762,7 +11975,7 @@ describe('the goal loop', () => {
     it('keeps pointing at the missing credential the whole feature runs on', async () => {
       await open();
       const view = sheet({ enabled: true, hasKey: false, model: MODEL, objective: '', blocked: '' });
-      expect(view.rows[1]!.note).toBe('OpenRouter API key essential for goal feature');
+      expect(view.mode).toMatchObject({ note: 'OpenRouter key required', warn: true });
       expect(view.objective).toMatchObject({
         available: false,
         unavailable: 'Add an OpenRouter API key in the app first.'

@@ -1816,6 +1816,36 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalSwitchFor('c-switch-child').own).toBe(false);
   });
 
+  /**
+   * The Off half of the same carry, which is the half that only started meaning anything once
+   * a chat's own switch outranked its saved goal.
+   *
+   * Compact & Resume is the one place a chat changes identity, and both halves of what the
+   * user chose have to arrive in the replacement: the sentence, and the answer to whether it
+   * is running. An Off left behind would hand chat B back to the app-wide setting with the
+   * goal still written down — which is the exact state that reads as on.
+   */
+  it('carries a chosen Off, and its goal, into the chat that replaces it', async () => {
+    await goal.setGoalSwitchNow('c-off-parent', 'goal', false);
+    goal.setGoalObjective('c-off-parent', 'port the module');
+    expect(goal.goalSwitchFor('c-off-parent')).toMatchObject({ enabled: false, own: true });
+    expect(goal.goalArmedFor('c-off-parent')).toBe(false);
+
+    expect(goal.moveGoalObjective('c-off-parent', 'c-off-child')).toBe(true);
+    expect(goal.moveGoalSwitch('c-off-parent', 'c-off-child')).toBe(true);
+
+    // Still stopped, still carrying the sentence it was stopped on, and still this chat's own
+    // answer rather than the app-wide one.
+    expect(goal.goalSwitchFor('c-off-child')).toMatchObject({ enabled: false, own: true });
+    expect(goal.goalObjectiveFor('c-off-child')).toBe('port the module');
+    expect(goal.goalArmedFor('c-off-child')).toBe(false);
+
+    // And starting it again in the replacement picks the same goal back up, unretyped.
+    await goal.setGoalSwitchNow('c-off-child', 'loop', true);
+    expect(goal.goalArmedFor('c-off-child')).toBe(true);
+    expect(goal.goalObjectiveFor('c-off-child')).toBe('port the module');
+  });
+
   it('moves the same objective to the replacement chat on resume', () => {
     goal.setGoalObjective('c-obj-parent', 'finish the release unattended');
 

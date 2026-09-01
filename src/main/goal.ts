@@ -486,7 +486,7 @@ export async function acceptGoalReplyNow(input: {
   const active =
     !input.blocked &&
     getConfig().sessions.record &&
-    (goalSwitchEnabledFor(input.conversationId) || goalObjectiveFor(input.conversationId) !== '') &&
+    goalArmedFor(input.conversationId) &&
     (await getSecret('openRouterApiKey')) !== null;
   goalReplies.set(input.conversationId, {
     conversationId: input.conversationId,
@@ -727,6 +727,20 @@ export function goalSwitchFor(conversationId: string): { enabled: boolean; mode:
 /** Is the loop switched on for this chat — ignoring worker identity, which the bridge owns. */
 export function goalSwitchEnabledFor(conversationId: string): boolean {
   return goalSwitchFor(conversationId).enabled;
+}
+
+/**
+ * The switch and the saved goal read as one answer — the same one the bridge gives.
+ *
+ * A chat that has moved its own switch is answered by that switch alone, Off included; a chat
+ * that never has still lets a goal typed into it arm the loop, so writing the finish line does
+ * not also require finding the app-wide setting. Kept beside the switch itself because the two
+ * places that ask — the route and the ticket below — must never drift apart.
+ */
+export function goalArmedFor(conversationId: string): boolean {
+  const held = goalSwitchFor(conversationId);
+  if (held.own) return held.enabled;
+  return held.enabled || goalObjectiveFor(conversationId) !== '';
 }
 
 /**
