@@ -216,17 +216,25 @@ describe('session store', () => {
     const rootPath = sessionsRoot();
     const rootReads = (): number => readdir.mock.calls.filter(([target]) => String(target) === rootPath).length;
 
-    expect(await findSessionByConversation(conversationId)).toBeNull();
-    expect(rootReads()).toBe(1);
-    expect(await findSessionByConversation(conversationId)).toBeNull();
-    expect(rootReads()).toBe(1);
+    // Restored in `finally`, like every other readdir spy in this file. Restoring on the
+    // success path alone turns one failure here into a file-wide cascade: the spy survives
+    // the failing test, the next test binds `realReaddir` to that leaked spy and installs its
+    // own delegating to it, and the pair recurses until "Maximum call stack size exceeded" —
+    // which is what the failure then reads as, in a different test, with the real one buried.
+    try {
+      expect(await findSessionByConversation(conversationId)).toBeNull();
+      expect(rootReads()).toBe(1);
+      expect(await findSessionByConversation(conversationId)).toBeNull();
+      expect(rootReads()).toBe(1);
 
-    const created = await createSession({ conversationId, title: 'now attached' });
-    expect((await findSessionByConversation(conversationId))?.id).toBe(created.id);
-    // The durable create updates the derived attachment catalog directly. No second global
-    // metadata scan is needed merely to discover the session this process just committed.
-    expect(rootReads()).toBe(1);
-    readdir.mockRestore();
+      const created = await createSession({ conversationId, title: 'now attached' });
+      expect((await findSessionByConversation(conversationId))?.id).toBe(created.id);
+      // The durable create updates the derived attachment catalog directly. No second global
+      // metadata scan is needed merely to discover the session this process just committed.
+      expect(rootReads()).toBe(1);
+    } finally {
+      readdir.mockRestore();
+    }
   });
 
   it('invalidates a cached miss before an in-flight session creation can be hidden by it', async () => {
