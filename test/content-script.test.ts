@@ -126,6 +126,8 @@ interface Hook {
   pullActivity(): Promise<void>;
   activityPullDelay(input: Record<string, boolean>): number;
   currentActivityPullDelay(): number;
+  notePresentation(messageId: string, text: string, now?: number): boolean;
+  presentationPending(now?: number): boolean;
   runCommand(): Promise<void>;
   startCompact(automatic?: boolean): Promise<void>;
   chronological<T extends { seq: number; time: number; kind: string; turnId?: string | null }>(entries: T[]): T[];
@@ -5451,6 +5453,36 @@ describe('a content script reloaded into a turn already in flight', () => {
 
     expect(live.hook.currentActivityPullDelay()).toBe(30_000);
   });
+
+  it('stops buying the live cadence for an obligation the app never acknowledges', async () => {
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', { activity: () => activity({}) });
+    const armed = 1_700_000_000_000;
+    expect(live.hook.notePresentation('never-echoed', 'The exact finished answer.', armed)).toBe(true);
+    expect(live.hook.presentationPending(armed + 9_000)).toBe(true);
+    // The app answers an unchanged observation with `changed:false`, which writes no new seq and
+    // therefore never puts this revision on the feed. One round trip is all the obligation was
+    // for, so it ends on its own rather than pinning this tab to 750ms for the life of the tab.
+    expect(live.hook.presentationPending(armed + 10_001)).toBe(false);
+
+    // And the cadence is what that buys. A live obligation still gets the fast round trip it
+    // was added for; one whose window has closed leaves the tab on the ordinary idle cadence
+    // instead of polling four times a minute with a full Fiber walk for the life of the tab.
+    expect(live.hook.activityPullDelay({ presentationPending: live.hook.presentationPending(armed + 9_000) })).toBe(750);
+    expect(live.hook.activityPullDelay({ presentationPending: live.hook.presentationPending(armed + 10_001) })).toBe(10_000);
+  });
+
+  it('does not re-arm the fast cadence for a final answer it has already offered', async () => {
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', { activity: () => activity({}) });
+    const armed = 1_700_000_000_000;
+    expect(live.hook.notePresentation('settled-answer', 'The exact finished answer.', armed)).toBe(true);
+    // Re-scans re-emit the whole visible transcript after `resetConversation()` or a
+    // `messagesReported` overflow. An answer already offered is not a newer revision, so it
+    // neither arms an obligation nor expedites a pull — a genuinely newer one still does.
+    expect(live.hook.notePresentation('settled-answer', 'The exact finished answer.', armed + 60_000)).toBe(false);
+    expect(live.hook.presentationPending(armed + 60_000)).toBe(false);
+    expect(live.hook.notePresentation('settled-answer', 'A newer exact revision.', armed + 60_000)).toBe(true);
+    expect(live.hook.presentationPending(armed + 60_000)).toBe(true);
+  });
 });
 
 describe('how a turn is recorded as having ended', () => {
@@ -9432,7 +9464,7 @@ describe('one live isolated-world recorder per document', () => {
 
     await expect(live.runtimeMessage({ type: 'clf-recorder-ping' })).resolves.toEqual({
       ok: true,
-      recorderVersion: 10
+      recorderVersion: 11
     });
   });
 
@@ -9813,6 +9845,62 @@ describe('the goal loop', () => {
     await live.hook.pullActivity();
     await settle();
     expect(requested).toBe(1);
+  });
+
+  it('collects a fresh pickup episode for the same stable reply without reloading the page', async () => {
+    let requested = 0;
+    let pending: Record<string, unknown> | null = null;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({
+        ok: true,
+        data: {
+          entries: [],
+          stream: [],
+          nextSince: 0,
+          pendingTools: 0,
+          job: null,
+          goal: {
+            enabled: true,
+            hasKey: true,
+            model: MODEL,
+            pending,
+            draft: null
+          }
+        }
+      }),
+      goal_draft: () => {
+        requested += 1;
+        // The app accepted this pickup. Its next activity snapshot therefore no longer offers
+        // it, exactly as after an acknowledged stop/no-reply decision in the real bridge.
+        pending = null;
+        return goalReplies().goal_draft();
+      }
+    });
+    await live.hook.pullActivity();
+
+    pending = {
+      replyId: 'stable-assistant-reply',
+      turnId: 'g-original-turn',
+      eventSeq: 12,
+      acceptedAt: 1_000
+    };
+    await live.hook.pullActivity();
+    await settle();
+    expect(requested).toBe(1);
+
+    // Off cancelled the first pickup; On deliberately re-armed the same stable reply. The
+    // document is still alive, so the stable turn id is unchanged while the ticket episode is
+    // new. This is the live Off -> On path that used to work only after a page reload.
+    pending = {
+      replyId: 'stable-assistant-reply',
+      turnId: 'g-original-turn',
+      eventSeq: 12,
+      acceptedAt: 2_000
+    };
+    await live.hook.pullActivity();
+    await settle();
+    expect(requested).toBe(2);
   });
 
   it('continues the first resumed answer that finished while the replacement tab was hidden', async () => {

@@ -41,7 +41,7 @@
   //
   // So: publish a handle instead of a flag and let a replacement supersede a dead one. A
   // *healthy* incumbent still wins, so the ordinary static/recovery race is unchanged.
-  const RECORDER_VERSION = 10;
+  const RECORDER_VERSION = 11;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -558,8 +558,49 @@
    * One exact final website revision that has crossed the extension journal but has not yet
    * returned from the app-owned activity feed. Until that happens Overwrite is still showing
    * an older durable revision, so this is active presentation work even after generation ends.
+   *
+   * Bounded on purpose, in two independent ways, because this latch buys the live 750ms cadence
+   * and an unreleasable one buys it for the life of the tab. The app releases it by echoing the
+   * exact revision back, and that echo is not guaranteed: `upsertMessageEvent` answers an
+   * unchanged observation with `changed:false`, which writes no new seq and therefore puts
+   * nothing on the feed this page reads. A re-scan that re-emits an already durable final answer
+   * is not rare — `resetConversation()` and the `messagesReported` overflow clear both make the
+   * page re-report the whole visible transcript — so the unreleased case was reachable in
+   * ordinary use, and every chat that hit it kept polling four times a minute at the live rate,
+   * hidden or not, with a full Fiber walk and a 1200-event app read on every pass.
+   *
+   * So: `until` is the deadline, after which the obligation is simply over — one round trip is
+   * all it was ever for — and the revision key is remembered past its release, so re-observing
+   * the same exact answer can never re-arm it. A genuinely newer revision still arms a new one.
    */
   let pendingPresentation = null;
+  /** One expedited round trip, and no more, for one final revision. */
+  const PRESENTATION_GRACE_MS = 10_000;
+
+  /** Whether an armed presentation obligation is still owed. Expiry is a fact about time. */
+  function presentationPending(now = Date.now()) {
+    return Boolean(pendingPresentation && pendingPresentation.until > now);
+  }
+
+  /**
+   * Arms the obligation for one exact revision, or refuses because it is not a new one.
+   *
+   * Returns whether it armed, so the caller only expedites for a revision the app has not
+   * already been told about. Settling and expiring both leave the key behind precisely so that
+   * a later identical observation is refused rather than restarting the fast cadence.
+   */
+  function notePresentation(messageId, text, now = Date.now()) {
+    if (pendingPresentation && pendingPresentation.messageId === messageId && pendingPresentation.text === text) {
+      return false;
+    }
+    pendingPresentation = { messageId, text, until: now + PRESENTATION_GRACE_MS };
+    return true;
+  }
+
+  /** The app is holding this exact revision. Kept, rather than dropped, as a settled key. */
+  function settlePresentation() {
+    if (pendingPresentation) pendingPresentation.until = 0;
+  }
   /** Stable user-message id → durable event position, used only to anchor page responses. */
   const userAnchorByMessage = new Map();
   let since = 0;
@@ -626,6 +667,10 @@
    * and this is the near-side half of the same rule.
    */
   let goalTurnId = null;
+  // The durable pickup episode currently claimed by this document. A stable assistant reply
+  // may deliberately be picked up again after Off -> On, so its turn id alone is not the
+  // once-key. The app renews acceptedAt for every such episode and publishes it with pending.
+  let goalTicketId = null;
   /** What this tab is doing about the goal loop right now. '' when it is doing nothing. */
   let goalPhase = '';
   /** Why the loop is where it is, in the app's own words. Empty unless something stopped. */
@@ -1181,6 +1226,7 @@
     // chat must not draft twice. The watch loop itself notices the change on its own tick and
     // exits; what it leaves behind is what this clears.
     goalTurnId = null;
+    goalTicketId = null;
     goalConfig = null;
     goalDraft = null;
     setGoalPhase('');
@@ -3194,11 +3240,11 @@
             ? { goalEligible: true }
             : {})
         });
-        if (state === 'final' && localOwner) {
-          pendingPresentation = { messageId: message.messageId, text: message.rawText };
+        if (state === 'final' && localOwner && notePresentation(message.messageId, message.rawText)) {
           // The page has produced a newer exact revision than the app-owned renderer can
           // possibly hold. Reuse the one activity scheduler and bring its next pass forward;
-          // the exact feed acknowledgement below releases this obligation.
+          // the exact feed acknowledgement below releases this obligation, and its own deadline
+          // ends it either way. Re-observing a revision already offered arms nothing.
           expediteActivityPull();
         }
       }
@@ -5002,7 +5048,7 @@
             (entry.final === true || entry.state === 'final') &&
             String(entry.text || '') === pendingPresentation.text
           ) {
-            pendingPresentation = null;
+            settlePresentation();
           }
           if (generating && isWork(entry)) exactTurnActivity = true;
           continue;
@@ -7481,7 +7527,10 @@
     if (!pending || !pending.replyId || !pending.turnId || !conversationId) return;
     if (!goalUsable() || goalBusy || goalDraft || generating || CLF_DOM.generating()) return;
     if (nativeBusy || (job && job.busy)) return;
-    if (goalTurnId === pending.turnId) return;
+    const acceptedAt = Number(pending.acceptedAt);
+    const ticketId = `${pending.replyId}:${Number.isFinite(acceptedAt) && acceptedAt > 0 ? acceptedAt : pending.eventSeq}`;
+    if (goalTicketId === ticketId) return;
+    goalTicketId = ticketId;
     goalTurnId = pending.turnId;
     setGoalPhase('');
     const forId = conversationId;
@@ -7624,7 +7673,12 @@
       // message parked the obligation until the next reload, which is the one thing a
       // transport failure must never be able to do to it. maybeRecoverDurableGoalTurn picks
       // the same durable pending row up again on the next pull.
-      if (goalTurnId === forTurn) goalTurnId = null;
+      if (goalTurnId === forTurn) {
+        goalTurnId = null;
+        // The app still holds this exact pending episode. Releasing both parts of the claim
+        // lets the next authoritative activity snapshot retry it without requiring a reload.
+        goalTicketId = null;
+      }
       return;
     }
     // From here the draft lives on /activity: its stage, its streaming text and — once — the
@@ -8503,7 +8557,7 @@
       generating,
       active,
       drafting,
-      presentationPending: Boolean(pendingPresentation)
+      presentationPending: presentationPending()
     });
   }
 
@@ -8812,6 +8866,8 @@
       pullActivity,
       activityPullDelay,
       currentActivityPullDelay,
+      notePresentation,
+      presentationPending,
       runCommand,
       startCompact,
       refreshFiber,

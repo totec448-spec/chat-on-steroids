@@ -40,7 +40,7 @@ const MODEL_REQUEST_TIMEOUT_MS = 190_000;
 /** The reason a deadline aborts with, so it is a fact the caller can act on rather than prose. */
 const TIMED_OUT = 'the app took too long to answer';
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 10;
+const BRIDGE_PROTOCOL = 11;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -2471,7 +2471,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
  * receive both its static manifest injection and this recovery injection.
  */
 const CHATGPT_TAB_URLS = ['https://chatgpt.com/*', 'https://chat.openai.com/*'];
-const PAGE_RECORDER_VERSION = 10;
+const PAGE_RECORDER_VERSION = 11;
 
 let deferredRecoveryWork = null;
 

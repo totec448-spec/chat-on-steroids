@@ -38,8 +38,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(10);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 10;');
+    expect(BRIDGE_PROTOCOL).toBe(11);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 11;');
   });
 
   /**
@@ -1260,7 +1260,7 @@ describe('extension command delivery', () => {
     const session = new FakeStorageArea();
     const worker = loadWorker({ local, session });
     worker.tabsQuery.mockResolvedValueOnce([{ id: 41 }]);
-    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 10 });
+    worker.tabsSendMessage.mockResolvedValueOnce({ ok: true, recorderVersion: 11 });
 
     await worker.installed('update');
 
@@ -1387,7 +1387,7 @@ describe('extension revival delivery', () => {
 
   const liveRecorder = async (_tabId: number, message: Record<string, unknown>) =>
     message.type === 'clf-recorder-ping'
-      ? { ok: true, recorderVersion: 10 }
+      ? { ok: true, recorderVersion: 11 }
       : { ok: true, claimed: true };
 
   it('scans before opening and routes to the oldest exact worker tab', async () => {

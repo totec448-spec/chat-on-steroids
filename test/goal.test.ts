@@ -1482,7 +1482,8 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalPendingReplyFor('c-reply-stable')).toEqual({
       replyId: 'assistant-message-stable',
       turnId: 'g-before-reload',
-      eventSeq: 12
+      eventSeq: 12,
+      acceptedAt: expect.any(Number)
     });
   });
 
@@ -1584,6 +1585,7 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({
       replyId: 'assistant-message-switch-rearm'
     });
+    const firstPickupAt = goal.goalPendingReplyFor(conversationId)!.acceptedAt;
 
     expect(await goal.setGoalReplyActiveNow(conversationId, false)).toBe(true);
     expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
@@ -1602,6 +1604,40 @@ describe('a chat driven towards a specific goal', () => {
       replyId: 'assistant-message-switch-rearm',
       turnId: 'g-switch-rearm'
     });
+    expect(goal.goalPendingReplyFor(conversationId)!.acceptedAt).toBeGreaterThan(firstPickupAt);
+  });
+
+  it('keeps an expired ticket as the stable-final tombstone a later On can re-arm', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-01T08:00:00Z'));
+      const conversationId = 'c-reply-expired-rearm';
+      await goal.acceptGoalReplyNow({
+        conversationId,
+        sessionId: 'session-reply-expired-rearm',
+        replyId: 'assistant-message-expired-rearm',
+        turnId: 'g-expired-rearm',
+        eventSeq: 15,
+        blocked: false
+      });
+      expect(await goal.setGoalReplyActiveNow(conversationId, false)).toBe(true);
+
+      vi.advanceTimersByTime(13 * 60 * 60_000);
+      expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+      // Exercise the normal snapshot/prune boundary that previously deleted the only exact
+      // identity an explicit later activation could safely pick up.
+      expect(goal.snapshotGoalReplies().replies).toContainEqual(
+        expect.objectContaining({ conversationId, state: 'handled' })
+      );
+
+      expect(await goal.setGoalReplyActiveNow(conversationId, true)).toBe(true);
+      expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({
+        replyId: 'assistant-message-expired-rearm',
+        turnId: 'g-expired-rearm'
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   /**
