@@ -57,6 +57,8 @@ export interface CallCaller {
    * evidence named one. Never anything the model wrote.
    */
   conversationId: string | null;
+  /** Durable local session principal carried by the same exact request proof. */
+  sessionId?: string | null;
 }
 
 export interface CallContext {

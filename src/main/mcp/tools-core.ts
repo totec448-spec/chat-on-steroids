@@ -54,7 +54,8 @@ import {
   MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
   noteExecAttended,
   noteExecOwner,
-  provenConversation
+  provenConversation,
+  provenSession
 } from '../codex/ownership.js';
 import {
   UnifiedExecError,
@@ -221,8 +222,8 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
   return applyUnifiedExecEnv(env);
 }
 
-/** Resolve the exact caller once so exec admission and later ownership cannot disagree. */
-async function execConversation(tool: 'exec_command' | 'write_stdin'): Promise<string | null> {
+/** Resolve the stable local session once so exec admission and later ownership cannot disagree. */
+async function execSession(tool: 'exec_command' | 'write_stdin'): Promise<string | null> {
   let conversationId = provenConversation(currentCaller().requestId, currentCaller().conversationId);
   const call = currentCall();
   if (!conversationId && call?.caller.requestId) {
@@ -231,7 +232,9 @@ async function execConversation(tool: 'exec_command' | 'write_stdin'): Promise<s
     });
     if (conversationId) call.caller.conversationId = conversationId;
   }
-  return conversationId;
+  const sessionId = provenSession(currentCaller().requestId, currentCaller().sessionId ?? null);
+  if (call) call.caller.sessionId = sessionId;
+  return sessionId;
 }
 
 export function registerCoreTools(reg: SurfaceRegistrar): void {
@@ -768,12 +771,12 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               }
             }
 
-            const owner = await execConversation('exec_command');
+            const owner = await execSession('exec_command');
             const unread = backgroundExecObligations(owner).exitedUnread;
             if (unread.length >= MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION) {
               const sessionIds = unread.map((session) => session.processId).join(', ');
               return fail(
-                `EXEC_RESULTS_UNREAD: ${unread.length} completed background results are still waiting for this conversation. ` +
+                  `EXEC_RESULTS_UNREAD: ${unread.length} completed background results are still waiting for this session. ` +
                   `Drain session IDs ${sessionIds} with write_stdin before starting another command. No child was spawned.`
               );
             }
@@ -797,8 +800,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               env: execChildEnvironment(),
               tty: input.tty ?? DEFAULT_TTY
             });
-            // Which chat may later write to this session id. Codex gets this for free from a
-            // per-conversation manager; see codex/ownership.ts for why one is needed here.
+            // Which durable local session may later write to this process id. The frontend
+            // conversation is replaceable during Compact & Resume; the local session is not.
             if (output.processId === null) {
               forgetExecOwner(processId);
             } else {
@@ -886,10 +889,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // A session id is a small integer that means nothing outside the chat that was given
           // it, and every chat reaches the same manager here. Refuse only what is proven to
           // belong elsewhere; an unproven caller keeps working exactly as before.
-          const asking = await execConversation('write_stdin');
+          const asking = await execSession('write_stdin');
           if (execOwnershipDenied(input.session_id, asking)) {
             return fail(
-              `write_stdin failed: session ${input.session_id} is not proven to belong to this ChatGPT conversation. Start your own with exec_command or retry after the extension reconnects.`
+              `write_stdin failed: session ${input.session_id} is not proven to belong to this durable Chat On Steroids session. Start your own with exec_command or retry after the extension reconnects.`
             );
           }
           // Both sides of the wait. An empty poll blocks for seconds by design, and a caller

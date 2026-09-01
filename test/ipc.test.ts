@@ -35,7 +35,7 @@ vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async (
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
-const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, initSessionStore, rebindSession, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, stopBridge } = await import(
   '../src/main/bridge.js'
@@ -592,6 +592,27 @@ describe('session IPC contracts', () => {
     expect(new Set(reply.data.pressure.map((entry: { id: string }) => entry.id))).toEqual(
       new Set(reply.data.sessions.map((entry: { id: string }) => entry.id))
     );
+  });
+
+  it('projects compaction pressure from the current chat context, not session lifetime history', async () => {
+    const chatA = 'aaaaaaaa-1111-2222-3333-444444444444';
+    const chatB = 'bbbbbbbb-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'reset context pressure', conversationId: chatA });
+    await appendEvent(session.id, {
+      time: Date.now(),
+      source: 'app',
+      kind: 'note',
+      message: { text: 'x'.repeat(8_000), truncated: false, chars: 8_000 }
+    });
+    expect(await rebindSession(session.id, chatA, chatB)).toBe(true);
+
+    const reply = await sessionList();
+    const listed = reply.data.sessions.find((entry: { id: string }) => entry.id === session.id);
+    const pressure = reply.data.pressure.find((entry: { id: string }) => entry.id === session.id);
+    expect(listed.estimatedTokens).toBeGreaterThan(0);
+    expect(listed.contextTokens).toBe(0);
+    expect(pressure.estimated).toBe(0);
+    expect(pressure.level).toBe('ok');
   });
 
   it('blocks and releases the stored conversation, and never a renderer-supplied one', async () => {

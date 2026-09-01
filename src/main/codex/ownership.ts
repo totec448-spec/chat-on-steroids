@@ -1,14 +1,15 @@
 /**
- * Which ChatGPT conversation owns a live `exec_command` session.
+ * Which durable local session owns a live `exec_command` process.
  *
  * Codex never needs this. It hangs `UnifiedExecProcessManager` off `session.services`, so a
- * conversation cannot even name another conversation's process: the manager it reaches is a
+ * session cannot even name another session's process: the manager it reaches is a
  * different object. This connector is one long-lived main process serving every chat through
  * one manager, so the same session ids are in scope everywhere, and `write_stdin(session_id)`
  * on a numeric id from another chat would otherwise reach that chat's shell.
  *
- * This is an authorization boundary. A proven owner can only be continued by that same proven
- * conversation. Legacy/single-chat calls that carry no request identity are kept in a separate
+ * This is an authorization boundary. A proven owner can only be continued by that same durable
+ * session, whose frontend attachment may legitimately change from A to B during Compact & Resume.
+ * Legacy/single-chat calls that carry no request identity are kept in a separate
  * anonymous bucket so existing terminal semantics still work, but a later proven chat cannot
  * adopt such a session and an anonymous call cannot touch a proven-owned session.
  */
@@ -58,9 +59,9 @@ const attendedAt = new Map<number, number>();
  */
 const announcedUnattended = new Set<number>();
 
-function processIdsOwnedBy(conversationId: string): Set<number> {
+function processIdsOwnedBy(sessionId: string): Set<number> {
   const processIds = new Set<number>();
-  for (const [processId, owner] of owners) if (owner === conversationId) processIds.add(processId);
+  for (const [processId, owner] of owners) if (owner === sessionId) processIds.add(processId);
   return processIds;
 }
 
@@ -76,10 +77,16 @@ export function provenConversation(requestId: string | null, conversationId: str
   return requestCorrelation(requestId)?.conversationId ?? null;
 }
 
-/** Records the conversation that opened a still-running exec session. */
-export function noteExecOwner(processId: number | null, conversationId: string | null): void {
+/** The stable local session principal behind this exact call, when it is proven. */
+export function provenSession(requestId: string | null, sessionId: string | null): string | null {
+  if (sessionId) return sessionId;
+  return requestCorrelation(requestId)?.sessionId ?? null;
+}
+
+/** Records the durable session that opened a still-running exec process. */
+export function noteExecOwner(processId: number | null, sessionId: string | null): void {
   if (processId === null) return;
-  owners.set(processId, conversationId);
+  owners.set(processId, sessionId);
   attendedAt.set(processId, Date.now());
 }
 
@@ -105,15 +112,15 @@ export function forgetExecOwner(processId: number | null): void {
   announcedUnattended.delete(processId);
 }
 
-/** The conversation that opened this session, or null when it was never proven. */
+/** The durable local session that opened this process, or null when it was never proven. */
 export function execOwner(processId: number): string | null {
   return owners.get(processId) ?? null;
 }
 
 /** One caller-scoped projection used by reminders, admission and runtime status. */
-export function backgroundExecObligations(conversationId: string | null | undefined): BackgroundExecState {
-  if (!conversationId) return { running: [], exitedUnread: [] };
-  return unifiedExecManager.backgroundState(processIdsOwnedBy(conversationId));
+export function backgroundExecObligations(sessionId: string | null | undefined): BackgroundExecState {
+  if (!sessionId) return { running: [], exitedUnread: [] };
+  return unifiedExecManager.backgroundState(processIdsOwnedBy(sessionId));
 }
 
 /** Owned sessions still running past the threshold that have not been announced yet. */
@@ -144,8 +151,8 @@ function describeIdle(idleMs: number): string {
  * session announced — so it belongs on the single path that appends notices to a delivered tool
  * result, and nowhere else. Calling it to peek would spend the only notice a session ever gets.
  */
-export function backgroundExecRecoveryNotices(conversationId: string | null | undefined): string[] {
-  const state = backgroundExecObligations(conversationId);
+export function backgroundExecRecoveryNotices(sessionId: string | null | undefined): string[] {
+  const state = backgroundExecObligations(sessionId);
   const notices = state.exitedUnread
     .slice(0, NOTICES_PER_KIND)
     .map(
@@ -169,41 +176,18 @@ export function backgroundExecRecoveryNotices(conversationId: string | null | un
 }
 
 /**
- * Whether `conversationId` may write to `processId`.
+ * Whether `sessionId` may write to `processId`.
  *
  * Proven sessions require the same proven caller. Anonymous sessions can only be continued by
  * anonymous callers; they are never adoptable by a later identified conversation. A process
  * with no registry entry at all is refused.
  */
-export function execOwnershipDenied(processId: number, conversationId: string | null): boolean {
+export function execOwnershipDenied(processId: number, sessionId: string | null): boolean {
   if (!owners.has(processId)) return true;
   const owner = owners.get(processId);
-  if (owner === null) return conversationId !== null;
-  if (!conversationId) return true;
-  return owner !== conversationId;
-}
-
-/**
- * Moves live process authority with a proven Compact & Resume chat A→B transition.
- *
- * Conversation ownership is the current representation used by the shared process manager.
- * Until it can be keyed directly by durable session principal, continuation publication must
- * move the processes opened by the old chat along with the session. This hook changes exactly
- * owners equal to `fromConversationId`: anonymous legacy sessions and processes belonging to
- * every other chat are untouched. It is app-internal and carries no discovery/wire surface.
- *
- * Attendance and announcement are keyed by process id rather than by chat, so both follow the
- * moved sessions without being touched here: B inherits A's clocks rather than a fresh set.
- */
-export function moveExecConversationOwners(fromConversationId: string, toConversationId: string): number {
-  if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return 0;
-  let moved = 0;
-  for (const [processId, owner] of owners) {
-    if (owner !== fromConversationId) continue;
-    owners.set(processId, toConversationId);
-    moved += 1;
-  }
-  return moved;
+  if (owner === null) return sessionId !== null;
+  if (!sessionId) return true;
+  return owner !== sessionId;
 }
 
 /** Test seam: the registry is process-global state with no natural lifetime boundary. */

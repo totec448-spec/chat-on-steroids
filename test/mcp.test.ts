@@ -30,6 +30,7 @@ import {
   appendEvent,
   createSession,
   initSessionStore,
+  rebindSession,
   upsertMessageEvent,
   writeOverflowText
 } from '../src/main/session/store.js';
@@ -3051,11 +3052,15 @@ describe('exec sessions belong to the chat that opened them', () => {
   });
 
   /** What the page reports once it has seen this connector request leave a given chat. */
-  const prove = (requestId: string, conversationId: string) =>
+  const prove = (
+    requestId: string,
+    conversationId: string,
+    sessionId = `session-${conversationId}`
+  ) =>
     observeRequestCorrelation({
       requestId,
       conversationId,
-      sessionId: '2026-08-20-execown',
+      sessionId,
       messageId: `msg-${requestId}`,
       tool: 'exec_command',
       observedAt: Date.now()
@@ -3098,7 +3103,7 @@ describe('exec sessions belong to the chat that opened them', () => {
     });
     expect(stranger.body.result?.isError).toBe(true);
     expect(textOf(stranger)).toContain(
-      `write_stdin failed: session ${sessionId} is not proven to belong to this ChatGPT conversation.`
+      `write_stdin failed: session ${sessionId} is not proven to belong to this durable Chat On Steroids session.`
     );
     expect(textOf(stranger)).not.toContain('echo=stolen');
 
@@ -3110,7 +3115,7 @@ describe('exec sessions belong to the chat that opened them', () => {
       yield_time_ms: 1_000
     });
     expect(unproven.body.result?.isError).toBe(true);
-    expect(textOf(unproven)).toContain('is not proven to belong to this ChatGPT conversation');
+    expect(textOf(unproven)).toContain('is not proven to belong to this durable Chat On Steroids session');
     expect(textOf(unproven)).not.toContain('echo=anon');
 
     // The replacement session contract exposes recordings only; the removed status action no
@@ -3130,6 +3135,44 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(owner)).toContain('Process exited with code 0');
   });
 
+  it('keeps a live process with the durable session across Compact & Resume and retires A', async () => {
+    const chatA = '6a96de28-76f4-83ed-a33a-b77f73003798';
+    const chatB = '6a96dee4-e598-83eb-80ac-a39827f932d3';
+    const summary = await createSession({ title: 'exec continuation owner', conversationId: chatA });
+    expect(prove('wfr_exec_resume_a', chatA, summary.id)).toBe('stored');
+
+    await fs.writeFile(
+      path.join(approved, 'resume-stdin.cjs'),
+      "const readline=require('node:readline'); const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity}); rl.on('line',(line)=>{ console.log('continued='+line); if(line==='done') rl.close(); });\n",
+      'utf8'
+    );
+    const started = await asChat('wfr_exec_resume_a', 'exec_command', {
+      cmd: 'node resume-stdin.cjs',
+      workdir: '/workspace',
+      tty: true,
+      yield_time_ms: 25
+    });
+    const processId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+    expect(Number.isInteger(processId), textOf(started)).toBe(true);
+    expect(execOwner(processId)).toBe(summary.id);
+
+    expect(await rebindSession(summary.id, chatA, chatB)).toBe(true);
+    expect(prove('wfr_exec_resume_b', chatB, summary.id)).toBe('stored');
+
+    const continued = await asChat('wfr_exec_resume_b', 'write_stdin', {
+      session_id: processId,
+      chars: 'done\r',
+      yield_time_ms: 5_000
+    });
+    expect(failed(continued), textOf(continued)).toBe(false);
+    expect(textOf(continued)).toContain('continued=done');
+
+    const stale = await asChat('wfr_exec_resume_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(stale)).toBe(true);
+    expect(textOf(stale)).toContain('CONVERSATION_SUPERSEDED');
+    expect(textOf(stale)).toContain('no local tool was run');
+  });
+
   it('does not let a stale owner inherit a recycled process id during the new exec yield', async () => {
     // Model the real lifetime split directly: the manager has released an exited process id,
     // but the separate ownership registry still carries the chat that used to own it. Force
@@ -3137,8 +3180,8 @@ describe('exec sessions belong to the chat that opened them', () => {
     // 1-in-99k lottery.
     await unifiedExecManager.terminateAllProcesses();
     const recycledId = 1_000;
-    noteExecOwner(recycledId, 'conv-execown-old');
-    expect(execOwner(recycledId)).toBe('conv-execown-old');
+    noteExecOwner(recycledId, 'session-conv-execown-old');
+    expect(execOwner(recycledId)).toBe('session-conv-execown-old');
     expect(prove('wfr_execown_old_recycled', 'conv-execown-old')).toBe('stored');
     expect(prove('wfr_execown_new_recycled', 'conv-execown-new')).toBe('stored');
 
@@ -3177,12 +3220,12 @@ describe('exec sessions belong to the chat that opened them', () => {
         yield_time_ms: 50
       });
       expect(stolen.body.result?.isError).toBe(true);
-      expect(textOf(stolen)).toContain('is not proven to belong to this ChatGPT conversation');
+      expect(textOf(stolen)).toContain('is not proven to belong to this durable Chat On Steroids session');
 
       const started = await starting;
       expect(started.body.result?.isError, textOf(started)).not.toBe(true);
       expect(Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1])).toBe(recycledId);
-      expect(execOwner(recycledId)).toBe('conv-execown-new');
+      expect(execOwner(recycledId)).toBe('session-conv-execown-new');
       expect(textOf(started)).not.toContain('got=');
 
       // Let the real owner release the shell normally. Besides proving the new principal did
@@ -3268,7 +3311,7 @@ describe('exec sessions belong to the chat that opened them', () => {
     }
 
     await vi.waitFor(
-      () => expect(backgroundExecObligations(conversationId).exitedUnread.map((row) => row.processId)).toEqual(
+      () => expect(backgroundExecObligations(`session-${conversationId}`).exitedUnread.map((row) => row.processId)).toEqual(
         [...sessionIds].sort((left, right) => left - right)
       ),
       { timeout: 8_000, interval: 25 }
@@ -3465,6 +3508,30 @@ describe('blocked chats', () => {
     return requestId;
   };
 
+  /**
+   * The same proof, deliberately late: the page reporting *after* the call has already landed.
+   *
+   * This is the ordinary order, not an exotic one. A turn's first call races its own evidence,
+   * and the wedged page this feature exists for is the slowest reporter there is. The recorder
+   * has always waited for exactly this and filed the call under the chat it proves, which is why
+   * a blocked chat could be seen running tools in its own timeline.
+   */
+  const provenLate = (conversationId: string, afterMs: number): string => {
+    const seq = ++proofSeq;
+    const requestId = `wfr_block_late_${seq}`;
+    setTimeout(() => {
+      observeRequestCorrelation({
+        requestId,
+        conversationId,
+        sessionId: 'session-blocked-chats',
+        messageId: `message-block-${seq}`,
+        tool: 'read',
+        observedAt: Date.now()
+      });
+    }, afterMs).unref?.();
+    return requestId;
+  };
+
   const readAs = (requestId: string | null, virtualPath = '/workspace/notes.txt'): Promise<any> =>
     modern(
       'tools/call',
@@ -3519,6 +3586,30 @@ describe('blocked chats', () => {
     const unproven = await readAs(null);
     expect(failed(unproven)).toBe(false);
     expect(textOf(unproven)).toContain('/workspace/notes.txt');
+  });
+
+  it('refuses the call whose page evidence proves the blocked chat only after it arrives', async () => {
+    setChatBlocked(ROGUE, true);
+
+    const reply = await readAs(provenLate(ROGUE, 40));
+
+    expect(failed(reply)).toBe(true);
+    expect(textOf(reply)).toContain('CHAT_BLOCKED');
+    // The point of the whole gate: the file was never read, so there is nothing to file under
+    // the blocked chat's timeline afterwards.
+    expect(textOf(reply)).not.toContain('/workspace/notes.txt');
+  });
+
+  it('still lets a call through when the page never proves it at all', async () => {
+    setChatBlocked(ROGUE, true);
+
+    // The wait is bounded by the same window attribution uses, and it ends the same way:
+    // unproven is unproven. A phone, or a chat with no extension behind it, is not the rogue
+    // turn and is not refused for failing to prove it is not.
+    const reply = await readAs('wfr_block_never_proven');
+
+    expect(failed(reply)).toBe(false);
+    expect(textOf(reply)).toContain('/workspace/notes.txt');
   });
 
   it('gives the chat its tools back the moment it is released, same request id and all', async () => {

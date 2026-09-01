@@ -38,8 +38,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(11);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 11;');
+    expect(BRIDGE_PROTOCOL).toBe(12);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 12;');
   });
 
   /**
@@ -764,14 +764,14 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         if (repairFailed) {
           failedActions.push(url.searchParams.get('repairAction') || '');
           asked.push(repairFailed === token ? `failed:${outstanding}` : `stale-failure:${repairFailed}`);
-          return response(200, { ok: true, repair: null });
+          return response(200, { ok: true, repairs: [] });
         }
         if (repaired) actions.push(url.searchParams.get('repairAction') || '');
         asked.push(repaired ? (repaired === token ? `repaired:${outstanding}` : `stale:${repaired}`) : 'status');
         if (repaired && repaired === token) outstanding = null;
-        if (!outstanding) return response(200, { ok: true, repair: null });
+        if (!outstanding) return response(200, { ok: true, repairs: [] });
         token = `tok-${(minted += 1)}`;
-        return response(200, { ok: true, repair: { conversationId: outstanding, token } });
+        return response(200, { ok: true, repairs: [{ conversationId: outstanding, token }] });
       }
       return response(404, {});
     });
@@ -870,7 +870,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         return response(200, {
           ok: true,
           recoveryMonitoring: !repaired,
-          repair: repaired ? null : { conversationId: CHAT, token: 'close-repair' }
+          repairs: repaired ? [] : [{ conversationId: CHAT, token: 'close-repair' }]
         });
       }
       return response(404, {});
@@ -913,7 +913,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
   /**
    * How long a repair can sit in the app before this browser sees it.
    *
-   * The app arms a repair exactly twenty seconds into an unattributed incident. A collector
+   * The app arms a repair fifteen to sixty seconds into an unattributed incident. A collector
    * that came round once a minute would make that deadline meaningless: an alarm created at
    * T+0 with `periodInMinutes: 1` ticks at T+15, too early for the app to have decided, and
    * then not again until T+75.
@@ -967,7 +967,7 @@ describe('active agent tab discard protection', () => {
       if (url.pathname === '/status') {
         return response(200, {
           ok: true,
-          repair: null,
+          repairs: [],
           recoveryMonitoring: live,
           nonDiscardableConversations: live ? [CHAT] : []
         });
@@ -1005,7 +1005,7 @@ describe('active agent tab discard protection', () => {
       if (url.pathname === '/status') {
         return response(200, {
           ok: true,
-          repair: null,
+          repairs: [],
           recoveryMonitoring: live,
           nonDiscardableConversations: live ? [CHAT] : []
         });
@@ -1077,6 +1077,84 @@ describe('worker settings authority', () => {
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);
+  });
+
+  /**
+   * Which Chrome instance the replacement chat is created in.
+   *
+   * The user had two Chrome instances open. A chat finished in the background one, Compact &
+   * Resume captured its summary, and the app asked the operating system to open chat B — which
+   * resolved to the foreground instance, because that is what `chrome.exe <url>` does. The
+   * summary was typed into a chat in a browser this extension was not loaded in, nothing ever
+   * redeemed the command, and the handoff was left connected to nothing.
+   *
+   * No argument names a window and no extension can report which instance it is, so the app
+   * cannot decide this from outside. It answers the capture request with the successor instead,
+   * and the browser that holds chat A creates the tab in chat A's own window.
+   */
+  it('opens the replacement chat in the window of the chat it continues', async () => {
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        return response(200, { stored: true, commandId: 'cmd-handoff', placement: { id: 'cmd-handoff' } });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch,
+      // Chat A's tab, in the background instance's window, third from the left.
+      tabsGet: async () => ({ id: 45, windowId: 9, index: 2 }) as never
+    });
+    await worker.registerTab(45);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 45);
+
+    await worker.send(
+      { type: 'compact', conversationId: CHAT, token: '0123456789abcdef0123456789abcdef', summary: 'the brief' },
+      45
+    );
+
+    expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+    const created = worker.tabsCreate.mock.calls[0]![0] as Record<string, unknown>;
+    // The window is the whole point. The marker is the app's command id and nothing else —
+    // redeeming it still requires the pairing token this worker holds.
+    expect(created.windowId).toBe(9);
+    expect(created.index).toBe(3);
+    expect(String(created.url)).toBe('https://chatgpt.com/?clf=cmd-handoff#clf=cmd-handoff');
+    // Active in its own window, and its own window only: nothing here focuses that window, so
+    // a handoff in the background instance does not yank the user out of the one they are in.
+    expect(created.active).toBe(true);
+    expect(worker.windowsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('leaves a compaction reply that places nothing to the app’s own opener', async () => {
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        // What an automatic pickup or a restart-restored resume answers with: there is no page
+        // in flight to hand the successor to, so the app opened it the way it always did.
+        return response(200, { stored: true, commandId: 'cmd-auto', placement: null });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch,
+      tabsGet: async () => ({ id: 46, windowId: 9, index: 0 }) as never
+    });
+    await worker.registerTab(46);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 46);
+
+    await worker.send(
+      { type: 'compact', conversationId: CHAT, token: '0123456789abcdef0123456789abcdef', summary: 'the brief' },
+      46
+    );
+
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
   });
 
   it('refuses a settings write that names a different conversation than the source tab owns', async () => {
@@ -1380,7 +1458,7 @@ describe('extension revival delivery', () => {
       const url = new URL(input);
       if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
       if (url.pathname === `/${route}`) {
-        return response(200, { ok: true, recoveryMonitoring: true, repair: null, revival });
+        return response(200, { ok: true, recoveryMonitoring: true, repairs: [], revival });
       }
       return response(404, {});
     });
@@ -1607,7 +1685,7 @@ describe('extension observation journal', () => {
       if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
       if (url.pathname === '/events') return healthy ? response(200, { ok: true }) : response(503, { error: 'retry' });
       if (url.pathname === '/closed') return response(200, { ok: true });
-      if (url.pathname === '/status') return response(200, { ok: true, repair: null, recoveryMonitoring: false });
+      if (url.pathname === '/status') return response(200, { ok: true, repairs: [], recoveryMonitoring: false });
       return response(404, {});
     });
     const worker = loadWorker({ local, session, fetch });

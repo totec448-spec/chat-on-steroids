@@ -86,6 +86,23 @@ function persist(): void {
   writeDurableSoon(CORRELATIONS_STATE, snapshot());
 }
 
+/**
+ * Whether a persisted row still carries everything an owner needs to be restored.
+ *
+ * The bar is exactly what this registry answers with: a request id, the conversation that
+ * proved it, the session epoch that owned it, and when. `tool` is a diagnostic label, kept so
+ * a stored row can be read by a human; no caller reads it, and the header above says why it
+ * could not be evidence even if one did. Demanding a nonempty one here was therefore a bar the
+ * registry itself does not have - and it silently deleted the rows that need restoring most.
+ *
+ * A request id is published on `message.metadata.request_id` before the `api_tool` message
+ * naming the tool exists, so the page proves ownership first and names the tool later. Those
+ * early sightings are stored with an empty tool on purpose - the join does not use the name,
+ * and waiting for it is what used to file the call under Unattributed activity. Every one of
+ * them then failed this check on the next launch, so a workflow whose calls were still arriving
+ * lost its proven owner to a restart: the same permanence bug the header describes, arriving
+ * through the door marked valid.
+ */
 function validCorrelation(value: unknown): value is RequestCorrelation {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<RequestCorrelation>;
@@ -94,7 +111,7 @@ function validCorrelation(value: unknown): value is RequestCorrelation {
     typeof item.conversationId === 'string' && item.conversationId.length > 0 && item.conversationId.length <= 200 &&
     typeof item.sessionId === 'string' && /^[0-9a-z-]{8,64}$/i.test(item.sessionId) &&
     typeof item.messageId === 'string' && item.messageId.length > 0 && item.messageId.length <= 300 &&
-    typeof item.tool === 'string' && item.tool.length > 0 && item.tool.length <= 100 &&
+    typeof item.tool === 'string' && item.tool.length <= 100 &&
     typeof item.observedAt === 'number' && Number.isFinite(item.observedAt)
   );
 }

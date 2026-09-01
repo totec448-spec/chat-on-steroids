@@ -626,6 +626,58 @@
   let retirementHandledFor = null;
 
   /**
+   * The one proof a zero-anchor conversation needs before its newest rendered user row may
+   * open a turn.
+   *
+   * A durable anchor normally distinguishes a new send from transcript hydration. With no
+   * anchors, an old chat opened for the first time and a genuinely new first send look the
+   * same after rendering. The composer submission is the missing boundary: remember its exact
+   * text and conversation before ChatGPT mutates either, then spend it on the matching newest
+   * user row. Merely mounting history or a transient Stop control can never mint this receipt.
+   *
+   * Compared with the whitespace squeezed out entirely, which is the same normalization
+   * `CLF_DOM.send()`, `insertPrompt` and `clearPromptExact` already use against this exact
+   * composer, and for the same reason: it is a rich-text editor, a blank line in the text
+   * becomes a paragraph break, and `textContent` stitches the paragraphs back together with
+   * no separator at all. Collapsing runs to a single space instead left the receipt for every
+   * multi-paragraph send unable to match the message it had just sent — so a Compact & Resume
+   * bootstrap, which is always multi-paragraph and always lands in a brand-new zero-anchor
+   * chat, opened no turn in the replacement chat. With no live generation there is no owned
+   * page turn, the fresh chat's provisional client thread is then the only conversation its
+   * Fiber branch names, and the request-id handshake that owns every tool call of that turn
+   * never runs: the whole resumed turn's work fell into Unattributed activity.
+   */
+  const USER_SEND_RECEIPT_MS = 30_000;
+  let userSendReceipt = null;
+  const sendText = (value) => String(value || '').replace(/\s+/g, '');
+  function rememberUserSend() {
+    const text = sendText(CLF_DOM.composer()?.textContent);
+    if (!text) return;
+    userSendReceipt = { text, conversationId: CLF_DOM.conversationId(), at: Date.now() };
+  }
+  document.addEventListener('click', (event) => {
+    const button = CLF_DOM.sendButton?.();
+    if (button && event.target && button.contains(event.target)) rememberUserSend();
+  }, true);
+  document.addEventListener('submit', (event) => {
+    const composer = CLF_DOM.composer();
+    if (composer && event.target && typeof event.target.contains === 'function' && event.target.contains(composer)) {
+      rememberUserSend();
+    }
+  }, true);
+  document.addEventListener('keydown', (event) => {
+    const composer = CLF_DOM.composer();
+    if (
+      composer &&
+      event.target &&
+      composer.contains(event.target) &&
+      event.key === 'Enter' &&
+      !event.shiftKey &&
+      !event.isComposing
+    ) rememberUserSend();
+  }, true);
+
+  /**
    * How full this conversation is, and what the app intends to do about it.
    *
    * `tokens` is the recorder's estimate of what has been said and returned so far;
@@ -1548,16 +1600,22 @@
      * set can never do and which no one-observation grace period ever approximated correctly:
      * the live page mounts its transcript seconds after boot.
      *
-     * Known gap: an empty anchor set is ambiguous. It means "the app holds nothing for this
-     * chat", which is true both of a chat whose newest question really is unrecorded and of
-     * one the app has never recorded at all — an old conversation opened for the first time
-     * after install. In the second case the newest question of a months-old transcript reads
-     * as a send. Closing it needs the app to say which of the two it is; requiring a
-     * non-empty anchor set instead is not the answer, because it also starves the first real
-     * send into a chat the app has only just started recording.
+     * An empty anchor set used to be ambiguous: it describes both a genuinely new first send
+     * and an old conversation opened for the first time after install. The composer receipt is
+     * the deciding fact in that case. Existing recorded chats keep using the durable anchor
+     * difference; zero-anchor chats require the exact recent submitted text as well.
      */
-    const authoredNow = (message) =>
-      message.id === newestUserId && !userAnchorByMessage.has(message.id);
+    const authoredNow = (message) => {
+      if (message.id !== newestUserId || userAnchorByMessage.has(message.id)) return false;
+      if (userAnchorByMessage.size > 0) return true;
+      const receipt = userSendReceipt;
+      if (!receipt || Date.now() - receipt.at > USER_SEND_RECEIPT_MS) return false;
+      const conversationId = CLF_DOM.conversationId();
+      if (receipt.conversationId && receipt.conversationId !== conversationId) return false;
+      if (receipt.text !== sendText(message.text)) return false;
+      userSendReceipt = null;
+      return true;
+    };
     for (const message of rendered) {
       if (!message.id || !message.text) continue;
       // Left over from a chat this tab has already navigated away from. Not "probably
@@ -1756,11 +1814,13 @@
     // resumes unchanged; if it is B, the branch above retires A and resets before anything
     // visible in B is recorded. No timeout and no DOM-position guess participates.
     if (!id && conversationId) {
-      // The route no longer proves that the composer on screen belongs to this chat. Keep
-      // the recorder state until another concrete id settles the A -> / -> B ambiguity, but
-      // do not keep A's presentation mounted over an unbound New Chat composer. If the
-      // route returns to A, the normal observer repaint restores any still-live stage.
-      removeStagePanel();
+      // The route no longer proves that the composer on screen belongs to this chat, and A's
+      // presentation must not stay mounted over an unbound New Chat composer. That decision
+      // belongs to injectStage() alone, which asks the same question every tick and knows the
+      // one id-less case worth painting: a chat being opened on a goal, whose opening message
+      // is being written right now. Tearing the panel down here as well made every tick
+      // destroy and rebuild the node injectStage() had just put back — a fresh element once a
+      // second, so its progress animation never survived long enough to play a single cycle.
       void flush();
       return;
     }
@@ -2945,7 +3005,8 @@
       else fiberTurns.set(turn.index, turn);
     }
     for (const [index, value] of fiberTurns) if (value === null) fiberTurns.delete(index);
-    const continuationReconciliation = reconcileContinuationMarkers();
+    const markedTurns = markedContinuationTurns();
+    const continuationReconciliation = reconcileContinuationMarkers(markedTurns);
     if (continuationReconciliation) await continuationReconciliation;
     if (epoch !== askedEpoch || conversationId !== askedConversation) return false;
     // Fiber names turns with ChatGPT's page `data-turn-id`, which the live page reuses. The
@@ -2955,6 +3016,19 @@
     // generation is currently bound to may inherit `turnId`; historical/reused matches still
     // prove the conversation made the call, but carry no durable turn id.
     const activeLocalTurnId = exactOwner?.localTurnId || null;
+    // ChatGPT represents a continuation prompt and its reply as adjacent Fiber turns. The
+    // durable local generation was opened by that exact newest marked user message, so its
+    // assistant/tool owner is `answerTurnFor(...)`, not the otherwise-empty prompt turn. This
+    // is the same relation summary capture already trusts; reusing it closes the local turn,
+    // stamps its partial/final revisions, and keeps chronology at the insertion point.
+    if (activeLocalTurnId && markedTurns.length > 0) {
+      const newestUser = [...CLF_DOM.messages()].reverse().find((message) => message.role === 'user');
+      const marker = String(newestUser?.text || '').match(CONTINUATION_MARKER);
+      const markedOwner = marker
+        ? markedTurns.find(([, marked]) => marked.kind === marker[1] && marked.token === marker[2])?.[1]
+        : null;
+      if (markedOwner?.answer) ownedPageTurn = markedOwner.answer;
+    }
     const activeTurnIndex =
       ownedPageTurn && activeLocalTurnId ? answer.turns.indexOf(ownedPageTurn) : -1;
     if (askedConversation) {
@@ -5748,6 +5822,21 @@
   let nativePhase = '';
   /** Guards the whole native run: one press, one interrupt, one injected prompt. */
   let nativeBusy = false;
+  /**
+   * Which native run is the live one. Bumped by a press and by a cancel.
+   *
+   * A press spends tens of seconds before it types anything — stopping the turn, then waiting
+   * for local tools — and the Cancel offered throughout that window used to change nothing
+   * but the durable ticket. The run itself carried on, reached the app with the ticket
+   * already aborted, opened a *fresh* continuation for it and typed the prompt in anyway. So
+   * the button did nothing that anybody could see, twice over: the pill went straight back to
+   * "Asking…", and the second press was the one that appeared to work.
+   *
+   * Every await in the run rechecks this alongside the conversation and the epoch, which is
+   * the same rule those two already enforce: a run whose world moved on under it must stop
+   * rather than finish into it.
+   */
+  let nativeRun = 0;
 
   function buildControl() {
     const root = document.createElement('div');
@@ -5807,14 +5896,21 @@
   }
 
   function currentState() {
+    // Whose composer this is, on the same terms as the panel above it — see injectStage.
+    // A run belongs to the chat it is running in, and this tab deliberately keeps holding
+    // that chat's id across an id-less route because React unmounts one for a frame at a
+    // time. New Chat is an id-less route too, so the pill went on spinning "Asking…" above
+    // an empty composer, with a Cancel that would have cancelled a handoff in a conversation
+    // no longer on screen. The panel already refused to paint there; the pill did not.
+    const mine = composerChat().state === 'chat';
     return controlState({
-      job,
+      job: mine ? job : null,
       connected: status.connected && status.paired,
       disconnected: status.disconnected === true,
-      conversationId,
-      pressedAt,
-      phase: nativePhase,
-      error: localError,
+      conversationId: mine ? conversationId : '',
+      pressedAt: mine ? pressedAt : 0,
+      phase: mine ? nativePhase : '',
+      error: mine ? localError : '',
       now: Date.now()
     });
   }
@@ -5866,6 +5962,16 @@
   let menuOpen = false;
   /** Set while a toggle is in flight, so a second click cannot race the first one's write. */
   let menuBusy = false;
+  /**
+   * The sheet that is on screen right now, as the exact input it was built from.
+   *
+   * The sheet is a function of that input, so a repaint whose input is unchanged has nothing
+   * to draw and must not touch the DOM. It used to rebuild anyway, once a second on the
+   * activity tick, and everything a rebuild destroys was destroyed with it: the node the
+   * pointer was over — so the hover bubble blinked out and came back on its 350 ms delay,
+   * for ever — and the selection, so text could not be selected in the sheet at all.
+   */
+  let menuPainted = '';
 
   function buildMenu() {
     const root = document.createElement('div');
@@ -5893,6 +5999,7 @@
 
   function closeMenu() {
     menuOpen = false;
+    menuPainted = '';
     if (menuNode) menuNode.hidden = true;
     if (control) control.button.setAttribute('aria-expanded', 'false');
   }
@@ -5978,8 +6085,8 @@
    * Which of the two links opened the editor, and therefore what Save will do.
    *
    * Held beside the draft rather than read back off the sheet for the same reason the draft
-   * is: renderMenu() rebuilds this sheet from scratch on every activity poll, and the mode is
-   * the half of this decision that cannot be recovered from the text.
+   * is: a change in what the sheet says rebuilds it, and the mode is the half of this
+   * decision that cannot be recovered from the text.
    */
   let menuMode = 'goal';
 
@@ -6019,7 +6126,7 @@
   async function saveObjective(text, mode) {
     if (objectiveBusy) return;
     const which = mode === 'loop' ? 'loop' : 'goal';
-    const goal = String(text || '').trim().slice(0, MAX_OBJECTIVE_CHARS);
+    const goal = String(text || '').trim();
     objectiveBusy = true;
     objectiveError = '';
     renderMenu();
@@ -6172,6 +6279,10 @@
       return;
     }
     await sleep(200);
+    // Programmatic sends do not reliably bubble the synthetic button click through the
+    // document listener in every ChatGPT renderer. Mint the same receipt explicitly at the
+    // irreversible boundary so the first user row can open its local generation.
+    rememberUserSend();
     const sent = await CLF_DOM.send();
     if (!sent) {
       setGoalPhase('sending', 'ChatGPT would not send the message');
@@ -6188,10 +6299,19 @@
     if (!control || !control.root.isConnected) return void closeMenu();
     const root = menuElement();
     const view = menuView();
-    // Every repaint of this sheet is a rebuild, and one of them can now land while somebody
-    // is halfway through typing a goal — an activity poll repaints it on its own cadence. The
-    // text itself survives in menuDraft; the caret and the focus have to be carried by hand,
-    // or the sentence being written jumps to its end a second later.
+    // Everything the sheet is drawn from: the view, and the three pieces of local state the
+    // view does not carry because they are this tab's rather than the app's. The draft is
+    // deliberately absent — the textarea already holds it, and Save is kept in step by the
+    // input listener, so typing a goal repaints nothing.
+    const painted = JSON.stringify([view, menuBusy, objectiveBusy, objectiveError]);
+    // Unchanged, so the sheet on screen is already the right sheet. Only its position is
+    // still worth re-deciding: the composer it hangs off moves as ChatGPT grows it.
+    if (painted === menuPainted && root.firstChild) return void placeMenu(root, control.button);
+    menuPainted = painted;
+    // A rebuild can still land while somebody is halfway through typing a goal, because the
+    // app can change what the sheet says at any moment. The text itself survives in menuDraft;
+    // the caret and the focus have to be carried by hand, or the sentence being written jumps
+    // to its end.
     const typing = root.querySelector('[data-clf-goal-input]');
     const caret =
       typing && document.activeElement === typing
@@ -6199,8 +6319,8 @@
         : null;
     // Where the box was scrolled to, kept whether or not it has the focus. A goal long enough
     // to scroll is exactly the one somebody reads back before saving, and a rebuilt textarea
-    // starts at the top — so without this the sheet threw the reader back to the first line
-    // on every activity poll, once a second, whichever way they were scrolling.
+    // starts at the top — so without this a rebuild threw the reader back to the first line,
+    // whichever way they were scrolling.
     const scrolled = typing ? typing.scrollTop : 0;
     root.textContent = '';
     root.dataset.clfBusy = menuBusy || objectiveBusy ? '1' : '0';
@@ -6413,7 +6533,6 @@
     input.className = 'clf-menu-goal-input';
     input.dataset.clfGoalInput = '1';
     input.rows = 3;
-    input.maxLength = MAX_OBJECTIVE_CHARS;
     input.placeholder = 'What does this chat have to reach?';
     input.value = menuDraft;
     input.disabled = objectiveBusy;
@@ -6654,12 +6773,20 @@
           : job.stage === 'waiting-for-browser'
             ? 'Waiting for Chrome'
             : 'ChatGPT is writing the handoff';
+      // The prompt's durable position, not this document's memory of typing it. A reload
+      // during the compaction turn starts a page whose `phase` is empty while the marked
+      // prompt has been with ChatGPT for minutes — and the bar then said "Preparing" about
+      // work that was two steps further on, for as long as the answer took. The app's
+      // checkpoint outlives the page, so the page reads its progress off that instead.
+      const asked =
+        job.sourceSend &&
+        (job.sourceSend.state === 'dispatched-unresolved' || job.sourceSend.state === 'sent');
       const at =
         job.stage === 'opening' || job.stage === 'waiting-for-browser'
           ? 3
           : phase === 'delivering'
             ? 2
-            : phase === 'prompting' || phase === 'waiting'
+            : phase === 'prompting' || phase === 'waiting' || asked
               ? 1
               : 0;
       return { stage, detail: '', body: '', kind: 'compact', steps: COMPACT_STEPS, at, done: false };
@@ -6985,8 +7112,10 @@
   async function startCompact(automatic = false) {
     const forId = conversationId;
     const forEpoch = epoch;
+    const forRun = ++nativeRun;
     const current = () =>
       alive &&
+      nativeRun === forRun &&
       conversationId === forId &&
       epoch === forEpoch &&
       CLF_DOM.conversationId() === forId;
@@ -7070,7 +7199,7 @@
     // summary of a machine state that had already moved on.
     // Automatic runs stop the turn exactly like a press does. They are *started* by a turn
     // being in flight, so refusing to interrupt one would refuse every automatic run.
-    const barrier = await stopAndSettle(forId, forEpoch);
+    const barrier = await stopAndSettle(forId, forEpoch, forRun);
     // Every await above can span an SPA navigation. `conversationId` is mutable global
     // state, so continuing after A -> B would otherwise post B to /compact and type A's
     // handoff instruction into B's composer. The new chat's reset already owns its UI state;
@@ -7116,7 +7245,7 @@
       void pullActivity();
       return;
     }
-    await runNativeCompaction(String(data.prompt), String(data.token || ''), forId, forEpoch);
+    await runNativeCompaction(String(data.prompt), String(data.token || ''), forId, forEpoch, forRun);
   }
 
   /**
@@ -7148,9 +7277,10 @@
    * not hear about it, and the handoff would describe a machine that no longer exists by
    * the time the fresh chat reads it.
    */
-  async function stopAndSettle(forId = conversationId, forEpoch = epoch) {
+  async function stopAndSettle(forId = conversationId, forEpoch = epoch, forRun = nativeRun) {
     const current = () =>
       alive &&
+      nativeRun === forRun &&
       conversationId === forId &&
       epoch === forEpoch &&
       CLF_DOM.conversationId() === forId;
@@ -7208,9 +7338,10 @@
   }
 
   /** Submits the marked source prompt after the app durably grants this exact Send. */
-  async function runNativeCompaction(prompt, token, forId = conversationId, forEpoch = epoch) {
+  async function runNativeCompaction(prompt, token, forId = conversationId, forEpoch = epoch, forRun = nativeRun) {
     const current = () =>
       alive &&
+      nativeRun === forRun &&
       conversationId === forId &&
       epoch === forEpoch &&
       CLF_DOM.conversationId() === forId;
@@ -7288,6 +7419,7 @@
         return;
       }
       attemptCrossed = true;
+      rememberUserSend();
       if (!(await CLF_DOM.send())) {
         CLF_DOM.clearPromptExact(prompt);
         nativeBusy = false;
@@ -7310,6 +7442,10 @@
         renderControl();
       }
     } finally {
+      // Cancelled while this was composing. Nothing was armed, so nothing was sent — but the
+      // instruction may already be sitting in the composer, and leaving a wall of handoff
+      // machinery in somebody's message box is not what pressing Cancel asked for.
+      if (nativeRun !== forRun && !attemptCrossed) CLF_DOM.clearPromptExact(prompt);
       // The guard is released either way; `nativePhase` is cleared by the app's job
       // reaching a terminal stage, or by abandon() above.
       // A stale A continuation must not unlock a new B compaction that started after an SPA
@@ -7324,10 +7460,42 @@
   const reconciledContinuations = new Set();
   let continuationJournalPending = false;
 
+  /**
+   * The turn that answered a marked prompt, or null while there is not one yet.
+   *
+   * ChatGPT's own turn model does not put a prompt and its reply in the same turn. The marked
+   * user message lands in one turn — beside nothing but a `model_editable_context` record —
+   * and the assistant's prose opens the next one. So a turn holding a user message has
+   * `endMessageId === null` by construction, and reading the finished answer off the marked
+   * message's own turn finds one only in the shape the page never produces.
+   *
+   * That is the whole of the reload failure: a compaction whose page was reloaded while
+   * ChatGPT was still thinking left a durable ticket in `awaiting-summary` and a finished
+   * brief on screen that no pass could ever capture, so no chat was ever opened.
+   *
+   * The prompt's own turn is still checked first, because a build (or a fixture) that does
+   * group them must keep working. Otherwise the answer is the next turn along — and a later
+   * *user* message means the reply this prompt opened is not on screen, which fails closed
+   * rather than adopting somebody else's answer as the brief.
+   */
+  function answerTurnFor(turns, index) {
+    const turn = turns[index];
+    if (turn.endMessageId) return turn;
+    for (let at = index + 1; at < turns.length; at++) {
+      const next = turns[at];
+      const messages = next.messages || [];
+      if (messages.some((message) => message.role === 'user')) return null;
+      if (messages.some((message) => message.role === 'assistant') || (next.calls || []).length > 0) return next;
+    }
+    return null;
+  }
+
   /** Finds a unique ChatGPT-authored marked user message and the exact turn it opened. */
   function markedContinuationTurns() {
     const found = new Map();
-    for (const turn of fiberTurns.values()) {
+    const turns = [...fiberTurns.values()];
+    for (let index = 0; index < turns.length; index++) {
+      const turn = turns[index];
       for (const message of turn.messages || []) {
         if (message.role !== 'user' || message.stable !== true) continue;
         const match = String(message.rawText || '').match(CONTINUATION_MARKER);
@@ -7337,6 +7505,7 @@
           kind: match[1],
           token: match[2],
           turn,
+          answer: answerTurnFor(turns, index),
           messageId: message.rawMessageId || message.messageId
         };
         found.set(key, found.has(key) ? null : marked);
@@ -7377,9 +7546,14 @@
       sourceMessageId: marked.messageId
     });
     if (!bound || bound.ok !== true) return false;
-    const terminalId = marked.turn.endMessageId;
-    if (!terminalId || (marked.turn.calls || []).some((call) => !call || call.answered !== true)) return false;
-    const terminal = (marked.turn.messages || []).find(
+    // The answer turn, not the prompt's — see answerTurnFor. Its calls are the ones that have
+    // to be finished, too: a brief cut while the compaction turn is still running a tool
+    // describes a machine that is still changing.
+    const answer = marked.answer;
+    if (!answer) return false;
+    const terminalId = answer.endMessageId;
+    if (!terminalId || (answer.calls || []).some((call) => !call || call.answered !== true)) return false;
+    const terminal = (answer.messages || []).find(
       (message) =>
         message.role === 'assistant' &&
         message.stable === true &&
@@ -7400,8 +7574,7 @@
     return true;
   }
 
-  function reconcileContinuationMarkers() {
-    const markedTurns = markedContinuationTurns();
+  function reconcileContinuationMarkers(markedTurns = markedContinuationTurns()) {
     if (markedTurns.length === 0) return null;
     return (async () => {
       for (const [key, marked] of markedTurns) {
@@ -7516,9 +7689,6 @@
         bootstrap !== 'worker'
     );
   }
-
-  /** How long a specific goal may be. Matches MAX_GOAL_OBJECTIVE_CHARS in src/shared/goal.ts. */
-  const MAX_OBJECTIVE_CHARS = 4000;
 
   /** The goal this chat is being driven towards, '' when it has none. */
   function currentObjective() {
@@ -7908,6 +8078,7 @@
         return;
       }
       await sleep(200);
+      rememberUserSend();
       const sent = await CLF_DOM.send();
       goalDraft = null;
       if (!sent) {
@@ -7991,6 +8162,12 @@
     if (!forId || !current()) return;
     // Cancellation is one-way in the durable continuation. A later marker observation cannot
     // revive an aborted token.
+    //
+    // Retire the live run first, and before the await: a press that is still stopping the turn
+    // or waiting for local tools must not come back from that with a prompt to type. It would
+    // be typing it into a transaction the next line is about to abort, which the app can only
+    // read as a fresh continuation — so the one thing Cancel is for would have started another.
+    nativeRun++;
     pressedAt = 0;
     nativeBusy = false;
     nativePhase = '';
@@ -8577,6 +8754,10 @@
         return;
       }
     }
+    // The destination Resume prompt is the first authored evidence in a brand-new chat.
+    // Record it before send() clicks so reportMessages can open B's turn immediately instead
+    // of waiting until Fiber eventually exposes the first connector request.
+    rememberUserSend();
     if (!(await CLF_DOM.send())) {
       CLF_DOM.clearPromptExact(boot.text);
       if (boot.type === 'resume') return;
@@ -8995,6 +9176,7 @@
       presentationPending,
       runCommand,
       startCompact,
+      cancelCompact,
       refreshFiber,
       fiberFor,
       readDescriptor,

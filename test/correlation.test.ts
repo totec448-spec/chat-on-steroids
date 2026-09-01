@@ -195,6 +195,42 @@ describe('request correlation ownership', () => {
     }
   });
 
+  /**
+   * ChatGPT publishes `metadata.request_id` before the `api_tool` message that names the tool,
+   * and the bridge stores that early sighting with an empty tool on purpose: the join never uses
+   * the name, and waiting for it is what used to file the call under Unattributed activity. Two
+   * such rows sat in the live 2026-09-01 registry. Both would have been thrown away on the next
+   * launch by a validity check stricter than the registry's own answer, taking the proven owner
+   * of a workflow whose calls could still be arriving.
+   */
+  it('restores an owner proved by a request id ChatGPT had not yet given a tool name', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'clf-correlation-untooled-'));
+    try {
+      resetDurableForTests();
+      initDurableStore(dir);
+      const requestId = '93c113a1-16a6-439d-bda1-cfcd4f2e39d6';
+      observeRequestCorrelation({
+        requestId,
+        conversationId: 'conv-bare-request-id',
+        sessionId: '2026-09-01-dd2e9210',
+        messageId: '88056b37-984c-4428-9f69-a4aa5bbbf7ac',
+        tool: '',
+        observedAt: 1_788_276_631_192
+      });
+      await flushDurable();
+
+      resetCorrelationRegistryForTests();
+      await restoreRequestCorrelations();
+
+      expect(requestCorrelation(requestId)?.conversationId).toBe('conv-bare-request-id');
+      expect(requestCorrelation(requestId)?.sessionId).toBe('2026-09-01-dd2e9210');
+    } finally {
+      resetCorrelationRegistryForTests();
+      resetDurableForTests();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it('migrates older proven owners and forgets the sticky conflicts those versions wrote', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'clf-correlation-v3-conflict-'));
     try {

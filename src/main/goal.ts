@@ -54,7 +54,6 @@ import {
   GOAL_OBJECTIVE_OPENING_TURN,
   GOAL_OBJECTIVE_TRAILER,
   GOAL_SYSTEM_TRAILER,
-  MAX_GOAL_OBJECTIVE_CHARS,
   goalObjectiveMessage
 } from '../shared/goal.js';
 import type { GoalMode } from '../shared/types.js';
@@ -564,7 +563,7 @@ export function restoreGoalObjectives(snapshot: GoalObjectivesSnapshot | null): 
   for (const raw of snapshot.objectives) {
     if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
     if (typeof raw.objective !== 'string') continue;
-    const objective = raw.objective.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+    const objective = raw.objective.trim();
     if (!objective) continue;
     goalObjectives.set(raw.conversationId, objective);
   }
@@ -578,11 +577,11 @@ export function goalObjectiveFor(conversationId: string): string {
 /**
  * Sets or clears one chat's goal. Empty text clears it.
  *
- * Returns what is now stored, already trimmed and bounded, so the caller reports the stored
- * value rather than the one it sent — the two differ whenever the text was over the cap.
+ * Returns what is now stored, already trimmed, so the caller reports the stored value rather
+ * than the one it sent — the two differ whenever the text had whitespace around it.
  */
 export function setGoalObjective(conversationId: string, text: string): string {
-  const goal = text.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+  const goal = text.trim();
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
   persistGoalObjectives();
@@ -600,7 +599,7 @@ export function setGoalObjective(conversationId: string, text: string): string {
  */
 export async function setGoalObjectiveNow(conversationId: string, text: string): Promise<string> {
   const before = goalObjectives.get(conversationId);
-  const goal = text.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+  const goal = text.trim();
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
   try {
@@ -1324,7 +1323,7 @@ export async function draftOpeningMessage(
   objective: string,
   named: GoalMode | null = null
 ): Promise<{ reply: string; model: string } | { error: string; retryable?: boolean }> {
-  const goal = objective.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+  const goal = objective.trim();
   if (!goal) return { error: 'no_objective' };
   const key = await getSecret('openRouterApiKey');
   if (!key) return { error: 'no_api_key' };

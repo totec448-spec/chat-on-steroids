@@ -1534,6 +1534,16 @@ input[readonly] {
   white-space: nowrap;
 }
 
+/* The Unattributed row's one sentence, and the only row that has one: every other row is a
+   chat, and a chat needs no explaining. Allowed to wrap, unlike the counts above it — it is
+   the whole reason that row is in the list. */
+.sess-note {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--faint);
+}
+
 /* Estimated tokens against the urgent threshold. Red only past it, because past
    it is the one case where carrying on is genuinely a mistake. */
 .bar {

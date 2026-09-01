@@ -267,11 +267,16 @@ void app.whenReady().then(async () => {
   // decides whether a previous run has been abandoned partly from which ChatGPT tabs are
   // open, and without this it can only answer "I cannot see" — which it treats, on
   // purpose, as a reason to leave the existing run alone.
-  // How a fresh chat actually opens. The app asks the OS to open the ChatGPT URL, which
-  // launches the browser if it is closed and creates the tab if there is none — the two
-  // cases the old "wait for a ChatGPT tab to poll us" delivery could never handle. Wired
-  // before any restored command is delivered, so a resume queued yesterday opens as soon
-  // as the bridge starts rather than waiting for the user to visit ChatGPT.
+  // How a fresh chat opens when no browser can be asked to open it. The app asks the OS for
+  // the ChatGPT URL, which launches the browser if it is closed and creates the tab if there
+  // is none — the two cases the old "wait for a ChatGPT tab to poll us" delivery could never
+  // handle. Wired before any restored command is delivered, so a resume queued yesterday opens
+  // as soon as the bridge starts rather than waiting for the user to visit ChatGPT.
+  //
+  // It is deliberately not how a page-driven Compact & Resume opens chat B. The OS resolves a
+  // URL to whichever browser instance last had focus, which is a different window — and can be
+  // a browser without this extension in it — from the one holding chat A. That decision belongs
+  // to the browser that owns the source chat; see bridge.ts::offerPlacement.
   setBrowserOpener(async (url) => {
     try {
       const browser = await openInPreferredBrowser(url);

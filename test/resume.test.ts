@@ -222,6 +222,14 @@ describe('the whole move, when it works', () => {
     expect(await sessionHandoffCount(sessionId)).toBe(1);
   });
 
+  /**
+   * One chat, opened by the browser chat A is in rather than by the operating system.
+   *
+   * Handing a URL to the OS opens it in whichever Chrome instance last had focus, which on a
+   * machine running two of them put a handoff's chat B in an instance the extension was not
+   * loaded in. The capture request comes from chat A's own page, so the reply to it names the
+   * chat to open and that browser creates it beside A. See bridge.ts::offerPlacement.
+   */
   it('opens exactly one chat, and only after a brief exists', async () => {
     await connect();
     await record();
@@ -229,10 +237,11 @@ describe('the whole move, when it works', () => {
     expect(pendingCommands()).toHaveLength(0);
     expect(opened).toHaveLength(0);
 
-    await capture(continuation);
+    const stored = await capture(continuation);
     expect(pendingCommands()).toHaveLength(1);
-    expect(opened).toHaveLength(1);
-    expect(opened[0]).toContain('clf=');
+    // Handed to A's browser, not to the OS — and exactly one chat either way.
+    expect(stored.body.placement).toEqual({ id: pendingCommands()[0]!.id });
+    expect(opened).toHaveLength(0);
   });
 });
 

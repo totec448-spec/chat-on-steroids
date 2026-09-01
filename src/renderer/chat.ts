@@ -194,12 +194,28 @@ function sessionWorking(summary: SessionSummary): boolean {
   return summary.endedAt === null && recentChatActivity(summary);
 }
 
+/**
+ * Is the Unattributed stream blocked?
+ *
+ * There is no per-chat block to read: the whole point of this row is that the app cannot say
+ * which chat these calls came from, so the only switch that can answer for them is the
+ * app-wide one. Off is a block — a call the app cannot attribute is refused — which is why
+ * the row draws it with the same button and the same word as a blocked chat.
+ */
+function unattributedBlocked(): boolean {
+  return deps.state()?.config.multiAgent.allowUnattributedCalls === false;
+}
+
 function sessionBadges(summary: SessionSummary): Badge[] {
   const badges: Badge[] = [];
   const origin = summary.origin;
   // The one session that is not a chat. Saying so on the row is what stops it reading
   // as a chat that mysteriously lost its name.
-  if (summary.conversationId === null) return [{ text: 'not a chat', tone: '' }];
+  if (summary.conversationId === null) {
+    return unattributedBlocked()
+      ? [{ text: 'blocked', tone: 'is-failed' }, { text: 'not a chat', tone: '' }]
+      : [{ text: 'not a chat', tone: '' }];
+  }
   // First, and in the failure tone: a blocked chat is the one state on this row that says the
   // app is actively refusing work, and the user came to the list to find it at a glance.
   if (blockedChats.has(summary.conversationId)) badges.push({ text: 'blocked', tone: 'is-failed' });
@@ -264,7 +280,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const share = level && level.limit > 0 ? Math.min(100, (level.estimated / level.limit) * 100) : 0;
   fill.style.width = `${share.toFixed(1)}%`;
   bar.append(fill);
-  bar.title = `~${compactNumber(summary.estimatedTokens)} rough context tokens from messages and tool I/O; transient progress is excluded`;
+  bar.title =
+    `~${compactNumber(summary.contextTokens)} rough tokens in the current chat context; ` +
+    `~${compactNumber(summary.estimatedTokens)} across the full recorded session. Transient progress is excluded.`;
 
   const remove = document.createElement('button');
   remove.className = 'btn sess-action sess-del';
@@ -277,6 +295,37 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   });
 
   const actions: HTMLButtonElement[] = [];
+  if (summary.conversationId === null) {
+    // The same button in the same column as a chat's, because it is the same decision: may
+    // this activity use local tools? It has no conversation to be stored against, so it moves
+    // the app-wide switch — the checkbox on the settings sheet — and nothing else.
+    const blocked = unattributedBlocked();
+    const block = document.createElement('button');
+    block.className = `btn sess-action sess-block${blocked ? ' is-blocked' : ''}`;
+    block.type = 'button';
+    block.title = blocked
+      ? 'Allow unattributed calls: self-contained calls run again even when the app cannot prove which chat sent them'
+      : 'Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop';
+    block.append(icon(blocked ? 'i-play' : 'i-ban'));
+    block.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void toggleUnattributedBlock(!blocked);
+    });
+    actions.push(block);
+
+    // The number is deliberately not repeated here. The chat itself is told how many seconds
+    // are left, counted from the open incident; a duration written into this row would be a
+    // second copy of that policy, free to drift from the one the model is actually given.
+    const note = el(
+      'div',
+      'sess-note',
+      blocked
+        ? 'Blocked: a call the app cannot attribute to a chat is refused, and the chat is told to stop.'
+        : 'Each call here tells its chat how long it has to prove its identity, and to stop rather than keep calling if it cannot.'
+    );
+    row.append(top, sub, note, bar, ...actions, remove);
+    return row;
+  }
   if (summary.conversationId) {
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
@@ -309,6 +358,19 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 
   row.append(top, sub, bar, ...actions, remove);
   return row;
+}
+
+/**
+ * Blocks or releases the Unattributed stream by moving the one switch that governs it.
+ *
+ * The settings sheet's checkbox is the stored state, and the renderer's save path reads every
+ * control from the DOM — so this presses that checkbox rather than inventing a second way to
+ * write the same setting. One switch, two places to reach it.
+ */
+async function toggleUnattributedBlock(blocked: boolean): Promise<void> {
+  $<HTMLInputElement>('allowUnattributedCalls').checked = !blocked;
+  await deps.save();
+  paintSessions();
 }
 
 async function toggleSessionBlock(id: string, blocked: boolean): Promise<void> {
@@ -916,7 +978,7 @@ function paintDetail(): void {
       facts.push(`filtered to ${agentFilter === UNATTRIBUTED ? 'unattributed' : agentFilter} — ${filtered.length} matched`);
     }
     if (windowed.omitted > 0) facts.push(`${shown.length} newest rendered`);
-    facts.push(`~${compactNumber(summary.estimatedTokens)} rough context tokens`);
+    facts.push(`~${compactNumber(summary.contextTokens)} rough current-chat context tokens`);
     const level = pressureOf(summary.id);
     if (level && level.level !== 'ok') {
       facts.push(

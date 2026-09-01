@@ -114,9 +114,6 @@ export const SUPERSEDED_GOAL_SYSTEM_PROMPTS: readonly string[] = [
   SUPERSEDED_EAGER_GATE_PROMPT
 ];
 
-/** Maximum specific-goal text one chat may carry. Long enough for a real brief, bounded. */
-export const MAX_GOAL_OBJECTIVE_CHARS = 4_000;
-
 /** The driver default shipped before the requirements rewrite, kept only so it can migrate. */
 export const PREVIOUS_DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT = `Your job is to prompt ChatGPT. You are the meta-prompter sitting in the user's seat, and the only thing you ever produce is the next message that user would type.
 

@@ -40,7 +40,7 @@ const MODEL_REQUEST_TIMEOUT_MS = 190_000;
 /** The reason a deadline aborts with, so it is a fact the caller can act on rather than prose. */
 const TIMED_OUT = 'the app took too long to answer';
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 11;
+const BRIDGE_PROTOCOL = 12;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -60,10 +60,14 @@ const RETRY_ALARM = 'clf-bridge-drain';
  * who installs a release.
  *
  * So this is a sleeping-service-worker fallback with an honest bound, not a fast path. The app
- * arms a repair twenty seconds into an unattributed incident; the browser sees it on the next
- * pass, which is up to thirty seconds later. Anything better would need a keepalive, an
- * offscreen document or a second timer framework to beat a browser API floor, and a broken
- * turn is not worth that.
+ * arms a repair fifteen to sixty seconds into an unattributed incident, depending on how many
+ * chats are still suspect; the browser sees it on the next pass, which is up to thirty seconds
+ * later. Anything better would need a keepalive, an offscreen document or a second timer
+ * framework to beat a browser API floor, and a broken turn is not worth that.
+ *
+ * That floor is also why one pass collects *every* repair now due rather than one: the app can
+ * decide three at the same instant, and handing them out one per pass would spread three
+ * reloads across a minute and a half for no reason anybody chose.
  *
  * A one-shot re-armed at the end of every pass, rather than `periodInMinutes`: a period may not
  * go below a minute at all, and that periodic form was why a repair armed at T+20 could wait
@@ -1207,9 +1211,19 @@ async function ackCommand(id, status, error, conversationId, agent, client, sour
   return drainCommandAcks(id);
 }
 
-function deferredRevivalId(value) {
+/**
+ * Bounded app command identity, shared by every marker this worker handles.
+ *
+ * Inert on its own: a command id names a row in the app's queue and proves nothing. Redeeming
+ * it still requires the pairing bearer token, which is why a marker may travel in a URL.
+ */
+function commandMarkerId(value) {
   const id = typeof value === 'string' ? value.trim() : '';
   return id && id.length <= 128 ? id : null;
+}
+
+function deferredRevivalId(value) {
+  return commandMarkerId(value);
 }
 
 async function rememberDeferredRevival(idValue, conversationValue) {
@@ -1559,18 +1573,22 @@ async function maintain() {
     await persistLive().catch(() => undefined);
   }
   if (await acceptBrowserRevival(reply.data.revival)) await recoverDeferredRevivals();
-  const repair = (reply.ok && reply.data ? reply.data.repair : null) || null;
-  const conversationId = cleanConversationId(repair && repair.conversationId);
-  // Quoted back exactly as it arrived. It names the handout being answered, so that a receipt
-  // this pass sends late cannot close a repair the app has since raised for a different turn.
-  const token = repair && typeof repair.token === 'string' ? repair.token : '';
+  // Quoted back exactly as they arrived. A token names the handout being answered, so that a
+  // receipt this pass sends late cannot close a repair the app has since raised for a different
+  // turn. An entry missing either half is not actionable and is dropped rather than guessed at.
+  const repairs = (Array.isArray(reply.data.repairs) ? reply.data.repairs : [])
+    .map((entry) => ({
+      conversationId: cleanConversationId(entry && entry.conversationId),
+      token: entry && typeof entry.token === 'string' ? entry.token : ''
+    }))
+    .filter((entry) => entry.conversationId && entry.token);
   const nonDiscardable = new Set(
     (Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : [])
       .map(cleanConversationId)
       .filter(Boolean)
   );
   const protectionWork = nonDiscardable.size > 0 || Object.keys(discardProtectedTabs).length > 0;
-  if (!protectionWork && (!conversationId || !token)) return clearRetryIfIdle();
+  if (!protectionWork && repairs.length === 0) return clearRetryIfIdle();
   let tabs = [];
   try {
     tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
@@ -1606,25 +1624,37 @@ async function maintain() {
     }
     if (changed) await persistLive().catch(() => undefined);
   }
-  if (!conversationId || !token) return clearRetryIfIdle();
-  const candidates = tabs.filter((tab) => conversationForTab(tab) === conversationId);
-  // One chat is one tab. Bailing out on two copies left the chat broken *and* left the duplicate
-  // sitting there, so the ambiguity is resolved instead: reload the copy this worker's registry
-  // already binds to the conversation, falling back to the lowest tab id so two passes never
-  // pick differently. A tab is only ever created when the chat has none.
-  const owned = candidates.filter((tab) => tabConversations[tab.id] === conversationId);
-  const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
-  const repairAction = target ? 'reloaded' : 'reopened';
-  try {
-    if (target) await chrome.tabs.reload(target.id);
-    else await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` });
-  } catch {
-    // A tab changed between the scan and action, or Chrome refused it. Report the exact failed
-    // handout so the app can show the failure while keeping the same repair retryable.
-    await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
-    return;
+  if (repairs.length === 0) return clearRetryIfIdle();
+  for (const { conversationId, token } of repairs) {
+    // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
+    // may have created a tab, and the scan has to be the state immediately before the action or
+    // the duplicate rule below is deciding on a tab list that no longer exists.
+    let live = [];
+    try {
+      live = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    } catch {
+      return;
+    }
+    const candidates = live.filter((tab) => conversationForTab(tab) === conversationId);
+    // One chat is one tab. Bailing out on two copies left the chat broken *and* left the
+    // duplicate sitting there, so the ambiguity is resolved instead: reload the copy this
+    // worker's registry already binds to the conversation, falling back to the lowest tab id so
+    // two passes never pick differently. A tab is only ever created when the chat has none.
+    const owned = candidates.filter((tab) => tabConversations[tab.id] === conversationId);
+    const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
+    const repairAction = target ? 'reloaded' : 'reopened';
+    try {
+      if (target) await chrome.tabs.reload(target.id);
+      else await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` });
+    } catch {
+      // A tab changed between the scan and action, or Chrome refused it. Report the exact failed
+      // handout so the app can show the failure while keeping the same repair retryable. The
+      // rest of the batch is unaffected: these are separate chats and separate failures.
+      await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}`);
+      continue;
+    }
+    await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=${repairAction}`);
   }
-  await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=${repairAction}`);
 }
 
 function conversationStillOpen(conversationId) {
@@ -2036,6 +2066,11 @@ const HANDLERS = {
     if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevival(result.data.revival)) {
       await recoverDeferredRevivals();
     }
+    // A fresh chat the app wants opened beside this one. Offered only to the home chat's own
+    // poll, so the window this tab is in is the window its successor is created in.
+    if (ownsDocument(source) && result.ok && result.data && result.data.placement) {
+      await placeSuccessorChat(result.data.placement, source.tab);
+    }
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
   /** Reinstall the least-trusted MAIN-world reader when a live content script loses it. */
@@ -2099,6 +2134,12 @@ const HANDLERS = {
           : {})
       })
     });
+    // Chat B, for this window. The app produced it inside this very request precisely so that
+    // the browser holding chat A is the browser that opens its successor — see
+    // placeSuccessorChat for what the operating system does with the URL instead.
+    if (ownsDocument(source) && result.ok && result.data && result.data.placement) {
+      await placeSuccessorChat(result.data.placement, source.tab);
+    }
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
   /**
@@ -2186,8 +2227,8 @@ const HANDLERS = {
   /**
    * This chat's specific goal, set or cleared from the settings sheet.
    *
-   * The text is the user's own and goes straight through; the app bounds and trims it and
-   * answers with what it actually stored, which is what the sheet then draws.
+   * The text is the user's own and goes straight through; the app trims it and answers with
+   * what it actually stored, which is what the sheet then draws.
    *
    * `mode` is the button the goal was written under — "add specific goal" or "add specific
    * loop" — and the app pins it as this chat's own switch in the same write. Only those two
@@ -2525,6 +2566,52 @@ function deferredRevivalUrl(entry) {
   url.searchParams.set('clf', entry.id);
   url.hash = `clf=${encodeURIComponent(entry.id)}`;
   return url.toString();
+}
+
+/**
+ * Opens a fresh ChatGPT chat in the window of the chat it succeeds.
+ *
+ * The app can name which chat a resume's chat B — or a worker's first chat — belongs beside,
+ * but it cannot open a tab there. Handing the URL to the operating system resolves to whichever
+ * Chrome instance the platform picks, which is the one that last had focus. With two instances
+ * running, the successor of a chat that had just finished in the background one was created in
+ * the foreground one instead — a browser this extension was not even loaded in, so nothing ever
+ * redeemed the command and the handoff died with nothing connected to it.
+ *
+ * Only the browser holding the home tab can put the successor in the same window, and a tab
+ * this worker creates is by construction in a browser that has the extension. That is the whole
+ * reason this decision lives here rather than in the app.
+ *
+ * The offer is spent by the app on handout, so this runs once per command; a second poll, from
+ * this tab or another tab of the same chat, is never given the same id. Nothing is retried
+ * locally either — when no redeem arrives the app opens it the old way, which is the only
+ * recovery that still works if this window is closing.
+ */
+async function placeSuccessorChat(raw, tabId) {
+  const id = commandMarkerId(raw && raw.id);
+  if (!id || typeof tabId !== 'number') return;
+  let home = null;
+  try {
+    home = await chrome.tabs.get(tabId);
+  } catch {
+    // The polling tab closed between its request and this reply. Nothing here can place a
+    // window-bound tab without it, and the app's fallback is what covers exactly this.
+    return;
+  }
+  if (!home || typeof home.windowId !== 'number') return;
+  // Both a query and a fragment, matching the app's commandUrl(): ChatGPT rewrites its own URL
+  // during boot and which of the two survives has changed between builds.
+  const marker = `clf=${encodeURIComponent(id)}`;
+  const create = { url: `https://chatgpt.com/?${marker}#${marker}`, windowId: home.windowId, active: true };
+  // Directly after the chat it continues, so a handoff reads as one piece of work instead of a
+  // tab appended to the far end of a long strip.
+  if (typeof home.index === 'number') create.index = home.index + 1;
+  try {
+    await chrome.tabs.create(create);
+  } catch {
+    // Window teardown or browser policy rejected the create. The app's placement fallback
+    // turns that into an ordinary OS open rather than a lost command.
+  }
 }
 
 /** Accepts only the inert app command identity; the browser still decides the target tab. */

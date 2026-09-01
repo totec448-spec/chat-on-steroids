@@ -29,6 +29,11 @@ function isExecutableBrowser(candidate: string, platform: NodeJS.Platform): bool
 /**
  * Browsers which can run the unpacked companion extension, in preference order.
  *
+ * Nothing here can choose *which running instance* of that browser the URL reaches: the
+ * platform resolves it to the one that last had focus. A chat that must be opened beside
+ * another chat is therefore not opened from this module at all — the browser holding the
+ * source chat opens it. See `bridge.ts::offerPlacement`.
+ *
  * Worker/resume URLs are not ordinary links: the extension must redeem the command marker
  * embedded in them. Sending those URLs to Safari/Firefox merely opens a dead ChatGPT tab, so
  * browser-backed orchestration deliberately prefers the Chrome installation the setup guide
