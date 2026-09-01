@@ -12,7 +12,7 @@
  * extension does nothing" into a diagnosable mismatch.
  */
 
-export const APP_VERSION = '2.0.2';
+export const APP_VERSION = '2.0.3';
 
 /**
  * Standalone extension recovery must stay on the app's own release. Using GitHub's moving
@@ -47,5 +47,9 @@ export function extensionDownloadUrl(version = APP_VERSION): string {
  *     `disconnected`, protected routes distinguish that revocation from a stale token, and
  *     /pair accepts `reconnect: true` only for an explicit browser-side reconnect. An older
  *     extension would otherwise silently undo the user's app-side Disconnect on its next 401.
+ * 9 — browser-restart worker revival markers are revalidated against app-owned durable command
+ *     state before the extension may recreate a ChatGPT tab. `/commands/revivals/pending` is a
+ *     read-only batch freshness fence; an older peer cannot provide this guarantee, so the
+ *     protocol must fail loudly instead of falling back to the unsafe startup behaviour.
  */
-export const BRIDGE_PROTOCOL = 8;
+export const BRIDGE_PROTOCOL = 9;
