@@ -324,6 +324,27 @@ jobs:
             unzip -Z1 release/Chat-On-Steroids-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
           done
 
+      - name: Package Firefox AMO extension
+        run: |
+          set -euo pipefail
+          npm run extension:firefox:stage
+          (cd release/firefox-extension && zip -qr ../Chat-On-Steroids-Firefox.zip . -x '*.map')
+          node <<'NODE'
+          const fs = require('node:fs');
+          const manifest = JSON.parse(fs.readFileSync('release/firefox-extension/manifest.json', 'utf8'));
+          const pkg = require('./package.json');
+          if (manifest.version !== pkg.version) throw new Error('Firefox extension version mismatch');
+          if (manifest.background?.scripts?.[0] !== 'background.js' || manifest.background?.service_worker) {
+            throw new Error('Firefox background manifest was not transformed');
+          }
+          if (manifest.browser_specific_settings?.gecko?.id !== 'chat-on-steroids-companion@local') {
+            throw new Error('Firefox add-on id changed');
+          }
+          NODE
+          for required in manifest.json background.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
+            unzip -Z1 release/Chat-On-Steroids-Firefox.zip | grep -Fxq "$required" || { echo "Firefox extension zip missing $required" >&2; exit 1; }
+          done
+
       - name: Create SHA-256 checksums
         run: |
           set -euo pipefail
@@ -339,6 +360,7 @@ jobs:
             release/Chat-On-Steroids-Linux-arm64.AppImage
             release/Chat-On-Steroids-Linux-arm64.deb
             release/Chat-On-Steroids-Extension.zip
+            release/Chat-On-Steroids-Firefox.zip
           )
           for file in "${files[@]}"; do test -f "$file" || { echo "Missing $file" >&2; exit 1; }; done
           (cd release && sha256sum \
@@ -352,7 +374,8 @@ jobs:
             Chat-On-Steroids-Linux-x64.deb \
             Chat-On-Steroids-Linux-arm64.AppImage \
             Chat-On-Steroids-Linux-arm64.deb \
-            Chat-On-Steroids-Extension.zip > SHA256SUMS.txt)
+            Chat-On-Steroids-Extension.zip \
+            Chat-On-Steroids-Firefox.zip > SHA256SUMS.txt)
           cat release/SHA256SUMS.txt
 
       - name: Upload release candidate
@@ -373,6 +396,7 @@ jobs:
             release/Chat-On-Steroids-Linux-arm64.AppImage
             release/Chat-On-Steroids-Linux-arm64.deb
             release/Chat-On-Steroids-Extension.zip
+            release/Chat-On-Steroids-Firefox.zip
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30

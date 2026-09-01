@@ -9,6 +9,35 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.0.3] — 2026-09-01
+
+2.0.3 is a browser/session recovery hardening release. It closes a Firefox restart failure where
+an inert deferred worker-wake marker could outlive its app-side command and recreate an old ChatGPT
+conversation on every browser start.
+
+### Fixed
+- **Firefox/browser restart recovery now validates deferred worker revivals before opening UI.**
+  The extension batches its persisted `{command id, conversation}` markers through the app's new
+  read-only `/commands/revivals/pending` fence. Cancelled, committed, superseded and otherwise stale
+  markers are pruned before `tabs.create`; if validation is unavailable, recovery fails closed and
+  opens nothing rather than guessing.
+- **Repeated resume-shadow repair polling no longer keeps replaying an already-satisfied prime
+  transfer.** This removes the stale-resume condition that previously required manual session-state
+  cleanup after some app/browser restarts.
+- **Redeemed resume leases survive the acknowledgement window correctly**, preventing a valid
+  browser-owned continuation from being reopened as a second delivery after its earlier lease was
+  already acquired.
+- **Stale Fiber request attribution cannot overwrite a newer exact request owner**, and ChatGPT
+  Project conversation routes are recognised as normal conversation routes.
+
+### Changed
+- **Bridge protocol is now 9.** The restart-revival validation contract is intentionally not
+  backward-compatible: a 2.0.3 extension paired to an older app must fail loudly/fail closed rather
+  than silently fall back to the unsafe startup behaviour.
+- **Firefox packaging is reproducible from the shared extension source.** Release CI now derives an
+  AMO-compatible manifest with the stable Gecko id instead of relying on manual manifest edits, and
+  publishes `Chat-On-Steroids-Firefox.zip` alongside the Chromium package.
+
 ## [2.0.2] — 2026-08-26
 
 2.0.2 is the native cross-platform release port. The already-published 2.0.1 release remains the

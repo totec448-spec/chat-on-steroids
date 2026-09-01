@@ -38,8 +38,8 @@ describe('extension release metadata', () => {
     expect(lock.version).toBe(APP_VERSION);
     expect(lock.packages?.['']?.version).toBe(APP_VERSION);
     expect(manifest.version).toBe(APP_VERSION);
-    expect(BRIDGE_PROTOCOL).toBe(8);
-    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 8;');
+    expect(BRIDGE_PROTOCOL).toBe(9);
+    expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 9;');
   });
 
   /**
@@ -959,9 +959,17 @@ describe('extension revival delivery', () => {
   const REVIVAL_URL = `https://chatgpt.com/c/${CHAT}?clf=cmd-wake#clf=cmd-wake`;
 
   const quiet = () =>
-    vi.fn(async (input: string) => {
+    vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);
       if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/commands/revivals/pending') {
+        const body = JSON.parse(String(init.body || '{}')) as { entries?: Array<{ id?: string }> };
+        return response(200, {
+          pending: (Array.isArray(body.entries) ? body.entries : [])
+            .map((entry) => entry?.id)
+            .filter((id): id is string => typeof id === 'string')
+        });
+      }
       return response(404, {});
     });
 
@@ -1159,16 +1167,60 @@ describe('extension revival delivery', () => {
 
     // Full browser restart: storage.session is gone, but the small inert recovery marker is in
     // storage.local. With no surviving ChatGPT tab, recovery recreates exactly the marked target.
+    const restartFetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/commands/revivals/pending') {
+        return response(200, { pending: ['cmd-persisted-wake'] });
+      }
+      return response(404, {});
+    });
     const restarted = loadWorker({
       local,
       session: new FakeStorageArea(),
-      fetch: quiet(),
+      fetch: restartFetch,
       tabsQuery: async () => []
     });
     await vi.waitFor(() => expect(restarted.tabsCreate).toHaveBeenCalledTimes(1));
     const created = String(restarted.tabsCreate.mock.calls[0]?.[0]?.url || '');
     expect(created).toContain(`/c/${CHAT}`);
     expect(created).toContain('clf=cmd-persisted-wake');
+  });
+
+  it('prunes a stale deferred revival before browser startup can recreate its ChatGPT tab', async () => {
+    const local = new FakeStorageArea({
+      ...paired,
+      deferredRevivals: [{ id: 'cmd-dead-after-restart', conversationId: CHAT, queuedAt: Date.now() }]
+    });
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/commands/revivals/pending') return response(200, { pending: [] });
+      return response(404, {});
+    });
+
+    const restarted = loadWorker({ local, session: new FakeStorageArea(), fetch, tabsQuery: async () => [] });
+    await vi.waitFor(() => expect(fetch.mock.calls.some(([input]) => new URL(String(input)).pathname === '/commands/revivals/pending')).toBe(true));
+
+    expect(restarted.tabsCreate).not.toHaveBeenCalled();
+    expect(local.data.deferredRevivals).toEqual([]);
+  });
+
+  it('fails closed when deferred-revival validation is unavailable instead of opening an unproven tab', async () => {
+    const marker = { id: 'cmd-validation-unavailable', conversationId: CHAT, queuedAt: Date.now() };
+    const local = new FakeStorageArea({ ...paired, deferredRevivals: [marker] });
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/commands/revivals/pending') return response(503, { error: 'bridge_recovering' });
+      return response(404, {});
+    });
+
+    const restarted = loadWorker({ local, session: new FakeStorageArea(), fetch, tabsQuery: async () => [] });
+    await vi.waitFor(() => expect(fetch.mock.calls.some(([input]) => new URL(String(input)).pathname === '/commands/revivals/pending')).toBe(true));
+
+    expect(restarted.tabsCreate).not.toHaveBeenCalled();
+    expect(local.data.deferredRevivals).toMatchObject([marker]);
   });
 
   it('replaces an older deferred marker for the same worker chat when a newer wake reaches browser custody', async () => {

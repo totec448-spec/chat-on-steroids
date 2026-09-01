@@ -24,7 +24,7 @@ const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
 /** Bumped only when the request/response shape changes; the app compares it. */
-const BRIDGE_PROTOCOL = 8;
+const BRIDGE_PROTOCOL = 9;
 
 /**
  * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
@@ -2544,6 +2544,35 @@ function deferredRevivalUrl(entry) {
 }
 
 /**
+ * Reconciles browser-persisted wake markers with the app before recovery can create a tab.
+ *
+ * The marker deliberately survives a browser restart, while the corresponding app command can
+ * be cancelled, committed, superseded or retired during the same interval. Treating the marker
+ * itself as proof of live work lets a dead id reopen its old ChatGPT conversation on every
+ * browser startup. The app owns command truth, so ask it once for the whole bounded set and fail
+ * closed on transport/version errors: keeping an inert marker for a later retry is harmless;
+ * opening an unproven tab is not.
+ */
+async function reconcileDeferredRevivalsWithApp() {
+  if (deferredRevivals.length === 0) return true;
+  const entries = deferredRevivals
+    .map((entry) => ({ id: deferredRevivalId(entry?.id), conversationId: cleanConversationId(entry?.conversationId) }))
+    .filter((entry) => entry.id && entry.conversationId)
+    .slice(-100);
+  const result = await call('/commands/revivals/pending', {
+    method: 'POST',
+    body: JSON.stringify({ entries })
+  });
+  if (!result.ok || !Array.isArray(result.data?.pending)) return false;
+
+  const pending = new Set(result.data.pending.filter((id) => typeof id === 'string'));
+  const before = deferredRevivals.length;
+  deferredRevivals = deferredRevivals.filter((entry) => pending.has(entry?.id));
+  if (deferredRevivals.length !== before) await persistLive();
+  return true;
+}
+
+/**
  * Re-presents deferred revival markers after MV3/document/browser lifetime loss.
  *
  * There is deliberately no command text here and no local "sent" decision. An existing exact
@@ -2563,6 +2592,13 @@ function recoverDeferredRevivals() {
       (entry) => deferredRevivalId(entry?.id) && cleanConversationId(entry?.conversationId) && !ackIds.has(entry.id)
     );
     if (deferredRevivals.length !== before) await persistLive();
+    if (deferredRevivals.length === 0) return;
+
+    // A browser-local marker is correlation metadata, not authority to create UI. Revalidate it
+    // against the app's durable command state before querying or creating tabs. If the app is
+    // unavailable or an older build does not support the read-only route, keep the marker and do
+    // nothing; the next lifecycle wake retries without spraying recovery tabs.
+    if (!(await reconcileDeferredRevivalsWithApp())) return;
     if (deferredRevivals.length === 0) return;
 
     let tabs = [];

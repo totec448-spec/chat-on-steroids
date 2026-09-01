@@ -1967,6 +1967,39 @@ describe('delivering a bootstrap', () => {
     expect(stale.body.error).toBe('no_such_command');
   });
 
+  it('validates deferred revival ids read-only before browser restart recovery opens a tab', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'sleep and wake for recovery validation' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'abababab-1111-4222-8333-444444444444';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'sleep now');
+    wake([{ to: 'worker-1', text: 'wake once after restart' }]);
+    await waitForOpened(2);
+    const id = new URL(opened[1]!).searchParams.get('clf')!;
+
+    const checked = await request('POST', '/commands/revivals/pending', {
+      body: {
+        entries: [
+          { id, conversationId },
+          { id: 'dead-command-id', conversationId },
+          { id, conversationId: '99999999-1111-4222-8333-444444444444' }
+        ]
+      }
+    });
+    expect(checked.status).toBe(200);
+    expect(checked.body).toEqual({ pending: [id] });
+
+    // Validation must not consume or lease the command. The actual page can still redeem the
+    // exact same wake afterwards, which preserves the existing one-page arbitration boundary.
+    const claimed = await request('POST', '/commands/redeem', {
+      body: { id, client: 'validated-restart-tab', conversationId }
+    });
+    expect(claimed.status).toBe(200);
+  });
+
   it('keeps a redeemed revival browser-owned until its exact sent acknowledgement', async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });

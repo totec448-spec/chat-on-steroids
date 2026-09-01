@@ -1878,6 +1878,43 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     );
   }
 
+  // Browser-restart recovery keeps only inert command ids in extension storage. Before the
+  // extension is allowed to recreate any ChatGPT tab, let it reconcile those ids against the
+  // app's current durable command state in one read-only batch. This route deliberately exposes
+  // no command text and acquires no owner/lease: it is only a freshness fence for recovery
+  // markers that can outlive the command they once referred to.
+  if (route === '/commands/revivals/pending' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const rawEntries = Array.isArray(body['entries']) ? body['entries'] : null;
+    if (!rawEntries || rawEntries.length > 100) {
+      return json(res, 400, { error: 'bad_revival_entries' }, origin);
+    }
+
+    tidyCommands();
+    const pending: string[] = [];
+    for (const raw of rawEntries) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const candidate = raw as Record<string, unknown>;
+      const wanted = typeof candidate['id'] === 'string' ? candidate['id'].slice(0, 128) : '';
+      const reportedConversation = conversationId(candidate['conversationId']);
+      if (!wanted || !reportedConversation) continue;
+
+      const command = commands.find((entry) => entry.id === wanted);
+      if (!command || command.spec.type !== 'revive') continue;
+      if (command.spec.conversationId !== reportedConversation) continue;
+      const revival = revivalFor(command.spec.agent);
+      if (!revival || revival.conversationId !== reportedConversation) continue;
+      pending.push(wanted);
+    }
+    return json(res, 200, { pending }, origin);
+  }
+
   // The targeted-open path: one page, opened by the app, redeeming the one command the
   // app opened it for. The id is not a credential — this route is behind the same bearer
   // token as everything else — it is a correlation marker, which is why a leaked URL or a
