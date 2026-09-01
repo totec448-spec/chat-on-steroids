@@ -1503,8 +1503,9 @@ input[readonly] {
 }
 
 .sess-top em {
-  /* Keep the age out from under the hover-only Open Chat + delete hit targets. */
-  margin-right: 58px;
+  /* Keep the age out from under the block, Open Chat and delete hit targets. Block is not
+     hover-only once it is on, so this reserve is what the row is actually drawn with. */
+  margin-right: 84px;
   flex: 0 0 auto;
   font-style: normal;
   font-size: 11px;
@@ -1562,6 +1563,18 @@ input[readonly] {
 
 .sess-open {
   right: 32px;
+}
+
+.sess-block {
+  right: 58px;
+}
+
+/* A block is state, not just an action, so it stays legible without hovering the row —
+   the hover-reveal rule below only governs the actions that do nothing until pressed. */
+.sess-block.is-blocked {
+  opacity: 1;
+  background: var(--red-wash);
+  color: var(--red);
 }
 
 .sess-del {

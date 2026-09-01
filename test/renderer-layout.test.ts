@@ -148,14 +148,21 @@ describe('a session row', () => {
 });
 
 describe('the session-row chat actions', () => {
-  it('reserves both top-right hit targets instead of laying the timestamp underneath them', () => {
+  it('reserves all three top-right hit targets instead of laying the timestamp underneath them', () => {
     expect(rule('.sess-action')).toContain('position: absolute');
-    expect(rule('.sess-top em')).toContain('margin-right: 58px');
+    expect(rule('.sess-top em')).toContain('margin-right: 84px');
   });
 
-  it('opens only recorded conversations and never selects or deletes the adjacent row', () => {
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,500}openSessionChat\(summary\.id\)/);
+  it('opens and blocks only recorded conversations, and never selects or deletes the adjacent row', () => {
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}openSessionChat\(summary\.id\)/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,800}toggleSessionBlock\(summary\.id/);
     expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
+    expect(chatSource).toMatch(/block\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
+  });
+
+  it('keeps a block visible without hovering, because it is state and not just an action', () => {
+    expect(rule('.sess-action')).toContain('opacity: 0');
+    expect(rule('.sess-block.is-blocked')).toContain('opacity: 1');
   });
 });
 

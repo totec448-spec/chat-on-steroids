@@ -38,6 +38,7 @@ import { DEFAULT_CAPABILITIES, type Capabilities, type Root } from '../src/share
 import type { ToolOutcome } from '../src/shared/session.js';
 import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
+import { resetBlockedChatsForTests, setChatBlocked } from '../src/main/session/blocked-chats.js';
 import {
   backdateExecAttendanceForTests,
   backgroundExecObligations,
@@ -3430,5 +3431,104 @@ describe('the outcome a shell command is recorded with', () => {
       noteOutcome('ok');
     });
     expect(context.outcome).toBe('process_exit_nonzero');
+  });
+});
+
+
+/**
+ * The user's own stop for a ChatGPT turn the page will not stop.
+ *
+ * The property under test is not "a flag is read" but the whole join: a block is stored against
+ * a *conversation*, and the thing arriving over HTTP is a *request id*, so every assertion here
+ * goes through the same exact ownership proof the connector uses in production. The two failure
+ * directions matter equally — a block that does not reach the rogue chat is useless, and a block
+ * that reaches anyone else is worse than useless.
+ */
+describe('blocked chats', () => {
+  const ROGUE = 'conv-blocked-rogue';
+  const BYSTANDER = 'conv-innocent-bystander';
+  let proofSeq = 0;
+
+  /** Proves one request id belongs to a chat, exactly as the page evidence path would. */
+  const owned = (conversationId: string): string => {
+    const requestId = `wfr_block_${++proofSeq}`;
+    expect(
+      observeRequestCorrelation({
+        requestId,
+        conversationId,
+        sessionId: 'session-blocked-chats',
+        messageId: `message-block-${proofSeq}`,
+        tool: 'read',
+        observedAt: Date.now()
+      })
+    ).toBe('stored');
+    return requestId;
+  };
+
+  const readAs = (requestId: string | null, virtualPath = '/workspace/notes.txt'): Promise<any> =>
+    modern(
+      'tools/call',
+      { name: 'read', arguments: { paths: [virtualPath] } },
+      requestId ? { 'x-request-id': `${requestId}/att1` } : {}
+    );
+
+  beforeEach(() => resetBlockedChatsForTests());
+  afterAll(() => resetBlockedChatsForTests());
+
+  it('refuses a blocked chat’s call and tells the model to stop instead of retrying', async () => {
+    setChatBlocked(ROGUE, true);
+    const reply = await readAs(owned(ROGUE));
+    const text = textOf(reply);
+
+    expect(failed(reply)).toBe(true);
+    expect(text).toContain('CHAT_BLOCKED');
+    // The refusal has to end the turn, so it must forbid the retry loop a bare error invites
+    // and name the one action that finishes.
+    expect(text).toMatch(/no further tool calls/i);
+    expect(text).toMatch(/final answer/i);
+    // And no work may have happened behind it: the refusal is the whole result.
+    expect(text).not.toContain('/workspace/notes.txt');
+  });
+
+  it('blocks every tool the chat has, not only the one it was blocked during', async () => {
+    ctx.caps = withCaps({ command: true, create: true, edit: true });
+    ctx.readOnly = false;
+    setChatBlocked(ROGUE, true);
+
+    for (const call of [
+      { name: 'read', arguments: { paths: ['/workspace/notes.txt'] } },
+      { name: 'exec_command', arguments: { cmd: 'echo rogue', workdir: '/workspace' } },
+      { name: 'apply_patch', arguments: { patch: addPatch('/workspace/blocked.txt', ['nope']) } }
+    ]) {
+      const reply = await modern('tools/call', call, { 'x-request-id': `${owned(ROGUE)}/att1` });
+      expect(textOf(reply), call.name).toContain('CHAT_BLOCKED');
+    }
+    // apply_patch was refused before it ran, not after it wrote.
+    await expect(fs.access(path.join(approved, 'blocked.txt'))).rejects.toThrow();
+  });
+
+  it('never touches another chat, or a call it cannot place at all', async () => {
+    setChatBlocked(ROGUE, true);
+
+    const other = await readAs(owned(BYSTANDER));
+    expect(failed(other)).toBe(false);
+    expect(textOf(other)).toContain('/workspace/notes.txt');
+
+    // No proof, no conversation, no block. Refusing here would punish an unrelated chat — or
+    // a phone — for a turn this app cannot even show was theirs.
+    const unproven = await readAs(null);
+    expect(failed(unproven)).toBe(false);
+    expect(textOf(unproven)).toContain('/workspace/notes.txt');
+  });
+
+  it('gives the chat its tools back the moment it is released, same request id and all', async () => {
+    const requestId = owned(ROGUE);
+    setChatBlocked(ROGUE, true);
+    expect(textOf(await readAs(requestId))).toContain('CHAT_BLOCKED');
+
+    setChatBlocked(ROGUE, false);
+    const after = await readAs(requestId);
+    expect(failed(after)).toBe(false);
+    expect(textOf(after)).toContain('/workspace/notes.txt');
   });
 });

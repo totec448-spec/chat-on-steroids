@@ -76,6 +76,7 @@ import {
   recordAgentMessage,
   recordToolCall
 } from '../session/recorder.js';
+import { BLOCKED_CHAT_REFUSAL, isChatBlocked } from '../session/blocked-chats.js';
 import { backgroundExecRecoveryNotices } from '../codex/ownership.js';
 import { unattributedRepairEta } from '../bridge.js';
 import { readOverflowText } from '../session/store.js';
@@ -534,6 +535,11 @@ async function dispatchTracked(
   // inbox that rode on the missing result. Every other tool call from the same chat is refused
   // by endedWorkerNotice as before.
   const endedWorker = isFinish ? null : endedWorkerNotice(context.caller.conversationId);
+  // The user's own verdict on this chat, and the only one that outranks every other. It is not
+  // a lifecycle state the broker derived: somebody looked at a rogue turn they could not stop
+  // from the page and stopped it here instead, so it applies to every tool on every surface,
+  // `agents` finish included. A blocked chat has nothing left to finish.
+  const blockedChat = isChatBlocked(context.caller.conversationId);
   const allowUnattributed = getConfig().multiAgent.allowUnattributedCalls;
   const retiredLeaseAmbiguous =
     !allowUnattributed && hasRetiredWorkerLeases() && !context.caller.conversationId;
@@ -544,7 +550,9 @@ async function dispatchTracked(
   // back to the first approved root turns an attribution outage into wrong-project mutation.
   // Refuse and let the model retry once page evidence is healthy instead.
   const result = await runInCallContext(context, () =>
-      dormantWorker
+      blockedChat
+        ? Promise.resolve(fail(BLOCKED_CHAT_REFUSAL))
+        : dormantWorker
         ? Promise.resolve(fail(dormantWorker))
         : retiredWorker
         ? Promise.resolve(
