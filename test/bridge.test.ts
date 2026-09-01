@@ -3603,6 +3603,52 @@ describe('a worker chat that never opens', () => {
   });
 
   /**
+   * One cold browser start at a time, because a second one is a second browser.
+   *
+   * Handing a URL to a browser that is already running is free. Handing one to a machine with
+   * no browser running is a cold start, and a second open fired into that window does not join
+   * the instance still booting — it becomes an instance of its own, with its own tabs and its
+   * own memory. Delivery advances the moment a command ends, so a browser that never came back
+   * was answered with one cold start per queued command, and every close the user performed was
+   * answered with another. Live on 2026-09-01: eight Chrome process trees, each holding its own
+   * ChatGPT tabs, together pegging the machine.
+   */
+  it('waits for one cold browser start rather than stacking a second', async () => {
+    await pair();
+    vi.useFakeTimers();
+    try {
+      const attempts: string[] = [];
+      setBrowserOpener(async (url) => {
+        attempts.push(url);
+        throw new Error('the browser is still starting');
+      });
+      // The user closed the browser: nothing has reported for longer than presence lasts, so
+      // every open from here is a cold start rather than a URL handed to a running browser.
+      await vi.advanceTimersByTimeAsync(61_000);
+
+      spawn({ workers: [{ task: 'first audit' }, { task: 'second audit' }], caller: { conversationId: PRIME_CHAT } });
+      await flushDurable();
+      await vi.advanceTimersByTimeAsync(10);
+      await flushDurable();
+
+      // worker-1's open failed and ended its command, so delivery advanced to worker-2 in the
+      // same beat. That is the beat this guard exists for: worker-2 waits for the browser
+      // worker-1 asked for instead of asking the operating system for a second one.
+      expect(attempts).toHaveLength(1);
+      expect(pendingCommands().some((command) => command.what === 'worker:worker-2')).toBe(true);
+
+      // Still nothing has reported, so the launch is now one this app has stopped believing in
+      // and worker-2 may have its own.
+      await vi.advanceTimersByTimeAsync(60_001);
+      await flushDurable();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(attempts).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
    * A bootstrap that ends by being *retired* has to move the line too.
    *
    * Only `drop()`'s callers advanced the queue. A worker whose page lost its ACK is bound
@@ -5856,6 +5902,62 @@ describe('the goal loop over the bridge', () => {
   });
 
   /**
+   * The other half of that rule, and the reason the composer can offer an Off at all.
+   *
+   * A goal speaks for a chat that has never answered for itself. It does not outrank the chat's
+   * own answer: the sheet's mode slider has an Off stop, and an Off that left the loop running
+   * because a goal was still written down would be a control that says it stopped something it
+   * did not. The goal itself is kept — Off is a mode, not a delete — so moving back to Goal or
+   * Loop resumes the same sentence.
+   */
+  it('stops a chat that switched itself off, and keeps its goal for when it starts again', async () => {
+    await pair();
+    const chat = 'cafe0023-0000-4000-8000-000000000023';
+    await saveConfig({
+      ...defaultConfig(),
+      sessions: { ...defaultConfig().sessions, record: true },
+      goal: { ...defaultConfig().goal, enabled: false }
+    });
+    await request('POST', '/events', {
+      body: {
+        conversationId: chat,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'start the port', messageId: 'm-goal-off' }]
+      }
+    });
+    await request('POST', '/goal/objective', { body: { conversationId: chat, text: 'port the module' } });
+
+    // Nothing has been said about this chat's own switch yet, so its goal still speaks for it.
+    const inherited = await request('GET', `/activity?conversationId=${chat}`);
+    expect(inherited.body.goal).toMatchObject({ enabled: false, own: false, objective: 'port the module' });
+
+    // Off, chosen here. The write is chat-scoped, which is what makes it this chat's own answer.
+    const off = await request('POST', '/settings', { body: { conversationId: chat, goal: false } });
+    expect(off.status).toBe(200);
+    expect(off.body.goal).toMatchObject({ enabled: false, own: true });
+    const stopped = await request('GET', `/activity?conversationId=${chat}`);
+    expect(stopped.body.goal).toMatchObject({ enabled: false, own: true, objective: 'port the module' });
+
+    const drafted = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId: 'g-off' } });
+    expect(drafted.status).toBe(409);
+    expect(drafted.body.error).toBe('goal_disabled');
+
+    // And back on, into the same goal, without retyping it.
+    const on = await request('POST', '/settings', { body: { conversationId: chat, loop: true } });
+    expect(on.body.goal).toMatchObject({ enabled: true, own: true, mode: 'loop' });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      Response.json({
+        choices: [{ message: { content: JSON.stringify({ action: 'continue', reply: 'still red' }) } }]
+      })) as never;
+    try {
+      const again = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId: 'g-on' } });
+      expect(again.status).toBe(200);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  /**
    * The run that was lost, and the reason the goal now carries its mode.
    *
    * A goal saved from the sheet armed the loop but said nothing about *which* loop, so the
@@ -6347,6 +6449,9 @@ describe('the goal loop over the bridge', () => {
     expect(reply.status).toBe(200);
     expect(reply.body.goal).toEqual({
       enabled: true,
+      // The app-wide setting belongs to no chat, so it is nobody's own answer: this is what a
+      // chat that has never moved its own switch inherits.
+      own: false,
       mode: 'goal',
       hasKey: true,
       model: 'deepseek/deepseek-v4-flash',

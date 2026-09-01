@@ -672,6 +672,12 @@
     width: 100%;
     animation: none;
   }
+
+  /* The handle appears at its stop instead of sliding to it. Where it is is the setting; the
+     travel is only how the change is announced. */
+  .clf-menu-mode-fill {
+    transition: none;
+  }
 }
 
 /* --- app-owned chronological assistant stream ---------------------------- */
@@ -1019,6 +1025,120 @@
 
 .clf-switch[data-clf-on='1'] .clf-switch-knob {
   transform: translateX(14px);
+}
+
+/* Off | Goal | Loop — the switch above, stretched to three stops.
+
+   Same pill, same green, same sliding travel; only the handle is a third of the track wide and
+   has two places to stop instead of one. Everything about it is fixed height, and the line
+   under it never wraps: this sheet hangs off a composer, and a note that grew to two lines as
+   somebody chose Loop pushed the whole panel taller under their cursor. */
+.clf-menu-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px 9px;
+}
+
+.clf-menu-mode-track {
+  position: relative;
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 3px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* The one moving part. Its stop is the value, so nothing has to be kept in step with it. */
+.clf-menu-mode-fill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: 9999px;
+  background: color-mix(in srgb, currentColor 26%, transparent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 22%);
+  transition: transform 0.18s cubic-bezier(0.23, 1, 0.32, 1), background-color 0.15s ease;
+}
+
+.clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-fill,
+.clf-menu-mode-track[data-clf-value='loop'] .clf-menu-mode-fill {
+  background: #10a37f;
+}
+
+.clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-fill {
+  transform: translateX(100%);
+}
+
+.clf-menu-mode-track[data-clf-value='loop'] .clf-menu-mode-fill {
+  transform: translateX(200%);
+}
+
+.clf-menu-mode-option {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px 0 5px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.2;
+  text-align: center;
+  opacity: 0.62;
+  cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.clf-menu-mode-option:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.clf-menu-mode-option[aria-checked='true'] {
+  opacity: 1;
+}
+
+/* Only the two green stops recolour their word: the neutral Off handle keeps the sheet's ink,
+   which is the same reason the switch above is neutral when it is off rather than red. */
+.clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-option[aria-checked='true'],
+.clf-menu-mode-track[data-clf-value='loop'] .clf-menu-mode-option[aria-checked='true'] {
+  color: #fff;
+}
+
+.clf-menu-mode-option:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 45%, transparent);
+  outline-offset: -2px;
+}
+
+/* A worker chat's slider is drawn and dead. Dimmed rather than hidden, because the position
+   it is parked at is still the true answer to "what writes here" — nothing does. */
+.clf-menu-mode-option:disabled {
+  cursor: default;
+  opacity: 0.34;
+}
+
+.clf-menu-mode-option:disabled[aria-checked='true'] {
+  opacity: 0.6;
+}
+
+/* One line, always. See the note above the block. */
+.clf-menu-mode-note {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.62;
+}
+
+.clf-menu-mode-note[data-clf-warn='1'] {
+  color: color-mix(in srgb, currentColor 45%, #f59e0b);
+  opacity: 1;
 }
 
 /* The specific goal, sitting under the Goal switch it belongs to.

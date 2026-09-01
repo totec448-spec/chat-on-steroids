@@ -36,6 +36,7 @@ import {
   draftOpeningMessage,
   goalKeyPresent,
   goalDraftBusy,
+  goalArmedFor,
   goalObjectiveFor,
   goalPendingReplyFor,
   goalSwitchFor,
@@ -916,12 +917,13 @@ function goalModeFor(id?: string): 'goal' | 'loop' {
  * something it was asked for is unfinished. A *specific goal* is one chat's own instruction,
  * given deliberately, naming the finish line; asking somebody to also find and flip a global
  * switch before the goal they just typed does anything would be asking them to say yes twice.
- * So either is enough — and the worker rule still overrides both, because there the prime is
- * already the author of the user's turns.
+ * So either is enough — until this chat answers for itself, which is what goalArmedFor() adds:
+ * the composer's mode slider has an Off position and Off has to mean off. The worker rule
+ * overrides all of it, because there the prime is already the author of the user's turns.
  */
 function goalActiveFor(id: string): boolean {
   if (goalWorkerChat(id)) return false;
-  return goalSwitchFor(id).enabled || goalObjectiveFor(id) !== '';
+  return goalArmedFor(id);
 }
 
 // -------------------------------------------------------------------- routes
@@ -1362,6 +1364,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
               autoCompactReady: false,
               goal: {
                 enabled: false,
+                own: true,
                 mode: goalModeFor(id),
                 hasKey: await goalKeyPresent(),
                 model: getConfig().goal.model,
@@ -1558,6 +1561,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // the panel above the composer streams — there is no second connection to hold open.
         goal: {
           enabled: goalEnabledFor(id),
+          // Has this chat answered for itself? The page reads the switch and the saved goal as
+          // one state — see goalArmedFor() — and cannot tell an Off somebody chose here from an
+          // Off merely inherited from the app-wide setting without being told which it is.
+          own: workerBlocked || goalSwitchFor(id).own,
           mode: goalModeFor(id),
           hasKey: await goalKeyPresent(),
           model: getConfig().goal.model,
@@ -2102,7 +2109,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         objective,
         // What the chat's switch says now, so the sheet draws the mode the goal was saved in
         // rather than waiting a poll for it. Absent when the page named none.
-        ...(chatSwitch ? { enabled: chatSwitch.enabled, mode: chatSwitch.mode } : {})
+        ...(chatSwitch ? { enabled: chatSwitch.enabled, own: true, mode: chatSwitch.mode } : {})
       },
       origin
     );
@@ -2162,6 +2169,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         context: contextView(),
         goal: {
           enabled: getConfig().goal.enabled,
+          // The app-wide setting is nobody's own answer, by definition: it is what a chat that
+          // has never said anything inherits.
+          own: false,
           mode: goalModeFor(),
           hasKey: await goalKeyPresent(),
           model: getConfig().goal.model,
@@ -2284,6 +2294,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         goal: {
           // What this chat's switch now says, which is the only answer its composer can draw.
           enabled: chatSwitch ? chatSwitch.enabled : next.goal.enabled,
+          // A chat-scoped write is this chat answering for itself, and the sheet must draw that
+          // on the same frame — the next poll is a second away and the Off it just chose would
+          // read as an inherited one until then.
+          own: chatSwitch !== null,
           mode: chatSwitch ? chatSwitch.mode : next.goal.mode,
           hasKey: await goalKeyPresent(),
           model: next.goal.model
@@ -3857,6 +3871,50 @@ function queueResumeCommand(sessionId: string, token: string): Command {
  */
 let openInBrowser: ((url: string) => Promise<void>) | null = null;
 
+/**
+ * How long one cold browser start is given to show up before another may be attempted.
+ *
+ * Opening a URL is cheap when a browser is already running: the launcher hands it to the
+ * running instance and exits. Opening one when nothing is running is not — it is a full cold
+ * start, and a second launch fired into that window does not join the instance that is still
+ * booting, it becomes an instance of its own. This app can queue several browser-backed
+ * commands and delivers the next one the moment the previous is dropped or expires, so a
+ * browser that never came back was answered with one cold start per command, and a user who
+ * closed the browser was answered with another. That is how eight Chrome process trees, each
+ * holding its own pinned ChatGPT tabs, end up on one machine.
+ *
+ * Sixty seconds is `BROWSER_PRESENT_MS`, and deliberately the same number: presence is what
+ * ends this wait early, so the wait is over exactly when this app would have stopped believing
+ * in the launch anyway. A launch that worked costs nothing — the extension's first poll lands
+ * within seconds of the page loading and the next command goes out immediately.
+ */
+const BROWSER_LAUNCH_GRACE_MS = BROWSER_PRESENT_MS;
+
+/** When this app last cold-started a browser. Zero until it has, and reset with the bridge. */
+let lastBrowserLaunchAt = 0;
+/** The one deferred delivery owed to a launch still inside its grace window. */
+let browserLaunchTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Whether a browser this app started is still inside the window in which it might appear.
+ *
+ * Presence answers it first and answers it best: a browser that is talking to this process is
+ * not a launch anybody is waiting on, whether or not it is the one that was started.
+ */
+function browserLaunchPending(now = Date.now()): boolean {
+  return !browserPresent() && now < lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS;
+}
+
+/** Re-runs delivery once the pending launch's window closes, so nothing waits on a lost one. */
+function deliverAfterLaunchWindow(now = Date.now()): void {
+  if (browserLaunchTimer) return;
+  browserLaunchTimer = setTimeout(() => {
+    browserLaunchTimer = null;
+    void deliver();
+  }, Math.max(1, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS - now + 1));
+  browserLaunchTimer.unref?.();
+}
+
 export function setBrowserOpener(open: ((url: string) => Promise<void>) | null): void {
   openInBrowser = open;
 }
@@ -4793,6 +4851,14 @@ async function deliverOne(): Promise<void> {
     drop(command, 'this app has no way to open a browser window');
     return;
   }
+  // A cold start already under way is the browser this command is going to be opened in. Asking
+  // the operating system for a second one does not join it — it starts a second browser — so
+  // this waits for the first rather than adding to it. Deliberately before the lease: a command
+  // that has not been handed to anything must not be spending its ninety seconds here.
+  if (browserLaunchPending()) {
+    deliverAfterLaunchWindow();
+    return;
+  }
   const claimedAt = Date.now();
   if (!(await persistCommandLease(command, null, claimedAt))) return;
   armDeadline(command);
@@ -4806,6 +4872,9 @@ async function deliverOne(): Promise<void> {
   if (command.spec.type === 'resume') noteResumeOpening(command.spec.token);
   logInfo(`bridge: opening a fresh ChatGPT chat for ${specKey(command.spec)}`);
   try {
+    // Stamped whether or not a browser was already running: this process cannot tell the
+    // difference, and the window it opens is only ever spent by a browser failing to appear.
+    if (!browserPresent()) lastBrowserLaunchAt = Date.now();
     await openInBrowser(url);
   } catch (err) {
     // One command is one browser-open attempt. A rejected opener can never produce an ACK,
@@ -5615,6 +5684,9 @@ export function resetBridgeForTests(): void {
   resetContinuationsForTests();
   sessionTokens.clear();
   openInBrowser = null;
+  if (browserLaunchTimer) clearTimeout(browserLaunchTimer);
+  browserLaunchTimer = null;
+  lastBrowserLaunchAt = 0;
   lastSeenAt = null;
   extensionVersion = null;
   versionWarned = false;

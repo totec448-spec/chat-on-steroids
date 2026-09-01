@@ -1738,7 +1738,7 @@
             const stored = reply.data && typeof reply.data.objective === 'string' ? reply.data.objective : carried;
             const switched =
               reply.data && typeof reply.data.mode === 'string' && typeof reply.data.enabled === 'boolean'
-                ? { enabled: reply.data.enabled, mode: reply.data.mode }
+                ? { enabled: reply.data.enabled, mode: reply.data.mode, own: true }
                 : null;
             goalConfig = { ...(goalConfig || {}), ...(switched || {}), objective: stored };
           } else {
@@ -5255,10 +5255,10 @@
   /**
    * What the settings sheet says. Pure, so the whole of it can be tested without a composer.
    *
-   * Two switches and one action, and the reason they share a sheet is that they are the same
-   * subject: what this app is allowed to do to this chat while nobody is watching it. The
-   * hover line is the same information in one breath, for the far commoner case of wanting to
-   * know rather than to change.
+   * One switch, one three-way slider and one action, and the reason they share a sheet is that
+   * they are the same subject: what this app is allowed to do to this chat while nobody is
+   * watching it. The hover line is the same information in one breath, for the far commoner
+   * case of wanting to know rather than to change.
    *
    * `context` and `goal` both come from the app on every poll, so this never reports a
    * setting from memory — a change made in the app's own window shows up here within a tick.
@@ -5282,25 +5282,33 @@
     const blocked = goal && typeof goal.blocked === 'string' ? goal.blocked : '';
     const auto = Boolean(context && context.auto) && blocked !== 'worker';
     const threshold = context && context.threshold > 0 ? context.threshold : 0;
-    // One setting, two switches. The app sends the mode beside `enabled`, which is what makes
-    // it impossible for this sheet to ever draw both of them on: there is one value to read.
+    // One setting, one control. The app sends the mode beside `enabled`, so there is a single
+    // value to read and the slider can only ever be in one of its three positions.
     const mode = goal && goal.mode === 'loop' ? 'loop' : 'goal';
     const goalOn = Boolean(goal && goal.enabled) && mode === 'goal';
     const loopOn = Boolean(goal && goal.enabled) && mode === 'loop';
+    // Whether this chat has moved its own switch, which is what tells an Off somebody chose
+    // here from an Off inherited from the app-wide setting. Only the second lets a saved goal
+    // speak for the chat — see goalArmedFor() in src/main/goal.ts, which this mirrors.
+    const own = Boolean(goal && goal.own);
     const hasKey = Boolean(goal && goal.hasKey);
     const objective = goal && typeof goal.objective === 'string' ? goal.objective : '';
     // The app's own reason, rather than this tab's guess. Today there is exactly one: a
     // worker chat, where the prime already writes the user's turns.
     const from = threshold > 0 ? `from ${roundK(threshold)} tokens` : '';
-    // Either half is enough to make the loop run here, which is why the summary line says
-    // "on" for a chat that has a goal even while the standing switch is off.
-    const running = (goalOn || loopOn || Boolean(objective)) && hasKey && !blocked;
+    // Is anything driving this chat at all? A saved goal is enough on its own, but only for a
+    // chat that has never moved its own switch — the same rule the app applies.
+    const armed = own ? goalOn || loopOn : goalOn || loopOn || Boolean(objective);
+    const running = armed && hasKey && !blocked;
     // Which instruction would actually drive this chat, which is not the same question as
     // which switch is on. A chat that runs only because it carries a goal, with the standing
     // switch off, is driven as a Goal and may therefore stop. This mirrors goalDrivingMode()
-    // in src/main/goal.ts exactly, and it is what the two links below are labelled from — a
+    // in src/main/goal.ts exactly, and it is what the task editor below is labelled from — a
     // sheet that named the mode differently from the app would be worse than naming none.
     const driving = loopOn ? 'loop' : 'goal';
+    // The slider's position: the one word for everything above. Off is a real position and not
+    // merely "neither switch", which is why `armed` and not `enabled` decides it.
+    const position = blocked ? 'off' : !armed ? 'off' : loopOn ? 'loop' : 'goal';
     return {
       // Two short lines rather than a sentence: this is read while reaching for something
       // else, and the only questions it answers are "is it on" and "at what point".
@@ -5314,17 +5322,17 @@
               : objective
                 ? 'Opening this chat on its goal'
                 : 'Add a goal or a loop to start this chat'
-            : loopOn
-              ? hasKey
-                ? 'Loop on — never stops on its own'
-                : 'Loop on — no API key'
-              : objective
-                ? 'Goal on — chasing this chat’s goal'
-                : goalOn
-                  ? hasKey
-                    ? 'Goal on'
-                    : 'Goal on — no API key'
-                  : 'Goal and Loop off'
+            : position === 'off'
+              ? 'Goal and Loop off'
+              : position === 'loop'
+                ? hasKey
+                  ? 'Loop on — never stops on its own'
+                  : 'Loop on — no API key'
+                : hasKey
+                  ? objective
+                    ? 'Goal on — chasing this chat’s goal'
+                    : 'Goal on'
+                  : 'Goal on — no API key'
       ].join('\n'),
       rows: [
         {
@@ -5339,101 +5347,122 @@
           on: auto,
           warn: false,
           disabled: blocked === 'worker'
-        },
-        {
-          key: 'goal',
-          label: 'Goal',
-          // The missing key is the note, not a separate warning line. It is the answer to
-          // the only question somebody switching this on has.
-          //
-          // So is the worker case, and for a plainer reason: the switch is drawn off there
-          // whatever the setting says, because the prime is the author of a worker's user
-          // turns. Without a word for it, a rule working exactly as designed looked like a
-          // setting that had failed to save — which is precisely how it was reported.
-          note:
-            blocked === 'worker'
-              ? 'off here: the prime agent writes this worker’s messages'
-              : !hasKey
-                ? 'OpenRouter API key essential for goal feature'
-                : objective
-                  ? `on for this chat’s own goal, with ${modelLabel(goal.model)}`
-                  : goalOn
-                    ? `replies as you with ${modelLabel(goal.model)}`
-                    : 'reply as you until the goal is met',
-          on: goalOn,
-          warn: !hasKey || blocked === 'worker',
-          disabled: blocked === 'worker'
-        },
-        {
-          /**
-           * The other half of the same setting.
-           *
-           * Loop is Goal with the stop taken away: the model writes the next message every
-           * time, and the only thing that ends the run is this switch going off again. Drawn
-           * as its own row rather than a mode picker inside Goal because that is the decision
-           * being made — "keep it going" is a different intent from "finish what I asked for" —
-           * and turning either one on turns the other off, which the app enforces.
-           */
-          key: 'loop',
-          label: 'Loop',
-          note:
-            blocked === 'worker'
-              ? 'off here: the prime agent writes this worker’s messages'
-              : !hasKey
-                ? 'OpenRouter API key essential for goal feature'
-                : loopOn
-                  ? objective
-                    ? `never stops — chases this chat’s goal with ${modelLabel(goal.model)}`
-                    : `never stops — replies as you with ${modelLabel(goal.model)}`
-                  : 'keep prompting for ever, until you switch it off',
-          on: loopOn,
-          warn: !hasKey || blocked === 'worker',
-          disabled: blocked === 'worker'
         }
-        // Above a New Chat there is no chat for a switch to belong to, so these two moved the
-        // app-wide default while the goal written beside them started a chat under whatever
-        // that default happened to say. Two controls, two scopes, one apparent decision. The
-        // links below are the whole decision there, and they carry their mode with them.
-      ].filter((row) => !fresh || row.key === 'autoCompact'),
+      ],
       /**
-       * The specific goal, and the mode it is written in.
+       * Off, Goal, Loop — one control, because it was always one setting.
        *
-       * Not a third switch, because it is not a mode — it is a piece of text, and until there
-       * is one there is nothing to be on. Saving one is what turns it on, and *which* link
-       * saved it is what decides whether the run may stop: Goal chases it and stops when it is
-       * reached, Loop chases it and never stops. That is why there are two links rather than
-       * one plus a switch to remember afterwards — the choice is made in the act of writing
-       * the goal, in the same sheet, and no other state can quietly answer it differently.
+       * Drawn as two switches it was possible to read the sheet as offering two independent
+       * things that happened to cancel each other, and an unattended run got started as a Goal
+       * by somebody who had come here to start a Loop. A slider cannot say that: it has one
+       * handle, three stops, and the stop it is at is the mode this chat runs in.
+       *
+       * Every note under it is a few words wide on purpose. The sheet is a fixed-size thing
+       * hanging off a composer, and a note long enough to wrap made the whole panel change
+       * height the moment somebody moved the handle.
+       *
+       * Absent above a New Chat: there is no chat for a mode to belong to, and the two links
+       * below carry the mode with them there instead.
+       */
+      mode: fresh
+        ? null
+        : {
+            value: position,
+            options: [
+              { value: 'off', label: 'Off', hint: 'Nothing is written here on its own.' },
+              {
+                value: 'goal',
+                label: 'Goal',
+                hint: `Replies as you until this chat’s goal is reached, then stops. Written with ${modelLabel(goal && goal.model)}.`
+              },
+              {
+                value: 'loop',
+                label: 'Loop',
+                hint: `Replies as you for ever — only this slider ends it. Written with ${modelLabel(goal && goal.model)}.`
+              }
+            ],
+            // The one line under the slider: what the position it is at actually does. The
+            // missing key and the worker rule are said here too, because they are the answer
+            // to the only question somebody reaching for this control has.
+            note:
+              blocked === 'worker'
+                ? 'the prime writes here'
+                : !hasKey
+                  ? 'OpenRouter key required'
+                  : position === 'loop'
+                    ? 'replies for ever'
+                    : position === 'goal'
+                      ? 'replies until goal reached'
+                      : 'no replies written here',
+            warn: !hasKey || blocked === 'worker',
+            disabled: blocked === 'worker'
+          },
+      /**
+       * The one task, and — above a New Chat only — the mode it is written in.
+       *
+       * Goal and Loop share it. They are the same instruction read two ways: chase this, and
+       * stop when it is reached, or chase this and never stop. So sliding from one to the other
+       * keeps the sentence that was written; the slider above owns the mode, and this owns the
+       * words, and neither can quietly answer for the other.
+       *
+       * A New Chat has no slider, because it has no chat for a mode to belong to. There the two
+       * links are the whole decision, and they carry their mode with them into the chat they
+       * are about to start.
        */
       objective: {
         text: objective,
         editing: Boolean(editing),
-        /** Which link opened the editor, and therefore what Save is about to do. */
-        mode: editingMode === 'loop' ? 'loop' : 'goal',
+        /**
+         * What Save is about to write this task as.
+         *
+         * In a chat the slider owns it, not the link that opened the editor — an editor left
+         * open while the handle moves must not save into the mode the sheet has stopped being
+         * in. Above a New Chat there is no slider, so there the link that was pressed is the
+         * only thing that knows.
+         */
+        mode: fresh ? (editingMode === 'loop' ? 'loop' : 'goal') : driving,
+        /**
+         * May this editor save at all? Off is not a mode a task can be written into, and an
+         * open editor is the one way a save could otherwise reach past an Off and switch the
+         * chat back on behind the slider that had just turned it off.
+         */
+        savable: fresh || position !== 'off',
         /** Shown instead of the links once a goal exists, so it can be read without opening it. */
         summary: objective ? clampLine(objective, 120) : '',
-        /** The mode this chat is being driven in right now, so the links can say what changes. */
+        /** The mode this chat is being driven in right now, so the editor saves into it. */
         driving,
-        actions: [
-          {
-            mode: 'goal',
-            label: !objective ? 'add specific goal' : driving === 'goal' ? 'change the goal' : 'run it as a goal',
-            hint: !objective
-              ? 'Write what this chat has to reach. It then prompts until it is reached, and stops there.'
-              : driving === 'goal'
-                ? 'Replace or clear the goal this chat is being driven towards.'
-                : 'Keep this goal, but let the run stop once it is reached.'
-          },
-          {
-            mode: 'loop',
-            label: !objective ? 'add specific loop' : driving === 'loop' ? 'change the loop' : 'run it as a loop',
-            hint: !objective
-              ? 'Write what this chat has to reach. It then prompts for ever — nothing but the Loop switch ends it.'
-              : driving === 'loop'
-                ? 'Replace or clear the goal this loop is being driven towards.'
-                : 'Keep this goal, and never stop on it — only the Loop switch ends the run.'
-          }
-        ],
+        actions: fresh
+          ? [
+              {
+                mode: 'goal',
+                label: 'add specific goal',
+                hint: 'Write what this chat has to reach. It then prompts until it is reached, and stops there.'
+              },
+              {
+                mode: 'loop',
+                label: 'add specific loop',
+                hint: 'Write what this chat has to reach. It then prompts for ever — nothing but the Loop slider ends it.'
+              }
+            ]
+          : [
+              {
+                // One link in a chat, whatever the mode. The text and the mode have distinct
+                // owners here: this editor changes the words, the slider changes how they run.
+                // Two links would offer the mode a second time and let a text save masquerade
+                // as a mode switch.
+                mode: driving,
+                label: objective ? 'edit task' : 'add task',
+                // Off is not a mode this task could be saved into, so it is not offered as one.
+                // Picking Goal or Loop first is the same order the slider reads in.
+                disabled: position === 'off',
+                hint:
+                  position === 'off'
+                    ? 'Pick Goal or Loop above first — Off writes nothing.'
+                    : objective
+                      ? `Change or clear what this chat has to reach. It runs as ${driving === 'loop' ? 'Loop' : 'Goal'}.`
+                      : `Write what this chat has to reach. It runs as ${driving === 'loop' ? 'Loop' : 'Goal'}.`
+              }
+            ],
         available: hasKey && !blocked,
         unavailable:
           blocked === 'worker'
@@ -5899,6 +5928,22 @@
     void pullActivity();
   }
 
+  /**
+   * Moves the mode slider, which is still the two switches the app owns underneath.
+   *
+   * Goal and Loop are one write each and the app turns the other off. Off is the write that
+   * used to have no button: whichever of the two is on goes off, and a chat that is running
+   * only on its saved task names Goal, because that is the mode a task alone runs in. Either
+   * way the write is chat-scoped, so the app records this chat's own answer — which is what
+   * makes Off mean off here rather than deferring to the task still saved beside it.
+   */
+  async function setMode(next, now) {
+    if (menuBusy || next === now) return;
+    if (next === 'goal') return void setSetting('goal', true);
+    if (next === 'loop') return void setSetting('loop', true);
+    return void setSetting(now === 'loop' ? 'loop' : 'goal', false);
+  }
+
   function menuView() {
     // The route, not the id this tab is still holding. Clicking New Chat leaves that id in
     // place on purpose (see composerChat), so a sheet drawn from it would keep offering the
@@ -6007,9 +6052,11 @@
       const stored = reply.data && typeof reply.data.objective === 'string' ? reply.data.objective : goal;
       // The switch the app just pinned, taken from its answer rather than assumed from the
       // button: what the sheet draws is what was actually written down.
+      // Pinning the mode is this chat answering for itself, so the sheet stops reading the saved
+      // task as the thing that speaks for it — which is what makes a clear here land on Off.
       const switched =
         reply.data && typeof reply.data.mode === 'string' && typeof reply.data.enabled === 'boolean'
-          ? { enabled: reply.data.enabled, mode: reply.data.mode }
+          ? { enabled: reply.data.enabled, mode: reply.data.mode, own: true }
           : null;
       goalConfig = { ...(goalConfig || {}), ...(switched || {}), objective: stored };
       menuEditing = false;
@@ -6190,9 +6237,11 @@
       }
       root.append(line);
     }
-    // Under the switches rather than between them: the goal text is what either mode is
-    // pointed at. Outside the loop, because above a New Chat there are no switches to hang
-    // it off and it is then the only thing in the sheet that can start anything.
+    // Under the switch, and above the task it points at.
+    if (view.mode) root.append(buildMode(view.mode));
+    // Under the slider rather than between the modes: the task text is what either mode is
+    // pointed at. Outside the loop, because above a New Chat there is no slider to hang it
+    // off and it is then the only thing in the sheet that can start anything.
     root.append(buildObjective(view.objective));
 
     const act = document.createElement('button');
@@ -6231,12 +6280,68 @@
   }
 
   /**
-   * The specific goal, and the two modes it can be written in.
+   * Off | Goal | Loop, as one handle with three stops.
    *
-   * Closed it is two links, because most of the time there is no goal and the sheet should
-   * not grow a paragraph to say so — and because the mode is the decision, so it belongs on
-   * the control that opens the editor rather than on a switch somewhere else in the sheet
-   * that has to be remembered afterwards. Open it is a box, a Save that names the mode it is
+   * The three stops are drawn at a fixed width and the line under them is one line, always, so
+   * that moving the handle changes what the sheet says and never how big it is. A sheet that
+   * grew a row taller as somebody chose Loop moved everything under the cursor while they were
+   * still looking at it.
+   *
+   * `aria-checked` rather than a `<select>` because this is what it looks like: three positions,
+   * one of them true, all three readable without opening anything.
+   */
+  function buildMode(mode) {
+    const box = document.createElement('div');
+    box.className = 'clf-menu-mode';
+    box.dataset.clfRow = 'mode';
+
+    const track = document.createElement('div');
+    track.className = 'clf-menu-mode-track';
+    track.dataset.clfValue = mode.value;
+    track.setAttribute('role', 'radiogroup');
+    track.setAttribute('aria-label', 'Goal mode');
+
+    // Behind the three labels, and the only thing that moves. Its position is the value, so
+    // there is nothing to keep in step with the buttons in front of it.
+    const fill = document.createElement('span');
+    fill.className = 'clf-menu-mode-fill';
+    fill.setAttribute('aria-hidden', 'true');
+    track.append(fill);
+
+    for (const option of mode.options) {
+      const stop = document.createElement('button');
+      stop.type = 'button';
+      stop.className = 'clf-menu-mode-option';
+      stop.dataset.clfMode = option.value;
+      stop.setAttribute('role', 'radio');
+      stop.setAttribute('aria-checked', option.value === mode.value ? 'true' : 'false');
+      stop.textContent = option.label;
+      stop.disabled = menuBusy || mode.disabled === true;
+      if (option.hint) stop.setAttribute('data-clf-tip', option.hint);
+      if (!mode.disabled) {
+        stop.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void setMode(option.value, mode.value);
+        });
+      }
+      track.append(stop);
+    }
+    box.append(track);
+
+    const note = document.createElement('span');
+    note.className = 'clf-menu-mode-note';
+    note.textContent = mode.note;
+    if (mode.warn) note.dataset.clfWarn = '1';
+    box.append(note);
+    return box;
+  }
+
+  /**
+   * The specific goal, and the mode it is written in.
+   *
+   * Closed it is a link — two only above a New Chat, where the mode is still to be chosen and
+   * there is no slider to choose it on. Open it is a box, a Save that names the mode it is
    * about to save in, a Cancel, and a Clear once there is something to clear.
    */
   function buildObjective(objective) {
@@ -6277,8 +6382,15 @@
         link.type = 'button';
         link.className = 'clf-menu-goal-link';
         link.dataset.clfGoalMode = action.mode;
-        link.disabled = objectiveBusy || menuBusy;
-        link.setAttribute('data-clf-tip', action.hint);
+        // Off offers no editor, and says why in the tooltip rather than by disappearing: a
+        // control that vanishes reads as a bug, and this one comes back on the next stop.
+        link.disabled = objectiveBusy || menuBusy || action.disabled === true;
+        // The reason hangs on the row, not on the button, whenever the button is the thing
+        // that is off. A disabled control receives no pointer events at all, so a tooltip
+        // put on it is a tooltip nobody can read — and this one is the whole explanation of
+        // why the task cannot be opened here.
+        if (action.disabled === true) links.setAttribute('data-clf-tip', action.hint);
+        else link.setAttribute('data-clf-tip', action.hint);
         const plus = document.createElement('span');
         plus.className = 'clf-menu-goal-plus';
         plus.textContent = objective.summary ? '✎' : '+';
@@ -6310,6 +6422,9 @@
       // genuinely needs paragraphs still has shift+enter.
       if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
+        // Same gate as the Save button, because this is the same act: a keystroke must not be
+        // the one way past an Off.
+        if (objective.savable === false) return;
         void saveObjective(input.value, objective.mode);
       }
     });
@@ -6324,7 +6439,7 @@
     // Named, not just "Save". This button is the moment the mode is decided, and the two
     // outcomes are a run that may stop and a run that may not.
     save.textContent = objectiveBusy ? 'Saving…' : objective.mode === 'loop' ? 'Save as loop' : 'Save as goal';
-    save.disabled = objectiveBusy || !menuDraft.trim();
+    save.disabled = objectiveBusy || !menuDraft.trim() || objective.savable === false;
     save.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -6344,15 +6459,23 @@
     // in it that depends on what has been typed is kept in step by hand.
     input.addEventListener('input', () => {
       menuDraft = input.value;
-      save.disabled = objectiveBusy || !menuDraft.trim();
+      save.disabled = objectiveBusy || !menuDraft.trim() || objective.savable === false;
     });
+    // On the row rather than on Save, for the same reason as the link above: the button this
+    // explains is disabled, and a disabled button is deaf to the pointer.
+    if (objective.savable === false) {
+      buttons.setAttribute('data-clf-tip', 'Pick Goal or Loop above first — Off writes nothing.');
+    }
     buttons.append(save, cancel);
     if (objective.text) {
       const clear = document.createElement('button');
       clear.type = 'button';
       clear.className = 'clf-menu-goal-clear';
       clear.textContent = 'Clear';
-      clear.disabled = objectiveBusy;
+      // Deleting the task is an edit like any other, so Off stops it too. Reachable only from
+      // an editor that was already open when the handle moved — and letting it through there
+      // would delete the sentence from under a slider that says nothing is written here.
+      clear.disabled = objectiveBusy || objective.savable === false;
       clear.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -7407,9 +7530,11 @@
     return Boolean(
       conversationId &&
         goalConfig &&
-        // Either the standing switch, or this chat's own goal. The app applies the same rule
-        // to the request itself, and reports no goal at all for a chat the loop may not drive.
-        (goalConfig.enabled === true || currentObjective() !== '') &&
+        // Either the standing switch, or this chat's own goal — unless this chat has moved its
+        // own switch, in which case that switch is the whole answer and Off means off. The app
+        // applies the same rule to the request itself (goalArmedFor), and reports no goal at
+        // all for a chat the loop may not drive.
+        (goalConfig.enabled === true || (goalConfig.own !== true && currentObjective() !== '')) &&
         goalConfig.hasKey === true &&
         // A worker chat is already being driven — by the prime agent, through the agents
         // tool. A second author typing into it is two conversations in one composer.
