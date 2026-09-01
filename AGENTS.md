@@ -1389,29 +1389,26 @@ is **Unattributed** opens a 60-second
 mid-turn (`repairCandidates()`), excludes those that proved their join, and queues one recovery for
 each remaining broken chat. It does not choose "the one likely chat", and agent role is not an
 eligibility gate. A recoverable page transport error similarly queues an `assistant-error` repair
-for the reported nonempty turn identity — normally the owning local generation, subject to the
-current fallback/authority gap below — even while attributed MCP calls continue server-side. An **eligible mid-turn**
+only when the observation carries the owning local generation id — even while attributed MCP calls
+continue server-side. An **eligible mid-turn**
 final-tab close may queue `no-tab`: a still-owned detached agent is gated by `recoverAgentTabs`, while
 an ordinary chat must already have durable `toolCalls>0`. The extension owns the final **reload
 existing exact tab vs open exact conversation** choice at action time, so stale app-side tab guesses
 cannot create a duplicate.
 
 `assistant-error` starts even earlier at the selector boundary: `chatgpt-dom.js::errors()` records
-visible ChatGPT errors, but only `transportFailure()`-classified delivery/stream/network failures
-receive `recoverable:true`. Hidden/live-region noise and CLF-owned surfaces are ignored; a generic
-visible alert may still enter the transcript as an error without granting browser-repair authority.
-When matching transport text lives inside an assistant turn, `content.js` resolves ChatGPT's page
-turn back to the **local generation id** that owns recorder chronology (`localGenerationOf()`) when
-that ownership is available; a top-level banner prefers the local generation in which its node first
-appeared. **Current code still has a weaker fallback:** when neither proof exists,
-`content.js` may emit the page's `error.turnId` (or the current fallback turn id). The page turn id is
-not intrinsically a recorder generation id even though both are called “turn”. Correspondingly,
-`bridge.ts::noteRecoveryObservations()` currently checks only `chat_error + recoverable:true +
-nonempty turnId`; it does **not** compare that id to the recorder's current `activeTurnId` before
-queueing `assistant-error`. The normal live path is therefore well-scoped by content-side ownership,
-but a newly observed historical visible transport failure after reload is not independently fenced
-at the bridge. Treat that as a current authority gap to fix at the source boundary, not as license to
-add another reload fallback or to document a current-turn guarantee the code does not enforce.
+visible ChatGPT errors, but only a **whole normalized notice** matching `transportFailure()` receives
+`recoverable:true`; ordinary assistant prose that merely quotes those words is not an error. Hidden
+live-region noise and CLF-owned surfaces are ignored, while a generic visible alert may still enter
+the transcript as evidence without granting browser-repair authority. When a transport notice lives
+inside an assistant turn, `content.js` may put it in recorder chronology only after exact section-node
+ownership proves which **local generation id** owns it; a reused ChatGPT page turn id is never enough.
+A top-level banner,
+which has no page-turn identity of its own, uses the local generation in which its node first appeared.
+If an in-turn occurrence cannot prove that mapping, it is recorded **unscoped**: ChatGPT's raw page
+turn id never enters `SessionEvent.turnId`. `bridge.ts::noteRecoveryObservations()` still requires a
+recoverable error with a nonempty turn id before queueing `assistant-error`, so an unresolved or
+historical page error remains transcript evidence without acquiring browser-reload authority.
 
 The five recovery reasons are intentionally different **evidence**, but not different action
 machines:

@@ -1445,15 +1445,17 @@
     return '';
   }
 
-  /** Whether an error rendered inside a turn belongs to the given one. */
-  function sameTurn(error, turn) {
-    if (error.turnId && turn.id) return error.turnId === turn.id;
-    // Id-less sections cannot be compared by id without merging all of them, so fall back
-    // to the only other thing that is actually true: the error is inside this turn's DOM.
-    for (const node of turn.nodes || [turn.node]) {
-      if (node && node.contains && node.contains(error.node)) return true;
-    }
-    return false;
+  /** Local recorder generation proven to own this exact rendered error occurrence, if any. */
+  function localErrorGeneration(error) {
+    const section = sectionOf(error.node);
+    // An in-turn error has a concrete section. Its page turn id is only a presentation hint:
+    // ChatGPT reuses those ids and CLF_DOM.turns() groups equal ids for tool-row accounting, so
+    // either one can join an old section to the current response. Only this exact section node
+    // may prove local generation ownership.
+    if (section) return localGenerationOfSection(section);
+    // A top-level banner has no section/page-turn identity. Its node was stamped with the local
+    // generation in which it first appeared, which is the one exact ownership fact it has.
+    return errorFirstSeen.get(error.node) ?? null;
   }
 
   /** An error occurrence this script has not already emitted for this node and turn. */
@@ -1485,13 +1487,9 @@
     // Only this turn's failures. An error inside another turn's section is that turn's,
     // and a toast still on screen from an earlier failure was already on screen when this
     // turn began — neither says anything about how this one ended.
-    const failures = CLF_DOM.errors().filter((error) => {
-      if (isStale(error.node)) return false;
-      if (error.turnId || error.turn) return turn ? sameTurn(error, turn) : false;
-      // A node nothing has recorded yet can only have arrived on this tick, which is this
-      // turn's — the same default the clock version had, without the tie.
-      return (errorFirstSeen.get(error.node) ?? turnId) === turnId;
-    });
+    const failures = CLF_DOM.errors().filter(
+      (error) => !isStale(error.node) && Boolean(turnId) && localErrorGeneration(error) === turnId
+    );
     if (failures.length > 0) return { outcome: 'failed', detail: failures[0].text };
     // Degraded fallback only. If the MAIN-world Fiber helper has ever answered on this page,
     // its end_turn bit is the authority on successful completion and mere visible prose is
@@ -1536,22 +1534,22 @@
   function localGenerationOf(turn) {
     if (!turn) return null;
     const nodes = turn.nodes || (turn.node ? [turn.node] : []);
-    if (generating && genNode) {
-      for (const node of nodes) {
-        if (node === genNode || (node && node.contains && node.contains(genNode))) return turnId;
-      }
-    }
     for (const node of nodes) {
-      const settled = node ? settledGenerations.get(node) : null;
-      if (!settled) continue;
-      // React may reuse the same section node for the next assistant turn. A tombstone is
-      // valid only while the page-authored section signature is still the one that finished
-      // under it; once ChatGPT changes that section, the old generation no longer owns the
-      // node and renderer reconciliation must fall through to fresh Fiber identity/native.
-      if (sectionMark(node) !== settled.mark) continue;
-      return settled.turnId;
+      const local = localGenerationOfSection(node);
+      if (local) return local;
     }
     return null;
+  }
+
+  /** The local generation proven by one exact assistant section node, never by its reusable page id. */
+  function localGenerationOfSection(node) {
+    if (!node) return null;
+    if (generating && genNode === node) return turnId;
+    const settled = settledGenerations.get(node);
+    if (!settled) return null;
+    // React may reuse the same section node for the next assistant turn. A tombstone is valid
+    // only while the page-authored section signature is still the one that finished under it.
+    return sectionMark(node) === settled.mark ? settled.turnId : null;
   }
 
   function currentGenerationOwner() {
@@ -2097,20 +2095,16 @@
      * failure happening a second time. Errors rendered inside a turn carry that turn's id
      * as well, so two turns failing identically stay distinct even in the markdown case.
      */
-    const fallbackTurn = turnId || (turn && turn.id) || '';
     for (const error of visibleErrors) {
       if (isStale(error.node)) continue;
       // The DOM adapter names ChatGPT's page turn. The recorder timeline is keyed by the
       // local generation this document minted, so putting that page id on a live error leaves
-      // the row outside its turn group and chronology renders it after every later call. Resolve
-      // through the same node ownership used by messages/tools; a top-level banner belongs to
-      // the generation in which it first appeared.
-      const pageTurn = error.turn || (turn && sameTurn(error, turn) ? turn : null);
-      const recordedTurn =
-        localGenerationOf(pageTurn) ||
-        (!error.turnId ? errorFirstSeen.get(error.node) : null) ||
-        error.turnId ||
-        fallbackTurn;
+      // the row outside its turn group and chronology renders it after every later call. Only
+      // node-owned local generation proof may cross that identity boundary. A top-level banner
+      // has no page turn at all, so the generation in which its node first appeared is its local
+      // owner. An in-turn error whose section cannot be mapped stays unscoped instead of leaking
+      // ChatGPT's unrelated page id into the recorder turn-id namespace.
+      const recordedTurn = localErrorGeneration(error);
       const scope = recordedTurn || '';
       if (!unreportedError(error, scope)) continue;
       markErrorReported(error, scope);
