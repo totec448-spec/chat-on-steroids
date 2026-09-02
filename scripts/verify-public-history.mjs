@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 
 const maintainerLogin = 'totec448-spec';
 const safeMaintainerEmail = /^(?:\d+\+)?totec448-spec@users\.noreply\.github\.com$/i;
+const canonicalRepositoryRemote = /^(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:|git:\/\/github\.com\/)totec448-spec\/chat-on-steroids(?:\.git)?\/?$/i;
 
 // Keep the blocked values split so this guard does not contain the data it rejects.
 const blockedText = [
@@ -81,22 +82,39 @@ function checkMessageFile(messagePath) {
  * Commits that are already published on the public main line.
  *
  * The gate exists to keep a private value from *entering* public history. A commit that is
- * already on `origin/main` has entered it, and refusing every later local push cannot
+ * already on the canonical public main line has entered it, and refusing every later local push cannot
  * unpublish it — it only strands the working clone, because the merge commits GitHub writes
  * for a merged pull request carry whatever address that account publishes, and no local hook
  * ever saw them. Those are exempt here; everything a local push would actually add stays
  * checked. Removing a value from published history is a deliberate rewrite of a public branch,
  * not something a pre-push hook should be able to demand.
  *
- * A missing `origin/main` — a fresh CI checkout, a clone with another remote name — exempts
- * nothing, so the strict reading is the fallback.
+ * Fork clones commonly call the fork `origin` and the canonical repository `upstream`, so the
+ * remote name itself is not authority. Prefer a fetched `main` whose configured URL names the
+ * canonical GitHub repository; fall back to `origin/main` for ordinary clones and CI checkouts.
+ * If neither exists, exempt nothing and keep the strict reading.
  */
+function publishedMainRef() {
+  const remotes = runGit(['remote'], { allowFailure: true });
+  if (remotes.status === 0) {
+    for (const remote of String(remotes.stdout).split(/\r?\n/).filter(Boolean)) {
+      const url = runGit(['remote', 'get-url', remote], { allowFailure: true });
+      if (url.status !== 0 || !canonicalRepositoryRemote.test(String(url.stdout).trim())) continue;
+      const candidate = `refs/remotes/${remote}/main`;
+      const ref = runGit(['rev-parse', '--verify', '--quiet', candidate], { allowFailure: true });
+      if (ref.status === 0) return candidate;
+    }
+  }
+
+  const fallback = 'refs/remotes/origin/main';
+  const origin = runGit(['rev-parse', '--verify', '--quiet', fallback], { allowFailure: true });
+  return origin.status === 0 ? fallback : null;
+}
+
 function publishedCommits() {
-  const ref = runGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], {
-    allowFailure: true,
-  });
-  if (ref.status !== 0) return new Set();
-  const listed = runGit(['rev-list', 'refs/remotes/origin/main'], { allowFailure: true });
+  const ref = publishedMainRef();
+  if (!ref) return new Set();
+  const listed = runGit(['rev-list', ref], { allowFailure: true });
   if (listed.status !== 0) return new Set();
   return new Set(String(listed.stdout).split(/\r?\n/).filter(Boolean));
 }

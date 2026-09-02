@@ -147,6 +147,37 @@ describe('public-history privacy gate', () => {
     expect(result.stderr).not.toContain(privateEmail);
   });
 
+  it('recognises the canonical upstream main when origin is a stale fork', () => {
+    const repository = makeRepository();
+    const privateEmail = ['totec448', 'gmail.com'].join('@');
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/Inmerson/chat-on-steroids.git'], { cwd: repository });
+    execFileSync('git', ['remote', 'add', 'upstream', 'https://github.com/totec448-spec/chat-on-steroids.git'], { cwd: repository });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Unsafe identity already merged by the canonical forge', privateEmail);
+    execFileSync('git', ['update-ref', 'refs/remotes/upstream/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Clean fork work on top', safeEmail);
+
+    const result = verify(repository);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('privacy check passed');
+  });
+
+  it('does not trust an arbitrary remote main as canonical published history', () => {
+    const repository = makeRepository();
+    const privateEmail = ['totec448', 'gmail.com'].join('@');
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/Inmerson/chat-on-steroids.git'], { cwd: repository });
+    execFileSync('git', ['remote', 'add', 'mirror', 'https://example.invalid/totec448-spec/chat-on-steroids.git'], { cwd: repository });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Unsafe identity only on an arbitrary mirror', privateEmail);
+    execFileSync('git', ['update-ref', 'refs/remotes/mirror/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Clean local commit on top', safeEmail);
+
+    const result = verify(repository);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('non-noreply maintainer email');
+    expect(result.stderr).not.toContain(privateEmail);
+  });
+
   it('keeps annotated tags reachable from HEAD under the same checks', () => {
     const repository = makeRepository();
     const sessionUrl = ['https://claude.ai/code/', 'session_taggedIdentifier'].join('');
