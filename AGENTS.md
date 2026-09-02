@@ -360,7 +360,7 @@ src/main/computer/browser-chords.ts  pure: which chords manage browser tabs/wind
 native/macos-desktop-helper/* shared ScreenCaptureKit, AXUIElement and CGEvent Swift source
 native/macos-desktop-addon/* N-API bridge that runs that Swift backend in the Electron process
 src/main/tunnel/*             index.ts lifecycle · health.ts metrics · locate.ts binaries
-test/*.test.ts                75 tracked Vitest suites, named for the subsystem/boundary they cover
+test/*.test.ts                77 tracked Vitest suites, named for the subsystem/boundary they cover
 vitest.config.ts              test runtime/safety boundary: Node, 30s limits, isolated bridge ports + short in-process evidence wait
 electron.vite.config.ts       exact main/preload/renderer bundle entrypoints; extension is not bundled here
 scripts/*                     build-time icon / tunnel-client / ripgrep fetchers
@@ -2736,7 +2736,7 @@ microseconds-or-never; never copy that value into production browser attribution
 
 ### Where a regression belongs
 
-71 tracked `*.test.ts` suites in the current tree, named for the subsystem or boundary they cover.
+77 tracked `*.test.ts` suites in the current tree, named for the subsystem or boundary they cover.
 Vitest uses real filesystem, real processes and real HTTP in many of them. **Do not maintain this
 count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating this section.
 
@@ -2772,6 +2772,8 @@ count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating 
 | `goal-resume-handoff` | Goal provider-context continuity from **committed resume handoff provenance**; aborted/stale/legacy provenance must not become a false context anchor |
 | `goal` | the goal loop's prompt, privacy boundary, one-draft rule, OpenRouter failures |
 | `ipc` | main<->renderer boundary and payload validation |
+| `macos-desktop-hardening` | source-level invariants of the Swift backend, its build script and the in-process boundary; runs on every host |
+| `macos-computer-live` | opt-in (`COS_LIVE_MACOS_DESKTOP=1`) probe of the real macOS backend on a packaged Mac host |
 | `mcp` | surfaces, handlers, integration — the widest suite |
 | `mcp-inbound` | `x-request-id` extraction and normalization |
 | `mcp-inflight` | request/tool lifetime counters and post-handler settling |
