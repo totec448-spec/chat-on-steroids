@@ -56,18 +56,8 @@ var CLF_DOM = (() => {
     '[grid-area="trailing"]';
   const SPEECH =
     'button[data-testid="composer-speech-button"], button[data-testid="composer-dictate-button"], ' +
-    'button[aria-label^="Dictate" i], button[aria-label^="Voice" i]';
-  /**
-   * A control ChatGPT mounts for a completed assistant message, scoped to that turn.
-   *
-   * `Copy message` is intentionally exact. Code blocks have their own Copy controls while a
-   * response is still streaming, so a generic copy button would turn ordinary interim prose
-   * into false terminal evidence. The current live renderer exposes the accessible label and
-   * recent renderers also used the explicit test id below.
-   */
-  const COMPLETION_ACTION =
-    'button[data-testid="copy-turn-action-button"], button[aria-label="Copy message" i]';
-
+    'button[aria-label^="Dictate" i], button[aria-label^="Voice" i], ' +
+    'button[aria-label="Start dictation" i], button[aria-label="Start Voice" i]';
   const safe = (fn, fallback) => {
     try {
       const value = fn();
@@ -254,7 +244,7 @@ var CLF_DOM = (() => {
 
   function transportFailure(value) {
     const line = String(value || '').replace(/\s+/g, ' ').trim();
-    return /(?:message delivery timed out|unknown error occurred|there was an error generating (?:a|the) response|error in message stream|network error|something went wrong)/i.test(line);
+    return /^(?:message delivery timed out(?:\. please try again\.?)?(?: retry)?|connection interrupted\.? waiting for the complete answer\.?|unknown error occurred\.?|there was an error generating (?:a|the) response\.?|error in message stream\.?|network error\.?|something went wrong\.?|something went wrong while generating the response(?:\. if this issue persists please contact us through our help center at help\.openai\.com\.?)?\.?)$/i.test(line);
   }
 
   /**
@@ -452,23 +442,6 @@ var CLF_DOM = (() => {
     }, []);
   }
 
-  /**
-   * ChatGPT's completed-message action for exactly this logical assistant turn, if mounted.
-   *
-   * This is corroborating lifecycle evidence only. content.js still requires a quiet turn,
-   * authored assistant prose, a matching healthy Fiber descriptor and no unanswered connector
-   * call before it may use this node as a completion fallback.
-   */
-  function completionAction(turn) {
-    return safe(() => {
-      for (const section of turnNodes(turn)) {
-        const action = section && section.querySelector ? section.querySelector(COMPLETION_ACTION) : null;
-        if (action) return action;
-      }
-      return null;
-    }, null);
-  }
-
   /** True while ChatGPT is producing a turn. The stop button is the honest signal. */
   function generating() {
     return safe(() => document.querySelector(STOP) !== null, false);
@@ -476,6 +449,11 @@ var CLF_DOM = (() => {
 
   function stopButton() {
     return safe(() => document.querySelector(STOP), null);
+  }
+
+  /** The page-owned Send control, exposed so content.js can witness an actual submission. */
+  function sendButton() {
+    return safe(() => document.querySelector(SEND), null);
   }
 
   /**
@@ -1086,7 +1064,17 @@ var CLF_DOM = (() => {
         if (!displayed(node)) continue;
         const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
         if (value.length <= 2 || value.length >= 500) continue;
-        out.push({ text: value, node, turnId: null });
+        // A live region names no turn. It is announced above the thread, outside every
+        // section, so `turnId` stays null here and the caller's own live generation is what
+        // places it. The wording it does carry goes through the same classifier the in-turn
+        // branch below trusts, because that is the only difference between the two: a send
+        // that dies before an assistant turn exists has nowhere to paint "Message delivery
+        // timed out" except up here. Withholding recovery authority from that one case left
+        // the app recording the failure, marking the turn failed, and then leaving the chat
+        // parked on it - which is what a reload exists to undo. An announcement that is not
+        // a recognised transport failure ("Reasoning details opened", a user-row error) is
+        // still recorded as session evidence and still authorizes nothing.
+        out.push({ text: value, node, turnId: null, recoverable: transportFailure(value) });
         texts.add(value);
       }
       for (const turn of turns()) {
@@ -1096,7 +1084,7 @@ var CLF_DOM = (() => {
             const value = text(markdown, 500).replace(/\s+/g, ' ').trim();
             if (!value || !transportFailure(value) || texts.has(value)) continue;
             texts.add(value);
-            out.push({ text: value, node: markdown, turnId: turn.id, turn });
+            out.push({ text: value, node: markdown, turnId: turn.id, turn, recoverable: true });
           }
         }
       }
@@ -1306,18 +1294,14 @@ var CLF_DOM = (() => {
   }
 
   /**
-   * Makes one assistant turn an app-owned surface without deleting any React-owned DOM.
+   * Mounts app-owned activity before one assistant turn without replacing ChatGPT's answer.
    *
-   * The recorder still needs ChatGPT's native subtree to exist so it can observe final
-   * prose, progress and lifecycle changes. The visible stream deliberately lives *beside*
-   * ChatGPT's turn sections, not inside one of them. React transiently moves/reuses assistant
-   * sections while mounting the next user turn; keeping our stream inside such a section made
-   * the already-correct assistant answer jump across the new user message for one paint before
-   * reconciliation put it back. A connected sibling stream therefore never follows a native
-   * section that React moves. Turning Overwrite off only removes markers/the sibling; React
-   * never has to reconstruct anything we destroyed.
+   * The live React subtree remains the one renderer for prose, code/document blocks and action
+   * buttons. Overwrite owns only activity rows, mounted as a sibling so React cannot move them
+   * across a later user message. Turning it off removes only the marker/sibling; ChatGPT never
+   * has to reconstruct anything we destroyed.
    */
-  function replaceTurn(turn, root, replaced) {
+  function replaceActivity(turn, root, replaced) {
     return safe(() => {
       const sections = turnNodes(turn);
       if (sections.length === 0) return false;
@@ -1327,19 +1311,24 @@ var CLF_DOM = (() => {
       }
       const embedded = Boolean(root && sections.some((section) => root.parentElement === section));
       if (replaced && root && (!root.isConnected || embedded)) {
-        const last = sections[sections.length - 1];
-        if (last && last.parentElement) last.parentElement.insertBefore(root, last.nextSibling);
+        const first = sections[0];
+        if (first && first.parentElement) first.parentElement.insertBefore(root, first);
       }
       return true;
     }, false);
   }
 
-  /** Types into the composer. Refuses if the user already has a draft there. */
-  function insertPrompt(value) {
+  /** Types into the composer; dedicated fresh-chat automation may replace an autosaved draft. */
+  function insertPrompt(value, replace = false) {
     return safe(() => {
       const box = composer();
       if (!box) return false;
-      if ((box.textContent || '').trim() !== '') return false;
+      if ((box.textContent || '').trim() !== '') {
+        if (!replace) return false;
+        box.focus();
+        box.replaceChildren();
+        box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+      }
       box.focus();
       // execCommand still produces the native editing path ChatGPT listens for. Newer
       // composer builds occasionally ignore its return value, so verify the DOM and
@@ -1347,6 +1336,20 @@ var CLF_DOM = (() => {
       document.execCommand('insertText', false, value);
       box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
       return (box.textContent || '').trim().length > 0;
+    }, false);
+  }
+
+  /** Clears only app-owned text that still exactly matches the value it inserted. */
+  function clearPromptExact(value) {
+    return safe(() => {
+      const box = composer();
+      const compact = (text) => String(text || '').replace(/\s+/g, '');
+      if (!box || compact(box.textContent) !== compact(value)) return false;
+      box.focus();
+      document.execCommand('selectAll', false);
+      document.execCommand('delete', false);
+      box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+      return (box.textContent || '').trim() === '';
     }, false);
   }
 
@@ -1441,10 +1444,10 @@ var CLF_DOM = (() => {
     presentationTurns,
     messages,
     messagesIn,
-    completionAction,
     sectionSignature,
     generating,
     stopButton,
+    sendButton,
     progressLine,
     progressItems,
     interrupted,
@@ -1467,8 +1470,9 @@ var CLF_DOM = (() => {
     firstUserMessage,
     turnMount,
     hideProgress,
-    replaceTurn,
+    replaceActivity,
     insertPrompt,
+    clearPromptExact,
     send
   };
 })();

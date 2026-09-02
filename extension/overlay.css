@@ -672,6 +672,12 @@
     width: 100%;
     animation: none;
   }
+
+  /* The handle appears at its stop instead of sliding to it. Where it is is the setting; the
+     travel is only how the change is announced. */
+  .clf-menu-mode-fill {
+    transition: none;
+  }
 }
 
 /* --- app-owned chronological assistant stream ---------------------------- */
@@ -683,17 +689,9 @@
   display: none !important;
 }
 
-/* Overwrite is whole-turn ownership, not a selective relabel pass. ChatGPT's native
-   assistant subtree remains mounted for observation/React state, but every direct child is
-   visually removed. The app-owned stream is a sibling of the turn section so React cannot
-   drag it across the next user message when it transiently reorders/reuses native sections. */
-[data-clf-turn-replaced='1'] > :not(.clf-stream) {
-  display: none !important;
-}
-
 /* The reading column, not the thread.
  *
- * `replaceTurn` appends this to the turn's <article>, which is as wide as the whole thread
+ * `replaceActivity` mounts this beside the turn's <article>, which is as wide as the whole thread
  * pane; ChatGPT's own prose sits in a centred column inside it. Inheriting the article's
  * width made the app's rendering run edge to edge while the native turn above it stayed
  * narrow — the same conversation in two different measures. So take ChatGPT's own column
@@ -741,13 +739,11 @@
   overflow-wrap: anywhere;
 }
 
-.clf-stream-progress,
-.clf-stream-assistant_message {
+.clf-stream-progress {
   opacity: 1;
 }
 
-.clf-stream-progress .clf-stream-icon,
-.clf-stream-assistant_message .clf-stream-icon {
+.clf-stream-progress .clf-stream-icon {
   display: none;
 }
 
@@ -766,71 +762,6 @@
   opacity: 0.86;
 }
 
-.clf-stream-assistant_message {
-  display: block;
-  margin: 0.55rem 0 0.25rem;
-  font-size: 1rem;
-  line-height: 1.7;
-}
-
-.clf-stream-assistant_message .clf-stream-text {
-  display: block;
-  white-space: normal;
-  font-weight: 400;
-}
-
-.clf-stream-assistant_message .clf-stream-text > :first-child { margin-top: 0; }
-.clf-stream-assistant_message .clf-stream-text > :last-child { margin-bottom: 0; }
-.clf-stream-assistant_message .clf-stream-text p,
-.clf-stream-assistant_message .clf-stream-text ul,
-.clf-stream-assistant_message .clf-stream-text ol,
-.clf-stream-assistant_message .clf-stream-text blockquote,
-.clf-stream-assistant_message .clf-stream-text pre,
-.clf-stream-assistant_message .clf-stream-text table,
-.clf-stream-assistant_message .clf-stream-text h1,
-.clf-stream-assistant_message .clf-stream-text h2,
-.clf-stream-assistant_message .clf-stream-text h3,
-.clf-stream-assistant_message .clf-stream-text h4,
-.clf-stream-assistant_message .clf-stream-text h5,
-.clf-stream-assistant_message .clf-stream-text h6 { margin: 0.6em 0; }
-.clf-stream-assistant_message .clf-stream-text ul,
-.clf-stream-assistant_message .clf-stream-text ol { padding-left: 1.55em; }
-.clf-stream-assistant_message .clf-stream-text blockquote {
-  margin-left: 0;
-  padding-left: 0.8em;
-  border-left: 2px solid color-mix(in srgb, currentColor 20%, transparent);
-  opacity: 0.86;
-}
-.clf-stream-assistant_message .clf-stream-text code {
-  padding: 0.08em 0.28em;
-  border-radius: 0.3rem;
-  background: color-mix(in srgb, currentColor 7%, transparent);
-  font-size: 0.92em;
-}
-.clf-stream-assistant_message .clf-stream-text pre {
-  overflow: auto;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
-  border-radius: 0.5rem;
-  background: color-mix(in srgb, currentColor 4%, transparent);
-  white-space: pre;
-}
-.clf-stream-assistant_message .clf-stream-text pre code { padding: 0; background: transparent; }
-.clf-stream-assistant_message .clf-stream-text table {
-  width: max-content;
-  min-width: 100%;
-  border-collapse: collapse;
-}
-.clf-stream-assistant_message .clf-stream-text th,
-.clf-stream-assistant_message .clf-stream-text td {
-  padding: 0.28rem 0.45rem;
-  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  text-align: left;
-  vertical-align: top;
-}
-
-.clf-stream-assistant_message .clf-agent,
-.clf-stream-assistant_message .clf-when,
 .clf-stream-progress .clf-when {
   display: none;
 }
@@ -1096,6 +1027,120 @@
   transform: translateX(14px);
 }
 
+/* Off | Goal | Loop — the switch above, stretched to three stops.
+
+   Same pill, same green, same sliding travel; only the handle is a third of the track wide and
+   has two places to stop instead of one. Everything about it is fixed height, and the line
+   under it never wraps: this sheet hangs off a composer, and a note that grew to two lines as
+   somebody chose Loop pushed the whole panel taller under their cursor. */
+.clf-menu-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px 9px;
+}
+
+.clf-menu-mode-track {
+  position: relative;
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 3px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+/* The one moving part. Its stop is the value, so nothing has to be kept in step with it. */
+.clf-menu-mode-fill {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  border-radius: 9999px;
+  background: color-mix(in srgb, currentColor 26%, transparent);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 22%);
+  transition: transform 0.18s cubic-bezier(0.23, 1, 0.32, 1), background-color 0.15s ease;
+}
+
+.clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-fill,
+.clf-menu-mode-track[data-clf-value='loop'] .clf-menu-mode-fill {
+  background: #10a37f;
+}
+
+.clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-fill {
+  transform: translateX(100%);
+}
+
+.clf-menu-mode-track[data-clf-value='loop'] .clf-menu-mode-fill {
+  transform: translateX(200%);
+}
+
+.clf-menu-mode-option {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px 0 5px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.2;
+  text-align: center;
+  opacity: 0.62;
+  cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.clf-menu-mode-option:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.clf-menu-mode-option[aria-checked='true'] {
+  opacity: 1;
+}
+
+/* Only the two green stops recolour their word: the neutral Off handle keeps the sheet's ink,
+   which is the same reason the switch above is neutral when it is off rather than red. */
+.clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-option[aria-checked='true'],
+.clf-menu-mode-track[data-clf-value='loop'] .clf-menu-mode-option[aria-checked='true'] {
+  color: #fff;
+}
+
+.clf-menu-mode-option:focus-visible {
+  outline: 2px solid color-mix(in srgb, currentColor 45%, transparent);
+  outline-offset: -2px;
+}
+
+/* A worker chat's slider is drawn and dead. Dimmed rather than hidden, because the position
+   it is parked at is still the true answer to "what writes here" — nothing does. */
+.clf-menu-mode-option:disabled {
+  cursor: default;
+  opacity: 0.34;
+}
+
+.clf-menu-mode-option:disabled[aria-checked='true'] {
+  opacity: 0.6;
+}
+
+/* One line, always. See the note above the block. */
+.clf-menu-mode-note {
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.62;
+}
+
+.clf-menu-mode-note[data-clf-warn='1'] {
+  color: color-mix(in srgb, currentColor 45%, #f59e0b);
+  opacity: 1;
+}
+
 /* The specific goal, sitting under the Goal switch it belongs to.
    Indented to the switch's own text column and set in the note's size, so it reads as part
    of that row rather than as a second setting. The accent is this app's amber — the same
@@ -1114,6 +1159,18 @@
   line-height: 1.4;
   opacity: 0.75;
   overflow-wrap: anywhere;
+}
+
+/* The two modes a goal can be written in, side by side because they are one choice rather
+   than two settings. Wraps rather than compressing: the labels change with what the chat is
+   already doing ("change the goal", "run it as a loop"), and a truncated one of those is a
+   sentence that means something else. */
+.clf-menu-goal-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px 8px;
 }
 
 .clf-menu-goal-link {
@@ -1223,8 +1280,9 @@
   overflow-wrap: anywhere;
 }
 
-.clf-menu-goal-note[data-clf-warn='1'],
-.clf-menu-goal-link [data-clf-warn='1'] {
+/* A failed save is a note above the links now, not a label inside one of them: with two
+   links, an error worn by one of them reads as that mode's own problem. */
+.clf-menu-goal-note[data-clf-warn='1'] {
   color: color-mix(in srgb, currentColor 45%, #f59e0b);
   opacity: 1;
 }

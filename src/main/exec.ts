@@ -49,6 +49,8 @@ export const MAX_ENV_VALUE_CHARS = 8_192;
 const CONSOLE_UTF8 =
   '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); ' +
   '$OutputEncoding = [System.Text.UTF8Encoding]::new($false); ';
+/** Windows PowerShell 5.1 otherwise decodes UTF-8 source files with the system ANSI code page. */
+const GET_CONTENT_UTF8 = "$PSDefaultParameterValues['Get-Content:Encoding'] = 'UTF8'; ";
 
 export class ExecError extends Error {}
 export type CommandEnvironment = Record<string, string>;
@@ -438,7 +440,7 @@ export function prepareShellCommand(
   }
   const shell = findPowerShell();
   if (!shell) throw new ExecError('PowerShell was not found on this system');
-  const cleanScript = `${CONSOLE_UTF8}$ProgressPreference='SilentlyContinue'; ${script}`;
+  const cleanScript = `${CONSOLE_UTF8}${GET_CONTENT_UTF8}$ProgressPreference='SilentlyContinue'; ${script}`;
   const encoded = Buffer.from(cleanScript, 'utf16le').toString('base64');
   return {
     file: shell,
@@ -466,7 +468,7 @@ export async function runPowerShell(
   // command line as a place where model-supplied text could be misparsed. The encoding
   // preamble is the other half: what goes *in* has been unambiguous all along, and this is
   // what makes what comes back out unambiguous too. See CONSOLE_UTF8.
-  const cleanScript = `${CONSOLE_UTF8}$ProgressPreference='SilentlyContinue'; ${script}`;
+  const cleanScript = `${CONSOLE_UTF8}${GET_CONTENT_UTF8}$ProgressPreference='SilentlyContinue'; ${script}`;
   const encoded = Buffer.from(cleanScript, 'utf16le').toString('base64');
   const result = await run({
     file: shell,

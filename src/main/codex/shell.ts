@@ -126,6 +126,19 @@ const PWSH_FALLBACK_PATHS =
 const POWERSHELL_FALLBACK_PATHS =
   process.platform === 'win32' ? ['C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'] : [];
 
+/**
+ * Whether a resolved shell path is Windows PowerShell 5.1 rather than PowerShell 7.
+ *
+ * `getShell('powershell')` prefers `pwsh.exe` and falls back to `powershell.exe`, so a shell
+ * type of `powershell` says nothing about which of the two the model is talking to — and the
+ * two differ on the thing that breaks most often, because 5.1 has no `&&` or `||`. Only 5.1 is
+ * ever named `powershell`; PowerShell 7 is `pwsh` on every platform it ships for. An empty or
+ * unrecognised path answers false, so a caller that cannot tell does nothing.
+ */
+export function isWindowsPowerShell5(shellPath: string): boolean {
+  return /(?:^|[\\/])powershell(?:\.exe)?$/i.test(shellPath.trim());
+}
+
 export function getShell(shellType: ShellType, path?: string): DetectedShell | null {
   const resolve = (binary: string, fallbacks: readonly string[]): string | null =>
     getShellPath(shellType, path, binary, fallbacks);

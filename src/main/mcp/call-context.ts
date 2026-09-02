@@ -57,6 +57,8 @@ export interface CallCaller {
    * evidence named one. Never anything the model wrote.
    */
   conversationId: string | null;
+  /** Durable local session principal carried by the same exact request proof. */
+  sessionId?: string | null;
 }
 
 export interface CallContext {
@@ -235,12 +237,13 @@ export function bindOnAttribution(agent: string): void {
 export function noteOutcome(outcome: ToolOutcome): void {
   const store = storage.getStore();
   if (!store) return;
-  // A lower-severity wrapper result must never erase a more specific outcome the tool
-  // already established. The concrete live failure was exec_command: noteExec() marked a
-  // non-zero child exit as `error`, then guard() saw an ordinary (non-isError) ToolResult
-  // and overwrote it with `ok`. Session history consequently showed a failed build as a
-  // successful MCP call. Keep the strongest fact seen during the call instead.
-  const rank: Record<ToolOutcome, number> = { ok: 0, rejected: 1, error: 2 };
+  // Keep a wrapper's generic result from overwriting a more specific tool outcome.
+  const rank: Record<ToolOutcome, number> = {
+    ok: 0,
+    process_exit_nonzero: 1,
+    tool_rejected: 2,
+    tool_internal_error: 3
+  };
   if (store.outcome === null || rank[outcome] > rank[store.outcome]) store.outcome = outcome;
 }
 
@@ -288,11 +291,8 @@ export function noteExec(result: {
   timedOut?: boolean;
   durationMs?: number;
   /**
-   * The caller has proven this non-zero exit is a reported result, not a failure.
-   *
-   * Only `exec_command` can know this, because only it has the command line: `rg` spends
-   * exit 1 on "no matches". Left false everywhere else, so `write_stdin` and every older
-   * call site keep the original behaviour exactly.
+   * The caller has proven this non-zero exit is a reported result, not a failure. Only
+   * `exec_command` can know this, because only it has the command line.
    */
   benignExit?: boolean;
 }): void {
@@ -300,19 +300,10 @@ export function noteExec(result: {
   if (!store) return;
   noteProcess(result);
   store.evidence.timedOut = result.timedOut === true;
-  // A command that ran and failed is not an `ok` call. The dispatcher's fallback only sees
-  // `result.isError`, and a completed non-zero shell result is not a transport error, so a
-  // failed build was being stored beside a successful one with nothing to tell them apart.
-  // A still-running process has `exitCode === null` and has not failed yet; leave it alone,
-  // and never overwrite an outcome a tool set deliberately.
-  //
-  // The `benignExit` exemption is narrow and deliberate: a non-zero exit that the caller
-  // proved is a *result* would otherwise make the error count uninterpretable, which is the
-  // opposite of what marking failures was for. A timeout is never exempt — it is a failure
-  // whatever the program's exit convention says.
-  const failed = result.timedOut === true || (result.exitCode !== null && result.exitCode !== 0);
-  const exempt = result.benignExit === true && result.timedOut !== true;
-  if (!store.outcome && failed && !exempt) {
-    store.outcome = 'error';
+  // A timeout is our failure and outranks a child status; benign child statuses are exempt.
+  const exempt = result.benignExit === true;
+  if (result.exitCode !== null && result.exitCode !== 0 && !exempt) {
+    noteOutcome('process_exit_nonzero');
   }
+  if (result.timedOut === true) noteOutcome('tool_internal_error');
 }

@@ -138,12 +138,14 @@ function authored(
     workingTurnId?: string;
     turnExchangeId?: string;
     createTime?: number;
+    channel?: string;
   } = {}
 ): Message {
   return {
     id,
     author: { role: 'assistant' },
     recipient: 'all',
+    ...(options.channel ? { channel: options.channel } : {}),
     ...(options.status ? { status: options.status } : {}),
     ...(options.endTurn !== undefined ? { end_turn: options.endTurn } : {}),
     ...(options.createTime ? { create_time: options.createTime } : {}),
@@ -264,7 +266,8 @@ interface TurnEvidence {
 interface TurnFixture {
   id: string;
   messages: Message[];
-  rendered?: string[];
+  /** A visible `.markdown` block: its text, or markup when the test is about the markup. */
+  rendered?: Array<string | { html: string }>;
   staleStamp?: string;
   conversationProps?: Record<string, unknown>;
 }
@@ -297,10 +300,11 @@ async function scan(
       turn.messages,
       turn.conversationProps
     );
-    for (const text of turn.rendered ?? []) {
+    for (const entry of turn.rendered ?? []) {
       const block = document.createElement('div');
       block.className = 'markdown';
-      block.textContent = text;
+      if (typeof entry === 'string') block.textContent = entry;
+      else block.innerHTML = entry.html;
       section.append(block);
     }
     document.body.append(section);
@@ -642,6 +646,32 @@ describe('the calls a turn says it made', () => {
     ]);
   });
 
+  /**
+   * Markup is carried whole or not at all.
+   *
+   * Cutting it at a character count cuts it mid-tag, and the cut lands inside ChatGPT's
+   * code-block chrome far more often than its size suggests, because that chrome is several
+   * hundred characters of toolbar and layout around a few lines of code. What arrived then
+   * was a presentation that stopped inside an unclosed box: the prose after the block gone,
+   * and the remainder of the message drawn as code. The canonical text below is unaffected,
+   * so refusing the capture costs presentation and never content.
+   */
+  it('drops a rendered capture too large to carry whole rather than cutting it mid-tag', async () => {
+    const text = 'x'.repeat(121_000);
+    const { turns } = await scan([], [
+      {
+        id: 'turn-oversized-html',
+        messages: [authored('assistant-oversized', text)],
+        rendered: [{ html: `<p>${text}</p>` }]
+      }
+    ]);
+
+    expect(turns[0]!.messages[0]!.rawText).toBe(text);
+    expect(turns[0]!.messages[0]!.renderedHtml).toBe('');
+    // No rendered join was made either, so nothing downstream reads this block as evidence.
+    expect(turns[0]!.messages[0]).not.toHaveProperty('sectionIndex');
+  });
+
   it('keeps one exact logical id when ChatGPT rotates the raw UUID before the thought parent mounts', async () => {
     const relation = {
       parent: 'thought-stream-owner',
@@ -781,6 +811,41 @@ describe('the calls a turn says it made', () => {
     const { turns } = await scan([], [{ id: 'turn-terminal', messages, rendered: ['Still working.', 'Finished.'] }]);
 
     expect(turns[0]!.endMessageId).toBe('final-public');
+  });
+
+  it('reads through the trailing analysis ghost the page leaves after a finished answer', async () => {
+    // Measured live 2026-08-31 on a finished tool-heavy turn: the answer sits on `final` with
+    // `end_turn`, and behind it the page keeps an empty `analysis` message at `in_progress`
+    // forever. Reading the tail as "the last public text decides" hid the answer for good.
+    const ghost = authored('analysis-ghost', '', { status: 'in_progress', channel: 'analysis' });
+    const messages = [
+      authored('final-public', 'Finished.', { status: 'finished_successfully', endTurn: true, channel: 'final' }),
+      ghost
+    ];
+    const { turns } = await scan([], [{ id: 'turn-ghost', messages, rendered: ['Finished.'] }]);
+
+    expect(turns[0]!.endMessageId).toBe('final-public');
+    expect(turns[0]!.messages.map((message) => message.messageId)).toEqual(['final-public']);
+  });
+
+  it('reads through a trailing commentary message that never carries the answer', async () => {
+    const messages = [
+      authored('final-public', 'Finished.', { status: 'finished_successfully', endTurn: true, channel: 'final' }),
+      authored('narration', 'Wrapping up.', { status: 'finished_successfully', endTurn: false, channel: 'commentary' })
+    ];
+    const { turns } = await scan([], [{ id: 'turn-narration', messages, rendered: ['Finished.', 'Wrapping up.'] }]);
+
+    expect(turns[0]!.endMessageId).toBe('final-public');
+  });
+
+  it('still lets a newer answer-capable message hold the turn open after an earlier answer ended', async () => {
+    const messages = [
+      authored('old-final', 'Old completed attempt.', { status: 'finished_successfully', endTurn: true, channel: 'final' }),
+      authored('retry-active', 'Trying again.', { status: 'finished_successfully', endTurn: false, channel: 'final' })
+    ];
+    const { turns } = await scan([], [{ id: 'turn-channel-retry', messages, rendered: ['Old completed attempt.', 'Trying again.'] }]);
+
+    expect(turns[0]!.endMessageId ?? null).toBeNull();
   });
 
   it('does not call an active turn finished merely because prior messages are finished successfully', async () => {

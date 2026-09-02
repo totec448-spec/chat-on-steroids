@@ -6,7 +6,7 @@
  * ipcRenderer itself is never exposed.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppState, Capabilities, Config, Diagnosis, LogEntry } from '../shared/types.js';
 import type {
   Handoff,
@@ -42,6 +42,8 @@ export interface GoalModelPage {
 export interface SessionList {
   sessions: SessionSummary[];
   activeId: string | null;
+  /** ChatGPT conversation ids the user has blocked from using local tools. */
+  blocked: string[];
   pressure: Array<TokenPressure & { id: string }>;
   /** Total retained sessions, not merely the current IPC page. */
   total: number;
@@ -65,6 +67,8 @@ const api = {
   getState: () => call<AppState>('state:get'),
   saveSettings: (patch: SettingsPatch, base: SettingsPatch) => call<AppState>('settings:save', { patch, base }),
   addRoot: () => call<AppState>('roots:add'),
+  /** A folder dropped on the window; only the preload can learn a dropped File's path. */
+  addRootPath: (file: File) => call<AppState>('roots:addPath', { path: webUtils.getPathForFile(file) }),
   removeRoot: (name: string) => call<AppState>('roots:remove', { name }),
   renameRoot: (name: string, newName: string) => call<AppState>('roots:rename', { name, newName }),
   setApiKey: (value: string) => call<AppState>('secret:set', { value }),
@@ -87,6 +91,11 @@ const api = {
     call<SessionList>('sessions:list', options ?? {}),
   getSession: (id: string, options?: { from?: number; limit?: number }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),
+  openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
+  // Stops a chat this app cannot stop in the page: every tool call it has already been proved
+  // to own is refused until it is released. Returns the whole blocked set, so one press
+  // repaints without a second read.
+  setSessionBlocked: (id: string, blocked: boolean) => call<string[]>('sessions:block', { id, blocked }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 

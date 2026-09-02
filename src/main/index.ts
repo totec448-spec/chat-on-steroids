@@ -36,8 +36,19 @@ import {
 } from './agents.js';
 import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
+import { restoreBlockedChats } from './session/blocked-chats.js';
 import { stopComputerHelper } from './computer/index.js';
-import { GOAL_OBJECTIVES_STATE, restoreGoalObjectives, type GoalObjectivesSnapshot } from './goal.js';
+import {
+  GOAL_OBJECTIVES_STATE,
+  GOAL_REPLIES_STATE,
+  GOAL_SWITCHES_STATE,
+  restoreGoalObjectives,
+  restoreGoalReplies,
+  restoreGoalSwitches,
+  type GoalObjectivesSnapshot,
+  type GoalRepliesSnapshot,
+  type GoalSwitchesSnapshot
+} from './goal.js';
 import {
   CONTINUATIONS_STATE,
   restoreContinuations,
@@ -46,6 +57,7 @@ import {
 } from './session/continuation.js';
 import { startSessionRetentionMaintenance } from './session/retention.js';
 import { runShutdownSequence } from './shutdown.js';
+import { applyStagedUpdate, startUpdateChecks } from './update.js';
 import { windowLayoutForWorkArea } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
 import {
@@ -233,9 +245,19 @@ void app.whenReady().then(async () => {
   const savedGoalObjectives = await readDurable<GoalObjectivesSnapshot>(GOAL_OBJECTIVES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalObjectives(savedGoalObjectives);
+  const savedGoalSwitches = await readDurable<GoalSwitchesSnapshot>(GOAL_SWITCHES_STATE);
+  if (windowActivation.isDisabled()) return;
+  restoreGoalSwitches(savedGoalSwitches);
+  const savedGoalReplies = await readDurable<GoalRepliesSnapshot>(GOAL_REPLIES_STATE);
+  if (windowActivation.isDisabled()) return;
+  restoreGoalReplies(savedGoalReplies);
   // Request ownership must exist before either side of the bridge can race in. A request id
   // that was proved yesterday remains the same workflow today even if its ChatGPT tab closed.
   await restoreRequestCorrelations();
+  if (windowActivation.isDisabled()) return;
+  // And the user's blocks, for the same reason: a chat blocked yesterday is still the rogue
+  // turn today, and a block that loads after the first call is a tool the turn already got.
+  await restoreBlockedChats();
   if (windowActivation.isDisabled()) return;
   setAgentConversationLookup(agentConversation);
   // The prime's chat is the user's own, so no extension report can name it. It is bound
@@ -245,11 +267,16 @@ void app.whenReady().then(async () => {
   // decides whether a previous run has been abandoned partly from which ChatGPT tabs are
   // open, and without this it can only answer "I cannot see" — which it treats, on
   // purpose, as a reason to leave the existing run alone.
-  // How a fresh chat actually opens. The app asks the OS to open the ChatGPT URL, which
-  // launches the browser if it is closed and creates the tab if there is none — the two
-  // cases the old "wait for a ChatGPT tab to poll us" delivery could never handle. Wired
-  // before any restored command is delivered, so a resume queued yesterday opens as soon
-  // as the bridge starts rather than waiting for the user to visit ChatGPT.
+  // How a fresh chat opens when no browser can be asked to open it. The app asks the OS for
+  // the ChatGPT URL, which launches the browser if it is closed and creates the tab if there
+  // is none — the two cases the old "wait for a ChatGPT tab to poll us" delivery could never
+  // handle. Wired before any restored command is delivered, so a resume queued yesterday opens
+  // as soon as the bridge starts rather than waiting for the user to visit ChatGPT.
+  //
+  // It is deliberately not how a page-driven Compact & Resume opens chat B. The OS resolves a
+  // URL to whichever browser instance last had focus, which is a different window — and can be
+  // a browser without this extension in it — from the one holding chat A. That decision belongs
+  // to the browser that owns the source chat; see bridge.ts::offerPlacement.
   setBrowserOpener(async (url) => {
     try {
       const browser = await openInPreferredBrowser(url);
@@ -355,6 +382,12 @@ void app.whenReady().then(async () => {
   });
 
   if (getConfig().ui.autoConnect) void connect();
+
+  // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
+  // window that is already on screen. Everything it learns arrives through the ordinary state
+  // push, every failure ends inside it, and its own timer keeps it running for a tray app that
+  // is never restarted.
+  startUpdateChecks();
 });
 
 app.on('before-quit', () => {
@@ -403,7 +436,12 @@ app.on('will-quit', (event) => {
       // Phase 3: recorder work can enqueue both session projections and named durable state.
       { name: 'recorder flush', budgetMs: 10_000, run: () => [flushRecorder()] },
       // These are independent writers. One rejection must never skip the other flush.
-      { name: 'durable flush', budgetMs: 10_000, run: () => [flushSessions(), flushDurable()] }
+      { name: 'durable flush', budgetMs: 10_000, run: () => [flushSessions(), flushDurable()] },
+      // Last, because it is the one phase whose effect is meant to outlive this process: a
+      // staged update is handed to the platform's installer here, so the next start of the app
+      // is the new version. Nothing is staged unless it downloaded whole and matched the
+      // release's published SHA-256, and applying it cannot fail loudly - see update.ts.
+      { name: 'update handoff', budgetMs: 5_000, run: () => [applyStagedUpdate()] }
     ],
     {
       info: logInfo,

@@ -187,11 +187,12 @@ export function summarizeToolCall(input: SummaryInput): ActivitySummary {
   const changes = evidence.changes;
   const summary = build(input.tool, args, evidence, changes, input);
 
-  if (input.outcome === 'ok') return summary;
-  const refused = input.outcome === 'rejected';
+  // A child process reporting failure is still a successfully executed tool call.
+  if (input.outcome === 'ok' || input.outcome === 'process_exit_nonzero') return summary;
+  const refused = input.outcome === 'tool_rejected';
   const failed: ActivitySummary = {
     ...summary,
-    tone: input.outcome === 'error' ? 'bad' : 'warn',
+    tone: input.outcome === 'tool_internal_error' ? 'bad' : 'warn',
     // The verb carries the outcome, not just the colour. Tone and metric are easy to
     // miss and are gone entirely once a line is quoted or read back as text.
     title: undoTitle(summary.title, refused)

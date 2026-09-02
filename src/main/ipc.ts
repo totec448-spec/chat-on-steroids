@@ -10,11 +10,18 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { z } from 'zod';
-import { CAPABILITIES, GOAL_REASONING_LEVELS, type AppState, type Config } from '../shared/types.js';
+import {
+  CAPABILITIES,
+  GOAL_MODES,
+  GOAL_REASONING_LEVELS,
+  RELEASES_PAGE,
+  type AppState,
+  type Config
+} from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
 import { getConfig, updateConfig } from './config.js';
-import { listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts } from './goal.js';
+import { clearAllGoalSwitches, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
@@ -25,6 +32,7 @@ import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
 import {
   bridgeStatus,
   cancelWorkerCommands,
+  chatUrl,
   onBridgeChange,
   startBridge,
   stopBridge,
@@ -41,6 +49,7 @@ import {
   readHandoff
 } from './session/store.js';
 import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
+import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
 import {
   clearAgent,
   onSwarmChange,
@@ -52,6 +61,8 @@ import {
 import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
+import { openInPreferredBrowser } from './browser.js';
+import { onUpdateChange, updateStatus } from './update.js';
 
 /** The only URLs the renderer may ask the OS to open. */
 const ALLOWED_LINKS = new Set([
@@ -66,7 +77,9 @@ const ALLOWED_LINKS = new Set([
   // Where the key for the goal loop comes from. The button beside the key field is useless
   // without this: `link:open` refuses anything not named here, so it threw where nobody
   // was looking and the button did nothing at all.
-  'https://openrouter.ai/settings/keys'
+  'https://openrouter.ai/settings/keys',
+  // Where an installation that cannot update itself gets the new version by hand.
+  RELEASES_PAGE
 ]);
 
 const capabilityPatch = z.object(
@@ -113,10 +126,15 @@ const settingsPatch = z.object({
   }),
   multiAgent: z.object({
     enabled: z.boolean(),
-    maxWorkers: z.number().int().min(1).max(8)
+    maxWorkers: z.number().int().min(1).max(8),
+    allowUnattributedCalls: z.boolean(),
+    recoverAgentTabs: z.boolean()
   }),
   goal: z.object({
     enabled: z.boolean(),
+    // Which of the two standing modes the switch runs. One field, so the renderer has no way
+    // to describe a state where Goal and Loop are both on.
+    mode: z.enum(GOAL_MODES),
     // An OpenRouter model id, and validated only as a shape: the catalogue changes weekly,
     // and an allow-list here would mean this app deciding which models exist.
     // The leading `~` is OpenRouter's own marker for an alias that always resolves to the
@@ -133,7 +151,8 @@ const settingsPatch = z.object({
       ),
     reasoning: z.enum(GOAL_REASONING_LEVELS),
     prompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS),
-    objectivePrompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
+    objectivePrompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS),
+    loopPrompt: z.string().trim().min(1).max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
   })
 });
 
@@ -196,10 +215,21 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     },
     multiAgent: {
       enabled: pick(current.multiAgent.enabled, base.multiAgent.enabled, wanted.multiAgent.enabled),
-      maxWorkers: pick(current.multiAgent.maxWorkers, base.multiAgent.maxWorkers, wanted.multiAgent.maxWorkers)
+      maxWorkers: pick(current.multiAgent.maxWorkers, base.multiAgent.maxWorkers, wanted.multiAgent.maxWorkers),
+      allowUnattributedCalls: pick(
+        current.multiAgent.allowUnattributedCalls,
+        base.multiAgent.allowUnattributedCalls,
+        wanted.multiAgent.allowUnattributedCalls
+      ),
+      recoverAgentTabs: pick(
+        current.multiAgent.recoverAgentTabs,
+        base.multiAgent.recoverAgentTabs,
+        wanted.multiAgent.recoverAgentTabs
+      )
     },
     goal: {
       enabled: pick(current.goal.enabled, base.goal.enabled, wanted.goal.enabled),
+      mode: pick(current.goal.mode, base.goal.mode, wanted.goal.mode),
       model: pick(current.goal.model, base.goal.model, wanted.goal.model),
       reasoning: pick(current.goal.reasoning, base.goal.reasoning, wanted.goal.reasoning),
       prompt: pick(current.goal.prompt, base.goal.prompt, wanted.goal.prompt),
@@ -207,7 +237,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         current.goal.objectivePrompt,
         base.goal.objectivePrompt,
         wanted.goal.objectivePrompt
-      )
+      ),
+      loopPrompt: pick(current.goal.loopPrompt, base.goal.loopPrompt, wanted.goal.loopPrompt)
     }
   };
 }
@@ -241,7 +272,8 @@ async function buildState(): Promise<AppState> {
     hasGoalKey: await hasSecret('openRouterApiKey'),
     resolvedBinary: resolvedBinary(config),
     bundledTunnelVersion: bundledVersion(),
-    bridge: await bridgeStatus()
+    bridge: await bridgeStatus(),
+    update: updateStatus()
   };
 }
 
@@ -290,13 +322,23 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     getWindow()?.setBackgroundColor(next.ui.theme === 'dark' ? '#0e0e11' : '#ffffff');
     if (
       before.goal.enabled !== next.goal.enabled ||
+      // The mode is authority too: a draft started as a gate must not be typed after the user
+      // asked for a loop, and a loop draft must not be typed after they asked for a gate.
+      before.goal.mode !== next.goal.mode ||
       before.goal.model !== next.goal.model ||
       before.goal.reasoning !== next.goal.reasoning ||
       before.goal.prompt !== next.goal.prompt ||
-      before.goal.objectivePrompt !== next.goal.objectivePrompt
+      before.goal.objectivePrompt !== next.goal.objectivePrompt ||
+      before.goal.loopPrompt !== next.goal.loopPrompt
     ) {
       retireGoalDrafts();
     }
+    // The app-wide switch going off is the master stop, and has to actually stop things. Chats
+    // carry their own Goal/Loop answer now, so without this the one control that looks like it
+    // governs everything would govern only the chats that never disagreed with it — and a loop
+    // somebody wanted stopped would go on running with nowhere obvious to switch it off.
+    // Turning it *on* deliberately does not reach into a chat that has said no.
+    if (before.goal.enabled && !next.goal.enabled) clearAllGoalSwitches();
     // Switching multi-agent mode off has to be able to remove the `agents` tool from the
     // schemas, and the exposed surface only ever widens by default. So the latch is
     // released here — the one place that knows the user made the decision
@@ -340,6 +382,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     return buildState();
   });
 
+  /** Approves one folder by path. The picker dialog and the drop zone both end here. */
+  const approveRoot = async (folderPath: string): Promise<AppState> => {
+    let addedName = '';
+    await updateConfig(async (config) => {
+      const real = await validateNewRoot(folderPath, config.roots);
+      const name = uniqueRootName(real, config.roots);
+      addedName = name;
+      return { ...config, roots: [...config.roots, { name, path: real }] };
+    });
+    logInfo(`approved folder /${addedName}`);
+    return buildState();
+  };
+
   handle('roots:add', async () => {
     const window = getWindow();
     if (!window) throw new Error('No window');
@@ -348,16 +403,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       properties: ['openDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
+    return approveRoot(result.filePaths[0]);
+  });
 
-    let addedName = '';
-    await updateConfig(async (config) => {
-      const real = await validateNewRoot(result.filePaths[0]!, config.roots);
-      const name = uniqueRootName(real, config.roots);
-      addedName = name;
-      return { ...config, roots: [...config.roots, { name, path: real }] };
-    });
-    logInfo(`approved folder /${addedName}`);
-    return buildState();
+  // A folder dropped onto the Folders card. The renderer never sees a system path itself:
+  // the preload turns the dropped File into one, and the same validation the dialog goes
+  // through decides whether it is a folder this app may approve at all.
+  handle('roots:addPath', async (payload) => {
+    const { path: folderPath } = z.object({ path: z.string().min(1).max(4096) }).parse(payload);
+    return approveRoot(folderPath);
   });
 
   handle('roots:remove', async (payload) => {
@@ -497,9 +551,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
       total: page.total,
       nextCursor: page.nextCursor,
       activeId: activeSessionId(),
+      // Live policy, not session history: a block is keyed by ChatGPT conversation and does
+      // not belong in any session's meta.json. It rides the list for the same reason
+      // `activeId` and `pressure` do — one paint, one round trip.
+      blocked: blockedChatIds(),
       pressure: sessions.map((summary) => ({
         id: summary.id,
-        ...tokenPressure(summary.estimatedTokens, config.sessions.advisoryTokens, config.sessions.limitTokens)
+        // Pressure belongs to the currently attached ChatGPT context. `estimatedTokens` is
+        // deliberately lifetime history and therefore never resets across Compact & Resume;
+        // using it here made a fresh B look fuller than the A it had just replaced.
+        ...tokenPressure(summary.contextTokens, config.sessions.advisoryTokens, config.sessions.limitTokens)
       }))
     };
   });
@@ -529,6 +590,44 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     return { summary, events, total: summary.events, nextFrom };
   });
 
+  handle('sessions:openChat', async (payload) => {
+    const { id } = sessionIdArg.parse(payload);
+    const summary = await getSession(id);
+    const conversationId = summary?.conversationId;
+    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
+      throw new Error('This session has no valid ChatGPT conversation');
+    }
+    const browser = await openInPreferredBrowser(chatUrl(conversationId));
+    if (!browser) throw new Error('Chrome or Chromium was not found');
+    return true;
+  });
+
+  /**
+   * Blocks or releases the ChatGPT conversation this session is attached to.
+   *
+   * The renderer names a session, never a conversation, for the same reason `sessions:openChat`
+   * does: the stored conversation id is re-read and validated here, so a renderer-supplied id
+   * can neither invent a conversation nor block one it is not looking at. A session with no
+   * conversation has no rogue turn to stop and is refused rather than silently ignored.
+   */
+  handle('sessions:block', async (payload) => {
+    const { id, blocked } = z
+      .object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), blocked: z.boolean() })
+      .parse(payload);
+    const summary = await getSession(id);
+    const conversationId = summary?.conversationId;
+    if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
+      throw new Error('This session has no valid ChatGPT conversation');
+    }
+    setChatBlocked(conversationId, blocked);
+    logInfo(
+      blocked
+        ? `conversation ${conversationId} blocked; its tool calls are refused until it is released`
+        : `conversation ${conversationId} released; its tool calls run again`
+    );
+    return blockedChatIds();
+  });
+
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     // Detach first. The recorder maps live ChatGPT conversations to session ids, so
@@ -536,6 +635,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     // longer existed — the events went to a resurrected half-session with no summary.
     // Forgetting the mapping makes the next observation open a fresh session instead.
     const detached = forgetSession(id);
+    // Release first. The block button lives on this row, so a block left behind by the row's
+    // deletion would refuse that conversation's tools with nothing left in the app that could
+    // ever release it.
+    const summary = await getSession(id);
+    if (summary?.conversationId) setChatBlocked(summary.conversationId, false);
     await deleteSession(id);
     logInfo(
       detached.length > 0
@@ -657,6 +761,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
+  onUpdateChange(pushState);
   onLog((entry) => push('log:entry', entry));
   onSessionChange(() => push('session:changed'));
   onSwarmChange(() => push('swarm:changed', swarmState()));
