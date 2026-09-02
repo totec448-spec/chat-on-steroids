@@ -49,7 +49,9 @@ const expectedPlist = {
   CFBundleShortVersionString: packageVersion,
   CFBundleVersion: packageVersion,
   LSApplicationCategoryType: 'public.app-category.developer-tools',
-  LSMinimumSystemVersion: '12.0'
+  LSMinimumSystemVersion: '12.0',
+  NSScreenCaptureUsageDescription:
+    'Chat On Steroids captures a display or window only when the enabled Desktop connector asks to observe it.'
 };
 for (const [key, expected] of Object.entries(expectedPlist)) {
   const actual = plistValue(key);
@@ -91,13 +93,20 @@ function walkFiles(root) {
 
 function isLaunchedMachO(file) {
   const normalized = file.split(path.sep).join('/');
-  return normalized.includes('.app/Contents/MacOS/') || path.basename(file) === 'chrome_crashpad_handler';
+  return (
+    normalized.includes('.app/Contents/MacOS/') ||
+    path.basename(file) === 'chrome_crashpad_handler' ||
+    path.basename(file) === 'macos-desktop-addon.node' ||
+    path.basename(file) === 'libcos-desktop.dylib'
+  );
 }
 
 const nativeDir = `darwin-${arch}`;
 const nodeModules = path.join(resources, 'app.asar.unpacked', 'node_modules');
 const mainExecutable = path.join(contents, 'MacOS', 'Chat On Steroids');
 const appIcon = requireFile(path.join(resources, 'icon.icns'));
+const desktopAddon = path.join(resources, 'desktop', 'macos-desktop-addon.node');
+const desktopLibrary = path.join(resources, 'desktop', 'libcos-desktop.dylib');
 const ptyDir = path.join(nodeModules, 'node-pty', 'prebuilds', nativeDir);
 const sharpLib = path.join(nodeModules, '@img', `sharp-darwin-${arch}`, 'lib');
 const vipsLib = path.join(nodeModules, '@img', `sharp-libvips-darwin-${arch}`, 'lib');
@@ -108,6 +117,8 @@ if (iconBytes.length < 8 || iconBytes.toString('ascii', 0, 4) !== 'icns') {
 }
 
 requireThinMachO(mainExecutable, true);
+requireThinMachO(desktopAddon, true, '12.3');
+requireThinMachO(desktopLibrary, true, '12.3');
 requireThinMachO(path.join(ptyDir, 'pty.node'));
 requireThinMachO(path.join(ptyDir, 'spawn-helper'), true);
 requireThinMachO(path.join(nodeModules, 'tree-sitter', 'prebuilds', nativeDir, 'tree-sitter.node'));
@@ -139,7 +150,8 @@ for (const file of walkFiles(contents)) {
   // ZIP integrity alone does not prove POSIX modes survived archive creation/extraction. In
   // particular, Electron's nested Helper.app processes and crashpad handler must remain directly
   // executable. The same bundle audit runs on the unpacked app, mounted DMG and ditto-extracted ZIP.
-  requireThinMachO(file, launched);
+  const desktopPayload = file === desktopAddon || file === desktopLibrary;
+  requireThinMachO(file, launched, desktopPayload ? '12.3' : expectedPlist.LSMinimumSystemVersion);
 }
 if (machOCount < 8) throw new Error(`Only found ${machOCount} Mach-O files in ${app}; bundle audit is unexpectedly shallow`);
 if (launchedMachOCount < 6) {

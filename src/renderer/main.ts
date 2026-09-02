@@ -323,8 +323,38 @@ function paintGroups(): void {
   }
 }
 
+function paintDesktopAccess(next: AppState): void {
+  const box = $('desktopAccess');
+  const access = next.desktopAccess;
+  const needsScreen = next.config.capabilities.screen;
+  const needsAccessibility = next.config.capabilities.control && !next.config.readOnly;
+  if (next.platform?.family !== 'macos' || (!needsScreen && !needsAccessibility) || !access) {
+    box.hidden = true;
+    return;
+  }
+
+  const missing: string[] = [];
+  if (needsScreen && access.screen !== 'granted') missing.push(`Screen Recording: ${access.screen}`);
+  if (needsAccessibility && access.accessibility !== 'granted') {
+    missing.push(`Accessibility: ${access.accessibility}`);
+  }
+  box.hidden = missing.length === 0;
+  if (box.hidden) return;
+
+  $('desktopAccessTitle').textContent = 'Desktop access needs attention';
+  $('desktopAccessDetail').textContent =
+    `${missing.join(' · ')}. These are live verdicts from the native backend executing inside Chat On Steroids. ` +
+    'Grant the missing macOS permission, then fully quit and reopen the app.';
+  $<HTMLButtonElement>('openDesktopScreen').hidden =
+    !needsScreen || access.screen === 'granted';
+  $<HTMLButtonElement>('openDesktopAccessibility').hidden =
+    !needsAccessibility || access.accessibility === 'granted';
+  $<HTMLButtonElement>('requestDesktopAccessibility').hidden =
+    !needsAccessibility || access.accessibility === 'granted';
+}
+
 /**
- * How many MCP tools ChatGPT can currently discover, across both connectors.
+ * How many MCP tools this app can expose in total, across both connectors.
  *
  * Taken from the surfaces the main process reports rather than recomputed from the
  * checkboxes, so this number cannot drift away from what the servers actually register.
@@ -354,8 +384,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
   const capabilities = { ...previous.capabilities };
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const capability = input.dataset.cap as Capability;
-    // The macOS/Linux port deliberately hides Desktop automation while preserving any
-    // Windows choices stored in this config. A hidden disabled checkbox is presentation,
+    // Unsupported hosts hide Desktop automation while preserving any choices stored in this
+    // config. A hidden disabled checkbox is presentation,
     // not a user edit: copying its forced-false value into every unrelated settings save
     // would erase those choices merely because the config was opened on another OS.
     if (!(state.platform?.desktopAutomation ?? true) && DESKTOP_CAPABILITIES.includes(capability)) continue;
@@ -817,6 +847,7 @@ function apply(next: AppState): void {
     previousState?.config.sessions.record
   );
   paintGroups();
+  paintDesktopAccess(next);
 
   // ---- folders
   paintRoots(config.roots);
@@ -1129,8 +1160,8 @@ function facts(next: AppState): HTMLElement[] {
   }
 
   rows.push([
-    'Tools ChatGPT can see',
-    `${toolsOn(next)} available · ${config.roots.length} folder${config.roots.length === 1 ? '' : 's'}`
+    'Tools across Core + Desktop',
+    `${toolsOn(next)} total · ${config.roots.length} folder${config.roots.length === 1 ? '' : 's'}`
   ]);
 
   return rows.map(([label, value, bad]) => {
@@ -1407,6 +1438,16 @@ async function runChecks(): Promise<void> {
 }
 
 $('runChecks').addEventListener('click', () => void runChecks());
+$('requestDesktopAccessibility').addEventListener('click', async () => {
+  const button = $<HTMLButtonElement>('requestDesktopAccessibility');
+  button.disabled = true;
+  try {
+    const next = await run(api.requestDesktopAccessibility());
+    if (next) apply(next);
+  } finally {
+    button.disabled = false;
+  }
+});
 $('closeChecks').addEventListener('click', () => {
   $('checksBox').hidden = true;
 });

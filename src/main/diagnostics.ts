@@ -25,8 +25,9 @@ import {
   type PollHealth
 } from './tunnel/health.js';
 
-import type { Check, Diagnosis } from '../shared/types.js';
+import type { Capabilities, Check, Diagnosis, MacOSDesktopAccessStatus } from '../shared/types.js';
 import { surfaceIsUseful } from './mcp/surfaces.js';
+import { refreshMacOSDesktopAccess } from './computer/index.js';
 
 async function fetchJson(
   url: string,
@@ -138,6 +139,55 @@ export function metadataErrorIsCurrent(
     health?.lastSuccessMs === undefined ||
     nowMs - health.lastSuccessMs > POLL_FRESH_MS
   );
+}
+
+/** Pure projection used by both the live self-test and targeted regressions. */
+export function describeMacOSDesktopAccess(
+  access: MacOSDesktopAccessStatus | null,
+  caps: Pick<Capabilities, 'screen' | 'control'>
+): Check[] {
+  const checks: Check[] = [];
+  if (!caps.screen && !caps.control) return checks;
+  if (access === null) {
+    return [{
+      name: 'macOS Desktop permissions',
+      status: 'not-run',
+      ok: null,
+      detail: 'The in-process native backend has not reported its Screen Recording or Accessibility state yet.'
+    }];
+  }
+
+  const check = (
+    name: string,
+    state: MacOSDesktopAccessStatus['screen'],
+    missing: string
+  ): Check => ({
+    name,
+    status: state === 'granted' ? 'pass' : state === 'missing' ? 'fail' : 'not-run',
+    ok: state === 'granted' ? true : state === 'missing' ? false : null,
+    detail:
+      state === 'granted'
+        ? 'Granted to the in-process Desktop backend.'
+        : state === 'missing'
+          ? `${missing} Fully quit and reopen the app after changing the macOS permission.`
+          : access.error ?? 'The in-process Desktop backend could not determine the live TCC decision.'
+  });
+
+  if (caps.screen) {
+    checks.push(check(
+      'macOS Screen Recording',
+      access.screen,
+      'macOS denied Screen Recording to the current Desktop process. Open Privacy & Security → Device Control and Data Access.'
+    ));
+  }
+  if (caps.control) {
+    checks.push(check(
+      'macOS Accessibility',
+      access.accessibility,
+      'macOS denied AXUIElement access to the in-process Chat On Steroids.app backend. Open Privacy & Security → Accessibility (Device Control and Data Access on newer macOS).'
+    ));
+  }
+  return checks;
 }
 
 /** Runs an initialize + tools/list against our own loopback endpoint. */
@@ -263,6 +313,13 @@ export async function runDiagnostics(): Promise<Diagnosis> {
         ? 'Nothing is switched on, so the connector would expose no tools.'
         : `${config.roots.length} folder${config.roots.length === 1 ? '' : 's'} shared; on: ${enabled.join(', ')}${config.readOnly ? ' (read-only)' : ''}`
   });
+
+  // Ask the in-process backend that performs protected operations. A settings row or the
+  // parent prompt API alone is not an authorization verdict.
+  if (process.platform === 'darwin' && (caps.screen || caps.control)) {
+    const access = await refreshMacOSDesktopAccess();
+    checks.push(...describeMacOSDesktopAccess(access, caps));
+  }
 
   // 2. Our own server, end to end, over the same URL the tunnel uses.
   if (!isServerRunning() || !status.localUrl) {

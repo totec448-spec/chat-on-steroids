@@ -21,7 +21,7 @@ export function serverInstructions(
   surface: SurfaceId = 'core',
   platform: NodeJS.Platform = process.platform
 ): string {
-  return surface === 'desktop' ? desktopInstructions(ctx) : coreInstructions(ctx, platform);
+  return surface === 'desktop' ? desktopInstructions(ctx, platform) : coreInstructions(ctx, platform);
 }
 
 function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
@@ -29,6 +29,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
   const sessionTools = ctx.sessionTools ?? config.sessions.record;
   const agentTools = ctx.agentTools ?? config.multiAgent.enabled;
   const windows = platform === 'win32';
+  const desktop = windows || platform === 'darwin';
   const hostName = platform === 'darwin' ? 'macOS' : platform === 'linux' ? 'Linux' : windows ? 'Windows' : 'local';
   // Marked here rather than discovered by the model: `git status` in a folder that is not a
   // repository was one of the most repeated recoverable failures in the recorded sessions,
@@ -101,12 +102,12 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     'Output is capped. When a result says it was truncated, narrow the request instead of repeating it.'
   ];
 
-  if (windows && (ctx.caps.screen || ctx.caps.control || ctx.caps.clipboardRead || ctx.caps.clipboardWrite)) {
+  if (desktop && (ctx.caps.screen || ctx.caps.control || ctx.caps.clipboardRead || ctx.caps.clipboardWrite)) {
     lines.push(
       '',
       // Named rather than hinted at: the model can see this connector but not the other, and
       // "I cannot do that" is the wrong answer when the user only has to connect it.
-      `Seeing and controlling the Windows desktop lives in a separate connector, "${surfaceDefinition('desktop').connectorName}".`,
+      `Seeing and controlling the native desktop lives in a separate connector, "${surfaceDefinition('desktop').connectorName}".`,
       'If a task needs screenshots, windows, mouse/keyboard control or the clipboard and that connector is not available here, say so and ask the user to connect it.'
     );
   }
@@ -157,9 +158,11 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
   return lines.join('\n');
 }
 
-function desktopInstructions(ctx: ToolContext): string {
+function desktopInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
+  const host = platform === 'darwin' ? 'Mac' : 'Windows PC';
+  const paste = platform === 'darwin' ? 'command+v' : 'ctrl+v';
   const lines = [
-    'Local Windows desktop control: look at this PC’s screen and windows, and drive its mouse and keyboard.',
+    `Local desktop control: look at this ${host}’s screen and windows, and drive its mouse and keyboard.`,
     '',
     'observe first, then computer. A bare observe() returns the foreground window, a screenshot and its',
     'controls with refs; refs beat pixel coordinates because they resolve the real control again when acted on.',
@@ -176,13 +179,14 @@ function desktopInstructions(ctx: ToolContext): string {
     // Said here as well as in the schema: the clipboard is reached through computer rather
     // than through a tool of its own, and a model looking for a "clipboard" tool finds none.
     'The clipboard lives in computer too — read_clipboard and write_clipboard run in sequence with',
-    'the other actions, so copying text in and pasting it with keypress ctrl+v is one call.',
+    `the other actions, so copying text in and pasting it with keypress ${paste} is one call.`,
     // The prime that closed its own chat with ctrl+w on 2026-09-02 was testing its game in a tab
     // beside its ChatGPT chats. A chord cannot see which tab it lands on, so the rule is a window
     // of its own, and the tool refuses the chords that would move between tabs or windows.
     'A browser window here may be holding the ChatGPT chats this app runs. Open the page you are testing in a',
     'browser window of its own, keep that window in front and act only there. Keyboard chords that close, open',
     'or switch tabs or windows, or take the address bar, are refused in every browser window.',
+
     'Act only on what the user asked for and leave the rest of their desktop alone.'
   ];
 

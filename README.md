@@ -54,7 +54,7 @@ shasum -a 256 Chat-On-Steroids-macOS-arm64.dmg    # macOS
 sha256sum Chat-On-Steroids-Linux-x64.AppImage     # Linux
 ```
 
-> **This is a beta with real permissions.** A fresh install starts with the full Core capability set on, read-only mode off, multi-agent mode on with two workers, and, on Windows, the Desktop permissions on. Review the Home panel before you connect ChatGPT. `exec_command` runs programs as your logged-in user. Approve a project folder, not your home directory, and work on code that is committed somewhere.
+> **This is a beta with real permissions.** A fresh install starts with the full Core capability set on, read-only mode off, multi-agent mode on with two workers, and, on Windows, the Desktop permissions on. On macOS the Desktop permissions start off; switch them on in the Home panel if you want them, then grant Screen Recording and Accessibility in System Settings. Review the Home panel before you connect ChatGPT. `exec_command` runs programs as your logged-in user. Approve a project folder, not your home directory, and work on code that is committed somewhere.
 
 ## Requirements
 
@@ -71,7 +71,7 @@ Use a normal ChatGPT conversation with the custom app enabled. OpenAI's built-in
 1. Install the build for your CPU and open Chat On Steroids. It lives in the tray or menu bar.
 2. On **Home**, review the permissions and approve a project folder. Press **Add**, or drop the folder onto the Folders card.
 3. Create an OpenAI Secure MCP Tunnel and a restricted API key, then press **Connect**. Details below.
-4. In ChatGPT on the web, enable Developer mode and create the **Core** app from the tunnel. On Windows, create the **Desktop** app too if you left screen and input control on.
+4. In ChatGPT on the web, enable Developer mode and create the **Core** app from the tunnel. On Windows, create the **Desktop** app too if you left screen and input control on; on macOS, if you switched them on.
 5. Press **Open extension folder**, open `chrome://extensions`, enable Developer mode, choose **Load unpacked** and select that folder. Pairing is automatic.
 
 The Setup tab marks each hop done only once the app has actually seen traffic on it.
@@ -83,7 +83,7 @@ The Setup tab marks each hop done only once the app has actually seen traffic on
 3. Paste both into the Setup tab and press **Connect**.
 4. In ChatGPT, enable Developer mode under **Settings → Apps → Advanced settings** and create a custom app of type **Tunnel**. Review the discovered actions and enable it.
 
-Core and the Windows-only Desktop surface use separate tunnel ids, because ChatGPT treats each custom app as one endpoint. Release builds bundle a checksum-verified `tunnel-client`; a path you set explicitly wins over it, and `PATH` is only a fallback.
+Core and the optional Desktop surface (Windows and macOS) use separate tunnel ids, because ChatGPT treats each custom app as one endpoint. Release builds bundle a checksum-verified `tunnel-client`; a path you set explicitly wins over it, and `PATH` is only a fallback.
 
 ### Other tunnels
 
@@ -98,7 +98,7 @@ After changing permissions, refresh or recreate the custom app in ChatGPT and st
 | Connector | Tools | What they do |
 | --- | --- | --- |
 | **Core** (all platforms) | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` | Bounded reads and search inside approved folders, preflighted multi-file patches, shell commands and interactive terminals, lookups into the recorded session, and worker chat control |
-| **Desktop** (Windows only) | `observe`, `computer` | Screenshots, window and control inspection, mouse, keyboard and clipboard |
+| **Desktop** (Windows, and macOS 12.3 or newer when switched on) | `observe`, `computer` | Screenshots, window and control inspection, mouse, keyboard and clipboard |
 
 Core exposes at most seven tools at once: `find` is the no-shell search fallback and steps aside when commands are enabled. Revoking a permission takes effect immediately, even while ChatGPT still shows the old schema. The full contract lives in [`docs/tool-surface.md`](docs/tool-surface.md).
 
@@ -154,7 +154,7 @@ A wedged ChatGPT page can leave a turn running with no working Stop button while
 
 - **File tools stay inside approved folders.** Paths are validated and canonicalised first. This is application-level containment, not an OS sandbox; same-user filesystem races remain possible.
 - **Commands are not folder-sandboxed.** They start in an approved folder and then run with your normal user privileges.
-- **Desktop control is Windows-only and not folder-scoped.** When enabled, it applies to the whole desktop.
+- **Desktop control is not folder-scoped.** When enabled, it applies to the whole Windows or macOS desktop. On macOS it is off until you switch it on, and macOS additionally enforces its own Screen Recording and Accessibility grants.
 - **The MCP server is loopback-only** behind a random secret path. ChatGPT reaches it through the tunnel you configure. Treat any public tunnel URL as a password.
 - **The browser bridge is loopback-only and separate.** It exists for the extension and exposes no file, command or settings routes.
 - **Secrets use Electron `safeStorage`:** DPAPI on Windows, Keychain on macOS, libsecret or KWallet on Linux.

@@ -52,8 +52,11 @@ describe('portable browser-backed feature parity', () => {
     ).toBe(false);
   });
 
-  it('ships the complete Core/browser product on macOS while omitting only Desktop automation', () => {
-    const config = defaultConfig('darwin');
+  it('ships the complete Core/browser product plus native Desktop automation on macOS', () => {
+    // Model the oldest supported Desktop host explicitly. The real-host projection is
+    // intentionally false on macOS 12.0-12.2, and this policy test must not depend on the
+    // Darwin release of the machine running Vitest.
+    const config = defaultConfig('darwin', '21.4.0');
     expect(surfaceDefinition('core').tools).toEqual([
       'read',
       'view_image',
@@ -65,7 +68,10 @@ describe('portable browser-backed feature parity', () => {
       'agents'
     ]);
     expect(surfaceIsUseful('core', config.capabilities, 'darwin')).toBe(true);
+    // Fresh macOS installs start the Desktop group off; the surface exists once it is switched on.
     expect(surfaceIsUseful('desktop', config.capabilities, 'darwin')).toBe(false);
+    const switchedOn = { ...config.capabilities, screen: true, control: true };
+    expect(surfaceIsUseful('desktop', switchedOn, 'darwin', '21.4.0')).toBe(true);
 
     const manifest = JSON.parse(
       readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8')
