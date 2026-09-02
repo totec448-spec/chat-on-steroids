@@ -226,7 +226,7 @@ async function boot(events: SessionEvent[]) {
   };
 }
 
-it('folds a whole Compact & Resume into one card with its three steps', async () => {
+it('folds a whole Compact & Resume into one row that says the new chat opened', async () => {
   const { w } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
     toolCall(2, 'call-1'),
@@ -239,11 +239,8 @@ it('folds a whole Compact & Resume into one card with its three steps', async ()
   expect(cards).toHaveLength(1);
   const card = cards[0]!;
   expect(card.className).toContain('tone-good');
-  expect([...card.querySelectorAll('summary .step')].map((step) => [step.textContent, step.className])).toEqual([
-    ['Summary requested', 'step is-ok'],
-    ['Summary received', 'step is-ok'],
-    ['New chat opened', 'step is-ok']
-  ]);
+  expect(card.querySelector('summary')!.textContent).toMatch(/^Compact & Resume:New chat opened at .* \(44 characters\)$/);
+  expect(card.querySelectorAll('summary .step')).toHaveLength(0);
 
   // The rows the card replaces are gone from the list; nothing else is.
   expect(timeline.querySelector('.ev-handoff')).toBeNull();
@@ -272,15 +269,70 @@ it('shows a compaction that never made it into a new chat as failed once the cha
     end!
   ]);
   const timeline = w.document.getElementById('timeline')!;
-  const steps = () => [...timeline.querySelectorAll('details.compaction summary .step')].map((step) => step.textContent);
-  // Still the newest thing recorded: the summary is in, the new chat is being opened.
-  expect(steps()).toEqual(['Summary requested', 'Summary received', 'Opening chat']);
+  const state = () => timeline.querySelector('details.compaction summary .state')!.textContent;
+  // Still the newest thing recorded: the summary is written, the app is saving it.
+  expect(state()).toBe('Summary written — saving the handoff…');
   expect(timeline.querySelector('details.compaction')!.className).toContain('tone-wait');
 
   // The old chat carried on instead — the handoff never became a new chat.
   await append([toolCall(9, 'call-late')]);
-  expect(steps()).toEqual(['Summary requested', 'Summary received', 'No new chat']);
+  expect(state()).toBe('Summary written, but the app never saved it — the chat carried on here');
   expect(timeline.querySelector('details.compaction')!.className).toContain('tone-bad');
+});
+
+/**
+ * The shape the live recorder actually writes. The brief request is typed by the app, so its
+ * row carries no local turn id; the turn ChatGPT answers it in opens right after it. Folding by
+ * the request's own turn id left the start, the brief, the end and the handoff loose under an
+ * empty card — twenty rows for one compaction.
+ */
+it('folds the answer turn into the card when the request row has no turn id', async () => {
+  const [request, start, brief, end, handoff, resume] = compaction(2) as [
+    SessionEvent, SessionEvent, SessionEvent, SessionEvent, SessionEvent, SessionEvent
+  ];
+  delete (request as { turnId?: string }).turnId;
+  const { w } = await boot([
+    { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
+    request,
+    start,
+    brief,
+    end,
+    handoff,
+    { seq: 8, time: T0 + 8000, source: 'extension', kind: 'turn_start', turnId: 'turn-next' },
+    resume
+  ]);
+  const timeline = w.document.getElementById('timeline')!;
+  const order = [...timeline.children].map((row) => row.className);
+  expect(order).toEqual(['ev ev-session_start', 'ev ev-compaction', 'ev ev-turn_start']);
+  expect(timeline.querySelector('details.compaction')!.className).toContain('tone-good');
+});
+
+it('says why a compaction died when the app abandoned it', async () => {
+  const [request, start, brief, end] = compaction(2);
+  const { w } = await boot([
+    { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
+    request!,
+    start!,
+    brief!,
+    end!,
+    {
+      seq: 7,
+      time: T0 + 7000,
+      source: 'app',
+      kind: 'note',
+      continuation: TOKEN,
+      message: text('Compact & Resume abandoned — the handover never landed and was given up on')
+    },
+    toolCall(8, 'call-after')
+  ]);
+  const timeline = w.document.getElementById('timeline')!;
+  const card = timeline.querySelector('details.compaction')!;
+  expect(card.className).toContain('tone-bad');
+  expect(card.querySelector('summary .state')!.textContent).toBe('Failed — the handover never landed and was given up on');
+  // The note is the card's, not a loose row of its own.
+  expect(timeline.querySelectorAll('.ev-note')).toHaveLength(0);
+  card.toggleAttribute('open', true);
+  expect(card.textContent).toContain('abandoned');
 });
 
 it('keeps an unfolded tool row as the same open node while the chat keeps appending', async () => {

@@ -1008,7 +1008,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
     {
       title: 'Multi-agent run',
       description:
-        'Run ChatGPT workers. spawn always creates fresh worker chats for new parallel work; sleeping/terminal workers stay in this prime conversation’s durable history. ' +
+        'Run ChatGPT workers. Reuse a suitable sleeping worker with message before spawn; spawn creates fresh worker chats for new parallel work. Sleeping/terminal workers stay in this prime conversation’s durable history. ' +
         'message: prime→worker or worker→prime; messaging a sleeping worker revives that exact existing chat when a slot is free. Replies arrive on later tool results, so never poll. ' +
         'status shows this prime’s full worker history, including sleeping/revivable and terminal/non-revivable workers, even while no run is active. finish reports a worker result and normally puts it to sleep.',
       inputSchema: z.object({
@@ -1037,7 +1037,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(8)
           .optional()
           .describe(
-            'spawn: fresh workers to create. Existing sleeping workers are never silently reused; revive one explicitly with message.'
+            'spawn: fresh workers to create only after checking status for a suitable sleeping worker; revive one explicitly with message.'
           ),
         messages: z
           .array(
@@ -1274,9 +1274,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   : info.state === 'finished'
                     ? `${info.id} is finished. The prime agent has your result. This chat has also reached its context ` +
                       'limit, so there will be no more work in it: stop working and stop calling tools.'
-                    : `${info.id} reported and is now asleep. The prime agent has your result and your worker slot is ` +
-                      'free. Stop working and stop calling tools; if the prime has more for you it will say so here in ' +
-                      'this same chat, and you pick up from what you already know.'
+                    : `${info.id} reported and is now asleep but remains reusable. The prime agent has your result and ` +
+                      'your worker slot is free. Stop working and stop calling tools; for related follow-up work the ' +
+                      'prime should wake this same chat with agents action=message before spawning a replacement.'
               }
             ],
             structuredContent: { action: 'finish', self: info.id, state: info.state, repeat }
@@ -1300,10 +1300,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         const shown = (info: { state: string; revivable: boolean }): string =>
           info.state === 'sleeping'
             ? info.revivable
-              ? 'sleeping (reported; waiting for new instructions)'
+              ? 'sleeping (reusable; wake with action=message)'
               : 'sleeping'
             : info.state === 'waking'
               ? 'waking (your message is being delivered to its chat)'
+              : info.state === 'finished'
+                ? 'finished (not reusable)'
               : info.state;
         const asleep = state.agents.filter((info) => info.state === 'sleeping' && info.revivable);
         const slots = status.freeWorkerSlots;
@@ -1325,9 +1327,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 (me.id === PRIME_ID
                   ? `\n\n${slots} of your worker slots ${slots === 1 ? 'is' : 'are'} free.` +
                     (asleep.length > 0
-                      ? ` ${asleep.map((info) => info.id).join(', ')} ${asleep.length === 1 ? 'is' : 'are'} asleep and ` +
+                      ? ` REUSE FIRST: ${asleep.map((info) => info.id).join(', ')} ${asleep.length === 1 ? 'is' : 'are'} asleep and ` +
                         'can be woken with agents action=message, in the chat they already have and with everything ' +
-                        'they learned there still in it. Prefer that to action=spawn' +
+                        'they learned there still in it. For related follow-up work, do this before action=spawn' +
                         (slots === 0 ? ', once a slot frees up.' : '.')
                       : '')
                   : '') +

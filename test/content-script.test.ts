@@ -2496,6 +2496,50 @@ describe('the app-owned chronological stream', () => {
     }
   });
 
+  /**
+   * A reload of an open turn is part of that turn's story. The app names the turn on the row,
+   * and the page paints it where it happened, among the turn's tool calls, with the repair look
+   * — instead of hanging it between turns by user-message position (the user's ask, 2026-09-02).
+   */
+  it('paints a reload that names its turn inside that turn, in order, like a tool call', async () => {
+    const withReload = () => {
+      const data = activity().data;
+      (data.stream as Array<Record<string, unknown>>).push({
+        seq: 5,
+        time: 350,
+        kind: 'progress',
+        turnId,
+        agent: 'prime',
+        progressId: 'browser-repair:mid',
+        text: 'Reloaded chat to recover missing connector attribution.'
+      });
+      return { ok: true, data };
+    };
+    live = await harness(undefined, { activity: withReload });
+    renderingOn();
+    const section = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(section, 'wfr-app-stream');
+
+    live.hook.renderStreams();
+
+    const rows = overwriteRows(section, '.clf-stream-row .clf-stream-text').map((node) =>
+      (node.textContent || '').trim()
+    );
+    expect(rows).toEqual([
+      'Turn started',
+      'Checking the repository',
+      'Read second.ts',
+      'Reloaded chat to recover missing connector attribution.',
+      'Read third.ts'
+    ]);
+    const reload = overwriteRows(section, '.clf-stream-repair');
+    expect(reload).toHaveLength(1);
+    expect(reload[0]!.querySelector('.clf-stream-icon')?.textContent).toBe('↻');
+    expect(reload[0]!.querySelector('.clf-when')?.textContent ?? '').not.toBe('');
+    // In the turn, so not also hung between turns.
+    expect(live.document.querySelectorAll('.clf-repair-notice')).toHaveLength(0);
+  });
+
   it('shows local calls even when ChatGPT rendered no native tool row for them', async () => {
     live = await harness(undefined, { activity });
     renderingOn();
@@ -2882,6 +2926,103 @@ describe('the app-owned chronological stream', () => {
     expect(overwriteText(first)).not.toContain('Second work');
     expect(overwriteText(second)).toContain('Second work');
     expect(live.document.querySelectorAll('.clf-stream')).toHaveLength(2);
+  });
+
+  /**
+   * The row the app already files when it reloads a chat, painted where the reader is.
+   *
+   * Someone whose tab reloads under them wants the reason in the chat, not only in the
+   * session log. The app's `browser-repair:*` progress row names no turn, so the turn
+   * renderer dropped it; it is placed between turns by the app's own user anchors instead.
+   */
+  it('paints the app reload notice between the turns it happened between', async () => {
+    let reloadText = 'Trying to reload chat to recover an interrupted response…';
+    const repairActivity = () => ({
+      ok: true,
+      data: {
+        entries: [],
+        userAnchors: [
+          { seq: 1, time: 100, messageId: 'm-user-one' },
+          { seq: 7, time: 700, messageId: 'm-user-two' }
+        ],
+        stream: [
+          { seq: 2, time: 200, kind: 'turn_start', turnId: 'g-one', agent: null },
+          { seq: 3, time: 300, kind: 'assistant_message', turnId: 'g-one', messageId: 'site-one', text: 'First', final: true },
+          { seq: 4, time: 400, kind: 'turn_end', turnId: 'g-one', outcome: 'failed', detail: '' },
+          { seq: 5, time: 500, kind: 'progress', turnId: null, agent: null, progressId: 'browser-repair:a', text: reloadText },
+          { seq: 8, time: 800, kind: 'turn_start', turnId: 'g-two', agent: null },
+          { seq: 9, time: 900, kind: 'assistant_message', turnId: 'g-two', messageId: 'site-two', text: 'Second', final: true },
+          { seq: 10, time: 1000, kind: 'turn_end', turnId: 'g-two', outcome: 'completed', detail: '' },
+          { seq: 11, time: 1100, kind: 'progress', turnId: null, agent: null, progressId: 'browser-repair:b', text: 'Reloaded chat to recover an unresponsive open turn.' }
+        ],
+        job: null
+      }
+    });
+    live = await harness(undefined, { activity: repairActivity });
+    // Deliberately without Overwrite: the notice is about what the app did to this tab, and
+    // shows whether or not ChatGPT's own answers are being re-rendered.
+    userTurn(live.document, 'user-one', 'first question', { sent: false });
+    const firstAnswer = assistantTurn(live.document, 'request-one', []);
+    const secondQuestion = userTurn(live.document, 'user-two', 'second question', { sent: false });
+    const secondAnswer = assistantTurn(live.document, 'request-two', []);
+    await live.hook.pullActivity();
+    live.hook.renderStreams();
+
+    const notices = [...live.document.querySelectorAll('.clf-repair-notice')] as HTMLElement[];
+    expect(notices).toHaveLength(2);
+    expect(notices[0]!.textContent).toContain('Trying to reload chat to recover an interrupted response');
+    expect(notices[0]!.previousElementSibling).toBe(firstAnswer);
+    expect(notices[0]!.nextElementSibling).toBe(secondQuestion);
+    expect(notices[1]!.textContent).toContain('Reloaded chat to recover an unresponsive open turn.');
+    expect(notices[1]!.previousElementSibling).toBe(secondAnswer);
+    expect(notices[1]!.querySelector('.clf-when')?.textContent ?? '').not.toBe('');
+
+    // The app rewrites the row in place once the browser confirms the reload. Same seq, new
+    // words, still one notice in the same place.
+    reloadText = 'Reloaded chat to recover an interrupted response.';
+    await live.hook.pullActivity();
+    live.hook.renderStreams();
+    const again = [...live.document.querySelectorAll('.clf-repair-notice')] as HTMLElement[];
+    expect(again).toHaveLength(2);
+    expect(again[0]).toBe(notices[0]!);
+    expect(again[0]!.textContent).toContain('Reloaded chat to recover an interrupted response.');
+    expect(again[0]!.nextElementSibling).toBe(secondQuestion);
+  });
+
+  it('keeps a reload notice out of the DOM while the user message it precedes is virtualised away', async () => {
+    const repairActivity = () => ({
+      ok: true,
+      data: {
+        entries: [],
+        userAnchors: [
+          { seq: 1, time: 100, messageId: 'm-user-one' },
+          { seq: 7, time: 700, messageId: 'm-user-two' }
+        ],
+        stream: [
+          { seq: 2, time: 200, kind: 'turn_start', turnId: 'g-one', agent: null },
+          { seq: 3, time: 300, kind: 'assistant_message', turnId: 'g-one', messageId: 'site-one', text: 'First', final: true },
+          { seq: 4, time: 400, kind: 'turn_end', turnId: 'g-one', outcome: 'failed', detail: '' },
+          { seq: 5, time: 500, kind: 'progress', turnId: null, agent: null, progressId: 'browser-repair:a', text: 'Reloaded chat to recover an interrupted response.' }
+        ],
+        job: null
+      }
+    });
+    live = await harness(undefined, { activity: repairActivity });
+    // Only the first exchange is rendered; the second question is known to the app but is
+    // scrolled out of ChatGPT's virtualised thread. The notice must not be pinned under the
+    // last rendered turn, which is where it used to travel with the viewport.
+    userTurn(live.document, 'user-one', 'first question', { sent: false });
+    assistantTurn(live.document, 'request-one', []);
+    await live.hook.pullActivity();
+    live.hook.renderStreams();
+    expect(live.document.querySelectorAll('.clf-repair-notice')).toHaveLength(0);
+
+    // The second question scrolls back in: the notice takes its place before it.
+    const secondQuestion = userTurn(live.document, 'user-two', 'second question', { sent: false });
+    live.hook.renderStreams();
+    const notices = [...live.document.querySelectorAll('.clf-repair-notice')] as HTMLElement[];
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.nextElementSibling).toBe(secondQuestion);
   });
 
   it('hides timestamps by default and can show them without changing the stream', async () => {
@@ -5274,6 +5415,56 @@ describe('a content script reloaded into a turn already in flight', () => {
     const order = live.sent.map((message) => message.type);
     expect(order.indexOf('bind')).toBeGreaterThanOrEqual(0);
     expect(order.indexOf('bind')).toBeLessThan(order.indexOf('events'));
+  });
+
+  /**
+   * The 2026-09-02 gap. The previous document never delivered its `turn_start`, so the app
+   * holds no turn for the chat; the reload then filed the question as history and the chat
+   * was never considered working again — no automatic compaction, no recovery, no repair.
+   */
+  it('opens the turn itself when the app holds none and ChatGPT keeps generating', async () => {
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: null, userAnchors: [] }) },
+      midTurn
+    );
+
+    // One sighting of Stop is the hydration artifact, not a turn.
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+
+    live.advance(live.hook.TURN_SETTLE_MS);
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+
+    // Opened once: later ticks adopt nothing further for the same generation.
+    live.advance(live.hook.TURN_SETTLE_MS);
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
+  it('opens nothing when Stop does not outlast the settle window', async () => {
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: null, userAnchors: [] }) },
+      midTurn
+    );
+    live.hook.observe();
+    await settle();
+    stopGenerating(live.document);
+    live.advance(live.hook.TURN_SETTLE_MS);
+    live.hook.observe();
+    await settle();
+    startGenerating(live.document, { send: false });
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
   });
 
   it('waits for durable turn identity when the first reload activity request misses the app', async () => {
@@ -8322,6 +8513,42 @@ describe('the Compact & resume control', () => {
    * composer of a brand-new chat, with a Cancel that would have cancelled a handoff running in
    * a conversation no longer on screen. The panel above it already refused to paint there.
    */
+  /**
+   * Block is set in the app, and from the ChatGPT page nothing said so: the model kept answering
+   * with tool refusals. The composer now carries the one word, and the hover says where the
+   * block is undone.
+   */
+  it('says "Chat blocked" beside the gear of a chat blocked in the app, and how to release it', async () => {
+    let blocked = 'blocked';
+    live = await harness(undefined, {
+      activity: () => ({
+        ok: true,
+        data: {
+          entries: [],
+          stream: [],
+          nextSince: 0,
+          pendingTools: 0,
+          job: null,
+          goal: { enabled: false, own: true, mode: 'goal', hasKey: true, model: 'deepseek/deepseek-v4-flash', objective: '', blocked }
+        }
+      })
+    });
+    live.hook.injectControl();
+    await live.hook.pullActivity();
+    live.hook.injectControl();
+
+    const label = live.document.querySelector('.clf-blocked') as HTMLElement;
+    expect(label.hidden).toBe(false);
+    expect(label.textContent).toBe('Chat blocked');
+    expect(label.getAttribute('data-clf-tip')).toMatch(/hover this chat in the sessions list and press its block symbol/);
+
+    // Released in the app: the next poll takes the word away.
+    blocked = '';
+    await live.hook.pullActivity();
+    live.hook.injectControl();
+    expect(label.hidden).toBe(true);
+  });
+
   it('says nothing about another chat’s run above a composer with no chat', async () => {
     live = await harness(undefined, {
       activity: () => ({
@@ -8731,14 +8958,15 @@ describe('the field above the composer', () => {
 describe('folding away the chat’s opening instruction', () => {
   const BRIEF = 'TASK — ship v1.6\nREQUIREMENTS — no install, no reload\nDONE — the store fix';
 
-  async function opened(kind: string | null, text = BRIEF): Promise<HTMLElement> {
+  async function opened(kind: string | null, text = BRIEF, extra: Record<string, unknown> = {}): Promise<HTMLElement> {
     const section = userTurn(live!.document, 'u1', text);
     live!.reply.set('activity', () => ({
       ok: true,
       data: {
         entries: [],
         bootstrap: kind,
-        job: null
+        job: null,
+        ...extra
       }
     }));
     await live!.hook.pullActivity();
@@ -8765,10 +8993,15 @@ describe('folding away the chat’s opening instruction', () => {
     expect((section.querySelector('[data-message-id]') as HTMLElement).dataset.clfBootstrap).toBe('resume');
   });
 
-  it('says which kind of machinery it was', async () => {
+  it('says which kind of machinery it was, and which worker this chat is', async () => {
     live = await harness();
-    const section = await opened('worker', 'You are worker agent worker-1. Your task is …');
-    expect(section.querySelector('.clf-boot summary')!.textContent).toContain('gave the worker');
+    const section = await opened('worker', 'You are worker agent worker-3. Your task is …', { bootstrapAgent: 'worker-3' });
+    const summary = section.querySelector('.clf-boot summary')!;
+    expect(summary.querySelector('.clf-boot-label')!.textContent).toBe(
+      'This is worker-3 — the instruction this app gave the worker, not something you typed'
+    );
+    // The text itself stays visible in the closed fold, clamped, so the bubble keeps its width.
+    expect(summary.querySelector('.clf-boot-preview')!.textContent).toContain('You are worker agent worker-3');
   });
 
   it('folds only the first message, not everything the user went on to say', async () => {
@@ -8857,7 +9090,6 @@ describe('the fresh chat the app opened', () => {
     );
     expect(live.document.querySelector('#prompt-textarea')!.textContent).toContain('the long carried handoff');
     expect(live.sent.some((message) => message.type === 'compact' && message.destinationAttempt === true)).toBe(true);
-    expect(live.sent.some((message) => message.type === 'ack')).toBe(false);
 
     releaseStatus();
     await settle();
@@ -8900,7 +9132,18 @@ describe('the fresh chat the app opened', () => {
     expect(redeems[0]!.client).not.toBe('');
     expect(live.document.querySelector('#prompt-textarea')!.textContent).toContain('Handoff: h-1');
     expect(live.sent.some((message) => message.type === 'compact' && message.destinationAttempt === true)).toBe(true);
-    expect(live.sent.filter((message) => message.type === 'ack')).toEqual([]);
+    // The id ChatGPT gave the chat is reported like a worker's. The marker still commits the
+    // continuation when the page finds it; this ACK commits it when the page does not — on
+    // 2026-09-02 a brief was sent and worked on and its marker never redeemed, and the
+    // session stayed on the old chat.
+    expect(live.sent.filter((message) => message.type === 'ack')).toEqual([
+      expect.objectContaining({
+        type: 'ack',
+        id: 'cmd-7',
+        status: 'sent',
+        conversationId: '11111111-2222-3333-4444-555555555555'
+      })
+    ]);
   });
 
   /**
@@ -8941,13 +9184,16 @@ describe('the fresh chat the app opened', () => {
     expect(live.sent.filter((message) => message.type === 'redeem')).toHaveLength(1);
     expect(live.document.querySelector('#prompt-textarea')!.textContent).toContain('Handoff: h-project');
     expect(live.sent.some((message) => message.type === 'compact' && message.destinationAttempt === true)).toBe(true);
-    // A resume is committed from its own marker, so it never acks. What proves the Project
-    // route was read is that the page can name the chat ChatGPT just gave it: with a `/c/`
-    // test of its own, every message after the send still carried no conversation at all.
-    expect(live.sent.filter((message) => message.type === 'ack')).toEqual([]);
-    expect(
-      live.sent.some((message) => message.conversationId === '77777777-6666-5555-4444-333333333333')
-    ).toBe(true);
+    // What proves the Project route was read is that the page can name the chat ChatGPT just
+    // gave it, in the ACK that lets the app commit the continuation: with a `/c/` test of its
+    // own, every message after the send still carried no conversation at all.
+    expect(live.sent.filter((message) => message.type === 'ack')).toEqual([
+      expect.objectContaining({
+        type: 'ack',
+        status: 'sent',
+        conversationId: '77777777-6666-5555-4444-333333333333'
+      })
+    ]);
   });
 
   it('abandons a redeemed bootstrap if SPA navigation retargets the tab before insertion', async () => {
@@ -9182,6 +9428,60 @@ describe('the fresh chat the app opened', () => {
         navigationEpoch: expect.any(Number)
       }
     ]);
+  });
+
+  /**
+   * The worker label is the bootstrapped conversation's, not the tab's. A New chat opened in a
+   * worker's tab is the user's own chat: reported as worker-3 with the worker's command id, the
+   * app bound the slot to it, stamped a worker origin on its session and the page folded the
+   * user's first message as "the instruction this app gave the worker" (2026-09-02).
+   */
+  it('drops the worker identity when the tab moves to another chat', async () => {
+    const workerChat = '22222222-3333-4444-5555-666666666666';
+    const ownChat = '33333333-4444-5555-6666-777777777777';
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-move',
+      {
+        redeem: () => ({
+          ok: true,
+          command: { id: 'cmd-move', type: 'worker', text: 'Audit the renderer.', agent: 'worker-3' }
+        }),
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        });
+      }
+    );
+    await settle(400);
+    expect(live.sent.filter((message) => message.type === 'ack')).toContainEqual(
+      expect.objectContaining({ id: 'cmd-move', status: 'sent', conversationId: workerChat, agent: 'worker-3' })
+    );
+    live.hook.observe();
+    await settle();
+    live.sent.splice(0);
+
+    // The user presses New chat in this tab and asks their own question.
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${ownChat}` });
+    userTurn(live.document, 'turn-own-1', 'yo keep building the gta');
+    live.hook.observe();
+    await settle();
+    // The new chat's transcript is read only once the app has answered for it.
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+    await settle();
+
+    expect(live.sent.filter((message) => message.type === 'closed')).toEqual([
+      expect.objectContaining({ type: 'closed', conversationId: workerChat })
+    ]);
+    const entries = live.sent
+      .filter((message) => message.type === 'events')
+      .flatMap((message) => (message.entries ?? []) as Array<Record<string, any>>);
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.every((entry) => entry.conversationId === ownChat)).toBe(true);
+    expect(entries.every((entry) => entry.agent === null && entry.agentCommandId === null)).toBe(true);
   });
 
   it('acks a same-chat revival immediately after ChatGPT accepts the send, before any timer can be throttled', async () => {
@@ -10316,6 +10616,90 @@ app-owned prompt`,
     if (journalAt >= 0) expect(commitAt).toBeLessThan(journalAt);
     expect(live.sent.some((message) => message.type === 'ack')).toBe(false);
   });
+
+  /**
+   * The 2026-09-02 live failure. A chat that had been resumed the day before was reopened after
+   * an app restart, so the app no longer knew its continuation token and answered the marked
+   * message with 409 `no_such_continuation`. The journal gate that message had raised was only
+   * ever released by a commit, so the refusal left the document unable to hand over a single
+   * observation — and the New Chat the user opened next in the same tab lost its first message,
+   * its title, its turn and therefore its automatic compaction, until the tab was reloaded.
+   */
+  it('journals again once the app says a resumed chat’s marker names no continuation', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      activity: activityReply,
+      compact: (message) =>
+        message.destinationMessageId
+          ? { ok: false, status: 409, data: { error: 'no_such_continuation' } }
+          : { ok: false, error: 'unexpected_compact_shape' }
+    });
+    const section = userTurn(live.document, 'turn-destination', `${destinationMarker}
+
+app-owned prompt`, { sent: false });
+    live.hook.observe();
+    await settle();
+    await bindFiberTurns([{ section, turn: markedTurn('destination') }]);
+
+    userTurn(live.document, 'turn-next', 'the question asked after reopening');
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+
+    expect(live.sent.filter((message) => message.type === 'compact' && message.destinationMessageId)).toHaveLength(1);
+    expect(emitted(live.sent, 'user_message').map((entry) => entry.event.text)).toContain('the question asked after reopening');
+  });
+
+  it('keeps holding the journal while the app is merely unreachable', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      activity: activityReply,
+      compact: () => ({ ok: false, status: 0, error: 'app_not_found' })
+    });
+    const section = userTurn(live.document, 'turn-destination', `${destinationMarker}
+
+app-owned prompt`, { sent: false });
+    live.hook.observe();
+    await settle();
+    await bindFiberTurns([{ section, turn: markedTurn('destination') }]);
+
+    userTurn(live.document, 'turn-next', 'asked while the app is away');
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+
+    expect(emitted(live.sent, 'user_message')).toHaveLength(0);
+  });
+
+  it('does not carry a held journal gate into the next chat the tab moves to', async () => {
+    const CHAT_B = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      activity: activityReply,
+      compact: () => ({ ok: false, status: 0, error: 'app_not_found' })
+    });
+    const section = userTurn(live.document, 'turn-destination', `${destinationMarker}
+
+app-owned prompt`, { sent: false });
+    live.hook.observe();
+    await settle();
+    await bindFiberTurns([{ section, turn: markedTurn('destination') }]);
+
+    // New Chat in the same tab: the route moves, React replaces the transcript, the user sends.
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${CHAT_B}` });
+    live.hook.observe();
+    await settle();
+    section.remove();
+    userTurn(live.document, 'turn-b1', 'the new chat’s first question');
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+
+    // What A queued while its gate was shut is delivered under A once the tab moves on — the
+    // queue is never relabelled — and B's opening message is journalled as B's.
+    const messages = emitted(live.sent, 'user_message');
+    expect(messages.filter((entry) => entry.conversationId === CHAT_B).map((entry) => entry.event.text)).toEqual([
+      'the new chat’s first question'
+    ]);
+    expect(messages.filter((entry) => entry.conversationId === CHAT).every((entry) => entry.event.text.startsWith(destinationMarker))).toBe(true);
+  });
 });
 /**
  * One live recorder per document — and the ability to replace a dead one.
@@ -10845,6 +11229,53 @@ describe('the goal loop', () => {
     live.document.dispatchEvent(new live.window.Event('visibilitychange'));
     await settle(400);
     expect(requested).toBe(1);
+  });
+
+  it('hands the brief back when the composer lost it before Send, and journals what the user types next', async () => {
+    // 2026-09-02: the replacement chat opened, the brief landed, and the user pressed Escape in
+    // the same instant. The armed dispatch then sat for its six hours, and this document — gated
+    // for a marked message that would never come — recorded nothing the user typed into it.
+    const commandId = 'cmd-resume-escaped';
+    const token = '0123456789abcdef0123456789abcdef';
+    let page: Document | null = null;
+    live = await harness(
+      `https://chatgpt.com/?clf=${commandId}`,
+      {
+        redeem: () => ({
+          ok: true,
+          command: { id: commandId, type: 'resume', text: `[[CLF-RESUME:${token}]]\n\nthe carried handoff`, agent: null }
+        }),
+        compact: (message) => {
+          if (message.destinationAttempt) return { ok: true, data: { allowed: true } };
+          if (message.destinationDispatch) {
+            // The user's Escape, between the app arming the click and the click itself.
+            page!.querySelector('#prompt-textarea')!.textContent = '';
+            return { ok: true, data: { armed: true } };
+          }
+          if (message.destinationLost) return { ok: true, data: { released: true } };
+          return { ok: false, error: 'unexpected_compact_shape' };
+        },
+        ack: () => ({ ok: true }),
+        activity: () => ({
+          ok: true,
+          data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null, bootstrap: 'resume' }
+        })
+      },
+      (document) => {
+        page = document;
+      }
+    );
+
+    await settle(400);
+
+    expect(live.sent.filter((message) => message.type === 'compact' && message.destinationLost === true)).toEqual([
+      expect.objectContaining({ token })
+    ]);
+    expect(live.sent.some((message) => message.type === 'ack')).toBe(false);
+
+    userTurn(live.document, 'own-1', 'my own question instead');
+    await settle(400);
+    expect(emitted(live.sent, 'user_message').map((entry) => entry.event.text)).toContain('my own question instead');
   });
 
   it('recovers the exact observed resumed generation when it finishes before Goal config arrives', async () => {
@@ -12342,6 +12773,19 @@ describe('the goal loop', () => {
     live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
       startGenerating(live!.document);
     });
+    // The opening waits on the same quarter-minute clock as the in-chat loop, not on a
+    // one-second courtesy pause: a provider rate limit lasts longer than that, and a run
+    // started from an empty New Chat has no later turn to try again from.
+    const held = live;
+    const timer = held.window.setTimeout;
+    const wakes: Array<() => void> = [];
+    held.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === held.hook.GOAL_RETRY_MS) {
+        wakes.push(fn);
+        return 0;
+      }
+      return timer(fn, ms);
+    }) as typeof held.window.setTimeout;
     live.hook.injectControl();
     live.hook.toggleMenu();
     (live.document.querySelector('.clf-menu-goal-link') as HTMLButtonElement).click();
@@ -12350,11 +12794,68 @@ describe('the goal loop', () => {
     box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
 
     (live.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement).click();
+    await settle(400);
+
+    expect(attempts).toBe(1);
+    expect(wakes, 'a rate-limited opening waits for the Goal retry clock').toHaveLength(1);
+    expect(live.document.body.textContent).toContain('Retrying Goal in 15 seconds');
+    expect(live.document.body.textContent).not.toContain('The goal loop stopped');
+    wakes[0]!();
     await settle(800);
 
     expect(attempts).toBe(2);
     expect(sends()).toBe(1);
     expect(composerText(live.document)).toBe('rewrite the parser in rust');
+  });
+
+  it('keeps retrying a New Chat opening past a rate limit that lasts several rounds', async () => {
+    let attempts = 0;
+    live = await harness('https://chatgpt.com/', {
+      settings_get: () => ({
+        ok: true,
+        data: {
+          context: { auto: false, threshold: 400_000, warn: 400_000, limit: 533_000 },
+          goal: { enabled: false, hasKey: true, model: MODEL, objective: '', blocked: '' }
+        }
+      }),
+      goal_open: () => {
+        attempts += 1;
+        return attempts < 5
+          ? { ok: false, status: 502, data: { error: 'rate_limited: Provider returned error', retryable: true } }
+          : { ok: true, data: { reply: 'build the city', model: MODEL } };
+      }
+    });
+    await live.hook.pullActivity();
+    const sends = watchSend(live.document);
+    const held = live;
+    const timer = held.window.setTimeout;
+    const wakes: Array<() => void> = [];
+    held.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === held.hook.GOAL_RETRY_MS) {
+        wakes.push(fn);
+        return 0;
+      }
+      return timer(fn, ms);
+    }) as typeof held.window.setTimeout;
+    live.hook.injectControl();
+    live.hook.toggleMenu();
+    (live.document.querySelector('.clf-menu-goal-link') as HTMLButtonElement).click();
+    const box = live.document.querySelector('[data-clf-goal-input]') as HTMLTextAreaElement;
+    box.value = 'build the city';
+    box.dispatchEvent(new live.window.Event('input', { bubbles: true }));
+    (live.document.querySelector('.clf-menu-goal-save') as HTMLButtonElement).click();
+
+    for (let round = 1; round <= 4; round++) {
+      await settle(300);
+      expect(attempts).toBe(round);
+      expect(wakes).toHaveLength(round);
+      expect(live.document.body.textContent).not.toContain('The goal loop stopped');
+      wakes[round - 1]!();
+    }
+    await settle(800);
+    expect(attempts).toBe(5);
+    expect(sends()).toBe(1);
+    expect(composerText(live.document)).toBe('build the city');
   });
 
   /**
@@ -12940,6 +13441,29 @@ describe('the goal loop', () => {
         available: false,
         unavailable: 'A worker chat is already driven by its prime.'
       });
+    });
+
+    /**
+     * The user's block is the other reason: tools refused, so nothing this app types may
+     * drive the chat on. Every control in the sheet goes with it, and each says so.
+     */
+    it('takes every control away from a chat the user blocked in the app, and says so', async () => {
+      await open();
+      const view = sheet(
+        { enabled: false, own: true, mode: 'loop', hasKey: true, model: MODEL, objective: 'finish it', blocked: 'blocked' },
+        { context: { auto: true, threshold: 400_000, warn: 400_000, limit: 533_333 } }
+      );
+      expect(view.tip).toContain('blocked in the app');
+      expect(view.rows[0]).toMatchObject({
+        key: 'autoCompact',
+        on: false,
+        disabled: true,
+        note: expect.stringMatching(/blocked in the app/)
+      });
+      expect(view.mode).toMatchObject({ value: 'off', note: 'blocked in the app', warn: true, disabled: true });
+      expect(view.objective).toMatchObject({ available: false });
+      expect(view.objective.unavailable).toMatch(/blocked in the app/);
+      expect(view.action).toMatchObject({ label: 'Compact & resume unavailable', action: 'none' });
     });
 
     it('keeps pointing at the missing credential the whole feature runs on', async () => {

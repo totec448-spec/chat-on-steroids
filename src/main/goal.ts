@@ -1263,8 +1263,12 @@ async function run(draft: GoalDraft): Promise<void> {
       }
     });
     if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
-    if (decision.action === 'http') return settle(draft, 'failed', decision.error);
-    if (decision.action === 'invalid') return settle(draft, 'failed', decision.error);
+    // Logged like the exception path below. Ten rate limits in a row on 2026-09-02 left no
+    // trace in app.log because a provider's refusal is an answer, not an exception.
+    if (decision.action === 'http' || decision.action === 'invalid') {
+      logWarn(`goal: draft for ${draft.conversationId} failed — ${decision.error}`);
+      return settle(draft, 'failed', decision.error);
+    }
     if (decision.action === 'stop') {
       // Loop has already been asked again for exactly this, up to its limit. Reaching here
       // means the model kept refusing to write, which is a failure to produce an answer and

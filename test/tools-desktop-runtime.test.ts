@@ -49,9 +49,9 @@ function caps(over: Partial<Capabilities>): Capabilities {
   };
 }
 
-function desktopSurface() {
+function desktopSurface(over: Partial<Capabilities> = {}) {
   const registered = new Map<string, { config: any; handler: (input: any) => Promise<any> }>();
-  const liveCaps = caps({ screen: true });
+  const liveCaps = caps({ screen: true, ...over });
   registerDesktopTools({
     ctx: { privacyScreenshots: false },
     caps: liveCaps,
@@ -70,6 +70,62 @@ function desktopSurface() {
   } as never);
   return registered;
 }
+
+describe('Desktop computer browser chords', () => {
+  // 2026-09-02: the prime tested its game in a tab beside its own ChatGPT chats, closed its
+  // chat with ctrl+w mid-turn, and later walked the worker chats with ctrl+tab.
+  const screen = { x: 0, y: 0, width: 1920, height: 1080 };
+  const chrome = { id: 41, title: 'Build GTA Web Game - Google Chrome', process: 'chrome', ...screen, state: 'foreground' };
+  const notepad = { ...chrome, id: 42, title: 'notes.txt - Notepad', process: 'notepad' };
+  const acted = { completedCount: 1, routes: ['helper'], cursor: null, clipboard: [], screenshot: null, verification: null };
+
+  it('refuses a tab or window chord aimed at the browser in front', async () => {
+    desktop.actAndCapture.mockClear();
+    desktop.activeWindow.mockResolvedValueOnce({ window: chrome, screen });
+    const computer = desktopSurface({ control: true }).get('computer')!;
+
+    const result = await computer.handler({ actions: [{ type: 'keypress', keys: ['ctrl', 'w'] }] });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('BROWSER_TAB_CHORD: ctrl+w');
+    expect(result.content[0].text).toContain('Build GTA Web Game - Google Chrome');
+    expect(desktop.actAndCapture).not.toHaveBeenCalled();
+  });
+
+  it('judges the chord by the window the batch focuses first', async () => {
+    desktop.actAndCapture.mockClear();
+    desktop.listWindows.mockResolvedValueOnce({ windows: [notepad, chrome], screen });
+    const computer = desktopSurface({ control: true }).get('computer')!;
+
+    const result = await computer.handler({
+      actions: [{ type: 'focus', window: 41 }, { type: 'keypress', keys: ['ctrl', 'shift', 'tab'] }]
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('BROWSER_TAB_CHORD: ctrl+shift+tab');
+    expect(desktop.actAndCapture).not.toHaveBeenCalled();
+  });
+
+  it('lets the same chord through to a window that is not a browser', async () => {
+    desktop.actAndCapture.mockClear();
+    desktop.activeWindow.mockResolvedValueOnce({ window: notepad, screen });
+    desktop.actAndCapture.mockResolvedValueOnce(acted);
+    const computer = desktopSurface({ control: true }).get('computer')!;
+
+    const result = await computer.handler({ actions: [{ type: 'keypress', keys: ['ctrl', 'w'] }] });
+    expect(result.isError).toBeFalsy();
+    expect(desktop.actAndCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it('never asks about the window for an ordinary key', async () => {
+    desktop.actAndCapture.mockClear();
+    desktop.activeWindow.mockClear();
+    desktop.actAndCapture.mockResolvedValueOnce(acted);
+    const computer = desktopSurface({ control: true }).get('computer')!;
+
+    const result = await computer.handler({ actions: [{ type: 'keypress', keys: ['ctrl', 'r'] }] });
+    expect(result.isError).toBeFalsy();
+    expect(desktop.activeWindow).not.toHaveBeenCalled();
+  });
+});
 
 describe('Desktop observe runtime contract', () => {
   it('rejects explicit window ids where the documented mode cannot use them', () => {

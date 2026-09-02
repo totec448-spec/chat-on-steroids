@@ -16,6 +16,7 @@
     "verify": "npm run verify:ci",
     "verify:ci": "npm run rg && npm run verify:privacy && npm run typecheck && vitest run --exclude test/mcp-shutdown.test.ts && vitest run test/mcp-shutdown.test.ts",
     "verify:privacy": "node scripts/verify-public-history.mjs",
+    "verify:tunnel-current": "node scripts/verify-current-tunnel.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "icon": "node scripts/make-icon.mjs",
     "tunnel": "node scripts/fetch-tunnel-client.mjs",

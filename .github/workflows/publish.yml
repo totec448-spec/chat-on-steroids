@@ -92,6 +92,11 @@ jobs:
           }
           NODE
 
+      # A release remains reproducible because the tunnel bytes are version/checksum pinned.
+      # Refuse a stale pin instead of silently changing the payload named by this tag.
+      - name: Require current OpenAI tunnel-client
+        run: npm run verify:tunnel-current
+
       - name: Verify public-history privacy
         run: node scripts/verify-public-history.mjs
 
@@ -168,6 +173,9 @@ jobs:
       - name: Publish the release
         run: |
           set -euo pipefail
+          # Repeat after the native candidate build so a new upstream release published while
+          # the six runners were working cannot leave this release stale.
+          npm run verify:tunnel-current
           node scripts/check-release-absent.mjs
           gh release create "$TAG" \
             publish/Chat-On-Steroids-Setup-x64.exe \
