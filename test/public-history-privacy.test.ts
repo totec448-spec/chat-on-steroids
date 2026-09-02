@@ -117,6 +117,36 @@ describe('public-history privacy gate', () => {
     expect(result.stderr).not.toContain(privateEmail);
   });
 
+  /**
+   * The merge commit GitHub writes for a merged pull request carries whatever address that
+   * account publishes, and no local hook ever saw it. Once it is on `origin/main` the value
+   * is public, so failing every later push cannot unpublish it — it only strands the clone.
+   * Taking it out is a deliberate rewrite of a public branch, not a hook's decision.
+   */
+  it('exempts unsafe identity that is already published on origin/main', () => {
+    const repository = makeRepository();
+    const privateEmail = ['totec448', 'gmail.com'].join('@');
+    commit(repository, 'Unsafe identity merged through the forge', privateEmail);
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Clean local commit on top', safeEmail);
+
+    const result = verify(repository);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('privacy check passed');
+  });
+
+  it('still rejects unsafe identity a push would add ahead of origin/main', () => {
+    const repository = makeRepository();
+    const privateEmail = ['totec448', 'gmail.com'].join('@');
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Unsafe identity not published yet', privateEmail);
+
+    const result = verify(repository);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('non-noreply maintainer email');
+    expect(result.stderr).not.toContain(privateEmail);
+  });
+
   it('keeps annotated tags reachable from HEAD under the same checks', () => {
     const repository = makeRepository();
     const sessionUrl = ['https://claude.ai/code/', 'session_taggedIdentifier'].join('');

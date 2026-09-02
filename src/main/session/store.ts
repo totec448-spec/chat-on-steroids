@@ -33,7 +33,7 @@ import type {
   SessionSummary,
   StoredText
 } from '../../shared/session.js';
-import { eventTokens } from '../../shared/session.js';
+import { eventTokens, normalizedToolOutcome } from '../../shared/session.js';
 import { chronological } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
@@ -206,6 +206,10 @@ interface MetaCheckpoint {
   summary: SessionSummary;
   /** Null means metadata written by a version that did not yet persist a history watermark. */
   historySeq: number | null;
+  /** Derived migration signal; never persisted. */
+  outcomeCountersMissing: boolean;
+  /** Derived final-message activity boundary was added after the original summaries. */
+  activityBoundaryMissing: boolean;
 }
 
 function messageKey(event: Pick<MessageEvent, 'kind' | 'messageId'>): string | null {
@@ -238,10 +242,16 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     events: 0,
     userMessages: 0,
     toolCalls: 0,
+    lastToolCallAt: null,
+    lastAssistantFinalAt: null,
+    lastTurnEndAt: null,
+    lastFinishReportAt: null,
+    processExitNonzero: 0,
+    toolRejected: 0,
+    toolInternalErrors: 0,
     errors: 0,
     estimatedTokens: 0,
     contextTokens: 0,
-    autoCompactTriggeredAt: null,
     lastHandoffId: null,
     lastHandoffAt: null,
     lastCommittedResumeHandoffId: null,
@@ -618,6 +628,13 @@ async function rebuildSummaryFromHistory(
         events: rebuilt.events,
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
+        lastToolCallAt: rebuilt.lastToolCallAt,
+        lastAssistantFinalAt: rebuilt.lastAssistantFinalAt,
+        lastTurnEndAt: rebuilt.lastTurnEndAt,
+        lastFinishReportAt: rebuilt.lastFinishReportAt,
+        processExitNonzero: rebuilt.processExitNonzero,
+        toolRejected: rebuilt.toolRejected,
+        toolInternalErrors: rebuilt.toolInternalErrors,
         errors: rebuilt.errors,
         estimatedTokens: rebuilt.estimatedTokens,
         // `contextTokens` may have been reset by a durable rebind, which is metadata-only and
@@ -658,13 +675,26 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     const historySeq = Math.max(journalSeq, messageSeq);
     const checkpoint = await readMetaCheckpoint(id);
 
-    if (checkpoint?.historySeq === historySeq) {
+    // A pre-taxonomy checkpoint can have a current watermark but stale outcome classification.
+    if (
+      checkpoint?.historySeq === historySeq &&
+      !checkpoint.outcomeCountersMissing &&
+      !checkpoint.activityBoundaryMissing
+    ) {
       return { summary: checkpoint.summary, messages, historySeq, reconciled: false };
     }
-    if (checkpoint && checkpoint.historySeq === null && historySeq === 0) {
-      // Legacy empty session: there is no history to replay, only a missing watermark.
-      await writeSummary(checkpoint.summary, 0);
-      return { summary: checkpoint.summary, messages, historySeq: 0, reconciled: true };
+    if (checkpoint && historySeq === 0) {
+      // Nothing to replay: stamp the empty legacy projection in place.
+      const summary = {
+        ...checkpoint.summary,
+        ...(checkpoint.outcomeCountersMissing ? { errors: 0 } : {}),
+        lastToolCallAt: null,
+        lastAssistantFinalAt: null,
+        lastTurnEndAt: null,
+        lastFinishReportAt: null
+      };
+      await writeSummary(summary, 0);
+      return { summary, messages, historySeq: 0, reconciled: true };
     }
     if (!checkpoint && historySeq === 0) return null;
 
@@ -743,10 +773,26 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'user_message') summary.userMessages += 1;
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
-    if (event.call.outcome === 'error') summary.errors += 1;
+    summary.lastToolCallAt = Math.max(summary.lastToolCallAt ?? 0, event.time);
+    if (event.call.endsActivity === true) {
+      summary.lastFinishReportAt = Math.max(summary.lastFinishReportAt ?? 0, event.time);
+    }
+    const outcome = normalizedToolOutcome(event.call);
+    if (outcome === 'process_exit_nonzero') summary.processExitNonzero += 1;
+    if (outcome === 'tool_rejected') summary.toolRejected += 1;
+    if (outcome === 'tool_internal_error') {
+      summary.toolInternalErrors += 1;
+      summary.errors += 1;
+    }
+  }
+  if (event.kind === 'assistant_message' && (event.final === true || event.state === 'final')) {
+    summary.lastAssistantFinalAt = Math.max(summary.lastAssistantFinalAt ?? 0, event.time);
   }
   if (event.kind === 'chat_error') summary.errors += 1;
-  if (event.kind === 'turn_end') summary.lastTurnOutcome = event.outcome;
+  if (event.kind === 'turn_end') {
+    summary.lastTurnOutcome = event.outcome;
+    summary.lastTurnEndAt = Math.max(summary.lastTurnEndAt ?? 0, event.time);
+  }
   if (event.kind === 'turn_start') summary.activeTurnId = event.turnId ?? `seq-${event.seq}`;
   if (event.kind === 'turn_end' && (!event.turnId || summary.activeTurnId === event.turnId)) summary.activeTurnId = null;
   if (event.kind === 'handoff') {
@@ -757,7 +803,7 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
 }
 
 /**
- * Whether this chat is over its automatic-compaction line and still has its one trigger.
+ * Whether this chat is over its automatic-compaction line.
  *
  * A level, and deliberately not the edge this used to be. The edge version armed on the
  * below-to-above crossing and then waited for that turn to end cleanly, which had two
@@ -767,50 +813,18 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
  * one moment where a handoff is pointless, because the work it would carry across is
  * already done.
  *
- * So this half of the rule is just "over the line, not yet used". The other half — that
+ * So this half of the rule is just "over the line". The other half — that
  * the model is working *right now* — is a fact about the open browser connection rather
  * than about the recording, so it is asked at the point of use, in bridge.ts. That is what
  * keeps a stale 500k chat quiet when it is merely opened: it is over the line all day, and
- * nothing is running in it.
+ * nothing is running in it. The existing continuation transaction is the durable authority
+ * once a stopped/settled chat asks for its handoff prompt; pre-barrier refusal owns no durable
+ * state and may be attempted by a later generation.
  */
 export function autoCompactionReady(summary: SessionSummary | null | undefined): boolean {
-  if (!summary || summary.autoCompactTriggeredAt !== null) return false;
+  if (!summary) return false;
   const config = getConfig().compaction;
   return config.auto && config.autoTokens > 0 && summary.contextTokens >= config.autoTokens;
-}
-
-/**
- * Atomically consumes the one automatic trigger before the browser starts doing anything.
- *
- * Consumption is durable and happens before ChatGPT is stopped or prompted. If the browser
- * then disappears, the stop barrier fails, or the user cancels, reopening the same old chat
- * cannot replay the automatic trigger. A manual Compact & Resume is still always available.
- */
-export async function claimAutoCompaction(
-  sessionId: string,
-  conversationId: string,
-  stillWorking: () => boolean = () => true
-): Promise<boolean> {
-  const entry = await ensureOpen(sessionId);
-  const claim = entry.queue.then(async () => {
-    if (entry.summary.conversationId !== conversationId || !autoCompactionReady(entry.summary)) return false;
-    // Asked here rather than by the caller beforehand, because the answer decides whether
-    // the one-shot is spent. A turn that ended while this claim was queued must leave the
-    // trigger untouched: under the level rule the chat stays over the line, so the next
-    // turn it opens can still have it. Spending it on a race would silently retire
-    // automatic compaction for the whole chat.
-    if (!stillWorking()) return false;
-    const staged: SessionSummary = { ...entry.summary, autoCompactTriggeredAt: Date.now() };
-    await writeSummary(staged, entry.historySeq);
-    Object.assign(entry.summary, staged);
-    entry.metaDirty = false;
-    return true;
-  });
-  entry.queue = claim.then(
-    () => undefined,
-    (err: Error) => logError(`automatic compaction claim failed: ${err.message}`)
-  );
-  return claim;
 }
 
 /**
@@ -916,6 +930,10 @@ export function upsertMessageEvent(
               // `final` is a compatibility mirror of state, not an independent truth.
               state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
               final: event.state === 'final' || event.final === true,
+              // Goal eligibility is an accepted fact about this stable reply, not a property a
+              // later sparse page snapshot may retract. This is what makes a 503/reload replay
+              // re-offer the same durable obligation instead of silently dropping it.
+              ...(previous.goalEligible === true ? { goalEligible: true } : {}),
               // A sparse re-observation of the same prose must not throw away the richer
               // representation we already captured. If the prose itself changed, omitting
               // HTML deliberately falls back to the new plain text instead of showing stale
@@ -952,7 +970,8 @@ export function upsertMessageEvent(
           (nextEvent.kind === 'assistant_message' &&
             storedTextEqual(previous.renderedHtml, nextEvent.renderedHtml) &&
             previous.state === nextEvent.state &&
-            previous.final === nextEvent.final)) &&
+            previous.final === nextEvent.final &&
+            previous.goalEligible === nextEvent.goalEligible)) &&
         (previous.turnId ?? undefined) === settledTurnId &&
         (nextEvent.agent === undefined || previous.agent === nextEvent.agent) &&
         (!options.preferTime || previous.time === nextEvent.time)
@@ -987,6 +1006,12 @@ export function upsertMessageEvent(
         entry.summary.estimatedTokens = Math.max(0, entry.summary.estimatedTokens + delta);
         entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens + delta);
         entry.summary.updatedAt = Math.max(entry.summary.updatedAt, nextEvent.time);
+        if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final')) {
+          entry.summary.lastAssistantFinalAt = Math.max(
+            entry.summary.lastAssistantFinalAt ?? 0,
+            nextEvent.time
+          );
+        }
         if (full.agent && !entry.summary.agents.includes(full.agent)) entry.summary.agents.push(full.agent);
       }
       entry.historySeq = full.seq;
@@ -1277,6 +1302,13 @@ export async function rewriteUnattributedToolCalls(
       events: 0,
       userMessages: 0,
       toolCalls: 0,
+      lastToolCallAt: null,
+      lastAssistantFinalAt: null,
+      lastTurnEndAt: null,
+      lastFinishReportAt: null,
+      processExitNonzero: 0,
+      toolRejected: 0,
+      toolInternalErrors: 0,
       errors: 0,
       estimatedTokens: 0,
       contextTokens: 0,
@@ -1317,10 +1349,39 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
     // has no such field. A session recorded before the lineage was a single chat by
     // definition, and everything it holds was in that chat's context, so both defaults are
     // the truth rather than a placeholder.
+    const outcomeCountersMissing =
+      typeof publicSummary.processExitNonzero !== 'number' ||
+      typeof publicSummary.toolRejected !== 'number' ||
+      typeof publicSummary.toolInternalErrors !== 'number';
+    const activityBoundaryMissing = !Object.prototype.hasOwnProperty.call(publicSummary, 'lastAssistantFinalAt');
     return {
       historySeq,
+      outcomeCountersMissing,
+      activityBoundaryMissing,
       summary: {
         ...publicSummary,
+        // Keep in-place increments numeric until the forced rebuild supplies the real values.
+        processExitNonzero: publicSummary.processExitNonzero ?? 0,
+        toolRejected: publicSummary.toolRejected ?? 0,
+        toolInternalErrors: publicSummary.toolInternalErrors ?? 0,
+        // A two-minute display clock is not worth replaying every legacy session during the
+        // attachment-catalog scan. The next real tool call sets the exact value immediately.
+        lastToolCallAt:
+          typeof publicSummary.lastToolCallAt === 'number' && Number.isFinite(publicSummary.lastToolCallAt)
+            ? publicSummary.lastToolCallAt
+            : null,
+        lastAssistantFinalAt:
+          typeof publicSummary.lastAssistantFinalAt === 'number' && Number.isFinite(publicSummary.lastAssistantFinalAt)
+            ? publicSummary.lastAssistantFinalAt
+            : null,
+        lastTurnEndAt:
+          typeof publicSummary.lastTurnEndAt === 'number' && Number.isFinite(publicSummary.lastTurnEndAt)
+            ? publicSummary.lastTurnEndAt
+            : null,
+        lastFinishReportAt:
+          typeof publicSummary.lastFinishReportAt === 'number' && Number.isFinite(publicSummary.lastFinishReportAt)
+            ? publicSummary.lastFinishReportAt
+            : null,
         agents: Array.isArray(publicSummary.agents) ? publicSummary.agents : [],
         origin: publicSummary.origin ?? null,
         chatIds: Array.isArray(publicSummary.chatIds)
@@ -1330,8 +1391,6 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
             : [],
         contextTokens:
           typeof publicSummary.contextTokens === 'number' ? publicSummary.contextTokens : publicSummary.estimatedTokens,
-        autoCompactTriggeredAt:
-          typeof publicSummary.autoCompactTriggeredAt === 'number' ? publicSummary.autoCompactTriggeredAt : null,
         // Older summaries predate successful-resume provenance. Missing means unknown, never
         // "use lastHandoffId": capture publication happens before the continuation rebind.
         lastCommittedResumeHandoffId:
@@ -1707,6 +1766,52 @@ export async function findSessionByConversation(
 }
 
 /**
+ * Has this ChatGPT conversation already been replaced inside any durable session lineage?
+ *
+ * This is intentionally independent of current attachment. Opening an old source chat after
+ * Compact & Resume may create a new recording epoch for genuinely new user activity there, but
+ * it must never restore automation authority that the successful A->B handoff retired. The
+ * lineage is the durable fact: if any retained session contains A while being attached to a
+ * different conversation, A is historical for browser recovery, Goal and Loop forever.
+ */
+export async function conversationWasSuperseded(conversationId: string): Promise<boolean> {
+  if (!conversationId) return false;
+  const catalog = await ensureAttachmentCatalog();
+  const sessionIds = new Set(catalog.historical.get(conversationId) ?? []);
+  for (const [id, entry] of open) {
+    if (entry.summary.chatIds.includes(conversationId)) sessionIds.add(id);
+  }
+  for (const id of sessionIds) {
+    const summary = open.get(id)?.summary ?? catalog.summaries.get(id) ?? null;
+    if (summary?.chatIds.includes(conversationId) && summary.conversationId !== conversationId) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether one ChatGPT frontend is still the session's executable attachment.
+ *
+ * Historical `chatIds` are transcript lineage, not continuing authority. Compact & Resume
+ * deliberately keeps A there so old messages remain readable, while `conversationId` moves to
+ * B. Every caller that has to decide whether new work from A is still admissible uses this one
+ * store-owned verdict rather than reinterpreting lineage for itself.
+ */
+export async function conversationAttachment(
+  conversationId: string,
+  sessionId: string | null = null
+): Promise<'current' | 'superseded' | 'unknown'> {
+  if (!conversationId) return 'unknown';
+  if (sessionId) {
+    const exact = await getSession(sessionId);
+    if (!exact || !exact.chatIds.includes(conversationId)) return 'unknown';
+    return exact.conversationId === conversationId ? 'current' : 'superseded';
+  }
+  const current = await findSessionByConversation(conversationId, { requireUnique: true });
+  if (current) return 'current';
+  return (await conversationWasSuperseded(conversationId)) ? 'superseded' : 'unknown';
+}
+
+/**
  * Filesystem time of the newest durable mutation belonging to a session.
  *
  * Session event timestamps describe when an action happened, not when it finally reached
@@ -1763,10 +1868,6 @@ export async function reopenSession(id: string): Promise<void> {
   await enqueueSessionOperation(entry, 'reopen', async () => {
     if (entry.summary.endedAt === null) return;
     entry.summary.endedAt = null;
-    // Nothing about automatic compaction is reset here. Reopening a stale chat cannot fire
-    // it — that takes a turn running in the page right now — and `autoCompactTriggeredAt`
-    // is a fact about this chat that a reopen must not forget, or every reopen would hand
-    // the same conversation another automatic compaction.
     entry.summary.updatedAt = Date.now();
     await writeMeta(entry);
   });
@@ -1855,7 +1956,6 @@ export async function rebindSession(
         ? [...entry.summary.chatIds]
         : [...entry.summary.chatIds, toConversationId],
       contextTokens: 0,
-      autoCompactTriggeredAt: null,
       activeTurnId: null,
       ...(committedResumeHandoffId !== undefined
         ? { lastCommittedResumeHandoffId: committedResumeHandoffId }

@@ -11,6 +11,8 @@ import * as packagingTargets from '../scripts/packaging-targets.mjs';
 // @ts-ignore Build scripts are intentionally plain ESM JavaScript.
 import { assertReleaseAbsent } from '../scripts/check-release-absent.mjs';
 // @ts-ignore Build scripts are intentionally plain ESM JavaScript.
+import { assertCurrentTunnelRelease } from '../scripts/verify-current-tunnel.mjs';
+// @ts-ignore Build scripts are intentionally plain ESM JavaScript.
 import * as macOSAuditUtils from '../scripts/macos-audit-utils.mjs';
 const { RIPGREP, TUNNEL_CLIENT } = packagingVersions;
 const {
@@ -31,6 +33,11 @@ const {
 } = packagingTargets;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** The notes that ship with this tree's version, so the checks below read what the release will say. */
+const currentReleaseNotes = () => {
+  const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string };
+  return readFileSync(path.join(root, 'docs', 'release-notes', `v${version}.md`), 'utf8');
+};
 
 function yamlFile(relative: string): any {
   return loadYaml(readFileSync(path.join(root, ...relative.split('/')), 'utf8'));
@@ -57,6 +64,27 @@ describe('cross-platform packaging targets', () => {
     }
     expect(RIPGREP.targets.linux.x64.triple).toBe('unknown-linux-musl');
     expect(RIPGREP.targets.linux.arm64.triple).toBe('unknown-linux-musl');
+  });
+
+  it('fails closed unless the pinned tunnel-client is OpenAI\'s current stable release', async () => {
+    const response = (body: Record<string, unknown>, status = 200) => async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' }
+      });
+
+    await expect(assertCurrentTunnelRelease({
+      pinnedVersion: 'v0.0.14',
+      fetchImpl: response({ tag_name: 'v0.0.14', draft: false, prerelease: false })
+    })).resolves.toMatchObject({ tag_name: 'v0.0.14' });
+    await expect(assertCurrentTunnelRelease({
+      pinnedVersion: 'v0.0.13',
+      fetchImpl: response({ tag_name: 'v0.0.14', draft: false, prerelease: false })
+    })).rejects.toThrow(/v0\.0\.13 is stale.*v0\.0\.14/);
+    await expect(assertCurrentTunnelRelease({
+      pinnedVersion: 'v0.0.14',
+      fetchImpl: response({ message: 'rate limited' }, 403)
+    })).rejects.toThrow(/refusing to publish without proving the pin is current/);
   });
 
   it('selects only target Sharp packages and unpacked directory families', () => {
@@ -343,7 +371,7 @@ describe('cross-platform packaging targets', () => {
 
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
     const security = readFileSync(path.join(root, 'SECURITY.md'), 'utf8');
-    const notes = readFileSync(path.join(root, 'docs', 'release-notes', 'v2.0.2.md'), 'utf8');
+    const notes = currentReleaseNotes();
     for (const document of [readme, security, notes]) {
       expect(document).toContain('--no-sandbox');
       expect(document).toMatch(/unprivileged user namespaces/i);
@@ -373,7 +401,7 @@ describe('cross-platform packaging targets', () => {
     expect(builder.mac.identity).toBeNull();
     expect(builder.mac.notarize).toBe(false);
     expect(builder.mac.category).toBe('public.app-category.developer-tools');
-    expect(builder.mac.minimumSystemVersion).toBe('12.0');
+    expect(builder.mac.minimumSystemVersion).toBe('13.0');
     expect(builder.mac.artifactName).toBe('Chat-On-Steroids-macOS-${arch}.${ext}');
     const nativePrep = readFileSync(path.join(root, 'scripts', 'prepare-packaging-native.mjs'), 'utf8');
     expect(nativePrep).toContain("await chmod(path.join(payloadRoot, 'node-pty', 'prebuilds', prebuildDir, 'spawn-helper'), 0o755)");
@@ -386,7 +414,7 @@ describe('cross-platform packaging targets', () => {
       'CFBundleShortVersionString: packageVersion',
       'CFBundleVersion: packageVersion',
       "LSApplicationCategoryType: 'public.app-category.developer-tools'",
-      "LSMinimumSystemVersion: '12.0'",
+      "LSMinimumSystemVersion: '13.0'",
       'NSScreenCaptureUsageDescription:',
       "path.join(resources, 'desktop', 'macos-desktop-addon.node')",
       "path.join(resources, 'desktop', 'libcos-desktop.dylib')",
@@ -417,10 +445,10 @@ describe('cross-platform packaging targets', () => {
     expect(packagedRuntime).toContain("addon.handle('{\"op\":\"warm\"}')");
 
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
-    const notes = readFileSync(path.join(root, 'docs', 'release-notes', 'v2.0.2.md'), 'utf8');
-    expect(readme).toContain('macOS 12 Monterey or newer');
-    expect(notes).toContain('macOS 12');
-    expect(notes).toContain('Monterey or newer');
+    const notes = currentReleaseNotes();
+    expect(readme).toContain('macOS 13 Ventura or newer');
+    expect(notes).toContain('macOS 13');
+    expect(notes).toContain('Ventura or newer');
   });
 
   it('hides Electron helper parentheses from otool-classic without changing the inspected file', () => {
@@ -550,11 +578,13 @@ Load command 11
     expect(candidate).toBeGreaterThan(preflight);
     expect(publish).toBeGreaterThan(candidate);
     expect(workflow.slice(preflight, candidate)).toContain('node scripts/check-release-absent.mjs');
+    expect(workflow.slice(preflight, candidate)).toContain('npm run verify:tunnel-current');
     expect(workflow.slice(preflight, candidate)).toContain('Verify release metadata agrees');
     expect(workflow.slice(preflight, candidate)).toContain("APP_VERSION = '([^']+)'");
     expect(workflow.slice(preflight, candidate)).toContain('must disclose unsigned and unnotarized macOS artifacts');
     expect(workflow.slice(candidate, publish)).toContain('needs: preflight');
     expect(workflow.slice(publish)).toContain('node scripts/check-release-absent.mjs');
+    expect(workflow.slice(publish).match(/npm run verify:tunnel-current/g)).toHaveLength(1);
     expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
   });
 

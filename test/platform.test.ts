@@ -9,7 +9,7 @@ import {
 import { surfaceIsUseful } from '../src/main/mcp/surfaces.js';
 import { serverInstructions } from '../src/main/mcp/instructions.js';
 import { unifiedExecEnvForPlatform } from '../src/main/codex/unified-exec-constants.js';
-import type { Capabilities } from '../src/shared/types.js';
+import { CAPABILITIES, DESKTOP_CAPABILITIES, type Capabilities } from '../src/shared/types.js';
 
 const allCapabilities = (): Capabilities => ({
   browse: true,
@@ -28,11 +28,18 @@ const allCapabilities = (): Capabilities => ({
 });
 
 describe('cross-platform product surface', () => {
-  it('keeps Core and native Desktop fully usable on macOS', () => {
+  it('starts macOS with Core on and Desktop off, and keeps a Desktop the user switched on', () => {
     const config = defaultConfig('darwin', '21.4.0');
-    expect(config.capabilities).toEqual(allCapabilities());
+    for (const capability of DESKTOP_CAPABILITIES) expect(config.capabilities[capability], capability).toBe(false);
+    for (const capability of CAPABILITIES) {
+      if (!DESKTOP_CAPABILITIES.includes(capability)) expect(config.capabilities[capability], capability).toBe(true);
+    }
     expect(surfaceIsUseful('core', config.capabilities, 'darwin')).toBe(true);
-    expect(surfaceIsUseful('desktop', config.capabilities, 'darwin', '21.4.0')).toBe(true);
+    expect(surfaceIsUseful('desktop', config.capabilities, 'darwin', '21.4.0')).toBe(false);
+    // The off default is a stored choice, not a platform mask: switching the group on works.
+    const switchedOn = { ...config, capabilities: allCapabilities() };
+    expect(effectiveCapabilities(switchedOn, 'darwin', '21.4.0')).toEqual(allCapabilities());
+    expect(surfaceIsUseful('desktop', switchedOn.capabilities, 'darwin', '21.4.0')).toBe(true);
   });
 
   it('keeps Core fully usable while omitting Desktop on Linux', () => {

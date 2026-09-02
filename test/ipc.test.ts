@@ -31,10 +31,11 @@ vi.mock('electron', () => ({
 
 // This suite owns IPC behavior, not Electron's packaged-vs-checkout path discovery.
 vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd() }));
+vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: vi.fn(async () => 'chrome.exe') }));
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
-const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, initSessionStore, rebindSession, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, stopBridge } = await import(
   '../src/main/bridge.js'
@@ -59,6 +60,7 @@ const {
   swarmStateForCaller
 } = await import('../src/main/agents.js');
 const { registerIpc } = await import('../src/main/ipc.js');
+const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const { app, nativeTheme, safeStorage, shell } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
@@ -133,7 +135,7 @@ beforeEach(async () => {
   await saveConfig({
     ...defaultConfig(),
     sessions: { ...defaultConfig().sessions, record: true },
-    multiAgent: { enabled: true, maxWorkers: 3 }
+    multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false, recoverAgentTabs: true }
   });
 });
 
@@ -360,9 +362,63 @@ describe('settings writes from more than one UI', () => {
     expect(currentWindow.setBackgroundColor).toHaveBeenCalledWith('#0e0e11');
     expect(getConfig().goal.enabled).toBe(false);
   });
+
+  it('preserves a newer unattributed-call choice across an unrelated stale renderer save', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    await saveConfig({
+      ...base,
+      multiAgent: { ...base.multiAgent, allowUnattributedCalls: true }
+    });
+
+    const wanted = { ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } };
+    const reply = await save(wanted, base);
+
+    expect(reply.ok, reply.error).toBe(true);
+    expect(getConfig().ui.minimizeToTray).toBe(!base.ui.minimizeToTray);
+    expect(getConfig().multiAgent.allowUnattributedCalls).toBe(true);
+  });
+
+  it('preserves a newer agent-tab recovery choice across an unrelated stale renderer save', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    await saveConfig({
+      ...base,
+      multiAgent: { ...base.multiAgent, recoverAgentTabs: false }
+    });
+
+    const wanted = { ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } };
+    const reply = await save(wanted, base);
+
+    expect(reply.ok, reply.error).toBe(true);
+    expect(getConfig().ui.minimizeToTray).toBe(!base.ui.minimizeToTray);
+    expect(getConfig().multiAgent.recoverAgentTabs).toBe(false);
+  });
 });
 
 describe('root namespace invariants', () => {
+  it('approves a dropped folder path exactly like the picker, and refuses a dropped file', async () => {
+    const { promises: fs } = await import('node:fs');
+    const path = await import('node:path');
+    await saveConfig({ ...defaultConfig(), roots: [] });
+    const folder = path.join(dir, 'dropped-project');
+    await fs.mkdir(folder, { recursive: true });
+    const file = path.join(dir, 'dropped-file.txt');
+    await fs.writeFile(file, 'not a folder');
+    const addPath = (payload: unknown): Promise<any> => handlers.get('roots:addPath')!(null, payload) as Promise<any>;
+
+    const added = await addPath({ path: folder });
+    expect(added.ok).toBe(true);
+    expect(getConfig().roots.map((root) => root.name)).toEqual(['dropped-project']);
+
+    // The drop zone is not a second, weaker approval path: the same validation applies.
+    const refused = await addPath({ path: file });
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/not a folder/i);
+    expect((await addPath({ path: '' })).ok).toBe(false);
+    expect(getConfig().roots).toHaveLength(1);
+  });
+
   it('refuses a live rename into the reserved /skills namespace', async () => {
     const base = defaultConfig();
     await saveConfig({
@@ -471,9 +527,9 @@ describe('the goal model id', () => {
   const withModel = (model: string) => ({ ...settings({ record: false, multiAgent: false }), goal: { ...defaultConfig().goal, model } });
 
   it('accepts the family aliases OpenRouter marks with a tilde', async () => {
-    const reply = await save(withModel('~deepseek/deepseek-v4-flash-latest'));
+    const reply = await save(withModel('~z-ai/glm-latest'));
     expect(reply.ok, reply.error).toBe(true);
-    expect(getConfig().goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
+    expect(getConfig().goal.model).toBe('~z-ai/glm-latest');
   });
 
   it('still accepts an ordinary pinned id, with or without a variant suffix', async () => {
@@ -558,6 +614,95 @@ describe('session IPC contracts', () => {
     expect(new Set(reply.data.pressure.map((entry: { id: string }) => entry.id))).toEqual(
       new Set(reply.data.sessions.map((entry: { id: string }) => entry.id))
     );
+  });
+
+  it('projects compaction pressure from the current chat context, not session lifetime history', async () => {
+    const chatA = 'aaaaaaaa-1111-2222-3333-444444444444';
+    const chatB = 'bbbbbbbb-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'reset context pressure', conversationId: chatA });
+    await appendEvent(session.id, {
+      time: Date.now(),
+      source: 'app',
+      kind: 'note',
+      message: { text: 'x'.repeat(8_000), truncated: false, chars: 8_000 }
+    });
+    expect(await rebindSession(session.id, chatA, chatB)).toBe(true);
+
+    const reply = await sessionList();
+    const listed = reply.data.sessions.find((entry: { id: string }) => entry.id === session.id);
+    const pressure = reply.data.pressure.find((entry: { id: string }) => entry.id === session.id);
+    expect(listed.estimatedTokens).toBeGreaterThan(0);
+    expect(listed.contextTokens).toBe(0);
+    expect(pressure.estimated).toBe(0);
+    expect(pressure.level).toBe('ok');
+  });
+
+  it('blocks and releases the stored conversation, and never a renderer-supplied one', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const conversationId = 'aaaaaaaa-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'rogue chat', conversationId });
+
+    const blocked = (await handlers.get('sessions:block')!(null, { id: session.id, blocked: true })) as any;
+    expect(blocked.ok, blocked.error).toBe(true);
+    expect(blocked.data).toEqual([conversationId]);
+    expect(isChatBlocked(conversationId)).toBe(true);
+
+    const released = (await handlers.get('sessions:block')!(null, { id: session.id, blocked: false })) as any;
+    expect(released.ok, released.error).toBe(true);
+    expect(released.data).toEqual([]);
+    expect(isChatBlocked(conversationId)).toBe(false);
+
+    // The renderer names a session; it can neither name a conversation nor block a session
+    // that has none — the same boundary `sessions:openChat` holds.
+    const unattributed = await createSession({ title: 'no conversation', conversationId: null });
+    const refused = (await handlers.get('sessions:block')!(null, { id: unattributed.id, blocked: true })) as any;
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
+    resetBlockedChatsForTests();
+  });
+
+  it('releases a block when the row that carries its button is deleted', async () => {
+    const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const conversationId = 'bbbbbbbb-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'blocked then deleted', conversationId });
+    await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
+    expect(isChatBlocked(conversationId)).toBe(true);
+
+    const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+    expect(deleted.ok, deleted.error).toBe(true);
+    // Otherwise the conversation stays refused with nothing left in the app to release it.
+    expect(isChatBlocked(conversationId)).toBe(false);
+  });
+
+  it('reports the blocked set with every session list, so one paint marks every row', async () => {
+    const { resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
+    resetBlockedChatsForTests();
+    const conversationId = 'cccccccc-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'listed while blocked', conversationId });
+
+    expect((await sessionList()).data.blocked).toEqual([]);
+    await handlers.get('sessions:block')!(null, { id: session.id, blocked: true });
+    expect((await sessionList()).data.blocked).toEqual([conversationId]);
+    resetBlockedChatsForTests();
+  });
+
+  it('opens only the stored conversation URL in Chrome', async () => {
+    const session = await createSession({
+      title: 'open me',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    });
+    const reply = await handlers.get('sessions:openChat')!(null, { id: session.id }) as any;
+    expect(reply.ok, reply.error).toBe(true);
+    expect(openInPreferredBrowser).toHaveBeenCalledWith(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    );
+
+    const unattributed = await createSession({ title: 'no conversation', conversationId: null });
+    const refused = await handlers.get('sessions:openChat')!(null, { id: unattributed.id }) as any;
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
   });
 });
 

@@ -10,6 +10,26 @@
 export type EventSource = 'extension' | 'mcp' | 'app';
 
 /**
+ * How long the native Active badge keeps showing a chat as working after its last activity.
+ *
+ * Deliberately longer than the recovery window below, and this is the whole point of them being
+ * two constants rather than one. They answer different questions. Recovery asks "has this chat
+ * been quiet long enough that its page needs putting back together?", and two minutes is the
+ * answer that was measured. The badge answers "is this chat still the one doing something?",
+ * which stays true across the reload that the first question triggers — a page being reloaded on
+ * the app's own instruction is a chat mid-repair, not an idle one.
+ *
+ * Sharing the two-minute duration made the badge go dark first and the reload arrive afterwards:
+ * the label expired exactly on the boundary while the browser action still had the sweep and the
+ * extension's alarm ahead of it. A user watching that sees a chat go idle and then, half a minute
+ * later, reload itself for no visible reason. One minute of headroom covers both hops.
+ */
+export const CHAT_ACTIVE_MS = 3 * 60_000;
+
+/** The inactivity window after which exact-chat browser recovery reloads an open turn once. */
+export const CHAT_SILENCE_MS = 2 * 60_000;
+
+/**
  * How a ChatGPT turn ended.
  *
  * Deliberately more than "done" and "failed". Guessing "output limit reached" for
@@ -107,7 +127,8 @@ export interface FileChange {
   approximate: boolean;
 }
 
-export type ToolOutcome = 'ok' | 'error' | 'rejected';
+/** Only `tool_internal_error` is a connector defect. */
+export type ToolOutcome = 'ok' | 'process_exit_nonzero' | 'tool_rejected' | 'tool_internal_error';
 
 /**
  * How confident the recorder is that this call belongs to the session it landed in.
@@ -119,7 +140,14 @@ export type ToolOutcome = 'ok' | 'error' | 'rejected';
  * than guessed into somebody's history. The extension refuses to rewrite ChatGPT's UI for
  * an inferred call.
  */
-export type CallAttribution = 'request_id' | 'unattributed' | 'turn' | 'agent' | 'generation' | 'inferred';
+export type CallAttribution =
+  | 'request_id'
+  | 'unattributed'
+  | 'superseded'
+  | 'turn'
+  | 'agent'
+  | 'generation'
+  | 'inferred';
 
 /**
  * What each grade of attribution actually rests on, in the words shown to the user.
@@ -143,6 +171,7 @@ export type CallAttribution = 'request_id' | 'unattributed' | 'turn' | 'agent' |
 export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
   request_id: 'exact request id',
   unattributed: 'request id not resolved',
+  superseded: 'retired conversation',
   agent: 'agent key',
   turn: 'tool block on the page',
   generation: 'the only chat generating',
@@ -157,8 +186,8 @@ export interface ToolCallRecord {
   requestId: string | null;
   /** Conversation proven by that request id, or null when ownership was unresolved. */
   conversationId: string | null;
-  /** New 1.8 calls use only these two deterministic outcomes. */
-  attributionMethod: 'request_id' | 'unattributed';
+  /** Deterministic placement outcome for current, unresolved, or deliberately retired callers. */
+  attributionMethod: 'request_id' | 'unattributed' | 'superseded';
   /** Exact arguments as JSON. Cut inline past the cap, with the whole text in an asset. */
   args: StoredText;
   result: StoredText;
@@ -168,9 +197,37 @@ export interface ToolCallRecord {
   /** Files this call demonstrably changed, with line counts where computable. */
   changes?: FileChange[];
   assets?: AssetRef[];
+  /**
+   * This call was the caller's last word: a worker's successful finish report. Recorded so
+   * the session itself, not only the in-memory swarm, knows the worker stopped working here.
+   */
+  endsActivity?: true;
 }
 
 export type MessageState = 'streaming' | 'final';
+
+/** Reads current outcomes and only self-proving legacy `error` rows; ambiguous legacy errors abstain. */
+export function normalizedToolOutcome(
+  call: Pick<ToolCallRecord, 'tool' | 'summary'> & { outcome: unknown }
+): ToolOutcome | null {
+  if (
+    call.outcome === 'ok' ||
+    call.outcome === 'process_exit_nonzero' ||
+    call.outcome === 'tool_rejected' ||
+    call.outcome === 'tool_internal_error'
+  ) {
+    return call.outcome;
+  }
+  if (call.outcome === 'rejected') return 'tool_rejected';
+  if (
+    call.outcome === 'error' &&
+    (call.tool === 'exec_command' || call.tool === 'write_stdin') &&
+    /^✕ exit -?\d+$/.test(call.summary.metric ?? '')
+  ) {
+    return 'process_exit_nonzero';
+  }
+  return null;
+}
 
 interface BaseEvent {
   /** 1-based, strictly increasing within a session. Ordering never relies on time. */
@@ -211,6 +268,8 @@ export type SessionEvent =
       state?: MessageState;
       /** Compatibility mirror for older consumers; equivalent to state === 'final'. */
       final: boolean;
+      /** This exact stable reply was proven terminal and may enter Goal policy. */
+      goalEligible?: boolean;
       /** First sequence assigned to this logical message; later revisions keep this anchor. */
       origin?: number;
     })
@@ -240,11 +299,19 @@ export type SessionEvent =
    * for readers working from a cursor that has already consumed it.
    */
   | (BaseEvent & { kind: 'page_tool'; messageId: string; label: string; origin?: number })
-  | (BaseEvent & { kind: 'turn_start' })
+  /**
+   * `detail` names an app-authored reopening: the page reported this turn ended, and a tool
+   * call under the same server turn then proved it had not. Absent on the page's own starts.
+   */
+  | (BaseEvent & { kind: 'turn_start'; detail?: string })
   | (BaseEvent & { kind: 'turn_end'; outcome: TurnOutcome; detail?: string })
   | (BaseEvent & { kind: 'chat_error'; message: StoredText })
   | (BaseEvent & { kind: 'tool_call'; call: ToolCallRecord })
-  | (BaseEvent & { kind: 'note'; message: StoredText })
+  /**
+   * An app-authored line. `continuation` names the Compact & Resume it is about, so the
+   * timeline can fold the note into that compaction's one row instead of showing it loose.
+   */
+  | (BaseEvent & { kind: 'note'; message: StoredText; continuation?: string })
   /**
    * A message routed between agents.
    *
@@ -273,6 +340,15 @@ export type SessionEvent =
     });
 
 export type SessionEventKind = SessionEvent['kind'];
+
+/**
+ * The marker Compact & Resume puts at the head of the two prompts it types itself: the brief
+ * request in the source chat and the bootstrap in its replacement. Group 1 says which, group
+ * 2 is the continuation token that ties the pair together. Mirrors `CONTINUATION_MARKER` in
+ * `extension/content.js`, which cannot import; the renderer uses this one to fold a
+ * compaction's three rows into one.
+ */
+export const CONTINUATION_MARKER = /^\s*\[\[CLF-(HANDOFF|RESUME):([A-Za-z0-9_-]{16,64})\]\](?:\s|$)/;
 
 /**
  * An event before the store assigns its sequence number.
@@ -359,6 +435,32 @@ export interface SessionSummary {
   events: number;
   userMessages: number;
   toolCalls: number;
+  /** Start time of the newest exact attributed tool call, independent of later page noise. */
+  lastToolCallAt: number | null;
+  /** Observation time of the newest stable final assistant message. */
+  lastAssistantFinalAt?: number | null;
+  /**
+   * Time of the newest turn end, whatever ended it: the model finishing, the user pressing
+   * stop, or an error. The other end of "recent activity" beside `lastAssistantFinalAt`, which
+   * a stopped turn never sets — so a prime the user blocked and stopped stayed `active` for
+   * three minutes on the strength of the refused call before the stop (2026-09-02). Undefined
+   * on metadata written before this field existed.
+   */
+  lastTurnEndAt?: number | null;
+  /**
+   * Start time of the newest successful worker finish report in this session.
+   *
+   * A worker's finish is its final answer as far as this app is concerned, and it is durable
+   * here because the swarm that also knows it parks the moment its last worker stops: a list
+   * that read only the swarm showed a finished worker as `active` for three minutes and then
+   * as nothing at all. Undefined on metadata written before this field existed.
+   */
+  lastFinishReportAt?: number | null;
+  processExitNonzero: number;
+  toolRejected: number;
+  /** Connector/tool implementation failures; the tool reliability numerator. */
+  toolInternalErrors: number;
+  /** Chat errors plus `toolInternalErrors`. */
   errors: number;
   /** Rough local estimate for the whole session — never ChatGPT's private counter. */
   estimatedTokens: number;
@@ -373,16 +475,6 @@ export interface SessionSummary {
    * compaction immediately after every compaction.
    */
   contextTokens: number;
-  /**
-   * When this chat's one automatic compaction was claimed, or null while it still has one.
-   *
-   * The whole durable state of automatic compaction, because the rest of the rule is read
-   * live rather than remembered: the chat is over `contextTokens`, and the model is working
-   * *right now*. Set before the browser is touched, so a failed or abandoned attempt can
-   * never become a retry loop, and reset when Compact & Resume attaches this session to a
-   * fresh ChatGPT conversation — a new chat gets a new budget and a new trigger.
-   */
-  autoCompactTriggeredAt: number | null;
   /** Id of the newest stored handoff, or null when the session was never compacted. */
   lastHandoffId: string | null;
   lastHandoffAt: number | null;
@@ -446,10 +538,12 @@ export type AgentRole = 'prime' | 'worker';
  * accumulate more sleeping workers than `maxWorkers` while never having more than
  * `maxWorkers` of them awake at once.
  *
- * `waking` is the short window between the prime's message being accepted and the app
- * proving it typed that message into the worker's chat. It holds the slot the revival
- * reserved, so two revivals cannot claim the same one; a revival that fails puts the worker
- * back to sleep and gives the slot back.
+ * `waking` is the short window between the prime's message being accepted and the woken chat
+ * proving it is running — its first tool call, or a turn that begins after the sleep. It holds
+ * the slot the revival reserved, so two revivals cannot claim the same one; a revival that
+ * fails puts the worker back to sleep and gives the slot back. Nothing observed from outside
+ * can stop a waking worker: a settled answer or finish that arrives then is the old turn's,
+ * and the wake ends only through its own proof or failure.
  *
  * `finished` and `failed` remain the two terminal states, and a worker only reaches
  * `finished` once its own chat has grown past the context ceiling: past that point there is

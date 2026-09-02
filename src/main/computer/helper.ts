@@ -423,7 +423,11 @@ function Ui-RuntimeKey($element) {
 
 $script:UiSnapshots = [ordered]@{}
 $script:NextUiSnapshotId = 1
-$script:MaxUiSnapshots = 16
+# One helper serves every chat, so this cap is shared across a whole swarm: with sixteen,
+# thirteen workers taking turns evicted each other's newest snapshot before its owner could
+# act on a ref from it (forty STALE_UI_SNAPSHOT refusals on 2026-09-01). A snapshot holds
+# element handles, not screenshots, so keeping a few per worker is cheap.
+$script:MaxUiSnapshots = 96
 
 function Remember-UiSnapshot([int64]$id, $root, $elements) {
   $snapshotId = $script:NextUiSnapshotId

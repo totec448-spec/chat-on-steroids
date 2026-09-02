@@ -21,6 +21,7 @@ import {
   noteChatOrigin,
   recordChatObservations,
   recordToolCall,
+  repairDeterministicAttribution,
   rebindConversation,
   resetRecorderForTests,
   sessionForConversation,
@@ -28,7 +29,6 @@ import {
 import {
   appendEvent,
   autoCompactionReady,
-  claimAutoCompaction,
   createSession,
   deleteSession,
   endSession,
@@ -58,13 +58,16 @@ import {
 import { summarizeToolCall } from '../src/main/session/summarize.js';
 import { HANDOFF_BRIEF_RULES, nativeHandoffPrompt } from '../src/main/session/handoff-prompt.js';
 import {
+  CHAT_ACTIVE_MS,
+  CHAT_SILENCE_MS,
   estimateTokens,
   eventTokens,
   foldProgress,
   originTitle,
   tokenPressure,
   type SessionEvent,
-  type SessionOrigin
+  type SessionOrigin,
+  type ToolOutcome
 } from '../src/shared/session.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -214,17 +217,25 @@ describe('session store', () => {
     const rootPath = sessionsRoot();
     const rootReads = (): number => readdir.mock.calls.filter(([target]) => String(target) === rootPath).length;
 
-    expect(await findSessionByConversation(conversationId)).toBeNull();
-    expect(rootReads()).toBe(1);
-    expect(await findSessionByConversation(conversationId)).toBeNull();
-    expect(rootReads()).toBe(1);
+    // Restored in `finally`, like every other readdir spy in this file. Restoring on the
+    // success path alone turns one failure here into a file-wide cascade: the spy survives
+    // the failing test, the next test binds `realReaddir` to that leaked spy and installs its
+    // own delegating to it, and the pair recurses until "Maximum call stack size exceeded" —
+    // which is what the failure then reads as, in a different test, with the real one buried.
+    try {
+      expect(await findSessionByConversation(conversationId)).toBeNull();
+      expect(rootReads()).toBe(1);
+      expect(await findSessionByConversation(conversationId)).toBeNull();
+      expect(rootReads()).toBe(1);
 
-    const created = await createSession({ conversationId, title: 'now attached' });
-    expect((await findSessionByConversation(conversationId))?.id).toBe(created.id);
-    // The durable create updates the derived attachment catalog directly. No second global
-    // metadata scan is needed merely to discover the session this process just committed.
-    expect(rootReads()).toBe(1);
-    readdir.mockRestore();
+      const created = await createSession({ conversationId, title: 'now attached' });
+      expect((await findSessionByConversation(conversationId))?.id).toBe(created.id);
+      // The durable create updates the derived attachment catalog directly. No second global
+      // metadata scan is needed merely to discover the session this process just committed.
+      expect(rootReads()).toBe(1);
+    } finally {
+      readdir.mockRestore();
+    }
   });
 
   it('invalidates a cached miss before an in-flight session creation can be hidden by it', async () => {
@@ -679,6 +690,228 @@ describe('session store', () => {
     expect(after?.estimatedTokens).toBeGreaterThanOrEqual(100);
   });
 
+  it('keeps the exact last attributed tool-call time separate from unrelated session activity', async () => {
+    const summary = await createSession({ title: 'tool activity clock' });
+    const toolAt = summary.startedAt + 20;
+    const laterAt = summary.startedAt + 90;
+    await appendEvent(summary.id, {
+      time: toolAt,
+      source: 'mcp',
+      kind: 'tool_call',
+      call: {
+        callId: 'call-tool-clock',
+        tool: 'read',
+        attribution: 'request_id',
+        requestId: 'wfr-tool-clock',
+        conversationId: 'c-tool-clock',
+        attributionMethod: 'request_id',
+        args: { text: '{"paths":["/project/a.ts"]}', truncated: false, chars: 27 },
+        result: { text: 'ok', truncated: false, chars: 2 },
+        outcome: 'ok',
+        durationMs: 1,
+        summary: { title: 'Read a.ts', tone: 'neutral', kind: 'read' }
+      }
+    });
+    await appendEvent(summary.id, {
+      time: laterAt,
+      source: 'extension',
+      kind: 'note',
+      message: { text: 'later but not a tool call', truncated: false, chars: 25 }
+    });
+
+    expect(await getSession(summary.id)).toMatchObject({ updatedAt: laterAt, lastToolCallAt: toolAt });
+  });
+
+  /**
+   * A stopped turn has no final assistant message, so it never moved the activity boundary and
+   * a blocked, stopped prime kept its `active` badge on the refused call before the stop.
+   */
+  it('projects any turn end, a stop included, as an end of recent tool activity', async () => {
+    const summary = await createSession({ title: 'turn end boundary' });
+    expect((await getSession(summary.id))?.lastTurnEndAt).toBeNull();
+    await appendEvent(summary.id, { time: 300, source: 'extension', kind: 'turn_start', turnId: 'g-stop' });
+    await appendEvent(summary.id, {
+      time: 400,
+      source: 'extension',
+      kind: 'turn_end',
+      turnId: 'g-stop',
+      outcome: 'stopped'
+    });
+    expect((await getSession(summary.id))?.lastTurnEndAt).toBe(400);
+  });
+
+  it('projects a stable final assistant message as the exact end of recent tool activity', async () => {
+    const summary = await createSession({ title: 'final activity boundary' });
+    const messageId = 'assistant-final-activity-boundary';
+    await upsertMessageEvent(summary.id, {
+      time: 100,
+      source: 'extension',
+      kind: 'assistant_message',
+      messageId,
+      message: { text: 'Still working', truncated: false, chars: 13 },
+      state: 'streaming',
+      final: false
+    });
+    expect((await getSession(summary.id))?.lastAssistantFinalAt).toBeNull();
+
+    await upsertMessageEvent(summary.id, {
+      time: 200,
+      source: 'extension',
+      kind: 'assistant_message',
+      messageId,
+      message: { text: 'Finished.', truncated: false, chars: 9 },
+      state: 'final',
+      final: true
+    });
+
+    expect((await getSession(summary.id))?.lastAssistantFinalAt).toBe(200);
+  });
+
+  it('projects a successful worker finish report as the session finish boundary', async () => {
+    const summary = await createSession({ title: 'finish boundary' });
+    const call = (callId: string, tool: string, finish: boolean) => ({
+      callId,
+      tool,
+      attribution: 'exact',
+      requestId: callId,
+      conversationId: 'conv-finish',
+      attributionMethod: 'request_id',
+      args: { text: '{}', truncated: false, chars: 2 },
+      result: { text: 'ok', truncated: false, chars: 2 },
+      outcome: 'ok',
+      durationMs: 1,
+      summary: { kind: 'agent', tone: 'good', title: 'Reported the finished task' },
+      ...(finish ? { endsActivity: true } : {})
+    });
+    await appendEvent(summary.id, { time: 300, source: 'mcp', kind: 'tool_call', call: call('c-work', 'read', false) } as SessionEvent);
+    expect((await getSession(summary.id))?.lastFinishReportAt).toBeNull();
+
+    await appendEvent(summary.id, { time: 400, source: 'mcp', kind: 'tool_call', call: call('c-finish', 'agents', true) } as SessionEvent);
+    const after = await getSession(summary.id);
+    expect(after?.lastFinishReportAt).toBe(400);
+    expect(after?.lastToolCallAt).toBe(400);
+  });
+
+  it('keeps the open turn open when the ChatGPT page detaches mid-turn', async () => {
+    const conversationId = 'c-detach-keeps-turn-open';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: 10, text: 'run the long job', messageId: 'detach-user-1' },
+      { kind: 'turn_start', time: 11, turnId: 'g-detach-open' }
+    ]);
+    const sessionId = opened.sessionId!;
+
+    await closeConversation(conversationId);
+
+    // A detach is not evidence about the turn. It may not end it, and it may not end it
+    // "unknown" either: an ended turn is unreachable for the recovery that follows.
+    expect(await readEvents(sessionId, { kinds: ['turn_end'] })).toEqual([]);
+    const notes = await readEvents(sessionId, { kinds: ['note'] });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]?.turnId).toBe('g-detach-open');
+
+    const reopened = await recordChatObservations(conversationId, [
+      { kind: 'turn_end', time: 30, turnId: 'g-detach-open', outcome: 'completed' }
+    ]);
+    expect(reopened.sessionId).toBe(sessionId);
+    const ends = await readEvents(sessionId, { kinds: ['turn_end'] });
+    expect(ends.map((event) => event.kind === 'turn_end' && event.outcome)).toEqual(['completed']);
+  });
+
+  it('offers a stable final reply to Goal after reload lost an uncertain turn identity', async () => {
+    const conversationId = 'c-goal-final-after-reload';
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 10, turnId: 'g-before-reload' },
+      { kind: 'turn_end', time: 20, turnId: 'g-before-reload', outcome: 'unknown' }
+    ]);
+
+    const recovered = await recordChatObservations(conversationId, [{
+      kind: 'assistant_message',
+      // ChatGPT may stamp the assistant object when generation starts, before a later detach.
+      time: 15,
+      messageId: 'assistant-stable-after-reload',
+      text: 'The complete final answer that appeared after reload.',
+      state: 'final',
+      final: true
+    }]);
+
+    expect(recovered.goalCandidates).toEqual([{
+      replyId: 'assistant-stable-after-reload',
+      turnId: 'reply:assistant-stable-after-reload',
+      eventSeq: expect.any(Number)
+    }]);
+
+    const replayed = await recordChatObservations(conversationId, [{
+      kind: 'assistant_message',
+      time: 15,
+      messageId: 'assistant-stable-after-reload',
+      text: 'The complete final answer that appeared after reload.',
+      state: 'final',
+      final: true
+    }]);
+    expect(replayed.goalCandidates).toEqual(recovered.goalCandidates);
+    const [storedFinal] = await readEvents(recovered.sessionId!, { kinds: ['assistant_message'] });
+    expect(storedFinal?.kind === 'assistant_message' && storedFinal.goalEligible).toBe(true);
+  });
+
+  it('does not turn a historical final answer into Goal work merely because a chat was opened', async () => {
+    const conversationId = 'c-goal-historical-final';
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 100, turnId: 'g-newer-uncertain' },
+      { kind: 'turn_end', time: 200, turnId: 'g-newer-uncertain', outcome: 'unknown' }
+    ]);
+    const recovered = await recordChatObservations(conversationId, [{
+      kind: 'assistant_message',
+      time: 30,
+      messageId: 'assistant-historical-final',
+      text: 'An answer from an already idle chat.',
+      state: 'final',
+      final: true
+    }]);
+
+    expect(recovered.goalCandidates).toEqual([]);
+  });
+
+  it('uses the stable final when it and the uncertain end arrive in the same browser batch', async () => {
+    const recovered = await recordChatObservations('c-goal-final-same-batch', [
+      { kind: 'turn_start', time: 10, turnId: 'g-same-batch' },
+      {
+        kind: 'assistant_message',
+        time: 15,
+        messageId: 'assistant-final-same-batch',
+        text: 'Complete despite the page losing its finish edge.',
+        state: 'final',
+        final: true
+      },
+      { kind: 'turn_end', time: 20, turnId: 'g-same-batch', outcome: 'unknown' }
+    ]);
+
+    expect(recovered.goalCandidates).toEqual([expect.objectContaining({
+      replyId: 'assistant-final-same-batch',
+      turnId: 'reply:assistant-final-same-batch'
+    })]);
+  });
+
+  it('does not spend an earlier uncertain boundary while a newer turn is still open', async () => {
+    const conversationId = 'c-goal-newer-turn-open';
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 10, turnId: 'g-old-uncertain' },
+      { kind: 'turn_end', time: 20, turnId: 'g-old-uncertain', outcome: 'unknown' }
+    ]);
+    const current = await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 30, turnId: 'g-new-open' },
+      {
+        kind: 'assistant_message',
+        time: 35,
+        messageId: 'assistant-while-new-open',
+        text: 'Do not decide this turn before its own terminal boundary.',
+        state: 'final',
+        final: true
+      }
+    ]);
+
+    expect(current.goalCandidates).toEqual([]);
+  });
+
   it('does not advance seq or summary state when the durable append fails', async () => {
     const summary = await createSession({ title: 'append failure is not an event' });
     const append = vi.spyOn(fs, 'appendFile').mockRejectedValueOnce(new Error('disk full'));
@@ -916,6 +1149,68 @@ describe('session store', () => {
     });
   });
 
+  const toolCall = (callId: string, tool: string, outcome: string, metric: string | undefined, seq: number) => ({
+    time: 100 + seq,
+    source: 'app' as const,
+    kind: 'tool_call' as const,
+    call: {
+      callId,
+      tool,
+      attribution: 'unattributed' as const,
+      requestId: null,
+      conversationId: null,
+      attributionMethod: 'unattributed' as const,
+      args: { text: '{}', truncated: false, chars: 2 },
+      result: { text: 'ok', truncated: false, chars: 2 },
+      outcome: outcome as ToolOutcome,
+      durationMs: 1,
+      summary: { title: callId, tone: 'neutral' as const, kind: 'run' as const, ...(metric ? { metric } : {}) }
+    }
+  });
+
+  it('charges the reliability count for a defect here and for nothing else', async () => {
+    const summary = await createSession({ title: 'reliability numerator' });
+    await appendEvent(summary.id, toolCall('clean', 'exec_command', 'ok', undefined, 1));
+    await appendEvent(summary.id, toolCall('failing-build', 'exec_command', 'process_exit_nonzero', undefined, 2));
+    await appendEvent(summary.id, toolCall('refused', 'apply_patch', 'tool_rejected', undefined, 3));
+    expect(await getSession(summary.id)).toMatchObject({ toolCalls: 3, errors: 0 });
+
+    await appendEvent(summary.id, toolCall('broken', 'exec_command', 'tool_internal_error', undefined, 4));
+    expect(await getSession(summary.id)).toMatchObject({
+      toolCalls: 4,
+      processExitNonzero: 1,
+      toolRejected: 1,
+      toolInternalErrors: 1,
+      errors: 1
+    });
+  });
+
+  it('re-derives outcome counters for a session recorded before the taxonomy existed', async () => {
+    const summary = await createSession({ title: 'legacy outcome projection' });
+    await appendEvent(summary.id, toolCall('legacy-exit', 'exec_command', 'error', '✕ exit 7', 1));
+    await appendEvent(summary.id, toolCall('legacy-refusal', 'apply_patch', 'rejected', 'refused', 2));
+    await appendEvent(summary.id, toolCall('legacy-ambiguous', 'read', 'error', undefined, 3));
+    await flushSessions();
+
+    const metaPath = path.join(sessionsRoot(), summary.id, 'meta.json');
+    const stored = JSON.parse(await fs.readFile(metaPath, 'utf8')) as Record<string, unknown>;
+    delete stored.processExitNonzero;
+    delete stored.toolRejected;
+    delete stored.toolInternalErrors;
+    stored.errors = 3;
+    await fs.writeFile(metaPath, JSON.stringify(stored, null, 2), 'utf8');
+
+    resetSessionStoreForTests();
+    const expected = { processExitNonzero: 1, toolRejected: 1, toolInternalErrors: 0, errors: 0 };
+    expect(await getSession(summary.id)).toMatchObject({ toolCalls: 3, ...expected });
+    expect(JSON.parse(await fs.readFile(metaPath, 'utf8'))).toMatchObject(expected);
+
+    const outcomes = (await readEvents(summary.id))
+      .filter((event): event is Extract<SessionEvent, { kind: 'tool_call' }> => event.kind === 'tool_call')
+      .map((event) => event.call.outcome);
+    expect(outcomes).toEqual(['error', 'rejected', 'error']);
+  });
+
   it('reconciles a canonical message revision newer than the metadata checkpoint', async () => {
     const summary = await createSession({ title: 'stale meta canonical recovery' });
     const messageId = 'canonical-crash-revision';
@@ -999,17 +1294,7 @@ describe('session store', () => {
     expect(await readAsset(summary.id, '../../../config.json')).toBeNull();
   });
 
-  /**
-   * The store half of automatic compaction is a level, not an edge.
-   *
-   * The edge version armed on the below-to-above crossing and waited for that turn to end
-   * cleanly, which had two consequences nobody wanted: one interrupted turn destroyed the
-   * trigger forever (a counter that only grows never crosses the same line twice), and
-   * every compaction that did fire landed after the answer, where a handoff carries
-   * nothing across. So the store now answers only "over the line, and this chat still has
-   * its one compaction". Whether the model is working is asked live, in bridge.ts.
-   */
-  it('offers its one automatic compaction while the chat is over the line', async () => {
+  it('keeps automatic compaction ready above the line across interrupted and later turns', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
     try {
@@ -1025,83 +1310,15 @@ describe('session store', () => {
       });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
 
-      // Mid-turn is exactly when it is meant to be taken, and taking it is terminal here.
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-level')).toBe(true);
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-level')).toBe(false);
-      const claimed = await getSession(summary.id);
-      expect(claimed?.autoCompactTriggeredAt).not.toBeNull();
-      expect(autoCompactionReady(claimed)).toBe(false);
-
-      // Not after several more turns above the line either: one per chat.
-      await appendEvent(summary.id, { time: 3, source: 'extension', kind: 'turn_end', turnId: 't-1', outcome: 'completed' });
+      await appendEvent(summary.id, { time: 3, source: 'extension', kind: 'turn_end', turnId: 't-1', outcome: 'interrupted' });
       await appendEvent(summary.id, { time: 4, source: 'extension', kind: 'turn_start', turnId: 't-2' });
-      expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
-    } finally {
-      await saveConfig(base);
-    }
-  });
-
-  /**
-   * The interrupted crossing that used to be fatal. Replaying a real 587-event session
-   * armed correctly at the crossing, lost the arm to `interrupted` on that very turn, and
-   * then ran to 433k tokens against a 40k threshold without ever becoming ready.
-   */
-  it('still offers the trigger after the turn that crossed the line was interrupted', async () => {
-    const base = defaultConfig();
-    await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
-    try {
-      const summary = await createSession({ title: 'interrupted', conversationId: 'conv-auto-interrupted' });
-      await appendEvent(summary.id, { time: 1, source: 'extension', kind: 'turn_start', turnId: 't-crossed' });
-      await appendEvent(summary.id, {
-        time: 2,
-        source: 'extension',
-        kind: 'user_message',
-        messageId: 'cross',
-        turnId: 't-crossed',
-        message: { text: 'c'.repeat(44_000), truncated: false, chars: 44_000 }
-      });
-      await appendEvent(summary.id, {
-        time: 3,
-        source: 'extension',
-        kind: 'turn_end',
-        turnId: 't-crossed',
-        outcome: 'interrupted'
-      });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
     } finally {
       await saveConfig(base);
     }
   });
 
-  /**
-   * The claim is where the one-shot is spent, so it is also where liveness has to be
-   * proved. A turn that ends while the claim sits in the session queue must leave the
-   * trigger alone: the chat is still over the line, and its next turn can have it.
-   */
-  it('spends nothing when the chat stopped working before the claim was written', async () => {
-    const base = defaultConfig();
-    await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
-    try {
-      const summary = await createSession({ title: 'raced', conversationId: 'conv-auto-raced' });
-      await appendEvent(summary.id, {
-        time: 1,
-        source: 'extension',
-        kind: 'user_message',
-        messageId: 'u1',
-        message: { text: 'a'.repeat(44_000), truncated: false, chars: 44_000 }
-      });
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-raced', () => false)).toBe(false);
-      const current = await getSession(summary.id);
-      expect(current?.autoCompactTriggeredAt).toBeNull();
-      expect(autoCompactionReady(current)).toBe(true);
-
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-raced', () => true)).toBe(true);
-    } finally {
-      await saveConfig(base);
-    }
-  });
-
-  it('offers nothing while the switch is off, below the line, or for another chat', async () => {
+  it('offers nothing while the switch is off or below the line', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, compaction: { ...base.compaction, auto: false, autoTokens: 10_000 } });
     try {
@@ -1114,26 +1331,18 @@ describe('session store', () => {
         message: { text: 'a'.repeat(44_000), truncated: false, chars: 44_000 }
       });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-off')).toBe(false);
 
       await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 4_000_000 } });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
 
       await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
-      // A claim names the chat it belongs to; the session's own id is not enough.
-      expect(await claimAutoCompaction(summary.id, 'conv-somebody-else')).toBe(false);
     } finally {
       await saveConfig(base);
     }
   });
 
-  /**
-   * Reopening a closed chat must not hand it a second automatic compaction. Nothing about
-   * the trigger is reset there any more: the level speaks for itself, and the latch is a
-   * fact about this chat that outlives the tab being closed.
-   */
-  it('keeps a spent trigger spent across a close and a reopen', async () => {
+  it('keeps the level ready across a close and reopen so a later generation can retry', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
     try {
@@ -1145,14 +1354,10 @@ describe('session store', () => {
         messageId: 'u1',
         message: { text: 'r'.repeat(44_000), truncated: false, chars: 44_000 }
       });
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-reopen')).toBe(true);
-
       await endSession(summary.id);
       await reopenSession(summary.id);
       const reopened = await getSession(summary.id);
-      expect(reopened?.autoCompactTriggeredAt).not.toBeNull();
-      expect(autoCompactionReady(reopened)).toBe(false);
-      expect(await claimAutoCompaction(summary.id, 'conv-auto-reopen')).toBe(false);
+      expect(autoCompactionReady(reopened)).toBe(true);
     } finally {
       await saveConfig(base);
     }
@@ -1607,6 +1812,64 @@ describe('canonical recorder 1.8', () => {
     }
   });
 
+  /**
+   * Live 2026-09-02: the page reloaded mid-turn, adopted the open turn and reported it
+   * completed four seconds later; the same ChatGPT request id then called tools for another
+   * twenty-four minutes. The request id is per server turn, so a call under the ended turn's
+   * request id that starts after the reported end is proof the end was the page's, not
+   * ChatGPT's. The recorder reopens the turn durably and lets the real end close it later.
+   */
+  it('reopens a turn the page ended while its server turn kept calling tools', async () => {
+    const conversationId = 'conv-false-turn-end';
+    const sessionId = await sessionForConversation(conversationId);
+    const now = Date.now();
+    const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: now, turnId: 'g-false-end' },
+      {
+        kind: 'tool_evidence', time: now, fiberConversationId: conversationId,
+        calls: [
+          { messageId: 'same-0', tool: 'read', order: 0, answered: false, requestId: 'wfr_same_turn' },
+          { messageId: 'next-0', tool: 'read', order: 1, answered: false, requestId: 'wfr_next_turn' }
+        ]
+      }
+    ]);
+    await tool('wfr_same_turn', now + 10);
+    expect(active()).toBe('g-false-end');
+
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_end', time: now + 20, turnId: 'g-false-end', outcome: 'completed' }
+    ]);
+    expect(active()).toBeNull();
+
+    // An in-flight call that merely finished late proves nothing about the end.
+    await tool('wfr_same_turn', now + 15);
+    expect(active()).toBeNull();
+    // Nor does a different server turn: that is a different turn.
+    await tool('wfr_next_turn', now + 30);
+    expect(active()).toBeNull();
+
+    // The same server turn calling on after the end is the turn not having ended.
+    await tool('wfr_same_turn', now + 40);
+    expect(active()).toBe('g-false-end');
+    const starts = await readEvents(sessionId!, { kinds: ['turn_start'] });
+    expect(starts.map((event) => [event.turnId, event.source])).toEqual([
+      ['g-false-end', 'extension'],
+      ['g-false-end', 'app']
+    ]);
+    expect(starts[1]?.kind === 'turn_start' && starts[1].detail).toMatch(/kept calling tools/);
+
+    // Reopened once; the same turn going on is not news, and the real end is accepted.
+    await tool('wfr_same_turn', now + 50);
+    expect(await readEvents(sessionId!, { kinds: ['turn_start'] })).toHaveLength(2);
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_end', time: now + 60, turnId: 'g-false-end', outcome: 'completed' }
+    ]);
+    expect(active()).toBeNull();
+    const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
+    expect(ends.map((event) => event.time)).toEqual([now + 20, now + 60]);
+  });
+
   it('never cross-attributes concurrent same-tool calls from two chats', async () => {
     const now = Date.now();
     const firstId = 'conv-concurrent-a';
@@ -1667,7 +1930,15 @@ describe('canonical recorder 1.8', () => {
     expect(call?.conversationId).toBeNull();
   });
 
-  it('logs one transition when a shared request id becomes conflicted, not one warning per call or replay', async () => {
+  /**
+   * One line, and not a problem line.
+   *
+   * A refused claim means the registry did its job: the id keeps the chat that proved it and
+   * every call under it keeps arriving there. Reporting that as a fault put a run that was
+   * working perfectly into the problem count, and reporting it once per call put it there
+   * thirty-five times over.
+   */
+  it('reports a refused claim once per batch, and as a note rather than a problem', async () => {
     const firstConversation = 'conv-conflict-log-first';
     const secondConversation = 'conv-conflict-log-second';
     const requestId = `wfr_conflict_log_${Date.now()}`;
@@ -1681,10 +1952,9 @@ describe('canonical recorder 1.8', () => {
       calls: [{ messageId: 'first-proof', tool: 'read', order: 0, answered: true, requestId }]
     }]);
 
-    const warnings = (): number => getLog().filter(
-      (entry) => entry.level === 'warn' && entry.message.includes(`request attribution conflict for ${requestId}`)
+    const lines = (level: 'warn' | 'info'): number => getLog().filter(
+      (entry) => entry.level === level && entry.message.includes(`${requestId} stays with conversation`)
     ).length;
-    const before = warnings();
     const conflictingCalls = Array.from({ length: 35 }, (_, index) => ({
       messageId: `conflicting-call-${index}`,
       tool: index % 2 === 0 ? 'read' : 'exec_command',
@@ -1698,18 +1968,14 @@ describe('canonical recorder 1.8', () => {
       fiberConversationId: secondConversation,
       calls: conflictingCalls
     }]);
-    expect(warnings()).toBe(before + 1);
+    expect(lines('info')).toBe(1);
+    expect(lines('warn')).toBe(0);
 
-    // Once the registry is already in the fail-closed state, another at-least-once browser
-    // replay contains no new diagnostic fact. It must not refill the Activity panel with the
-    // same warning again.
-    await recordChatObservations(secondConversation, [{
-      kind: 'tool_evidence',
-      time: now + 2,
-      fiberConversationId: secondConversation,
-      calls: conflictingCalls
-    }]);
-    expect(warnings()).toBe(before + 1);
+    // And the id still belongs to the chat that proved it, which is the whole point of having
+    // refused: a call arriving under it now is filed there, not left unattributed.
+    const call = await tool(requestId, now + 2);
+    expect(call?.attributionMethod).toBe('request_id');
+    expect(call?.conversationId).toBe(firstConversation);
   });
 
   /**
@@ -1974,7 +2240,7 @@ describe('naming the chats this app opened', () => {
     expect((await getSession(originalSessionId))?.endedAt).not.toBeNull();
   });
 
-  it('pins a late pre-transfer request to its original session epoch even after the old conversation starts a fresh session', async () => {
+  it('files a retired source chat into its own lineage and refuses its later requests as superseded', async () => {
     const oldConversation = 'conv-worker-before-transfer';
     const newConversation = 'conv-worker-after-transfer';
     const oldRequest = 'wfr_worker_before_transfer';
@@ -1994,15 +2260,26 @@ describe('naming the chats this app opened', () => {
     expect(await rebindSession(originalSessionId, oldConversation, newConversation)).toBe(true);
     rebindConversation(originalSessionId, oldConversation, newConversation);
 
-    // The stale old tab is now honestly a new local session epoch for the same old ChatGPT id.
+    // The stale old tab is a retired frontend of the one session, never a chat of its own: its
+    // prose files into the lineage (2026-09-02: the brief's late re-render minted a session
+    // holding nothing but the summary) and it moves none of the projections B now owns.
     const stale = await recordChatObservations(oldConversation, [
-      { kind: 'user_message', time: Date.now(), text: 'stale tab carried on', messageId: 'stale-epoch-user' }
+      { kind: 'user_message', time: Date.now(), text: 'stale tab carried on', messageId: 'stale-epoch-user' },
+      { kind: 'turn_start', time: Date.now(), turnId: 'g-stale-tab-turn' }
     ]);
-    const staleSessionId = stale.sessionId!;
-    expect(staleSessionId).not.toBe(originalSessionId);
+    expect(stale.sessionId).toBe(originalSessionId);
+    expect(stale.activity).toEqual({ meaningful: false, working: false, terminal: false });
+    expect(
+      (await readEvents(originalSessionId, { kinds: ['user_message'] })).some(
+        (event) => event.kind === 'user_message' && event.messageId === 'stale-epoch-user'
+      )
+    ).toBe(true);
+    expect(await readEvents(originalSessionId, { kinds: ['turn_start'] })).toEqual([]);
+    expect((await getSession(originalSessionId))?.conversationId).toBe(newConversation);
+    expect((await listSessions()).filter((entry) => entry.chatIds.includes(oldConversation))).toHaveLength(1);
 
-    // A request proved before the transfer stays pinned to the exact old session epoch even
-    // though live broker context is now contradictory and the old conversation has a new epoch.
+    // Exact proof preserves forensic identity, but it is not execution authority after A was
+    // replaced. The call stays out of B's live history.
     await recordToolCall({
       tool: 'read',
       args: { paths: ['/project/old.ts'] },
@@ -2014,13 +2291,32 @@ describe('naming the chats this app opened', () => {
       agent: 'prime'
     });
     const originalCalls = await readEvents(originalSessionId, { kinds: ['tool_call'] });
-    const staleCallsBefore = await readEvents(staleSessionId, { kinds: ['tool_call'] });
-    expect(originalCalls).toHaveLength(1);
-    expect(staleCallsBefore).toHaveLength(0);
-    expect(originalCalls[0]?.kind === 'tool_call' && originalCalls[0].agent).toBe('worker-1');
+    expect(originalCalls).toHaveLength(0);
+    const buckets = (await listSessions()).filter((entry) => entry.title === 'Unattributed activity');
+    let isolated: Extract<SessionEvent, { kind: 'tool_call' }> | undefined;
+    let isolatedBucketId = '';
+    for (const bucket of buckets) {
+      const calls = await readEvents(bucket.id, { kinds: ['tool_call'] });
+      const match = calls.find(
+        (event): event is Extract<SessionEvent, { kind: 'tool_call' }> =>
+          event.kind === 'tool_call' && event.call.requestId === oldRequest
+      );
+      if (!match) continue;
+      isolated = match;
+      isolatedBucketId = bucket.id;
+      break;
+    }
+    expect(isolated?.call.attributionMethod).toBe('superseded');
+    await repairDeterministicAttribution();
+    expect(
+      (await readEvents(isolatedBucketId, { kinds: ['tool_call'] })).some(
+        (event) => event.kind === 'tool_call' && event.call.requestId === oldRequest
+      )
+    ).toBe(true);
 
-    // This must not be implemented as "historical session always wins": a genuinely new
-    // request first proved in the stale tab's new epoch belongs to that new epoch.
+    // A request first proved in the stale tab after the move is still the retired chat's, so it
+    // is refused as superseded — a message that names the handover — instead of waiting out
+    // the identity window as nobody's. It lands beside the late one, never in the lineage.
     await recordChatObservations(oldConversation, [
       {
         kind: 'tool_evidence',
@@ -2039,9 +2335,12 @@ describe('naming the chats this app opened', () => {
       requestId: freshRequest,
       agent: null
     });
-    const staleCallsAfter = await readEvents(staleSessionId, { kinds: ['tool_call'] });
-    expect(staleCallsAfter).toHaveLength(1);
-    expect(staleCallsAfter[0]?.kind === 'tool_call' && staleCallsAfter[0].call.requestId).toBe(freshRequest);
+    expect(await readEvents(originalSessionId, { kinds: ['tool_call'] })).toHaveLength(0);
+    const fresh = (await readEvents(isolatedBucketId, { kinds: ['tool_call'] })).find(
+      (event) => event.kind === 'tool_call' && event.call.requestId === freshRequest
+    );
+    expect(fresh?.kind === 'tool_call' && fresh.call.attributionMethod).toBe('superseded');
+    expect((await listSessions()).filter((entry) => entry.chatIds.includes(oldConversation))).toHaveLength(1);
   });
 
   it('does not publish or return stale A→S first-sight state after S durably rebinds to B', async () => {
@@ -2092,7 +2391,7 @@ describe('naming the chats this app opened', () => {
 // --------------------------------------------------------------- summaries
 
 describe('tool summaries', () => {
-  const summarize = (tool: string, args: unknown, patch: Partial<ReturnType<typeof emptyEvidence>> = {}, outcome: 'ok' | 'error' | 'rejected' = 'ok', durationMs = 10) =>
+  const summarize = (tool: string, args: unknown, patch: Partial<ReturnType<typeof emptyEvidence>> = {}, outcome: ToolOutcome = 'ok', durationMs = 10) =>
     summarizeToolCall({ tool, args, evidence: evidence(patch), outcome, durationMs, resultHead: 'head line' });
 
   /** The patch text a summary reads its intent off. */
@@ -2201,14 +2500,14 @@ describe('tool summaries', () => {
   it('keeps the subject but not the claim when a call fails or is refused', () => {
     const refused = summarize('apply_patch', { patch: patch('Delete File', '/p/x.ts') }, {
       changes: [{ path: '/p/x.ts', added: 0, removed: 3, approximate: false }]
-    }, 'rejected');
+    }, 'tool_rejected');
     expect(refused.title).toBe('Refused to delete x.ts');
     expect(refused.metric).toBe('refused');
     expect(refused.tone).toBe('warn');
 
     const errored = summarize('apply_patch', { patch: patch('Update File', '/p/x.ts') }, {
       changes: [{ path: '/p/x.ts', added: 1, removed: 1, approximate: false }]
-    }, 'error');
+    }, 'tool_internal_error');
     expect(errored.title).toBe('Could not edit x.ts');
     expect(errored.metric).toBe('✕ failed');
     expect(errored.detail).toBe('head line');
@@ -2232,7 +2531,7 @@ describe('tool summaries', () => {
       ['some_future_tool', {}, 'Could not run some_future_tool']
     ];
     for (const [tool, args, title] of cases) {
-      const summary = summarize(tool, args, {}, 'error');
+      const summary = summarize(tool, args, {}, 'tool_internal_error');
       expect(summary.title, tool).toBe(title);
       // Nothing may still read as an accomplished action.
       expect(summary.title, tool).not.toMatch(/^(Read|Applied|Created|Searched|Ran|Messaged|Reported|Looked) /);
@@ -2499,5 +2798,24 @@ describe('a session store nobody has pointed anywhere', () => {
   it('refuses to read as well, instead of reporting an empty history', async () => {
     unsetSessionRootForTests();
     await expect(listSessions()).rejects.toThrow(/initSessionStore/);
+  });
+});
+
+describe('activity windows', () => {
+  /**
+   * The label must outlive the reload it triggers.
+   *
+   * Both durations came from one constant, so the Active badge expired on the same instant the
+   * silence ledger did — and the browser action still had this app's sweep and Chrome's alarm
+   * ahead of it. What a user saw was a chat going idle and then reloading itself half a minute
+   * later for no visible reason. Any future edit that collapses these two back into one number,
+   * or reorders them, reproduces that exactly.
+   */
+  it('keeps the Active badge alive past the silence reload it triggers', () => {
+    expect(CHAT_SILENCE_MS).toBe(2 * 60_000);
+    expect(CHAT_ACTIVE_MS).toBeGreaterThan(CHAT_SILENCE_MS);
+    // Enough headroom for both hops a queued reload still has to make: this app's maintenance
+    // tick and the extension's thirty-second alarm floor.
+    expect(CHAT_ACTIVE_MS - CHAT_SILENCE_MS).toBeGreaterThanOrEqual(60_000);
   });
 });

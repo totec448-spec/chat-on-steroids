@@ -1,10 +1,13 @@
 import { expect, it } from 'vitest';
 import { UnifiedExecProcessManager, applyUnifiedExecEnv } from '../src/main/codex/unified-exec.js';
-import { DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS } from '../src/main/codex/unified-exec-constants.js';
+import {
+  DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS,
+  MAX_UNIFIED_EXEC_PROCESSES
+} from '../src/main/codex/unified-exec-constants.js';
 
 const truncationPolicy = { kind: 'tokens' as const, tokens: 10_000 };
 
-it('does not let capacity pruning steal an interaction lock from an already queued waiter', async () => {
+it('does not let a lock attempt barge ahead of an already queued waiter', async () => {
   const manager = new UnifiedExecProcessManager(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS);
   const processId = manager.allocateProcessId();
   const initial = manager.execCommand({
@@ -49,6 +52,57 @@ it('does not let capacity pruning steal an interaction lock from an already queu
   } finally {
     await manager.terminateProcess(processId);
     await initial.catch(() => undefined);
+    await manager.terminateAllProcesses();
+  }
+});
+
+it('refuses new capacity without evicting a completed unread result', async () => {
+  const manager = new UnifiedExecProcessManager(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS);
+  const unreadId = manager.allocateProcessId();
+  const request = (processId: number, command: string, yieldTimeMs: number) => ({
+    command: [process.execPath, '-e', command],
+    shellType: process.platform === 'win32' ? ('powershell' as const) : ('bash' as const),
+    hookCommand: 'capacity obligation probe',
+    processId,
+    yieldTimeMs,
+    maxOutputTokens: undefined,
+    truncationPolicy,
+    cwd: process.cwd(),
+    displayCwd: process.cwd(),
+    env: applyUnifiedExecEnv(process.env),
+    tty: false
+  });
+  const fillerIds: number[] = [];
+
+  try {
+    const started = await manager.execCommand(
+      request(unreadId, "setTimeout(() => { console.log('owed-output'); process.exit(7); }, 500)", 100)
+    );
+    expect(started.processId).toBe(unreadId);
+    await expect.poll(() => manager.backgroundState(new Set([unreadId])).exitedUnread).toEqual([
+      { processId: unreadId, exitCode: 7 }
+    ]);
+
+    while (fillerIds.length < MAX_UNIFIED_EXEC_PROCESSES - 1) fillerIds.push(manager.allocateProcessId());
+    const refusedId = manager.allocateProcessId();
+    await expect(manager.execCommand(request(refusedId, "console.log('must-not-run')", 100))).rejects.toThrow(
+      `too many retained terminal sessions (limit ${MAX_UNIFIED_EXEC_PROCESSES})`
+    );
+
+    expect(manager.backgroundState(new Set([unreadId])).exitedUnread).toEqual([
+      { processId: unreadId, exitCode: 7 }
+    ]);
+    const drained = await manager.writeStdin({
+      processId: unreadId,
+      input: '',
+      yieldTimeMs: 250,
+      maxOutputTokens: undefined,
+      truncationPolicy
+    });
+    expect(drained.rawOutput.toString('utf8')).toContain('owed-output');
+    expect(drained.exitCode).toBe(7);
+  } finally {
+    for (const processId of fillerIds) manager.releaseProcessId(processId);
     await manager.terminateAllProcesses();
   }
 });

@@ -15,7 +15,6 @@ import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/m
 import {
   execOwner,
   execOwnershipDenied,
-  moveExecConversationOwners,
   noteExecOwner,
   resetExecOwnershipForTests
 } from '../src/main/codex/ownership.js';
@@ -96,21 +95,20 @@ beforeEach(() => {
 });
 
 describe('live process ownership across chat replacement', () => {
-  it('moves only the exact proven A owner to B and leaves anonymous or unrelated sessions unchanged', () => {
-    noteExecOwner(101, 'chat-a');
+  it('stays with the durable session while its frontend changes from A to B', () => {
+    noteExecOwner(101, 'session-a-b');
     noteExecOwner(102, null);
-    noteExecOwner(103, 'chat-other');
+    noteExecOwner(103, 'session-other');
 
-    expect(moveExecConversationOwners('chat-a', 'chat-b')).toBe(1);
-    expect(execOwner(101)).toBe('chat-b');
-    expect(execOwnershipDenied(101, 'chat-a')).toBe(true);
-    expect(execOwnershipDenied(101, 'chat-b')).toBe(false);
+    expect(execOwner(101)).toBe('session-a-b');
+    expect(execOwnershipDenied(101, 'session-a-b')).toBe(false);
+    expect(execOwnershipDenied(101, 'session-other')).toBe(true);
 
     expect(execOwner(102)).toBeNull();
     expect(execOwnershipDenied(102, null)).toBe(false);
-    expect(execOwnershipDenied(102, 'chat-b')).toBe(true);
-    expect(execOwner(103)).toBe('chat-other');
-    expect(execOwnershipDenied(103, 'chat-other')).toBe(false);
+    expect(execOwnershipDenied(102, 'session-a-b')).toBe(true);
+    expect(execOwner(103)).toBe('session-other');
+    expect(execOwnershipDenied(103, 'session-other')).toBe(false);
   });
 });
 

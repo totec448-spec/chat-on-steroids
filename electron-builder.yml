@@ -84,7 +84,7 @@ mac:
     - zip
   icon: build/icon.png
   category: public.app-category.developer-tools
-  minimumSystemVersion: "12.0"
+  minimumSystemVersion: "13.0"
   extendInfo:
     NSScreenCaptureUsageDescription: Chat On Steroids captures a display or window only when the enabled Desktop connector asks to observe it.
   # v2.0.2 intentionally ships unsigned/unnotarized macOS artifacts. Make that policy

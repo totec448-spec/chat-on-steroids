@@ -48,10 +48,14 @@ import { composeCommandBatch, parseCommandBatchSections } from '../codex/command
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
 import { DEFAULT_TRUNCATION_POLICY, EXEC_OUTPUT_CEILING_POLICY, unifiedExecManager } from '../codex/manager.js';
 import {
+  backgroundExecObligations,
   execOwnershipDenied,
   forgetExecOwner,
+  MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
+  noteExecAttended,
   noteExecOwner,
-  provenConversation
+  provenConversation,
+  provenSession
 } from '../codex/ownership.js';
 import {
   UnifiedExecError,
@@ -78,6 +82,7 @@ import {
   EXEC_COMMAND_WORKDIR_DESCRIPTION,
   EXEC_COMMAND_YIELD_TIME_DESCRIPTION,
   MAX_OUTPUT_TOKENS_DESCRIPTION,
+  MAX_OUTPUT_TOKENS_RETIRED_NOTE,
   WRITE_STDIN_CHARS_DESCRIPTION,
   WRITE_STDIN_DESCRIPTION,
   WRITE_STDIN_SESSION_ID_DESCRIPTION,
@@ -89,6 +94,7 @@ import {
   bindBundledRipgrep,
   execRecoveryHints,
   nonZeroExitIsBenign,
+  normalizePowerShellOperators,
   normalizeShellCommand,
   repairPowerShellQuoting,
   withExecNotes
@@ -216,8 +222,39 @@ function execChildEnvironment(): NodeJS.ProcessEnv {
   return applyUnifiedExecEnv(env);
 }
 
+/** Resolve the stable local session once so exec admission and later ownership cannot disagree. */
+async function execSession(tool: 'exec_command' | 'write_stdin'): Promise<string | null> {
+  let conversationId = provenConversation(currentCaller().requestId, currentCaller().conversationId);
+  const call = currentCall();
+  if (!conversationId && call?.caller.requestId) {
+    conversationId = await awaitFreshCallOrigin(tool, call.startedAt, IDENTITY_EVIDENCE_MS, {
+      requestId: call.caller.requestId
+    });
+    if (conversationId) call.caller.conversationId = conversationId;
+  }
+  const sessionId = provenSession(currentCaller().requestId, currentCaller().sessionId ?? null);
+  if (call) call.caller.sessionId = sessionId;
+  return sessionId;
+}
+
 export function registerCoreTools(reg: SurfaceRegistrar): void {
   const { ctx, caps, exposedCaps } = reg;
+  // Named from the live roots, never from a `/project` that may not exist: a worked example the
+  // model cannot act on costs a refused call and a retry. What followed the root had the same
+  // problem and cost more of them. `/<root>/src/main.ts` is a project's shape, so it read as a
+  // promise that the root *is* the project — and an approved root is a folder somebody picked,
+  // routinely a parent holding several. Reading it that way turns every repo-relative path into
+  // `/<root>/AGENTS.md` for a file that lives a folder deeper, which was the single most
+  // repeated read failure in the recorded corpus. The relationship is the fact worth the bytes;
+  // the rest of the path the model already has, because it is the one it gives exec_command as
+  // `workdir`. No example is invented here, and the host path stays unsaid, so nothing in this
+  // sentence can be stale or unreachable.
+  const virtualRoots = ctx.roots.map((root) => `/${root.name}`);
+  const readPathDescription =
+    virtualRoots.length > 0
+      ? `Paths inside the live approved roots: ${virtualRoots.join(', ')}. A root is an approved folder, usually a parent of the project rather than the project itself, so name every folder between the root and the file — the same path exec_command takes as workdir. Reading a root lists it one level deep. ` +
+        'Absolute native paths copied from command output are also accepted when they resolve inside one of these roots; globs work in either spelling.'
+      : 'Paths require an approved virtual root in the form /<root>/...; no root is currently approved. Globs are supported after a root is approved.';
 
   // ------------------------------------------------------------------- read
 
@@ -242,9 +279,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               .array(pathArg)
               .min(1)
               .max(20)
-              .describe(
-                'Paths inside approved roots. Use virtual paths such as /project/src/main.ts, or paste an absolute native path from command output that is inside an approved root; native paths are normalized to the same virtual sandbox. Globs are supported in either spelling.'
-              ),
+              .describe(readPathDescription),
             start_line: lineNumberArg
               .optional()
               .describe('First line, 1-based. Applied to every file the call reads, so prefer one path when the range is file-specific.'),
@@ -610,6 +645,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             workdir: z.string().optional().describe(EXEC_COMMAND_WORKDIR_DESCRIPTION),
             tty: z.boolean().optional().describe(EXEC_COMMAND_TTY_DESCRIPTION),
             yield_time_ms: unsignedIntegerNumber.optional().describe(EXEC_COMMAND_YIELD_TIME_DESCRIPTION),
+            // Accepted and ignored on purpose; see MAX_OUTPUT_TOKENS_DESCRIPTION.
             max_output_tokens: unsignedIntegerNumber.optional().describe(MAX_OUTPUT_TOKENS_DESCRIPTION),
             shell: z.string().optional().describe(EXEC_COMMAND_SHELL_DESCRIPTION),
             login: z.boolean().optional().describe(EXEC_COMMAND_LOGIN_DESCRIPTION)
@@ -672,12 +708,18 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               nodeFs.readdirSync(nodePath.resolve(dir.real, relativeDirectory))
             );
             const prefix = (note: string): string => (isBatch ? `Command ${index + 1}: ${note}` : note);
-            commandNotes.push(...repaired.notes.map(prefix), ...normalized.notes.map(prefix));
-            return bindBundledRipgrep(
+            const bound = bindBundledRipgrep(
               normalized.cmd,
               shell.shellType,
               shell.shellType === 'cmd' ? null : locateRipgrep()
             );
+            const chained = normalizePowerShellOperators(bound, shell.shellType, shell.shellPath);
+            commandNotes.push(
+              ...repaired.notes.map(prefix),
+              ...normalized.notes.map(prefix),
+              ...chained.notes.map(prefix)
+            );
+            return chained.cmd;
           });
           // Shell functions/aliases can resolve before applications on PATH. The app deliberately
           // ships ripgrep, parses rg's flags against that exact version, and puts it first on child
@@ -694,16 +736,6 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // but make the deterministic/no-profile path the Windows default.
           const useLoginShell = input.login ?? process.platform !== 'win32';
           const command = deriveExecArgs(shell, boundCommand, useLoginShell);
-          const processId = unifiedExecManager.allocateProcessId();
-          // Process ids are deliberately small/reusable, while chat ownership lives in a
-          // separate registry from the Codex process manager. An exited session may be
-          // evicted by the manager without passing through write_stdin, so its old owner row
-          // can outlive the reservation. Clear that row at the *new allocation boundary*,
-          // before the child is inserted into the manager. Otherwise a recycled numeric id
-          // briefly authorizes the old chat to write/interrupt the new chat's process during
-          // this exec_command's initial yield, before noteExecOwner below publishes the new
-          // owner. No caller should own a brand-new id until this call actually returns it.
-          forgetExecOwner(processId);
           try {
             // Current Codex intercepts an explicit `apply_patch` shell invocation before spawning
             // the shell process. The parser is the port of apply-patch/src/invocation.rs and uses
@@ -711,38 +743,49 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             if (!isBatch) {
               const interceptedPatch = maybeParseApplyPatchForExec(command, dir.real);
               if (interceptedPatch.kind === 'correctness_error') {
-                unifiedExecManager.releaseProcessId(processId);
                 return fail(`apply_patch verification failed: ${interceptedPatch.error.message}`);
               }
               if (interceptedPatch.kind === 'body') {
-                try {
-                  const patchRun = await runParsedPatch(interceptedPatch.args, ctx.roots, dir);
-                  if (patchRun.result.isError || patchRun.content === null) return patchRun.result;
+                const patchRun = await runParsedPatch(interceptedPatch.args, ctx.roots, dir);
+                if (patchRun.result.isError || patchRun.content === null) return patchRun.result;
 
-                  // `exec_command.rs` converts a successful intercepted patch into an
-                  // ExecCommandToolOutput with zero wall time and no process/exit/chunk metadata.
-                  const output: ExecCommandToolOutput = {
-                    chunkId: '',
-                    wallTimeMs: 0,
-                    rawOutput: Buffer.from(patchRun.content, 'utf8'),
-                    truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
-                    maxOutputTokens: input.max_output_tokens,
-                    processId: null,
-                    exitCode: null,
-                    originalTokenCount: null,
-                    outputOmittedBytes: null
-                  };
-                  noteExec({ running: false, exitCode: null, timedOut: false, durationMs: 0 });
-                  noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
-                  return {
-                    content: [{ type: 'text' as const, text: execCommandResponseText(output) }],
-                    structuredContent: execCommandStructuredOutput(output)
-                  };
-                } finally {
-                  unifiedExecManager.releaseProcessId(processId);
-                }
+                // `exec_command.rs` converts a successful intercepted patch into an
+                // ExecCommandToolOutput with zero wall time and no process/exit/chunk metadata.
+                const output: ExecCommandToolOutput = {
+                  chunkId: '',
+                  wallTimeMs: 0,
+                  rawOutput: Buffer.from(patchRun.content, 'utf8'),
+                  truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
+                  maxOutputTokens: undefined,
+                  processId: null,
+                  exitCode: null,
+                  originalTokenCount: null,
+                  outputOmittedBytes: null
+                };
+                noteExec({ running: false, exitCode: null, timedOut: false, durationMs: 0 });
+                noteDetail(commandDetail.replace(/\s+/g, ' ').slice(0, 120));
+                return {
+                  content: [{ type: 'text' as const, text: execCommandResponseText(output) }],
+                  structuredContent: execCommandStructuredOutput(output)
+                };
               }
             }
+
+            const owner = await execSession('exec_command');
+            const unread = backgroundExecObligations(owner).exitedUnread;
+            if (unread.length >= MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION) {
+              const sessionIds = unread.map((session) => session.processId).join(', ');
+              return fail(
+                  `EXEC_RESULTS_UNREAD: ${unread.length} completed background results are still waiting for this session. ` +
+                  `Drain session IDs ${sessionIds} with write_stdin before starting another command. No child was spawned.`
+              );
+            }
+
+            const processId = unifiedExecManager.allocateProcessId();
+            // Process ids are deliberately small/reusable, while chat ownership lives in a
+            // separate registry. Clear any stale row at the allocation boundary so a recycled
+            // id cannot briefly authorize its previous chat before this call publishes the new owner.
+            forgetExecOwner(processId);
 
             const output = await unifiedExecManager.execCommand({
               command,
@@ -750,26 +793,18 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               hookCommand: commandDetail,
               processId,
               yieldTimeMs: input.yield_time_ms ?? DEFAULT_EXEC_YIELD_TIME_MS,
-              maxOutputTokens: input.max_output_tokens,
+              maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY,
               cwd: dir.real,
               displayCwd: dir.virtual,
               env: execChildEnvironment(),
               tty: input.tty ?? DEFAULT_TTY
             });
-            // Which chat may later write to this session id. Codex gets this for free from a
-            // per-conversation manager; see codex/ownership.ts for why one is needed here.
+            // Which durable local session may later write to this process id. The frontend
+            // conversation is replaceable during Compact & Resume; the local session is not.
             if (output.processId === null) {
               forgetExecOwner(processId);
             } else {
-              let owner = provenConversation(currentCaller().requestId, currentCaller().conversationId);
-              const call = currentCall();
-              if (!owner && call?.caller.requestId) {
-                owner = await awaitFreshCallOrigin('exec_command', call.startedAt, IDENTITY_EVIDENCE_MS, {
-                  requestId: call.caller.requestId
-                });
-                if (owner) call.caller.conversationId = owner;
-              }
               noteExecOwner(output.processId, owner);
             }
             const responseText = execCommandResponseText(output);
@@ -807,14 +842,20 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // `Process exited with code 1` under an empty body and re-run a search that had
             // already answered. It is the same classification, now also said out loud.
             const notes = [
+              ...(input.max_output_tokens === undefined ? [] : [MAX_OUTPUT_TOKENS_RETIRED_NOTE]),
               ...commandNotes,
               ...(benign
                 ? isBatch
                   ? nonZeroSections.map(
                       (section) =>
-                        `Command ${section.index}: ${benignExitNote(boundCommands[section.index - 1] ?? '', shell.shellType)}`
+                        `Command ${section.index}: ${benignExitNote(
+                          boundCommands[section.index - 1] ?? '',
+                          shell.shellType,
+                          section.exitCode,
+                          section.text
+                        )}`
                     )
-                  : [benignExitNote(boundCommand, shell.shellType)]
+                  : [benignExitNote(boundCommand, shell.shellType, output.exitCode, responseText)]
                 : []),
               ...execRecoveryHints(rawCommands.join('\n'), responseText, shell.shellType)
             ];
@@ -848,33 +889,33 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // A session id is a small integer that means nothing outside the chat that was given
           // it, and every chat reaches the same manager here. Refuse only what is proven to
           // belong elsewhere; an unproven caller keeps working exactly as before.
-          let asking = provenConversation(currentCaller().requestId, currentCaller().conversationId);
-          const call = currentCall();
-          if (!asking && call?.caller.requestId) {
-            asking = await awaitFreshCallOrigin('write_stdin', call.startedAt, IDENTITY_EVIDENCE_MS, {
-              requestId: call.caller.requestId
-            });
-            if (asking) call.caller.conversationId = asking;
-          }
+          const asking = await execSession('write_stdin');
           if (execOwnershipDenied(input.session_id, asking)) {
             return fail(
-              `write_stdin failed: session ${input.session_id} is not proven to belong to this ChatGPT conversation. Start your own with exec_command or retry after the extension reconnects.`
+              `write_stdin failed: session ${input.session_id} is not proven to belong to this durable Chat On Steroids session. Start your own with exec_command or retry after the extension reconnects.`
             );
           }
+          // Both sides of the wait. An empty poll blocks for seconds by design, and a caller
+          // sitting in one is attending its session rather than neglecting it.
+          noteExecAttended(input.session_id);
           try {
             const output = await unifiedExecManager.writeStdin({
               processId: input.session_id,
               input: input.chars ?? '',
               yieldTimeMs: input.yield_time_ms ?? DEFAULT_WRITE_STDIN_YIELD_TIME_MS,
-              maxOutputTokens: input.max_output_tokens,
+              maxOutputTokens: undefined,
               truncationPolicy: EXEC_OUTPUT_CEILING_POLICY
             });
             if (output.processId === null) forgetExecOwner(input.session_id);
+            else noteExecAttended(input.session_id);
             noteExec({
               ...(output.processId === null ? {} : { id: String(output.processId) }),
               running: output.processId !== null,
               exitCode: output.exitCode,
               timedOut: false,
+              // No `benignExit` here on purpose: a status this drains belongs to the child, is
+              // recorded as `process_exit_nonzero`, and is already outside the reliability
+              // numerator. Exempting it would relabel a failed test run `ok`.
               durationMs: output.wallTimeMs
             });
             logInfo(`tool write_stdin ${input.session_id} (${(input.chars ?? '').length} chars)`);
@@ -884,7 +925,11 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             };
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            return fail(`write_stdin failed: ${message}`);
+            const retry =
+              error instanceof UnifiedExecError && error.kind === 'write_to_stdin'
+                ? ` Retry this same session_id (${input.session_id}); do not replace it with a new command.`
+                : '';
+            return fail(`write_stdin failed: ${message}${retry}`);
           }
         })
     );
@@ -963,7 +1008,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
     {
       title: 'Multi-agent run',
       description:
-        'Run ChatGPT workers. spawn always creates fresh worker chats for new parallel work; sleeping/terminal workers stay in this prime conversation’s durable history. ' +
+        'Run ChatGPT workers. Reuse a suitable sleeping worker with message before spawn; spawn creates fresh worker chats for new parallel work. Sleeping/terminal workers stay in this prime conversation’s durable history. ' +
         'message: prime→worker or worker→prime; messaging a sleeping worker revives that exact existing chat when a slot is free. Replies arrive on later tool results, so never poll. ' +
         'status shows this prime’s full worker history, including sleeping/revivable and terminal/non-revivable workers, even while no run is active. finish reports a worker result and normally puts it to sleep.',
       inputSchema: z.object({
@@ -992,7 +1037,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(8)
           .optional()
           .describe(
-            'spawn: fresh workers to create. Existing sleeping workers are never silently reused; revive one explicitly with message.'
+            'spawn: fresh workers to create only after checking status for a suitable sleeping worker; revive one explicitly with message.'
           ),
         messages: z
           .array(
@@ -1229,9 +1274,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   : info.state === 'finished'
                     ? `${info.id} is finished. The prime agent has your result. This chat has also reached its context ` +
                       'limit, so there will be no more work in it: stop working and stop calling tools.'
-                    : `${info.id} reported and is now asleep. The prime agent has your result and your worker slot is ` +
-                      'free. Stop working and stop calling tools; if the prime has more for you it will say so here in ' +
-                      'this same chat, and you pick up from what you already know.'
+                    : `${info.id} reported and is now asleep but remains reusable. The prime agent has your result and ` +
+                      'your worker slot is free. Stop working and stop calling tools; for related follow-up work the ' +
+                      'prime should wake this same chat with agents action=message before spawning a replacement.'
               }
             ],
             structuredContent: { action: 'finish', self: info.id, state: info.state, repeat }
@@ -1255,10 +1300,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         const shown = (info: { state: string; revivable: boolean }): string =>
           info.state === 'sleeping'
             ? info.revivable
-              ? 'sleeping (reported; waiting for new instructions)'
+              ? 'sleeping (reusable; wake with action=message)'
               : 'sleeping'
             : info.state === 'waking'
               ? 'waking (your message is being delivered to its chat)'
+              : info.state === 'finished'
+                ? 'finished (not reusable)'
               : info.state;
         const asleep = state.agents.filter((info) => info.state === 'sleeping' && info.revivable);
         const slots = status.freeWorkerSlots;
@@ -1280,9 +1327,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 (me.id === PRIME_ID
                   ? `\n\n${slots} of your worker slots ${slots === 1 ? 'is' : 'are'} free.` +
                     (asleep.length > 0
-                      ? ` ${asleep.map((info) => info.id).join(', ')} ${asleep.length === 1 ? 'is' : 'are'} asleep and ` +
+                      ? ` REUSE FIRST: ${asleep.map((info) => info.id).join(', ')} ${asleep.length === 1 ? 'is' : 'are'} asleep and ` +
                         'can be woken with agents action=message, in the chat they already have and with everything ' +
-                        'they learned there still in it. Prefer that to action=spawn' +
+                        'they learned there still in it. For related follow-up work, do this before action=spawn' +
                         (slots === 0 ? ', once a slot frees up.' : '.')
                       : '')
                   : '') +
@@ -1291,7 +1338,11 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 (failed.length > 0
                   ? `\n\n${failed.map((info) => info.id).join(', ')} will not report. Do that work yourself or wake ` +
                     'another worker; do not wait for them.'
-                  : '')
+                  : '') +
+                // A status check is a glance, not a stopping point. Without this the table reads
+                // like an answer to hand back to the user, and a prime that has just looked at its
+                // workers stops mid-run to report what it saw.
+                '\n\nThis is the current stats, keep working.'
             }
           ],
           structuredContent: {

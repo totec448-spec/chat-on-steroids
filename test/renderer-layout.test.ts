@@ -118,16 +118,87 @@ describe('a session row', () => {
   it('never borrows live worker status from a different run that reused worker-1/worker-2', () => {
     // Worker ids are slot names and repeat every run. The conversation is the durable chat
     // identity, so both have to match before an old recorded session can show the current
-    // swarm's `joined` / `finished` badge. This pins the screenshot regression where several
-    // old worker-2 rows all suddenly said `joined` when one new worker-2 was active.
+    // swarm's `active` / `finished` badge. This pins the screenshot regression where several
+    // old worker-2 rows all suddenly said `active` when one new worker-2 was active.
     expect(chatSource).toMatch(/entry\.id === origin\.agentId[\s\S]{0,220}entry\.conversationId === summary\.conversationId/);
+  });
+
+  it('does not call an idle prime active merely because it still owns the run', () => {
+    expect(chatSource).toMatch(/else if \(agent && agent\.role !== 'prime'\)/);
+    // Idle means idle: generic recording traffic cannot renew the exact tool clock.
+    expect(chatSource).toMatch(/Math\.max\(summary\.lastAssistantFinalAt \?\? 0, summary\.lastTurnEndAt \?\? 0\)/);
+    expect(chatSource).toMatch(/lastActivityAt > finishedAt/);
+  });
+
+  /**
+   * A page that lost its answer stream has no open turn while the model behind it goes on
+   * calling tools for minutes. Keying the badge on the open turn alone showed that chat - the
+   * one a user most wants to see is still going - as idle.
+   */
+  it('uses session start and exact calls rather than reload-generated turn boundaries for visible activity', () => {
+    expect(chatSource).toMatch(/Math\.max\(summary\.startedAt, summary\.lastToolCallAt \?\? 0\)/);
+    expect(chatSource).toMatch(/return summary\.endedAt === null && !workerReportedFinish\(summary\) && recentChatActivity\(summary\)/);
+    expect(chatSource).toMatch(/else if \(!agent && workerReportedFinish\(summary\)\) badges\.push\(AGENT_BADGE\.sleeping\)/);
+    expect(chatSource).toMatch(/if \(sessionWorking\(summary\)\) badges\.push\(AGENT_BADGE\.active\)/);
+    expect(chatSource).toMatch(/scheduleToolActivityExpiry/);
+  });
+
+  it('lets a worker finish report override its still-recent finish tool call', () => {
+    expect(chatSource).toMatch(/\['sleeping', 'finished', 'failed'\]\.includes\(agent\.state\)/);
+    expect(chatSource).toMatch(/if \(workerStopped\) badges\.push\(AGENT_BADGE\[agent\.state\]\)/);
   });
 });
 
-describe('the session-row delete affordance', () => {
-  it('reserves its top-right hit target instead of laying the timestamp underneath it', () => {
-    expect(rule('.sess-del')).toContain('position: absolute');
-    expect(rule('.sess-top em')).toContain('margin-right: 30px');
+describe('the session-row chat actions', () => {
+  it('renders current-chat pressure separately from the session lifetime total', () => {
+    expect(chatSource).toContain('compactNumber(summary.contextTokens)');
+    expect(chatSource).toContain('compactNumber(summary.estimatedTokens)');
+    expect(chatSource).toContain('across the full recorded session');
+    expect(chatSource).toContain('rough current-chat context tokens');
+  });
+
+  it('reserves all three top-right hit targets instead of laying the timestamp underneath them', () => {
+    expect(rule('.sess-action')).toContain('position: absolute');
+    expect(rule('.sess-top em')).toContain('margin-right: 84px');
+  });
+
+  it('opens and blocks only recorded conversations, and never selects or deletes the adjacent row', () => {
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}openSessionChat\(summary\.id\)/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,800}toggleSessionBlock\(summary\.id/);
+    expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
+    expect(chatSource).toMatch(/block\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
+  });
+
+  it('keeps a block visible without hovering, because it is state and not just an action', () => {
+    expect(rule('.sess-action')).toContain('opacity: 0');
+    expect(rule('.sess-block.is-blocked')).toContain('opacity: 1');
+  });
+
+  /**
+   * The Unattributed row is the one row with no chat to block, and it was the one row with no
+   * way to stop what it was showing. The switch that governs it is app-wide by necessity — the
+   * whole point of the row is that the app cannot say which chat these calls came from — so the
+   * button presses the settings checkbox rather than writing a second copy of that state.
+   */
+  it('blocks the Unattributed row through the one switch that can answer for it', () => {
+    expect(chatSource).toMatch(
+      /if \(summary\.conversationId === null\)[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)/
+    );
+    expect(chatSource).toMatch(
+      /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/
+    );
+    expect(chatSource).toMatch(/unattributedBlocked\(\)[\s\S]{0,200}allowUnattributedCalls === false/);
+    // Same word and same tone as a blocked chat: one state, read the same way down the list.
+    expect(chatSource).toMatch(/unattributedBlocked\(\)[\s\S]{0,120}text: 'blocked', tone: 'is-failed'/);
+    // And the row says what it is, on its own line, because no other row needs explaining.
+    expect(rule('.sess-note')).toContain('font-size: 11px');
+  });
+});
+
+describe('the live worker list', () => {
+  it('shows the exact broker id instead of a generic worker role chip', () => {
+    expect(chatSource).toMatch(/if \(label !== agent\.id\)[^\n]*agent\.id/);
+    expect(chatSource).not.toContain("el('span', 'chip', agent.role)");
   });
 });
 

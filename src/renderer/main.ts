@@ -17,6 +17,8 @@ import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
 import type { AppState, Capability, LogEntry, SurfaceStatus } from '../shared/types.js';
 import {
   browserExtensionRequired,
+  isNewer,
+  RELEASES_PAGE,
   CAPABILITY_DETAILS,
   CAPABILITY_LABELS,
   CAPABILITY_TOOLS,
@@ -683,6 +685,101 @@ function paintRoots(roots: AppState['config']['roots']): void {
 
 // ----------------------------------------------------------------- render
 
+/** How the one update sentence reads: nothing to do, something in progress, something wrong. */
+type UpdateTone = 'ok' | 'work' | 'bad';
+
+/** The update notification is news, and news is told once per window. */
+let announced = false;
+
+/**
+ * Everything this window knows about being current, as one sentence and one tone.
+ *
+ * Two facts feed it and this owns neither: what the update service found (state.update, which
+ * reports a `latest` only when it is genuinely newer, so nothing here compares versions), and
+ * the version of the extension the bridge is talking to. An extension that is not present has
+ * no version worth reporting - a stale number from a browser that has since closed would nag
+ * about nothing.
+ *
+ * Null is the one silence that is not an answer: GitHub has not replied yet in this run, so
+ * "up to date" would be a claim nobody has checked. That is what `checkedAt` is for.
+ *
+ * `notice` is the narrower question of whether the header bar carries the sentence at all. That
+ * bar is for what the user can act on - a version to fetch by hand, an extension to reload -
+ * while the Activity line reports every state, including the good one.
+ */
+function updateSummary({ bridge, update }: AppState): { text: string; tone: UpdateTone; notice: boolean } | null {
+  // Only an extension older than this app is the user's to fix. The other direction is an app
+  // that has not caught up yet - normal while an update downloads - and telling that user to
+  // load the bundled folder again would talk them into downgrading a working extension. The
+  // app sentence already owns being behind.
+  const stale =
+    bridge.present && bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion)
+      ? bridge.extensionVersion
+      : null;
+  if (!stale && !update.latest && update.stage === 'idle' && !update.checkedAt) return null;
+
+  const lines: string[] = [];
+  let tone: UpdateTone = 'work';
+  if (update.latest) {
+    // `latest` set with a stage of `idle` is the deliberate case: a new version exists and this
+    // installation - a Linux .deb, macOS, a development tree, an architecture with no artifact -
+    // is not one the app can update by itself. That is when the button matters.
+    lines.push(
+      update.stage === 'ready'
+        ? `Chat On Steroids ${update.latest} is downloaded and installs the next time you start the app.`
+        : update.stage === 'downloading'
+          ? `Chat On Steroids ${update.latest} is downloading. Keep working; it installs on your next start.`
+          : update.stage === 'failed'
+            ? `Chat On Steroids ${update.latest} could not be downloaded: ${update.error ?? 'the download stopped'}.`
+            : `Chat On Steroids ${update.latest} is out. This installation has to be updated by hand.`
+    );
+    if (update.stage === 'failed') tone = 'bad';
+  } else if (update.stage === 'failed') {
+    lines.push(`Could not check for a newer version: ${update.error ?? 'the check stopped'}.`);
+    tone = 'bad';
+  } else if (update.stage === 'checking') {
+    lines.push('Checking for a newer version…');
+  } else if (!stale) {
+    const extension = bridge.present && bridge.extensionVersion ? ` · extension ${bridge.extensionVersion}` : '';
+    lines.push(`Up to date! Chat On Steroids ${update.current}${extension}`);
+    tone = 'ok';
+  }
+  if (stale) {
+    lines.push(
+      `The browser extension is ${stale} and this app is ${update.current}. ` +
+        'Load the extension folder again in Chrome.'
+    );
+    tone = 'bad';
+  }
+  return { text: lines.join(' '), tone, notice: Boolean(update.latest || stale) };
+}
+
+/** The header bar, the Activity line and the one notification, from that single sentence. */
+function paintUpdate(next: AppState): void {
+  const summary = updateSummary(next);
+  const notice = $('updateNotice');
+  const line = $('updateLine');
+  if (!summary) {
+    notice.hidden = true;
+    line.hidden = true;
+    return;
+  }
+  const { update } = next;
+  $('updateText').textContent = summary.text;
+  $<HTMLButtonElement>('updateGet').hidden = !update.latest || update.stage === 'downloading' || update.stage === 'ready';
+  notice.hidden = !summary.notice;
+  line.textContent = summary.text;
+  line.className = `upline${summary.tone === 'ok' ? ' is-ok' : summary.tone === 'bad' ? ' is-bad' : ''}`;
+  line.hidden = false;
+  // One notification per window, on the first answer that is an outcome rather than progress.
+  // The Activity line keeps the sentence afterwards, so repeating it as a toast on every state
+  // push would be the same news arriving over and over.
+  if (!announced && update.stage !== 'checking' && update.stage !== 'downloading') {
+    announced = true;
+    toast(summary.text);
+  }
+}
+
 function apply(next: AppState): void {
   const previousState = state;
   state = next;
@@ -722,6 +819,9 @@ function apply(next: AppState): void {
   $('connectLabel').textContent = running ? 'Disconnect' : 'Connect';
   connectBtn.disabled = !running && missing !== null;
   connectBtn.title = !running && missing ? missing.text : '';
+
+  // ---- out of date, app or extension
+  paintUpdate(next);
 
   // ---- health numbers and facts
   paintClock();
@@ -1278,6 +1378,20 @@ async function addFolder(): Promise<void> {
   if (next) apply(next);
 }
 
+/** Whether a drag carries files at all, which is the only kind the Folders card accepts. */
+function dragHasFiles(event: DragEvent): boolean {
+  return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+/** Every dropped entry is offered as a folder; the main process says no to anything else. */
+async function dropFolders(event: DragEvent): Promise<void> {
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  for (const file of files) {
+    const next = await run(api.addRootPath(file));
+    if (next) apply(next);
+  }
+}
+
 async function toggleConnection(): Promise<void> {
   if (!state) return;
   // Mirrors the button label exactly, so a click always does what it says.
@@ -1359,10 +1473,33 @@ $('readOnlyBtn').addEventListener('click', () => {
 $('addFolder').addEventListener('click', () => void addFolder());
 $('wizAddFolder').addEventListener('click', () => void addFolder());
 
+// Dropping a file anywhere on an Electron window otherwise navigates the whole window to
+// it. Only the Folders card accepts drops, and everything else swallows them.
+window.addEventListener('dragover', (event) => event.preventDefault());
+window.addEventListener('drop', (event) => event.preventDefault());
+{
+  const card = $('foldersCard');
+  card.addEventListener('dragover', (event) => {
+    if (!dragHasFiles(event)) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'link';
+    card.classList.add('drop-target');
+  });
+  card.addEventListener('dragleave', (event) => {
+    if (!card.contains(event.relatedTarget as Node | null)) card.classList.remove('drop-target');
+  });
+  card.addEventListener('drop', (event) => {
+    event.preventDefault();
+    card.classList.remove('drop-target');
+    if (dragHasFiles(event)) void dropFolders(event);
+  });
+}
+
 $('wizExpand').addEventListener('click', () => {
   showAllSteps = !showAllSteps;
   if (state) apply(state);
 });
+$('updateGet').addEventListener('click', () => void run(api.openLink(RELEASES_PAGE)));
 $('connectBtn').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 

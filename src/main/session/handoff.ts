@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
 import { getSession, saveHandoff } from './store.js';
+import { destinationContinuationMarker } from './handoff-prompt.js';
 
 export interface PrepareHandoffInput {
   sessionId: string;
@@ -31,8 +32,10 @@ export interface PrepareHandoffInput {
  * reconstructs that chat-facing conversation from the durable session after the local session
  * has been rebound. Sharing one formatter prevents those two model contexts from drifting.
  */
-export function resumeBootstrapText(summary: string): string {
+export function resumeBootstrapText(summary: string, token = ''): string {
+  const identity = destinationContinuationMarker(token);
   return (
+    (identity ? `${identity}\n\n` : '') +
     'Continuing a Chat On Steroids session that was compacted. This is the brief the previous chat wrote about ' +
     'its own work; carry on from it rather than starting again.\n\n' +
     summary
@@ -51,7 +54,8 @@ export function resumeBootstrapText(summary: string): string {
 export function resumeBootstrapMatches(recorded: string, summary: string): boolean {
   const canonical = (value: string): string =>
     value.replace(/\u00c2\u00a0/g, ' ').replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n');
-  return canonical(recorded) === canonical(resumeBootstrapText(summary));
+  const withoutMarker = canonical(recorded).replace(/^\[\[CLF-RESUME:[A-Za-z0-9_-]{16,64}\]\]\n\n/, '');
+  return withoutMarker === canonical(resumeBootstrapText(summary));
 }
 
 /**

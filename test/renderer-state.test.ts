@@ -42,7 +42,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2 },
+    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -57,7 +57,8 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
     hasGoalKey: false,
     resolvedBinary: null,
     bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null }
+    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.0.2', latest: null, stage: 'idle', error: null, checkedAt: null }
   };
   const ok = (data: any) => Promise.resolve({ ok: true, data });
   const api: any = new Proxy({
@@ -91,6 +92,13 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
   stateListener(structuredClone(state));
   expect(w.document.activeElement).toBe(multiAgent);
   expect(multiAgent.checked).toBe(true);
+
+  const allowUnattributed = w.document.getElementById('allowUnattributedCalls') as HTMLInputElement;
+  allowUnattributed.focus();
+  allowUnattributed.checked = true;
+  stateListener(structuredClone(state));
+  expect(w.document.activeElement).toBe(allowUnattributed);
+  expect(allowUnattributed.checked).toBe(true);
 
   // The settings sheet used to bypass the dirty-field guard used by Home. An unrelated
   // status push therefore erased this value while the user was still typing it.
@@ -189,7 +197,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2 },
+    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -204,7 +212,8 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
     hasGoalKey: false,
     resolvedBinary: null,
     bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null }
+    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.0.2', latest: null, stage: 'idle', error: null, checkedAt: null }
   });
   let current = appState(baseConfig);
   const calls: any[] = [];
@@ -335,7 +344,7 @@ async function mountChat(
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as const },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2 },
+    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
     goal: {
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
@@ -350,7 +359,8 @@ async function mountChat(
     hasGoalKey: false,
     resolvedBinary: null,
     bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null },
+    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.0.2', latest: null, stage: 'idle', error: null, checkedAt: null },
     ...overrides
   };
   let listener: (next: any) => void = () => undefined;
@@ -594,7 +604,8 @@ it('requires a live browser only when a browser-backed feature is actually enabl
     },
     // The token survived, but this process has not heard from the extension. This is the
     // disabled/uninstalled-extension-after-app-restart repro.
-    bridge: { running: true, port: 8765, paired: true, present: false, lastSeenAt: null }
+    bridge: { running: true, port: 8765, paired: true, present: false, lastSeenAt: null, extensionVersion: null },
+    update: { current: '2.0.2', latest: null, stage: 'idle', error: null, checkedAt: null }
   });
   const doc = mounted.window.document;
   const browserStep = doc.querySelector<HTMLElement>('[data-step="browser"]')!;
@@ -627,6 +638,91 @@ it('requires a live browser only when a browser-backed feature is actually enabl
   expect(doc.getElementById('bridgeState')!.textContent).toContain('not needed');
   expect((doc.getElementById('goalEnabled') as HTMLInputElement).disabled).toBe(true);
   expect(doc.getElementById('goalHint')!.textContent).toMatch(/recording first/i);
+});
+
+/**
+ * "Up to date" is a claim, and a claim needs somebody to have checked.
+ *
+ * Before GitHub answers, `{latest: null, stage: 'idle'}` means only that nothing has been
+ * established - the same record a check that never ran would leave - so the Activity line stays
+ * empty and no notification is shown. The timestamp is what turns that silence into an answer.
+ */
+it('says nothing about being current until the check has actually answered', async () => {
+  const mounted = await mountChat({
+    bridge: { running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.2' }
+  });
+  const doc = mounted.window.document;
+  const line = doc.getElementById('updateLine')!;
+  expect(line.hidden).toBe(true);
+  expect(doc.querySelector('.toast')).toBeNull();
+
+  const checked = structuredClone(mounted.state) as any;
+  checked.update.checkedAt = Date.now();
+  mounted.push(checked);
+
+  // Green, both versions, and the same sentence as the one notification this window shows.
+  expect(line.hidden).toBe(false);
+  expect(line.className).toBe('upline is-ok');
+  expect(line.textContent).toBe('Up to date! Chat On Steroids 2.0.2 · extension 2.0.2');
+  expect(doc.querySelector('.toast')!.textContent).toBe(line.textContent);
+  // Nothing to act on, so the header bar stays out of the way.
+  expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
+
+  // The news is told once. A later push of the same fact repaints the line and nothing else.
+  doc.querySelector('.toast')!.remove();
+  mounted.push(structuredClone(checked) as any);
+  expect(doc.querySelector('.toast')).toBeNull();
+  expect(line.textContent).toBe('Up to date! Chat On Steroids 2.0.2 · extension 2.0.2');
+});
+
+/**
+ * A staged update is not "up to date", and it is not a failure either.
+ */
+it('reports a staged update in the Activity line and the header bar', async () => {
+  const mounted = await mountChat();
+  const staged = structuredClone(mounted.state) as any;
+  staged.update = { current: '2.0.2', latest: '2.0.3', stage: 'ready', error: null, checkedAt: Date.now() };
+  mounted.push(staged);
+
+  const doc = mounted.window.document;
+  const line = doc.getElementById('updateLine')!;
+  expect(line.className).toBe('upline');
+  expect(line.textContent).toContain('2.0.3 is downloaded and installs the next time');
+  expect(doc.getElementById('updateNotice')!.hidden).toBe(false);
+  // There is nothing to fetch by hand once it is on disk.
+  expect((doc.getElementById('updateGet') as HTMLButtonElement).hidden).toBe(true);
+
+  const broken = structuredClone(staged) as any;
+  broken.update = { current: '2.0.2', latest: null, stage: 'failed', error: 'latest answered 503', checkedAt: null };
+  mounted.push(broken);
+  expect(line.className).toBe('upline is-bad');
+  expect(line.textContent).toContain('503');
+  // A check that could not reach GitHub is a diagnostic, not something the user can act on.
+  expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
+});
+
+/**
+ * The version difference has a direction, and only one of them is the user's to act on.
+ *
+ * An extension newer than the app is the ordinary state while an app update is downloading, and
+ * the bundled folder is then the older copy: "load the extension folder again" would talk that
+ * user into downgrading a working extension. The app-update line already owns being behind.
+ */
+it('asks for an extension reload only when the extension is older than this app', async () => {
+  const mounted = await mountChat({
+    bridge: {
+      running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.1'
+    }
+  });
+  const doc = mounted.window.document;
+  const notice = doc.getElementById('updateNotice')!;
+  expect(notice.hidden).toBe(false);
+  expect(doc.getElementById('updateText')!.textContent).toContain('2.0.1');
+
+  const ahead = structuredClone(mounted.state) as any;
+  ahead.bridge.extensionVersion = '2.0.3';
+  mounted.push(ahead);
+  expect(notice.hidden, 'a newer extension is not a downgrade prompt').toBe(true);
 });
 
 /**
