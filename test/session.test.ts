@@ -2139,7 +2139,7 @@ describe('naming the chats this app opened', () => {
     expect((await getSession(originalSessionId))?.endedAt).not.toBeNull();
   });
 
-  it('isolates a late request from retired A even after the old conversation starts a fresh recording epoch', async () => {
+  it('files a retired source chat into its own lineage and refuses its later requests as superseded', async () => {
     const oldConversation = 'conv-worker-before-transfer';
     const newConversation = 'conv-worker-after-transfer';
     const oldRequest = 'wfr_worker_before_transfer';
@@ -2159,15 +2159,26 @@ describe('naming the chats this app opened', () => {
     expect(await rebindSession(originalSessionId, oldConversation, newConversation)).toBe(true);
     rebindConversation(originalSessionId, oldConversation, newConversation);
 
-    // The stale old tab is now honestly a new local session epoch for the same old ChatGPT id.
+    // The stale old tab is a retired frontend of the one session, never a chat of its own: its
+    // prose files into the lineage (2026-09-02: the brief's late re-render minted a session
+    // holding nothing but the summary) and it moves none of the projections B now owns.
     const stale = await recordChatObservations(oldConversation, [
-      { kind: 'user_message', time: Date.now(), text: 'stale tab carried on', messageId: 'stale-epoch-user' }
+      { kind: 'user_message', time: Date.now(), text: 'stale tab carried on', messageId: 'stale-epoch-user' },
+      { kind: 'turn_start', time: Date.now(), turnId: 'g-stale-tab-turn' }
     ]);
-    const staleSessionId = stale.sessionId!;
-    expect(staleSessionId).not.toBe(originalSessionId);
+    expect(stale.sessionId).toBe(originalSessionId);
+    expect(stale.activity).toEqual({ meaningful: false, working: false, terminal: false });
+    expect(
+      (await readEvents(originalSessionId, { kinds: ['user_message'] })).some(
+        (event) => event.kind === 'user_message' && event.messageId === 'stale-epoch-user'
+      )
+    ).toBe(true);
+    expect(await readEvents(originalSessionId, { kinds: ['turn_start'] })).toEqual([]);
+    expect((await getSession(originalSessionId))?.conversationId).toBe(newConversation);
+    expect((await listSessions()).filter((entry) => entry.chatIds.includes(oldConversation))).toHaveLength(1);
 
     // Exact proof preserves forensic identity, but it is not execution authority after A was
-    // replaced. The call stays out of both B's live history and the stale tab's fresh epoch.
+    // replaced. The call stays out of B's live history.
     await recordToolCall({
       tool: 'read',
       args: { paths: ['/project/old.ts'] },
@@ -2179,9 +2190,7 @@ describe('naming the chats this app opened', () => {
       agent: 'prime'
     });
     const originalCalls = await readEvents(originalSessionId, { kinds: ['tool_call'] });
-    const staleCallsBefore = await readEvents(staleSessionId, { kinds: ['tool_call'] });
     expect(originalCalls).toHaveLength(0);
-    expect(staleCallsBefore).toHaveLength(0);
     const buckets = (await listSessions()).filter((entry) => entry.title === 'Unattributed activity');
     let isolated: Extract<SessionEvent, { kind: 'tool_call' }> | undefined;
     let isolatedBucketId = '';
@@ -2204,8 +2213,9 @@ describe('naming the chats this app opened', () => {
       )
     ).toBe(true);
 
-    // This must not be implemented as "historical session always wins": a genuinely new
-    // request first proved in the stale tab's new epoch belongs to that new epoch.
+    // A request first proved in the stale tab after the move is still the retired chat's, so it
+    // is refused as superseded — a message that names the handover — instead of waiting out
+    // the identity window as nobody's. It lands beside the late one, never in the lineage.
     await recordChatObservations(oldConversation, [
       {
         kind: 'tool_evidence',
@@ -2224,9 +2234,12 @@ describe('naming the chats this app opened', () => {
       requestId: freshRequest,
       agent: null
     });
-    const staleCallsAfter = await readEvents(staleSessionId, { kinds: ['tool_call'] });
-    expect(staleCallsAfter).toHaveLength(1);
-    expect(staleCallsAfter[0]?.kind === 'tool_call' && staleCallsAfter[0].call.requestId).toBe(freshRequest);
+    expect(await readEvents(originalSessionId, { kinds: ['tool_call'] })).toHaveLength(0);
+    const fresh = (await readEvents(isolatedBucketId, { kinds: ['tool_call'] })).find(
+      (event) => event.kind === 'tool_call' && event.call.requestId === freshRequest
+    );
+    expect(fresh?.kind === 'tool_call' && fresh.call.attributionMethod).toBe('superseded');
+    expect((await listSessions()).filter((entry) => entry.chatIds.includes(oldConversation))).toHaveLength(1);
   });
 
   it('does not publish or return stale A→S first-sight state after S durably rebinds to B', async () => {

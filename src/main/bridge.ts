@@ -1807,6 +1807,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         (candidate) => candidate.spec.type === 'resume' && candidate.spec.token === checkpointToken
       );
       if (command) retire(command, 'the marked replacement message committed the continuation');
+      if (result.status === 'committed') armResumedChat(entry.sessionId, result.conversationId);
       return json(
         res,
         200,
@@ -2752,6 +2753,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
             completedAt: Date.now()
           };
         } else {
+          if (result.status === 'committed') armResumedChat(command.spec.sessionId, result.conversationId);
           receipt = {
             id,
             client: client || command.owner,
@@ -4276,6 +4278,23 @@ function grantActivity(conversationId: string, sessionId: string, at = Date.now(
   if (!sessionId) return;
   activeUntil.set(conversationId, { sessionId, until: at + CHAT_SILENCE_MS });
   armSilenceSweep();
+}
+
+/**
+ * Puts a freshly resumed chat on the activity clock the moment the session moves onto it.
+ *
+ * Chat B has just been handed the brief and told to carry on, so from here it is expected to
+ * work — yet nothing said so. The recorder learns of B's turn only from B's own page, and a
+ * page whose reporting never gets going leaves B invisible to every recovery path: on
+ * 2026-09-02 B's first two calls each waited out the identity window as nobody's, and the
+ * unattributed incident had no suspect to reload because B had never reported a turn. The
+ * grant a turn start would have made is what makes B a suspect the incident may reload and,
+ * failing any sign of life at all, what hands it silence's one reload. B's first attributed
+ * call or observed turn takes over the clock exactly as for any working chat.
+ */
+function armResumedChat(sessionId: string, conversationId: string): void {
+  grantActivity(conversationId, sessionId);
+  logInfo(`bridge: resumed chat ${conversationId} armed — expecting its first attributed call`);
 }
 
 /** A real terminal — stable final answer, explicit stop, worker finish — spends the deadline. */
