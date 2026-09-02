@@ -9,7 +9,18 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [Unreleased — 2.0.3]
+## [2.0.3] — 2026-09-02
+
+**A small step towards the infinite loop.**
+
+- **The Loop.** Goal with the exit removed: every finished turn gets its next message until you switch it off.
+- **Improved stability and reliability through auto reloads.** A chat that goes silent, shows an error or loses its tab is reloaded or reopened on its own evidence, and a turn that is still running is never closed early.
+- **macOS computer use.** The optional Desktop connector now ships on macOS, off by default.
+- **Auto update.** Windows and Linux AppImage installs fetch the next release and apply it on the next quit.
+- **Small things.** UI polish, blocked chats, worker recovery, session timeline fixes.
+
+<details>
+<summary>Full list of changes</summary>
 
 ### Added
 - **A blocked chat says so in its composer.** Block is set in the app, and from the ChatGPT page
@@ -53,6 +64,25 @@ the app refuses the extension and asks you to reload the matching copy.
   other chats' tabs" is on, and it now starts off.
 
 ### Fixed
+- **A worker chat that opens and never starts is opened once more, not waited on.** The tab the
+  app opened for a worker loaded as an empty New chat and never picked up its instruction. The
+  app held that page's ninety-second lease to the end, then failed the worker, and only then
+  opened the two workers queued behind it, which is why they appeared two minutes after the
+  prime asked. A fresh worker page now has twenty seconds to redeem its marker; past that the
+  same command is opened again, once, and a second silence fails the slot immediately so the
+  line moves. The command is single-owner, so the page that redeems first is the only one that
+  types. The old "never handed to a page" retry, a leftover from before every ending advanced
+  the queue, is gone.
+- **A reload no longer ends a turn that is still running.** The page reloaded in the middle of a
+  prime's turn — once for a foreign unattributed call, once for a lost stream — adopted the open
+  turn from the app, saw the interim prose ChatGPT had committed and no Stop control, and four
+  seconds later reported the turn completed. The same request id then called tools for another
+  twenty-four minutes, and Goal wrote the next user message against an answer that had never been
+  given. Two changes, one from each side. The page's visible-prose rule now applies only to a
+  turn the document has seen running; an adopted turn waits for ChatGPT's own end-of-turn, an
+  error, a stop, a new send or the ten-minute stall. And the app treats the server turn as the
+  authority: a call under the ended turn's request id that starts after the reported end reopens
+  the turn durably, hands it back to the page, and withdraws the Goal decision drafted for it.
 - **A stopped turn ends the `active` badge.** The badge went dark only on the model's final answer,
   so a chat whose turn the user stopped — the blocked prime of 2026-09-02, stopped right after a
   refused call — read `active` for three more minutes. Any turn end now ends it, the user's stop
@@ -234,6 +264,8 @@ the app refuses the extension and asks you to reload the matching copy.
 - macOS Screen Recording and Accessibility remain independent OS grants. The helper requests no
   privilege at startup, reports a typed error when a live operation lacks consent, and permission
   revocation remains effective without changing the connector schema cached by ChatGPT.
+
+</details>
 
 ## [2.0.2] — 2026-08-26
 

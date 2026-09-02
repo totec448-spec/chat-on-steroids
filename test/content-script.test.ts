@@ -5733,6 +5733,41 @@ describe('a content script reloaded into a turn already in flight', () => {
   });
 
   /**
+   * The live 2026-09-02 shape: a reload in the middle of a running turn, on a page whose
+   * MAIN-world helper never answers. ChatGPT shows the interim prose it had committed and no
+   * Stop control yet. The degraded DOM rule — visible prose means a finished answer — used to
+   * close the adopted turn four seconds in, and the same request id then called tools for
+   * another twenty-four minutes while Goal drafted the next message against nothing.
+   */
+  it('never closes an adopted turn from visible prose alone', async () => {
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) },
+      finishedDuringReload
+    );
+    live.hook.observe();
+    await settle();
+    live.advance(live.hook.TURN_SETTLE_MS * 3);
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+
+    // The one document-side verdict left for a turn nothing ever names finished: the stall
+    // budget, and honestly so — not "completed".
+    live.advance(10 * 60_000 + 1);
+    live.hook.observe();
+    await settle();
+    live.advance(live.hook.TURN_SETTLE_MS);
+    live.hook.observe();
+    await settle();
+    const ends = emitted(live.sent, 'turn_end').map((entry) => entry.event);
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.turnId).toBe('g-old-run-0-4');
+    expect(ends[0]!.outcome).toBe('stalled');
+  });
+
+  /**
    * The same page at boot, and a completely different situation: the stop button was simply
    * missing for a moment while the reloaded page rendered. Resuming on the strength of one
    * sample and publishing the visible prose as the answer would close `g-old` from a turn

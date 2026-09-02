@@ -836,7 +836,7 @@ function eventBody(event: SessionEvent): HTMLElement {
       return line;
     }
     case 'turn_start':
-      return el('p', 'meta', 'Turn started');
+      return el('p', 'meta', event.detail ? `Turn reopened — ${event.detail}` : 'Turn started');
     case 'turn_end': {
       const line = el(
         'p',

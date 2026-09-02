@@ -50,6 +50,7 @@ const {
   REVIVAL_ACTIVITY_MS,
   REVIVAL_DEADLINE_MS,
   WORKER_BOOTSTRAP_LIMIT_MS,
+  WORKER_REDEEM_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   startBridge,
@@ -4121,38 +4122,113 @@ describe('a worker chat that never opens', () => {
   });
 
   /**
-   * The two clocks a still-`invited` worker lives under.
+   * A chat that opened and never picked up its marker is opened once more, then failed.
    *
-   * Retrying is only safe because nothing was opened: an unleased command has no tab and no
-   * marker, so the second attempt is the first one. The limit is absolute from the invitation,
-   * so no combination of a late hand-out and a fresh lease can keep the slot past two minutes.
+   * worker-4 on 2026-09-02: the tab loaded as an empty New chat, the bridge held its lease for
+   * the full ninety seconds, and the two workers queued behind it opened only after it was
+   * failed. The re-open is the same command — single-owner, so a late redeem from the first tab
+   * is refused and nothing is typed twice — and it is spent once.
    */
-  it('stops holding a slot invited two minutes after the invitation, however late its chat opens', async () => {
+  it('opens a worker chat once more when the first page never redeems, and fails it after the second silence', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       spawn({ workers: [{ task: 'opens first' }, { task: 'waits behind it' }], caller: { conversationId: PRIME_CHAT } });
-      // worker-1's chat opens and is never redeemed, so worker-2's command cannot be handed out
-      // at all: it has no lease, no page and — before this — no clock either. Its retry at one
-      // minute finds the queue still blocked, and worker-1's own deadline only frees the line at
-      // ninety seconds. Counting worker-2's ninety from *there* would keep the slot invited for
-      // three minutes; the limit is measured from the invitation instead.
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      const first = new URL(opened[0]!).searchParams.get('clf')!;
+
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      // The same command, not a second one: whichever page redeems first owns it.
+      expect(new URL(opened[1]!).searchParams.get('clf')).toBe(first);
       expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-1', 'worker-2']);
 
-      // worker-1's own ninety seconds are up by here and worker-2's chat has just been opened,
-      // so it is the second worker's invitation that is still running.
-      // worker-1's chat is the one that opens; worker-2's command has no page and no lease.
-      await vi.waitFor(() => expect(opened.length).toBeGreaterThan(0));
+      const second = await redeem(first, 'tab-2');
+      expect(second.agent).toBe('worker-1');
+      const late = await request('POST', '/commands/redeem', { body: { id: first, client: 'tab-1' } });
+      expect(late.status).toBe(409);
+      // Owned now: the page's typing budget applies, and the redeem window no longer does.
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
+      expect(opened).toHaveLength(2);
+      expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-1', 'worker-2']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-      await vi.advanceTimersByTimeAsync(WORKER_BOOTSTRAP_LIMIT_MS - 5_000);
+  it('fails a worker whose reopened chat never redeems either, and moves the line on', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'opens first' }, { task: 'waits behind it' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
+      // worker-1 is failed, and worker-2's chat opens in the same beat rather than after ninety seconds.
+      await vi.waitFor(() => expect(opened).toHaveLength(3));
       expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-2']);
+      expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('failed');
+      const next = await redeem(new URL(opened[2]!).searchParams.get('clf')!);
+      expect(next.agent).toBe('worker-2');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-      await vi.advanceTimersByTimeAsync(6_000);
+  /**
+   * The absolute clock a still-`invited` worker lives under.
+   *
+   * A command still in line has no clock of its own; the limit is absolute from the invitation,
+   * so no combination of a late hand-out and a fresh lease can keep the slot past two minutes.
+   */
+  it('stops holding a slot invited two minutes after the invitation, however late its chat opens', async () => {
+    vi.useFakeTimers();
+    const previous = getConfig();
+    try {
+      await saveConfig({ ...previous, multiAgent: { ...previous.multiAgent, maxWorkers: 3 } });
+      await pair();
+      spawn({
+        workers: [{ task: 'opens first' }, { task: 'waits behind it' }, { task: 'waits longest' }],
+        caller: { conversationId: PRIME_CHAT }
+      });
+      expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-1', 'worker-2', 'worker-3']);
+      // Nothing ever redeems. Each worker's chat opens, is opened once more, and fails: worker-1
+      // by forty seconds, worker-2 by eighty, and worker-3's re-open lands at about a hundred.
+      // Counting worker-3's clock from *there* would keep the slot invited past two minutes; the
+      // limit is measured from the invitation instead.
+      let elapsed = 0;
+      const advance = async (ms: number): Promise<void> => {
+        await vi.advanceTimersByTimeAsync(ms);
+        elapsed += ms;
+      };
+      // Each re-open re-leases through a real durable write, which lands after the fake clock has
+      // moved on, so the deadline it arms may need one more tick to fire.
+      const openedSoon = async (count: number): Promise<void> => {
+        try {
+          await vi.waitFor(() => expect(opened).toHaveLength(count), { timeout: 300 });
+        } catch {
+          await advance(1_000);
+          await vi.waitFor(() => expect(opened).toHaveLength(count));
+        }
+      };
+      for (let count = 1; count <= 5; count += 1) {
+        await openedSoon(count);
+        // The browser keeps polling, so no re-open is mistaken for a cold browser launch.
+        await request('GET', '/status');
+        await advance(WORKER_REDEEM_MS + 1_000);
+      }
+      await openedSoon(6);
+      expect(elapsed).toBeLessThan(WORKER_BOOTSTRAP_LIMIT_MS - 5_000);
+      expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-3']);
+
+      await advance(WORKER_BOOTSTRAP_LIMIT_MS + 1_000 - elapsed);
       // No zombie slot left behind: nothing is still owed a tab, and nothing is still invited.
       await vi.waitFor(() => expect(pendingWorkerSpawns()).toEqual([]));
       expect(swarmState().agents.every((agent) => agent.state !== 'invited')).toBe(true);
     } finally {
       vi.useRealTimers();
+      await saveConfig(previous);
     }
   });
 });
