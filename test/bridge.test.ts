@@ -1524,6 +1524,46 @@ describe('delivering a bootstrap', () => {
     expect(pendingCommands().some((entry) => entry.id === command.id)).toBe(false);
   });
 
+  it('arms the resumed chat the moment the session moves onto it', async () => {
+    // 2026-09-02: chat B's first two calls each waited out the identity window as nobody's,
+    // and the unattributed incident had no suspect to reload because B had never reported a
+    // turn. From the commit on, B is expected to work: it is on the activity clock like any
+    // chat with an open turn, so the incident can reload it and silence can reload it once.
+    await pair();
+    const chatA = 'a2a2a2a2-2222-4333-8444-555555555555';
+    const chatB = 'b2b2b2b2-2222-4333-8444-555555555555';
+    const { sessionId, token } = await compactedSession(chatA, 'the brief for the armed move');
+    const command = queueResume(sessionId, token)!;
+    expect((await redeem(command.id, 'tab-b2')).text).toContain('the brief for the armed move');
+    expect((await request('POST', '/compact', { body: { token, destinationAttempt: true } })).body.allowed).toBe(true);
+    expect((await request('POST', '/compact', { body: { token, destinationDispatch: true } })).body.armed).toBe(true);
+    const logged = getLog().length;
+
+    const reply = await request('POST', '/compact', {
+      body: { conversationId: chatB, token, destinationMessageId: 'm-b2-marked-resume' }
+    });
+    expect(reply.status).toBe(200);
+    expect(reply.body.committed).toBe(true);
+    expect((await getSession(sessionId))?.conversationId).toBe(chatB);
+    expect(
+      getLog()
+        .slice(logged)
+        .some((entry) => entry.message.includes(`resumed chat ${chatB} armed`))
+    ).toBe(true);
+    expect((await request('GET', '/status')).body.recoveryMonitoring).toBe(true);
+
+    // Idempotent re-reads of the marked message (a reloaded B) do not arm it a second time.
+    const again = await request('POST', '/compact', {
+      body: { conversationId: chatB, token, destinationMessageId: 'm-b2-marked-resume' }
+    });
+    expect(again.status).toBe(200);
+    expect(
+      getLog()
+        .slice(logged)
+        .filter((entry) => entry.message.includes(`resumed chat ${chatB} armed`))
+    ).toHaveLength(1);
+  });
+
   /**
    * The name the fresh chat ends up with.
    *

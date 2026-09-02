@@ -23,7 +23,13 @@ import type {
   SwarmState,
   TokenPressure
 } from '../shared/session.js';
-import { ATTRIBUTION_LABELS, CHAT_ACTIVE_MS, TURN_OUTCOME_LABELS, foldProgress } from '../shared/session.js';
+import {
+  ATTRIBUTION_LABELS,
+  CHAT_ACTIVE_MS,
+  CONTINUATION_MARKER,
+  TURN_OUTCOME_LABELS,
+  foldProgress
+} from '../shared/session.js';
 import { chronological } from '../shared/chronology.js';
 import {
   DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
@@ -721,6 +727,22 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
  */
 const openTools = new Set<string>();
 
+/**
+ * The rows currently on screen, by timeline key, with the signature they were drawn from.
+ *
+ * A repaint rebuilds only the rows whose signature changed and reuses every other element
+ * as it is. That is what keeps the scroll position honest: a row the user has opened keeps
+ * its height and its place, so the pane does not lurch when ChatGPT records one more call —
+ * and the rebuilt-from-scratch list, which made the whole pane re-lay out on every event,
+ * is what made reading an open call impossible while a chat was working.
+ */
+const rowCache = new Map<string, { sig: string; row: HTMLElement }>();
+
+function forgetTimelineRows(): void {
+  openTools.clear();
+  rowCache.clear();
+}
+
 function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>): HTMLElement {
   const { call } = event;
   const box = document.createElement('details');
@@ -940,6 +962,255 @@ function boundedTimeline(source: SessionEvent[]): { shown: SessionEvent[]; omitt
   return { shown: source.slice(start), omitted: start };
 }
 
+// ------------------------------------------------------------ compaction rows
+
+/**
+ * One Compact & Resume, folded out of the rows the recorder wrote for it.
+ *
+ * The recorder stores a compaction as it happened: the brief request typed into chat A, the
+ * brief ChatGPT answered with, the app's own "handoff saved" line, and the bootstrap typed
+ * into chat B — four rows, three of them long, in an order that reflects when each was
+ * observed rather than what they were. Read as a timeline they look like three separate
+ * things going on; they are one thing with three steps, and this is that thing.
+ */
+interface CompactionBlock {
+  token: string;
+  /** The row this card takes the place of. */
+  seq: number;
+  time: number;
+  prompt: Extract<SessionEvent, { kind: 'user_message' }> | null;
+  brief: Extract<SessionEvent, { kind: 'assistant_message' }> | null;
+  handoff: Extract<SessionEvent, { kind: 'handoff' }> | null;
+  resume: Extract<SessionEvent, { kind: 'user_message' }> | null;
+  /** Something was recorded after this compaction, so a step still missing has failed. */
+  moved: boolean;
+}
+
+type TimelineItem = { kind: 'event'; event: SessionEvent } | { kind: 'compaction'; block: CompactionBlock };
+
+function continuationMarker(event: SessionEvent): { kind: 'HANDOFF' | 'RESUME'; token: string } | null {
+  if (event.kind !== 'user_message') return null;
+  const match = CONTINUATION_MARKER.exec(event.message.text);
+  return match ? { kind: match[1] as 'HANDOFF' | 'RESUME', token: match[2]! } : null;
+}
+
+/**
+ * The timeline with each compaction folded into one item.
+ *
+ * A card opens at the marked brief request and, until anything unrelated is recorded,
+ * absorbs what belongs to it: the answer (the brief), the app's handoff line, and the
+ * request turn's own lifecycle rows. The marked bootstrap in the replacement chat closes
+ * the same card by token, wherever it lands. A bootstrap whose request has scrolled out of
+ * the window still gets a card, with the steps it implies already done.
+ */
+function timelineItems(source: SessionEvent[]): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  const blocks = new Map<string, CompactionBlock>();
+  let open: CompactionBlock | null = null;
+  for (const event of source) {
+    const marker = continuationMarker(event);
+    if (marker && event.kind === 'user_message') {
+      let block = blocks.get(marker.token);
+      if (!block) {
+        block = {
+          token: marker.token,
+          seq: event.seq,
+          time: event.time,
+          prompt: null,
+          brief: null,
+          handoff: null,
+          resume: null,
+          moved: false
+        };
+        blocks.set(marker.token, block);
+        items.push({ kind: 'compaction', block });
+      }
+      if (marker.kind === 'HANDOFF') {
+        block.prompt = event;
+        open = block;
+        // Chronology puts a turn's start before the message that opened it, so the request
+        // turn's own start row is already on the list; it belongs to the card like the rest.
+        const previous = items[items.length - 2];
+        if (
+          previous?.kind === 'event' &&
+          previous.event.kind === 'turn_start' &&
+          event.turnId !== undefined &&
+          previous.event.turnId === event.turnId
+        ) {
+          items.splice(items.length - 2, 1);
+        }
+      } else {
+        block.resume = event;
+        if (open === block) open = null;
+      }
+      continue;
+    }
+    if (open) {
+      const requestTurn = open.prompt?.turnId;
+      const sameTurn = requestTurn !== undefined && event.turnId === requestTurn;
+      if (event.kind === 'handoff') {
+        open.handoff = event;
+        continue;
+      }
+      if (event.kind === 'assistant_message') {
+        open.brief = event;
+        continue;
+      }
+      if (
+        sameTurn &&
+        (event.kind === 'turn_start' || event.kind === 'turn_end' || event.kind === 'progress' || event.kind === 'page_tool')
+      ) {
+        continue;
+      }
+      open = null;
+    }
+    items.push({ kind: 'event', event });
+  }
+  for (let index = 0; index < items.length - 1; index++) {
+    const item = items[index]!;
+    if (item.kind === 'compaction') item.block.moved = true;
+  }
+  return items;
+}
+
+type StepTone = 'ok' | 'wait' | 'bad';
+
+/** The three steps as two-word states: what happened, what is still happening, what did not. */
+function compactionSteps(block: CompactionBlock): Array<{ label: string; tone: StepTone }> {
+  const received = block.handoff !== null || block.brief?.final === true || block.resume !== null;
+  const summary: { label: string; tone: StepTone } = received
+    ? { label: 'Summary received', tone: 'ok' }
+    : block.brief
+      ? { label: 'Writing summary', tone: 'wait' }
+      : block.moved
+        ? { label: 'No summary', tone: 'bad' }
+        : { label: 'Awaiting summary', tone: 'wait' };
+  const placed: { label: string; tone: StepTone } = block.resume
+    ? { label: 'New chat opened', tone: 'ok' }
+    : block.moved || summary.tone === 'bad'
+      ? { label: 'No new chat', tone: 'bad' }
+      : { label: 'Opening chat', tone: 'wait' };
+  return [{ label: 'Summary requested', tone: 'ok' }, summary, placed];
+}
+
+function compactionRow(block: CompactionBlock): HTMLElement {
+  const key = `compaction:${block.token}`;
+  const steps = compactionSteps(block);
+  const worst: StepTone = steps.some((step) => step.tone === 'bad')
+    ? 'bad'
+    : steps.some((step) => step.tone === 'wait')
+      ? 'wait'
+      : 'ok';
+
+  const box = document.createElement('details');
+  box.className = `tool compaction tone-${worst === 'ok' ? 'good' : worst === 'bad' ? 'bad' : 'wait'}`;
+  box.open = openTools.has(key);
+  box.addEventListener('toggle', () => {
+    if (box.open) openTools.add(key);
+    else openTools.delete(key);
+  });
+
+  const head = document.createElement('summary');
+  head.append(icon('i-steps', 'ico tool-ico'));
+  head.append(el('b', '', 'Compact & Resume'));
+  const chips = el('span', 'steps');
+  for (const step of steps) chips.append(el('span', `step is-${step.tone}`, step.label));
+  head.append(chips);
+  box.append(head);
+
+  const raw = el('div', 'raw');
+  if (block.prompt) {
+    raw.append(el('h4', '', 'Brief request'));
+    // The routing marker is the app's, not the user's; the card already says what this is.
+    const request = block.prompt.message.text.replace(CONTINUATION_MARKER, '');
+    raw.append(textBlock('pre', request, block.prompt.message.truncated, block.prompt.message.chars));
+  }
+  if (block.brief) {
+    raw.append(el('h4', '', block.brief.final ? 'Summary' : 'Summary (still writing)'));
+    raw.append(renderedMessage(block.brief.renderedHtml, block.brief.message.text));
+  }
+  if (block.handoff) {
+    raw.append(
+      el('p', 'raw-facts', `Handoff saved — ${compactNumber(block.handoff.chars)} characters (${block.handoff.reason})`)
+    );
+  }
+  if (block.resume) {
+    raw.append(
+      el(
+        'p',
+        'raw-facts',
+        `Bootstrap sent into the new chat — ${compactNumber(block.resume.message.chars)} characters at ${clockTime(block.resume.time)}`
+      )
+    );
+  }
+  box.append(raw);
+
+  const row = el('div', 'ev ev-compaction');
+  const time = document.createElement('time');
+  time.textContent = clockTime(block.time);
+  time.title = new Date(block.time).toLocaleString();
+  const body = el('div', 'ev-body');
+  body.append(box);
+  row.append(time, body);
+  return row;
+}
+
+/** What a row was drawn from; a different signature is a different row. */
+function itemSignature(item: TimelineItem): string {
+  if (item.kind === 'compaction') {
+    const { block } = item;
+    return [
+      block.token,
+      block.prompt?.seq ?? '',
+      block.brief ? `${block.brief.seq}:${block.brief.message.chars}:${block.brief.renderedHtml?.chars ?? 0}:${block.brief.state}` : '',
+      block.handoff?.seq ?? '',
+      block.resume?.seq ?? '',
+      block.moved ? 'moved' : ''
+    ].join('|');
+  }
+  const { event } = item;
+  const parts: Array<string | number> = [event.seq, event.time, event.kind, event.agent ?? ''];
+  switch (event.kind) {
+    case 'user_message':
+    case 'progress':
+    case 'chat_error':
+    case 'note':
+    case 'agent_message':
+      parts.push(event.message.chars);
+      break;
+    case 'assistant_message':
+      parts.push(event.message.chars, event.renderedHtml?.chars ?? 0, event.state ?? '', event.final ? 'final' : '');
+      break;
+    case 'tool_call':
+      parts.push(
+        event.call.outcome,
+        event.call.attribution,
+        event.call.durationMs,
+        event.call.args.chars,
+        event.call.result.chars,
+        event.call.summary.title,
+        event.call.summary.detail ?? ''
+      );
+      break;
+    case 'page_tool':
+      parts.push(event.label);
+      break;
+    case 'turn_end':
+      parts.push(event.outcome, event.detail ?? '');
+      break;
+    case 'handoff':
+      parts.push(event.chars);
+      break;
+    default:
+      break;
+  }
+  return parts.join('|');
+}
+
+function itemKey(item: TimelineItem): string {
+  return item.kind === 'compaction' ? `compaction:${item.block.token}` : `event:${item.event.seq}`;
+}
+
 function paintDetail(): void {
   const summary = sessions.find((s) => s.id === selectedId) ?? null;
   $('chatTitle').textContent = summary ? summary.title || 'Untitled session' : 'No session selected';
@@ -965,7 +1236,21 @@ function paintDetail(): void {
       )
     );
   }
-  timelineRows.push(...shown.map(eventRow));
+  const keep = new Set<string>();
+  for (const item of timelineItems(shown)) {
+    const key = itemKey(item);
+    const sig = itemSignature(item);
+    keep.add(key);
+    const cached = rowCache.get(key);
+    if (cached && cached.sig === sig) {
+      timelineRows.push(cached.row);
+      continue;
+    }
+    const row = item.kind === 'compaction' ? compactionRow(item.block) : eventRow(item.event);
+    rowCache.set(key, { sig, row });
+    timelineRows.push(row);
+  }
+  for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
   $('timeline').replaceChildren(...timelineRows);
   $('timelineEmpty').hidden = shown.length > 0;
   pane.scrollTop = atBottom ? pane.scrollHeight : was;
@@ -1672,7 +1957,7 @@ export function initChat(next: Deps): void {
     detailFor = null;
     detailCursor = null;
     // A different session is a different set of calls; nothing here should arrive open.
-    openTools.clear();
+    forgetTimelineRows();
     handoff = null;
     handoffFor = null;
     paintSessions();
