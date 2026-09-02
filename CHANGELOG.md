@@ -9,6 +9,31 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [Unreleased — 2.0.3]
+
+### Fixed
+- **A resumed chat is armed the moment Compact & Resume commits.** The new chat used to get its
+  activity grant only after it had proved a turn of its own; when it never got its first tool call
+  through, nothing knew it was mid-turn and nothing reloaded it. Its calls stayed Unattributed and
+  the loop stalled on the first call after every automatic compaction. The commit now grants the
+  replacement chat the same silence and unattributed recovery an ordinary working chat has.
+- **A retired chat's late observations no longer mint a session of their own.** The old chat
+  re-rendering the brief seconds after the commit created a second session consisting of nothing
+  but the summary. Such observations are filed into the session lineage they came from, without any
+  activity, turn or Goal effect.
+- **The Activity log survives the run.** It was in-memory only, so a failed overnight run left
+  nothing to read. It is now mirrored, redacted as before, to `app.log` in the app's data folder
+  (4 MB, one rotation).
+
+### Changed
+- **One Compact & Resume is one timeline row.** The brief request, the brief, the "handoff saved"
+  line and the bootstrap in the new chat fold into a single expandable card whose header shows the
+  three steps as coloured chips — summary requested, summary received or not, new chat opened or
+  not — so a failed handover is recognisable at a glance instead of being three long messages.
+- **Unfolded tool rows stay put while a chat is running.** The timeline used to be rebuilt from
+  scratch on every change, closing whatever the user had expanded and jumping the scroll position.
+  Rows whose record did not change are now kept as the same nodes.
+
 ## [2.0.2] — 2026-08-26
 
 2.0.2 is the native cross-platform release port. The already-published 2.0.1 release remains the

@@ -269,7 +269,7 @@ src/main/connection.ts        MCP + tunnel lifecycle, per-surface publication & 
 src/main/ipc.ts               every renderer→main operation and main→renderer push
 src/preload/index.ts          the complete renderer-facing API allowlist
 src/main/secrets.ts           Electron safeStorage-backed secret storage
-src/main/logger.ts            redacted RAM-only operational log (not the session store)
+src/main/logger.ts            redacted operational log: 500-entry ring + userData/app.log mirror (not the session store)
 src/main/durable.ts           small named JSON state files under userData/state
 src/main/diagnostics.ts       the UI self-test chain, hop by hop
 src/main/update.ts            process-lifetime updater: startup + 6h checks, one in-flight pass; apply only on ordinary quit
@@ -1381,6 +1381,14 @@ An open semantic turn grants its **conversation** a two-minute silence deadline 
 earliest deadline across all chats, so a 30-second maintenance tick cannot silently add another
 half-minute to the contract. Expiry queues one receipt-tracked browser recovery for an ordinary
 chat, Prime or Worker alike; a confirmed one-shot repair is not repeated for the same episode.
+**A resumed chat is armed at the commit** (`armResumedChat()`, called from both commit sites —
+the `/compact` destination-marker route and the `/commands/ack` resume receipt): the moment S
+names B, B gets the same grant an accepted turn would have earned. The 2026-09-02 automatic
+handover showed why. B never reported its turn or bound its first request id, so its calls went
+Unattributed and B, with no grant and no known turn, was not a repair candidate — the incident
+had nothing to reload and B stayed stuck at its first tool call. With the grant, the silence and
+unattributed sweeps cover B from the first second, exactly as they would a chat that had proved
+itself.
 
 Unattributed recovery is separate evidence feeding the same queue. One recorder verdict that a call
 is **Unattributed** opens a 60-second
@@ -1707,7 +1715,11 @@ for forensics, but it cannot run a new local tool after S names B: `kernel.ts` r
 handler, and `recorder.ts` files the refused row under Unattributed activity with terminal
 `superseded` attribution so deterministic repair can never place it back in B. Such a refusal is
 historical evidence, not liveness: it may not revive a worker, acknowledge its inbox or refresh B's
-activity clock. B's programmatic Resume send mints the same exact composer receipt as a manual send,
+activity clock. A's **late page observations** are filed the same way (`recorder.ts::supersededLineage`):
+prose from a superseded conversation with no live mapping and no current session is stored into the
+lineage session S without any activity, turn or Goal effect, and `initializeSessionForConversation`
+refuses to mint a session for it. Before this, A's re-render of the brief seconds after the commit
+minted a shadow session holding nothing but the brief's HTML (2026-09-02). B's programmatic Resume send mints the same exact composer receipt as a manual send,
 so its zero-anchor user row opens the local turn before the first connector request races in.
 ChatGPT currently represents that marked prompt and its assistant reply as adjacent Fiber turns;
 `answerTurnFor()` is the one relationship used both for handoff capture and for binding B's
@@ -2399,7 +2411,7 @@ Async loads use generation counters so a slow load for session A cannot paint ov
 user selected, and unsolicited state pushes must not clobber a focused unsaved form field.
 Captured ChatGPT HTML is untrusted: `chat.ts::renderedMessage()` allowlists semantic tags,
 strips attributes, drops executable/form/embed content and non-safe link schemes.
-Tests: `ipc.test.ts`, `renderer-html.test.ts`, `renderer-layout.test.ts`, `renderer-state.test.ts`.
+Tests: `ipc.test.ts`, `renderer-html.test.ts`, `renderer-layout.test.ts`, `renderer-state.test.ts`, `renderer-timeline.test.ts` (compaction card, stable rows).
 
 Chats **Open Chat** is another example of the same narrow boundary. `renderer/chat.ts::sessionRow()`
 draws the action only when the current session summary carries a `conversationId`, but the renderer
@@ -2528,7 +2540,10 @@ green boolean. Developer Mode inference specifically compares "ChatGPT reached t
 `logger.ts` is deliberately not durable telemetry. It keeps only 500 redacted entries in RAM,
 inherits current agent attribution from call AsyncLocalStorage, and exports the already-redacted
 projection. If a fact is needed for restart recovery, it does not belong in this log; give it a
-real durable owner instead.
+real durable owner instead. Since 2.0.3 the same redacted lines are also mirrored to
+`userData/app.log` (`initLogFile()` in `index.ts`; 4 MB, one `.1` rotation, self-disabling on write
+failure) so a failed overnight run can still be read the next morning — the 2026-09-02 run left no
+log at all. Nothing reads that file back; it is for humans.
 
 **On-disk state to inspect.** Electron `userData` — `%APPDATA%\chat-on-steroids\` on Windows,
 `~/Library/Application Support/chat-on-steroids/` on macOS, `${XDG_CONFIG_HOME:-~/.config}/chat-on-steroids/`

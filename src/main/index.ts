@@ -7,7 +7,7 @@ import { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, sessi
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
-import { logError, logInfo, logWarn } from './logger.js';
+import { initLogFile, logError, logInfo, logWarn } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
 import { setBrowserOpener, shutdownBridge, startBridge } from './bridge.js';
@@ -232,6 +232,7 @@ void app.whenReady().then(async () => {
   // primary that was told to quit before ready, must never touch the primary's shared userData.
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
   const userData = app.getPath('userData');
+  initLogFile(path.join(userData, 'app.log'));
   initConfigPath(userData);
   initSecretsPath(userData);
   initSessionStore(userData);

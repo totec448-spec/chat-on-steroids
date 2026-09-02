@@ -329,6 +329,15 @@ export type SessionEvent =
 export type SessionEventKind = SessionEvent['kind'];
 
 /**
+ * The marker Compact & Resume puts at the head of the two prompts it types itself: the brief
+ * request in the source chat and the bootstrap in its replacement. Group 1 says which, group
+ * 2 is the continuation token that ties the pair together. Mirrors `CONTINUATION_MARKER` in
+ * `extension/content.js`, which cannot import; the renderer uses this one to fold a
+ * compaction's three rows into one.
+ */
+export const CONTINUATION_MARKER = /^\s*\[\[CLF-(HANDOFF|RESUME):([A-Za-z0-9_-]{16,64})\]\](?:\s|$)/;
+
+/**
  * An event before the store assigns its sequence number.
  *
  * Written as a distributive conditional because a plain Omit over a union keeps only
