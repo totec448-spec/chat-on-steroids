@@ -64,6 +64,7 @@ const {
   dispatchContinuationDestinationSendNow,
   dispatchContinuationSourceSendNow,
   openContinuationNow,
+  releaseContinuationDestinationSendNow,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   restoreContinuations,
@@ -384,6 +385,31 @@ describe('committing', () => {
     expect(await commitContinuation(token, CHAT_B)).toBe(true);
     expect(await commitContinuation(token, CHAT_B)).toBe(true);
     expect((await getSession(sessionId))?.chatIds).toEqual([CHAT_A, CHAT_B]);
+  });
+
+  it('hands an armed replacement dispatch back on proof that nothing left the page, never once sent', async () => {
+    // 2026-09-02: the brief landed in the replacement chat and the user's Escape emptied the
+    // composer in the same instant. The armed dispatch then sat for its six hours.
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(false);
+
+    expect(await releaseContinuationDestinationSendNow(token)).toBe(true);
+    expect(continuationByToken(token)).toMatchObject({
+      state: 'awaiting-chat',
+      destinationSend: { state: 'not-attempted' }
+    });
+    // A fresh command claims what the retired one held; the release is what makes that legal.
+    expect(await claimContinuationNow(token, 'cmd-2')).not.toBeNull();
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+    // Sent is past the point of no return: the marked message or a cancel ends it, not a page.
+    expect(await releaseContinuationDestinationSendNow(token)).toBe(false);
+    expect(continuationByToken(token)?.destinationSend.state).toBe('sent');
+    expect(await releaseContinuationDestinationSendNow('0000000000000000000000000000dead')).toBe(false);
   });
 
   it('re-proves the exact destination message after the continuation already committed', async () => {

@@ -1875,9 +1875,9 @@ input[readonly] {
   color: var(--red);
 }
 
-/* One Compact & Resume as one row: the name, then its three steps as coloured two-word
-   states. Reuses the tool row's open/closed surface so it reads as one more foldable
-   thing in the timeline rather than a panel of its own. */
+/* One Compact & Resume as one row: the name, then one sentence saying where it is or where
+   it died, coloured like the tool rows — green landed, red will not, grey in flight. Reuses
+   the tool row's open/closed surface so it reads as one more foldable thing in the timeline. */
 .compaction > summary {
   flex-wrap: wrap;
 }
@@ -1886,40 +1886,18 @@ input[readonly] {
   color: var(--soft);
 }
 
-.steps {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-left: auto;
+.compaction > summary .state {
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.step {
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
-  border: 1px solid var(--line);
-  color: var(--faint);
-}
-
-.step.is-ok {
+.compaction.tone-good > summary .state {
   color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 45%, transparent);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
 }
 
-.step.is-wait {
-  color: var(--soft);
-  border-color: color-mix(in srgb, var(--soft) 40%, transparent);
-  background: color-mix(in srgb, var(--soft) 8%, transparent);
-}
-
-.step.is-bad {
+.compaction.tone-bad > summary .state {
   color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 45%, transparent);
-  background: color-mix(in srgb, var(--red) 10%, transparent);
 }
 
 .compaction .raw .rich,

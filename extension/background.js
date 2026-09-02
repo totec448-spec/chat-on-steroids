@@ -830,7 +830,12 @@ async function fetchBounded(url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
  * the worker goes back to sleep until a page or the browser wakes it.
  */
 function retryWanted() {
+  // Paired at all is reason enough. The app hands out reopen/reload work only when this worker
+  // asks for it, and after a browser restart this worker holds no tabs and no queues — which is
+  // exactly when a Loop chat the user closed is waiting to be opened again. On 2026-09-02 a Loop
+  // prime sat unopened for good because nothing here thought it had a reason to ask.
   return (
+    token !== null ||
     journal.length > 0 ||
     closeOutbox.length > 0 ||
     commandAckOutbox.length > 0 ||
@@ -1558,13 +1563,9 @@ async function noteTabConversation(source, value) {
  * that is worth placing behind the app's per-chat cooldown.
  */
 async function maintain() {
-  if (
-    Object.keys(tabConversations).length === 0 &&
-    Object.keys(discardProtectedTabs).length === 0 &&
-    !recoveryMonitoring &&
-    deferredRevivals.length === 0
-  )
-    return;
+  // The app decides whether there is recovery work; a worker holding no tabs is not a worker
+  // with nothing to do, it is the one that has to open the chat the app is owed.
+  if (token === null) return;
   const reply = await call('/status');
   if (!reply.ok || !reply.data) return;
   const monitoring = reply.data.recoveryMonitoring === true;
@@ -2775,7 +2776,10 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
       .then(() => drain())
       .then(() => drainCloses())
       .then(() => recoverDeferredRevivals())
-      .catch(() => undefined);
+      // The browser just came back; the app may have been waiting the whole time it was gone.
+      .then(() => maintain())
+      .catch(() => undefined)
+      .then(() => scheduleRetry());
   });
 }
 

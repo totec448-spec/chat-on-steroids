@@ -143,7 +143,9 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   enabled: false,
   maxWorkers: 2,
   allowUnattributedCalls: false,
-  recoverAgentTabs: true
+  // Off: Goal/Loop chats are always recovered, and reopening anything else — a worker, a prime,
+  // a plain chat that once called a tool — is the user's choice to make.
+  recoverAgentTabs: false
 };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(

@@ -893,21 +893,30 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
    * precisely the case where no page will wake it. So holding a chat is itself a reason to
    * keep the alarm running - without that, the repair waits for traffic that never comes.
    */
-  it('keeps its maintenance alarm running while it holds a chat, and asks nobody when it holds none', async () => {
+  /**
+   * Paired is reason enough to ask. The app hands out reopen work only when this worker asks,
+   * and after a browser restart the worker holds no tabs — which is exactly when a Loop chat
+   * the user closed is waiting to be opened again (2026-09-02: a Loop prime never came back
+   * because the worker, holding nothing, never asked).
+   */
+  it('keeps its maintenance alarm running and asks the app on every pass while it is paired, tabs or none', async () => {
     const { fetch, asked } = appWith(null);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
-
     await worker.fireAlarm();
-    expect(asked).toEqual([]);
-    expect(worker.alarmCreate).not.toHaveBeenCalled();
-
+    expect(asked).toEqual(['status']);
+    expect(worker.alarmCreate).toHaveBeenCalledWith('clf-bridge-drain', { delayInMinutes: 0.5 });
 
     await worker.registerTab(51);
     await worker.send({ type: 'bind', conversationId: CHAT }, 51);
-    expect(worker.alarmCreate).toHaveBeenCalledWith('clf-bridge-drain', { delayInMinutes: 0.5 });
-
     await worker.fireAlarm();
-    expect(asked).toEqual(['status']);
+    expect(asked).toEqual(['status', 'status']);
+  });
+
+  it('asks nobody while it is not paired', async () => {
+    const { fetch, asked } = appWith(null);
+    const worker = loadWorker({ local: new FakeStorageArea({}), session: new FakeStorageArea(), fetch });
+    await worker.fireAlarm();
+    expect(asked).toEqual([]);
   });
 
   /**
@@ -949,9 +958,10 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     expect(worker.tabsReload).toHaveBeenCalledWith(61);
     expect(asked.slice(-2)).toEqual(['status', `repaired:${CHAT}`]);
 
-    // And the cadence stops with the tab, rather than waking a worker forever.
+    // The cadence outlives the tab: a paired worker with nothing open is the one that has to
+    // open the chat the app is owed.
     await worker.closeTab(61);
-    expect(worker.alarmClear).toHaveBeenCalledWith('clf-bridge-drain');
+    expect(worker.alarmClear).not.toHaveBeenCalledWith('clf-bridge-drain');
   });
 });
 
@@ -1739,13 +1749,12 @@ describe('extension observation journal', () => {
     healthy = true;
     await worker.send({ type: 'events', conversationId, entries: [event('third')] });
     expect(journalOf(session)).toEqual([]);
-    // Delivered, but this browser is still holding that chat - and a chat it holds is itself
-    // work, because the alarm is the only thing that wakes a stopped worker to collect a
-    // repair for it. It stops when the tab does.
+    // Delivered, but this browser is paired - and a paired worker keeps asking, because the
+    // alarm is the only thing that wakes a stopped worker to collect a repair, tab or no tab.
     expect(worker.alarmClear).not.toHaveBeenCalled();
 
     await worker.closeTab(1);
-    expect(worker.alarmClear).toHaveBeenCalledWith('clf-bridge-drain');
+    expect(worker.alarmClear).not.toHaveBeenCalledWith('clf-bridge-drain');
   });
 
   it('durably retries a lost command ACK after the service worker restarts', async () => {
