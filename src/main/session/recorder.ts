@@ -266,6 +266,16 @@ async function initializeSessionForConversation(
     }
     known = await findSessionByConversation(conversationId);
   }
+  if (!known && (await conversationWasSuperseded(conversationId))) {
+    // Compact & Resume moved this chat's session onto its replacement. Whatever the old page
+    // still reports — the brief re-rendered with its HTML, a lingering turn, the user typing
+    // into it — is history of that one session, never a chat of its own: on 2026-09-02 the
+    // brief's late re-render minted a second session holding nothing but the summary.
+    // recordChatObservationsNow() files such messages into the lineage; nothing else may
+    // mint a session for a conversation this app has already replaced.
+    logInfo(`conversation ${conversationId} was replaced by Compact & Resume; its late observation gets no session of its own`);
+    return null;
+  }
   // A chat this app opened is named for the command that opened it. The alternative —
   // the first thing said in the chat — is this app's own bootstrap prompt.
   const origin = pendingOrigins.get(conversationId) ?? null;
@@ -1547,6 +1557,86 @@ export function recordChatObservations(
   return work;
 }
 
+/**
+ * The session a replaced Compact & Resume source chat still writes its prose to.
+ *
+ * Null for every conversation that is current somewhere or unknown; those take the ordinary
+ * path. Only a chat that is a past frontend of exactly one session, and current on none, has
+ * a lineage to file into.
+ */
+async function supersededLineage(conversationId: string): Promise<string | null> {
+  if (!conversationId || !(await conversationWasSuperseded(conversationId))) return null;
+  if (await findSessionByConversation(conversationId)) return null;
+  const lineage = await findSessionByConversation(conversationId, { includeHistorical: true });
+  return lineage && lineage.conversationId !== conversationId ? lineage.id : null;
+}
+
+/**
+ * What a replaced chat may still add to its session: its messages, and nothing else.
+ *
+ * The session's live turn, activity clock, Goal obligations and title belong to the chat
+ * that replaced it, so a lingering page on the old chat records prose only — the brief's
+ * final rendering arriving after the commit, or the user carrying on in the old tab — and
+ * moves none of the projections the replacement now owns.
+ */
+async function recordSupersededMessages(
+  conversationId: string,
+  sessionId: string,
+  observations: readonly ChatObservation[]
+): Promise<number> {
+  let stored = 0;
+  for (const item of observations) {
+    // Request evidence still joins a request to this retired chat, so its call is refused as
+    // superseded — a message that names the handover — rather than waiting out the identity
+    // window and being refused as nobody's.
+    if (item.kind === 'tool_evidence') {
+      if (item.calls && item.calls.length > 0) {
+        noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time);
+      }
+      continue;
+    }
+    if (!item.messageId) continue;
+    const base = {
+      time: item.time,
+      source: 'extension' as const,
+      ...(item.turnId ? { turnId: item.turnId } : {})
+    };
+    let written: { changed: boolean } | null = null;
+    if (item.kind === 'user_message') {
+      written = await upsertMessageEvent(
+        sessionId,
+        {
+          ...base,
+          kind: 'user_message',
+          message: await storeText(sessionId, item.text ?? '', MAX_USER_MESSAGE_CHARS),
+          messageId: item.messageId
+        },
+        { preferTime: item.authoredTime === true }
+      );
+    } else if (item.kind === 'assistant_message') {
+      const state = item.state ?? (item.final === true ? 'final' : 'streaming');
+      written = await upsertMessageEvent(
+        sessionId,
+        {
+          ...base,
+          kind: 'assistant_message',
+          message: await storeText(sessionId, item.text ?? '', 256_000),
+          ...(item.renderedHtml
+            ? { renderedHtml: await storeText(sessionId, item.renderedHtml, 120_000) }
+            : {}),
+          messageId: item.messageId,
+          state,
+          final: state === 'final'
+        },
+        { preferTime: item.authoredTime === true }
+      );
+    }
+    if (written?.changed) stored++;
+  }
+  if (stored > 0) notifyChanged();
+  return stored;
+}
+
 async function recordChatObservationsNow(
   conversationId: string,
   observations: readonly ChatObservation[],
@@ -1559,6 +1649,13 @@ async function recordChatObservationsNow(
 }> {
   const activity = { meaningful: false, working: false, terminal: false };
   if (!recordingEnabled()) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
+  if (!conversations.has(conversationId)) {
+    const lineage = await supersededLineage(conversationId);
+    if (lineage) {
+      const stored = await recordSupersededMessages(conversationId, lineage, observations);
+      return { sessionId: lineage, stored, activity, goalCandidates: [] };
+    }
+  }
   let firstUser: ChatObservation | undefined;
   let pageTitle: ChatObservation | undefined;
   const explicitEnds = new Set<string>();
