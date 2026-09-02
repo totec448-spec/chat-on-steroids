@@ -401,7 +401,7 @@ describe('cross-platform packaging targets', () => {
     expect(builder.mac.identity).toBeNull();
     expect(builder.mac.notarize).toBe(false);
     expect(builder.mac.category).toBe('public.app-category.developer-tools');
-    expect(builder.mac.minimumSystemVersion).toBe('12.0');
+    expect(builder.mac.minimumSystemVersion).toBe('13.0');
     expect(builder.mac.artifactName).toBe('Chat-On-Steroids-macOS-${arch}.${ext}');
     const nativePrep = readFileSync(path.join(root, 'scripts', 'prepare-packaging-native.mjs'), 'utf8');
     expect(nativePrep).toContain("await chmod(path.join(payloadRoot, 'node-pty', 'prebuilds', prebuildDir, 'spawn-helper'), 0o755)");
@@ -414,7 +414,7 @@ describe('cross-platform packaging targets', () => {
       'CFBundleShortVersionString: packageVersion',
       'CFBundleVersion: packageVersion',
       "LSApplicationCategoryType: 'public.app-category.developer-tools'",
-      "LSMinimumSystemVersion: '12.0'",
+      "LSMinimumSystemVersion: '13.0'",
       'NSScreenCaptureUsageDescription:',
       "path.join(resources, 'desktop', 'macos-desktop-addon.node')",
       "path.join(resources, 'desktop', 'libcos-desktop.dylib')",
@@ -446,9 +446,9 @@ describe('cross-platform packaging targets', () => {
 
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
     const notes = currentReleaseNotes();
-    expect(readme).toContain('macOS 12 Monterey or newer');
-    expect(notes).toContain('macOS 12');
-    expect(notes).toContain('Monterey or newer');
+    expect(readme).toContain('macOS 13 Ventura or newer');
+    expect(notes).toContain('macOS 13');
+    expect(notes).toContain('Ventura or newer');
   });
 
   it('hides Electron helper parentheses from otool-classic without changing the inspected file', () => {

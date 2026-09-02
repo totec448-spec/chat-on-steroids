@@ -60,7 +60,7 @@ sha256sum Chat-On-Steroids-Linux-x64.AppImage     # Linux
 
 ## Requirements
 
-- **Windows 10/11**, **macOS 12 Monterey or newer**, or a current desktop **Linux**, on x64 or ARM64 matching the build you downloaded.
+- **Windows 10/11**, **macOS 13 Ventura or newer**, or a current desktop **Linux**, on x64 or ARM64 matching the build you downloaded.
 - **Chrome 116 or newer** for the companion extension. Without it you still get the MCP tools, but not session attribution, Compact & Resume, worker chats or the Goal loop.
 - **Linux:** a Secret Service keyring such as GNOME Keyring or KWallet. The app refuses Electron's unencrypted `basic_text` fallback for stored keys.
 - A ChatGPT workspace with **Developer mode** and custom MCP apps. OpenAI currently documents full MCP support, including write actions, as a beta for Business, Enterprise and Edu, with Pro limited to read and fetch. Business needs an admin to enable it. Check OpenAI's [Developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt) page if your workspace looks different.
@@ -100,7 +100,7 @@ After changing permissions, refresh or recreate the custom app in ChatGPT and st
 | Connector | Tools | What they do |
 | --- | --- | --- |
 | **Core** (all platforms) | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` | Bounded reads and search inside approved folders, preflighted multi-file patches, shell commands and interactive terminals, lookups into the recorded session, and worker chat control |
-| **Desktop** (Windows, and macOS 12.3 or newer when switched on) | `observe`, `computer` | Screenshots, window and control inspection, mouse, keyboard and clipboard |
+| **Desktop** (Windows, and macOS when switched on) | `observe`, `computer` | Screenshots, window and control inspection, mouse, keyboard and clipboard |
 
 Core exposes at most seven tools at once: `find` is the no-shell search fallback and steps aside when commands are enabled. Revoking a permission takes effect immediately, even while ChatGPT still shows the old schema. The full contract lives in [`docs/tool-surface.md`](docs/tool-surface.md).
 

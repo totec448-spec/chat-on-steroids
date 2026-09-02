@@ -266,7 +266,7 @@ Do not "restore" these from an older document:
 src/main/index.ts             Electron startup, window/tray, shutdown, security shell
 src/main/shutdown.ts          ordered teardown phases, each bounded, ending in the exit
 src/main/config.ts            validated settings, migrations, defaults, read-only caps
-src/main/platform.ts          host capability projection; Desktop exists only on Windows and macOS ≥ 12.3
+src/main/platform.ts          host capability projection; Desktop exists only on Windows and macOS (ScreenCaptureKit floor 12.3, below the 13.0 app floor)
 src/main/connection.ts        MCP + tunnel lifecycle, per-surface publication & status
 src/main/ipc.ts               every renderer→main operation and main→renderer push
 src/preload/index.ts          the complete renderer-facing API allowlist
@@ -383,7 +383,7 @@ durable or externally re-observable fact can reconstruct it.
 | Fact / mechanism | Authoritative owner | Lifetime / durable form | Consumers / invariant |
 | --- | --- | --- | --- |
 | approved roots + permissions + feature toggles | `config.ts` | `userData/config.json`, atomic temp→rename; validated/migrated on every load | `effectiveCapabilities()` is the live permission projection; malformed existing config recovers conservatively, never as fresh-install consent |
-| host capability availability | `platform.ts` + `shared/capabilities.ts` | derived, not stored | Desktop capabilities are impossible off Windows/macOS ≥ 12.3; every newly added capability is root-required until explicitly classified rootless |
+| host capability availability | `platform.ts` + `shared/capabilities.ts` | derived, not stored | Desktop capabilities are impossible off Windows/macOS; every newly added capability is root-required until explicitly classified rootless |
 | secrets | `secrets.ts` | OS `safeStorage`; never config/log/renderer | OpenAI, bridge and OpenRouter credentials never cross into untrusted renderer/page state |
 | small cross-restart control state | `durable.ts` | named `userData/state/*.json`; temp→rename; debounced generations + explicit `writeDurableNow` barriers | swarm, continuations, correlations, bridge commands, Goal ledgers; a failed file must not poison later files or publish a rejected generation |
 | MCP surface shape | `mcp/surfaces.ts` + `server.ts` exposure cache | endpoint lifetime | discovery is a cached schema promise; live permission enforcement is separate and current |

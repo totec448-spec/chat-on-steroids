@@ -132,7 +132,7 @@ function describeSurfaces(): SurfaceStatus[] {
 
 function desktopUnavailableDetail(id: SurfaceId): string {
   if (id === 'desktop' && !desktopAutomationSupported()) {
-    return 'Desktop automation requires Windows or macOS 12.3 or later; Linux is not yet supported. Core files, terminal, sessions and sub-agents remain available.';
+    return 'Desktop automation requires Windows or macOS; Linux is not yet supported. Core files, terminal, sessions and sub-agents remain available.';
   }
   return id === 'desktop'
     ? 'Turn on "See the screen", "Control mouse and keyboard" or a clipboard permission to use this connector.'
