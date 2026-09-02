@@ -89,6 +89,19 @@ interface LiveConversation {
   lastTurnOutcome: TurnOutcome | null;
   /** Start of that turn, so its final may predate a later detach/end while old finals cannot. */
   lastTurnStartedAt: number | null;
+  /** ChatGPT request ids — one per server turn — that called tools while the open turn ran. */
+  turnRequestIds: Set<string>;
+  /**
+   * The newest turn the page reported completed, with the server turns it was calling under.
+   *
+   * A request id is minted per server turn and outlives anything the page does: a reload,
+   * a lost stream, a Stop click. So a call under one of these ids that *starts* after the
+   * reported end is proof the end was the page's mistake — ChatGPT is still working that
+   * turn — and the recorder reopens it rather than let Goal answer a turn that has not
+   * finished. See reopenFalselyEndedTurn. In-memory only: an app restart inside such a turn
+   * loses the proof, and the turn stays closed as the page reported it.
+   */
+  endedTurn: { turnId: string; startedAt: number | null; endedAt: number; requestIds: Set<string> } | null;
   /** Visible ChatGPT-native activity rows, updated by the page's stable row identity. */
   pageTools: Map<string, ProgressRecord>;
 }
@@ -342,6 +355,8 @@ async function initializeSessionForConversation(
     knownTurnEnds: history.knownTurnEnds,
     lastTurnOutcome: summary.lastTurnOutcome,
     lastTurnStartedAt: history.lastTurnStartedAt,
+    turnRequestIds: new Set<string>(),
+    endedTurn: null,
     pageTools: history.pageTools
   });
   if (!known) {
@@ -1281,6 +1296,13 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       ...(eventAgent ? { agent: eventAgent } : {}),
       ...(target.turnId ? { turnId: target.turnId } : {})
     });
+    const reopenedTurnId = await reopenFalselyEndedTurn(
+      sessionId,
+      target.conversationId,
+      input.requestId ?? null,
+      input.startedAt,
+      eventAgent
+    );
     notifyChanged();
     try {
       const filed = await getSession(sessionId);
@@ -1296,7 +1318,8 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         input.endsActivity === true,
         filed?.lastAssistantFinalAt ?? null,
         // The one thing an unattributed call still carries: the server turn it belongs to.
-        input.requestId ?? null
+        input.requestId ?? null,
+        reopenedTurnId
       );
     } catch (err) {
       logWarn(`call attribution listener failed: ${(err as Error).message}`);
@@ -1306,6 +1329,62 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     logWarn(`session recorder could not store a tool call: ${(err as Error).message}`);
     return null;
   }
+}
+
+/**
+ * Files one attributed call against its conversation's turn lifecycle.
+ *
+ * While a turn is open the call's request id is remembered as one of the server turns that
+ * turn runs under. With no turn open, the same request id calling again — starting after the
+ * end the page reported — is the earliest fact that contradicts that end: ChatGPT does not
+ * mint a new request id for a turn it is still working, so the turn never ended, and only the
+ * page's view of it did. Live 2026-09-02: a reload mid-turn adopted the open turn and closed it
+ * "completed" four seconds later from interim prose; the same request id then called tools for
+ * twenty-four more minutes, and Goal typed the next message against an answer that had never
+ * been given. The reopening is app-authored and durable — a second `turn_start` for the same
+ * id, named as such — so the page's real end is accepted afterwards, the projection hands the
+ * open id back to the next document, and Goal is told (through the attribution listener) that
+ * the decision it was drafting was owed to nothing.
+ *
+ * Deliberately narrow: a call that *started* before the reported end is the ordinary in-flight
+ * call finishing late and proves nothing; a different request id is a different server turn.
+ * Returns the reopened turn id, or null when this call changed no lifecycle.
+ */
+async function reopenFalselyEndedTurn(
+  sessionId: string,
+  conversationId: string | null,
+  requestId: string | null,
+  startedAt: number,
+  agent: string | null
+): Promise<string | null> {
+  if (!conversationId || !requestId) return null;
+  const live = conversations.get(conversationId);
+  if (!live || live.sessionId !== sessionId) return null;
+  if (live.turnStartedAt !== null) {
+    live.turnRequestIds.add(requestId);
+    return null;
+  }
+  const ended = live.endedTurn;
+  if (!ended || !ended.requestIds.has(requestId) || startedAt <= ended.endedAt) return null;
+  await appendEvent(sessionId, {
+    time: startedAt,
+    source: 'app',
+    kind: 'turn_start',
+    turnId: ended.turnId,
+    detail: 'the same ChatGPT request kept calling tools after the page reported this turn completed',
+    ...(agent ? { agent } : {})
+  });
+  live.endedTurn = null;
+  live.knownTurnEnds.delete(ended.turnId);
+  live.openTurns.add(ended.turnId);
+  live.turnId = ended.turnId;
+  live.turnStartedAt = ended.startedAt ?? startedAt;
+  live.lastTurnOutcome = null;
+  live.turnRequestIds = new Set(ended.requestIds);
+  logInfo(
+    `session ${sessionId} reopened turn ${ended.turnId} — request ${requestId} kept calling tools after the page reported it completed`
+  );
+  return ended.turnId;
 }
 
 interface Target {
@@ -1341,7 +1420,8 @@ let attributionListener:
       startedAt: number,
       endsActivity: boolean,
       lastAssistantFinalAt: number | null,
-      requestId: string | null
+      requestId: string | null,
+      reopenedTurnId: string | null
     ) => void)
   | null = null;
 
@@ -1354,7 +1434,9 @@ export function setCallAttributionListener(
         startedAt: number,
         endsActivity: boolean,
         lastAssistantFinalAt: number | null,
-        requestId: string | null
+        requestId: string | null,
+        /** The turn this call reopened, when it proved the page's completed end false. */
+        reopenedTurnId: string | null
       ) => void)
     | null
 ): void {
@@ -1875,6 +1957,9 @@ async function recordChatObservationsNow(
           live.turnStartedAt = item.time;
           live.turnId = item.turnId;
           live.openTurns.add(item.turnId);
+          // A page-authored start is a new send; whatever end came before it is settled.
+          live.turnRequestIds = new Set<string>();
+          live.endedTurn = null;
         }
         activity.meaningful = true;
         activity.working = true;
@@ -1906,6 +1991,14 @@ async function recordChatObservationsNow(
           live.openTurns.delete(item.turnId);
           live.lastTurnOutcome = item.outcome ?? 'unknown';
           live.lastTurnStartedAt = endedStartedAt;
+          // Only a completed end can be proven false by a later call: it is the one verdict
+          // Goal acts on, and the one a reloaded page fabricates. A stop is the user's own
+          // decision and the failure outcomes already belong to recovery.
+          live.endedTurn =
+            live.turnId === item.turnId && item.outcome === 'completed'
+              ? { turnId: item.turnId, startedAt: endedStartedAt, endedAt: item.time, requestIds: live.turnRequestIds }
+              : null;
+          live.turnRequestIds = new Set<string>();
           if (live.turnId === item.turnId) {
             live.turnStartedAt = null;
             live.turnId = null;
@@ -2115,6 +2208,8 @@ export function rebindConversation(sessionId: string, fromConversationId: string
     knownTurnEnds: new Set<string>(),
     lastTurnOutcome: null,
     lastTurnStartedAt: null,
+    turnRequestIds: new Set<string>(),
+    endedTurn: null,
     pageTools: new Map()
   });
   lastActiveSessionId = sessionId;

@@ -532,6 +532,22 @@
    */
   const pageTurnIds = new Map();
   let turnStartedAt = 0;
+  /**
+   * The open generation was adopted from the app and this document has not yet seen ChatGPT
+   * generating it.
+   *
+   * A document that watched the Stop control come and go has lifecycle evidence of its own,
+   * whether it opened the generation or adopted it. A reloaded document that has seen neither
+   * has none: only the app's word that a turn is open and whatever transcript ChatGPT
+   * committed before the reload. Live 2026-09-02: that transcript was interim prose of a turn
+   * still running, the Stop control had not come back yet, and the degraded DOM rule closed
+   * the adopted turn as completed four seconds in while the same request id went on calling
+   * tools for twenty-four minutes — after which Goal wrote the next user message against an
+   * answer that had never been given. So until this document sees the turn running, visible
+   * prose never closes it: only the page model, an error, a user stop, a new send or the stall
+   * budget may. See endOutcome.
+   */
+  let unwitnessedGeneration = false;
   let lastChangeAt = 0;
   let stallReported = false;
   let userStopped = false;
@@ -1263,6 +1279,7 @@
     seedResumeBaseline();
     anchorAdoptedQuestion();
     generating = true;
+    unwitnessedGeneration = true;
     turnId = open;
     genNode = null;
     priorSections = new WeakSet(baselineSections);
@@ -1646,8 +1663,11 @@
     // its end_turn bit is the authority on successful completion and mere visible prose is
     // never enough to close a quiet turn: interim commentary is public assistant prose too.
     // A browser where Fiber genuinely is unavailable still needs a usable lifecycle, so the
-    // old DOM rule remains there behind this capability check.
-    if (!fiberPresent && answerText(turn).length > 0) return { outcome: 'completed' };
+    // old DOM rule remains there behind this capability check — for generations this
+    // document has seen running. An adopted one it has not has no document-side evidence of
+    // finishing at all, and its visible prose is whatever was committed before the reload.
+    // See unwitnessedGeneration.
+    if (!fiberPresent && !unwitnessedGeneration && answerText(turn).length > 0) return { outcome: 'completed' };
     if (turnStalled()) {
       return { outcome: 'stalled', detail: 'no visible output and no progress for ten minutes' };
     }
@@ -1887,6 +1907,7 @@
     // and waits for it to hold still first. See noteGoalTurn.
     noteGoalTurn(ended, result.outcome, endedTurnId);
     turnStartedAt = 0;
+    unwitnessedGeneration = false;
     genNode = null;
   }
 
@@ -2026,6 +2047,9 @@
     }
 
     const nowGenerating = CLF_DOM.generating();
+    // The Stop control on screen for a turn this document adopted is the document seeing that
+    // turn run — from here its lifecycle evidence is as good as for a turn it opened itself.
+    if (generating && nowGenerating) unwitnessedGeneration = false;
 
     // The transcript that is already settled goes in first — before this tick can open a
     // new generation. The recorded order used to be the other way round: `turn_start` for
@@ -2100,6 +2124,7 @@
       stallReported = false;
       genCount++;
       turnId = `g-${RUN_ID}-${epoch}-${genCount}`;
+      unwitnessedGeneration = false;
       bindResumeGoalTurn(turnId);
       genNode = null;
       // What was already there is what this generation must not adopt — as it stood at the

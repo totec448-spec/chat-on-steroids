@@ -211,8 +211,8 @@ Do not "restore" these from an older document:
 - `mcp/instructions.ts::coreInstructions()` also still carries a root example shaped like
   `${firstRoot}/src/main.ts`. That silently assumes the approved root *is* the project. Live Core
   tool contracts in `tools-core.ts` are the authority: an approved root is often the **parent** of
-  the project, so every intermediate folder remains explicit (`/totec/chatgpt-local-files/...`,
-  not `/totec/src/...`). There is no model-visible `list_roots` fallback that makes the old example
+  the project, so every intermediate folder remains explicit (`/me/projects/app/...`,
+  not `/me/src/...`). There is no model-visible `list_roots` fallback that makes the old example
   safe; fix the instruction text/tests rather than teaching tools to guess a missing project level.
 - Goal currently continues **completed final answers only**. Older README/working-note wording that
   says an `interrupted` turn is automatically continued is stale against `content.js::GOAL_CONTINUABLE`.
@@ -1092,7 +1092,24 @@ The recovery proof is intentionally **state-based, not page-turn-id-based**. A r
 replay old final messages carrying historical turn ids, so `recorder.ts` scans for the newest final
 assistant observation whose exact `turnId` is still present in the durable `openTurns` set and has
 no explicit end in the same batch. Only that `recoveredFinal` may append a synthetic
-`turn_end(completed)`. Other historical finals remain transcript backfill. For Goal, a newer stable
+`turn_end(completed)`. Other historical finals remain transcript backfill.
+
+**A completed end the page reported is withdrawn by the server turn calling on.** ChatGPT's
+request id is minted per server turn and outlives the page — reload, lost stream, Stop click. The
+recorder remembers the request ids an open turn called under and, when the page reports that turn
+`completed`, keeps them with the end. A call under one of those ids that *starts* after the
+reported end (`reopenFalselyEndedTurn`) proves the end was the page's, not ChatGPT's: the recorder
+appends an app-authored `turn_start` for the same id (with `detail`), takes the id out of
+`knownTurnEnds` so the real end is accepted later, publishes it as `activeTurnId` again, and the
+bridge retires whatever Goal was drafting for it (`retireGoalDraftsFor` + `forgetGoalWatch`). A call
+that started before the end is an in-flight call finishing late and proves nothing; a different
+request id is a different turn; only `completed` ends are reopened — a stop is the user's, the
+failure outcomes belong to recovery. The proof is process memory: an app restart inside such a turn
+leaves it closed as reported. Live 2026-09-02: a reload mid-turn closed the adopted turn after four
+seconds, the same request id called tools for twenty-four more minutes, and Goal typed the next
+message against an answer never given.
+
+For Goal, a newer stable
 final may also strengthen an earlier uncertain (`unknown|failed|interrupted|stalled`) turn boundary
 when its authored time is at/after that turn's durable start; that marks the canonical assistant
 message `goalEligible` **without fabricating another turn end**. Canonical message upsert keeps
@@ -1216,6 +1233,12 @@ Turn closing is deliberately asymmetric:
 - Stop disappearing merely opens a settle window. If Stop returns, text/native activity changes,
   unanswered connector work remains, or the terminal message does not belong to this exact turn,
   completion is withdrawn;
+- the degraded no-Fiber rule — visible prose after the settle window means `completed` — applies
+  only to a generation this document has seen running (`unwitnessedGeneration`). A turn adopted
+  from the app on reload has no document-side evidence until the Stop control has been seen for
+  it; until then only the page model, an error, a user stop, a new send or the stall budget may
+  close it. Live 2026-09-02: the committed interim prose of a running turn closed the adopted turn
+  four seconds after the reload;
 - a genuinely newer authored user message is a hard boundary for the previous turn, while page
   unload/`closeConversation` alone never invents its outcome.
 
@@ -1626,9 +1649,13 @@ chat tied to one continuation token/session), and `revive` (the already-bound ex
 conversation + run incarnation + unique wake identity). The deadlines differ because the semantic
 risks differ:
 
-- **Fresh worker before any page owns it:** discovery may make one safe re-delivery after **60s**;
-  nothing irreversible happened. But the worker invitation has an absolute **120s bootstrap
-  lifetime from creation**, so a late handout cannot keep a slot forever.
+- **Fresh worker before any page owns it:** the chat this app opened has **`WORKER_REDEEM_MS`
+  (20s)** to redeem its marker (plus the browser launch window when the app had to start the
+  browser). A page silent past that is dead, not slow: the same single-owner command is opened
+  **once more**, and a second silence fails the slot at once so the workers queued behind it open
+  (2026-09-02, worker-4 held its siblings for ninety seconds). A command still in line has no
+  clock of its own; the worker invitation has an absolute **120s bootstrap lifetime from
+  creation**, so a late handout cannot keep a slot forever.
 - **Fresh worker after redeem:** the page-owned attempt is one-shot. Its lease is bounded by the
   smaller of **90s from claim** and the remaining absolute worker-bootstrap lifetime. A page-reported
   bootstrap failure is terminal rather than a prompt to open another worker chat.

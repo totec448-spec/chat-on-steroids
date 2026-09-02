@@ -44,6 +44,7 @@ import {
   goalViewFor,
   pendingGoalReplies,
   retireGoalDrafts,
+  retireGoalDraftsFor,
   setGoalReplyActiveNow,
   setGoalObjectiveNow,
   setGoalSwitchNow,
@@ -199,18 +200,25 @@ export const COMMAND_DEADLINE_MS = 90_000;
 /**
  * The two clocks a worker bootstrap lives under before it is a failure rather than a wait.
  *
- * A bootstrap that has never been handed to a page is the one case where trying again cannot
- * duplicate anything: no tab was opened, no marker exists, so a second attempt is the first
- * attempt. That is `RETRY`. `LIMIT` is absolute and measured from the moment the broker invited
- * the worker, so no combination of a late hand-out and a fresh ninety-second lease can keep a
- * slot `invited` past it — which is exactly what happened to a worker whose command sat unleased
- * for nine minutes holding the last free slot.
+ * `REDEEM` is how long the chat this app opened gets to pick up its instruction. That is the
+ * browser's whole round trip — create the tab, load ChatGPT, run the content script, redeem —
+ * and it takes four to six seconds when it works at all; twenty is the same allowance the
+ * placement offer gives it. A page that has not redeemed by then is not slow, it is dead: a tab
+ * that loaded and never ran the marker (worker-4 on 2026-09-02 sat as an empty New chat for the
+ * full ninety seconds, and the two workers queued behind it opened only after it was failed).
+ * So the chat is opened once more, once, and a second silence fails the slot. This is safe
+ * because `/commands/redeem` is single-owner: whichever page redeems first types, the other is
+ * told there is nothing for it, and the worst case is one blank tab. It is bounded because the
+ * retry is spent once and `LIMIT` is absolute, measured from the moment the broker invited the
+ * worker, so no combination of a late hand-out and a fresh lease keeps a slot `invited` past it
+ * — which is what happened to a worker whose command sat unleased for nine minutes holding the
+ * last free slot.
  *
- * A *leased* command is deliberately not retried. `deliverOne()` opens one chat per command on
- * purpose; a background retry over a page that is merely slow is how this app used to grow
- * duplicate worker tabs minutes after anyone expected them.
+ * Once a page owns the command the attempt is one-shot again: it has `COMMAND_DEADLINE_MS` to
+ * type and name its chat, and a page that redeemed and never typed is a failure, not a prompt
+ * to open another chat.
  */
-const WORKER_BOOTSTRAP_RETRY_MS = 60_000;
+export const WORKER_REDEEM_MS = 20_000;
 export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
 /** A worker may occupy the broker's `waking` state for one short, absolute attempt. */
 /**
@@ -380,11 +388,11 @@ interface Command {
    */
   claimedAt: number | null;
   /**
-   * When the unleased-bootstrap retry was spent, so it is spent once. Memory only.
+   * When a worker bootstrap's one re-open was spent, so it is spent once. Memory only.
    *
    * Not persisted: after a restart the absolute limit is still measured from the persisted
-   * `createdAt`, so the worst a forgotten retry can cost is one more delivery attempt inside a
-   * window that ends at the same instant either way.
+   * `createdAt`, so the worst a forgotten retry can cost is one more open of the same
+   * single-owner command inside a window that ends at the same instant either way.
    */
   retriedAt: number | null;
   /**
@@ -5448,9 +5456,18 @@ function noteCallAttribution(
   startedAt: number,
   endsActivity = false,
   lastAssistantFinalAt: number | null = null,
-  requestId: string | null = null
+  requestId: string | null = null,
+  reopenedTurnId: string | null = null
 ): void {
   if (conversationId) {
+    // The recorder has just withdrawn a completed end the page reported: the same server turn
+    // went on calling tools. Whatever Goal was drafting for that end — or had filed as owed —
+    // was a reply to an answer that has not been given. The real end, when the page sees it,
+    // files its own obligation.
+    if (reopenedTurnId && retireGoalDraftsFor(conversationId)) {
+      forgetGoalWatch(conversationId);
+      logInfo(`goal: withdrew the decision owed for turn ${reopenedTurnId} of ${conversationId} — the turn is still running`);
+    }
     if (unattributedIncident && !unattributedIncident.proven.has(conversationId)) {
       unattributedIncident.proven.add(conversationId);
       // One suspect fewer is a shorter rung for everybody still waiting. Re-read it now instead
@@ -5960,11 +5977,15 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
   }
   if (command.spec.type === 'worker') {
     // Absolute, from the invitation. Whatever else this command is waiting for, the slot it
-    // holds stops being `invited` by this instant.
+    // holds stops being `invited` by this instant. A command still in line has no clock of its
+    // own: every ending of the command ahead of it calls deliver(), and this limit is the fence.
     const limit = command.createdAt + WORKER_BOOTSTRAP_LIMIT_MS;
-    if (command.claimedAt === null) {
-      const next = command.retriedAt === null ? command.createdAt + WORKER_BOOTSTRAP_RETRY_MS : limit;
-      return Math.min(next, limit) - now;
+    if (command.claimedAt === null) return limit - now;
+    // Opened but not yet redeemed: the page's round trip, not its typing budget. A browser this
+    // app had to start is given its launch window on top, since nothing can redeem before it is up.
+    if (command.owner === null) {
+      const redeemBy = Math.max(command.claimedAt + WORKER_REDEEM_MS, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS);
+      return Math.min(redeemBy, limit) - now;
     }
     return Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit) - now;
   }
@@ -6056,19 +6077,18 @@ function expire(command: Command): void {
     retire(command, 'its worker is bound and running');
     return;
   }
-  // Nothing was ever opened for this one, so trying again is not a second tab — it is the first.
-  // The queue stalling is the normal way to get here: a sibling bootstrap that finished without
-  // an ACK used to leave nothing to advance the line behind it.
+  // The chat opened for it never redeemed the marker. Open it once more, once: the command is
+  // single-owner, so the page that does redeem is the only one that ever types.
   if (
     spec.type === 'worker' &&
-    command.claimedAt === null &&
+    command.claimedAt !== null &&
+    command.owner === null &&
     command.retriedAt === null &&
     Date.now() < command.createdAt + WORKER_BOOTSTRAP_LIMIT_MS
   ) {
     command.retriedAt = Date.now();
-    logWarn(`bridge: ${specKey(spec)} was never handed to a page — trying to open its chat once more`);
-    armDeadline(command);
-    void deliver();
+    logWarn(`bridge: the chat opened for ${specKey(spec)} never picked up its instruction — opening it once more`);
+    void reopenWorkerChat(command);
     return;
   }
   if (spec.type === 'revive' && !revivalFor(spec.agent)) {
@@ -6077,6 +6097,27 @@ function expire(command: Command): void {
   }
   drop(command, command.lastError ?? 'the chat this app opened did not report back in time');
   deliver();
+}
+
+/**
+ * The one re-open of a worker chat that opened and never redeemed.
+ *
+ * A fresh lease first, so the redeem window and the durable record both restart from this
+ * open; a lease that cannot be written ends the command instead, exactly as a first delivery
+ * would. Straight to the OS opener rather than the placement offer: the home page already had
+ * its chance to place this one.
+ */
+async function reopenWorkerChat(command: Command): Promise<void> {
+  if (!(await persistCommandLease(command, null, Date.now()))) {
+    if (commands.includes(command)) {
+      drop(command, 'the chat this app opened did not report back in time');
+      await deliver();
+    }
+    return;
+  }
+  armDeadline(command);
+  changed();
+  await openFreshChatInBrowser(command);
 }
 
 /** Finishes a command that has nothing left to do, timer and all. */

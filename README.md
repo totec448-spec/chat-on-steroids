@@ -42,6 +42,8 @@ It runs in the tray, hosts no model of its own, and works with the ChatGPT you a
 
 Every package ships with matching native dependencies, a pinned `tunnel-client`, ripgrep and the Chrome extension for that CPU. A standalone [extension zip](../../releases/latest/download/Chat-On-Steroids-Extension.zip) is attached for manual installs, and [`SHA256SUMS.txt`](../../releases/latest/download/SHA256SUMS.txt) lists every hash.
 
+Windows and AppImage installs check GitHub for a newer release on start and every six hours, download it, verify its checksum and apply it when you quit. macOS and DEB installs are told and linked to the release page instead.
+
 **Debian and Ubuntu: prefer the DEB.** The AppImage uses electron-builder's static launcher. On a host that disables unprivileged user namespaces, that launcher can fall back to starting Chromium with `--no-sandbox` so the app still opens. If you do not want that fallback, use the DEB.
 
 **The builds are not publisher-signed yet**, and macOS builds are not notarized. SmartScreen, Gatekeeper or your browser will warn. Verify the hash first, then use the normal "run anyway" path, or [build from source](#building).
