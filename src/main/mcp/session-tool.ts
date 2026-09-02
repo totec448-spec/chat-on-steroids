@@ -310,11 +310,28 @@ async function searchOneSession(summary: SessionSummary, query: string): Promise
   return counts.size > 0 ? { summary, counts, anchorSeq, snapshot } : null;
 }
 
+/** The failure breakdown. Each kind is named, and omitted at zero so a clean row stays short. */
+function formatFailureCounts(summary: SessionSummary): string {
+  const parts: string[] = [];
+  if (summary.processExitNonzero > 0) {
+    parts.push(`${summary.processExitNonzero} non-zero exit${summary.processExitNonzero === 1 ? '' : 's'}`);
+  }
+  if (summary.toolRejected > 0) parts.push(`${summary.toolRejected} rejected`);
+  if (summary.toolInternalErrors > 0) {
+    parts.push(`${summary.toolInternalErrors} tool error${summary.toolInternalErrors === 1 ? '' : 's'}`);
+  }
+  // `errors` is chat errors plus tool defects; the chat share is what the named defects leave.
+  const chatErrors = Math.max(0, summary.errors - summary.toolInternalErrors);
+  if (chatErrors > 0) parts.push(`${chatErrors} chat error${chatErrors === 1 ? '' : 's'}`);
+  return parts.join(' · ');
+}
+
 function formatSessionRow(summary: SessionSummary): string {
+  const failures = formatFailureCounts(summary);
   return (
     `${summary.id}  ${formatDate(summary.updatedAt)}  ${summary.endedAt === null ? 'active' : 'ended'}\n` +
     `  ${flat(summary.title, 180)}\n` +
-    `  ${summary.userMessages} user · ${summary.toolCalls} tools · ${summary.events} events · ${summary.errors} errors`
+    `  ${summary.userMessages} user · ${summary.toolCalls} tools · ${summary.events} events${failures ? ` · ${failures}` : ''}`
   );
 }
 
@@ -852,11 +869,12 @@ function item(event: SessionEvent, text: string, label: string): TimelineItem {
 }
 
 function sessionHeader(summary: SessionSummary): string {
+  const failures = formatFailureCounts(summary);
   return (
     `Session: ${summary.id}\nTitle: ${summary.title}\n` +
     `Started: ${formatDate(summary.startedAt)}\nUpdated: ${formatDate(summary.updatedAt)}\n` +
     `State: ${summary.endedAt === null ? 'active' : 'ended'}\n` +
-    `Recorded: ${summary.userMessages} user · ${summary.toolCalls} tools · ${summary.events} events · ${summary.errors} errors`
+    `Recorded: ${summary.userMessages} user · ${summary.toolCalls} tools · ${summary.events} events${failures ? ` · ${failures}` : ''}`
   );
 }
 

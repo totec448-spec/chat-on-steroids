@@ -49,12 +49,14 @@ import { getSecret } from './secrets.js';
 import { getSession, readEvents, readHandoff, readRecentEvents } from './session/store.js';
 import { resumeBootstrapMatches, resumeBootstrapText } from './session/handoff.js';
 import {
+  GOAL_LOOP_STOP_REFUSED,
+  GOAL_LOOP_TRAILER,
   GOAL_OBJECTIVE_OPENING_TURN,
   GOAL_OBJECTIVE_TRAILER,
   GOAL_SYSTEM_TRAILER,
-  MAX_GOAL_OBJECTIVE_CHARS,
   goalObjectiveMessage
 } from '../shared/goal.js';
+import type { GoalMode } from '../shared/types.js';
 
 /** Where OpenRouter lives. One host, both routes. */
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
@@ -76,6 +78,25 @@ const MAX_CONTEXT_CHARS = 120_000;
 const MAX_MESSAGE_CHARS = 12_000;
 /** How long one draft may take before it is abandoned as failed. */
 const REQUEST_TIMEOUT_MS = 180_000;
+
+/**
+ * Failures that asking again cannot answer, whoever asks and however long they wait.
+ *
+ * A key that is refused, an account with no credit, a model id OpenRouter does not know and a
+ * chat with nothing to continue from are all settings, not weather. Everything else — the
+ * provider erroring, a stream cut short, a timeout, an answer in a shape this app cannot read —
+ * is the same request having a bad moment, and it is asked again.
+ *
+ * Nothing in this module acts on that distinction: one draft is one request, and asking again
+ * belongs to the page's Goal loop, which is the only place that can tell whether the turn is
+ * still the one being answered. This is what that loop reads, published as `retryable`.
+ */
+const SETTLED_FAILURE = /^(?:auth_rejected|out_of_credit|unknown_model|no_api_key|no_conversation|no_objective)(?:$|:)/;
+
+/** One failure classification shared by ordinary drafts and the conversation-less opening request. */
+function retryableGoalFailure(error: string): boolean {
+  return !SETTLED_FAILURE.test(error);
+}
 /** The catalogue is UI data; a dead provider must not leave the picker request hanging forever. */
 const MODEL_LIST_TIMEOUT_MS = 30_000;
 /** A single SSE record should be tiny; this still leaves ample room around the 12k reply cap. */
@@ -111,6 +132,17 @@ const MODEL_CONTROL_TOKEN = /<\|[^|\r\n]{1,100}\|>|<\/?s>|\[\/?INST\]|<<\/?SYS>>
 /** Reasoning wrappers are not formatting; their contents are never a user message. */
 const UNSAFE_REASONING_TAG = /<\/?(?:think|analysis|reasoning)\b[^>]*>/iu;
 
+/**
+ * How many times one loop draft may be asked again after it tried to stop anyway.
+ *
+ * Structured output already removes `stop` from the loop's vocabulary, so this only catches
+ * the model writing the sentinel into the message text — rare, and usually gone on the next
+ * attempt. It is bounded because the alternative is a chat that silently spends a key in a
+ * circle; past the last attempt the draft fails *retryably* and the page's own Goal loop asks
+ * again on its clock, which is the one place that knows whether this turn is still the last one.
+ */
+const LOOP_ATTEMPTS = 3;
+
 /** App-owned transport contract. The editable prompt decides policy, never wire syntax. */
 const GOAL_OUTPUT_PROTOCOL =
   'Return only the app decision described by the response schema. Use action "stop" when the editable instruction would say NO_REPLY. ' +
@@ -141,6 +173,42 @@ const GOAL_RESPONSE_FORMAT = {
   }
 } as const;
 
+/**
+ * Loop's transport contract: the same envelope with the stop half taken out.
+ *
+ * The editable instruction says the loop never stops, and this is the same statement made
+ * where a model cannot argue with it — `continue` is the only value the enum admits, so a
+ * provider honouring the schema has no way to spell the answer this mode does not accept.
+ * The prompt remains the thing that decides *what* to write; this only removes the exit.
+ */
+const LOOP_OUTPUT_PROTOCOL =
+  'Return only the app decision described by the response schema. Action is always "continue" — there is no stop, and no message may be skipped. ' +
+  'Put the exact next user message in reply, and put no reasoning, counting, labels, tokenizer markers, or protocol words in it.';
+
+const LOOP_RESPONSE_FORMAT = {
+  type: 'json_schema',
+  json_schema: {
+    name: 'goal_decision',
+    strict: true,
+    schema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['continue'],
+          description: 'always continue; this mode never stops on its own'
+        },
+        reply: {
+          type: 'string',
+          description: 'the short message to send as the user; never empty'
+        }
+      },
+      required: ['action', 'reply'],
+      additionalProperties: false
+    }
+  }
+} as const;
+
 /** The persisted instruction used for the next draft. Exported for focused contract tests. */
 export function goalSystemPrompt(): string {
   return getConfig().goal.prompt;
@@ -149,6 +217,23 @@ export function goalSystemPrompt(): string {
 /** The persisted driver instruction, used instead of the gate once a chat carries a goal. */
 export function goalObjectivePrompt(): string {
   return getConfig().goal.objectivePrompt;
+}
+
+/** The persisted loop instruction, used instead of both of the above while Loop is on. */
+export function goalLoopPrompt(): string {
+  return getConfig().goal.loopPrompt;
+}
+
+/**
+ * Which instruction drives right now: the gate/driver pair, or the loop.
+ *
+ * Read through the master switch on purpose. A chat that runs only because it carries its own
+ * saved objective, with the standing switch off, is not a chat the user switched Loop on for —
+ * and Loop is the mode that never stops by itself, so it is never entered by inheritance.
+ */
+export function goalDrivingMode(conversationId?: string): GoalMode {
+  const goal = conversationId ? goalSwitchFor(conversationId) : getConfig().goal;
+  return goal.enabled && goal.mode === 'loop' ? 'loop' : 'goal';
 }
 
 /** How a draft is going, in the order it goes. */
@@ -176,14 +261,35 @@ export interface GoalDraftView {
   reply: string;
   /** A short machine-readable reason, shown by the page when the stage is `failed`. */
   error: string | null;
+  /**
+   * Whether this failure is one the same request could still answer.
+   *
+   * A Goal run ends on one of two answers — `[no reply]`, or words to type — so a failure ends
+   * nothing by itself; it leaves the turn still waiting. This is the app's half of that: it
+   * says whether asking again is capable of producing an answer. Whether asking again is
+   * *allowed* stays with the page, which is where every reason Goal may not act already lives.
+   */
+  retryable: boolean;
 }
 
-interface GoalDraft extends GoalDraftView {
+// `retryable` is left out on purpose: it is read off the failure every time it is asked for,
+// so there is no second place where a draft can be described as retryable and be wrong.
+interface GoalDraft extends Omit<GoalDraftView, 'retryable'> {
   sessionId: string;
   /** Frozen with the draft, just like its model, so one request never mixes two settings saves. */
   systemPrompt: string;
   /** The driver instruction, frozen for the same reason. Used only when `objective` is set. */
   objectiveSystemPrompt: string;
+  /** The loop instruction, frozen for the same reason. Used only when `mode` is `loop`. */
+  loopSystemPrompt: string;
+  /**
+   * Which mode this draft was started in, frozen with its prompts.
+   *
+   * Switching from Loop to Goal mid-request must not turn a request that was promised a
+   * message into one that may answer with silence, and the reverse must not let a gate answer
+   * be regenerated for refusing to speak. The mode a draft was born in is the mode it finishes.
+   */
+  mode: GoalMode;
   /**
    * This chat's specific goal, frozen with the draft. Empty for an ordinary Goal Mode run.
    *
@@ -203,6 +309,221 @@ interface GoalDraft extends GoalDraftView {
 
 /** At most one draft per conversation. A new turn replaces the old chat's finished draft. */
 const drafts = new Map<string, GoalDraft>();
+
+/**
+ * The stable ChatGPT reply that still needs one terminal Goal decision.
+ *
+ * Local generation ids are deliberately not the identity here: ChatGPT remints them after a
+ * reload and can replay several start/end pairs for one authored reply. replyId is the
+ * canonical assistant message id already used by the session store; eventSeq only orders
+ * genuinely newer replies. A handled row is retained so history never replays on its own;
+ * only an explicit later activation may turn that exact tombstone into a fresh pickup.
+ */
+interface GoalReplyObligation {
+  conversationId: string;
+  sessionId: string;
+  replyId: string;
+  turnId: string;
+  eventSeq: number;
+  /** When this app froze the decision. The row's whole lifetime is measured from here. */
+  acceptedAt: number;
+  state: 'pending' | 'handled';
+}
+
+const goalReplies = new Map<string, GoalReplyObligation>();
+
+/**
+ * How long one reply may wait for its Goal decision, and how many chats may be waiting.
+ *
+ * The obligation is durable so a reload, a crashed page or an app restart cannot lose a
+ * finished reply the loop still owes an answer to. It is *not* a standing invitation: a pickup
+ * that outlives this window becomes handled, because typing into a chat somebody left a day
+ * ago is the failure this whole subsystem is careful about. The stable identity remains only
+ * so a later deliberate activation can safely ask for it again without scanning page history.
+ *
+ * The cap is the second half of the same statement. One row per conversation is written for
+ * every final assistant reply this app records, each one fsynced before its HTTP 200, so an
+ * unbounded ledger would make every reply in every chat pay for every chat that came before.
+ */
+const GOAL_REPLY_TTL_MS = 12 * 60 * 60_000;
+const MAX_GOAL_REPLIES = 200;
+
+/** Retires expired pickups and caps the stable-final ledger to its newest conversations. */
+function boundGoalReplies(now: number): void {
+  for (const reply of goalReplies.values()) {
+    // Expiry revokes automatic pickup authority; it does not erase the exact final assistant
+    // identity. A later deliberate On may re-arm that tombstone, while leaving it handled here
+    // prevents a stale page or watchdog from collecting it on its own.
+    if (reply.state === 'pending' && now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) reply.state = 'handled';
+  }
+  if (goalReplies.size <= MAX_GOAL_REPLIES) return;
+  const oldestFirst = [...goalReplies.values()].sort((a, b) => a.acceptedAt - b.acceptedAt);
+  for (const reply of oldestFirst.slice(0, goalReplies.size - MAX_GOAL_REPLIES)) {
+    goalReplies.delete(reply.conversationId);
+  }
+}
+export const GOAL_REPLIES_STATE = 'goal-replies';
+
+export interface GoalRepliesSnapshot {
+  version: 1;
+  savedAt: number;
+  replies: GoalReplyObligation[];
+}
+
+export function snapshotGoalReplies(): GoalRepliesSnapshot {
+  boundGoalReplies(Date.now());
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    replies: [...goalReplies.values()].map((reply) => ({ ...reply }))
+  };
+}
+
+export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
+  goalReplies.clear();
+  if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.replies)) return;
+  for (const raw of snapshot.replies) {
+    if (
+      !raw ||
+      !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId) ||
+      !raw.sessionId ||
+      !raw.replyId ||
+      !raw.turnId ||
+      !Number.isSafeInteger(raw.eventSeq) ||
+      raw.eventSeq < 1 ||
+      !Number.isSafeInteger(raw.acceptedAt) ||
+      raw.acceptedAt <= 0 ||
+      (raw.state !== 'pending' && raw.state !== 'handled')
+    ) continue;
+    goalReplies.set(raw.conversationId, {
+      conversationId: raw.conversationId,
+      sessionId: String(raw.sessionId).slice(0, 200),
+      replyId: String(raw.replyId).slice(0, 200),
+      turnId: String(raw.turnId).slice(0, 200),
+      eventSeq: raw.eventSeq,
+      acceptedAt: raw.acceptedAt,
+      state: raw.state
+    });
+  }
+  boundGoalReplies(Date.now());
+}
+
+function persistGoalRepliesSoon(): void {
+  writeDurableSoon(GOAL_REPLIES_STATE, snapshotGoalReplies());
+}
+
+/**
+ * Is a request for this chat's draft in flight right now?
+ *
+ * The one thing the app-side watchdog has to ask about the page before reloading it. A draft
+ * being written is not a stalled chat, it is a chat mid-answer, and reloading it throws away a
+ * request somebody is paying OpenRouter for. Deliberately only the two in-flight stages: a
+ * `ready` draft nobody types is exactly the stall the watchdog exists to break, and reloading
+ * it costs nothing because the obligation it was drafted for is still on file.
+ */
+export function goalDraftBusy(conversationId: string): boolean {
+  const draft = drafts.get(conversationId);
+  // An acknowledged draft is spent whatever stage it was in: run() returns early without
+  // settling the stage when the draft was retired mid-request, and reporting that as busy
+  // kept the owed-goal inspection from ever nudging the chat again.
+  if (!draft || draft.acknowledged) return false;
+  return draft.stage === 'sending' || draft.stage === 'answering';
+}
+
+export function goalPendingReplyFor(
+  conversationId: string
+): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq' | 'acceptedAt'> | null {
+  const reply = goalReplies.get(conversationId);
+  // Expiry is read here as well as pruned on write, because the ledger is only pruned when
+  // something writes to it. A chat reopened after the window must not be offered work the
+  // next prune would have thrown away.
+  if (reply && Date.now() - reply.acceptedAt >= GOAL_REPLY_TTL_MS) return null;
+  return reply?.state === 'pending'
+    ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq, acceptedAt: reply.acceptedAt }
+    : null;
+}
+
+/**
+ * Every chat that still owes one Goal decision, newest acceptance first.
+ *
+ * `goalPendingReplyFor` answers for a page that has come to ask. This answers for the app,
+ * which has to notice the chats that never will — the reason it exists at all is that the only
+ * trigger for a Goal draft lives in the page, so a conversation whose document died between the
+ * final answer and the draft request owes work that nothing was left alive to collect.
+ */
+export function pendingGoalReplies(
+  now = Date.now()
+): Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number }> {
+  const owed: Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number }> = [];
+  for (const reply of goalReplies.values()) {
+    if (reply.state !== 'pending' || now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) continue;
+    owed.push({
+      conversationId: reply.conversationId,
+      sessionId: reply.sessionId,
+      replyId: reply.replyId,
+      acceptedAt: reply.acceptedAt
+    });
+  }
+  return owed.sort((a, b) => b.acceptedAt - a.acceptedAt);
+}
+
+/** Freezes Goal eligibility at the durable recorder boundary. */
+export async function acceptGoalReplyNow(input: {
+  conversationId: string;
+  sessionId: string;
+  replyId: string;
+  turnId: string;
+  eventSeq: number;
+  blocked: boolean;
+}): Promise<void> {
+  const current = goalReplies.get(input.conversationId);
+  if (current?.replyId === input.replyId || (current && current.eventSeq > input.eventSeq)) return;
+  const provisionalUpgrade = Boolean(
+    current &&
+      current.eventSeq === 0 &&
+      current.turnId === input.turnId &&
+      current.replyId === `turn:${input.turnId}`.slice(0, 200)
+  );
+  const before = current ? { ...current } : null;
+  const bounded = snapshotGoalReplies().replies;
+  const active =
+    !input.blocked &&
+    getConfig().sessions.record &&
+    goalArmedFor(input.conversationId) &&
+    (await getSecret('openRouterApiKey')) !== null;
+  goalReplies.set(input.conversationId, {
+    conversationId: input.conversationId,
+    sessionId: input.sessionId,
+    replyId: input.replyId.slice(0, 200),
+    turnId: input.turnId.slice(0, 200),
+    eventSeq: input.eventSeq,
+    // `/goal/draft` may have had to persist the local turn before Fiber exposed ChatGPT's
+    // stable assistant id. The later id strengthens that same row; it must not re-evaluate
+    // policy or reopen a decision the page already acknowledged in the meantime.
+    acceptedAt: provisionalUpgrade ? current!.acceptedAt : Date.now(),
+    state: provisionalUpgrade ? current!.state : active ? 'pending' : 'handled'
+  });
+  try {
+    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  } catch (error) {
+    // The rejected write is one whole revision, so the rollback is too: the row this accept
+    // added and the expired rows it pruned go back together, leaving the ledger exactly as the
+    // decision found it.
+    goalReplies.clear();
+    for (const reply of bounded) goalReplies.set(reply.conversationId, reply);
+    if (before) goalReplies.set(input.conversationId, before);
+    else goalReplies.delete(input.conversationId);
+    persistGoalRepliesSoon();
+    throw error;
+  }
+}
+
+function handleGoalReply(conversationId: string, turnId?: string): void {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.state !== 'pending' || (turnId && reply.turnId !== turnId)) return;
+  reply.state = 'handled';
+  persistGoalRepliesSoon();
+}
 
 /** Durable state file for per-chat Goal objectives. */
 export const GOAL_OBJECTIVES_STATE = 'goal-objectives';
@@ -246,7 +567,7 @@ export function restoreGoalObjectives(snapshot: GoalObjectivesSnapshot | null): 
   for (const raw of snapshot.objectives) {
     if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
     if (typeof raw.objective !== 'string') continue;
-    const objective = raw.objective.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+    const objective = raw.objective.trim();
     if (!objective) continue;
     goalObjectives.set(raw.conversationId, objective);
   }
@@ -260,11 +581,11 @@ export function goalObjectiveFor(conversationId: string): string {
 /**
  * Sets or clears one chat's goal. Empty text clears it.
  *
- * Returns what is now stored, already trimmed and bounded, so the caller reports the stored
- * value rather than the one it sent — the two differ whenever the text was over the cap.
+ * Returns what is now stored, already trimmed, so the caller reports the stored value rather
+ * than the one it sent — the two differ whenever the text had whitespace around it.
  */
 export function setGoalObjective(conversationId: string, text: string): string {
-  const goal = text.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+  const goal = text.trim();
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
   persistGoalObjectives();
@@ -282,7 +603,7 @@ export function setGoalObjective(conversationId: string, text: string): string {
  */
 export async function setGoalObjectiveNow(conversationId: string, text: string): Promise<string> {
   const before = goalObjectives.get(conversationId);
-  const goal = text.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+  const goal = text.trim();
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
   try {
@@ -312,9 +633,179 @@ export function moveGoalObjective(fromConversationId: string, toConversationId: 
   return true;
 }
 
-export function goalSettings(): { enabled: boolean; model: string; reasoning: string } {
+/**
+ * One of the two switches, moved.
+ *
+ * Goal and Loop are the same setting seen from two controls, which is what makes them mutually
+ * exclusive without anything having to keep them in step: turning either one on names the mode
+ * and enables it, and turning one off only means anything while it is the one that is running.
+ * Switching a mode off therefore leaves `mode` where it was — it is a preference, not a state,
+ * and a user who turns Loop off and on again should get Loop back.
+ */
+export function applyGoalSwitch<T extends { enabled: boolean; mode: GoalMode }>(
+  goal: T,
+  which: 'goal' | 'loop' | null,
+  on: boolean | null
+): T {
+  if (which === null || on === null) return goal;
+  if (on) return { ...goal, enabled: true, mode: which };
+  return goal.enabled && goal.mode === which ? { ...goal, enabled: false } : goal;
+}
+
+/** Durable state file for per-chat Goal/Loop switches. */
+export const GOAL_SWITCHES_STATE = 'goal-switches';
+
+export interface GoalSwitchesSnapshot {
+  version: 1;
+  savedAt: number;
+  switches: Array<{ conversationId: string; enabled: boolean; mode: GoalMode; at: number }>;
+}
+
+/**
+ * One chat's own answer to "may the loop write here, and in which mode".
+ *
+ * The switch used to be one app-wide setting, which made it the wrong shape for the thing people
+ * actually do with it: leave a loop running in one chat while every other chat stays a chat.
+ * Turning it off to stop one runaway conversation stopped all of them, and turning it back on
+ * later re-armed every chat that had ever been left with an objective.
+ *
+ * A row here is an override and nothing else. A chat with no row follows the app-wide setting,
+ * so nothing that exists today changes meaning, and the first time somebody flips the switch
+ * from a chat's own composer that chat stops listening to the global one. That is also how an
+ * old conversation is retired: turning Goal off where it pops up writes `enabled: false` for
+ * that chat alone, and no later app-wide change can revive it.
+ */
+const goalSwitches = new Map<string, { enabled: boolean; mode: GoalMode; at: number }>();
+
+/**
+ * As many chats as anyone plausibly drives, and no more.
+ *
+ * The ledger is per conversation and never expires — an override is a decision, not an
+ * observation, so it may not quietly lapse the way a reply obligation does. The cap is what
+ * keeps that from being unbounded; the oldest decision is the one that goes.
+ */
+const MAX_GOAL_SWITCHES = 400;
+
+function boundGoalSwitches(): void {
+  if (goalSwitches.size <= MAX_GOAL_SWITCHES) return;
+  const oldestFirst = [...goalSwitches.entries()].sort((a, b) => a[1].at - b[1].at);
+  for (const [conversationId] of oldestFirst.slice(0, goalSwitches.size - MAX_GOAL_SWITCHES)) {
+    goalSwitches.delete(conversationId);
+  }
+}
+
+export function snapshotGoalSwitches(): GoalSwitchesSnapshot {
+  boundGoalSwitches();
+  return {
+    version: 1,
+    savedAt: Date.now(),
+    switches: [...goalSwitches.entries()].map(([conversationId, row]) => ({ conversationId, ...row }))
+  };
+}
+
+export function restoreGoalSwitches(snapshot: GoalSwitchesSnapshot | null): void {
+  goalSwitches.clear();
+  if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.switches)) return;
+  for (const raw of snapshot.switches) {
+    if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
+    if (typeof raw.enabled !== 'boolean' || (raw.mode !== 'goal' && raw.mode !== 'loop')) continue;
+    const at = Number.isSafeInteger(raw.at) && raw.at > 0 ? raw.at : Date.now();
+    goalSwitches.set(raw.conversationId, { enabled: raw.enabled, mode: raw.mode, at });
+  }
+  boundGoalSwitches();
+}
+
+function persistGoalSwitches(): void {
+  writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
+}
+
+/** This chat's switch: its own override when it has one, otherwise the app-wide setting. */
+export function goalSwitchFor(conversationId: string): { enabled: boolean; mode: GoalMode; own: boolean } {
+  const own = goalSwitches.get(conversationId);
+  if (own) return { enabled: own.enabled, mode: own.mode, own: true };
   const goal = getConfig().goal;
-  return { enabled: goal.enabled, model: goal.model, reasoning: goal.reasoning };
+  return { enabled: goal.enabled, mode: goal.mode, own: false };
+}
+
+/** Is the loop switched on for this chat — ignoring worker identity, which the bridge owns. */
+export function goalSwitchEnabledFor(conversationId: string): boolean {
+  return goalSwitchFor(conversationId).enabled;
+}
+
+/**
+ * The switch and the saved goal read as one answer — the same one the bridge gives.
+ *
+ * A chat that has moved its own switch is answered by that switch alone, Off included; a chat
+ * that never has still lets a goal typed into it arm the loop, so writing the finish line does
+ * not also require finding the app-wide setting. Kept beside the switch itself because the two
+ * places that ask — the route and the ticket below — must never drift apart.
+ */
+export function goalArmedFor(conversationId: string): boolean {
+  const held = goalSwitchFor(conversationId);
+  if (held.own) return held.enabled;
+  return held.enabled || goalObjectiveFor(conversationId) !== '';
+}
+
+/**
+ * Durable acceptance boundary for one chat's Goal/Loop switch.
+ *
+ * Same contract as `setGoalObjectiveNow`, for the same reason: the page is told the switch was
+ * saved, so the value must be on disk before that is said. A failed write restores the previous
+ * override exactly — including its absence, which is itself the meaningful state "this chat
+ * still follows the app-wide setting".
+ */
+export async function setGoalSwitchNow(
+  conversationId: string,
+  which: 'goal' | 'loop',
+  on: boolean
+): Promise<{ enabled: boolean; mode: GoalMode }> {
+  const before = goalSwitches.get(conversationId);
+  const next = applyGoalSwitch(goalSwitchFor(conversationId), which, on);
+  goalSwitches.set(conversationId, { enabled: next.enabled, mode: next.mode, at: Date.now() });
+  try {
+    await writeDurableNow(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
+    return { enabled: next.enabled, mode: next.mode };
+  } catch (error) {
+    goalSwitches.delete(conversationId);
+    if (before) goalSwitches.set(conversationId, before);
+    writeDurableSoon(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
+    throw error;
+  }
+}
+
+/**
+ * Puts every chat back under the app-wide setting.
+ *
+ * The one caller is the app's own switch being turned off, which is the master stop: see the
+ * note at that call. Nothing else may do this — an override is somebody's decision about one
+ * conversation, and discarding all of them is only defensible as the answer to a deliberate
+ * "stop everything".
+ */
+export function clearAllGoalSwitches(): void {
+  if (goalSwitches.size === 0) return;
+  goalSwitches.clear();
+  persistGoalSwitches();
+}
+
+/** Drops one chat's override, putting it back under the app-wide setting. */
+export function clearGoalSwitch(conversationId: string): void {
+  if (goalSwitches.delete(conversationId)) persistGoalSwitches();
+}
+
+/** Moves one chat-owned switch to the replacement conversation used by Compact & Resume. */
+export function moveGoalSwitch(fromConversationId: string, toConversationId: string): boolean {
+  if (!fromConversationId || !toConversationId || fromConversationId === toConversationId) return false;
+  const row = goalSwitches.get(fromConversationId);
+  if (!row) return false;
+  goalSwitches.delete(fromConversationId);
+  goalSwitches.set(toConversationId, row);
+  persistGoalSwitches();
+  return true;
+}
+
+export function goalSettings(): { enabled: boolean; mode: GoalMode; model: string; reasoning: string } {
+  const goal = getConfig().goal;
+  return { enabled: goal.enabled, mode: goal.mode, model: goal.model, reasoning: goal.reasoning };
 }
 
 export async function goalKeyPresent(): Promise<boolean> {
@@ -332,7 +823,8 @@ function view(draft: GoalDraft): GoalDraftView {
     // The reply is handed over only while it is still the thing to do. Once acknowledged it
     // is history, and a page that polls again must not find a message to type a second time.
     reply: draft.stage === 'ready' && !draft.acknowledged ? draft.reply : '',
-    error: draft.error
+    error: draft.error,
+    retryable: draft.stage === 'failed' && retryableGoalFailure(draft.error ?? '')
   };
 }
 
@@ -341,6 +833,11 @@ function expireDraftPayload(draft: GoalDraft): void {
   // The TTL is for the *payload*, not the idempotency key. A ready draft can have crossed
   // ChatGPT's irreversible send boundary while its local ACK was lost. Keep this turn's token
   // as a spent tombstone until a genuinely newer generation supersedes it.
+  //
+  // It is emphatically not for the *obligation*. The reply ledger records that this exact turn
+  // is owed an answer, and a clock running out is not an answer: expiring the row here retired
+  // the turn unanswered whenever an app restart, a closed tab or a slow provider outlasted ten
+  // minutes. Only a real decision — the draft typed, or NO_REPLY — discharges it.
   draft.acknowledged = true;
   draft.text = '';
   draft.reply = '';
@@ -380,7 +877,24 @@ export function ackGoalDraft(conversationId: string, token: string, clientId?: s
   // aborting the controller closes the stream immediately.
   draft.abort?.abort();
   if (draft.settledAt === 0) draft.settledAt = Date.now();
+  // The two answers that discharge the obligation are the ones the page can act on: a message
+  // it typed, and NO_REPLY. Everything else is the app failing to produce one — a dropped
+  // stream, a rejected key, an exhausted balance, an abort — and a failure to answer may not
+  // be recorded as an answer. Retiring the row on `auth_rejected` meant the user fixing their
+  // key found the turn it was owed for silently gone.
+  if (draft.stage === 'ready' || draft.stage === 'no-reply') handleGoalReply(conversationId, draft.turnId);
   return true;
+}
+
+/** The browser ACK is not successful until the reply tombstone is crash-durable. */
+export async function ackGoalDraftNow(
+  conversationId: string,
+  token: string,
+  clientId?: string
+): Promise<boolean> {
+  const acknowledged = ackGoalDraft(conversationId, token, clientId);
+  if (acknowledged) await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  return acknowledged;
 }
 
 /**
@@ -401,6 +915,8 @@ export function retireGoalDrafts(): number {
     draft.reply = '';
     retired += 1;
   }
+  for (const reply of goalReplies.values()) reply.state = 'handled';
+  if (goalReplies.size > 0) persistGoalRepliesSoon();
   return retired;
 }
 
@@ -413,19 +929,66 @@ export function retireGoalDrafts(): number {
  */
 export function retireGoalDraftsFor(conversationId: string): boolean {
   const draft = drafts.get(conversationId);
-  if (!draft || draft.acknowledged) return false;
+  const pending = goalReplies.get(conversationId)?.state === 'pending';
+  if (!draft || draft.acknowledged) {
+    if (pending) handleGoalReply(conversationId);
+    return pending;
+  }
   draft.acknowledged = true;
   draft.abort?.abort();
   if (draft.settledAt === 0) draft.settledAt = Date.now();
   draft.text = '';
   draft.reply = '';
+  handleGoalReply(conversationId);
+  return true;
+}
+
+/**
+ * Applies one chat switch to the durable Goal obligation, not merely to its current draft.
+ *
+ * Off means there is no ticket left for a replacement page to collect. On means the newest
+ * stable reply already accepted by the recorder is owed again, even when that reply finished
+ * while the switch was off. The handled row remains as the stable-message tombstone while Off;
+ * re-arming that exact row is safer and smaller than scanning rendered transcript history.
+ *
+ * The provider draft is retired before the ledger write. If persistence fails, restoring the
+ * old row leaves the reply safely retryable but can never let the now-revoked text reach the
+ * composer. A later page simply drafts it again from the same durable reply identity.
+ */
+export async function setGoalReplyActiveNow(conversationId: string, active: boolean): Promise<boolean> {
+  const before = goalReplies.get(conversationId);
+  const draft = drafts.get(conversationId);
+  if (draft) {
+    draft.acknowledged = true;
+    draft.abort?.abort();
+    if (draft.settledAt === 0) draft.settledAt = Date.now();
+    draft.text = '';
+    draft.reply = '';
+    drafts.delete(conversationId);
+  }
+  if (!before) return Boolean(draft);
+
+  const previous = { ...before };
+  before.state = active ? 'pending' : 'handled';
+  // A deliberate On is a new pickup episode for the same stable final reply. It gets the
+  // recovery schedule from now, not from when that answer happened under an Off switch.
+  if (active) before.acceptedAt = Math.max(Date.now(), previous.acceptedAt + 1);
+  try {
+    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  } catch (error) {
+    goalReplies.set(conversationId, previous);
+    persistGoalRepliesSoon();
+    throw error;
+  }
   return true;
 }
 
 export function resetGoalStateForTests(): void {
   for (const draft of drafts.values()) draft.abort?.abort();
   drafts.clear();
+  goalReplies.clear();
   goalObjectives.clear();
+  goalSwitches.clear();
   firstUserCache.clear();
   legacyCommittedResumeCache.clear();
   modelCache = null;
@@ -438,6 +1001,8 @@ export interface StartGoalDraftInput {
   turnId: string;
   /** Browser-tab ownership fence. Omitted only by direct/legacy callers. */
   clientId?: string;
+  /** Bridge-only: reserve ownership while its durable reply obligation is committed. */
+  deferStart?: boolean;
 }
 
 /**
@@ -460,7 +1025,17 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
   }
   // Same turn, same draft. This is the idempotency that keeps a retried POST or a second
   // request from the owning tab from putting two messages into one conversation.
-  if (existing && existing.turnId === input.turnId) return view(existing);
+  //
+  // A failed draft the page has already retired is the one exception, and for exactly that
+  // reason: nothing was written, so asking again is this turn still waiting for its answer
+  // rather than a second message. Requiring the acknowledgement is what keeps it to one
+  // attempt at a time — an unacknowledged failure is still the page's to read. A settings
+  // failure is deliberately not retried here, because it would only be paid for again; the
+  // obligation behind it survives regardless — see ackGoalDraft — so the turn is still owed
+  // its answer once the setting that broke it is fixed.
+  const spentFailure =
+    existing?.stage === 'failed' && existing.acknowledged && !SETTLED_FAILURE.test(existing.error ?? '');
+  if (existing && existing.turnId === input.turnId && !spentFailure) return view(existing);
   // A different turn supersedes whatever the last one left behind, including an unfinished
   // request: the answer it was writing was about a conversation that has since moved on.
   if (existing) {
@@ -474,6 +1049,8 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     sessionId: input.sessionId,
     systemPrompt: settings.prompt,
     objectiveSystemPrompt: settings.objectivePrompt,
+    loopSystemPrompt: settings.loopPrompt,
+    mode: goalDrivingMode(input.conversationId),
     objective: goalObjectiveFor(input.conversationId),
     clientId,
     turnId: input.turnId,
@@ -489,10 +1066,26 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     abort: null
   };
   drafts.set(input.conversationId, draft);
+  if (!input.deferStart) beginGoalDraft(input.conversationId, draft.token);
+  return view(draft);
+}
+
+/** Starts provider work only after the bridge has durably committed this reserved turn. */
+export function beginGoalDraft(conversationId: string, token: string): boolean {
+  const draft = drafts.get(conversationId);
+  if (!draft || draft.token !== token || draft.acknowledged || draft.work) return false;
   draft.work = run(draft).catch((err: Error) => {
     settle(draft, 'failed', `goal_failed: ${err.message}`);
   });
-  return view(draft);
+  return true;
+}
+
+/** Releases a bridge reservation whose durable commit failed, before provider work began. */
+export function discardPreparedGoalDraft(conversationId: string, token: string): boolean {
+  const draft = drafts.get(conversationId);
+  if (!draft || draft.token !== token || draft.work) return false;
+  drafts.delete(conversationId);
+  return true;
 }
 
 function settle(draft: GoalDraft, stage: GoalStage, error: string | null = null): void {
@@ -516,6 +1109,13 @@ function settle(draft: GoalDraft, stage: GoalStage, error: string | null = null)
 interface GoalRequest {
   key: string;
   model: string;
+  /**
+   * Which contract this request is made under.
+   *
+   * `goal` may come back with either answer. `loop` is offered only one, both in the schema it
+   * is sent and in how the answer is read: see requestDrivingDecision.
+   */
+  mode: GoalMode;
   /** In order, ahead of the conversation. The wire protocol is appended here, not by callers. */
   system: string[];
   messages: ChatMessage[];
@@ -533,6 +1133,16 @@ interface GoalRequest {
   publish?: (text: string) => void;
 }
 
+/**
+ * One request, one answer — including "no usable answer".
+ *
+ * There is deliberately no retry here. A provider error, a cut stream and a reply in a shape
+ * this app cannot read are all the same event, and whether asking again is worth anything
+ * depends on facts this function cannot see: whether the turn being answered is still the last
+ * one, whether the user has started typing, whether Goal is even switched on. Those live in the
+ * page's Goal loop, which reads the failure back off `retryable` and asks again on its own
+ * clock. A second attempt from in here would be spent against a turn nobody rechecked.
+ */
 async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision | { action: 'http'; error: string }> {
   const settings = getConfig().goal;
   const body: Record<string, unknown> = {
@@ -542,11 +1152,11 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     stream: false,
     messages: [
       ...request.system.map((content) => ({ role: 'system', content })),
-      { role: 'system', content: GOAL_OUTPUT_PROTOCOL },
+      { role: 'system', content: request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL },
       ...request.messages,
       { role: 'system', content: request.trailer }
     ],
-    response_format: GOAL_RESPONSE_FORMAT,
+    response_format: request.mode === 'loop' ? LOOP_RESPONSE_FORMAT : GOAL_RESPONSE_FORMAT,
     plugins: [{ id: 'response-healing' }],
     // OpenRouter otherwise may route to a provider that silently ignores response_format.
     provider: { require_parameters: true }
@@ -574,6 +1184,34 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
   return normalizeGoalDecision(completion.text, completion.legacy);
 }
 
+/**
+ * One decision the caller may act on, with Loop's single addition: a stop is not one.
+ *
+ * In `goal` mode this is exactly `requestGoalDecision` — one request, one answer, no retry, for
+ * all the reasons written above it. In `loop` mode the model has been told it never stops and
+ * handed a schema with no way to say so, so a stop reaching this point means it wrote the
+ * sentinel into the message text instead. That is a malformed answer rather than a decision,
+ * and the honest repair is to ask again with the refusal spelled out — never to type a sentence
+ * this app wrote and attribute it to the model.
+ *
+ * Everything else — a provider error, a cut stream, an unreadable shape — is passed straight
+ * back, because whether *those* are worth asking again is the page's call and not this one's.
+ */
+async function requestDrivingDecision(
+  request: GoalRequest
+): Promise<GoalDecision | { action: 'http'; error: string }> {
+  let decision = await requestGoalDecision(request);
+  if (request.mode !== 'loop') return decision;
+  for (let attempt = 1; attempt < LOOP_ATTEMPTS && decision.action === 'stop'; attempt += 1) {
+    logWarn(`goal: the loop tried to stop with ${request.model}; asking again (${attempt}/${LOOP_ATTEMPTS - 1})`);
+    decision = await requestGoalDecision({
+      ...request,
+      system: [...request.system, GOAL_LOOP_STOP_REFUSED]
+    });
+  }
+  return decision;
+}
+
 async function run(draft: GoalDraft): Promise<void> {
   const key = await getSecret('openRouterApiKey');
   if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
@@ -596,14 +1234,28 @@ async function run(draft: GoalDraft): Promise<void> {
   draft.abort = abort;
   const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const decision = await requestGoalDecision({
+    const decision = await requestDrivingDecision({
       key,
       model: draft.model,
-      system: draft.objective
-        ? [draft.objectiveSystemPrompt, goalObjectiveMessage(draft.objective)]
-        : [draft.systemPrompt],
+      mode: draft.mode,
+      // Loop replaces the instruction, not the goal: a chat that carries one still hands it
+      // over verbatim, which is what "here is the task" in that prompt refers to. Without one
+      // the loop reads the job out of the conversation, exactly as the gate does.
+      system:
+        draft.mode === 'loop'
+          ? draft.objective
+            ? [draft.loopSystemPrompt, goalObjectiveMessage(draft.objective)]
+            : [draft.loopSystemPrompt]
+          : draft.objective
+            ? [draft.objectiveSystemPrompt, goalObjectiveMessage(draft.objective)]
+            : [draft.systemPrompt],
       messages: messages.length > 0 ? messages : [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
-      trailer: draft.objective ? GOAL_OBJECTIVE_TRAILER : GOAL_SYSTEM_TRAILER,
+      trailer:
+        draft.mode === 'loop'
+          ? GOAL_LOOP_TRAILER
+          : draft.objective
+            ? GOAL_OBJECTIVE_TRAILER
+            : GOAL_SYSTEM_TRAILER,
       signal: abort.signal,
       publish: (text) => {
         draft.stage = 'answering';
@@ -611,9 +1263,22 @@ async function run(draft: GoalDraft): Promise<void> {
       }
     });
     if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
-    if (decision.action === 'http') return settle(draft, 'failed', decision.error);
-    if (decision.action === 'invalid') return settle(draft, 'failed', decision.error);
+    // Logged like the exception path below. Ten rate limits in a row on 2026-09-02 left no
+    // trace in app.log because a provider's refusal is an answer, not an exception.
+    if (decision.action === 'http' || decision.action === 'invalid') {
+      logWarn(`goal: draft for ${draft.conversationId} failed — ${decision.error}`);
+      return settle(draft, 'failed', decision.error);
+    }
     if (decision.action === 'stop') {
+      // Loop has already been asked again for exactly this, up to its limit. Reaching here
+      // means the model kept refusing to write, which is a failure to produce an answer and
+      // not a decision to stay silent — so the turn stays owed one. The failure is deliberately
+      // outside SETTLED_FAILURE: the page retries it on its own clock, where it can still see
+      // whether this turn is the last one.
+      if (draft.mode === 'loop') {
+        logWarn(`goal: the loop would not write a message in ${draft.conversationId} with ${draft.model}`);
+        return settle(draft, 'failed', 'loop_stop_refused');
+      }
       logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent`);
       // Reaching the goal ends this Goal run, not the user's saved objective. Keeping the text
       // lets a reopened chat show what it was pursuing and lets a later manual correction such
@@ -652,12 +1317,21 @@ async function run(draft: GoalDraft): Promise<void> {
  * awaited by the page that will type it.
  *
  * It is deliberately not idempotent, because there is nothing yet to key idempotency to. The
- * page holds that end: one save, one call, and the result goes into an empty composer.
+ * page holds that end: one save, one call, and the result goes into an empty composer. It also
+ * holds the retry: this function classifies transient failures with the same authority as an
+ * ordinary draft, and the page rechecks that it is still the same empty New Chat before asking
+ * again. Provider work never retries in the background after the page has moved elsewhere.
+ *
+ * `named` is the mode the user chose while writing the goal, for the one case where the mode
+ * cannot be read from a chat: there is no chat yet. Without it this drafted the opening under
+ * the standing switch, which is how a run started from "add specific loop" could open — and
+ * then continue — as a Goal.
  */
 export async function draftOpeningMessage(
-  objective: string
-): Promise<{ reply: string; model: string } | { error: string }> {
-  const goal = objective.trim().slice(0, MAX_GOAL_OBJECTIVE_CHARS);
+  objective: string,
+  named: GoalMode | null = null
+): Promise<{ reply: string; model: string } | { error: string; retryable?: boolean }> {
+  const goal = objective.trim();
   if (!goal) return { error: 'no_objective' };
   const key = await getSecret('openRouterApiKey');
   if (!key) return { error: 'no_api_key' };
@@ -665,16 +1339,25 @@ export async function draftOpeningMessage(
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const decision = await requestGoalDecision({
+    const mode = named ?? goalDrivingMode();
+    const decision = await requestDrivingDecision({
       key,
       model,
-      system: [getConfig().goal.objectivePrompt, goalObjectiveMessage(goal)],
+      mode,
+      system: [
+        mode === 'loop' ? getConfig().goal.loopPrompt : getConfig().goal.objectivePrompt,
+        goalObjectiveMessage(goal)
+      ],
       messages: [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
-      trailer: GOAL_OBJECTIVE_TRAILER,
+      trailer: mode === 'loop' ? GOAL_LOOP_TRAILER : GOAL_OBJECTIVE_TRAILER,
       signal: abort.signal
     });
-    if (decision.action === 'http') return { error: decision.error };
-    if (decision.action === 'invalid') return { error: decision.error };
+    if (decision.action === 'http') {
+      return { error: decision.error, retryable: retryableGoalFailure(decision.error) };
+    }
+    if (decision.action === 'invalid') {
+      return { error: decision.error, retryable: retryableGoalFailure(decision.error) };
+    }
     // Stopping before the first word has been said is the model refusing the goal rather
     // than meeting it, and an empty opening message would leave somebody looking at a chat
     // that never started with nothing on screen to say why.
@@ -683,7 +1366,8 @@ export async function draftOpeningMessage(
     return { reply: humanReply(decision.reply), model };
   } catch (err) {
     const detail = (err as Error).message;
-    return { error: abort.signal.aborted ? 'timeout_or_cancelled' : `request_failed: ${detail}` };
+    const error = abort.signal.aborted ? 'timeout_or_cancelled' : `request_failed: ${detail}`;
+    return { error, retryable: retryableGoalFailure(error) };
   } finally {
     clearTimeout(timer);
   }

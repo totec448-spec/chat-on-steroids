@@ -250,6 +250,47 @@
     return found;
   }
 
+  /**
+   * ChatGPT's own name for what a public assistant message is *for*.
+   *
+   * The page model routes assistant prose down three named channels, and they are not
+   * interchangeable. `final` is the answer. `commentary` is the running narration a
+   * tool-using turn shows between calls. `analysis` is the model's private scratch, which
+   * this extension never records and never shows.
+   *
+   * Read as a plain string, absent included: page data old enough to carry no channel at all
+   * keeps behaving exactly as it did before this field was known, rather than being
+   * reclassified by a default.
+   */
+  function channelOf(message) {
+    return message && typeof message === 'object' ? str(message.channel) : '';
+  }
+
+  /**
+   * Whether this message is ChatGPT's private reasoning scratch rather than something it
+   * said. Recording it would put chain-of-thought in the transcript; letting it stand as the
+   * turn's newest public prose is worse, and is measured below.
+   */
+  function analysisMessage(message) {
+    return channelOf(message) === 'analysis';
+  }
+
+  /**
+   * Whether this message is, by ChatGPT's own routing, incapable of being the answer.
+   *
+   * Live 2026-08-31, on a finished tool-heavy turn with the Stop control already gone, the
+   * page model held: the answer on `channel:'final'` with `end_turn:true` and
+   * `status:'finished_successfully'`, and *after* it an empty message on `channel:'analysis'`
+   * left at `status:'in_progress'` forever. A trailing `commentary` message left at
+   * `end_turn:false` behaves the same way. Neither is a turn that is still running and
+   * neither can ever become the answer — so neither may stand in front of the message that
+   * is one.
+   */
+  function neverTerminalChannel(message) {
+    const channel = channelOf(message);
+    return channel === 'analysis' || channel === 'commentary';
+  }
+
   function hiddenMessage(message) {
     const meta = message && typeof message === 'object' ? message.metadata : null;
     return Boolean(
@@ -398,6 +439,8 @@
       const author = message.author;
       if (!author || author.role !== 'assistant') continue;
       if (requestOf(message) || resultOf(message) || hiddenMessage(message)) continue;
+      // Private reasoning, by ChatGPT's own routing. Never a transcript row.
+      if (analysisMessage(message)) continue;
       const id = str(message.id);
       const rawText = budgetedText(authoredText(message), budget, MAX_RENDERED_TEXT);
       if (!id || !rawText) continue;
@@ -511,10 +554,18 @@
    */
   function turnEndMessageId(messages) {
     if (!Array.isArray(messages)) return null;
-    // The latest public text is the current state of the assistant turn. A Retry/Regenerate
-    // can leave the previous finished attempt in the same model while a newer public message
-    // is active; searching for *any* older end_turn=true would incorrectly keep the new
-    // attempt terminal forever. First public text from the tail decides, fail closed.
+    // The latest public text that *could* be the answer is the current state of the assistant
+    // turn. A Retry/Regenerate can leave the previous finished attempt in the same model while
+    // a newer public message is active; searching for *any* older end_turn=true would
+    // incorrectly keep the new attempt terminal forever. So the first such message from the
+    // tail decides, fail closed.
+    //
+    // "Could be the answer" is ChatGPT's own routing, not a guess about content: a turn's
+    // trailing `analysis` or `commentary` message is not a turn still in flight, it is a
+    // message on a channel that never carries answers. Skipping those is what stops one empty
+    // scratch message — live, an `analysis` row stuck at `status:'in_progress'` after the
+    // Stop control had already gone — from hiding a completed answer forever, leaving the real
+    // final prose recorded as partial and the turn permanently open. See neverTerminalChannel.
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index];
       if (!message || typeof message !== 'object') continue;
@@ -522,6 +573,7 @@
       if (!author || author.role !== 'assistant') continue;
       const content = message.content;
       if (!content || typeof content !== 'object' || content.content_type !== 'text') continue;
+      if (neverTerminalChannel(message)) continue;
       if (message.end_turn === true && message.status === 'finished_successfully') return str(message.id);
       return null;
     }
@@ -685,7 +737,16 @@
       const block = blocks[at];
       let renderedHtml = '';
       try {
-        renderedHtml = budgetedText(block.innerHTML, budget, MAX_RENDERED_HTML);
+        // All of the markup or none of it. Cutting HTML at a character count cuts it mid-tag,
+        // and ChatGPT's code blocks carry several hundred characters of wrapper chrome around
+        // a few lines of code — so a cut lands inside one often, and everything after it is
+        // lost while the visible remainder ends as an unclosed box. The canonical raw text is
+        // always carried beside this, so an absent capture costs presentation, never content.
+        const markup = block.innerHTML;
+        renderedHtml =
+          markup.length <= Math.min(MAX_RENDERED_HTML, budget.remaining)
+            ? budgetedText(markup, budget, MAX_RENDERED_HTML)
+            : '';
       } catch {
         renderedHtml = '';
       }

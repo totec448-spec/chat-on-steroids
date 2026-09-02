@@ -10,6 +10,7 @@
  * that server does not have, which is exactly the confusion the split exists to end.
  */
 
+import { LAUNCHES_WINDOWS_POWERSHELL_5 } from '../codex/tool-specs.js';
 import { getConfig } from '../config.js';
 import { isGitRepository } from '../toolchain.js';
 import type { ToolContext } from './kernel.js';
@@ -38,6 +39,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     ctx.roots.length === 0
       ? 'None yet — the user must approve a folder in the Chat On Steroids app.'
       : ctx.roots.map((r) => `/${r.name}${isGitRepository(r.path) ? ' (git)' : ''}`).join('  ');
+  const firstRoot = ctx.roots[0] ? `/${ctx.roots[0].name}` : null;
 
   const mode = ctx.readOnly
     ? 'Read only. Nothing here can modify anything.'
@@ -52,9 +54,11 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     // Roots used to be a tool of their own. They are one line of context, they change only
     // when the user changes them, and a tool call to learn them was a round trip every
     // conversation paid before it could do anything.
-    windows
-      ? 'Paths are virtual, like /project/src/main.ts. Native Windows paths inside an approved folder are also accepted and normalized to the equivalent virtual path.'
-      : 'Paths are virtual, like /project/src/main.ts. Absolute native paths inside an approved folder are also accepted and normalized to the equivalent virtual path.',
+    firstRoot
+      ? windows
+        ? `Paths are virtual under the live roots above, for example ${firstRoot}/src/main.ts. Native Windows paths inside an approved folder are also accepted and normalized to the equivalent virtual path.`
+        : `Paths are virtual under the live roots above, for example ${firstRoot}/src/main.ts. Absolute native paths inside an approved folder are also accepted and normalized to the equivalent virtual path.`
+      : 'Paths are virtual under an approved root as /<root>/..., but no root is currently approved.',
     // Taught once here rather than in every tool description: it is one rule that holds
     // across read, find, exec_command and apply_patch alike, and repeating it per tool would
     // cost more context than the shorthand saves.
@@ -69,10 +73,16 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
           // before the program runs and PowerShell does not, so the program receives the asterisk.
           'PowerShell does not expand * or ? for native programs. Pass ripgrep filename patterns as -g \'*.go\', and expand other globs with Get-ChildItem before use.',
           'Bare rg/ripgrep in PowerShell is bound to this app’s bundled ripgrep; name an explicit path for a different one.',
-          // Two bash habits that Windows PowerShell answers with a failure the output does not
-          // explain. Neither can be rewritten safely — stripping the redirect changes what the
-          // command returns, and `;` is not what `&&` means — so they are said once, up front.
-          'In Windows PowerShell do not append 2>&1 to a native program: stderr is already captured, and redirecting it leaves $? false even after exit 0. PowerShell 5.1 has no && or ||: use cmds, or A; if ($?) { B }.'
+          // A bash habit Windows PowerShell answers with a failure the output does not explain.
+          // Nothing repairs it for the model: stripping the redirect changes what the command
+          // returns, so it is said once, up front.
+          'In Windows PowerShell do not append 2>&1 to a native program: stderr is already captured, and redirecting it leaves $? false even after exit 0.',
+          // Only true of 5.1, and `defaultUserShell()` prefers pwsh 7 — where the operators work
+          // and this would be a lie. Same resolution the exec schema uses, so the two cannot
+          // disagree about the shell the model is actually talking to.
+          ...(LAUNCHES_WINDOWS_POWERSHELL_5
+            ? ['This shell is Windows PowerShell 5.1, which has no && or ||: use cmds, or A; if ($?) { B }.']
+            : [])
         ]
       : [
           'exec_command uses the host’s normal POSIX shell (zsh/bash/sh unless you request another one), so ordinary shell quoting, pipes and glob expansion work normally.',
@@ -137,8 +147,9 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
       'give each worker the objective, files and constraints that are its own in its "task". Do not repeat the',
       'context inside the tasks, and do not preface a task with boilerplate like “you have zero prior context”.',
       'Workers write code as readily as they investigate, so say which files each one may change. Steer an active',
-      'worker with action=message, and send several at once with "messages" rather than one call per worker. A',
-      'finished worker is finished: give remaining work to a new one. As a worker, message the prime with',
+      'worker with action=message, and send several at once with "messages" rather than one call per worker. Reuse',
+      'a sleeping worker for related follow-up work before spawning a replacement; message wakes its exact chat.',
+      'Only terminal workers whose context is full need replacing. As a worker, message the prime with',
       'findings/decisions/blockers, keep working while replies are pending, and call action=finish only when done,',
       'under RESULT / CHANGES / VALIDATION / BLOCKERS. Workers talk only to the prime agent, never to each other.'
     );
@@ -169,6 +180,13 @@ function desktopInstructions(ctx: ToolContext, platform: NodeJS.Platform): strin
     // than through a tool of its own, and a model looking for a "clipboard" tool finds none.
     'The clipboard lives in computer too — read_clipboard and write_clipboard run in sequence with',
     `the other actions, so copying text in and pasting it with keypress ${paste} is one call.`,
+    // The prime that closed its own chat with ctrl+w on 2026-09-02 was testing its game in a tab
+    // beside its ChatGPT chats. A chord cannot see which tab it lands on, so the rule is a window
+    // of its own, and the tool refuses the chords that would move between tabs or windows.
+    'A browser window here may be holding the ChatGPT chats this app runs. Open the page you are testing in a',
+    'browser window of its own, keep that window in front and act only there. Keyboard chords that close, open',
+    'or switch tabs or windows, or take the address bar, are refused in every browser window.',
+
     'Act only on what the user asked for and leave the rest of their desktop alone.'
   ];
 

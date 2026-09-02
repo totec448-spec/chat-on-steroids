@@ -55,7 +55,7 @@
  * rewrite is far worse than a missed one.
  */
 
-import type { ShellType } from './codex/shell.js';
+import { isWindowsPowerShell5, type ShellType } from './codex/shell.js';
 
 /**
  * Programs whose exit code 1 means "found nothing", not "went wrong".
@@ -216,7 +216,7 @@ function hasUnsupportedShellLexemes(command: string): boolean {
 }
 
 /** Index of every top-level occurrence of any separator in `seps`, ignoring quoted text. */
-function splitTopLevel(command: string, seps: readonly string[]): string[] {
+function splitTopLevel(command: string, seps: readonly string[], hits?: string[]): string[] {
   const parts: string[] = [];
   let current = '';
   let quote: '"' | "'" | null = null;
@@ -237,18 +237,26 @@ function splitTopLevel(command: string, seps: readonly string[]): string[] {
     // `$( … )`, `@( … )` and plain grouping all hide separators that are not statement
     // boundaries. Depth-tracking keeps `(a; b)` from being read as two statements.
     if (char === '(' || char === '{') depth++;
-    else if (char === ')' || char === '}') depth = Math.max(0, depth - 1);
+    else if (char === ')' || char === '}') {
+      if (depth === 0) return [command];
+      depth--;
+    }
 
     if (depth === 0) {
       const hit = seps.find((sep) => command.startsWith(sep, i));
       if (hit !== undefined) {
         parts.push(current);
+        hits?.push(hit);
         current = '';
         i += hit.length - 1;
         continue;
       }
     }
     current += char;
+  }
+  if (quote !== null || depth !== 0) {
+    hits?.splice(0);
+    return [command];
   }
   parts.push(current);
   return parts.filter((part) => part.trim() !== '');
@@ -510,29 +518,89 @@ function pipelineStopCandidate(command: string): Token | null {
 }
 
 /**
- * Whether a cut pipeline's generator is a git command with no second reason to exit non-zero.
+ * The subcommand a `git …` generator names, when the generator is git and the name is usable.
  *
  * The subcommand must be the token straight after `git`. `git -C dir diff` reads the same to a
  * person and is refused here, because proving which token is the subcommand means knowing which
  * of git's own options take a value, and being wrong about that is how `git -c x=y --exit-code`
  * would slip through. Withholding the exemption from a form nobody recorded costs nothing.
  *
+ * Null when a predicate flag is present, because exit 1 is then the answer the caller asked for
+ * rather than an absence of output, and no caller of this may treat it as one.
+ *
  * Command-name lookup cannot be intercepted on this surface: exec.ts launches every exec_command
  * through `powershell -NoProfile`, so unlike the bare `rg` case there is no profile function that
  * could be answering to the name `git`.
  */
+function gitGeneratorSubcommand(command: string): string | null {
+  const statements = splitTopLevel(command, [';', '\n']);
+  const last = statements[statements.length - 1];
+  if (last === undefined) return null;
+  const generator = splitTopLevel(last, ['|'])[0];
+  if (generator === undefined) return null;
+  const tokens = tokenize(generator);
+  if (programName(tokens[0]) !== 'git') return null;
+  const subcommand = tokens[1];
+  if (subcommand === undefined) return null;
+  if (tokens.some((argument) => GIT_FLAGS_THAT_MAKE_THE_EXIT_MEAN_SOMETHING.test(argument.value))) return null;
+  return subcommand.value.toLowerCase();
+}
+
+/** Whether a cut pipeline's generator is a git command with no second reason to exit non-zero. */
 function cutPipelineGeneratorOnlyReports(command: string): boolean {
   const token = pipelineStopCandidate(command);
-  if (token === null || programName(token) !== 'git') return false;
+  if (token === null) return false;
+  if (programName(token) !== 'git') return cutPipelineGeneratorIsProvenSearch(token);
+  const subcommand = gitGeneratorSubcommand(command);
+  return subcommand !== null && GIT_SUBCOMMANDS_THAT_ONLY_REPORT.has(subcommand);
+}
+
+/**
+ * Whether the first pipeline stage is the one whose status the shell reported.
+ *
+ * `statusDeterminingToken` walks in from the right and stops at the first stage that could
+ * have set the status itself, so a generator only decides when everything after it is one of
+ * PowerShell's own passive shapes. Asking this separately is what keeps a git-subcommand read
+ * off the generator honest: without it, `git grep foo | git diff --exit-code` would have its
+ * predicate failure filed as a search that found nothing.
+ */
+function generatorDecidesStatus(command: string): boolean {
   const statements = splitTopLevel(command, [';', '\n']);
-  const last = statements[statements.length - 1] as string;
-  const generator = splitTopLevel(last, ['|'])[0] as string;
-  const tokens = tokenize(generator);
-  const subcommand = tokens[1];
-  if (subcommand === undefined || !GIT_SUBCOMMANDS_THAT_ONLY_REPORT.has(subcommand.value.toLowerCase())) {
-    return false;
-  }
-  return !tokens.some((argument) => GIT_FLAGS_THAT_MAKE_THE_EXIT_MEAN_SOMETHING.test(argument.value));
+  const last = statements[statements.length - 1];
+  if (last === undefined) return false;
+  return splitTopLevel(last, ['|'])
+    .slice(1)
+    .every((segment) => stageIsPassive(segment.trim()));
+}
+
+/** A path-proven search generator whose own failures are visible in its output. */
+function cutPipelineGeneratorIsProvenSearch(token: Token): boolean {
+  if (!NO_MATCH_MEANS_EXIT_1.has(programName(token))) return false;
+  return /[\\/]/.test(token.value);
+}
+
+/** Observed PowerShell native-pipeline cut statuses, including unsigned -1. */
+const CUT_PIPELINE_EXIT_CODES = new Set([1, -1, 0xff_ff_ff_ff]);
+
+/** A diagnostic line a search program printed about itself, rather than a match. */
+const SEARCH_DIAGNOSTIC = /^\s*(rg|ripgrep|grep|egrep|fgrep|findstr):/im;
+
+/** Command output with single-command response framing removed when present. */
+function commandOutputBody(outputText: string): string[] {
+  const lines = outputText.split('\n').map((line) => line.replace(/\r$/, ''));
+  const start = lines.indexOf('Output:');
+  return (start < 0 ? lines : lines.slice(start + 1)).filter(
+    (line) => line.trim() !== '' && !line.startsWith('---') && !line.startsWith('Warning: truncated output')
+  );
+}
+
+/** A path-proven search answered for at least one path while naming another path it could not read. */
+function searchAnsweredDespiteBadPath(command: string, outputText: string): boolean {
+  if (splitTopLevel(command, [';', '\n']).length !== 1) return false;
+  const token = statusDeterminingToken(command);
+  if (token === null || !/[\\/]/.test(token.value) || !NO_MATCH_MEANS_EXIT_1.has(programName(token))) return false;
+  if (!SEARCH_DIAGNOSTIC.test(outputText)) return false;
+  return commandOutputBody(outputText).some((line) => !SEARCH_DIAGNOSTIC.test(line));
 }
 
 /**
@@ -548,28 +616,36 @@ export function nonZeroExitIsBenign(
   exitCode: number | null,
   outputText: string
 ): boolean {
-  if (exitCode !== 1) return false;
-  // A shell that refused the command never reached the search at all, so reading the exit
-  // code as the search's answer is a fabrication. `Write-Output hi && rg foo` is the case
-  // that matters: Windows PowerShell 5.1 rejects `&&` outright, exits 1 without running a
-  // thing, and this function would otherwise call it ripgrep finding no matches.
+  if (exitCode === null) return false;
+  // A shell refusal means the status cannot be interpreted as the child's result.
   if (SHELL_REFUSED.test(outputText)) return false;
-  // A reporting git command that was cut short by `Select-Object -First`. Three things have to
-  // hold together before this is provable, and each one alone withholds it: the pipeline has a
-  // truncating stage and nothing that could have set the status itself, the generator is a git
-  // subcommand with no flag that spends the exit code on an answer, and the run printed
-  // something without printing a `fatal:`. Rule out the cut and there is no way left for `git
-  // diff` to have exited 1 with a diff on stdout — which is exactly the shape a worker hit while
-  // capping the output of a four-file diff, then re-ran because the status looked like a failure.
+  // A proven reporting generator cut by `Select-Object -First` can leave a native non-zero status.
   if (
+    CUT_PIPELINE_EXIT_CODES.has(exitCode) &&
     cutPipelineGeneratorOnlyReports(command) &&
-    outputText.trim() !== '' &&
-    !/^\s*(?:fatal|error):/im.test(outputText)
+    commandOutputBody(outputText).length > 0 &&
+    !/^\s*(?:fatal|error):/im.test(outputText) &&
+    !SEARCH_DIAGNOSTIC.test(outputText)
   ) {
     return true;
   }
+  if (exitCode === 2) return searchAnsweredDespiteBadPath(command, outputText);
+  if (exitCode !== 1) return false;
   const token = statusDeterminingToken(command);
   const program = programName(token ?? undefined);
+  // `git grep` spends exit 1 on "found nothing" for the same reason ripgrep does, and is the
+  // spelling a model reaches for once it is already running git. It needs no path-qualified
+  // form to prove itself: `powershell -NoProfile` leaves no way for a profile function to be
+  // answering to the name `git`. It does need to be the stage that decided the status, and to
+  // have printed no diagnostic of its own — a bad pathspec is `fatal:` and exit 128, so this
+  // withholds nothing git actually produces, and costs nothing if git ever changes its mind.
+  if (program === 'git') {
+    return (
+      gitGeneratorSubcommand(command) === 'grep' &&
+      generatorDecidesStatus(command) &&
+      !/^\s*(?:fatal|error):/im.test(outputText)
+    );
+  }
   if (!NO_MATCH_MEANS_EXIT_1.has(program)) return false;
   // A bare command name is not proof of which implementation ran. PowerShell profiles can
   // define functions/aliases named `rg` and even `rg.exe`; cmd.exe searches the current
@@ -911,19 +987,52 @@ function isRipgrepPatternRegion(command: string, region: QuotedRegion): boolean 
  * conclusion — the measured consequence being re-runs of searches that had already answered.
  * Both benign shapes are named, because nothing in the exit code tells them apart.
  */
-export function benignExitNote(command: string, shellType: ShellType = 'powershell'): string {
-  if (shellType === 'powershell' && cutPipelineGeneratorOnlyReports(command)) {
-    const program = programName(pipelineStopCandidate(command) ?? undefined);
+export function benignExitNote(
+  command: string,
+  shellType: ShellType = 'powershell',
+  exitCode?: number | null,
+  outputText?: string
+): string {
+  if (exitCode === 2 && outputText !== undefined && searchAnsweredDespiteBadPath(command, outputText)) {
+    const program = statusDeterminingProgram(command);
+    const missing = outputText
+      .split('\n')
+      .filter((line) => SEARCH_DIAGNOSTIC.test(line))
+      .slice(0, 3)
+      .map((line) => line.trim())
+      .join(' ');
     return (
-      `Exit code 1 here is \`Select-Object -First\` stopping the pipeline, not a failure: it ` +
-      `closes the pipe while \`${program}\` is still writing, and \`${program}\` has no other ` +
+      `Exit code 2 from \`${program}\` here is one path it could not read, not a failed search: ` +
+      'the matches above are a complete answer for every path that does exist. ' +
+      `${missing} Re-check that path's spelling and search it on its own — re-running the whole ` +
+      'search would return the same matches again.'
+    );
+  }
+  // A search cut is only the better explanation once it actually printed matches.
+  const cutGenerator =
+    shellType === 'powershell' && cutPipelineGeneratorOnlyReports(command)
+      ? pipelineStopCandidate(command)
+      : null;
+  const cutIsTheBetterStory =
+    cutGenerator !== null &&
+    (!cutPipelineGeneratorIsProvenSearch(cutGenerator) ||
+      (outputText !== undefined && commandOutputBody(outputText).length > 0));
+  if (cutGenerator !== null && cutIsTheBetterStory) {
+    const program = programName(cutGenerator);
+    return (
+      `Exit code ${exitCode ?? 1} here is \`Select-Object -First\` stopping the pipeline, not a ` +
+      `failure: it closes the pipe while \`${program}\` is still writing, and \`${program}\` has no other ` +
       'way to exit non-zero once it has printed. The output above is the first N objects and is ' +
       'complete for that window, so the command does not need to be run again. Add `-Wait` to ' +
       'the same stage to keep the exit code meaningful, at the cost of letting the command run ' +
       'to the end.'
     );
   }
-  const program = statusDeterminingProgram(command);
+  // Name the search the caller actually wrote. `git grep` decides its status as `git`, and a
+  // note reading "exit code 1 from `git`" would generalise to the git commands where 1 means
+  // something else entirely — which is the belief this note exists to prevent, not to spread.
+  const deciding = statusDeterminingProgram(command);
+  const program = deciding === 'git' ? `git ${gitGeneratorSubcommand(command) ?? ''}`.trim() : deciding;
   if (shellType !== 'powershell') {
     return (
       `Exit code 1 from \`${program}\` is a result, not a failure: this search program uses it ` +
@@ -942,6 +1051,42 @@ export interface NormalizedCommand {
   cmd: string;
   /** Human-readable description of every rewrite, for the model and the log. */
   notes: string[];
+}
+
+/** Rewrites only small, top-level conditional chains that PowerShell 5.1 would reject outright. */
+export function normalizePowerShellOperators(
+  cmd: string,
+  shellType: ShellType,
+  shellPath: string
+): NormalizedCommand {
+  if (shellType !== 'powershell' || !isWindowsPowerShell5(shellPath)) return { cmd, notes: [] };
+  if ((!cmd.includes('&&') && !cmd.includes('||')) || hasUnsupportedShellLexemes(cmd)) return { cmd, notes: [] };
+
+  const operators: string[] = [];
+  const operands = splitTopLevel(cmd, ['&&', '||'], operators);
+  if (operators.length === 0 || operands.length !== operators.length + 1 || operands.length > 4) {
+    return { cmd, notes: [] };
+  }
+  if (
+    operands.some((operand) => {
+      const value = operand.trim();
+      return !value || value.includes('>') || value.includes('$?') || splitTopLevel(value, [';', '\n']).length !== 1;
+    })
+  ) {
+    return { cmd, notes: [] };
+  }
+
+  const rewritten = operands
+    .map((operand, index) => {
+      if (index === 0) return operand.trim();
+      const guard = operators[index - 1] === '&&' ? 'if ($?)' : 'if (-not $?)';
+      return `${guard} { ${operand.trim()} }`;
+    })
+    .join('; ');
+  return {
+    cmd: rewritten,
+    notes: ['Windows PowerShell 5.1 cannot parse && or ||, so this simple chain was rewritten as guards on `$?`.']
+  };
 }
 
 /**
@@ -1004,6 +1149,19 @@ function quoteArgument(value: string): string {
 }
 
 /**
+ * The expanded names, as a note can carry them.
+ *
+ * Naming them is what lets the caller check what the search actually ran against, and a
+ * hundred filenames on one line is not checkable — so past a dozen the note gives the count
+ * and the head. Only the note is shortened; the command received every name.
+ */
+const NAMES_SHOWN_IN_NOTE = 12;
+function listExpandedNames(names: readonly string[]): string {
+  if (names.length <= NAMES_SHOWN_IN_NOTE) return names.join(', ');
+  return `${names.slice(0, NAMES_SHOWN_IN_NOTE).join(', ')} … and ${names.length - NAMES_SHOWN_IN_NOTE} more`;
+}
+
+/**
  * One brace group of plain alternatives, e.g. `src/{main,test}/x`.
  *
  * Deliberately one group and nothing clever inside it. A brace group is also PowerShell's
@@ -1047,10 +1205,14 @@ function expandBraces(token: Token): string[] | null {
 /**
  * The most names one glob may turn into.
  *
- * A command line has a length limit and a wall of filenames is unreadable in a log. Past
- * this, failing with the hint beats a line nobody can check.
+ * The bound is the command line's length limit, and 48 was well under it: a test directory of
+ * 71 files made `test/*.test.ts` fall past this, and what the caller then got was not the hint
+ * but ripgrep's `os error 123` on a literal asterisk — the exact failure this expansion exists
+ * to remove. 128 quoted relative paths is a few KB against PowerShell's ~32 KB, so the limit
+ * now sits where the real constraint is rather than ahead of it. The wall-of-filenames problem
+ * was the *note's*, and `listExpandedNames` is where that belongs.
  */
-const MAX_EXPANDED_NAMES = 48;
+const MAX_EXPANDED_NAMES = 128;
 
 /** Lists one validated relative directory's immediate entry names for glob expansion. */
 export type DirectoryLister = (relativeDirectory?: string) => readonly string[];
@@ -1154,7 +1316,7 @@ function normalizeRipgrepSegment(
       out.push(...braced.map(quoteArgument));
       notes.push(
         `PowerShell has no brace expansion, so \`${token.value}\` reached ripgrep as one literal name. ` +
-          `It was expanded here to the ${braced.length} paths bash would have produced: ${braced.join(', ')}.`
+          `It was expanded here to the ${braced.length} paths bash would have produced: ${listExpandedNames(braced)}.`
       );
       continue;
     }
@@ -1165,7 +1327,7 @@ function normalizeRipgrepSegment(
         `PowerShell does not expand globs for native programs, so \`${token.value}\` was expanded here to ` +
           `${expanded.hits.length === 1 ? 'the one entry' : `the ${expanded.hits.length} entries`} of the ` +
           `${expanded.directory === '.' ? 'working directory' : `relative directory ${expanded.directory}`} ` +
-          `matching it: ${expanded.hits.join(', ')}. Sub-directories were not searched, exactly as ` +
+          `matching it: ${listExpandedNames(expanded.hits)}. Sub-directories were not searched, exactly as ` +
           `the glob asked; use \`-g '${token.value}'\` if a recursive match was what you meant.`
       );
       continue;

@@ -17,6 +17,7 @@
 import http from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,14 +30,33 @@ import {
   appendEvent,
   createSession,
   initSessionStore,
+  rebindSession,
   upsertMessageEvent,
   writeOverflowText
 } from '../src/main/session/store.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 import { DEFAULT_CAPABILITIES, type Capabilities, type Root } from '../src/shared/types.js';
+import type { ToolOutcome } from '../src/shared/session.js';
 import { emptyEvidence, noteExec, noteOutcome, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
-import { execOwner, noteExecOwner, resetExecOwnershipForTests } from '../src/main/codex/ownership.js';
+import { resetBlockedChatsForTests, setChatBlocked } from '../src/main/session/blocked-chats.js';
+import {
+  abortContinuation,
+  attachSummary,
+  dispatchContinuationSourceSendNow,
+  beginContinuationSourceSendNow,
+  openContinuationNow,
+  resetContinuationsForTests
+} from '../src/main/session/continuation.js';
+import {
+  backdateExecAttendanceForTests,
+  backgroundExecObligations,
+  execOwner,
+  MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
+  noteExecOwner,
+  resetExecOwnershipForTests,
+  UNATTENDED_EXEC_NOTICE_MS
+} from '../src/main/codex/ownership.js';
 import { unifiedExecManager } from '../src/main/codex/manager.js';
 import { locateRipgrep } from '../src/main/ripgrep.js';
 import { IS_WINDOWS, makeTempDir, removeTempDir, writeTree } from './helpers.js';
@@ -783,7 +803,11 @@ describe('surface boundaries', () => {
             : tool.name === 'agents'
               ? 3_400
               : tool.name === 'exec_command'
-                ? 3_500
+                // Windows carries `WINDOWS_SHELL_GUIDANCE` in the same description, and that text
+                // is quoted verbatim from Codex's own shell spec — it is not ours to trim to fit a
+                // budget. The non-Windows number is the one that says whether *our* additions have
+                // grown, so both are asserted rather than one loose bound covering both.
+                ? (process.platform === 'win32' ? 3_800 : 3_500)
                 : 3_000;
       expect(bytes, `${tool.name} schema is ${bytes} bytes`).toBeLessThan(budget);
     }
@@ -1044,6 +1068,24 @@ describe('capability gating', () => {
     const names = toolNames(await core('tools/list'));
     expect(names).toContain('session');
     expect(names).toContain('agents');
+  });
+
+  it('teaches primes to reuse sleeping workers before spawning replacements', async () => {
+    ctx.agentTools = true;
+    const initialized = await core('initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'test-client', version: '1.0.0' }
+    });
+    const instructions: string = initialized.body.result.instructions ?? '';
+    expect(instructions).toMatch(/Reuse\s+a sleeping worker for related follow-up work before spawning a replacement/);
+    expect(instructions).toContain('Only terminal workers whose context is full need replacing');
+
+    const tools = await core('tools/list');
+    const agentsDescription = (tools.body.result.tools as Array<{ name: string; description?: string }>).find(
+      (tool) => tool.name === 'agents'
+    )?.description;
+    expect(agentsDescription).toContain('Reuse a suitable sleeping worker with message before spawn');
   });
 
   it('rejects action-specific agent fields instead of silently ignoring them', async () => {
@@ -1739,6 +1781,38 @@ describe('sandbox enforcement through the tool layer', () => {
     const instructions: string = reply.body.result.instructions ?? '';
     expect(instructions).toContain('/workspace');
     expect(instructions).toContain('Read only');
+  });
+
+  /**
+   * Every worked example the model is shown must name a root that exists, and no error may send
+   * it after a tool that does not. Both cost a refused call and a retry, and neither is visible
+   * from inside the app.
+   */
+  it('names only live roots and live tools in what the model is shown', async () => {
+    const read = toolList(await core('tools/list')).find((tool) => tool.name === 'read')!;
+    const paths = String(read.inputSchema.properties.paths.description);
+    expect(paths).toContain('/workspace');
+    // `/project` is nobody's root; it was a hardcoded example the model could not act on.
+    expect(paths).not.toContain('/project');
+
+    // Nor may anything be invented *after* the root. `/workspace/src/main.ts` named a live
+    // root and was still a worked example the model could not act on, and a worse one than
+    // `/project`: a project-shaped suffix reads as a promise that the root is the project.
+    // An approved root is routinely a parent holding several, and reading it the other way
+    // is what produced `/<root>/AGENTS.md` for a file one folder deeper — the most repeated
+    // read failure in the recorded corpus. What replaces it is the relationship, not another
+    // path, so there is nothing left here that can go stale.
+    expect(paths).not.toMatch(/\/workspace\/\S+\.\w+/);
+    expect(paths).toContain('parent of the project');
+    expect(paths).toContain('workdir');
+
+    // list_roots is retired, so no refusal may tell the model to call it. A native path outside
+    // every root is the refusal that used to, and it must still name the roots that do exist.
+    const refusal = textOf(
+      await core('tools/call', { name: 'read', arguments: { paths: [path.join(os.tmpdir(), 'nope.txt')] } })
+    );
+    expect(refusal).toContain('Approved roots');
+    expect(refusal).not.toContain('list_roots');
   });
 });
 
@@ -3009,11 +3083,15 @@ describe('exec sessions belong to the chat that opened them', () => {
   });
 
   /** What the page reports once it has seen this connector request leave a given chat. */
-  const prove = (requestId: string, conversationId: string) =>
+  const prove = (
+    requestId: string,
+    conversationId: string,
+    sessionId = `session-${conversationId}`
+  ) =>
     observeRequestCorrelation({
       requestId,
       conversationId,
-      sessionId: '2026-08-20-execown',
+      sessionId,
       messageId: `msg-${requestId}`,
       tool: 'exec_command',
       observedAt: Date.now()
@@ -3056,7 +3134,7 @@ describe('exec sessions belong to the chat that opened them', () => {
     });
     expect(stranger.body.result?.isError).toBe(true);
     expect(textOf(stranger)).toContain(
-      `write_stdin failed: session ${sessionId} is not proven to belong to this ChatGPT conversation.`
+      `write_stdin failed: session ${sessionId} is not proven to belong to this durable Chat On Steroids session.`
     );
     expect(textOf(stranger)).not.toContain('echo=stolen');
 
@@ -3068,7 +3146,7 @@ describe('exec sessions belong to the chat that opened them', () => {
       yield_time_ms: 1_000
     });
     expect(unproven.body.result?.isError).toBe(true);
-    expect(textOf(unproven)).toContain('is not proven to belong to this ChatGPT conversation');
+    expect(textOf(unproven)).toContain('is not proven to belong to this durable Chat On Steroids session');
     expect(textOf(unproven)).not.toContain('echo=anon');
 
     // The replacement session contract exposes recordings only; the removed status action no
@@ -3088,6 +3166,82 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(owner)).toContain('Process exited with code 0');
   });
 
+  it('keeps a live process with the durable session across Compact & Resume and retires A', async () => {
+    const chatA = '6a96de28-76f4-83ed-a33a-b77f73003798';
+    const chatB = '6a96dee4-e598-83eb-80ac-a39827f932d3';
+    const summary = await createSession({ title: 'exec continuation owner', conversationId: chatA });
+    expect(prove('wfr_exec_resume_a', chatA, summary.id)).toBe('stored');
+
+    await fs.writeFile(
+      path.join(approved, 'resume-stdin.cjs'),
+      "const readline=require('node:readline'); const rl=readline.createInterface({input:process.stdin,crlfDelay:Infinity}); rl.on('line',(line)=>{ console.log('continued='+line); if(line==='done') rl.close(); });\n",
+      'utf8'
+    );
+    const started = await asChat('wfr_exec_resume_a', 'exec_command', {
+      cmd: 'node resume-stdin.cjs',
+      workdir: '/workspace',
+      tty: true,
+      yield_time_ms: 25
+    });
+    const processId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+    expect(Number.isInteger(processId), textOf(started)).toBe(true);
+    expect(execOwner(processId)).toBe(summary.id);
+
+    expect(await rebindSession(summary.id, chatA, chatB)).toBe(true);
+    expect(prove('wfr_exec_resume_b', chatB, summary.id)).toBe('stored');
+
+    const continued = await asChat('wfr_exec_resume_b', 'write_stdin', {
+      session_id: processId,
+      chars: 'done\r',
+      yield_time_ms: 5_000
+    });
+    expect(failed(continued), textOf(continued)).toBe(false);
+    expect(textOf(continued)).toContain('continued=done');
+
+    const stale = await asChat('wfr_exec_resume_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(stale)).toBe(true);
+    expect(textOf(stale)).toContain('CONVERSATION_SUPERSEDED');
+    expect(textOf(stale)).toContain('no local tool was run');
+  });
+
+  it('refuses every tool from a chat whose handoff brief has been asked for, until the move is over', async () => {
+    resetContinuationsForTests();
+    const chatA = '6a97199d-9e70-83eb-be87-01a743616cda';
+    const chatB = '6a973cc2-2d84-83ec-9d84-b5a5a6f2a2ce';
+    const summary = await createSession({ title: 'compacting owner', conversationId: chatA });
+    expect(prove('wfr_compact_a', chatA, summary.id)).toBe('stored');
+
+    // A filed ticket alone changes nothing: the page may still be stopping the turn.
+    const opened = await openContinuationNow(summary.id, chatA, true);
+    const beforePrompt = await asChat('wfr_compact_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(beforePrompt), textOf(beforePrompt)).toBe(false);
+
+    // The marked prompt is submitted. From here on the chat's calls are refused — whether the
+    // turn Stop was clicked on really ended or, as on 2026-09-01, went on calling tools.
+    expect((await beginContinuationSourceSendNow(opened.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(opened.token)).toBe(true);
+    const duringHandoff = await asChat('wfr_compact_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(duringHandoff)).toBe(true);
+    expect(textOf(duringHandoff)).toContain('COMPACTION_IN_PROGRESS');
+    expect(textOf(duringHandoff)).toMatch(/no local tool was run/i);
+    expect(textOf(duringHandoff)).toMatch(/write that brief now/i);
+
+    // Still refused once the brief is stored and the replacement chat is on its way.
+    await attachSummary(opened.token, 'SUMMARY\n'.repeat(40));
+    const afterBrief = await asChat('wfr_compact_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(afterBrief)).toContain('COMPACTION_IN_PROGRESS');
+
+    // The commit hands the refusal over to the superseded attachment for good.
+    expect(await rebindSession(summary.id, chatA, chatB)).toBe(true);
+    expect(prove('wfr_compact_b', chatB, summary.id)).toBe('stored');
+    abortContinuation(opened.token, 'the test moved the session by hand');
+    const stale = await asChat('wfr_compact_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(stale)).toBe(true);
+    expect(textOf(stale)).toContain('CONVERSATION_SUPERSEDED');
+    const fresh = await asChat('wfr_compact_b', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(fresh), textOf(fresh)).toBe(false);
+  });
+
   it('does not let a stale owner inherit a recycled process id during the new exec yield', async () => {
     // Model the real lifetime split directly: the manager has released an exited process id,
     // but the separate ownership registry still carries the chat that used to own it. Force
@@ -3095,8 +3249,8 @@ describe('exec sessions belong to the chat that opened them', () => {
     // 1-in-99k lottery.
     await unifiedExecManager.terminateAllProcesses();
     const recycledId = 1_000;
-    noteExecOwner(recycledId, 'conv-execown-old');
-    expect(execOwner(recycledId)).toBe('conv-execown-old');
+    noteExecOwner(recycledId, 'session-conv-execown-old');
+    expect(execOwner(recycledId)).toBe('session-conv-execown-old');
     expect(prove('wfr_execown_old_recycled', 'conv-execown-old')).toBe('stored');
     expect(prove('wfr_execown_new_recycled', 'conv-execown-new')).toBe('stored');
 
@@ -3135,12 +3289,12 @@ describe('exec sessions belong to the chat that opened them', () => {
         yield_time_ms: 50
       });
       expect(stolen.body.result?.isError).toBe(true);
-      expect(textOf(stolen)).toContain('is not proven to belong to this ChatGPT conversation');
+      expect(textOf(stolen)).toContain('is not proven to belong to this durable Chat On Steroids session');
 
       const started = await starting;
       expect(started.body.result?.isError, textOf(started)).not.toBe(true);
       expect(Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1])).toBe(recycledId);
-      expect(execOwner(recycledId)).toBe('conv-execown-new');
+      expect(execOwner(recycledId)).toBe('session-conv-execown-new');
       expect(textOf(started)).not.toContain('got=');
 
       // Let the real owner release the shell normally. Besides proving the new principal did
@@ -3160,13 +3314,183 @@ describe('exec sessions belong to the chat that opened them', () => {
       resetExecOwnershipForTests();
     }
   });
+
+  it('re-offers an exited unread result on later owner calls without draining it or leaking it', async () => {
+    expect(prove('wfr_background_owner', 'conv-background-owner')).toBe('stored');
+    expect(prove('wfr_background_other', 'conv-background-other')).toBe('stored');
+    const started = await asChat('wfr_background_owner', 'exec_command', {
+      cmd: IS_WINDOWS
+        ? "Start-Sleep -Milliseconds 650; Write-Output 'background-e2e-once'; exit 7"
+        : "sleep 0.65; printf '%s\\n' background-e2e-once; exit 7",
+      workdir: '/workspace',
+      yield_time_ms: 250
+    });
+    expect(failed(started), textOf(started)).toBe(false);
+    const sessionId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+    expect(Number.isInteger(sessionId)).toBe(true);
+
+    const owned = new Set([sessionId]);
+    await vi.waitFor(() => expect(unifiedExecManager.exitedUnread(owned)).toHaveLength(1), {
+      timeout: 5_000,
+      interval: 20
+    });
+    const exitCode = unifiedExecManager.exitedUnread(owned)[0]!.exitCode;
+    expect(exitCode).toBe(7);
+    expect(unifiedExecManager.exitedUnread(new Set())).toEqual([]);
+
+    const stranger = await asChat('wfr_background_other', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(stranger)).not.toContain(`Background session ${sessionId}`);
+
+    const later = await asChat('wfr_background_owner', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(later)).toContain(
+      `Background session ${sessionId} finished with exit code ${exitCode} and has unread output`
+    );
+    expect(textOf(later)).toContain(`write_stdin(session_id=${sessionId}, chars="")`);
+    expect(textOf(later)).not.toContain('background-e2e-once');
+
+    const drained = await asChat('wfr_background_owner', 'write_stdin', {
+      session_id: sessionId,
+      chars: ''
+    });
+    expect(textOf(drained)).toContain('background-e2e-once');
+    expect(textOf(drained)).toContain(`Process exited with code ${exitCode}`);
+    expect(textOf(drained)).not.toContain('Background command recovery');
+
+    const after = await asChat('wfr_background_owner', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(after)).not.toContain(`Background session ${sessionId}`);
+  });
+
+  it('refuses new commands for the exact chat at the unread-result bound, then admits after a drain', async () => {
+    const conversationId = 'conv-background-admission';
+    const sessionIds: number[] = [];
+
+    for (let index = 0; index < MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION; index++) {
+      const requestId = `wfr_background_admission_${index}`;
+      expect(prove(requestId, conversationId)).toBe('stored');
+      const started = await asChat(requestId, 'exec_command', {
+        cmd: IS_WINDOWS
+          ? `Start-Sleep -Milliseconds 500; Write-Output 'owed-${index}'; exit ${index + 1}`
+          : `sleep 0.5; printf '%s\\n' owed-${index}; exit ${index + 1}`,
+        workdir: '/workspace',
+        yield_time_ms: 100
+      });
+      const sessionId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+      expect(Number.isInteger(sessionId), textOf(started)).toBe(true);
+      sessionIds.push(sessionId);
+    }
+
+    await vi.waitFor(
+      () => expect(backgroundExecObligations(`session-${conversationId}`).exitedUnread.map((row) => row.processId)).toEqual(
+        [...sessionIds].sort((left, right) => left - right)
+      ),
+      { timeout: 8_000, interval: 25 }
+    );
+
+    const blockedRequest = 'wfr_background_admission_blocked';
+    expect(prove(blockedRequest, conversationId)).toBe('stored');
+    const blocked = await asChat(blockedRequest, 'exec_command', {
+      cmd: IS_WINDOWS ? "Write-Output 'must-not-run'" : "printf '%s\\n' must-not-run",
+      workdir: '/workspace'
+    });
+    expect(failed(blocked)).toBe(true);
+    expect(textOf(blocked)).toContain('EXEC_RESULTS_UNREAD');
+    for (const sessionId of sessionIds) expect(textOf(blocked)).toContain(String(sessionId));
+
+    const drained = await asChat(blockedRequest, 'write_stdin', { session_id: sessionIds[0], chars: '' });
+    expect(textOf(drained)).toContain('owed-0');
+
+    const admitted = await asChat(blockedRequest, 'exec_command', {
+      cmd: IS_WINDOWS ? "Write-Output 'admitted-after-drain'" : "printf '%s\\n' admitted-after-drain",
+      workdir: '/workspace',
+      yield_time_ms: 5_000
+    });
+    expect(failed(admitted), textOf(admitted)).toBe(false);
+    expect(textOf(admitted)).toContain('admitted-after-drain');
+
+    for (const sessionId of sessionIds.slice(1)) {
+      await asChat(blockedRequest, 'write_stdin', { session_id: sessionId, chars: '' });
+    }
+  });
+
+  it('pings a live session left unpolled once, without blocking work or reaching another chat', async () => {
+    expect(prove('wfr_background_unattended', 'conv-background-unattended')).toBe('stored');
+    expect(prove('wfr_background_stranger', 'conv-background-stranger')).toBe('stored');
+    const started = await asChat('wfr_background_unattended', 'exec_command', {
+      cmd: IS_WINDOWS ? 'Start-Sleep -Seconds 30' : 'sleep 30',
+      workdir: '/workspace',
+      yield_time_ms: 250
+    });
+    const sessionId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+    expect(Number.isInteger(sessionId), textOf(started)).toBe(true);
+
+    try {
+      // Inside the threshold a live session is just work in progress, and says nothing.
+      const quiet = await asChat('wfr_background_unattended', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(quiet)).not.toContain(`Background session ${sessionId}`);
+
+      backdateExecAttendanceForTests(sessionId, UNATTENDED_EXEC_NOTICE_MS + 60_000);
+
+      const stranger = await asChat('wfr_background_stranger', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(stranger)).not.toContain(`Background session ${sessionId}`);
+
+      const pinged = await asChat('wfr_background_unattended', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(pinged)).toContain(`Background session ${sessionId} has been running unpolled for 3m`);
+      expect(textOf(pinged)).toContain(`write_stdin(session_id=${sessionId}, chars="")`);
+
+      // Once, and only once: a session that is supposed to run all turn must not nag all turn.
+      const again = await asChat('wfr_background_unattended', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(again)).not.toContain(`Background session ${sessionId}`);
+
+      // A reminder is not admission pressure. The session it names may be the point of the turn,
+      // so unlike a completed unread result it never spends the exec_command budget.
+      const admitted = await asChat('wfr_background_unattended', 'exec_command', {
+        cmd: IS_WINDOWS ? "Write-Output 'still-admitted'" : "printf '%s\n' still-admitted",
+        workdir: '/workspace',
+        yield_time_ms: 5_000
+      });
+      expect(failed(admitted), textOf(admitted)).toBe(false);
+      expect(textOf(admitted)).toContain('still-admitted');
+    } finally {
+      await unifiedExecManager.terminateProcess(sessionId);
+    }
+  });
+
+  it('restarts the unattended clock when the owner polls, rather than reminding it of what it just did', async () => {
+    expect(prove('wfr_background_attended', 'conv-background-attended')).toBe('stored');
+    const started = await asChat('wfr_background_attended', 'exec_command', {
+      cmd: IS_WINDOWS
+        ? "while ($true) { Write-Output 'tick'; Start-Sleep -Milliseconds 200 }"
+        : "while true; do printf '%s\n' tick; sleep 0.2; done",
+      workdir: '/workspace',
+      yield_time_ms: 250
+    });
+    const sessionId = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+    expect(Number.isInteger(sessionId), textOf(started)).toBe(true);
+
+    try {
+      backdateExecAttendanceForTests(sessionId, UNATTENDED_EXEC_NOTICE_MS + 60_000);
+      const polled = await asChat('wfr_background_attended', 'write_stdin', {
+        session_id: sessionId,
+        chars: ''
+      });
+      expect(failed(polled), textOf(polled)).toBe(false);
+      expect(textOf(polled)).toContain('tick');
+      // The mark lands before the wait, so the poll cannot report the session it is attending.
+      expect(textOf(polled)).not.toContain('has been running unpolled');
+
+      const after = await asChat('wfr_background_attended', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(after)).not.toContain(`Background session ${sessionId}`);
+    } finally {
+      await unifiedExecManager.terminateProcess(sessionId);
+    }
+  });
 });
 
 describe('the outcome a shell command is recorded with', () => {
   /** Runs `noteExec` the way a tool does, and reports what the recorder would store. */
   const outcomeOf = (
     result: { exitCode: number | null; timedOut?: boolean },
-    preset: 'ok' | 'error' | 'rejected' | null = null
+    preset: ToolOutcome | null = null
   ) => {
     const context: CallContext = {
       startedAt: Date.now(),
@@ -3182,9 +3506,9 @@ describe('the outcome a shell command is recorded with', () => {
     return context.outcome ?? 'ok';
   };
 
-  it('calls a completed non-zero exit an error, not a success', () => {
-    expect(outcomeOf({ exitCode: 1 })).toBe('error');
-    expect(outcomeOf({ exitCode: 3 })).toBe('error');
+  it('calls a completed non-zero exit the child’s own failure, not a success', () => {
+    expect(outcomeOf({ exitCode: 1 })).toBe('process_exit_nonzero');
+    expect(outcomeOf({ exitCode: 3 })).toBe('process_exit_nonzero');
   });
 
   it('leaves a clean exit and a still-running process alone', () => {
@@ -3194,12 +3518,13 @@ describe('the outcome a shell command is recorded with', () => {
     expect(outcomeOf({ exitCode: null })).toBe('ok');
   });
 
-  it('calls a timeout an error even when no exit code arrived', () => {
-    expect(outcomeOf({ exitCode: null, timedOut: true })).toBe('error');
+  it('blames this connector for a timeout, not the child', () => {
+    expect(outcomeOf({ exitCode: null, timedOut: true })).toBe('tool_internal_error');
+    expect(outcomeOf({ exitCode: 1, timedOut: true })).toBe('tool_internal_error');
   });
 
   it('never overwrites an outcome the tool layer set deliberately', () => {
-    expect(outcomeOf({ exitCode: 1 }, 'rejected')).toBe('rejected');
+    expect(outcomeOf({ exitCode: 1 }, 'tool_rejected')).toBe('tool_rejected');
   });
 
   it('does not let the guard downgrade a command error back to ok', () => {
@@ -3217,6 +3542,153 @@ describe('the outcome a shell command is recorded with', () => {
       // the child exited non-zero. The more specific process outcome must survive it.
       noteOutcome('ok');
     });
-    expect(context.outcome).toBe('error');
+    expect(context.outcome).toBe('process_exit_nonzero');
+  });
+});
+
+
+/**
+ * The user's own stop for a ChatGPT turn the page will not stop.
+ *
+ * The property under test is not "a flag is read" but the whole join: a block is stored against
+ * a *conversation*, and the thing arriving over HTTP is a *request id*, so every assertion here
+ * goes through the same exact ownership proof the connector uses in production. The two failure
+ * directions matter equally — a block that does not reach the rogue chat is useless, and a block
+ * that reaches anyone else is worse than useless.
+ */
+describe('blocked chats', () => {
+  const ROGUE = 'conv-blocked-rogue';
+  const BYSTANDER = 'conv-innocent-bystander';
+  let proofSeq = 0;
+
+  /** Proves one request id belongs to a chat, exactly as the page evidence path would. */
+  const owned = (conversationId: string): string => {
+    const requestId = `wfr_block_${++proofSeq}`;
+    expect(
+      observeRequestCorrelation({
+        requestId,
+        conversationId,
+        sessionId: 'session-blocked-chats',
+        messageId: `message-block-${proofSeq}`,
+        tool: 'read',
+        observedAt: Date.now()
+      })
+    ).toBe('stored');
+    return requestId;
+  };
+
+  /**
+   * The same proof, deliberately late: the page reporting *after* the call has already landed.
+   *
+   * This is the ordinary order, not an exotic one. A turn's first call races its own evidence,
+   * and the wedged page this feature exists for is the slowest reporter there is. The recorder
+   * has always waited for exactly this and filed the call under the chat it proves, which is why
+   * a blocked chat could be seen running tools in its own timeline.
+   */
+  const provenLate = (conversationId: string, afterMs: number): string => {
+    const seq = ++proofSeq;
+    const requestId = `wfr_block_late_${seq}`;
+    setTimeout(() => {
+      observeRequestCorrelation({
+        requestId,
+        conversationId,
+        sessionId: 'session-blocked-chats',
+        messageId: `message-block-${seq}`,
+        tool: 'read',
+        observedAt: Date.now()
+      });
+    }, afterMs).unref?.();
+    return requestId;
+  };
+
+  const readAs = (requestId: string | null, virtualPath = '/workspace/notes.txt'): Promise<any> =>
+    modern(
+      'tools/call',
+      { name: 'read', arguments: { paths: [virtualPath] } },
+      requestId ? { 'x-request-id': `${requestId}/att1` } : {}
+    );
+
+  beforeEach(() => resetBlockedChatsForTests());
+  afterAll(() => resetBlockedChatsForTests());
+
+  it('refuses a blocked chat’s call and tells the model to stop instead of retrying', async () => {
+    setChatBlocked(ROGUE, true);
+    const reply = await readAs(owned(ROGUE));
+    const text = textOf(reply);
+
+    expect(failed(reply)).toBe(true);
+    expect(text).toContain('CHAT_BLOCKED');
+    // The refusal has to end the turn, so it must forbid the retry loop a bare error invites
+    // and name the one action that finishes.
+    expect(text).toMatch(/no further tool calls/i);
+    expect(text).toMatch(/final answer/i);
+    // And no work may have happened behind it: the refusal is the whole result.
+    expect(text).not.toContain('/workspace/notes.txt');
+  });
+
+  it('blocks every tool the chat has, not only the one it was blocked during', async () => {
+    ctx.caps = withCaps({ command: true, create: true, edit: true });
+    ctx.readOnly = false;
+    setChatBlocked(ROGUE, true);
+
+    for (const call of [
+      { name: 'read', arguments: { paths: ['/workspace/notes.txt'] } },
+      { name: 'exec_command', arguments: { cmd: 'echo rogue', workdir: '/workspace' } },
+      { name: 'apply_patch', arguments: { patch: addPatch('/workspace/blocked.txt', ['nope']) } }
+    ]) {
+      const reply = await modern('tools/call', call, { 'x-request-id': `${owned(ROGUE)}/att1` });
+      expect(textOf(reply), call.name).toContain('CHAT_BLOCKED');
+    }
+    // apply_patch was refused before it ran, not after it wrote.
+    await expect(fs.access(path.join(approved, 'blocked.txt'))).rejects.toThrow();
+  });
+
+  it('never touches another chat, or a call it cannot place at all', async () => {
+    setChatBlocked(ROGUE, true);
+
+    const other = await readAs(owned(BYSTANDER));
+    expect(failed(other)).toBe(false);
+    expect(textOf(other)).toContain('/workspace/notes.txt');
+
+    // No proof, no conversation, no block. Refusing here would punish an unrelated chat — or
+    // a phone — for a turn this app cannot even show was theirs.
+    const unproven = await readAs(null);
+    expect(failed(unproven)).toBe(false);
+    expect(textOf(unproven)).toContain('/workspace/notes.txt');
+  });
+
+  it('refuses the call whose page evidence proves the blocked chat only after it arrives', async () => {
+    setChatBlocked(ROGUE, true);
+
+    const reply = await readAs(provenLate(ROGUE, 40));
+
+    expect(failed(reply)).toBe(true);
+    expect(textOf(reply)).toContain('CHAT_BLOCKED');
+    // The point of the whole gate: the file was never read, so there is nothing to file under
+    // the blocked chat's timeline afterwards.
+    expect(textOf(reply)).not.toContain('/workspace/notes.txt');
+  });
+
+  it('still lets a call through when the page never proves it at all', async () => {
+    setChatBlocked(ROGUE, true);
+
+    // The wait is bounded by the same window attribution uses, and it ends the same way:
+    // unproven is unproven. A phone, or a chat with no extension behind it, is not the rogue
+    // turn and is not refused for failing to prove it is not.
+    const reply = await readAs('wfr_block_never_proven');
+
+    expect(failed(reply)).toBe(false);
+    expect(textOf(reply)).toContain('/workspace/notes.txt');
+  });
+
+  it('gives the chat its tools back the moment it is released, same request id and all', async () => {
+    const requestId = owned(ROGUE);
+    setChatBlocked(ROGUE, true);
+    expect(textOf(await readAs(requestId))).toContain('CHAT_BLOCKED');
+
+    setChatBlocked(ROGUE, false);
+    const after = await readAs(requestId);
+    expect(failed(after)).toBe(false);
+    expect(textOf(after)).toContain('/workspace/notes.txt');
   });
 });

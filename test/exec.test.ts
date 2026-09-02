@@ -357,6 +357,16 @@ describe.runIf(IS_WINDOWS)('runPowerShell', () => {
     expect(result.stdout).not.toContain('�');
   });
 
+  it('reads UTF-8 source text through Get-Content without mojibake', async () => {
+    const file = path.join(cwd, 'utf8-source.txt');
+    const sample = 'äöüß → — … “quotes” 😀';
+    await fs.writeFile(file, sample, 'utf8');
+
+    const result = await runPowerShell(`Get-Content -Raw -LiteralPath ${JSON.stringify(file)}`, cwd, 30_000);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe(sample);
+  });
+
   it('round-trips the same characters on the error stream', async () => {
     // stderr is decoded separately from stdout and cleaned of PowerShell's XML error
     // records on the way through, so it is its own encoding path and its own regression.

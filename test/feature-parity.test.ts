@@ -19,7 +19,12 @@ describe('portable browser-backed feature parity', () => {
       // identical on every host. Its only product dependency is recording, not Windows/Desktop.
       expect(config.goal).toEqual(windows.goal);
       expect(config.goal.enabled).toBe(false);
-      expect(config.multiAgent).toEqual({ enabled: true, maxWorkers: 2 });
+      expect(config.multiAgent).toEqual({
+        enabled: true,
+        maxWorkers: 2,
+        allowUnattributedCalls: true,
+        recoverAgentTabs: false
+      });
       expect(browserExtensionRequired(config)).toBe(true);
     }
   );
@@ -63,7 +68,10 @@ describe('portable browser-backed feature parity', () => {
       'agents'
     ]);
     expect(surfaceIsUseful('core', config.capabilities, 'darwin')).toBe(true);
-    expect(surfaceIsUseful('desktop', config.capabilities, 'darwin')).toBe(true);
+    // Fresh macOS installs start the Desktop group off; the surface exists once it is switched on.
+    expect(surfaceIsUseful('desktop', config.capabilities, 'darwin')).toBe(false);
+    const switchedOn = { ...config.capabilities, screen: true, control: true };
+    expect(surfaceIsUseful('desktop', switchedOn, 'darwin', '21.4.0')).toBe(true);
 
     const manifest = JSON.parse(
       readFileSync(new URL('../extension/manifest.json', import.meta.url), 'utf8')

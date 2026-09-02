@@ -335,6 +335,11 @@ main {
   overflow: hidden;
 }
 
+.card.drop-target {
+  outline: 2px dashed var(--line);
+  outline-offset: -6px;
+}
+
 .card > h2 {
   display: flex;
   align-items: center;
@@ -517,6 +522,29 @@ main {
   background: var(--red-wash);
   border-radius: var(--pill);
   padding: 2px 8px;
+}
+
+/* ----------------------------------------------------------------- notice */
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--wash);
+  border-bottom: 1px solid var(--line);
+}
+
+.notice .ico {
+  flex: none;
+  color: var(--blue);
+}
+
+.notice span {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ------------------------------------------------------------- permissions */
@@ -1472,8 +1500,8 @@ input[readonly] {
 }
 
 .sess-top {
-  /* `.sess-del` is absolutely positioned at the row's top-right. Reserve its hit target
-     so the age text never sits underneath an invisible delete button. */
+  /* Session actions are absolutely positioned at the row's top-right. Reserve their hit targets
+     so the age text never sits underneath invisible buttons. */
   padding-right: 0;
   display: flex;
   align-items: baseline;
@@ -1501,8 +1529,9 @@ input[readonly] {
 }
 
 .sess-top em {
-  /* Keep the age out from under the hover-only delete hit target. */
-  margin-right: 30px;
+  /* Keep the age out from under the block, Open Chat and delete hit targets. Block is not
+     hover-only once it is on, so this reserve is what the row is actually drawn with. */
+  margin-right: 84px;
   flex: 0 0 auto;
   font-style: normal;
   font-size: 11px;
@@ -1531,6 +1560,16 @@ input[readonly] {
   white-space: nowrap;
 }
 
+/* The Unattributed row's one sentence, and the only row that has one: every other row is a
+   chat, and a chat needs no explaining. Allowed to wrap, unlike the counts above it — it is
+   the whole reason that row is in the list. */
+.sess-note {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--faint);
+}
+
 /* Estimated tokens against the urgent threshold. Red only past it, because past
    it is the one case where carrying on is genuinely a mistake. */
 .bar {
@@ -1551,15 +1590,34 @@ input[readonly] {
   background: var(--red);
 }
 
-.sess-del {
+.sess-action {
   position: absolute;
   top: 6px;
-  right: 6px;
   padding: 3px 5px;
   opacity: 0;
 }
 
-.sess:hover .sess-del {
+.sess-open {
+  right: 32px;
+}
+
+.sess-block {
+  right: 58px;
+}
+
+/* A block is state, not just an action, so it stays legible without hovering the row —
+   the hover-reveal rule below only governs the actions that do nothing until pressed. */
+.sess-block.is-blocked {
+  opacity: 1;
+  background: var(--red-wash);
+  color: var(--red);
+}
+
+.sess-del {
+  right: 6px;
+}
+
+.sess:hover .sess-action {
   opacity: 1;
 }
 
@@ -1836,6 +1894,37 @@ input[readonly] {
 
 .tool.tone-bad .metric {
   color: var(--red);
+}
+
+/* One Compact & Resume as one row: the name, then one sentence saying where it is or where
+   it died, coloured like the tool rows — green landed, red will not, grey in flight. Reuses
+   the tool row's open/closed surface so it reads as one more foldable thing in the timeline. */
+.compaction > summary {
+  flex-wrap: wrap;
+}
+
+.compaction.tone-wait {
+  color: var(--soft);
+}
+
+.compaction > summary .state {
+  font-weight: 500;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.compaction.tone-good > summary .state {
+  color: var(--green);
+}
+
+.compaction.tone-bad > summary .state {
+  color: var(--red);
+}
+
+.compaction .raw .rich,
+.compaction .raw .msg {
+  max-height: 60vh;
+  overflow: auto;
 }
 
 .raw {
@@ -2236,6 +2325,26 @@ nav button.is-sel::after {
   height: 6px;
   border-radius: 50%;
   background: var(--red);
+}
+
+/* The Activity panel's one line about being current. It borrows the foot's geometry
+   because it is the same kind of thing - a quiet fact under the feed - and gains colour
+   only for the two states that mean something: current, and not able to say so. */
+.upline {
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--soft);
+}
+
+.upline.is-ok {
+  background: var(--green-wash);
+  color: var(--green);
+}
+
+.upline.is-bad {
+  background: var(--red-wash);
+  color: var(--red);
 }
 
 /* ------------------------------------------------------------------- toast */

@@ -18,7 +18,7 @@ Chat On Steroids is a permission boundary between ChatGPT and the logged-in OS u
 - Filesystem tools validate paths against folders you explicitly approve.
 - Read-only mode disables effective file writes, commands, desktop control and clipboard writes.
 - `exec_command` is intentionally **not** confined to approved folders. It starts in an approved working directory, then runs with the normal privileges of your account.
-- Screen, mouse/keyboard and clipboard permissions are Windows-only desktop-wide capabilities, not folder permissions.
+- Screen, mouse/keyboard and clipboard permissions are desktop-wide capabilities on Windows and macOS, not folder permissions. On macOS they start off and also require the OS's own Screen Recording and Accessibility grants.
 - MCP servers bind to loopback and use secret tokenized paths. Public reachability comes only from the tunnel you configure.
 - The companion-extension bridge is a separate loopback service and exposes no filesystem, command or settings-mutation route.
 - Stored API/bridge credentials use Electron `safeStorage` (DPAPI on Windows, Keychain on macOS, a secure desktop secret store on Linux). Linux `basic_text` is refused; normal Activity logs are redacted, capped and memory-only.

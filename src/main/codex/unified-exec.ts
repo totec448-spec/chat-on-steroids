@@ -631,7 +631,11 @@ interface ProcessEntry {
   hookCommand: string;
   tty: boolean;
   initialExecCommandActive: boolean;
-  lastUsed: number;
+}
+
+export interface BackgroundExecState {
+  running: number[];
+  exitedUnread: Array<{ processId: number; exitCode: number | null }>;
 }
 
 export class UnifiedExecProcessManager {
@@ -696,8 +700,7 @@ export class UnifiedExecProcessManager {
         cwd: request.displayCwd,
         hookCommand: request.hookCommand,
         tty: request.tty,
-        initialExecCommandActive: true,
-        lastUsed: start
+        initialExecCommandActive: true
       });
     }
 
@@ -763,7 +766,6 @@ export class UnifiedExecProcessManager {
     try {
       const current = this.processes.get(request.processId);
       if (!current || current.process !== locked) throw UnifiedExecError.unknownProcessId(request.processId);
-      current.lastUsed = Date.now();
       const { process, tty } = { process: current.process, tty: current.tty };
 
       let statusAfterWrite: ProcessStatus | null = null;
@@ -870,6 +872,30 @@ export class UnifiedExecProcessManager {
       }));
   }
 
+  /** Non-destructive obligation view for a caller-owned set of retained sessions. */
+  backgroundState(processIds: ReadonlySet<number>): BackgroundExecState {
+    const running: number[] = [];
+    const exitedUnread: Array<{ processId: number; exitCode: number | null }> = [];
+    for (const entry of this.processes.values()) {
+      if (entry.initialExecCommandActive) continue;
+      if (!processIds.has(entry.processId)) continue;
+      if (entry.process.hasExited()) {
+        exitedUnread.push({ processId: entry.processId, exitCode: entry.process.exitCode() });
+      } else {
+        running.push(entry.processId);
+      }
+    }
+    return {
+      running: running.sort((left, right) => left - right),
+      exitedUnread: exitedUnread.sort((left, right) => left.processId - right.processId)
+    };
+  }
+
+  /** Exited rows not handled by the starting exec; polling releases these rows. */
+  exitedUnread(processIds: ReadonlySet<number>): Array<{ processId: number; exitCode: number | null }> {
+    return this.backgroundState(processIds).exitedUnread;
+  }
+
   async terminateProcess(processId: number): Promise<boolean> {
     const entry = this.processes.get(processId);
     if (!entry) return false;
@@ -910,32 +936,13 @@ export class UnifiedExecProcessManager {
     return { kind: 'alive', exitCode, processId: entry.processId };
   }
 
-  /**
-   * The soft cap on stored sessions.
-   *
-   * Protects the eight most recently used, prefers an exited least-recently-used session, and
-   * never evicts one whose interaction lock is held — that lock is what a concurrent
-   * `write_stdin` holds, and evicting under it would delete a session mid-call.
-   */
+  /** Capacity is admission, never garbage collection: every retained row still owes output. */
   private ensureProcessCapacity(requestProcessId: number): void {
     // Reservations participate in the hard cap, so concurrent exec_command calls cannot
     // each observe one free slot and collectively insert a 65th live process.
-    while (this.reservedProcessIds.size > MAX_UNIFIED_EXEC_PROCESSES) {
-      const exited = [...this.processes.values()]
-        .filter((entry) => entry.process.hasExited())
-        .sort((left, right) => left.lastUsed - right.lastUsed);
-      let removed = false;
-      for (const candidate of exited) {
-        const release = candidate.process.interactionLock.tryLock();
-        if (!release) continue;
-        release();
-        this.releaseProcessId(candidate.processId);
-        removed = true;
-        break;
-      }
-      if (removed) continue;
+    if (this.reservedProcessIds.size > MAX_UNIFIED_EXEC_PROCESSES) {
       throw UnifiedExecError.createProcess(
-        `too many active terminal sessions (limit ${MAX_UNIFIED_EXEC_PROCESSES}); close or terminate one before starting another`
+        `too many retained terminal sessions (limit ${MAX_UNIFIED_EXEC_PROCESSES}); drain a returned session with write_stdin before starting another`
       );
     }
     if (!this.reservedProcessIds.has(requestProcessId)) {

@@ -26,7 +26,6 @@ vi.mock('electron', () => ({
 
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const {
-  TRANSFER_TTL_MS,
   beginPrimeTransfer,
   bindConversation,
   cancelPrimeTransfer,
@@ -50,19 +49,28 @@ const {
   WORKER_CONTEXT_CEILING_TOKENS
 } = await import('../src/main/agents.js');
 const {
+  AUTOMATIC_HANDOVER_TTL_MS,
   CONTINUATION_TTL_MS,
   abortContinuation,
   attachSummary,
+  beginContinuationDestinationSendNow,
+  beginContinuationSourceSendNow,
+  bindContinuationDestinationMessageNow,
   claimContinuationNow,
   commitContinuation,
+  compactingConversation,
   continuationByToken,
   continuationForSession,
+  dispatchContinuationDestinationSendNow,
+  dispatchContinuationSourceSendNow,
   openContinuationNow,
+  releaseContinuationDestinationSendNow,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   restoreContinuations,
   setContinuationRecoveryHooks,
-  snapshotContinuations
+  snapshotContinuations,
+  supersededSourceConversations
 } = await import('../src/main/session/continuation.js');
 const { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } = await import('../src/main/session/resume-gate.js');
 const { briefShortfall, resumeBootstrapText } = await import('../src/main/session/handoff.js');
@@ -103,7 +111,8 @@ beforeAll(async () => {
   dir = await makeTempDir('clf-continuation-');
   initConfigPath(dir);
   initSessionStore(dir);
-  await saveConfig({ ...defaultConfig(), multiAgent: { enabled: true, maxWorkers: 3 } });
+  const config = defaultConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, enabled: true, maxWorkers: 3 } });
 });
 
 afterAll(async () => {
@@ -377,6 +386,47 @@ describe('committing', () => {
     expect(await commitContinuation(token, CHAT_B)).toBe(true);
     expect((await getSession(sessionId))?.chatIds).toEqual([CHAT_A, CHAT_B]);
   });
+
+  it('hands an armed replacement dispatch back on proof that nothing left the page, never once sent', async () => {
+    // 2026-09-02: the brief landed in the replacement chat and the user's Escape emptied the
+    // composer in the same instant. The armed dispatch then sat for its six hours.
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(false);
+
+    expect(await releaseContinuationDestinationSendNow(token)).toBe(true);
+    expect(continuationByToken(token)).toMatchObject({
+      state: 'awaiting-chat',
+      destinationSend: { state: 'not-attempted' }
+    });
+    // A fresh command claims what the retired one held; the release is what makes that legal.
+    expect(await claimContinuationNow(token, 'cmd-2')).not.toBeNull();
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+    // Sent is past the point of no return: the marked message or a cancel ends it, not a page.
+    expect(await releaseContinuationDestinationSendNow(token)).toBe(false);
+    expect(continuationByToken(token)?.destinationSend.state).toBe('sent');
+    expect(await releaseContinuationDestinationSendNow('0000000000000000000000000000dead')).toBe(false);
+  });
+
+  it('re-proves the exact destination message after the continuation already committed', async () => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'tab-1');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+
+    // A reloaded replacement document has lost its page-local proof, but the WAL still names
+    // the exact message that committed B. Reading that exact tuple back is safe and idempotent;
+    // any other chat or message remains a contradiction.
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'resume-message-b')).toBe(true);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_C, 'resume-message-b')).toBe(false);
+    expect(await bindContinuationDestinationMessageNow(token, CHAT_B, 'other-message')).toBe(false);
+  });
 });
 
 describe('the commit lock', () => {
@@ -641,37 +691,23 @@ describe('the swarm handover', () => {
     expect(primeConversation()).toBe(CHAT_B);
   });
 
-  it('survives a deadline crossed while the durable write is in flight', async () => {
+  it('commits a handover however long the handoff turn took', async () => {
+    // 2026-09-01: an automatic compaction opened its continuation, the handoff turn then took
+    // eleven minutes to produce the brief, and the swarm handover — which had a ten-minute
+    // clock of its own — was already expired when the replacement chat committed. The commit
+    // was refused with a perfectly live continuation, and the session was stranded between A
+    // and B. The handover has no clock now: the continuation is the only authority over it.
     vi.useFakeTimers();
     const summary = await createSession({ title: 'work', conversationId: CHAT_A });
     startSwarm(CHAT_A);
-    const opened = await openContinuationNow(summary.id, CHAT_A);
+    const opened = await openContinuationNow(summary.id, CHAT_A, true);
+    vi.setSystemTime(Date.now() + 11 * 60_000);
     await attachSummary(opened.token, SAMPLE_BRIEF);
     await claimContinuationNow(opened.token, 'tab-1');
+    vi.setSystemTime(Date.now() + 60_000);
 
-    let release = (): void => undefined;
-    const held = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const real = store.rebindSession;
-    vi.spyOn(store, 'rebindSession').mockImplementation(async (...args) => {
-      // The handover deadline passes while the disk write is happening. Before the freeze
-      // this left the session durably in B with the swarm still bound to A.
-      //
-      // Moved from the caller into the write itself: out there the jump had to be timed by
-      // guessing how many microtasks the preflight takes, and the durable record written
-      // before the preflight is a real file write, so one `await Promise.resolve()` landed
-      // the jump *before* freezePrimeTransfer instead of after it. That tested plain expiry,
-      // which is a different test two cases down.
-      vi.setSystemTime(Date.now() + TRANSFER_TTL_MS + 1_000);
-      await held;
-      return real(...args);
-    });
-    const commit = commitContinuation(opened.token, CHAT_B);
-    await Promise.resolve();
-    release();
-
-    expect(await commit).toBe(true);
+    expect(freezePrimeTransfer(CHAT_A)).toBe('frozen');
+    expect(await commitContinuation(opened.token, CHAT_B)).toBe(true);
     expect(await attachedChat(summary.id)).toBe(CHAT_B);
     expect(primeConversation()).toBe(CHAT_B);
   });
@@ -719,14 +755,14 @@ describe('the swarm handover', () => {
     expect(swarmRunning()).toBe(true);
   });
 
-  it('does not let a frozen handover expire, and thaws back to an expiring one', () => {
+  it('keeps a handover open until the continuation commits or cancels it', () => {
     vi.useFakeTimers();
     startSwarm(CHAT_A);
     beginPrimeTransfer(CHAT_A);
 
+    vi.setSystemTime(Date.now() + 2 * 60 * 60_000);
     expect(freezePrimeTransfer(CHAT_A)).toBe('frozen');
-    vi.setSystemTime(Date.now() + TRANSFER_TTL_MS * 2);
-    // Frozen means committed-to: no deadline of its own, so the move cannot decline.
+    // Frozen means committed-to: the move cannot decline.
     expect(primeConversationGone(CHAT_A)).toBe(false);
     expect(commitPrimeTransfer(CHAT_A, CHAT_B)).toBe(true);
     expect(primeConversation()).toBe(CHAT_B);
@@ -736,7 +772,13 @@ describe('the swarm handover', () => {
     beginPrimeTransfer(CHAT_A);
     expect(freezePrimeTransfer(CHAT_A)).toBe('frozen');
     thawPrimeTransfer(CHAT_A);
-    vi.setSystemTime(Date.now() + TRANSFER_TTL_MS + 1_000);
+    vi.setSystemTime(Date.now() + 2 * 60 * 60_000);
+    // A thawed handover is still open, however long ago it was opened.
+    expect(primeConversationGone(CHAT_A)).toBe(false);
+    expect(freezePrimeTransfer(CHAT_A)).toBe('frozen');
+    thawPrimeTransfer(CHAT_A);
+    // Only the continuation ends it.
+    cancelPrimeTransfer(CHAT_A);
     expect(freezePrimeTransfer(CHAT_A)).toBe('unavailable');
   });
 
@@ -782,9 +824,92 @@ describe('the swarm handover', () => {
     expect(primeConversationGone(CHAT_A)).toBe(false);
     expect(swarmRunning()).toBe(true);
   });
+
+  it('keeps an automatic ticket open past ordinary continuation deadlines and restart', async () => {
+    vi.useFakeTimers();
+    const summary = await createSession({ title: 'durable auto ticket', conversationId: CHAT_A });
+    const opened = await openContinuationNow(summary.id, CHAT_A, true);
+    const saved = snapshotContinuations();
+
+    vi.setSystemTime(Date.now() + CONTINUATION_TTL_MS * 6);
+    expect(continuationByToken(opened.token)).toMatchObject({
+      state: 'awaiting-summary',
+      automatic: true
+    });
+
+    resetContinuationsForTests();
+    await restoreContinuations(saved);
+    expect(continuationByToken(opened.token)).toMatchObject({
+      state: 'awaiting-summary',
+      automatic: true
+    });
+  });
 });
 
 describe('restart lifetime recovery', () => {
+  it('gives up an automatic handover that never lands, so the source chat gets its tools back', async () => {
+    vi.useFakeTimers();
+    const summary = await createSession({ title: 'stuck auto handover', conversationId: CHAT_A });
+    const opened = await openContinuationNow(summary.id, CHAT_A, true);
+
+    // Intended but not yet asked for: the chat may be mid-turn for as long as it likes.
+    vi.setSystemTime(Date.now() + AUTOMATIC_HANDOVER_TTL_MS * 2);
+    expect(continuationForSession(summary.id)?.state).toBe('awaiting-summary');
+    expect(compactingConversation(CHAT_A)).toBeNull();
+
+    // Asked for: from here chat A is refused every tool until the handover lands, so this is
+    // where the clock starts. A handover the model never finishes must not fence A for good.
+    expect((await beginContinuationSourceSendNow(opened.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(opened.token)).toBe(true);
+    expect(compactingConversation(CHAT_A)?.token).toBe(opened.token);
+    vi.setSystemTime(Date.now() + AUTOMATIC_HANDOVER_TTL_MS - 1);
+    expect(compactingConversation(CHAT_A)?.token).toBe(opened.token);
+    const saved = snapshotContinuations();
+
+    vi.setSystemTime(Date.now() + 2);
+    expect(compactingConversation(CHAT_A)).toBeNull();
+    expect(continuationForSession(summary.id)).toBeNull();
+
+    // The same verdict when a restart finds the record on disk.
+    resetContinuationsForTests();
+    await restoreContinuations(saved);
+    expect(compactingConversation(CHAT_A)).toBeNull();
+    expect(continuationForSession(summary.id)).toBeNull();
+  });
+
+  it('keeps a committed record committed when the session has since moved on again', async () => {
+    const now = Date.now();
+    const summary = await createSession({ title: 'moved twice', conversationId: CHAT_A });
+    expect(await store.rebindSession(summary.id, CHAT_A, CHAT_B)).toBe(true);
+    expect(await store.rebindSession(summary.id, CHAT_B, CHAT_C)).toBe(true);
+
+    await restoreContinuations({
+      version: 1,
+      savedAt: now,
+      entries: [
+        {
+          token: 'first-move-token-0',
+          sessionId: summary.id,
+          from: CHAT_A,
+          to: CHAT_B,
+          openedAt: now - 1_000,
+          state: 'committed',
+          summary: SAMPLE_BRIEF,
+          handoffId: null,
+          claimedBy: CHAT_B,
+          armed: true,
+          error: null
+        }
+      ]
+    });
+
+    // A later handover out of B does not make the first move any less real: A stays a
+    // superseded chat rather than the record being aborted for an "unexpected" attachment.
+    expect(continuationByToken('first-move-token-0')?.state).toBe('committed');
+    expect(supersededSourceConversations()).toContain(CHAT_A);
+    expect(await attachedChat(summary.id)).toBe(CHAT_C);
+  });
+
   it('does not roll an expired pre-commit record back into a fresh transfer', async () => {
     vi.useFakeTimers();
     const now = Date.now();

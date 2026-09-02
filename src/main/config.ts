@@ -12,9 +12,11 @@ import { z } from 'zod';
 import {
   CAPABILITIES,
   DEFAULT_CAPABILITIES,
+  GOAL_MODES,
   GOAL_REASONING_LEVELS,
   WRITE_CAPABILITIES,
   type Capabilities,
+  DESKTOP_CAPABILITIES,
   type CompactionSettings,
   type Config,
   type GoalSettings,
@@ -23,9 +25,12 @@ import {
   type SessionSettings
 } from '../shared/types.js';
 import {
+  DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
   DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS,
+  SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS,
+  SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS,
   SUPERSEDED_GOAL_SYSTEM_PROMPTS
 } from '../shared/goal.js';
 import { logError } from './logger.js';
@@ -115,29 +120,51 @@ const DEFAULT_COMPACTION: CompactionSettings = {
  * newest first, and whatever is chosen there is stored here verbatim.
  */
 /**
- * The `~` prefix is OpenRouter's marker for a family alias: this one always resolves to the
- * newest DeepSeek V4 Flash, so the default does not quietly rot into a snapshot from months
- * ago the way a pinned id does. `deepseek/deepseek-v4-flash` was such a pin — it reads like
- * "the flash model" but OpenRouter publishes it as V4 Flash 0423, and by August there were
- * two newer revisions the default would never have reached. The alias is also the cheaper
- * of the two: $0.04/M prompt against the pin's $0.057/M.
+ * The shipped Goal baseline. Keep the exact OpenRouter model id here rather than a provider
+ * fallback or a local alias: changing providers after one failed request would also change the
+ * protocol behaviour the Goal loop is validating. Existing user-selected models remain stored
+ * verbatim; this value is only the fresh/repair default.
  */
-export const DEFAULT_GOAL_MODEL = '~deepseek/deepseek-v4-flash-latest';
+export const DEFAULT_GOAL_MODEL = 'z-ai/glm-5.3';
 const DEFAULT_GOAL: GoalSettings = {
   enabled: false,
+  // The mode a fresh install runs the moment somebody flips the switch. Goal, because it is
+  // the one that can end by itself: a loop that never stops is a deliberate choice, not a
+  // default anybody should discover by turning something on.
+  mode: 'goal',
   model: DEFAULT_GOAL_MODEL,
   reasoning: 'default',
   prompt: DEFAULT_GOAL_SYSTEM_PROMPT,
-  objectivePrompt: DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT
+  objectivePrompt: DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
+  loopPrompt: DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
 };
 // Two workers, not three: three concurrent workers reproducibly trips ChatGPT's rate limit
 // ("too many requests"), which strands the run rather than making it faster.
-const DEFAULT_MULTI_AGENT: MultiAgentSettings = { enabled: false, maxWorkers: 2 };
+const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
+  enabled: false,
+  maxWorkers: 2,
+  allowUnattributedCalls: false,
+  // Off: Goal/Loop chats are always recovered, and reopening anything else — a worker, a prime,
+  // a plain chat that once called a tool — is the user's choice to make.
+  recoverAgentTabs: false
+};
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
   CAPABILITIES.map((capability) => [capability, true])
 ) as Capabilities;
-const FIRST_LAUNCH_MULTI_AGENT: MultiAgentSettings = { enabled: true, maxWorkers: DEFAULT_MULTI_AGENT.maxWorkers };
+// Unattributed calls start permitted on a fresh install for the same reason recording does:
+// the ambiguity fences refuse work when the extension cannot *prove* the caller, and a new
+// install is exactly where that evidence path is least likely to be healthy yet. Off, the
+// first thing a user sees is CALLER_IDENTITY_REQUIRED; on, the work runs and its activity is
+// still labelled Unattributed rather than guessed onto a chat. This relaxes only the fences —
+// a positively known dormant/retired/ended worker is refused either way. `DEFAULT_MULTI_AGENT`
+// keeps `false` so an upgrade never relaxes an older config merely because the field was
+// absent when that config was written.
+const FIRST_LAUNCH_MULTI_AGENT: MultiAgentSettings = {
+  ...DEFAULT_MULTI_AGENT,
+  enabled: true,
+  allowUnattributedCalls: true
+};
 
 const rootSchema = z.object({
   name: z
@@ -268,7 +295,9 @@ const configSchema = z.object({
   multiAgent: z
     .object({
       enabled: z.boolean().optional().default(DEFAULT_MULTI_AGENT.enabled),
-      maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers)
+      maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
+      allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls),
+      recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs)
     })
     .optional()
     .default({ ...DEFAULT_MULTI_AGENT }),
@@ -278,6 +307,10 @@ const configSchema = z.object({
   goal: z
     .object({
       enabled: z.boolean().optional().default(DEFAULT_GOAL.enabled),
+      // Repaired rather than rejected for the same reason `reasoning` below is: a config
+      // written by a version that knows one more mode than this one must not send every root
+      // and permission in the file through conservative recovery over a single word.
+      mode: z.enum(GOAL_MODES).optional().default(DEFAULT_GOAL.mode).catch(DEFAULT_GOAL.mode),
       model: z
         .string()
         .max(160)
@@ -314,18 +347,39 @@ const configSchema = z.object({
         .transform((prompt) =>
           prompt.trim() === '' ? DEFAULT_GOAL.objectivePrompt : prompt.trim()
         )
-        .catch(DEFAULT_GOAL.objectivePrompt)
+        .catch(DEFAULT_GOAL.objectivePrompt),
+      // The third editor, repaired exactly like the two above. Loop is the mode that cannot
+      // stop on its own, so an empty instruction here would be an unconstrained model typing
+      // into somebody's chat forever — the one shape this section must never load in.
+      loopPrompt: z
+        .string()
+        .max(MAX_GOAL_SYSTEM_PROMPT_CHARS)
+        .optional()
+        .default(DEFAULT_GOAL.loopPrompt)
+        .transform((prompt) => (prompt.trim() === '' ? DEFAULT_GOAL.loopPrompt : prompt.trim()))
+        .catch(DEFAULT_GOAL.loopPrompt)
     })
     .optional()
     .default({ ...DEFAULT_GOAL })
 });
 
+/**
+ * Fresh-install Desktop exposure differs by host. Windows starts the Desktop group on. macOS has
+ * a native backend too, but it starts **off** and is switched on by the user: every Desktop
+ * action there also needs Screen Recording / Accessibility consent from System Settings, and a
+ * fresh install must not publish a second connector nobody can use yet. Unsupported hosts mask
+ * the group at the platform boundary while preserving stored choices for a moved config.
+ */
+function firstLaunchCapabilities(platform: NodeJS.Platform, release?: string): Capabilities {
+  const capabilities = capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform, release);
+  if (platform === 'darwin') for (const capability of DESKTOP_CAPABILITIES) capabilities[capability] = false;
+  return capabilities;
+}
+
 export function defaultConfig(platform: NodeJS.Platform = process.platform, release?: string): Config {
   return {
     roots: [],
-    // Desktop permissions start usable on hosts with a native backend. Unsupported hosts mask
-    // them at the platform boundary while preserving stored choices for a moved config.
-    capabilities: capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform, release),
+    capabilities: firstLaunchCapabilities(platform, release),
     readOnly: false,
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'dark' },
@@ -373,15 +427,23 @@ function enforceFeatureDependencies(config: Config): Config {
 /**
  * Moves any exactly-as-shipped Goal prompt, from any past version, onto the current default.
  *
- * The prompt is editable and persisted, so changing the source constant alone would leave an
- * existing untouched install on the old behaviour forever. Exact equality is the fence: any
- * user customization, even a one-character change, is preserved verbatim. The list is walked
- * rather than compared against one predecessor, so an install that skipped a release still
- * migrates instead of being stranded on a default two generations old.
+ * All three prompts — the gate, the driver and the loop — are editable and persisted, so
+ * changing a source constant alone would leave an existing untouched install on the old
+ * behaviour forever. Exact equality is the fence: any user customization, even a one-character
+ * change, is preserved verbatim. Each list is walked rather than compared against one
+ * predecessor, so an install that skipped a release still migrates instead of being stranded on
+ * a default two generations old.
  */
 function adoptCurrentGoalPrompt(config: Config): Config {
-  if (!SUPERSEDED_GOAL_SYSTEM_PROMPTS.includes(config.goal.prompt)) return config;
-  return { ...config, goal: { ...config.goal, prompt: DEFAULT_GOAL_SYSTEM_PROMPT } };
+  const goal = { ...config.goal };
+  if (SUPERSEDED_GOAL_SYSTEM_PROMPTS.includes(goal.prompt)) goal.prompt = DEFAULT_GOAL_SYSTEM_PROMPT;
+  if (SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS.includes(goal.objectivePrompt)) {
+    goal.objectivePrompt = DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT;
+  }
+  if (SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS.includes(goal.loopPrompt)) {
+    goal.loopPrompt = DEFAULT_GOAL_LOOP_SYSTEM_PROMPT;
+  }
+  return { ...config, goal };
 }
 
 let configPath = '';

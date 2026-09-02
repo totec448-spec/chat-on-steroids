@@ -9,22 +9,267 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## Unreleased
+## [2.0.3] — 2026-09-02
+
+**A small step towards the infinite loop.**
+
+- **The Loop.** Goal with the exit removed: every finished turn gets its next message until you switch it off.
+- **Improved stability and reliability through auto reloads.** A chat that goes silent, shows an error or loses its tab is reloaded or reopened on its own evidence, and a turn that is still running is never closed early.
+- **macOS computer use.** The optional Desktop connector now ships on macOS, off by default.
+- **Auto update.** Windows and Linux AppImage installs fetch the next release and apply it on the next quit.
+- **Small things.** UI polish, blocked chats, worker recovery, session timeline fixes.
+
+<details>
+<summary>Full list of changes</summary>
 
 ### Added
+- **A blocked chat says so in its composer.** Block is set in the app, and from the ChatGPT page
+  nothing said so: the model kept answering with tool refusals. The composer now carries "Chat
+  blocked" beside the gear, and hovering it says where the block is undone: the app's Chat tab,
+  hover the chat in the sessions list, press its block symbol.
+- **The chat page shows why the app reloaded it.** The session log already carried one row per
+  browser repair, "Trying to reload chat to recover an interrupted response…" rewritten in place
+  to "Reloaded chat to recover …", but the page dropped it because the row names no turn. It is
+  now painted between the turns it happened between, with the time, whether or not Overwrite is
+  on, so a tab that reloads under you says what happened and why in the chat itself.
 - **macOS now publishes the optional Desktop connector.** Architecture-matched Swift code implements
   window/display capture through ScreenCaptureKit, snapshot-scoped semantic controls through
   AXUIElement, and physical mouse/keyboard input through CGEvent while preserving the existing
   `observe` / `computer` schemas, frame identity and partial-batch contract.
+- **On macOS the Desktop permissions start off.** The backend is there, but a fresh Mac install
+  publishes Core only; switch on "See the screen", "Control mouse and keyboard" or a clipboard
+  permission in the Home panel, grant Screen Recording and Accessibility in System Settings, and
+  the Desktop connector appears. Windows keeps starting with the Desktop permissions on.
 - **macOS packaging and smoke checks cover the in-process Desktop boundary and screen-capture purpose
   string.** Each x64/arm64 package ships a thin Swift dylib plus N-API addon outside asar. A Node
   Worker invokes that backend inside the responsible Electron process, and packaged-runtime smoke
   exercises this real addon/dylib path rather than the standalone development CLI protocol probe.
 
+### Changed
+- **macOS builds now require macOS 13 Ventura or newer.** The bundled OpenAI `tunnel-client` v0.0.14,
+  which the publish pipeline pins to OpenAI's current release, is built for macOS 13; the 12.0 floor
+  of 2.0.2 would have shipped a Connect button that cannot start it. The packaging audit refuses any
+  payload whose deployment target is above the declared minimum, which is how this was caught.
+- **The model is told not to spam browser instances.** A prime that could not get a foreground
+  reading out of the browser window it controlled launched a fresh debug instance on a new port
+  and profile for every retry. The exec_command description, which every turn
+  re-reads, now says it plainly: keep to one or two browser windows you actually use, reuse the one already
+  open, and stop and say so when control becomes ambiguous rather than launching a replacement.
+- **Each browser recovery stands on its own evidence, and nothing else.** Silence reloads a chat
+  after two minutes with no tool call and no page change, full stop. An error ChatGPT shows
+  reloads the chat once per user message, whatever the error says and whether or not the page
+  could tell which turn it belongs to. Unattributed activity reloads the chats that are working
+  once per server turn: a later unattributed call under the same request id is the same broken
+  turn and buys nothing, the next request id is the next turn and gets its own reload. None of
+  the three is refused because another one already fired.
+- **Goal and Loop chats always come back; everything else is a switch, off by default.** Silence
+  and a missing tab reopen or reload a chat the Goal/Loop switch is driving whatever the settings
+  say. Workers, primes and plain chats that have called tools are recovered only when "Recover
+  other chats' tabs" is on, and it now starts off.
+
+### Fixed
+- **A worker chat that opens and never starts is opened once more, not waited on.** The tab the
+  app opened for a worker loaded as an empty New chat and never picked up its instruction. The
+  app held that page's ninety-second lease to the end, then failed the worker, and only then
+  opened the two workers queued behind it, which is why they appeared two minutes after the
+  prime asked. A fresh worker page now has twenty seconds to redeem its marker; past that the
+  same command is opened again, once, and a second silence fails the slot immediately so the
+  line moves. The command is single-owner, so the page that redeems first is the only one that
+  types. The old "never handed to a page" retry, a leftover from before every ending advanced
+  the queue, is gone.
+- **A reload no longer ends a turn that is still running.** The page reloaded in the middle of a
+  prime's turn — once for a foreign unattributed call, once for a lost stream — adopted the open
+  turn from the app, saw the interim prose ChatGPT had committed and no Stop control, and four
+  seconds later reported the turn completed. The same request id then called tools for another
+  twenty-four minutes, and Goal wrote the next user message against an answer that had never been
+  given. Two changes, one from each side. The page's visible-prose rule now applies only to a
+  turn the document has seen running; an adopted turn waits for ChatGPT's own end-of-turn, an
+  error, a stop, a new send or the ten-minute stall. And the app treats the server turn as the
+  authority: a call under the ended turn's request id that starts after the reported end reopens
+  the turn durably, hands it back to the page, and withdraws the Goal decision drafted for it.
+- **A stopped turn ends the `active` badge.** The badge went dark only on the model's final answer,
+  so a chat whose turn the user stopped — the blocked prime of 2026-09-02, stopped right after a
+  refused call — read `active` for three more minutes. Any turn end now ends it, the user's stop
+  included; a refused call in a blocked chat still lights it, so a chat that keeps trying can be
+  found in the list, and it goes dark the moment its turn is stopped.
+- **A page retrying a rate-limited Goal draft is no longer reloaded for it.** OpenRouter answered
+  ten drafts in a row with 429 while the page retried every fifteen seconds, alive the whole
+  time; the owed-reply watchdog only saw a decision still owed after two minutes and reloaded
+  the chat twice for a page that was never dead. Each draft request now counts as the pickup it
+  is and pushes the reload out. Provider refusals are also written to app.log, which until now
+  held nothing about them.
+- **A reload of an open turn is painted inside that turn.** The row names the turn it is
+  repairing, so Overwrite lists it among the turn's tool calls, in order, with the ↻ and the
+  time. Only a reload with no turn open — a Goal reply nothing collected, a missing tab — still
+  sits between turns.
+- **A New chat opened in a worker's tab is no longer mistaken for that worker.** The page kept
+  the worker label and command id across the move, so every event of the user's own chat went
+  out as the worker's, the app bound the slot to it and stamped a worker origin on its session,
+  and the user's first message was folded as "the instruction this app gave the worker". A tab
+  that leaves the worker's chat now drops the identity with it.
+- **A resumed chat no longer inherits the reloads of the chat it replaced.** The session keeps
+  its identity across Compact & Resume, so the replacement chat's feed was cut from a log that
+  also held the old chat's "Reloaded chat to recover …" rows, and the page stacked them above
+  the handoff as if the new chat had been reloaded before it existed. The bootstrap this app
+  types is the boundary: reloads before it stay with the old chat, reloads after it are painted
+  where they happened.
+- **Blocking a chat also stops its Goal, Loop and auto-compaction.** Block refused the chat's
+  tools but left the loop typing the next message into it and the threshold free to compact and
+  resume it, so a blocked prime or solo chat could carry on, or reopen as a replacement chat the
+  block did not cover, with every one of those turns answered by tool refusals. A blocked chat
+  now reports Goal, Loop and compaction off with the reason in the composer sheet, refuses to
+  take a new goal or turn any of them on, and gets them all back exactly as stored when it is
+  released. Worker chats were already fenced.
+- **A Compact & Resume whose marker the new chat never redeemed no longer strands the session.**
+  The replacement chat was opened, the brief sent, and the prime in it went to work on the
+  predecessor session — but the app committed the continuation only from the marked message the
+  page had to find, and once it did not, the session stayed on the old chat, the new one was
+  refused as a stranger running someone else's swarm, and the loop was dead. The new chat now
+  also reports the id ChatGPT gave it, and the app commits from that report exactly as it does
+  from the marker.
+- **A Goal or Loop chat that stops with no final answer gets its next message anyway.** Two
+  minutes of silence earn the reload as before; if the fresh page shows the same dead turn for
+  one more minute — no tool call, no page change — the loop treats it as a finished answer and
+  files the next message. A stop you pressed yourself never triggers this.
+- **A call the app cannot place no longer tells the model to ask you to clear a worker.** The
+  message now says the app reloads the affected chat shortly because of the unattributed
+  activity, and to try once more.
+- **A closed Loop chat is reopened after Chrome restarts.** The app asked for the reload two
+  minutes after the chat went silent, but the extension only polled for recovery work while it
+  still held tabs or queues. After a browser restart it held neither, so the request was never
+  collected and the Loop prime stayed closed. The extension now asks the app on every pass and on
+  browser startup as long as it is paired.
+- **A worker that reported its finished task shows "sleeping" straight away.** The report parks
+  the run when it was the last working worker, and a parked run has no agent view for the session
+  list to read, so the row fell back to the activity heuristic and said "active" for three minutes,
+  then nothing. The finish is now recorded on the session itself and the row reads it.
+- **Blocking a worker's chat frees its swarm slot at once, restart or not.** A worker whose chat
+  the user had blocked was slept only when its in-memory silence grant expired. After a restart
+  there was no grant, so the restored run carried the blocked worker as active with no tab for an
+  hour, the next prime was refused with "another conversation is already running the swarm", and
+  the slot came free only when the tab finally closed and the detached clock ran out. The sweep
+  now sleeps every slot-holding worker whose chat is blocked from the durable block alone, and
+  pressing Block runs that sweep immediately.
+- **A goal started from an empty New Chat keeps retrying through a provider rate limit, with the
+  same "Retrying Goal in 15 seconds" card an in-chat turn shows.** The opening request asked
+  three times with a one- and two-second pause between them, which is shorter than any real rate
+  limit, and then painted "The goal loop stopped" over a run that had not started. It now waits
+  on the same quarter-minute clock as the in-chat loop with no attempt limit, and stops only when
+  the app refuses for a settled reason, the composer is no longer that empty New Chat, or a
+  different goal is saved over it.
+- **A chat in a background tab reports its answer the moment it lands, not when you click the
+  tab.** Chrome slows a hidden tab's timers to one wake-up a minute once the tab has been hidden
+  for five minutes, and the extension's transcript scan, activity poll and every wait in its retry
+  loops were exactly the chained timers that rule applies to. With the prime testing its game in
+  a tab beside its chats, each worker chat took two to three minutes to report an answer that had
+  long finished, the prime waited for reports that never came, and nothing moved until the tabs
+  were clicked through by hand. Every wait in the recorder now goes through a scheduler Chrome
+  keeps on its ordinary once-a-second schedule, and a tab brought back in front re-reads its
+  transcript at once.
+- **A tab or window shortcut is refused in a browser window.** The prime, driving its game in a
+  tab beside its ChatGPT chats, closed its own chat mid-turn with ctrl+w and later walked the
+  worker chats with ctrl+tab and typed a URL into one. A keyboard chord cannot see which tab it
+  lands on, so the `computer` tool now refuses the chords that close, open or switch tabs or
+  windows, or take the address bar, whenever the keys would reach a browser, and the desktop
+  instructions say to open the page under test in a browser window of its own. The macOS spellings — command+w, command+shift+], command+l and the rest —
+  and macOS application names such as "Google Chrome" and "Safari" count too.
+- **A compacting chat whose stream dies is reloaded on the next sweep, not after five minutes.**
+  While an automatic Compact & Resume owned a chat's recovery clock, the page's own "Connection
+  interrupted" was ignored entirely, and the prime sat on that error for nine minutes while its
+  model went on calling tools behind the dead page. The failure now brings the ticket's next
+  pickup forward — the same reload, under the same three-attempt bound.
+- **A brief lost from the composer before Send is offered to a fresh chat, and the chat it was
+  lost from records what you type next.** With the replacement chat open and the brief just
+  landed, an Escape in the same instant emptied the composer. The armed ticket then sat for its
+  six hours, the run could not move on, and the chat — waiting for a marked message that would
+  never come — journalled nothing typed into it afterwards. The page now proves the brief never
+  left it (an empty composer in a chat that still has no id), the app takes the armed dispatch and
+  the claim back and opens a fresh chat for the same brief at once, and the old page journals
+  normally.
+- **A chat whose answer stream died is reloaded, every time.** Three separate rules left the prime
+  chat dead on "Connection interrupted" for twenty minutes while its answer was long finished on
+  the server. The once-per-turn reload budget was charged when the reload landed, against a turn
+  that had already failed, so it stuck to the *next* turn and refused that turn's own error as
+  already spent. The failed turn's end then took the chat off the two-minute silence watch, exactly
+  as a completed answer would, so nothing was left to ask. Now the budget is charged only to a turn
+  actually running when the reload lands, a failed turn restarts the silence watch instead of
+  spending it, and a reload gives the chat a fresh two minutes before it is judged dead — a worker
+  writing a long answer used to be put to sleep, and its prime told to wake it, twenty-seven
+  seconds after its own reload.
+- **A woken worker is awake when its turn starts, and nothing can put it back to sleep on the
+  way.** Waking two sleeping workers at once, the browser typed both messages within a second
+  and both pages reported "turn started", yet both stayed *waking* because only a tool call
+  counted as proof, and those calls' page evidence was late. In the same second the page
+  re-reported the settled answer that had put each worker to sleep, and the app took that as a
+  fresh finish: the worker went back to *sleeping* and its wake command was retired, while the
+  message the browser had just typed ran as a turn the app did not own. A turn that begins after
+  the delivered wake now ends the wake like a call does, and no stop observed from outside — a
+  re-reported answer, a late finish call, a quiet sweep — applies while a worker is waking.
+- **A refused call from a replaced chat says what it is.** After Compact & Resume, ChatGPT can keep
+  running the old chat's stopped turn for a while, and every tool call it makes is refused as
+  superseded and filed under Unattributed activity. Those rows now carry a line explaining that
+  the request id proved exactly which chat it came from and that nothing needs repairing, instead
+  of reading like the attribution chain had broken.
+- **The bootstrap fold names the worker and no longer lurches.** The folded opening message of a
+  worker chat now says "This is worker-3 — …", from the session's durable origin so a reloaded tab
+  still knows, and keeps the first two lines of the text visible while closed so the bubble is the
+  same width open and closed.
+- **A Compact & Resume is one timeline row again, and it says where it stands.** The card keyed
+  its fold on the brief request's own turn id, but the app types that request, so the live
+  recorder writes it without one; the answer turn, the brief, the handoff line and the turn end
+  then fell out of the card as loose rows. The card now takes the turn that opens right after the
+  request. Its three overlapping step pills — which shared a class name with the setup wizard's
+  steps and inherited that layout — are replaced by one sentence: what happened, what is still
+  happening, or what failed and why. Green once the new chat opened, red once a step cannot come.
+  When the app abandons a continuation it records the reason into the session, and the row shows
+  it ("Failed — the handover never landed and was given up on").
+- **A compaction stuck writing its brief is reloaded every five minutes, for a quarter of an hour
+  at most.** The automatic pickup used to wait fifteen minutes before its first reload and
+  fifteen between each of the three, so one glitched page cost forty-five minutes of nothing.
+  While the brief is still being written the checkpoint is now five minutes; once the brief has
+  landed the five-minute clock stops and opening the replacement chat keeps the quarter-hour
+  cadence its command is leased for.
+- **Reopening an old resumed chat no longer silences the tab.** The marked resume message raised
+  the content script's journal gate, and only a committed continuation ever released it. Once the
+  app had forgotten that token — after a restart, or simply later — its `no_such_continuation`
+  refusal left the gate shut for the life of the document, and the gate followed the tab into the
+  New Chat opened next. That chat lost its first user message, its ChatGPT title and its
+  `turn_start`, so the app never saw it working: no automatic compaction, no unattributed-call
+  recovery, no reload repair, until the tab was refreshed by hand. A definitive app answer now
+  releases the gate, and moving to another chat drops the previous chat's gate outright.
+- **A reloaded tab records a turn the app never heard of.** A reload mid-turn used to adopt the
+  app's open turn or nothing: with no durable turn and no send receipt, the reloaded page filed
+  the running question as history, and the chat stayed "idle" for the app while ChatGPT worked
+  on. A document that has opened no generation of its own now claims the newest user message as
+  the running turn once Stop has outlasted the settle window and the app reports no active turn.
+- **A resumed chat is armed the moment Compact & Resume commits.** The new chat used to get its
+  activity grant only after it had proved a turn of its own; when it never got its first tool call
+  through, nothing knew it was mid-turn and nothing reloaded it. Its calls stayed Unattributed and
+  the loop stalled on the first call after every automatic compaction. The commit now grants the
+  replacement chat the same silence and unattributed recovery an ordinary working chat has.
+- **A retired chat's late observations no longer mint a session of their own.** The old chat
+  re-rendering the brief seconds after the commit created a second session consisting of nothing
+  but the summary. Such observations are filed into the session lineage they came from, without any
+  activity, turn or Goal effect.
+- **The Activity log survives the run.** It was in-memory only, so a failed overnight run left
+  nothing to read. It is now mirrored, redacted as before, to `app.log` in the app's data folder
+  (4 MB, one rotation).
+
+### Changed
+- **One Compact & Resume is one timeline row.** The brief request, the brief, the "handoff saved"
+  line and the bootstrap in the new chat fold into a single expandable card whose header shows the
+  three steps as coloured chips — summary requested, summary received or not, new chat opened or
+  not — so a failed handover is recognisable at a glance instead of being three long messages.
+- **Unfolded tool rows stay put while a chat is running.** The timeline used to be rebuilt from
+  scratch on every change, closing whatever the user had expanded and jumping the scroll position.
+  Rows whose record did not change are now kept as the same nodes.
+
 ### Security
 - macOS Screen Recording and Accessibility remain independent OS grants. The helper requests no
   privilege at startup, reports a typed error when a live operation lacks consent, and permission
   revocation remains effective without changing the connector schema cached by ChatGPT.
+
+</details>
 
 ## [2.0.2] — 2026-08-26
 

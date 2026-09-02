@@ -1,7 +1,14 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { defaultConfig, initConfigPath, loadConfig, saveConfig, updateConfig } from '../src/main/config.js';
+import {
+  DEFAULT_GOAL_MODEL,
+  defaultConfig,
+  initConfigPath,
+  loadConfig,
+  saveConfig,
+  updateConfig
+} from '../src/main/config.js';
 import { DESKTOP_CAPABILITIES, type Capability } from '../src/shared/types.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -298,8 +305,10 @@ describe('settings migration', () => {
 
 /** Fresh-install defaults, while migrations above prove existing choices stay narrow. */
 describe('shipped defaults', () => {
+  // Windows alone starts the Desktop group on. macOS has the backend but starts it off; the
+  // user switches it on and grants Screen Recording / Accessibility. Linux has no backend.
   const expectedFreshCapability = (capability: Capability, platform: NodeJS.Platform): boolean =>
-    platform === 'win32' || platform === 'darwin' || !DESKTOP_CAPABILITIES.includes(capability);
+    platform === 'win32' || !DESKTOP_CAPABILITIES.includes(capability);
 
   it('records sessions from first launch', () => {
     expect(defaultConfig().sessions.record).toBe(true);
@@ -313,10 +322,12 @@ describe('shipped defaults', () => {
       expect(enabled, capability).toBe(expectedFreshCapability(capability, process.platform));
     }
     expect(loaded.multiAgent.enabled).toBe(true);
+    expect(loaded.multiAgent.allowUnattributedCalls).toBe(true);
+    expect(loaded.multiAgent.recoverAgentTabs).toBe(false);
   });
 
   it.each(['win32', 'darwin', 'linux'] as const)(
-    'starts portable permissions on and only offers Desktop automation where supported on %s',
+    'starts portable permissions on and Desktop automation on Windows only on %s',
     (platform) => {
       const config = defaultConfig(platform);
       expect(config.readOnly).toBe(false);
@@ -325,6 +336,8 @@ describe('shipped defaults', () => {
       }
       expect(config.multiAgent.enabled).toBe(true);
       expect(config.multiAgent.maxWorkers).toBe(2);
+      expect(config.multiAgent.allowUnattributedCalls).toBe(true);
+      expect(config.multiAgent.recoverAgentTabs).toBe(false);
     }
   );
 
@@ -341,6 +354,8 @@ describe('shipped defaults', () => {
     expect(loaded.capabilities.command).toBe(false);
     expect(loaded.capabilities.control).toBe(false);
     expect(loaded.multiAgent.enabled).toBe(false);
+    expect(loaded.multiAgent.allowUnattributedCalls).toBe(false);
+    expect(loaded.multiAgent.recoverAgentTabs).toBe(false);
     expect(loaded.readOnly).toBe(true);
   });
 
@@ -370,6 +385,28 @@ describe('shipped defaults', () => {
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(withoutSessions), 'utf8');
     expect((await loadConfig()).sessions.record).toBe(true);
   });
+
+  /**
+   * Save, close, reopen. The unattributed switch is on out of the box, so the only way to
+   * see it off is to have turned it off — and that choice has to survive the next launch
+   * rather than being handed back the fresh-install default on load.
+   */
+  it('keeps either unattributed choice across a save and reload', async () => {
+    const config = defaultConfig();
+    expect(config.multiAgent.allowUnattributedCalls).toBe(true);
+
+    await saveConfig({
+      ...config,
+      multiAgent: { ...config.multiAgent, allowUnattributedCalls: false }
+    });
+    expect((await loadConfig()).multiAgent.allowUnattributedCalls).toBe(false);
+
+    await saveConfig({
+      ...config,
+      multiAgent: { ...config.multiAgent, allowUnattributedCalls: true }
+    });
+    expect((await loadConfig()).multiAgent.allowUnattributedCalls).toBe(true);
+  });
 });
 
 /**
@@ -383,7 +420,7 @@ describe('the goal loop settings', () => {
   it('is off out of the box', () => {
     const config = defaultConfig();
     expect(config.goal.enabled).toBe(false);
-    expect(config.goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
+    expect(config.goal.model).toBe('z-ai/glm-5.3');
     expect(config.goal.reasoning).toBe('default');
     expect(config.goal.prompt).toContain('Your job is to prompt ChatGPT');
     expect(config.goal.prompt).toContain('Nobody handed you a separate goal');
@@ -396,23 +433,28 @@ describe('the goal loop settings', () => {
   it('keeps the model, reasoning level and system prompt that were chosen', async () => {
     const prompt = 'Custom continuation gate. Reply NO_REPLY when finished.';
     const objectivePrompt = 'Custom goal driver. Reply NO_REPLY once the goal is reached.';
+    const loopPrompt = 'Custom loop. Always write the next message.';
     await saveConfig({
       ...defaultConfig(),
       goal: {
         ...defaultConfig().goal,
         enabled: true,
+        mode: 'loop',
         model: 'openai/gpt-5.2-mini:nitro',
         reasoning: 'high',
         prompt,
-        objectivePrompt
+        objectivePrompt,
+        loopPrompt
       }
     });
     expect((await loadConfig()).goal).toEqual({
       enabled: true,
+      mode: 'loop',
       model: 'openai/gpt-5.2-mini:nitro',
       reasoning: 'high',
       prompt,
-      objectivePrompt
+      objectivePrompt,
+      loopPrompt
     });
   });
 
@@ -455,6 +497,53 @@ describe('the goal loop settings', () => {
     }
   });
 
+  /**
+   * The driver and the loop are persisted and editable exactly as the gate is.
+   *
+   * They were migrated by nothing at all until the requirements rewrite, so an install holding
+   * either one verbatim would have kept a superseded instruction forever while the shipped
+   * constant moved on — the same stranding the gate's list exists to prevent.
+   */
+  it('upgrades an untouched driver and loop prompt too, not only the gate', async () => {
+    const { SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS, SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS } =
+      await import('../src/shared/goal.js');
+    const config = defaultConfig();
+
+    for (const superseded of SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS) {
+      await fs.writeFile(
+        path.join(dir, 'config.json'),
+        JSON.stringify({ ...config, goal: { ...config.goal, objectivePrompt: superseded } }),
+        'utf8'
+      );
+      expect((await loadConfig()).goal.objectivePrompt).toBe(defaultConfig().goal.objectivePrompt);
+    }
+
+    for (const superseded of SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS) {
+      await fs.writeFile(
+        path.join(dir, 'config.json'),
+        JSON.stringify({ ...config, goal: { ...config.goal, loopPrompt: superseded } }),
+        'utf8'
+      );
+      expect((await loadConfig()).goal.loopPrompt).toBe(defaultConfig().goal.loopPrompt);
+    }
+  });
+
+  it('keeps a customized driver or loop prompt that merely starts like a shipped one', async () => {
+    const { SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS, SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS } =
+      await import('../src/shared/goal.js');
+    const config = defaultConfig();
+    const objectivePrompt = `${SUPERSEDED_GOAL_OBJECTIVE_SYSTEM_PROMPTS[0]}\ncustom sentence`;
+    const loopPrompt = `${SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS[0]}\ncustom sentence`;
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, goal: { ...config.goal, objectivePrompt, loopPrompt } }),
+      'utf8'
+    );
+    const loaded = await loadConfig();
+    expect(loaded.goal.objectivePrompt).toBe(objectivePrompt);
+    expect(loaded.goal.loopPrompt).toBe(loopPrompt);
+  });
+
   it('repairs a blank goal driver prompt to its shipped default', async () => {
     const config = defaultConfig();
     await fs.writeFile(
@@ -478,7 +567,7 @@ describe('the goal loop settings', () => {
       'utf8'
     );
     const loaded = await loadConfig();
-    expect(loaded.goal.model).toBe('~deepseek/deepseek-v4-flash-latest');
+    expect(loaded.goal.model).toBe(DEFAULT_GOAL_MODEL);
     expect(loaded.goal.prompt).toBe(defaultConfig().goal.prompt);
     expect(loaded.goal.enabled).toBe(true);
     expect(loaded.roots).toEqual(config.roots);
@@ -490,11 +579,50 @@ describe('the goal loop settings', () => {
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(withoutGoal), 'utf8');
     expect((await loadConfig()).goal).toEqual({
       enabled: false,
-      model: '~deepseek/deepseek-v4-flash-latest',
+      mode: 'goal',
+      model: DEFAULT_GOAL_MODEL,
       reasoning: 'default',
       prompt: defaultConfig().goal.prompt,
-      objectivePrompt: defaultConfig().goal.objectivePrompt
+      objectivePrompt: defaultConfig().goal.objectivePrompt,
+      loopPrompt: defaultConfig().goal.loopPrompt
     });
+  });
+
+  /**
+   * Loop is the mode that cannot stop on its own, so a blank instruction here would be an
+   * unconstrained model typing into somebody's chat for ever. Repaired like the other two.
+   */
+  it('repairs a blank loop prompt rather than running the loop with no instruction', async () => {
+    const config = defaultConfig();
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...config, goal: { ...config.goal, enabled: true, mode: 'loop', loopPrompt: '   ' } }),
+      'utf8'
+    );
+    const loaded = await loadConfig();
+    expect(loaded.goal.loopPrompt).toBe(defaultConfig().goal.loopPrompt);
+    expect(loaded.goal.mode).toBe('loop');
+  });
+
+  /**
+   * The mode is one word out of a file holding every root and permission this app has. A
+   * version that knows a third mode must not cost the rest of it a trip through recovery.
+   */
+  it('repairs an unknown mode without discarding the config around it', async () => {
+    const config = defaultConfig();
+    await fs.writeFile(
+      path.join(dir, 'config.json'),
+      JSON.stringify({
+        ...config,
+        roots: [{ name: 'project', path: 'C:\\Users\\example\\project' }],
+        goal: { ...config.goal, enabled: true, mode: 'swarm' }
+      }),
+      'utf8'
+    );
+    const loaded = await loadConfig();
+    expect(loaded.goal.mode).toBe('goal');
+    expect(loaded.goal.enabled).toBe(true);
+    expect(loaded.roots).toEqual([{ name: 'project', path: 'C:\\Users\\example\\project' }]);
   });
 
   it('repairs a blank prompt to the safe continuation-gate default', async () => {

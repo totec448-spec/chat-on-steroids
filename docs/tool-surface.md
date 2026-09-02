@@ -18,7 +18,7 @@ separate secret tokenized local paths.
 The Desktop connector is optional on Windows/macOS. Core is the main connector everywhere.
 
 On a fresh current config, all Core tool permissions, session recording and multi-agent mode are
-enabled, while read-only mode is off. Windows and macOS also enable Desktop permissions. Linux masks
+enabled, while read-only mode is off. Windows also enables Desktop permissions; macOS starts them off and the user switches them on. Linux masks
 Desktop permissions off at runtime while preserving stored choices for a config later reopened on
 Windows or macOS. Existing configs keep explicit choices during upgrades; missing legacy permissions are
 not silently widened.
