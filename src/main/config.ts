@@ -16,6 +16,7 @@ import {
   GOAL_REASONING_LEVELS,
   WRITE_CAPABILITIES,
   type Capabilities,
+  DESKTOP_CAPABILITIES,
   type CompactionSettings,
   type Config,
   type GoalSettings,
@@ -362,13 +363,23 @@ const configSchema = z.object({
     .default({ ...DEFAULT_GOAL })
 });
 
-export function defaultConfig(platform: NodeJS.Platform = process.platform): Config {
+/**
+ * Fresh-install Desktop exposure differs by host. Windows starts the Desktop group on. macOS has
+ * a native backend too, but it starts **off** and is switched on by the user: every Desktop
+ * action there also needs Screen Recording / Accessibility consent from System Settings, and a
+ * fresh install must not publish a second connector nobody can use yet. Unsupported hosts mask
+ * the group at the platform boundary while preserving stored choices for a moved config.
+ */
+function firstLaunchCapabilities(platform: NodeJS.Platform, release?: string): Capabilities {
+  const capabilities = capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform, release);
+  if (platform === 'darwin') for (const capability of DESKTOP_CAPABILITIES) capabilities[capability] = false;
+  return capabilities;
+}
+
+export function defaultConfig(platform: NodeJS.Platform = process.platform, release?: string): Config {
   return {
     roots: [],
-    // Computer use is intentionally not part of the macOS/Linux port. Fresh installs on those
-    // hosts should therefore never present Windows-only permissions as granted, even though the
-    // stored schema remains cross-platform so one config can still be moved between machines.
-    capabilities: capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform),
+    capabilities: firstLaunchCapabilities(platform, release),
     readOnly: false,
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
     ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'dark' },
@@ -550,8 +561,12 @@ export function getConfig(): Config {
  * Read-only mode is enforced here as well as at the tool layer, so the effective
  * capability set can never disagree with what the UI shows.
  */
-export function effectiveCapabilities(config: Config, platform: NodeJS.Platform = process.platform): Capabilities {
-  const live = capabilitiesForPlatform(config.capabilities, platform);
+export function effectiveCapabilities(
+  config: Config,
+  platform: NodeJS.Platform = process.platform,
+  release?: string
+): Capabilities {
+  const live = capabilitiesForPlatform(config.capabilities, platform, release);
   if (!config.readOnly) return live;
   // Derived from WRITE_CAPABILITIES rather than listed again here, so adding a new
   // writing capability cannot accidentally leave it enabled in read-only mode.

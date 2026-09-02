@@ -21,6 +21,18 @@ the app refuses the extension and asks you to reload the matching copy.
   to "Reloaded chat to recover …", but the page dropped it because the row names no turn. It is
   now painted between the turns it happened between, with the time, whether or not Overwrite is
   on, so a tab that reloads under you says what happened and why in the chat itself.
+- **macOS now publishes the optional Desktop connector.** Architecture-matched Swift code implements
+  window/display capture through ScreenCaptureKit, snapshot-scoped semantic controls through
+  AXUIElement, and physical mouse/keyboard input through CGEvent while preserving the existing
+  `observe` / `computer` schemas, frame identity and partial-batch contract.
+- **On macOS the Desktop permissions start off.** The backend is there, but a fresh Mac install
+  publishes Core only; switch on "See the screen", "Control mouse and keyboard" or a clipboard
+  permission in the Home panel, grant Screen Recording and Accessibility in System Settings, and
+  the Desktop connector appears. Windows keeps starting with the Desktop permissions on.
+- **macOS packaging and smoke checks cover the in-process Desktop boundary and screen-capture purpose
+  string.** Each x64/arm64 package ships a thin Swift dylib plus N-API addon outside asar. A Node
+  Worker invokes that backend inside the responsible Electron process, and packaged-runtime smoke
+  exercises this real addon/dylib path rather than the standalone development CLI protocol probe.
 
 ### Changed
 - **The model is told not to spam browser instances.** A prime that could not get a foreground
@@ -125,7 +137,8 @@ the app refuses the extension and asks you to reload the matching copy.
   worker chats with ctrl+tab and typed a URL into one. A keyboard chord cannot see which tab it
   lands on, so the `computer` tool now refuses the chords that close, open or switch tabs or
   windows, or take the address bar, whenever the keys would reach a browser, and the desktop
-  instructions say to open the page under test in a browser window of its own.
+  instructions say to open the page under test in a browser window of its own. The macOS spellings — command+w, command+shift+], command+l and the rest —
+  and macOS application names such as "Google Chrome" and "Safari" count too.
 - **A compacting chat whose stream dies is reloaded on the next sweep, not after five minutes.**
   While an automatic Compact & Resume owned a chat's recovery clock, the page's own "Connection
   interrupted" was ignored entirely, and the prime sat on that error for nine minutes while its
@@ -216,6 +229,11 @@ the app refuses the extension and asks you to reload the matching copy.
 - **Unfolded tool rows stay put while a chat is running.** The timeline used to be rebuilt from
   scratch on every change, closing whatever the user had expanded and jumping the scroll position.
   Rows whose record did not change are now kept as the same nodes.
+
+### Security
+- macOS Screen Recording and Accessibility remain independent OS grants. The helper requests no
+  privilege at startup, reports a typed error when a live operation lacks consent, and permission
+  revocation remains effective without changing the connector schema cached by ChatGPT.
 
 ## [2.0.2] — 2026-08-26
 

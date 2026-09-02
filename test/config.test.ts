@@ -305,6 +305,8 @@ describe('settings migration', () => {
 
 /** Fresh-install defaults, while migrations above prove existing choices stay narrow. */
 describe('shipped defaults', () => {
+  // Windows alone starts the Desktop group on. macOS has the backend but starts it off; the
+  // user switches it on and grants Screen Recording / Accessibility. Linux has no backend.
   const expectedFreshCapability = (capability: Capability, platform: NodeJS.Platform): boolean =>
     platform === 'win32' || !DESKTOP_CAPABILITIES.includes(capability);
 
@@ -325,7 +327,7 @@ describe('shipped defaults', () => {
   });
 
   it.each(['win32', 'darwin', 'linux'] as const)(
-    'starts portable permissions on and only offers Desktop automation where supported on %s',
+    'starts portable permissions on and Desktop automation on Windows only on %s',
     (platform) => {
       const config = defaultConfig(platform);
       expect(config.readOnly).toBe(false);

@@ -40,8 +40,8 @@ computer capabilities over MCP. It is a bridge and a permission layer — not a 
 not a model host. It also ships a Chrome extension that watches ChatGPT itself, so the app can
 record conversations, prove which conversation issued which tool call, replace generic tool
 rows with what actually happened, compact a long chat into a fresh one, and run worker chats.
-Core is portable; the Desktop/computer-use surface is deliberately Windows-only and must be
-absent from live macOS/Linux capability/discovery state.
+Core is portable; the Desktop/computer-use surface has native Windows and macOS backends behind
+one protocol and must be absent from live Linux capability/discovery state.
 
 Four runtime planes, only two of which are servers:
 
@@ -160,7 +160,7 @@ Release numbers are authoritative in `package.json`, `src/main/version.ts` and
 the app/extension versions stay in sync, so this architecture guide deliberately does not
 copy a release number that can drift. Core is cross-platform; main process is TypeScript;
 extension is plain MV3 JavaScript with no build step; Vitest; `node-pty` is the main native
-terminal dependency. Desktop automation remains explicitly Windows-only.
+terminal dependency. Desktop automation is available through native Windows and macOS backends.
 
 Fresh-install defaults from `config.ts` — **all Core tool permissions on**, **read-only off**,
 **recording on**, session advisory/limit **400k/533k** estimated tokens, **auto-compaction on
@@ -177,8 +177,10 @@ so the defaults have to satisfy that relation or the first save in that panel mo
 line. Existing
 configs keep explicit user choices; conservative migration defaults do not widen omitted legacy
 permissions merely because the fresh-install defaults are broader. Windows also enables the
-Desktop capability group; macOS/Linux mask that group off at runtime while preserving stored
-choices so a config moved back to Windows does not lose them.
+Desktop capability group. macOS has the native backend but a fresh install starts that group **off**
+(`config.ts::firstLaunchCapabilities`): the user switches it on and grants Screen Recording and
+Accessibility. Linux masks the group off at runtime while preserving stored choices so a config
+moved to a supported host does not lose them.
 
 ### Stale-doc traps
 
@@ -264,7 +266,7 @@ Do not "restore" these from an older document:
 src/main/index.ts             Electron startup, window/tray, shutdown, security shell
 src/main/shutdown.ts          ordered teardown phases, each bounded, ending in the exit
 src/main/config.ts            validated settings, migrations, defaults, read-only caps
-src/main/platform.ts          host capability projection; Desktop is Windows-only by construction
+src/main/platform.ts          host capability projection; Desktop exists only on Windows and macOS ≥ 12.3
 src/main/connection.ts        MCP + tunnel lifecycle, per-surface publication & status
 src/main/ipc.ts               every renderer→main operation and main→renderer push
 src/preload/index.ts          the complete renderer-facing API allowlist
@@ -355,6 +357,8 @@ src/renderer/dom.ts           shared text-only renderer DOM/icon/toast/IPC-resul
 src/main/computer/index.ts    Desktop action policy, frame/ref lifetimes, batching and postconditions
 src/main/computer/helper.ts   Windows PowerShell/Win32/UIA helper protocol; no model text in argv
 src/main/computer/browser-chords.ts  pure: which chords manage browser tabs/windows, which processes are browsers
+native/macos-desktop-helper/* shared ScreenCaptureKit, AXUIElement and CGEvent Swift source
+native/macos-desktop-addon/* N-API bridge that runs that Swift backend in the Electron process
 src/main/tunnel/*             index.ts lifecycle · health.ts metrics · locate.ts binaries
 test/*.test.ts                75 tracked Vitest suites, named for the subsystem/boundary they cover
 vitest.config.ts              test runtime/safety boundary: Node, 30s limits, isolated bridge ports + short in-process evidence wait
@@ -364,7 +368,7 @@ electron-builder.yml          Windows/macOS/Linux package contents and target po
 ```
 
 `exec.ts` remains as the shared low-level process/environment primitive used by unified exec,
-the Windows desktop helper and tunnels. The retired connector-native managed-process and patch
+the Windows desktop helper, macOS in-process worker and tunnels. The retired connector-native managed-process and patch
 stacks were removed after production moved to `codex/unified-exec.ts` and `codex/apply-patch/*`;
 do not recreate parallel runtimes beside those live owners.
 
@@ -379,7 +383,7 @@ durable or externally re-observable fact can reconstruct it.
 | Fact / mechanism | Authoritative owner | Lifetime / durable form | Consumers / invariant |
 | --- | --- | --- | --- |
 | approved roots + permissions + feature toggles | `config.ts` | `userData/config.json`, atomic temp→rename; validated/migrated on every load | `effectiveCapabilities()` is the live permission projection; malformed existing config recovers conservatively, never as fresh-install consent |
-| host capability availability | `platform.ts` + `shared/capabilities.ts` | derived, not stored | Desktop capabilities are impossible off Windows; every newly added capability is root-required until explicitly classified rootless |
+| host capability availability | `platform.ts` + `shared/capabilities.ts` | derived, not stored | Desktop capabilities are impossible off Windows/macOS ≥ 12.3; every newly added capability is root-required until explicitly classified rootless |
 | secrets | `secrets.ts` | OS `safeStorage`; never config/log/renderer | OpenAI, bridge and OpenRouter credentials never cross into untrusted renderer/page state |
 | small cross-restart control state | `durable.ts` | named `userData/state/*.json`; temp→rename; debounced generations + explicit `writeDurableNow` barriers | swarm, continuations, correlations, bridge commands, Goal ledgers; a failed file must not poison later files or publish a rejected generation |
 | MCP surface shape | `mcp/surfaces.ts` + `server.ts` exposure cache | endpoint lifetime | discovery is a cached schema promise; live permission enforcement is separate and current |
@@ -604,10 +608,10 @@ earn it today.
 | `session` | recording enabled | session subsystem |
 | `agents` | multi-agent enabled | `agents.ts` |
 
-**Desktop** (`chat-on-steroids-desktop`, optional, **Windows-only**): `observe` needs `screen`;
+**Desktop** (`chat-on-steroids-desktop`, optional, **Windows/macOS**): `observe` needs `screen`;
 `computer` registers on `control` **or** either clipboard permission, then re-checks each
 of its 13 actions at runtime. The surface is offered at all only when one of those four
-permissions exists on Windows — an empty or impossible connector is worse than no connector.
+permissions exists on a supported host — an empty or impossible connector is worse than no connector.
 
 **Exposure is monotonic per endpoint lifetime.** ChatGPT caches schemas, and yanking one
 from under a cached snapshot surfaces as a transport-level UNKNOWN failure. So
@@ -2551,17 +2555,30 @@ allows the MCP endpoint a bounded **30-second** drain inside the app-wide shutdo
 tunnel callbacks after that generation change are ignored even if the child process emits them
 while being stopped.
 
-**Desktop automation (Windows only).** `tools-desktop.ts` + `computer/*` for screenshots, UI
-Automation and SendInput/clipboard. Registration-time permission is not enough: each action re-checks. The
-helper is prewarmed only when native Desktop capabilities are published; window observation is
+**Desktop automation (Windows/macOS).** `tools-desktop.ts` + `computer/*` own the shared model
+contract, frame/ref lifetime, batching and helper protocol. Windows implements that protocol with
+PowerShell, Win32 UI Automation and SendInput; macOS loads a thin Swift library through an N-API
+addon on a Node Worker thread inside the Electron main process. That in-process boundary is
+load-bearing: tccd authorises the responsible Electron app, while a raw spawned child can be
+reduced to a different path-based subject even when the parent is allowed. Registration-time permission is not enough: each action
+re-checks, and macOS Screen Recording/Accessibility consent remains an independent OS boundary.
+The helper is prewarmed only when native Desktop capabilities are published; window observation is
 background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
-window geometry; semantic refs bind cached elements to bounded UIA snapshots. Physical input
-revalidates the target, batches report partial completion and route evidence, and compact local
-postconditions avoid model-driven wait/observe loops. The browser on this desktop may be holding
+window geometry; semantic refs bind cached elements to bounded native accessibility snapshots.
+Visible-pixel crops and window-capture fallbacks are always screen-bound even when their request or
+coordinates named a window; otherwise an occluding app's pixels could be relabelled as the covered
+window. Screen captures compare the exact active-display rectangles with ScreenCaptureKit's snapshot
+and re-check them through and after capture. Physical input revalidates the target, and a semantic or
+explicit focus step carries its proven window into later keyboard actions in the same batch instead
+of degrading to global HID input. Batches report partial completion and route evidence.
+Image coordinates clamp to the frame's inclusive integer interior, and final text plus base64 image
+share one measured MCP result budget. The in-process Swift path sets a native AX messaging timeout and
+one aggregate bounded traversal deadline because a Node Worker timeout cannot pre-empt a synchronous
+accessibility call. Compact local postconditions avoid model-driven wait/observe loops. The browser on this desktop may be holding
 this app's own ChatGPT chats and a keyboard chord cannot see which tab it lands on, so
 `browser-chords.ts` names the tab/window/address-bar chords and `tools-desktop.ts` refuses them
-whenever the keys would reach a browser process. Tests: `computer*.test.ts`,
-`tools-desktop-runtime.test.ts`.
+whenever the keys would reach a browser process. Tests: `computer*.test.ts` and
+the opt-in `macos-computer-live.test.ts` packaged-host probe.
 
 **Secrets are one encrypted blob with serialized mutation, not three loose files.** `secrets.ts`
 stores `openaiApiKey`, the extension `bridgeToken`, and `openRouterApiKey` in `secrets.bin` through
@@ -2760,7 +2777,7 @@ count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating 
 | `mcp-inflight` | request/tool lifetime counters and post-handler settling |
 | `mcp-shutdown` | draining an accepted mutation before closing its socket |
 | `packaging` | package target/resource/native-runtime composition contracts |
-| `platform` | Windows-only Desktop capability projection |
+| `platform` | Windows/macOS Desktop capability projection and the macOS off-by-default start |
 | `public-history-privacy` | public Git history/session/path privacy gate |
 | `read-backend` | connector read/list/decode semantics below the public wrapper |
 | `renderer-html` | sanitization of captured ChatGPT HTML |
@@ -2821,6 +2838,11 @@ x64/ARM64 AppImage+DEB. Windows stays per-user-capable, `asInvoker`, no forced e
   do not point Chrome directly at an AppImage's temporary mount.
 - `node-pty`, Sharp/libvips and tree-sitter native payloads are staged for the exact target
   platform/arch; host-native build/prebuild leftovers must never override them.
+- macOS packages compile and stage one thin Swift dylib plus an architecture-matched N-API addon;
+  both remain outside asar and are loaded on a Node Worker thread in the Electron main process.
+  The standalone CLI build is a development protocol probe only and must never become the packaged
+  TCC subject again. Test through the installed app because TCC attribution cannot be proved by
+  invoking the source-tree binary.
 - Uninstall/package replacement deliberately preserves per-user app data.
 
 Before cutting a version, synchronize `package.json`, `src/main/version.ts` and

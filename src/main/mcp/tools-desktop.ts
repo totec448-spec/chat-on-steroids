@@ -1,5 +1,5 @@
 /**
- * The Desktop connector: seeing and driving Windows itself.
+ * The Desktop connector: seeing and driving the native desktop.
  *
  * Two tools, and they are deliberately not on Core. Desktop control is gated on permissions
  * most users leave off, its schemas are the largest this app publishes, and the majority of
@@ -56,6 +56,12 @@ const DEFAULT_WINDOW_RESULTS = 60;
  * with ctrl+tab and typed a URL into one. The window the keys would reach is the last one a
  * focus action in this batch named, else the one in front now.
  */
+function newBrowserWindowHint(): string {
+  return process.platform === 'darwin'
+    ? 'open -na "Google Chrome" --args --new-window "$url"'
+    : "Start-Process chrome.exe -ArgumentList '--new-window', $url";
+}
+
 async function browserChordRefusal(actions: Action[]): Promise<string | null> {
   let focused: number | null = null;
   for (const action of actions) {
@@ -72,7 +78,7 @@ async function browserChordRefusal(actions: Action[]): Promise<string | null> {
       `BROWSER_TAB_CHORD: ${chord} would close, open or switch tabs or windows of "${target.title}" (${target.process}). ` +
       'A browser here may be holding the ChatGPT chats this app runs, and a chord cannot tell which tab it lands on, so ' +
       'tab and window chords are refused in every browser window. Open the page you are testing in a browser window of its ' +
-      "own (Start-Process chrome.exe -ArgumentList '--new-window', $url), keep that window in front, and drive it there — " +
+      `own (${newBrowserWindowHint()}), keep that window in front, and drive it there — ` +
       'navigate with set_value on its address bar, never by keyboard tab or window chords.'
     );
   }
@@ -81,6 +87,29 @@ async function browserChordRefusal(actions: Action[]): Promise<string | null> {
 const MAX_WINDOW_RESULTS = 100;
 const MAX_CLIPBOARD_LINE_CHARS = 16_000;
 const MAX_CLIPBOARD_OUTPUT_CHARS = 64_000;
+const MAX_MCP_RESPONSE_BYTES = 8 * 1024 * 1024;
+const MCP_RESPONSE_ENVELOPE_RESERVE_BYTES = 64 * 1024;
+
+/**
+ * The image and its observation text share one MCP response budget. The capture layer can
+ * bound PNG bytes, but only this final assembly layer knows the actual control metadata.
+ */
+function desktopImageResult(text: string, data: string): { content: ToolContent[] } {
+  const result = {
+    content: [
+      { type: 'text', text } as ToolContent,
+      { type: 'image', data, mimeType: 'image/png' } as ToolContent
+    ]
+  };
+  const bytes = Buffer.byteLength(JSON.stringify(result), 'utf8');
+  const limit = MAX_MCP_RESPONSE_BYTES - MCP_RESPONSE_ENVELOPE_RESERVE_BYTES;
+  if (bytes > limit) {
+    throw new ComputerError(
+      `DESKTOP_RESULT_TOO_LARGE: combined screenshot and control metadata are ${bytes} bytes; limit ${limit}. Retry with a smaller max_width or max_elements.`
+    );
+  }
+  return result;
+}
 
 const computerActionArg = z.discriminatedUnion('type', [
   z.object({ type: z.literal('click_ref'), ref: z.string().min(1).max(64) }).strict().describe('Click a control by ref from observe.'),
@@ -120,14 +149,14 @@ const computerActionArg = z.discriminatedUnion('type', [
   z
     .object({ type: z.literal('keypress'), keys: z.array(z.string().max(20)).min(1).max(6) })
     .strict()
-    .describe('Press keys together, e.g. ["ctrl","s"].'),
+    .describe('Press keys together, e.g. ["ctrl","s"] on Windows or ["command","s"] on macOS.'),
   z.object({ type: z.literal('focus'), window: windowIdArg }).strict().describe('Bring a window to the front.'),
   z.object({ type: z.literal('wait'), ms: z.number().int().min(0).max(10_000).optional() }).strict().describe('Pause.'),
   z.object({ type: z.literal('read_clipboard') }).strict().describe('Return the clipboard text.'),
   z
     .object({ type: z.literal('write_clipboard'), text: z.string().max(100_000) })
     .strict()
-    .describe('Replace the clipboard text; pair with keypress ctrl+v to paste.')
+    .describe('Replace the clipboard text; paste with command+v on macOS or ctrl+v on Windows/Linux.')
 ]);
 
 const verificationArg = z
@@ -152,7 +181,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
       {
         title: 'Look at the desktop',
         description:
-          'Look at Windows without touching it. With no arguments, returns the foreground window, its picture and snapshot-scoped UI controls. ' +
+          'Look at the desktop without touching it. With no arguments, returns the foreground window, its picture and snapshot-scoped UI controls. ' +
           'what=windows lists windows; what=window inspects one; what=ui returns controls; wait_for waits for a title. ' +
           'Pass refs to computer click_ref/set_value and screenshot frameId with pixel coordinates. ' +
           'Window capture never focuses; a labeled visible-screen fallback may be occluded.',
@@ -287,7 +316,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               includeUi: true
             });
           } catch (err) {
-            // "There is no foreground window" is a real state of a Windows desktop — a
+            // "There is no foreground window" is a real native desktop state — a
             // locked screen, a shell restart, everything minimised — and it is not a reason
             // to refuse to look. Fall back to the monitor, which is the honest answer.
             if (
@@ -298,18 +327,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               throw err;
             }
             const shot = await screenshot({ maxWidth: input.max_width });
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: prefix(
-                    waited,
-                    `No foreground window, so this is the whole primary monitor.\nframe: ${shot.frameId}  ${shot.width}x${shot.height} — pass frameId ${shot.frameId} with any coordinates you read off it`
-                  )
-                } as ToolContent,
-                { type: 'image', data: shot.data, mimeType: 'image/png' } as ToolContent
-              ]
-            };
+            return desktopImageResult(
+              prefix(
+                waited,
+                `No foreground window, so this is the whole primary monitor.\nframe: ${shot.frameId}  ${shot.width}x${shot.height} — pass frameId ${shot.frameId} with any coordinates you read off it`
+              ),
+              shot.data
+            );
           }
           noteCount(state.elements.length);
           logInfo(`tool observe ${what} window=${state.window.id} (${state.elements.length} controls)`);
@@ -337,18 +361,15 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               const flags = `${element.enabled ? '' : ' disabled'}${element.offscreen ? ' offscreen' : ''}`;
               lines.push(`${element.ref}  ${element.role} ${JSON.stringify(element.name)}${automation}${image}${flags}`);
             }
+          } else if (state.uiUnavailable) {
+            lines.push(`controls: unavailable (${state.uiUnavailable.code}) — ${state.uiUnavailable.message}`);
           } else {
-            lines.push('controls: none exposed by Windows UI Automation');
+            lines.push('controls: none exposed by the platform accessibility API');
           }
 
           const text = prefix(waited, lines.join('\n'));
           if (!state.screenshot) return ok(text);
-          return {
-            content: [
-              { type: 'text', text } as ToolContent,
-              { type: 'image', data: state.screenshot.data, mimeType: 'image/png' } as ToolContent
-            ]
-          };
+          return desktopImageResult(text, state.screenshot.data);
         })
     );
   }
@@ -568,15 +589,10 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           const done = `Done ${result.completedCount}/${parsed.length} via ${routeSummary}: ${parsed.map((a) => a.type).join(', ')}. ${pointer}${clipboard ? `\n${clipboard}` : ''}${verified}`;
           const shot = result.screenshot;
           if (shot) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: `${done}\nCaptured frame ${shot.frameId}, ${shot.width}x${shot.height}. Use this frame for the next coordinates.`
-                } as ToolContent,
-                { type: 'image', data: shot.data, mimeType: 'image/png' } as ToolContent
-              ]
-            };
+            return desktopImageResult(
+              `${done}\nCaptured frame ${shot.frameId}, ${shot.width}x${shot.height}. Use this frame for the next coordinates.`,
+              shot.data
+            );
           }
           return ok(done);
         })
