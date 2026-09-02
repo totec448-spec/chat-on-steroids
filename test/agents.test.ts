@@ -52,6 +52,7 @@ const {
   DETACHED_SILENCE_MS,
   endedWorkerNotice,
   sleepSilentDetachedWorkers,
+  sleepWorker,
   noteAgentAlive,
   noteAgentContextTokens,
   failWorkerRevival,
@@ -825,6 +826,70 @@ describe('a worker that is sleeping', () => {
     expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
     expect(offerMessages('worker-1').map((message) => message.text)).toEqual(['second piece']);
+  });
+
+  it('finishes a delivered wake on the turn that starts after the sleep, not only on the first call', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'first piece done');
+    const sleptAt = swarmState().agents.find((agent) => agent.id === 'worker-1')!.sleptAt!;
+    stageMessages(prime, [{ to: 'worker-1', text: 'second piece' }]).commit();
+    const revival = pendingWorkerRevivals()[0]!;
+    expect(claimWorkerRevival('worker-1', 'c-worker-1')).toBe(true);
+
+    // Claimed but not typed: the browser owns the payload, so nothing may end the wake yet —
+    // not a turn the page reports, and not the old turn being replayed either.
+    expect(noteAgentAlive('c-worker-1', 'turn', sleptAt + 1)?.revived).toBe(false);
+    expect(noteWorkerRevived('worker-1', 'c-worker-1', revival.messageIds)).toBe(true);
+    expect(noteAgentAlive('c-worker-1', 'turn', sleptAt)?.revived).toBe(false);
+    expect(noteAgentAlive('c-worker-1', 'page')?.revived).toBe(false);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+
+    // The typed message started a turn. That is the model running, and the wake is over.
+    expect(noteAgentAlive('c-worker-1', 'turn', sleptAt + 1)).toMatchObject({ revived: true, report: null });
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      state: 'active',
+      sleptAt: null
+    });
+    expect(pendingWorkerRevivals()).toEqual([]);
+  });
+
+  it('lets a turn end a pre-claim wake the way a call does, and refuses the page alone', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'first piece done');
+    const sleptAt = swarmState().agents.find((agent) => agent.id === 'worker-1')!.sleptAt!;
+    stageMessages(prime, [{ to: 'worker-1', text: 'second piece' }]).commit();
+    expect(noteAgentAlive('c-worker-1', 'page')?.revived).toBe(false);
+    expect(noteAgentAlive('c-worker-1', 'turn', sleptAt + 1)?.revived).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+    // The queued words were never typed, so they ride on the worker's next result as usual.
+    expect(offerMessages('worker-1').map((message) => message.text)).toEqual(['second piece']);
+  });
+
+  it('does not let a stop observed while waking end the wake', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'first piece done');
+    stageMessages(prime, [{ to: 'worker-1', text: 'second piece' }]).commit();
+    const revival = pendingWorkerRevivals()[0]!;
+    expect(claimWorkerRevival('worker-1', 'c-worker-1')).toBe(true);
+    expect(noteWorkerRevived('worker-1', 'c-worker-1', revival.messageIds)).toBe(true);
+    const before = pendingCount(PRIME_ID);
+
+    // The page replaying the settled answer that put the worker to sleep, the sweep proving
+    // that same quiet, and the old turn's late finish call: none of them is a fresh stop.
+    expect(stageWorkerConversationFinish('c-worker-1', 'first piece done')).toBeNull();
+    expect(finishWorkerConversation('c-worker-1', 'first piece done')).toBeNull();
+    expect(sleepWorker('worker-1', 'It went quiet.')).toBeNull();
+    expect(finishAgent(worker.caller, 'first piece done').repeat).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('waking');
+    expect(pendingWorkerRevivals().map((entry) => entry.id)).toEqual(['worker-1']);
+    expect(pendingCount(PRIME_ID), 'the prime is not told the same report twice').toBe(before);
+
+    // The wake still ends the ordinary way.
+    expect(noteAgentAlive('c-worker-1', 'call')?.revived).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
   });
 
   it('never re-offers a browser-delivered revival row and only lets a later call acknowledge it', () => {
@@ -2291,7 +2356,8 @@ describe('through the MCP endpoint', () => {
     });
 
     const text = await asChat(PRIME_CHAT, 'status');
-    expect(text).toMatch(/worker-1.*finished/s);
+    expect(text).toMatch(/worker-1.*finished \(not reusable\)/s);
+    expect(text).not.toContain('REUSE FIRST: worker-1');
     const persistedWorker = written?.dormantRuns
       ?.flatMap((history) => history.agents)
       .find((entry) => entry.info.id === 'worker-1' && entry.info.conversationId === 'c-worker-1');
@@ -2487,15 +2553,23 @@ describe('through the MCP endpoint', () => {
     bindConversation('worker-1', 'c-worker-1');
     bindConversation('worker-2', 'c-worker-2');
 
-    await asChat('c-worker-1', 'finish', { result: 'first half done' });
+    const workerResult = await asChat('c-worker-1', 'finish', { result: 'first half done' });
+    expect(workerResult).toContain('remains reusable');
+    expect(workerResult).toContain('wake this same chat with agents action=message before spawning a replacement');
     const report = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
       message.text.includes('[worker-1 reported]')
     );
     // worker-2 is still live against a limit of 3, so two slots are free — not three.
     expect(report?.text).toContain('2 of 3 worker slots are free');
     expect(report?.text).toContain('is sleeping, not gone');
-    expect(report?.text).toContain('action=message');
+    expect(report?.text).toContain('reuse it first with agents action=message');
+    expect(report?.text).toContain('action=spawn only when no sleeping worker is suitable');
     expect(report?.text).not.toContain('cannot be reused');
+
+    const status = await asChat(PRIME_CHAT, 'status');
+    expect(status).toContain('worker-1  worker  sleeping (reusable; wake with action=message)');
+    expect(status).toContain('REUSE FIRST: worker-1');
+    expect(status).toContain('For related follow-up work, do this before action=spawn');
 
     // With the last worker asleep the whole limit is free, and the singular reads correctly.
     await asChat('c-worker-2', 'finish', { result: 'second half done' });
@@ -2510,7 +2584,9 @@ describe('through the MCP endpoint', () => {
     bindConversation('worker-1', 'c-worker-1');
     fillContext('c-worker-1');
 
-    await asChat('c-worker-1', 'finish', { result: 'all of it done' });
+    const workerResult = await asChat('c-worker-1', 'finish', { result: 'all of it done' });
+    expect(workerResult).toContain('reached its context limit');
+    expect(workerResult).not.toContain('remains reusable');
     const report = offerMessagesForConversation(PRIME_CHAT)?.messages.find((message) =>
       message.text.includes('[worker-1 finished]')
     );

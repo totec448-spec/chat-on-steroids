@@ -143,7 +143,8 @@ beforeAll(async () => {
   await saveConfig({
     ...config,
     sessions: { ...config.sessions, record: true },
-    multiAgent: { ...config.multiAgent, enabled: true }
+    // A plain chat is recovered on silence only when the user turned that on.
+    multiAgent: { ...config.multiAgent, enabled: true, recoverAgentTabs: true }
   });
   const port = await startBridge();
   expect(port).not.toBeNull();

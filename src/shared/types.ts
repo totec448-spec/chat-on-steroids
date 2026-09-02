@@ -239,7 +239,11 @@ export interface MultiAgentSettings {
   maxWorkers: number;
   /** Permit self-contained calls when browser evidence cannot identify their conversation. */
   allowUnattributedCalls: boolean;
-  /** Reopen/reload an active agent chat once when its browser view disappears or goes silent. */
+  /**
+   * Reopen/reload chats that are not Goal/Loop driven — workers, primes, plain chats that have
+   * called tools — once when their tab disappears or goes silent. Goal/Loop chats are always
+   * recovered, whatever this says.
+   */
   recoverAgentTabs: boolean;
 }
 

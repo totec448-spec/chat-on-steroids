@@ -146,8 +146,9 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
       'give each worker the objective, files and constraints that are its own in its "task". Do not repeat the',
       'context inside the tasks, and do not preface a task with boilerplate like “you have zero prior context”.',
       'Workers write code as readily as they investigate, so say which files each one may change. Steer an active',
-      'worker with action=message, and send several at once with "messages" rather than one call per worker. A',
-      'finished worker is finished: give remaining work to a new one. As a worker, message the prime with',
+      'worker with action=message, and send several at once with "messages" rather than one call per worker. Reuse',
+      'a sleeping worker for related follow-up work before spawning a replacement; message wakes its exact chat.',
+      'Only terminal workers whose context is full need replacing. As a worker, message the prime with',
       'findings/decisions/blockers, keep working while replies are pending, and call action=finish only when done,',
       'under RESULT / CHANGES / VALIDATION / BLOCKERS. Workers talk only to the prime agent, never to each other.'
     );
@@ -176,6 +177,12 @@ function desktopInstructions(ctx: ToolContext): string {
     // than through a tool of its own, and a model looking for a "clipboard" tool finds none.
     'The clipboard lives in computer too — read_clipboard and write_clipboard run in sequence with',
     'the other actions, so copying text in and pasting it with keypress ctrl+v is one call.',
+    // The prime that closed its own chat with ctrl+w on 2026-09-02 was testing its game in a tab
+    // beside its ChatGPT chats. A chord cannot see which tab it lands on, so the rule is a window
+    // of its own, and the tool refuses the chords that would move between tabs or windows.
+    'A browser window here may be holding the ChatGPT chats this app runs. Open the page you are testing in a',
+    'browser window of its own, keep that window in front and act only there. Keyboard chords that close, open',
+    'or switch tabs or windows, or take the address bar, are refused in every browser window.',
     'Act only on what the user asked for and leave the rest of their desktop alone.'
   ];
 

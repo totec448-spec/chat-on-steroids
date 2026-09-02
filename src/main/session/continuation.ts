@@ -66,7 +66,7 @@ import { clearChatWorkspace, moveChatWorkspace, workspaceForChat } from '../work
 import { clearGoalObjective, clearGoalSwitch, goalObjectiveFor, goalSwitchFor, moveGoalObjective, moveGoalSwitch } from '../goal.js';
 import { writeDurableNow, writeDurableSoon } from '../durable.js';
 import { prepareHandoff, resumeBootstrapMatches } from './handoff.js';
-import { ensureHandoffRecorded, recordHandoff, rebindConversation } from './recorder.js';
+import { ensureHandoffRecorded, recordHandoff, recordNote, rebindConversation } from './recorder.js';
 import { endResumeClaim, noteResumeClaim, resetResumeGate } from './resume-gate.js';
 import {
   ensureCommittedResumeHandoff,
@@ -800,6 +800,32 @@ export async function dispatchContinuationDestinationSendNow(token: string): Pro
   });
 }
 
+/**
+ * Takes an armed replacement dispatch back, on the one proof that nothing left the page: the
+ * composer no longer held the brief in a chat that still had no id, so the click had nothing
+ * to submit and ChatGPT nothing to accept. The user pressing Escape as the brief lands is that
+ * case. A composer still holding the text is the ambiguous one and stays armed; only the marked
+ * message or a cancel resolves it. Released, the brief may be offered to a fresh chat again.
+ */
+export async function releaseContinuationDestinationSendNow(token: string): Promise<boolean> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || !entry.handoffId || entry.state === 'awaiting-summary') return false;
+    if (entry.destinationSend.state === 'sent') return false;
+    if (entry.destinationSend.state === 'not-attempted' && entry.claimedBy === null) return true;
+    // The claim goes with the dispatch. It named the one command whose page was to send the
+    // brief; that page has sent nothing and its command is retired, so the next command — a
+    // fresh id — must be able to claim, or the released brief could never be offered again.
+    await transitionNow(entry, (current) => ({
+      ...current,
+      state: current.state === 'claimed' ? 'awaiting-chat' : current.state,
+      claimedBy: null,
+      destinationSend: { state: 'not-attempted', conversationId: null, messageId: null }
+    }));
+    return true;
+  });
+}
+
 /** Binds the marked bootstrap to its exact ChatGPT conversation and user-message identity. */
 export async function bindContinuationDestinationMessageNow(
   token: string,
@@ -1276,7 +1302,17 @@ export function abortContinuation(token: string, reason: string): boolean {
   cancelPrimeTransfer(entry.from);
   changed();
   logWarn(`continuation ${entry.token.slice(0, 8)} abandoned — ${reason}`);
+  noteAbandoned(entry, reason);
   return true;
+}
+
+/**
+ * Puts the reason a Compact & Resume died into the session it was compacting, so the
+ * timeline's one row for it can say what went wrong instead of only that nothing came.
+ * The log line above is operational and RAM-only; this is the durable, user-facing record.
+ */
+function noteAbandoned(entry: Continuation, reason: string): void {
+  void recordNote(entry.sessionId, `Compact & Resume abandoned — ${reason}`, entry.token);
 }
 
 /** Durable abort for user-visible cancellation paths. */
@@ -1287,6 +1323,7 @@ export async function abortContinuationNow(token: string, reason: string): Promi
   await transitionNow(entry, (current) => ({ ...current, state: 'aborted', error: reason }));
   cancelPrimeTransfer(entry.from);
   logWarn(`continuation ${entry.token.slice(0, 8)} durably abandoned — ${reason}`);
+  noteAbandoned(entry, reason);
   return true;
 }
 

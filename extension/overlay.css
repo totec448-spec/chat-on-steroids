@@ -168,30 +168,46 @@
    it is real input a real model was given, and a transcript that quietly hides part of
    its own input is worse than a long one. */
 .clf-boot > summary {
+  display: block;
   cursor: pointer;
   list-style: none;
   font-size: 0.82em;
-  font-weight: 600;
-  opacity: 0.55;
   user-select: none;
 }
 
+.clf-boot-label {
+  display: block;
+  font-weight: 600;
+  opacity: 0.55;
+}
+
+/* The first two lines of the folded text. Present while closed so the bubble is the same
+   width open and closed — ChatGPT fits the bubble to its content, and a one-line summary
+   made the message lurch left every time it was opened. */
+.clf-boot-preview {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-top: 0.25em;
+  font-weight: 400;
+  opacity: 0.6;
+}
+
+.clf-boot[open] > summary .clf-boot-preview {
+  display: none;
+}
+
+/* No disclosure triangle. The summary's children are blocks, so a marker — the native one
+   or a `::before` — landed on a line of its own above the label: a stray arrow floating in
+   empty space. The label and its clamped preview are the affordance; the whole summary is
+   the hit target. */
 .clf-boot > summary::-webkit-details-marker {
   display: none;
 }
 
-.clf-boot > summary::before {
-  content: '▸ ';
-  display: inline-block;
-  width: 1em;
-}
-
-.clf-boot[open] > summary::before {
-  content: '▾ ';
-}
-
-.clf-boot > summary:hover,
-.clf-boot > summary:focus-visible {
+.clf-boot > summary:hover .clf-boot-label,
+.clf-boot > summary:focus-visible .clf-boot-label {
   opacity: 0.9;
 }
 
@@ -599,6 +615,24 @@
   display: none;
 }
 
+/* "Chat blocked", beside the gear. The failure tone the app's own list uses for the block. */
+.clf-blocked {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, #dc2626 18%, transparent);
+  color: #f87171;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.clf-blocked[hidden] {
+  display: none;
+}
+
 .clf-pill-text {
   min-width: 0;
   overflow: hidden;
@@ -769,6 +803,21 @@
 .clf-stream-progress .clf-stream-icon {
   padding-top: 0.12rem;
   opacity: 0.58;
+}
+
+/* The app's own note that it reloaded or reopened this chat, and why. It sits between
+   turns at the point in the transcript where it happened, as the session log shows it. */
+.clf-repair-notice {
+  margin: 0.45rem auto 0.65rem;
+}
+
+.clf-stream-repair {
+  font-size: 0.84rem;
+  opacity: 0.78;
+}
+
+.clf-stream-repair .clf-stream-icon {
+  font-size: 1rem;
 }
 
 .clf-stream-tool_call {

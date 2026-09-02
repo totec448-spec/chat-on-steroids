@@ -181,16 +181,16 @@ export class AgentsBusyError extends AgentError {
  *
  * Every identity here is a conversation, so a call this app cannot place is a call it cannot
  * attribute — and the answer to that is to say so, not to accept a key the model is carrying
- * instead. In practice this is a page whose extension is not reporting: the fix is in the
- * browser, and the message says where to look.
+ * instead. In practice this is a page whose extension is not reporting, and the app's own
+ * answer to that is already on its way: an unattributed call is what makes it reload the
+ * chats that are working. The message says so, and asks for nothing from the user.
  */
 export class IdentityLostError extends AgentError {
   constructor() {
     super(
       'WORKER_IDENTITY_LOST: Chat On Steroids could not tell which conversation this call came from, so it cannot ' +
-        'act on the run from here. Check that the extension is connected in this tab and try once more. If this chat ' +
-        'was opened as a worker and never took up its slot, there is nothing to repair from inside the chat: ask the ' +
-        'user to clear that worker row in the app and spawn a replacement.'
+        'act on the run from here. This usually means the extension in this tab stopped reporting; the app ' +
+        'reloads the affected chat shortly because of this unattributed activity. Wait a moment and try once more.'
     );
   }
 }
@@ -244,6 +244,22 @@ function ceilingCrossed(info: AgentInfo): boolean {
  */
 function hasStopped(state: AgentState): boolean {
   return isOver(state) || state === 'sleeping';
+}
+
+/**
+ * Whether a stop observed now — a settled answer, a finish call, a chat proved quiet — may end
+ * this worker's current work.
+ *
+ * `waking` says no. The worker is not working, so there is nothing to stop, and the wake that
+ * reserved its slot ends only through its own proof (the woken chat's first call or turn) or
+ * its own failure. Treating a stop as applicable while waking is how the 2026-09-02 wakes were
+ * lost: the page re-reported the settled answer that had put the worker to sleep, the finish
+ * landed on the `waking` row as fresh, the worker went back to `sleeping` with the wake
+ * command retired as "no longer waiting" — and the message the browser had just typed ran as
+ * a turn the app did not own.
+ */
+function canStop(state: AgentState): boolean {
+  return !hasStopped(state) && state !== 'waking';
 }
 
 interface Agent {
@@ -1952,9 +1968,9 @@ function planFinish(agent: Agent, result: string): { info: AgentInfo; report: Ag
 (${agent.info.id} is finished for good: its own chat has reached the context limit, so it cannot be woken again. ` +
       `${slots}Spawn a new worker for any remaining work.)`
     : `
-(${agent.info.id} is sleeping, not gone. ${slots}It keeps this chat and everything it has already worked out, so send ` +
-      `it more work with agents action=message to="${agent.info.id}" — that wakes it up where it left off. Prefer that ` +
-      'to action=spawn: a new worker starts from nothing.)';
+(${agent.info.id} is sleeping, not gone. ${slots}It keeps this chat and everything it has already worked out. For ` +
+      `related follow-up work, reuse it first with agents action=message to="${agent.info.id}" — that wakes it up where ` +
+      'it left off. Use action=spawn only when no sleeping worker is suitable or true parallel capacity is needed.)';
   const report = newMessage(
     agent.info.id,
     PRIME_ID,
@@ -2023,7 +2039,7 @@ function runProjectionStillOwned(owner: Run): boolean {
 }
 
 function stageFinish(agent: Agent, result: string, acknowledgedMessageIds: readonly string[] = []): StagedFinish {
-  if (hasStopped(agent.info.state)) {
+  if (!canStop(agent.info.state)) {
     logInfo(`multi-agent: ${agent.info.id} called finish again after it had already stopped (${agent.info.state})`);
     return {
       info: { ...agent.info },
@@ -2111,7 +2127,7 @@ export function stageFinishAgent(caller: Caller, result: string): StagedFinish {
  */
 export function finishAgent(caller: Caller, result: string): FinishResult {
   const agent = finishTarget(caller);
-  if (hasStopped(agent.info.state)) {
+  if (!canStop(agent.info.state)) {
     logInfo(`multi-agent: ${agent.info.id} called finish again after it had already stopped (${agent.info.state})`);
     return { info: { ...agent.info }, report: null, repeat: true };
   }
@@ -2133,7 +2149,7 @@ export function finishAgent(caller: Caller, result: string): FinishResult {
 export function finishWorkerConversation(conversationId: string, result: string): FinishResult | null {
   if (!run || !conversationId) return null;
   const agent = agentForConversationId(conversationId);
-  if (!agent || agent.info.role !== 'worker' || hasStopped(agent.info.state)) return null;
+  if (!agent || agent.info.role !== 'worker' || !canStop(agent.info.state)) return null;
   return finishAgent({ conversationId }, result);
 }
 
@@ -2141,7 +2157,7 @@ export function finishWorkerConversation(conversationId: string, result: string)
 export function stageWorkerConversationFinish(conversationId: string, result: string): StagedFinish | null {
   if (!run || !conversationId) return null;
   const agent = agentForConversationId(conversationId);
-  if (!agent || agent.info.role !== 'worker' || hasStopped(agent.info.state)) return null;
+  if (!agent || agent.info.role !== 'worker' || !canStop(agent.info.state)) return null;
   // A settled browser answer is evidence the worker got past the preceding ordinary tool
   // result. Those are exactly the rows the next authenticated MCP call would retire. There is
   // no such next call when the worker simply answers and stops, so stage their retirement with
@@ -2220,7 +2236,7 @@ export function failAgent(
  */
 function sleepAgent(agent: Agent, reason: string): FinishResult | null {
   if (!run || agent.info.role !== 'worker') return null;
-  if (hasStopped(agent.info.state)) return null;
+  if (!canStop(agent.info.state)) return null;
   // A finish crossing its own durable acceptance barrier is the stronger, more specific
   // statement about the same transition. Never publish two of them.
   if (activeFinishStages.has(agent)) return null;
@@ -2441,7 +2457,9 @@ function planRevivalText(agent: Agent): { text: string; messageIds: string[] } {
  */
 function beginRevival(agent: Agent): void {
   agent.info.state = 'waking';
-  agent.info.sleptAt = null;
+  // `sleptAt` stays: the worker is still stopped while waking, and that timestamp is what tells
+  // a turn the page reports *now* apart from the page replaying the turn that ended before the
+  // sleep. It is cleared by the revival's own proof, in noteAgentAlive().
   agent.info.detachedAt = null;
   // True only for the pre-claim arbitration window. A proven tool call may still show that the
   // old server-side turn never stopped and take the worker active; `/commands/redeem` flips this
@@ -2558,7 +2576,6 @@ export function noteWorkerRevived(
   const now = Date.now();
   agent.info.revivable = false;
   agent.info.finishedAt = null;
-  agent.info.sleptAt = null;
   agent.info.result = null;
   if (commandId) agent.info.lastRevivalCommandId = commandId;
   const offered = new Set(messageIds);
@@ -2925,14 +2942,23 @@ export function noteAgentAlive(
     agent.info.state !== 'active' && agent.info.state !== 'invited';
   // A worker that was ended on the work's own evidence stays ended: its chat calling again is
   // a model that has not stopped, not a slot to reopen.
-  // Redeem makes `revivable=false`; only a delivery marker followed by this exact call may finish
-  // the wake. Before redeem, a late old-turn call may still prove the wake was unnecessary.
+  // Redeem makes `revivable=false`; only a delivery marker followed by this exact call, or a
+  // turn beginning after that delivery, may finish the wake. Before redeem, a late old-turn
+  // call or turn may still prove the wake was unnecessary. Between the two — the browser owns
+  // the payload but has not typed it — nothing does, so the page cannot be raced into typing
+  // the same words twice.
+  //
+  // A turn counts because it is the earlier of the two proofs and the one that never depends
+  // on the request-id join: the woken model routinely reads for a minute before its first
+  // call, and when that call's page evidence is late the worker used to sit in `waking` while
+  // its calls piled into Unattributed activity, until the deadline slept it as "could not be
+  // woken" under a turn that was visibly running.
   const hasDeliveredRevival =
     Boolean(agent.info.lastRevivalCommandId) ||
     agent.queue.some((message) => message.ackedAt === null && message.offeredViaRevival && message.offeredAt !== null);
   const provedDeliveredWake =
     agent.info.state === 'waking' &&
-    source === 'call' &&
+    source !== 'page' &&
     (agent.info.revivable || hasDeliveredRevival);
   if (!ended || (!provedDeliveredWake && agent.info.state !== 'detached' && !agent.info.revivable)) {
     agent.info.lastSeenAt = now;
@@ -2953,7 +2979,8 @@ export function noteAgentAlive(
   // coming back from `detached` needs nothing said — the prime was never told it had gone.
   let report: AgentMessage | null = null;
   if (was === 'failed' || was === 'sleeping') {
-    const how = source === 'page' ? 'reappeared in the browser' : 'made another tool call';
+    const how =
+      source === 'page' ? 'reappeared in the browser' : source === 'turn' ? 'started another turn' : 'made another tool call';
     report = newMessage(
       agent.info.id,
       PRIME_ID,

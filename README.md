@@ -198,7 +198,7 @@ npm run dist:linux:x64    # Linux x64 AppImage + DEB
 npm run dist:linux:arm64  # Linux ARM64 AppImage + DEB
 ```
 
-Package on the target operating system. The release workflow runs on native Windows, macOS and Linux runners for both CPUs, pins and verifies the tunnel and ripgrep assets, stages matching native dependencies, smoke-tests the packaged runtime, and assembles one release candidate with the extension zip and `SHA256SUMS.txt`.
+Package on the target operating system. The release workflow runs on native Windows, macOS and Linux runners for both CPUs, pins and verifies the tunnel and ripgrep assets, stages matching native dependencies, smoke-tests the packaged runtime, and assembles one release candidate with the extension zip and `SHA256SUMS.txt`. Publishing checks OpenAI's current stable `tunnel-client` release before and after the candidate build and refuses a stale pin, while keeping the tagged build reproducible.
 
 ## Contributing
 

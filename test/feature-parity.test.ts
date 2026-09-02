@@ -23,7 +23,7 @@ describe('portable browser-backed feature parity', () => {
         enabled: true,
         maxWorkers: 2,
         allowUnattributedCalls: true,
-        recoverAgentTabs: true
+        recoverAgentTabs: false
       });
       expect(browserExtensionRequired(config)).toBe(true);
     }

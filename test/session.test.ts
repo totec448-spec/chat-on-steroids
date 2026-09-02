@@ -722,6 +722,24 @@ describe('session store', () => {
     expect(await getSession(summary.id)).toMatchObject({ updatedAt: laterAt, lastToolCallAt: toolAt });
   });
 
+  /**
+   * A stopped turn has no final assistant message, so it never moved the activity boundary and
+   * a blocked, stopped prime kept its `active` badge on the refused call before the stop.
+   */
+  it('projects any turn end, a stop included, as an end of recent tool activity', async () => {
+    const summary = await createSession({ title: 'turn end boundary' });
+    expect((await getSession(summary.id))?.lastTurnEndAt).toBeNull();
+    await appendEvent(summary.id, { time: 300, source: 'extension', kind: 'turn_start', turnId: 'g-stop' });
+    await appendEvent(summary.id, {
+      time: 400,
+      source: 'extension',
+      kind: 'turn_end',
+      turnId: 'g-stop',
+      outcome: 'stopped'
+    });
+    expect((await getSession(summary.id))?.lastTurnEndAt).toBe(400);
+  });
+
   it('projects a stable final assistant message as the exact end of recent tool activity', async () => {
     const summary = await createSession({ title: 'final activity boundary' });
     const messageId = 'assistant-final-activity-boundary';
@@ -747,6 +765,31 @@ describe('session store', () => {
     });
 
     expect((await getSession(summary.id))?.lastAssistantFinalAt).toBe(200);
+  });
+
+  it('projects a successful worker finish report as the session finish boundary', async () => {
+    const summary = await createSession({ title: 'finish boundary' });
+    const call = (callId: string, tool: string, finish: boolean) => ({
+      callId,
+      tool,
+      attribution: 'exact',
+      requestId: callId,
+      conversationId: 'conv-finish',
+      attributionMethod: 'request_id',
+      args: { text: '{}', truncated: false, chars: 2 },
+      result: { text: 'ok', truncated: false, chars: 2 },
+      outcome: 'ok',
+      durationMs: 1,
+      summary: { kind: 'agent', tone: 'good', title: 'Reported the finished task' },
+      ...(finish ? { endsActivity: true } : {})
+    });
+    await appendEvent(summary.id, { time: 300, source: 'mcp', kind: 'tool_call', call: call('c-work', 'read', false) } as SessionEvent);
+    expect((await getSession(summary.id))?.lastFinishReportAt).toBeNull();
+
+    await appendEvent(summary.id, { time: 400, source: 'mcp', kind: 'tool_call', call: call('c-finish', 'agents', true) } as SessionEvent);
+    const after = await getSession(summary.id);
+    expect(after?.lastFinishReportAt).toBe(400);
+    expect(after?.lastToolCallAt).toBe(400);
   });
 
   it('keeps the open turn open when the ChatGPT page detaches mid-turn', async () => {

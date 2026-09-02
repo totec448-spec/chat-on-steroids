@@ -126,7 +126,8 @@ describe('a session row', () => {
   it('does not call an idle prime active merely because it still owns the run', () => {
     expect(chatSource).toMatch(/else if \(agent && agent\.role !== 'prime'\)/);
     // Idle means idle: generic recording traffic cannot renew the exact tool clock.
-    expect(chatSource).toMatch(/lastActivityAt > \(summary\.lastAssistantFinalAt \?\? 0\)/);
+    expect(chatSource).toMatch(/Math\.max\(summary\.lastAssistantFinalAt \?\? 0, summary\.lastTurnEndAt \?\? 0\)/);
+    expect(chatSource).toMatch(/lastActivityAt > finishedAt/);
   });
 
   /**
@@ -136,7 +137,8 @@ describe('a session row', () => {
    */
   it('uses session start and exact calls rather than reload-generated turn boundaries for visible activity', () => {
     expect(chatSource).toMatch(/Math\.max\(summary\.startedAt, summary\.lastToolCallAt \?\? 0\)/);
-    expect(chatSource).toMatch(/return summary\.endedAt === null && recentChatActivity\(summary\)/);
+    expect(chatSource).toMatch(/return summary\.endedAt === null && !workerReportedFinish\(summary\) && recentChatActivity\(summary\)/);
+    expect(chatSource).toMatch(/else if \(!agent && workerReportedFinish\(summary\)\) badges\.push\(AGENT_BADGE\.sleeping\)/);
     expect(chatSource).toMatch(/if \(sessionWorking\(summary\)\) badges\.push\(AGENT_BADGE\.active\)/);
     expect(chatSource).toMatch(/scheduleToolActivityExpiry/);
   });
