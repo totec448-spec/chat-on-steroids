@@ -10,7 +10,7 @@ Keep changes narrow. Preserve existing permission, identity and recovery behavio
 
 ## Development setup
 
-Development requires Node 22+ and is supported on Windows, macOS and Linux. Desktop/computer-use implementation and tests remain Windows-specific; Core, extension, sessions, agents and tunnel behavior must stay portable.
+Development requires Node 22+ and is supported on Windows, macOS and Linux. Desktop/computer-use has platform-native Windows and macOS helpers behind one protocol; Core, extension, sessions, agents and tunnel behavior must stay portable. macOS helper changes require Xcode/Swift and a packaged arm64 or x64 smoke check.
 
 ```sh
 npm ci

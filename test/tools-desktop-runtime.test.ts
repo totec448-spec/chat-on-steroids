@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Capabilities } from '../src/shared/types.js';
 
 const desktop = vi.hoisted(() => {
@@ -128,6 +128,8 @@ describe('Desktop computer browser chords', () => {
 });
 
 describe('Desktop observe runtime contract', () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it('rejects explicit window ids where the documented mode cannot use them', () => {
     const observe = desktopSurface().get('observe')!;
     expect(observe.config.inputSchema.safeParse({ what: 'active', window: 123 }).success).toBe(false);
@@ -160,5 +162,41 @@ describe('Desktop observe runtime contract', () => {
     const result = await observe.handler({});
     expect(result.content[0].text).toContain('No foreground window');
     expect(result.content[0].text).toContain('frameId 7');
+  });
+
+  it('rejects a screenshot whose real control text pushes the combined MCP result over budget', async () => {
+    const largeField = 'x'.repeat(4096);
+    desktop.getWindowState.mockResolvedValueOnce({
+      window: { id: 9, process: 'Target', state: 'foreground', title: 'Budget', x: 0, y: 0, width: 640, height: 480 },
+      snapshotId: 3,
+      screenshot: {
+        data: 'A'.repeat(7_600_000),
+        frameId: 11,
+        width: 640,
+        height: 480,
+        region: { x: 0, y: 0, width: 640, height: 480 },
+        scale: 1,
+        focused: true,
+        captureMode: 'window',
+        windowId: 9
+      },
+      elements: Array.from({ length: 100 }, (_, index) => ({
+        ref: `g1_s3_e${index + 1}`,
+        name: largeField,
+        role: 'Button',
+        automationId: largeField,
+        enabled: true,
+        offscreen: false,
+        bounds: { x: 0, y: 0, width: 20, height: 20 },
+        imageBounds: { x: 0, y: 0, width: 20, height: 20 },
+        imageCenter: { x: 10, y: 10 }
+      })),
+      uiUnavailable: null
+    });
+    const observe = desktopSurface().get('observe')!;
+
+    await expect(
+      observe.handler({ what: 'window', window: 9, max_elements: 100 })
+    ).rejects.toThrow(/DESKTOP_RESULT_TOO_LARGE.*smaller max_width or max_elements/);
   });
 });
