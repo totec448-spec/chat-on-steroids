@@ -299,7 +299,7 @@ describe('settings migration', () => {
 /** Fresh-install defaults, while migrations above prove existing choices stay narrow. */
 describe('shipped defaults', () => {
   const expectedFreshCapability = (capability: Capability, platform: NodeJS.Platform): boolean =>
-    platform === 'win32' || !DESKTOP_CAPABILITIES.includes(capability);
+    platform === 'win32' || platform === 'darwin' || !DESKTOP_CAPABILITIES.includes(capability);
 
   it('records sessions from first launch', () => {
     expect(defaultConfig().sessions.record).toBe(true);

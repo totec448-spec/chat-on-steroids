@@ -9,6 +9,23 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## Unreleased
+
+### Added
+- **macOS now publishes the optional Desktop connector.** Architecture-matched Swift code implements
+  window/display capture through ScreenCaptureKit, snapshot-scoped semantic controls through
+  AXUIElement, and physical mouse/keyboard input through CGEvent while preserving the existing
+  `observe` / `computer` schemas, frame identity and partial-batch contract.
+- **macOS packaging and smoke checks cover the in-process Desktop boundary and screen-capture purpose
+  string.** Each x64/arm64 package ships a thin Swift dylib plus N-API addon outside asar. A Node
+  Worker invokes that backend inside the responsible Electron process, and packaged-runtime smoke
+  exercises this real addon/dylib path rather than the standalone development CLI protocol probe.
+
+### Security
+- macOS Screen Recording and Accessibility remain independent OS grants. The helper requests no
+  privilege at startup, reports a typed error when a live operation lacks consent, and permission
+  revocation remains effective without changing the connector schema cached by ChatGPT.
+
 ## [2.0.2] — 2026-08-26
 
 2.0.2 is the native cross-platform release port. The already-published 2.0.1 release remains the

@@ -38,7 +38,7 @@ export const CAPABILITIES = [
 
 export type Capability = (typeof CAPABILITIES)[number];
 
-/** Model-facing Desktop permissions. The macOS/Linux port intentionally leaves these out. */
+/** Model-facing Desktop permissions, enabled only on hosts with a native backend. */
 export const DESKTOP_CAPABILITIES: readonly Capability[] = [
   'screen',
   'control',
@@ -65,7 +65,7 @@ export const WRITE_CAPABILITIES: readonly Capability[] = [
 
 export type Capabilities = Record<Capability, boolean>;
 
-/** Host family reported to the renderer. Desktop automation is intentionally Windows-only. */
+/** Host family reported to the renderer. */
 export type PlatformFamily = 'windows' | 'macos' | 'linux' | 'other';
 
 export interface PlatformInfo {
@@ -369,6 +369,15 @@ export interface BridgeStatus {
   lastSeenAt: number | null;
 }
 
+export type MacOSPermissionState = 'granted' | 'missing' | 'unknown';
+export interface MacOSDesktopAccessStatus {
+  /** Live preflights from the Swift backend executing inside the Electron process. */
+  screen: MacOSPermissionState;
+  accessibility: MacOSPermissionState;
+  checkedAt: number;
+  error: string | null;
+}
+
 /**
  * Whether the enabled product surface currently needs the companion browser extension.
  *
@@ -395,6 +404,8 @@ export interface AppState {
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */
   bundledTunnelVersion: string | null;
   bridge: BridgeStatus;
+  /** Present only on macOS once the in-process native backend has reported its live TCC state. */
+  desktopAccess?: MacOSDesktopAccessStatus | null;
 }
 
 export const DEFAULT_CAPABILITIES: Capabilities = {
