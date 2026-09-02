@@ -29,6 +29,7 @@ import {
   type Action,
   type VerificationSpec
 } from '../computer/index.js';
+import { browserTabChord, isBrowserProcess } from '../computer/browser-chords.js';
 import { logInfo } from '../logger.js';
 import { noteCount, noteDetail } from './call-context.js';
 import {
@@ -45,6 +46,38 @@ import {
 } from './kernel.js';
 
 const DEFAULT_WINDOW_RESULTS = 60;
+
+/**
+ * Refuses a keyboard chord that would manage a browser's tabs or windows.
+ *
+ * The browser on this desktop is very likely the one holding this app's own ChatGPT chats, and
+ * the model cannot see which tab a chord lands on: on 2026-09-02 the prime, testing its game in
+ * a tab beside its chats, closed its own chat with ctrl+w and later walked the worker chats
+ * with ctrl+tab and typed a URL into one. The window the keys would reach is the last one a
+ * focus action in this batch named, else the one in front now.
+ */
+async function browserChordRefusal(actions: Action[]): Promise<string | null> {
+  let focused: number | null = null;
+  for (const action of actions) {
+    if (action.type === 'focus') focused = action.window;
+    if (action.type !== 'keypress') continue;
+    const chord = browserTabChord(action.keys);
+    if (!chord) continue;
+    const target =
+      focused === null
+        ? (await activeWindow()).window
+        : ((await listWindows()).windows.find((window) => window.id === focused) ?? null);
+    if (!target || !isBrowserProcess(target.process)) continue;
+    return (
+      `BROWSER_TAB_CHORD: ${chord} would close, open or switch tabs or windows of "${target.title}" (${target.process}). ` +
+      'A browser here may be holding the ChatGPT chats this app runs, and a chord cannot tell which tab it lands on, so ' +
+      'tab and window chords are refused in every browser window. Open the page you are testing in a browser window of its ' +
+      "own (Start-Process chrome.exe -ArgumentList '--new-window', $url), keep that window in front, and drive it there — " +
+      'navigate with set_value on its address bar, never by keyboard tab or window chords.'
+    );
+  }
+  return null;
+}
 const MAX_WINDOW_RESULTS = 100;
 const MAX_CLIPBOARD_LINE_CHARS = 16_000;
 const MAX_CLIPBOARD_OUTPUT_CHARS = 64_000;
@@ -463,6 +496,8 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
                 break;
             }
           }
+          const chordRefusal = await browserChordRefusal(parsed);
+          if (chordRefusal) return fail(chordRefusal);
           logInfo(`tool computer ${parsed.map((a) => a.type).join(', ')}`);
           noteDetail(parsed.map((a) => a.type).join(', '));
           const verifyCapture = verify?.capture === 'always' || verify?.capture === 'on_change';

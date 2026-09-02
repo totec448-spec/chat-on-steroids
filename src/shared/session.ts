@@ -197,6 +197,11 @@ export interface ToolCallRecord {
   /** Files this call demonstrably changed, with line counts where computable. */
   changes?: FileChange[];
   assets?: AssetRef[];
+  /**
+   * This call was the caller's last word: a worker's successful finish report. Recorded so
+   * the session itself, not only the in-memory swarm, knows the worker stopped working here.
+   */
+  endsActivity?: true;
 }
 
 export type MessageState = 'streaming' | 'final';
@@ -298,7 +303,11 @@ export type SessionEvent =
   | (BaseEvent & { kind: 'turn_end'; outcome: TurnOutcome; detail?: string })
   | (BaseEvent & { kind: 'chat_error'; message: StoredText })
   | (BaseEvent & { kind: 'tool_call'; call: ToolCallRecord })
-  | (BaseEvent & { kind: 'note'; message: StoredText })
+  /**
+   * An app-authored line. `continuation` names the Compact & Resume it is about, so the
+   * timeline can fold the note into that compaction's one row instead of showing it loose.
+   */
+  | (BaseEvent & { kind: 'note'; message: StoredText; continuation?: string })
   /**
    * A message routed between agents.
    *
@@ -426,6 +435,23 @@ export interface SessionSummary {
   lastToolCallAt: number | null;
   /** Observation time of the newest stable final assistant message. */
   lastAssistantFinalAt?: number | null;
+  /**
+   * Time of the newest turn end, whatever ended it: the model finishing, the user pressing
+   * stop, or an error. The other end of "recent activity" beside `lastAssistantFinalAt`, which
+   * a stopped turn never sets — so a prime the user blocked and stopped stayed `active` for
+   * three minutes on the strength of the refused call before the stop (2026-09-02). Undefined
+   * on metadata written before this field existed.
+   */
+  lastTurnEndAt?: number | null;
+  /**
+   * Start time of the newest successful worker finish report in this session.
+   *
+   * A worker's finish is its final answer as far as this app is concerned, and it is durable
+   * here because the swarm that also knows it parks the moment its last worker stops: a list
+   * that read only the swarm showed a finished worker as `active` for three minutes and then
+   * as nothing at all. Undefined on metadata written before this field existed.
+   */
+  lastFinishReportAt?: number | null;
   processExitNonzero: number;
   toolRejected: number;
   /** Connector/tool implementation failures; the tool reliability numerator. */
@@ -508,10 +534,12 @@ export type AgentRole = 'prime' | 'worker';
  * accumulate more sleeping workers than `maxWorkers` while never having more than
  * `maxWorkers` of them awake at once.
  *
- * `waking` is the short window between the prime's message being accepted and the app
- * proving it typed that message into the worker's chat. It holds the slot the revival
- * reserved, so two revivals cannot claim the same one; a revival that fails puts the worker
- * back to sleep and gives the slot back.
+ * `waking` is the short window between the prime's message being accepted and the woken chat
+ * proving it is running — its first tool call, or a turn that begins after the sleep. It holds
+ * the slot the revival reserved, so two revivals cannot claim the same one; a revival that
+ * fails puts the worker back to sleep and gives the slot back. Nothing observed from outside
+ * can stop a waking worker: a settled answer or finish that arrives then is the old turn's,
+ * and the wake ends only through its own proof or failure.
  *
  * `finished` and `failed` remain the two terminal states, and a worker only reaches
  * `finished` once its own chat has grown past the context ceiling: past that point there is

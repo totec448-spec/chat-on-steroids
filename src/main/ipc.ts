@@ -36,6 +36,7 @@ import {
   onBridgeChange,
   startBridge,
   stopBridge,
+  sweepStaleSwarm,
   unpair
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
@@ -625,6 +626,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
         ? `conversation ${conversationId} blocked; its tool calls are refused until it is released`
         : `conversation ${conversationId} released; its tool calls run again`
     );
+    // A blocked worker chat frees its swarm slot now, not on the next 30-second pass: the
+    // user pressing Block on a worker is usually about to start something in its place.
+    if (blocked) await sweepStaleSwarm().catch(() => undefined);
     return blockedChatIds();
   });
 

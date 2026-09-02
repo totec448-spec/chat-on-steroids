@@ -244,6 +244,8 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     toolCalls: 0,
     lastToolCallAt: null,
     lastAssistantFinalAt: null,
+    lastTurnEndAt: null,
+    lastFinishReportAt: null,
     processExitNonzero: 0,
     toolRejected: 0,
     toolInternalErrors: 0,
@@ -628,6 +630,8 @@ async function rebuildSummaryFromHistory(
         toolCalls: rebuilt.toolCalls,
         lastToolCallAt: rebuilt.lastToolCallAt,
         lastAssistantFinalAt: rebuilt.lastAssistantFinalAt,
+        lastTurnEndAt: rebuilt.lastTurnEndAt,
+        lastFinishReportAt: rebuilt.lastFinishReportAt,
         processExitNonzero: rebuilt.processExitNonzero,
         toolRejected: rebuilt.toolRejected,
         toolInternalErrors: rebuilt.toolInternalErrors,
@@ -685,7 +689,9 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
         ...checkpoint.summary,
         ...(checkpoint.outcomeCountersMissing ? { errors: 0 } : {}),
         lastToolCallAt: null,
-        lastAssistantFinalAt: null
+        lastAssistantFinalAt: null,
+        lastTurnEndAt: null,
+        lastFinishReportAt: null
       };
       await writeSummary(summary, 0);
       return { summary, messages, historySeq: 0, reconciled: true };
@@ -768,6 +774,9 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
     summary.lastToolCallAt = Math.max(summary.lastToolCallAt ?? 0, event.time);
+    if (event.call.endsActivity === true) {
+      summary.lastFinishReportAt = Math.max(summary.lastFinishReportAt ?? 0, event.time);
+    }
     const outcome = normalizedToolOutcome(event.call);
     if (outcome === 'process_exit_nonzero') summary.processExitNonzero += 1;
     if (outcome === 'tool_rejected') summary.toolRejected += 1;
@@ -780,7 +789,10 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
     summary.lastAssistantFinalAt = Math.max(summary.lastAssistantFinalAt ?? 0, event.time);
   }
   if (event.kind === 'chat_error') summary.errors += 1;
-  if (event.kind === 'turn_end') summary.lastTurnOutcome = event.outcome;
+  if (event.kind === 'turn_end') {
+    summary.lastTurnOutcome = event.outcome;
+    summary.lastTurnEndAt = Math.max(summary.lastTurnEndAt ?? 0, event.time);
+  }
   if (event.kind === 'turn_start') summary.activeTurnId = event.turnId ?? `seq-${event.seq}`;
   if (event.kind === 'turn_end' && (!event.turnId || summary.activeTurnId === event.turnId)) summary.activeTurnId = null;
   if (event.kind === 'handoff') {
@@ -1292,6 +1304,8 @@ export async function rewriteUnattributedToolCalls(
       toolCalls: 0,
       lastToolCallAt: null,
       lastAssistantFinalAt: null,
+      lastTurnEndAt: null,
+      lastFinishReportAt: null,
       processExitNonzero: 0,
       toolRejected: 0,
       toolInternalErrors: 0,
@@ -1359,6 +1373,14 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         lastAssistantFinalAt:
           typeof publicSummary.lastAssistantFinalAt === 'number' && Number.isFinite(publicSummary.lastAssistantFinalAt)
             ? publicSummary.lastAssistantFinalAt
+            : null,
+        lastTurnEndAt:
+          typeof publicSummary.lastTurnEndAt === 'number' && Number.isFinite(publicSummary.lastTurnEndAt)
+            ? publicSummary.lastTurnEndAt
+            : null,
+        lastFinishReportAt:
+          typeof publicSummary.lastFinishReportAt === 'number' && Number.isFinite(publicSummary.lastFinishReportAt)
+            ? publicSummary.lastFinishReportAt
             : null,
         agents: Array.isArray(publicSummary.agents) ? publicSummary.agents : [],
         origin: publicSummary.origin ?? null,

@@ -1067,6 +1067,24 @@ describe('capability gating', () => {
     expect(names).toContain('agents');
   });
 
+  it('teaches primes to reuse sleeping workers before spawning replacements', async () => {
+    ctx.agentTools = true;
+    const initialized = await core('initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'test-client', version: '1.0.0' }
+    });
+    const instructions: string = initialized.body.result.instructions ?? '';
+    expect(instructions).toMatch(/Reuse\s+a sleeping worker for related follow-up work before spawning a replacement/);
+    expect(instructions).toContain('Only terminal workers whose context is full need replacing');
+
+    const tools = await core('tools/list');
+    const agentsDescription = (tools.body.result.tools as Array<{ name: string; description?: string }>).find(
+      (tool) => tool.name === 'agents'
+    )?.description;
+    expect(agentsDescription).toContain('Reuse a suitable sleeping worker with message before spawn');
+  });
+
   it('rejects action-specific agent fields instead of silently ignoring them', async () => {
     ctx.agentTools = true;
     const reply = await core('tools/call', {

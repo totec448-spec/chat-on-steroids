@@ -11,6 +11,8 @@ import * as packagingTargets from '../scripts/packaging-targets.mjs';
 // @ts-ignore Build scripts are intentionally plain ESM JavaScript.
 import { assertReleaseAbsent } from '../scripts/check-release-absent.mjs';
 // @ts-ignore Build scripts are intentionally plain ESM JavaScript.
+import { assertCurrentTunnelRelease } from '../scripts/verify-current-tunnel.mjs';
+// @ts-ignore Build scripts are intentionally plain ESM JavaScript.
 import * as macOSAuditUtils from '../scripts/macos-audit-utils.mjs';
 const { RIPGREP, TUNNEL_CLIENT } = packagingVersions;
 const {
@@ -57,6 +59,27 @@ describe('cross-platform packaging targets', () => {
     }
     expect(RIPGREP.targets.linux.x64.triple).toBe('unknown-linux-musl');
     expect(RIPGREP.targets.linux.arm64.triple).toBe('unknown-linux-musl');
+  });
+
+  it('fails closed unless the pinned tunnel-client is OpenAI\'s current stable release', async () => {
+    const response = (body: Record<string, unknown>, status = 200) => async () =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' }
+      });
+
+    await expect(assertCurrentTunnelRelease({
+      pinnedVersion: 'v0.0.14',
+      fetchImpl: response({ tag_name: 'v0.0.14', draft: false, prerelease: false })
+    })).resolves.toMatchObject({ tag_name: 'v0.0.14' });
+    await expect(assertCurrentTunnelRelease({
+      pinnedVersion: 'v0.0.13',
+      fetchImpl: response({ tag_name: 'v0.0.14', draft: false, prerelease: false })
+    })).rejects.toThrow(/v0\.0\.13 is stale.*v0\.0\.14/);
+    await expect(assertCurrentTunnelRelease({
+      pinnedVersion: 'v0.0.14',
+      fetchImpl: response({ message: 'rate limited' }, 403)
+    })).rejects.toThrow(/refusing to publish without proving the pin is current/);
   });
 
   it('selects only target Sharp packages and unpacked directory families', () => {
@@ -544,11 +567,13 @@ Load command 11
     expect(candidate).toBeGreaterThan(preflight);
     expect(publish).toBeGreaterThan(candidate);
     expect(workflow.slice(preflight, candidate)).toContain('node scripts/check-release-absent.mjs');
+    expect(workflow.slice(preflight, candidate)).toContain('npm run verify:tunnel-current');
     expect(workflow.slice(preflight, candidate)).toContain('Verify release metadata agrees');
     expect(workflow.slice(preflight, candidate)).toContain("APP_VERSION = '([^']+)'");
     expect(workflow.slice(preflight, candidate)).toContain('must disclose unsigned and unnotarized macOS artifacts');
     expect(workflow.slice(candidate, publish)).toContain('needs: preflight');
     expect(workflow.slice(publish)).toContain('node scripts/check-release-absent.mjs');
+    expect(workflow.slice(publish).match(/npm run verify:tunnel-current/g)).toHaveLength(1);
     expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
   });
 

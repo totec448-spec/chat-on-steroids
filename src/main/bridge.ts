@@ -23,7 +23,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { BridgeStatus } from '../shared/types.js';
-import { CHAT_SILENCE_MS, type SessionOrigin } from '../shared/session.js';
+import { CHAT_SILENCE_MS, CONTINUATION_MARKER, type SessionEvent, type SessionOrigin } from '../shared/session.js';
 import { isChatBlocked } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { getConfig, updateConfig } from './config.js';
@@ -99,6 +99,7 @@ import {
   releaseQuiescentRun,
   retiredWorkerForConversation,
   sleepSilentDetachedWorkers,
+  occupiesSlot,
   sleepWorker,
   stageQueuedWorkerRevivals,
   swarmState,
@@ -129,11 +130,13 @@ import {
   dispatchContinuationDestinationSendNow,
   dispatchContinuationSourceSendNow,
   openContinuationNow,
+  releaseContinuationDestinationSendNow,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   sendUnattempted,
   type ContinuationSendState
 } from './session/continuation.js';
+import type { ContinuationView } from './session/continuation.js';
 import { noteResumeOpening } from './session/resume-gate.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
@@ -921,8 +924,32 @@ function goalWorkerChat(id: string): boolean {
   return (agent !== null && agent !== PRIME_ID) || retiredWorkerForConversation(id) !== null;
 }
 
+/**
+ * Is the loop kept out of this chat, and why?
+ *
+ * Two reasons, one gate. A worker chat is the prime's to write (see goalWorkerChat). A chat
+ * the user **blocked** in the app is one they took this app's hands off: its tool calls are
+ * refused, so a loop, a goal or an automatic compaction that kept typing into it would drive
+ * ChatGPT on without the tools every one of those turns assumes — the model would answer
+ * `CHAT_BLOCKED` refusals for as long as the loop kept asking. Block therefore stops the
+ * loop as well as the tools, and releasing the chat is what brings the loop back: the
+ * stored goal and switch are kept, only their effect is suspended. Reported to the page as
+ * `goal.blocked` so the switch drawn off says why. Worker wins when both apply, because that
+ * one never lifts.
+ */
+function goalBlockReason(id: string): 'worker' | 'blocked' | '' {
+  if (goalWorkerChat(id)) return 'worker';
+  if (isChatBlocked(id)) return 'blocked';
+  return '';
+}
+
+/** A chat the loop may not drive — by role, or by the user's block. */
+function goalFencedChat(id: string): boolean {
+  return goalBlockReason(id) !== '';
+}
+
 function goalEnabledFor(id: string): boolean {
-  if (goalWorkerChat(id)) return false;
+  if (goalFencedChat(id)) return false;
   return goalSwitchFor(id).enabled;
 }
 
@@ -950,7 +977,7 @@ function goalModeFor(id?: string): 'goal' | 'loop' {
  * overrides all of it, because there the prime is already the author of the user's turns.
  */
 function goalActiveFor(id: string): boolean {
-  if (goalWorkerChat(id)) return false;
+  if (goalFencedChat(id)) return false;
   return goalArmedFor(id);
 }
 
@@ -1236,6 +1263,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (turnStartedAt > 0) {
       const woke = noteAgentAlive(id, 'turn', turnStartedAt);
       if (woke?.report) await recordAgentMessage(woke.report, 'sent');
+      // A turn that finished a wake has spent its revival command; retire it now rather than
+      // on the next poll, so the prime's status and the command queue agree with the broker.
+      if (woke?.revived) tidyCommands();
     }
     observationWritesInFlight += 1;
     try {
@@ -1267,7 +1297,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
             conversationId: id,
             sessionId: result.sessionId!,
             ...candidate,
-            blocked: superseded || goalWorkerChat(id)
+            blocked: superseded || goalFencedChat(id)
           });
         }
       } catch (err) {
@@ -1405,7 +1435,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // Has this chat answered for itself? The page reads the switch and the saved goal as
       // one state — see goalArmedFor() — and cannot tell an Off somebody chose here from an
       // Off merely inherited from the app-wide setting without being told which it is.
-      own: superseded || goalWorkerChat(id) || goalSwitchFor(id).own,
+      own: superseded || goalFencedChat(id) || goalSwitchFor(id).own,
       mode: goalModeFor(id),
       hasKey: await goalKeyPresent(),
       model: getConfig().goal.model,
@@ -1414,10 +1444,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       objective: superseded || goalWorkerChat(id) ? '' : goalObjectiveFor(id),
       // Why the switch is drawn off when the user did not turn it off. Without this the
       // menu says "Goal off" in a worker chat and looks like a setting that failed to save.
-      blocked: superseded ? 'continued' : goalWorkerChat(id) ? 'worker' : '',
+      // 'blocked' is the user's own block from the app, which suspends the loop with the
+      // tools — see goalBlockReason.
+      blocked: superseded ? 'continued' : goalBlockReason(id),
       // Stable, crash-durable reply still owed one Goal decision. A replacement content
       // script resumes this instead of manufacturing a turn from the rendered transcript.
-      pending: superseded || goalWorkerChat(id) ? null : goalPendingReplyFor(id),
+      // A blocked chat's owed decision is withheld too, so the page cannot pick it up and
+      // draft into a chat whose tools are refused.
+      pending: superseded || goalFencedChat(id) ? null : goalPendingReplyFor(id),
       draft: superseded ? null : goalViewFor(id, goalClient)
     });
     // Every open ChatGPT tab polls this for its own conversation every few seconds, so
@@ -1443,7 +1477,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           nextSince: Number.isFinite(since) ? Math.max(0, since) : 0,
           job: null,
           goal: await goalView(),
-          ...(goalWorkerChat(id) || superseded
+          ...(goalFencedChat(id) || superseded
             ? {
                 // Worker conversations are never Compact & Resume sources. Keep the page's
                 // own auto-compaction switch projection off even when this worker has no live
@@ -1472,7 +1506,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
     }
     const summary = await getSession(live.sessionId);
-    const workerBlocked = goalWorkerChat(id);
+    // Worker chats and user-blocked chats alike: neither may auto-compact — see goalBlockReason.
+    const workerBlocked = goalFencedChat(id);
     const requestedSince = Number.isFinite(since) ? Math.max(0, since) : 0;
     // A page reload begins at cursor zero. Never turn that into a full JSONL parse/response:
     // large audited sessions used to freeze the Electron main process here for tens of
@@ -1485,9 +1520,33 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       requestedSince < firstAvailable &&
       !(requestedSince === 0 && firstAvailable === 1);
     const events = recent.filter((event) => resetActivity || event.seq >= requestedSince);
+    // Where this conversation begins inside a session that has been compacted and resumed.
+    //
+    // The session keeps its identity across Compact & Resume, so its log carries chat A's rows
+    // into chat B's feed. Every row that names a turn is placed by that turn and simply finds
+    // none in B, but a browser-repair notice names no turn: the page sits it before the first
+    // user message recorded after it, and in B that was the bootstrap — three "Reloaded chat"
+    // rows for reloads B never had, stacked above its handoff (2026-09-02). The bootstrap is
+    // the boundary, and it is durable: the app typed it with the RESUME marker at its head.
+    // Repairs before the newest one belong to a chat that no longer exists on this feed. The
+    // whole window is scanned, not only the events past the cursor, so a page resuming from a
+    // cursor still knows a boundary it consumed earlier.
+    const resumeBoundary = recent.reduce(
+      (boundary, event) =>
+        event.kind === 'user_message' && CONTINUATION_MARKER.exec(event.message.text)?.[1] === 'RESUME'
+          ? Math.max(boundary, event.origin ?? event.seq)
+          : boundary,
+      0
+    );
+    const earlierChatRepair = (event: SessionEvent): boolean =>
+      event.kind === 'progress' &&
+      typeof event.progressId === 'string' &&
+      event.progressId.startsWith('browser-repair:') &&
+      (event.origin ?? event.seq) < resumeBoundary;
     // App-owned transcript feed. Presentation-only: raw tool I/O stays in the local
     // session store. This is the source the connected page will render chronologically.
     const stream = events.flatMap((event) => {
+      if (earlierChatRepair(event)) return [];
       const base = { seq: event.seq, time: event.time, turnId: event.turnId ?? null, agent: event.agent ?? null };
       switch (event.kind) {
         case 'tool_call':
@@ -1652,6 +1711,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // it to fold that message away. Read off the session record rather than remembered
         // in the tab, so it still holds after a reload, days later.
         bootstrap: summary?.origin?.kind ?? null,
+        // Which worker this chat is, for the page's fold of the bootstrap. From the durable
+        // origin, so a reloaded worker tab — which no longer holds its command — still knows.
+        bootstrapAgent: summary?.origin?.kind === 'worker' ? summary.origin.agentId ?? null : null,
         entries,
         stream,
         userAnchors,
@@ -1750,6 +1812,35 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         origin
       );
     }
+    if (body['destinationLost'] === true) {
+      // The page armed the click and then proved the brief never left it. The lease belongs to
+      // that page and is retired with it, and the same brief is offered to a fresh chat at once —
+      // not after the quarter-hour the lease was measured for, and for a manual Compact & Resume
+      // as much as an automatic one: the ticket exists to land the brief, and Cancel is there
+      // for a user who meant the Escape.
+      const released = await releaseContinuationDestinationSendNow(checkpointToken);
+      if (released) {
+        const entry = continuationByToken(checkpointToken);
+        for (const command of commands.filter(
+          (candidate) => candidate.spec.type === 'resume' && candidate.spec.token === checkpointToken
+        )) {
+          retire(command, 'the page lost the brief before Send; nothing was sent');
+        }
+        if (entry) {
+          queueResumeCommand(entry.sessionId, checkpointToken);
+          void deliver();
+        }
+        logInfo(
+          `bridge: the brief for ${entry?.sessionId ?? checkpointToken.slice(0, 8)} was lost before Send — offering it to a fresh chat`
+        );
+      }
+      return json(
+        res,
+        released ? 200 : 409,
+        released ? { released: true } : { error: 'destination_send_not_releasable' },
+        origin
+      );
+    }
     const id = conversationId(body['conversationId']);
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
     // The last durable write before the click, quoting the claim handed out above. A false
@@ -1826,6 +1917,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         {
           error: 'worker_compaction_disabled',
           message: 'Worker chats stay in their existing conversation so the prime can revive them safely.'
+        },
+        origin
+      );
+    }
+    // A blocked chat is stopped, and Compact & Resume would start it again: the replacement
+    // chat is a new conversation the block does not cover, opened on a brief this app typed.
+    if (isChatBlocked(id)) {
+      return json(
+        res,
+        409,
+        {
+          error: 'chat_blocked',
+          message: 'This chat is blocked in the app. Release it there before compacting or resuming it.'
         },
         origin
       );
@@ -2080,6 +2184,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const id = conversationId(body['conversationId']);
     const turnId = typeof body['turnId'] === 'string' ? body['turnId'].slice(0, 200) : '';
     const terminalRequired = body['terminalRequired'] === true;
+    // The page asking is the pickup the owed-reply watchdog is waiting for, whatever the
+    // provider then says. On 2026-09-02 OpenRouter answered ten drafts in a row with 429 and the
+    // page retried every fifteen seconds, alive the whole time; the watchdog only saw a reply
+    // still owed after two minutes and reloaded the chat twice for a page that was never dead.
+    // A reload cannot fix a rate limit, so each request pushes the reload out instead.
+    if (id) noteGoalWatchActivity(id);
     const clientId = typeof body['clientId'] === 'string' ? body['clientId'].slice(0, 100) : '';
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
     if (!turnId) return json(res, 400, { error: 'bad_turn_id' }, origin);
@@ -2214,6 +2324,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (text.trim() && (await conversationWasSuperseded(id))) {
       return json(res, 409, { error: 'conversation_superseded' }, origin);
     }
+    // Clearing is always allowed; giving a blocked chat something new to chase is not, for
+    // the same reason the loop is off there — see goalBlockReason.
+    if (text.trim() && isChatBlocked(id)) return json(res, 409, { error: 'chat_blocked' }, origin);
     const named =
       body['mode'] === 'goal' || body['mode'] === 'loop' ? (body['mode'] as 'goal' | 'loop') : null;
     let chatSwitch: { enabled: boolean; mode: 'goal' | 'loop' } | null = null;
@@ -2354,6 +2467,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       (await conversationWasSuperseded(settingsConversation))
     ) {
       return json(res, 409, { error: 'conversation_superseded' }, origin);
+    }
+    // Turning anything *on* from a blocked chat's composer is refused; turning it off is
+    // still the user's to do. The block itself is lifted in the app, not here.
+    if (
+      settingsConversation &&
+      (auto === true || goal === true || loop === true) &&
+      isChatBlocked(settingsConversation)
+    ) {
+      return json(
+        res,
+        409,
+        {
+          error: 'chat_blocked',
+          message: 'This chat is blocked in the app. Release it there before turning Goal, Loop or auto-compaction on.'
+        },
+        origin
+      );
     }
     if (auto !== null && settingsConversation && goalWorkerChat(settingsConversation)) {
       return json(
@@ -3034,6 +3164,8 @@ async function durableQuiescence(conversationId: string, now: number): Promise<D
  */
 export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   const silent = inspectSilentChats(now);
+  // A Goal/Loop chat that is spent is not abandoned: the loop owes it the next message.
+  await fileSilenceGoalTickets(silent.spent, now);
   // Beside the silence pass rather than inside it: they measure the same quiet from opposite
   // ends of a turn — one an answer that never arrived, one an answer that arrived and was never
   // picked up — and a chat can only ever be in one of those states.
@@ -3064,6 +3196,27 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   // explicitly excluded inside sleepSilentDetachedWorkers and still require durable turn proof.
   const stoppedWorkers: string[] = [];
 
+  // Block is the user's stop for that chat, and a worker whose chat is blocked is not working
+  // on this run: every tool it calls is refused and no browser recovery will ever be attempted
+  // for it. It is slept here, on every pass, from the durable block alone. It used to be slept
+  // only when the chat's silence grant expired — and that grant is process memory. On
+  // 2026-09-02 worker-3 was blocked, the app restarted, and the restored run carried it as
+  // `active` with no grant left to expire: it held the swarm's slot for an hour, the next
+  // prime was refused with AGENTS_BUSY, and the slot came free only when its tab finally
+  // closed and the detached clock ran out.
+  for (const agent of state.agents) {
+    if (agent.role !== 'worker' || !occupiesSlot(agent.state) || !agent.conversationId) continue;
+    if (!isChatBlocked(agent.conversationId)) continue;
+    const slept = sleepWorker(
+      agent.id,
+      'The user blocked its chat, so its tools are refused, no browser recovery was attempted and its open turn was abandoned.'
+    );
+    if (!slept) continue;
+    if (slept.report) await recordAgentMessage(slept.report, 'sent');
+    stoppedWorkers.push(agent.id);
+    finishSilentChats([agent.conversationId]);
+  }
+
   // Every open chat gets the same one-shot reload. Only after the browser confirms carrying it
   // out, and another maintenance pass finds no durable progress, does an active Worker release
   // its slot. Prime and ordinary chats have no worker slot to mutate; forgetting their grant is
@@ -3076,9 +3229,7 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
     if (!worker) continue;
     const slept = sleepWorker(
       worker.id,
-      silent.blocked.has(conversationId)
-        ? 'The user blocked its chat, so no browser recovery was attempted and its open turn was abandoned.'
-        : 'Its open ChatGPT turn produced no durable activity after one browser reload.'
+      'Its open ChatGPT turn went silent for two minutes and no browser recovery brought it back.'
     );
     if (slept?.report) await recordAgentMessage(slept.report, 'sent');
     if (slept) stoppedWorkers.push(worker.id);
@@ -4274,10 +4425,63 @@ interface ActivityGrant {
 const activeUntil = new Map<string, ActivityGrant>();
 
 /** A semantic turn start arms the silence deadline; later evidence of work pushes it forward. */
-function grantActivity(conversationId: string, sessionId: string, at = Date.now()): void {
+function grantActivity(conversationId: string, sessionId: string, at = Date.now(), window = CHAT_SILENCE_MS): void {
   if (!sessionId) return;
-  activeUntil.set(conversationId, { sessionId, until: at + CHAT_SILENCE_MS });
+  activeUntil.set(conversationId, { sessionId, until: at + window });
   armSilenceSweep();
+}
+
+/**
+ * How long a Goal/Loop chat is listened to after its silence reload before the loop writes.
+ *
+ * Two minutes of nothing earned the reload; one more minute of nothing on the fresh page is
+ * the verdict. Not less, because an answer the reload brought back sometimes flutters in a
+ * few seconds late — an interim, a final, a first tool call — and a message typed under it
+ * would be a message about the wrong turn.
+ */
+const GOAL_SILENCE_LISTEN_MS = 60_000;
+
+/**
+ * Files the Goal ticket for a Goal/Loop chat whose silence reload brought nothing back.
+ *
+ * The prime stopped writing with no final answer, the reload showed the same dead turn, and a
+ * minute of listening heard nothing: no tool call, no page change, no answer. The loop treats
+ * that exactly as it treats a finished answer — the chat is owed the next user message — and
+ * files the same crash-durable obligation a finished answer would have, under a turn of its
+ * own. The page collects it on its next pull like any other pending reply (the same pickup a
+ * reload restores), drafts, and sends; the reply that starts is attributed by its own request
+ * id, so a prime whose page was lost for one turn carries on in the next. A stop the user
+ * pressed never gets here: it ends the chat's activity, and a chat without activity is never
+ * silent.
+ */
+async function fileSilenceGoalTickets(spent: readonly string[], now: number): Promise<void> {
+  for (const conversationId of spent) {
+    if (!goalActiveFor(conversationId) || goalWorkerChat(conversationId) || isChatBlocked(conversationId)) continue;
+    // Only after a silence reload that was carried out and answered by nothing. A grant spent
+    // for any other reason — not a chat the user wants brought back, say — earned no reload
+    // and gets no ticket.
+    const held = repairsInFlight.get(conversationId);
+    if (held?.reason !== 'silence' || held.state !== 'done') continue;
+    const session = await getSession(held.sessionId);
+    if (!session || session.conversationId !== conversationId) continue;
+    if (continuationForSession(session.id)) continue;
+    const turnId = `g-silence-${now}`;
+    try {
+      await acceptGoalReplyNow({
+        conversationId,
+        sessionId: session.id,
+        replyId: `silence:${now}`,
+        turnId,
+        eventSeq: session.events,
+        blocked: false
+      });
+      logInfo(
+        `bridge: ${conversationId} stayed silent after its reload — filing a Goal ticket so the loop writes the next message`
+      );
+    } catch (err) {
+      logWarn(`bridge: could not file the Goal ticket for ${conversationId} — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 }
 
 /**
@@ -4425,6 +4629,12 @@ interface UnattributedIncident {
    */
   dismissed: Set<string>;
   /**
+   * The server turns whose calls opened or fed this incident. Once the incident has reloaded
+   * anybody, these are the request ids a reload has been tried for — see
+   * `unattributedReloadedRequests`.
+   */
+  requestIds: Set<string>;
+  /**
    * When each suspect first came under suspicion, and therefore what its own deadline counts
    * from. A chat that joined the incident late has not been silent as long as one that was here
    * at the start, and judging both from `startedAt` would reload it for somebody else's silence.
@@ -4496,7 +4706,7 @@ interface Repair {
   /** One logical timeline row across every attempt and final outcome. */
   progressId: string;
   /** Durable first-snapshot anchor plus the newest text, used to avoid duplicate snapshots. */
-  progress?: { sessionId: string; seq: number; time: number; text: string };
+  progress?: { sessionId: string; seq: number; time: number; text: string; turnId: string | null };
 }
 
 /**
@@ -4514,22 +4724,55 @@ const repairsInFlight = new Map<string, Repair>();
 const lastBrowserRecoveryAt = new Map<string, number>();
 
 /**
- * The turn on which each chat has already spent its one turn-scoped reload.
+ * The user turn on which each chat has already spent its one error reload.
  *
- * One reload per broken turn, and one budget shared by both reasons that answer a turn rather
- * than a chat. A reload is a whole new document: if the request-id join is still dead on the far
- * side of one, or the page loses a second answer in the same turn, a second reload is not a
- * repair. It is the same repair that already failed, and it costs the turn another answer to
- * find that out again. The chat is gone for this turn, and letting it end is the honest move.
+ * Every message the user sends buys the chat one reload for an error ChatGPT shows during the
+ * answer, and exactly one: a second reload of the same broken turn is the same repair that
+ * already failed, and it costs the turn another answer to find that out again. The budget is
+ * keyed to the turn itself — the running generation, or the count of finished turns when none
+ * is running — so it is released by the next turn the chat starts, not by a count that the
+ * failed turn's own end may already have moved past (that is how a prime went unreloaded on
+ * 2026-09-02: its turn had failed ten seconds before the reload landed and the charge fell on
+ * the turn that started fifteen minutes later).
  *
- * That the two reasons used to hold separate budgets is how one turn got two reloads: an
- * `unattributed` incident and the `assistant-error` the same dead page produced each spent their
- * own, and neither could see the other's.
+ * This is the error reload's budget alone. Silence answers a different question — is this chat
+ * alive at all — and carries no budget beyond its own two minutes; an `unattributed` reload is
+ * rationed by the request id it was tried for, see `unattributedReloadedRequests`. None of the
+ * three waits on, or is refused because of, another.
  *
  * Written only once the browser confirms the action, so a handout nobody carried out spends
- * nothing, and released by the fact that retires the repair itself — a later turn ending.
+ * nothing.
  */
-const turnRepairSpent = new Map<string, { sessionId: string; endedTurns: number }>();
+const turnRepairSpent = new Map<string, { sessionId: string; turnKey: string }>();
+
+/** The identity of the turn a chat is on right now, for the error reload's budget. */
+function turnKeyFor(live: { activeTurnId: string | null; endedTurns: number } | undefined): string {
+  return live?.activeTurnId ?? `ended:${live?.endedTurns ?? 0}`;
+}
+
+/**
+ * Request ids of unattributed calls that have already had their reload.
+ *
+ * An unattributed call is a server turn this app cannot place, and a broken join produces one
+ * every few seconds for as long as that turn runs. The reload is tried once per such turn: a
+ * later call carrying the same request id is the same broken turn, and a second reload for it
+ * would only prove again what the first one proved. A *different* request id is a different
+ * turn — a new message from the phone, say — and gets its own reload. Bounded so a day of
+ * foreign turns cannot grow it without limit.
+ */
+const unattributedReloadedRequests = new Set<string>();
+const UNATTRIBUTED_REQUEST_MEMORY = 500;
+
+function rememberUnattributedReload(incident: UnattributedIncident): void {
+  for (const requestId of incident.requestIds) {
+    unattributedReloadedRequests.delete(requestId);
+    unattributedReloadedRequests.add(requestId);
+  }
+  for (const oldest of unattributedReloadedRequests) {
+    if (unattributedReloadedRequests.size <= UNATTRIBUTED_REQUEST_MEMORY) break;
+    unattributedReloadedRequests.delete(oldest);
+  }
+}
 
 /**
  * Queues one exact browser action for one inactivity/failure episode.
@@ -4555,10 +4798,17 @@ function queueBrowserRecovery(
   // assistant-error, goal, compaction — so refusing here refuses all of them, and none of them
   // needs its own exemption.
   if (!sessionId || isChatBlocked(conversationId)) return false;
-  // The turn's one reload, already spent. Checked before the episode and state guards below
-  // because it outlives both: those forget a repair the moment its episode changes, and the
-  // whole point here is that a *new* episode on the same broken turn buys nothing.
-  if (TURN_SCOPED_REPAIRS.has(reason) && turnRepairSpent.has(conversationId)) return false;
+  // The turn's one error reload, already spent. Checked before the episode and state guards
+  // below because it outlives both: those forget a repair the moment its episode changes, and
+  // the whole point here is that a *new* error on the same broken turn buys nothing.
+  if (reason === 'assistant-error') {
+    // Read against the turn the chat is on *now*: the release in retireSpentRepairs runs on
+    // the browser's pass, and an error on the next turn can arrive before that pass does.
+    const spent = turnRepairSpent.get(conversationId);
+    const live = liveConversations().find((entry) => entry.conversationId === conversationId);
+    if (spent && turnKeyFor(live) === spent.turnKey) return false;
+    if (spent) turnRepairSpent.delete(conversationId);
+  }
   const held = repairsInFlight.get(conversationId);
   if (held?.episode === episode) return false;
   // Silence may take an entry away from a turn-scoped repair, and it has to be able to. Those
@@ -4636,25 +4886,46 @@ function noteRecoveryObservations(
       grantActivity(conversationId, sessionId);
     }
   }
-  if (activity.terminal) endActivity(conversationId);
+  // A turn that ended *failed* is not a chat that has stopped: the model behind the dead stream
+  // is usually still running, and a reload shows the answer it has meanwhile finished. So a
+  // failure restarts the two-minute watch instead of spending it — the same chat-level question
+  // silence always asks, from the moment the page gave up. Ending activity here is how the
+  // 2026-09-02 prime sat dead for twenty minutes: its failure had been refused the immediate
+  // reload, its turn end took it off the silence clock, and nothing was left to ask.
+  let lastEnd: string | null = null;
+  for (const item of observations) {
+    if (item.kind === 'turn_end') lastEnd = item.outcome ?? 'unknown';
+  }
+  if (activity.terminal) {
+    if (lastEnd === 'failed' && sessionId) grantActivity(conversationId, sessionId);
+    else endActivity(conversationId);
+  }
 
-  // A transport failure rendered inside an assistant turn is the page saying, in its own words,
-  // that the answer it was producing is gone. That is true of any chat: an ordinary conversation
-  // with no worker attached breaks the same way, and leaving it parked on "message delivery
-  // timed out" until a human notices was the whole of this bug. Neither an agent binding nor a
-  // recent attributed call is evidence about that failure, so neither may gate the repair.
+  // An error rendered on the page is the page saying, in its own words, that nothing more is
+  // coming: the answer it was producing is gone, or the site has stopped. That is true of any
+  // chat — an ordinary conversation with no worker attached breaks the same way, and leaving it
+  // parked on "message delivery timed out" until a human notices was the whole of this bug —
+  // and it is true whatever the error says. Whether the DOM classifier called it recoverable,
+  // and whether the page could name the turn it belongs to, decides nothing here: the page is
+  // reloaded because it shows an error, once per user turn (see turnRepairSpent), and neither
+  // an agent binding nor a recent attributed call may gate that.
   const now = Date.now();
   for (const item of observations) {
-    // Two facts, from the two places that own them. Only the DOM adapter's transport-failure
-    // classifier may set `recoverable`, so an ordinary announcement or a user-row error is
-    // recorded and authorizes nothing; only the page's own live generation may name the turn,
-    // which is what keeps a banner still on screen from an earlier failure out of this.
-    if (item.kind !== 'chat_error' || item.recoverable !== true || !item.turnId) continue;
+    if (item.kind !== 'chat_error') continue;
     // Auto-compaction owns this chat's recovery clock until its ticket commits or is cancelled.
-    // A native error inside a ten-minute handoff is not permission for the ordinary two-minute
-    // response watchdog to cut across the user's explicit fifteen-minute pickup interval.
-    if (pendingAutomaticContinuations().some((entry) => entry.from === conversationId)) break;
-    const episode = `assistant-error:${item.turnId}:${(item.text ?? '').slice(0, 240)}`;
+    // A native error inside a handoff is not permission for the ordinary two-minute response
+    // watchdog to cut across the compaction's own pickup schedule. The failure is still the page
+    // saying its answer is gone, so the ticket's next pickup — the same reload of the same chat,
+    // under the same bound — is brought forward to the next sweep instead of waiting out its five
+    // minutes. That wait is how the 2026-09-02 prime showed "Connection interrupted" for nine
+    // minutes while its model went on calling tools behind the dead page.
+    if (pendingAutomaticContinuations().some((entry) => entry.from === conversationId)) {
+      if (expediteCompactionPickup(conversationId)) {
+        logInfo(`bridge: assistant transport failure — bringing the compaction pickup for ${conversationId} forward`);
+      }
+      break;
+    }
+    const episode = `assistant-error:${item.turnId ?? 'page'}:${(item.text ?? '').slice(0, 240)}`;
     // How many turns this chat will have finished once the broken turn is over. The turn that
     // just failed is still open here - its own end is the very next one to arrive - so counting
     // only the ends already in hand would have the failure retire its own repair a few seconds
@@ -4702,14 +4973,26 @@ function closableAgentConversations(): string[] {
     .sort();
 }
 
+/**
+ * Whether silence or a missing tab may reopen or reload this chat at all.
+ *
+ * A chat the Goal or Loop switch is driving is always brought back: the loop is the user's
+ * standing instruction to keep that chat going, and a closed browser is not a reason to stop
+ * carrying it out. Every other chat — a worker, a prime, a plain chat that has called tools —
+ * comes back only when the user has turned tab recovery on for them, and that starts off.
+ */
+function tabRecoveryWanted(conversationId: string): boolean {
+  return goalActiveFor(conversationId) || getConfig().multiAgent.recoverAgentTabs;
+}
+
 /** The active agent chats for which the browser must keep asking the app for recovery work. */
 function browserRecoveryMonitoring(): boolean {
   if (repairsInFlight.size > 0 || activeUntil.size > 0 || goalWatch.size > 0 || compactionWatch.size > 0) return true;
-  if (!getConfig().multiAgent.recoverAgentTabs) return false;
   return swarmState().agents.some(
     (agent) =>
       Boolean(agent.conversationId) &&
-      (agent.state === 'active' || agent.state === 'waking')
+      (agent.state === 'active' || agent.state === 'waking') &&
+      tabRecoveryWanted(agent.conversationId as string)
   );
 }
 
@@ -4722,14 +5005,9 @@ function browserRecoveryMonitoring(): boolean {
  * asks whether a conversation is still alive, so nothing scoped to one of its turns may switch
  * it off — see the supersede rule in `queueBrowserRecovery`.
  */
-function inspectSilentChats(now: number): {
-  queued: boolean;
-  spent: string[];
-  blocked: Set<string>;
-} {
+function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
   let queued = false;
   const spent: string[] = [];
-  const blocked = new Set<string>();
   const compacting = new Set(pendingAutomaticContinuations().map((entry) => entry.from));
   for (const [conversationId, grant] of activeUntil) {
     if (compacting.has(conversationId)) continue;
@@ -4737,10 +5015,16 @@ function inspectSilentChats(now: number): {
     // A blocked chat never gets the reload, so it can never get the confirmation this pass
     // otherwise waits for, and it would sit measured-silent in the ledger — and in the live set
     // the UI paints — for the rest of the process. Its silence is spent the moment it is
-    // measured: abandon it now, which is where the reload path leads anyway.
+    // measured. (A blocked chat's worker slot is not this pass's business: sweepStaleSwarm
+    // sleeps it from the block itself, grant or no grant.)
     if (isChatBlocked(conversationId)) {
       spent.push(conversationId);
-      blocked.add(conversationId);
+      continue;
+    }
+    // Not a chat the user wants brought back: its silence is spent the same way, without the
+    // reload that would otherwise be its one chance.
+    if (!tabRecoveryWanted(conversationId)) {
+      spent.push(conversationId);
       continue;
     }
     const held = repairsInFlight.get(conversationId);
@@ -4760,7 +5044,7 @@ function inspectSilentChats(now: number): {
       );
     }
   }
-  return { queued, spent, blocked };
+  return { queued, spent };
 }
 
 /** Retires a confirmed one-shot silence recovery after the caller has handled any Worker slot. */
@@ -4805,14 +5089,48 @@ const GOAL_WATCH_BACKOFF_MS = [2, 2, 5, 10, 15].map((minutes) => minutes * 60_00
 const goalWatch = new Map<string, { replyId: string; dueAt: number; attempts: number }>();
 
 /**
- * The source page gets the first attempt; these are its three remaining pickups. Fifteen
- * minutes is deliberate: a very large handoff can still be legitimately generating then.
- * Page activity never pushes this deadline — the checkpoint reloads the same exact chat and
- * lets its stable marker recover output that is already generated or still generating.
+ * The source page gets the first attempt; these are its three remaining pickups.
+ *
+ * Two clocks, by what the ticket is waiting for. While the brief is still being *written*, a
+ * glitched page costs the whole run: nothing else is happening in that chat, and a stuck page
+ * looks exactly like a slow one. So the checkpoint comes every five minutes and, with three
+ * pickups, the writing phase is retried for at most a quarter of an hour. The reload is safe
+ * at any point of the writing — it reloads the same exact chat, and the stable marker recovers
+ * a brief that is already generated or still generating. The moment the brief has landed the
+ * five-minute clock stops with it: opening the replacement chat keeps the slower quarter-hour
+ * cadence, which is the interval the user's resume command is leased for.
+ *
+ * Page activity never pushes either deadline; `since` is when the ticket opened or was last
+ * picked up, and the interval is read off the ticket's *current* state each time.
  */
+const COMPACTION_WRITING_PICKUP_MS = 5 * 60_000;
 const COMPACTION_PICKUP_MS = 15 * 60_000;
 const COMPACTION_RELOADS = 3;
-const compactionWatch = new Map<string, { token: string; dueAt: number; attempts: number }>();
+const compactionWatch = new Map<string, { token: string; since: number; attempts: number }>();
+
+function compactionPickupInterval(state: ContinuationView['state']): number {
+  return state === 'awaiting-summary' ? COMPACTION_WRITING_PICKUP_MS : COMPACTION_PICKUP_MS;
+}
+
+/**
+ * Makes a ticket's next automatic pickup due on the next sweep, within the same bound.
+ *
+ * The schedule is not otherwise moved by page activity, and this adds no attempts: a pickup
+ * brought forward is one of the same three. False when there is no automatic ticket for the
+ * chat, the ticket predates this process, or its pickups are exhausted.
+ */
+function expediteCompactionPickup(conversationId: string): boolean {
+  const entry = pendingAutomaticContinuations().find((candidate) => candidate.from === conversationId);
+  if (!entry || compactionWatchFloor === null || entry.openedAt < compactionWatchFloor) return false;
+  const watch = compactionWatch.get(conversationId);
+  if (watch && watch.token === entry.token) {
+    if (watch.attempts >= COMPACTION_RELOADS) return false;
+    watch.since = 0;
+    return true;
+  }
+  compactionWatch.set(conversationId, { token: entry.token, attempts: 0, since: 0 });
+  return true;
+}
 
 /** A switch change retires both the schedule and any queued reload for its former ticket. */
 function forgetGoalWatch(conversationId: string): void {
@@ -4951,14 +5269,10 @@ function inspectOwedCompactions(now: number): boolean {
     if (entry.openedAt < compactionWatchFloor) continue;
     let watch = compactionWatch.get(entry.from);
     if (!watch) {
-      watch = {
-        token: entry.token,
-        attempts: 0,
-        dueAt: entry.openedAt + COMPACTION_PICKUP_MS
-      };
+      watch = { token: entry.token, attempts: 0, since: entry.openedAt };
       compactionWatch.set(entry.from, watch);
     }
-    if (watch.attempts >= COMPACTION_RELOADS || now < watch.dueAt) continue;
+    if (watch.attempts >= COMPACTION_RELOADS || now < watch.since + compactionPickupInterval(entry.state)) continue;
 
     let acted = false;
     if (entry.state === 'awaiting-summary') {
@@ -4987,7 +5301,7 @@ function inspectOwedCompactions(now: number): boolean {
     if (!acted) continue;
 
     watch.attempts += 1;
-    watch.dueAt = now + COMPACTION_PICKUP_MS;
+    watch.since = now;
     queued = true;
     logInfo(
       `bridge: auto-compaction ticket ${entry.token.slice(0, 8)} pickup ${watch.attempts + 1} of ${COMPACTION_RELOADS + 1}`
@@ -5022,9 +5336,7 @@ async function queueMissingTab(conversationId: string, closedMidTurn: boolean, n
   const agent = agentInfoForOwnedConversation(conversationId);
   // Read after closeConversation() has ended the session, so `endedAt` is this exact close.
   const session = await findSessionByConversation(conversationId);
-  const eligible = agent
-    ? agent.state === 'detached' && getConfig().multiAgent.recoverAgentTabs
-    : (session?.toolCalls ?? 0) > 0;
+  const eligible = tabRecoveryWanted(conversationId) && (agent ? agent.state === 'detached' : (session?.toolCalls ?? 0) > 0);
   if (!eligible) return;
   const wentAt = agent?.detachedAt ?? session?.endedAt ?? now;
   if (session && queueBrowserRecovery(conversationId, session.id, `no-tab:${wentAt}`, 'no-tab', 0, now)) {
@@ -5105,12 +5417,13 @@ function retireSpentRepairs(): void {
     const entry = live.get(conversationId);
     if (entry && entry.endedTurns > repair.endedTurns) repairsInFlight.delete(conversationId);
   }
-  // The budget is released by the same fact and nowhere else: the chat got through a turn. Not
-  // by an attributed call — a join that came back proves the reload worked, which is a reason
-  // not to need another one, never a reason to be handed one.
+  // The budget is released by the chat being on a different turn than the one it was charged
+  // to — the user sent the next message — and by nothing else. Not by an attributed call: a
+  // join that came back proves the reload worked, which is a reason not to need another one,
+  // never a reason to be handed one.
   for (const [conversationId, spent] of turnRepairSpent) {
     const entry = live.get(conversationId);
-    if (entry && entry.endedTurns > spent.endedTurns) turnRepairSpent.delete(conversationId);
+    if (entry && turnKeyFor(entry) !== spent.turnKey) turnRepairSpent.delete(conversationId);
   }
 }
 
@@ -5134,7 +5447,8 @@ function noteCallAttribution(
   currentConversation: boolean,
   startedAt: number,
   endsActivity = false,
-  lastAssistantFinalAt: number | null = null
+  lastAssistantFinalAt: number | null = null,
+  requestId: string | null = null
 ): void {
   if (conversationId) {
     if (unattributedIncident && !unattributedIncident.proven.has(conversationId)) {
@@ -5188,7 +5502,13 @@ function noteCallAttribution(
     }
     return;
   }
-  if (unattributedIncident) return;
+  // The same broken turn, already reloaded for. A reload is tried once per request id; a call
+  // that carries one the app has reloaded for is the turn going on being broken, not news.
+  if (requestId && unattributedReloadedRequests.has(requestId)) return;
+  if (unattributedIncident) {
+    if (requestId) unattributedIncident.requestIds.add(requestId);
+    return;
+  }
   const openedAt = Date.now();
   // Seeded now, not at the first wake. Everyone already under suspicion when the incident opens
   // has been silent since this instant, and dating them from the first tick instead would hand
@@ -5200,6 +5520,7 @@ function noteCallAttribution(
     timer: null,
     proven: new Set(),
     dismissed: new Set(),
+    requestIds: new Set(requestId ? [requestId] : []),
     seen: new Map(opening.map((entry) => [entry.conversationId, openedAt])),
     due: new Map(opening.map((entry) => [entry.conversationId, openedAt + rung]))
   };
@@ -5301,14 +5622,19 @@ function tickUnattributedIncident(): void {
         logInfo(`bridge: unattributed activity — asking the browser to reload ${target.conversationId}`);
         continue;
       }
-      // Refused, and for this turn it will keep being refused: the chat is blocked, or it has
-      // already spent its one reload. Holding the incident open for a deadline nothing will act on
-      // would keep every other suspect's rung pinned to a suspect that is no longer one.
+      // Refused, and it will keep being refused: the chat is blocked, or a repair is already
+      // running for it. Holding the incident open for a deadline nothing will act on would keep
+      // every other suspect's rung pinned to a suspect that is no longer one.
       incident.dismissed.add(target.conversationId);
       incident.seen.delete(target.conversationId);
       incident.due.delete(target.conversationId);
     }
-    if (acted) continue;
+    if (acted) {
+      // Reloads went out for these request ids. What arrives under them from here is the same
+      // broken turn and buys nothing; the next request id is the next turn and buys its own.
+      rememberUnattributedReload(incident);
+      continue;
+    }
     if (next === null) closeUnattributedIncident();
     else armUnattributedTick(incident, next - now);
     return;
@@ -5400,16 +5726,27 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
     if (repair.state === 'handed' && repair.token === token) {
       repair.state = 'done';
       lastBrowserRecoveryAt.set(conversationId, Date.now());
-      if (TURN_SCOPED_REPAIRS.has(repair.reason)) {
-        // The chat's own count, not the repair's. `assistant-error` files itself one turn ahead
-        // so that the turn it is answering cannot retire it; the budget is about the turn that
-        // is actually running, and reading the live count is what keeps the two reasons on one
-        // numbering. Falling back to the repair's own figure only costs a later release.
+      if (repair.reason === 'silence') {
+        // The reload is the chat's chance, so the verdict on it waits — not the next maintenance
+        // pass. A model writing a long answer makes no durable progress until the answer lands;
+        // judging the reload on the pass right after it is how worker-2 was slept 27 seconds
+        // after its reload on 2026-09-02, its prime told to wake it, a wake typed into a chat
+        // still generating, and the answer arriving four minutes later as if nothing had
+        // happened. A worker gets the full two minutes again. A Goal/Loop chat gets one: it is
+        // not going to be slept but written to, and a minute of nothing after a fresh page is
+        // the loop's cue to write — see fileSilenceGoalTickets.
+        grantActivity(
+          conversationId,
+          repair.sessionId,
+          Date.now(),
+          goalActiveFor(conversationId) ? GOAL_SILENCE_LISTEN_MS : CHAT_SILENCE_MS
+        );
+      }
+      if (repair.reason === 'assistant-error') {
+        // Charged to the turn the chat is on when the reload lands, running or not, and
+        // released when it is on another one — see turnRepairSpent.
         const live = liveConversations().find((entry) => entry.conversationId === conversationId);
-        turnRepairSpent.set(conversationId, {
-          sessionId: repair.sessionId,
-          endedTurns: live?.endedTurns ?? repair.endedTurns
-        });
+        turnRepairSpent.set(conversationId, { sessionId: repair.sessionId, turnKey: turnKeyFor(live) });
       }
       await updateRepairProgress(
         conversationId,
@@ -5460,8 +5797,18 @@ async function updateRepairProgress(conversationId: string, repair: Repair, text
     )?.id;
   if (!sessionId) return;
   const anchor = repair.progress ? { seq: repair.progress.seq, time: repair.progress.time } : undefined;
-  const recorded = await recordProgress(sessionId, repair.progressId, text, anchor);
-  if (recorded) repair.progress = { sessionId, ...recorded, text };
+  // The turn this reload is about, read once when the row is first written and kept for every
+  // rewrite of it. A reload of an open turn — an interrupted answer, a call the app could not
+  // attribute, a silent turn — is part of that turn's story, so the row names the turn and the
+  // page paints it inside the turn's Overwrite list, in order, like the tool calls around it
+  // (the user's ask of 2026-09-02). A reload with no turn open — a Goal reply nothing came to
+  // collect, a missing tab — names none and is placed between turns.
+  const turnId =
+    repair.progress?.turnId ??
+    liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ??
+    null;
+  const recorded = await recordProgress(sessionId, repair.progressId, text, anchor, turnId);
+  if (recorded) repair.progress = { sessionId, ...recorded, text, turnId };
 }
 
 /**

@@ -1269,7 +1269,8 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       durationMs: input.durationMs,
       summary,
       ...(evidence.changes.length > 0 ? { changes: evidence.changes } : {}),
-      ...(assets.length > 0 ? { assets } : {})
+      ...(assets.length > 0 ? { assets } : {}),
+      ...(input.endsActivity === true ? { endsActivity: true as const } : {})
     };
 
     await appendEvent(sessionId, {
@@ -1293,7 +1294,9 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         currentConversation,
         input.startedAt,
         input.endsActivity === true,
-        filed?.lastAssistantFinalAt ?? null
+        filed?.lastAssistantFinalAt ?? null,
+        // The one thing an unattributed call still carries: the server turn it belongs to.
+        input.requestId ?? null
       );
     } catch (err) {
       logWarn(`call attribution listener failed: ${(err as Error).message}`);
@@ -1337,7 +1340,8 @@ let attributionListener:
       currentConversation: boolean,
       startedAt: number,
       endsActivity: boolean,
-      lastAssistantFinalAt: number | null
+      lastAssistantFinalAt: number | null,
+      requestId: string | null
     ) => void)
   | null = null;
 
@@ -1349,7 +1353,8 @@ export function setCallAttributionListener(
         currentConversation: boolean,
         startedAt: number,
         endsActivity: boolean,
-        lastAssistantFinalAt: number | null
+        lastAssistantFinalAt: number | null,
+        requestId: string | null
       ) => void)
     | null
 ): void {
@@ -1918,13 +1923,14 @@ async function recordChatObservationsNow(
 }
 
 /** Records something the app itself decided, e.g. a saved handoff. */
-export async function recordNote(sessionId: string, text: string): Promise<void> {
+export async function recordNote(sessionId: string, text: string, continuation?: string): Promise<void> {
   if (!recordingEnabled()) return;
   await appendEvent(sessionId, {
     time: Date.now(),
     source: 'app',
     kind: 'note',
-    message: await storeText(sessionId, text, 4000)
+    message: await storeText(sessionId, text, 4000),
+    ...(continuation ? { continuation } : {})
   }).catch(() => undefined);
   notifyChanged();
 }
@@ -1940,16 +1946,22 @@ export async function recordProgress(
   sessionId: string,
   progressId: string,
   text: string,
-  anchor?: { seq: number; time: number }
+  anchor?: { seq: number; time: number },
+  turnId?: string | null
 ): Promise<{ seq: number; time: number } | null> {
   if (!recordingEnabled() || !progressId) return null;
   const time = anchor?.time ?? Date.now();
+  // `turnId` is the turn this row happened inside, when the caller can name one. A row that
+  // names its turn is a member of that turn on every reader — the desktop transcript and the
+  // page's Overwrite alike — and sits in it chronologically like a tool call; a row that names
+  // none belongs to no turn and is placed between turns instead.
   const event = await appendEvent(sessionId, {
     time,
     source: 'app',
     kind: 'progress',
     progressId,
     ...(anchor ? { origin: anchor.seq } : {}),
+    ...(turnId ? { turnId } : {}),
     message: await storeText(sessionId, text, 4000)
   }).catch(() => null);
   if (!event) return null;

@@ -186,18 +186,34 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  * window is the point — a chat being reloaded on the app's instruction is mid-repair, and the
  * badge going dark first is what made that reload look like it came out of nowhere.
  */
-/** A new session and exact calls stay active for three minutes unless a later final finished them. */
+/**
+ * A new session and exact calls stay active for three minutes unless a later turn end finished
+ * them — the model's final answer, or the turn ending any other way, the user's stop included.
+ * A refused call in a blocked chat still counts as the call it was: the badge is how the user
+ * sees that something is still trying, and it goes dark the moment the turn is stopped.
+ */
 function recentChatActivity(summary: SessionSummary, now = Date.now()): boolean {
   const lastActivityAt = Math.max(summary.startedAt, summary.lastToolCallAt ?? 0);
+  const finishedAt = Math.max(summary.lastAssistantFinalAt ?? 0, summary.lastTurnEndAt ?? 0);
+  return lastActivityAt > finishedAt && now - lastActivityAt < CHAT_ACTIVE_MS;
+}
+
+/**
+ * A worker whose newest call was its own finish report has stopped working, whatever the swarm
+ * currently says or fails to say: the run parks the moment its last worker stops, and a parked
+ * run has no agent view for the list to read.
+ */
+function workerReportedFinish(summary: SessionSummary): boolean {
   return (
-    lastActivityAt > (summary.lastAssistantFinalAt ?? 0) &&
-    now - lastActivityAt < CHAT_ACTIVE_MS
+    summary.origin?.kind === 'worker' &&
+    typeof summary.lastFinishReportAt === 'number' &&
+    summary.lastFinishReportAt >= (summary.lastToolCallAt ?? 0)
   );
 }
 
 /** Reload-generated turn boundaries are not activity authority; session start, calls and finals are. */
 function sessionWorking(summary: SessionSummary): boolean {
-  return summary.endedAt === null && recentChatActivity(summary);
+  return summary.endedAt === null && !workerReportedFinish(summary) && recentChatActivity(summary);
 }
 
 /**
@@ -250,6 +266,10 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   // projection. A parked/restarted run can lose its AgentView while the chat still makes calls.
   const workerStopped = agent?.role === 'worker' && ['sleeping', 'finished', 'failed'].includes(agent.state);
   if (workerStopped) badges.push(AGENT_BADGE[agent.state]);
+  // The swarm no longer shows this worker — its run parked when it and its siblings stopped —
+  // but its own session records that its last call was the finish report. That is a worker
+  // between jobs, and "sleeping" is the word that says its chat can be woken.
+  else if (!agent && workerReportedFinish(summary)) badges.push(AGENT_BADGE.sleeping);
   else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
   return badges;
@@ -869,6 +889,19 @@ function eventRow(event: SessionEvent): HTMLElement {
   const body = el('div', 'ev-body');
   if (event.agent) body.append(el('span', 'chip', event.agent));
   body.append(eventBody(event));
+  // A refused call from a chat Compact & Resume already replaced is not a placement failure:
+  // its request id proved exactly which chat it came from, and that chat's stopped turn simply
+  // kept calling from OpenAI's side. Say so beside the row, or a full Unattributed bucket of
+  // these reads as the attribution chain having broken.
+  if (event.kind === 'tool_call' && event.call.attributionMethod === 'superseded') {
+    body.append(
+      el(
+        'p',
+        'meta',
+        'From a chat that Compact & Resume had already replaced — ChatGPT kept running its stopped turn there. Refused by design; nothing to repair.'
+      )
+    );
+  }
   row.append(time, body);
   return row;
 }
@@ -979,9 +1012,16 @@ interface CompactionBlock {
   seq: number;
   time: number;
   prompt: Extract<SessionEvent, { kind: 'user_message' }> | null;
+  /**
+   * The turn ChatGPT answered the brief request in. The request is typed by the app, so its
+   * row carries no local turn id of its own; the turn is the one that opens right after it.
+   */
+  turnId: string | null;
   brief: Extract<SessionEvent, { kind: 'assistant_message' }> | null;
   handoff: Extract<SessionEvent, { kind: 'handoff' }> | null;
   resume: Extract<SessionEvent, { kind: 'user_message' }> | null;
+  /** What the app said about this compaction, newest last — an abandonment and why. */
+  notes: Array<Extract<SessionEvent, { kind: 'note' }>>;
   /** Something was recorded after this compaction, so a step still missing has failed. */
   moved: boolean;
 }
@@ -998,35 +1038,48 @@ function continuationMarker(event: SessionEvent): { kind: 'HANDOFF' | 'RESUME'; 
  * The timeline with each compaction folded into one item.
  *
  * A card opens at the marked brief request and, until anything unrelated is recorded,
- * absorbs what belongs to it: the answer (the brief), the app's handoff line, and the
- * request turn's own lifecycle rows. The marked bootstrap in the replacement chat closes
- * the same card by token, wherever it lands. A bootstrap whose request has scrolled out of
- * the window still gets a card, with the steps it implies already done.
+ * absorbs what belongs to it: the turn that answers it, the answer (the brief), the app's
+ * handoff line. The marked bootstrap in the replacement chat closes the same card by token,
+ * wherever it lands, and so does an app note naming the token. A bootstrap whose request has
+ * scrolled out of the window still gets a card, with the steps it implies already done.
+ *
+ * Which turn answers the request is read from the log, not from the request row. The
+ * request is typed by the app into the chat, so the extension records it with no local turn
+ * id (or, on a reload, with the previous turn's); the generation ChatGPT opens for it is the
+ * first `turn_start` after it. Keying on the request's own `turnId` left that start, the
+ * brief, the end and the handoff as four loose rows under an empty card — the live shape.
  */
 function timelineItems(source: SessionEvent[]): TimelineItem[] {
   const items: TimelineItem[] = [];
   const blocks = new Map<string, CompactionBlock>();
   let open: CompactionBlock | null = null;
+  const blockFor = (token: string, event: SessionEvent): CompactionBlock => {
+    let block = blocks.get(token);
+    if (!block) {
+      block = {
+        token,
+        seq: event.seq,
+        time: event.time,
+        prompt: null,
+        turnId: null,
+        brief: null,
+        handoff: null,
+        resume: null,
+        notes: [],
+        moved: false
+      };
+      blocks.set(token, block);
+      items.push({ kind: 'compaction', block });
+    }
+    return block;
+  };
   for (const event of source) {
     const marker = continuationMarker(event);
     if (marker && event.kind === 'user_message') {
-      let block = blocks.get(marker.token);
-      if (!block) {
-        block = {
-          token: marker.token,
-          seq: event.seq,
-          time: event.time,
-          prompt: null,
-          brief: null,
-          handoff: null,
-          resume: null,
-          moved: false
-        };
-        blocks.set(marker.token, block);
-        items.push({ kind: 'compaction', block });
-      }
+      const block = blockFor(marker.token, event);
       if (marker.kind === 'HANDOFF') {
         block.prompt = event;
+        block.turnId = event.turnId ?? null;
         open = block;
         // Chronology puts a turn's start before the message that opened it, so the request
         // turn's own start row is already on the list; it belongs to the card like the rest.
@@ -1045,21 +1098,28 @@ function timelineItems(source: SessionEvent[]): TimelineItem[] {
       }
       continue;
     }
+    if (event.kind === 'note' && event.continuation) {
+      const block = blockFor(event.continuation, event);
+      block.notes.push(event);
+      if (open === block) open = null;
+      continue;
+    }
     if (open) {
-      const requestTurn = open.prompt?.turnId;
-      const sameTurn = requestTurn !== undefined && event.turnId === requestTurn;
       if (event.kind === 'handoff') {
         open.handoff = event;
         continue;
       }
       if (event.kind === 'assistant_message') {
         open.brief = event;
+        if (event.turnId !== undefined) open.turnId = event.turnId;
         continue;
       }
-      if (
-        sameTurn &&
-        (event.kind === 'turn_start' || event.kind === 'turn_end' || event.kind === 'progress' || event.kind === 'page_tool')
-      ) {
+      if (event.kind === 'turn_start' && !open.brief && !open.handoff) {
+        open.turnId = event.turnId ?? null;
+        continue;
+      }
+      const sameTurn = open.turnId !== null && event.turnId === open.turnId;
+      if (sameTurn && (event.kind === 'turn_end' || event.kind === 'progress' || event.kind === 'page_tool')) {
         continue;
       }
       open = null;
@@ -1073,37 +1133,44 @@ function timelineItems(source: SessionEvent[]): TimelineItem[] {
   return items;
 }
 
-type StepTone = 'ok' | 'wait' | 'bad';
+type CompactionTone = 'good' | 'wait' | 'bad';
 
-/** The three steps as two-word states: what happened, what is still happening, what did not. */
-function compactionSteps(block: CompactionBlock): Array<{ label: string; tone: StepTone }> {
-  const received = block.handoff !== null || block.brief?.final === true || block.resume !== null;
-  const summary: { label: string; tone: StepTone } = received
-    ? { label: 'Summary received', tone: 'ok' }
-    : block.brief
-      ? { label: 'Writing summary', tone: 'wait' }
-      : block.moved
-        ? { label: 'No summary', tone: 'bad' }
-        : { label: 'Awaiting summary', tone: 'wait' };
-  const placed: { label: string; tone: StepTone } = block.resume
-    ? { label: 'New chat opened', tone: 'ok' }
-    : block.moved || summary.tone === 'bad'
-      ? { label: 'No new chat', tone: 'bad' }
-      : { label: 'Opening chat', tone: 'wait' };
-  return [{ label: 'Summary requested', tone: 'ok' }, summary, placed];
+const ABANDONED_NOTE = /^Compact & Resume abandoned\s*[\u2014-]\s*/i;
+
+/**
+ * One sentence for where the compaction is, or where it died.
+ *
+ * Green is a replacement chat that opened; red is a step that will not come — the app said
+ * so, or the chat carried on without it; grey is the step still in flight. The app's own
+ * abandonment note wins over any inference, because it names the reason.
+ */
+function compactionState(block: CompactionBlock): { text: string; tone: CompactionTone } {
+  const abandoned = [...block.notes].reverse().find((note) => ABANDONED_NOTE.test(note.message.text));
+  if (abandoned) return { text: `Failed — ${abandoned.message.text.replace(ABANDONED_NOTE, '')}`, tone: 'bad' };
+  const chars = block.handoff ? ` (${compactNumber(block.handoff.chars)} characters)` : '';
+  if (block.resume) return { text: `New chat opened at ${clockTime(block.resume.time)}${chars}`, tone: 'good' };
+  if (block.handoff) {
+    return block.moved
+      ? { text: `Summary saved${chars}, but no new chat was opened — the chat carried on here`, tone: 'bad' }
+      : { text: `Summary saved${chars} — opening the new chat…`, tone: 'wait' };
+  }
+  if (block.brief?.final) {
+    return block.moved
+      ? { text: 'Summary written, but the app never saved it — the chat carried on here', tone: 'bad' }
+      : { text: 'Summary written — saving the handoff…', tone: 'wait' };
+  }
+  if (block.brief) return { text: 'ChatGPT is writing the summary…', tone: 'wait' };
+  return block.moved
+    ? { text: 'No summary was written — the chat carried on here', tone: 'bad' }
+    : { text: 'Summary requested — waiting for ChatGPT…', tone: 'wait' };
 }
 
 function compactionRow(block: CompactionBlock): HTMLElement {
   const key = `compaction:${block.token}`;
-  const steps = compactionSteps(block);
-  const worst: StepTone = steps.some((step) => step.tone === 'bad')
-    ? 'bad'
-    : steps.some((step) => step.tone === 'wait')
-      ? 'wait'
-      : 'ok';
+  const state = compactionState(block);
 
   const box = document.createElement('details');
-  box.className = `tool compaction tone-${worst === 'ok' ? 'good' : worst === 'bad' ? 'bad' : 'wait'}`;
+  box.className = `tool compaction tone-${state.tone}`;
   box.open = openTools.has(key);
   box.addEventListener('toggle', () => {
     if (box.open) openTools.add(key);
@@ -1112,10 +1179,8 @@ function compactionRow(block: CompactionBlock): HTMLElement {
 
   const head = document.createElement('summary');
   head.append(icon('i-steps', 'ico tool-ico'));
-  head.append(el('b', '', 'Compact & Resume'));
-  const chips = el('span', 'steps');
-  for (const step of steps) chips.append(el('span', `step is-${step.tone}`, step.label));
-  head.append(chips);
+  head.append(el('b', '', 'Compact & Resume:'));
+  head.append(el('span', 'state', state.text));
   box.append(head);
 
   const raw = el('div', 'raw');
@@ -1143,6 +1208,7 @@ function compactionRow(block: CompactionBlock): HTMLElement {
       )
     );
   }
+  for (const note of block.notes) raw.append(el('p', 'raw-facts', `${clockTime(note.time)} — ${note.message.text}`));
   box.append(raw);
 
   const row = el('div', 'ev ev-compaction');
@@ -1165,6 +1231,7 @@ function itemSignature(item: TimelineItem): string {
       block.brief ? `${block.brief.seq}:${block.brief.message.chars}:${block.brief.renderedHtml?.chars ?? 0}:${block.brief.state}` : '',
       block.handoff?.seq ?? '',
       block.resume?.seq ?? '',
+      block.notes.map((note) => note.seq).join(','),
       block.moved ? 'moved' : ''
     ].join('|');
   }
@@ -1406,6 +1473,9 @@ async function showExtensionPath(): Promise<void> {
 function paintSwarm(state: SwarmState): void {
   swarm = state;
   paintStateLine();
+  // Session rows borrow their live badge from the swarm, so a worker that just went to sleep
+  // must not keep saying "active" until some unrelated session update repaints the list.
+  paintSessions();
   const list = $('swarmList');
   if (state.agents.length === 0) {
     list.replaceChildren(
