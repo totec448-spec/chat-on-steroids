@@ -118,6 +118,8 @@ export interface TunnelSettings {
 export interface UiPrefs {
   minimizeToTray: boolean;
   autoConnect: boolean;
+  /** Launch the packaged Windows app at sign-in without opening its window. */
+  startAtLogin: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */

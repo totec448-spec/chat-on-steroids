@@ -312,6 +312,16 @@ describe('shipped defaults', () => {
     expect(defaultConfig().sessions.record).toBe(true);
   });
 
+  it('does not opt an existing or fresh install into OS login startup', async () => {
+    expect(defaultConfig().ui.startAtLogin).toBe(false);
+    const legacy = defaultConfig() as unknown as Record<string, any>;
+    const ui = { ...legacy.ui };
+    delete ui.startAtLogin;
+    legacy.ui = ui;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.startAtLogin).toBe(false);
+  });
+
   it('loads a genuinely missing config with every portable Core capability enabled', async () => {
     await fs.rm(path.join(dir, 'config.json'), { force: true });
     const loaded = await loadConfig();

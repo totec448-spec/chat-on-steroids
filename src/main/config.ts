@@ -250,6 +250,7 @@ const configSchema = z.object({
   ui: z.object({
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
+    startAtLogin: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
@@ -369,7 +370,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform): Con
     capabilities: capabilitiesForPlatform({ ...ALL_FIRST_LAUNCH_CAPABILITIES }, platform),
     readOnly: false,
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'dark' },
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark' },
     sessions: { ...DEFAULT_SESSIONS },
     compaction: { ...DEFAULT_COMPACTION },
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },

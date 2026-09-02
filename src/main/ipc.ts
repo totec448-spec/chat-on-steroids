@@ -63,6 +63,7 @@ import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
 import { openInPreferredBrowser } from './browser.js';
 import { onUpdateChange, updateStatus } from './update.js';
+import { syncLoginStartup } from './background-startup.js';
 
 /** The only URLs the renderer may ask the OS to open. */
 const ALLOWED_LINKS = new Set([
@@ -109,6 +110,7 @@ const settingsPatch = z.object({
   ui: z.object({
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
+    startAtLogin: z.boolean(),
     privacyScreenshots: z.boolean(),
     theme: z.enum(['light', 'dark'])
   }),
@@ -192,6 +194,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     ui: {
       minimizeToTray: pick(current.ui.minimizeToTray, base.ui.minimizeToTray, wanted.ui.minimizeToTray),
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
+      startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       privacyScreenshots: pick(
         current.ui.privacyScreenshots,
         base.ui.privacyScreenshots,
@@ -311,6 +314,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     const before = getConfig();
     const wasMultiAgent = before.multiAgent.enabled;
     const next = await updateConfig((config) => ({ ...config, ...mergeSettings(config, request.base, request.patch) }));
+    syncLoginStartup(app, next.ui.startAtLogin);
     // Renderer palette changes are immediate, so keep OS/Electron-owned chrome in lock-step too.
     // Without this, selecting Dark on macOS left the title bar, menus and file picker in the
     // system theme until restart (and startup still defaulted to system before index.ts applies it).

@@ -374,6 +374,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
     },
     ui: {
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
+      startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
       theme: over.theme ?? previous.ui.theme
@@ -840,6 +841,8 @@ function apply(next: AppState): void {
   );
   applyValue($<HTMLInputElement>('binaryPath'), config.tunnel.binaryPath, previousState?.config.tunnel.binaryPath);
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
+  applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin, previousState?.config.ui.startAtLogin);
+  $('startAtLoginSetting').hidden = next.platform?.family !== 'windows';
   applyChecked(
     $<HTMLInputElement>('minimizeToTray'),
     config.ui.minimizeToTray,
@@ -1509,6 +1512,7 @@ $('removeApiKey').addEventListener('click', async () => {
 
 for (const id of [
   'autoConnect',
+  'startAtLogin',
   'minimizeToTray',
   'privacyScreenshots',
   'tunnelKind',

@@ -39,7 +39,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
       screen: false, control: false, clipboardRead: false, clipboardWrite: false
     },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' },
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'light' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
@@ -75,6 +75,14 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
 
   await import('../src/renderer/main.js');
   await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const startAtLogin = w.document.getElementById('startAtLogin') as HTMLInputElement;
+  expect(startAtLogin).not.toBeNull();
+  expect(startAtLogin.checked).toBe(false);
+  const withLoginStartup = structuredClone(state) as any;
+  withLoginStartup.config.ui.startAtLogin = true;
+  stateListener(withLoginStartup);
+  expect(startAtLogin.checked).toBe(true);
 
   const field = w.document.getElementById('tunnelId') as HTMLInputElement;
   expect(field.value).toBe(baseConfig.tunnel.tunnelId);
@@ -170,7 +178,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
       screen: true, control: true, clipboardRead: true, clipboardWrite: true
     },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
@@ -267,6 +275,13 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'light' } });
   pending.shift()!({ ok: true, data: current });
   await new Promise((resolve) => setTimeout(resolve, 0));
+
+  const startAtLogin = w.document.getElementById('startAtLogin') as HTMLInputElement;
+  startAtLogin.checked = true;
+  startAtLogin.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(calls).toHaveLength(6));
+  expect(calls[5].ui.startAtLogin).toBe(true);
+  pending.shift()!({ ok: true, data: appState({ ...baseConfig, ui: { ...baseConfig.ui, autoConnect: true, startAtLogin: true, theme: 'light' } }) });
 });
 
 /**
@@ -403,6 +418,7 @@ it('preserves Windows-only Desktop permissions when saving unrelated settings on
 
   const desktopGroup = w.document.querySelector<HTMLElement>('[data-group="desktop"]')!;
   expect(desktopGroup.hidden).toBe(true);
+  expect((w.document.getElementById('startAtLoginSetting') as HTMLElement).hidden).toBe(true);
 
   const autoConnect = w.document.getElementById('autoConnect') as HTMLInputElement;
   autoConnect.checked = true;
@@ -428,6 +444,7 @@ it('uses native menu-bar/Dock wording on macOS instead of Windows tray copy', as
   expect(doc.getElementById('backgroundRunningCopy')!.textContent).toContain('menu bar and Dock');
   expect(doc.getElementById('backgroundRunningCopy')!.textContent).not.toContain('tray');
   expect(doc.getElementById('minimizeToTrayCopy')!.textContent).toBe('Hide the window to the menu bar when closed');
+  expect((doc.getElementById('startAtLoginSetting') as HTMLElement).hidden).toBe(true);
 });
 
 it('surfaces the existing root rename API in the folder row', async () => {
