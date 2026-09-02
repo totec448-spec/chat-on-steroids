@@ -10,6 +10,26 @@
 export type EventSource = 'extension' | 'mcp' | 'app';
 
 /**
+ * How long the native Active badge keeps showing a chat as working after its last activity.
+ *
+ * Deliberately longer than the recovery window below, and this is the whole point of them being
+ * two constants rather than one. They answer different questions. Recovery asks "has this chat
+ * been quiet long enough that its page needs putting back together?", and two minutes is the
+ * answer that was measured. The badge answers "is this chat still the one doing something?",
+ * which stays true across the reload that the first question triggers — a page being reloaded on
+ * the app's own instruction is a chat mid-repair, not an idle one.
+ *
+ * Sharing the two-minute duration made the badge go dark first and the reload arrive afterwards:
+ * the label expired exactly on the boundary while the browser action still had the sweep and the
+ * extension's alarm ahead of it. A user watching that sees a chat go idle and then, half a minute
+ * later, reload itself for no visible reason. One minute of headroom covers both hops.
+ */
+export const CHAT_ACTIVE_MS = 3 * 60_000;
+
+/** The inactivity window after which exact-chat browser recovery reloads an open turn once. */
+export const CHAT_SILENCE_MS = 2 * 60_000;
+
+/**
  * How a ChatGPT turn ended.
  *
  * Deliberately more than "done" and "failed". Guessing "output limit reached" for
@@ -107,7 +127,8 @@ export interface FileChange {
   approximate: boolean;
 }
 
-export type ToolOutcome = 'ok' | 'error' | 'rejected';
+/** Only `tool_internal_error` is a connector defect. */
+export type ToolOutcome = 'ok' | 'process_exit_nonzero' | 'tool_rejected' | 'tool_internal_error';
 
 /**
  * How confident the recorder is that this call belongs to the session it landed in.
@@ -119,7 +140,14 @@ export type ToolOutcome = 'ok' | 'error' | 'rejected';
  * than guessed into somebody's history. The extension refuses to rewrite ChatGPT's UI for
  * an inferred call.
  */
-export type CallAttribution = 'request_id' | 'unattributed' | 'turn' | 'agent' | 'generation' | 'inferred';
+export type CallAttribution =
+  | 'request_id'
+  | 'unattributed'
+  | 'superseded'
+  | 'turn'
+  | 'agent'
+  | 'generation'
+  | 'inferred';
 
 /**
  * What each grade of attribution actually rests on, in the words shown to the user.
@@ -143,6 +171,7 @@ export type CallAttribution = 'request_id' | 'unattributed' | 'turn' | 'agent' |
 export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
   request_id: 'exact request id',
   unattributed: 'request id not resolved',
+  superseded: 'retired conversation',
   agent: 'agent key',
   turn: 'tool block on the page',
   generation: 'the only chat generating',
@@ -157,8 +186,8 @@ export interface ToolCallRecord {
   requestId: string | null;
   /** Conversation proven by that request id, or null when ownership was unresolved. */
   conversationId: string | null;
-  /** New 1.8 calls use only these two deterministic outcomes. */
-  attributionMethod: 'request_id' | 'unattributed';
+  /** Deterministic placement outcome for current, unresolved, or deliberately retired callers. */
+  attributionMethod: 'request_id' | 'unattributed' | 'superseded';
   /** Exact arguments as JSON. Cut inline past the cap, with the whole text in an asset. */
   args: StoredText;
   result: StoredText;
@@ -171,6 +200,29 @@ export interface ToolCallRecord {
 }
 
 export type MessageState = 'streaming' | 'final';
+
+/** Reads current outcomes and only self-proving legacy `error` rows; ambiguous legacy errors abstain. */
+export function normalizedToolOutcome(
+  call: Pick<ToolCallRecord, 'tool' | 'summary'> & { outcome: unknown }
+): ToolOutcome | null {
+  if (
+    call.outcome === 'ok' ||
+    call.outcome === 'process_exit_nonzero' ||
+    call.outcome === 'tool_rejected' ||
+    call.outcome === 'tool_internal_error'
+  ) {
+    return call.outcome;
+  }
+  if (call.outcome === 'rejected') return 'tool_rejected';
+  if (
+    call.outcome === 'error' &&
+    (call.tool === 'exec_command' || call.tool === 'write_stdin') &&
+    /^✕ exit -?\d+$/.test(call.summary.metric ?? '')
+  ) {
+    return 'process_exit_nonzero';
+  }
+  return null;
+}
 
 interface BaseEvent {
   /** 1-based, strictly increasing within a session. Ordering never relies on time. */
@@ -211,6 +263,8 @@ export type SessionEvent =
       state?: MessageState;
       /** Compatibility mirror for older consumers; equivalent to state === 'final'. */
       final: boolean;
+      /** This exact stable reply was proven terminal and may enter Goal policy. */
+      goalEligible?: boolean;
       /** First sequence assigned to this logical message; later revisions keep this anchor. */
       origin?: number;
     })
@@ -359,6 +413,15 @@ export interface SessionSummary {
   events: number;
   userMessages: number;
   toolCalls: number;
+  /** Start time of the newest exact attributed tool call, independent of later page noise. */
+  lastToolCallAt: number | null;
+  /** Observation time of the newest stable final assistant message. */
+  lastAssistantFinalAt?: number | null;
+  processExitNonzero: number;
+  toolRejected: number;
+  /** Connector/tool implementation failures; the tool reliability numerator. */
+  toolInternalErrors: number;
+  /** Chat errors plus `toolInternalErrors`. */
   errors: number;
   /** Rough local estimate for the whole session — never ChatGPT's private counter. */
   estimatedTokens: number;
@@ -373,16 +436,6 @@ export interface SessionSummary {
    * compaction immediately after every compaction.
    */
   contextTokens: number;
-  /**
-   * When this chat's one automatic compaction was claimed, or null while it still has one.
-   *
-   * The whole durable state of automatic compaction, because the rest of the rule is read
-   * live rather than remembered: the chat is over `contextTokens`, and the model is working
-   * *right now*. Set before the browser is touched, so a failed or abandoned attempt can
-   * never become a retry loop, and reset when Compact & Resume attaches this session to a
-   * fresh ChatGPT conversation — a new chat gets a new budget and a new trigger.
-   */
-  autoCompactTriggeredAt: number | null;
   /** Id of the newest stored handoff, or null when the session was never compacted. */
   lastHandoffId: string | null;
   lastHandoffAt: number | null;

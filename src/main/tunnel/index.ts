@@ -57,35 +57,15 @@ export class TunnelError extends Error {}
 
 export const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
 
-/**
- * Kills a child and everything it started. tunnel-client supervises cloudflared.
- *
- * Through the shared primitive rather than this module's own `spawn('taskkill')`, which
- * had the same defect the exec runner did and independently of it: the helper was looked
- * up on PATH, so an inherited path missing System32 meant the kill never started. That
- * failure arrives asynchronously as an `error` event, which the surrounding try/catch
- * could not reach and no listener handled — so the tunnel-client (and the cloudflared it
- * supervises) went on running while `stop()` reported success. terminateProcessTree uses
- * an absolute taskkill and falls back to signalling the pid directly.
- */
-function killTree(child: ChildProcess | null): void {
-  if (!child || child.pid === undefined || child.exitCode !== null) return;
-  const pid = child.pid;
-  void terminateProcessTree(pid).catch(() => {
-    try {
-      child.kill('SIGTERM');
-    } catch {
-      /* already gone */
-    }
-  });
-}
-
 /** Terminates an owned tunnel tree and waits for the child handle to observe exit. */
-async function stopTree(child: ChildProcess | null, timeoutMs = 3_000): Promise<void> {
-  if (!child || child.pid === undefined || child.exitCode !== null) return;
-  const closed = new Promise<void>((resolve) => {
-    if (child.exitCode !== null) resolve();
-    else child.once('close', () => resolve());
+/** A child that died by signal has a null exitCode and a signalCode; it is just as gone. */
+const exited = (child: ChildProcess): boolean => child.exitCode !== null || child.signalCode !== null;
+
+async function stopTree(child: ChildProcess | null, timeoutMs = 3_000): Promise<boolean> {
+  if (!child || child.pid === undefined || exited(child)) return true;
+  const closed = new Promise<boolean>((resolve) => {
+    if (exited(child)) resolve(true);
+    else child.once('close', () => resolve(true));
   });
   await terminateProcessTree(child.pid).catch(() => {
     try {
@@ -94,7 +74,7 @@ async function stopTree(child: ChildProcess | null, timeoutMs = 3_000): Promise<
       // Already gone.
     }
   });
-  await Promise.race([closed, new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
+  return Promise.race([closed, new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs))]);
 }
 
 function lineReader(onLine: (line: string) => void): (chunk: Buffer) => void {
@@ -125,7 +105,7 @@ const AUTH_FAILURE = /\b(401|403|unauthorized|invalid[_ ]api[_ ]key|invalid_requ
  * of view nothing local has failed.
  */
 const UNREACHABLE =
-  /poll failed|no such host|dial tcp|i\/o timeout|connection (was )?(aborted|refused|reset)|network is (unreachable|down)|no route to host|tls handshake timeout|temporary failure in name resolution|forcibly closed/i;
+  /poll (?:failed|timed out)|no such host|dial tcp|i\/o timeout|connection (was )?(aborted|refused|reset)|network is (unreachable|down)|no route to host|tls handshake timeout|temporary failure in name resolution|forcibly closed/i;
 
 /** Turns a Go network error into something worth showing a person. */
 export function describeNetworkError(raw: string): string {
@@ -170,13 +150,6 @@ const MAX_BACKOFF_MS = 60_000;
 /** How often to look again while the control plane is unreachable. */
 const OFFLINE_RECHECK_MS = 5_000;
 /**
- * How long the client must go without complaining before we believe it is back.
- *
- * It has to exceed the client's own retry gap during an outage — observed at up to
- * ~20s — or the quiet between two failed retries would be mistaken for recovery.
- */
-const RECOVERY_QUIET_MS = 30_000;
-/**
  * How long a run of "cannot reach OpenAI" complaints must go without a completed poll
  * before the user is told the connection is down.
  *
@@ -213,6 +186,21 @@ export function outageConfirmed(run: UnreachableRun, nowMs: number): boolean {
 export function outageRecovered(run: UnreachableRun, lastHandshake: number | null): boolean {
   if (run.since === 0 || lastHandshake === null) return false;
   return run.handshakeBefore === null || lastHandshake > run.handshakeBefore;
+}
+
+export type RouteObservation = 'connected' | 'offline' | 'unknown';
+
+/** Missing metrics prove neither recovery nor failure; a readable zero is a ready first poll. */
+export function routeObservation(
+  read: number | null,
+  lastHandshake: number | null,
+  run: UnreachableRun,
+  nowMs: number
+): RouteObservation {
+  if (read === null) return 'unknown';
+  if (outageConfirmed(run, nowMs)) return 'offline';
+  if (lastHandshake === null) return 'connected';
+  return nowMs - lastHandshake > POLL_FRESH_MS ? 'offline' : 'connected';
 }
 
 /**
@@ -255,63 +243,73 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     'info'
   ];
 
+  interface ClientRun {
+    proc: ChildProcess;
+    lastError: string;
+    unreachableReason: string;
+    outage: UnreachableRun;
+    lastHandshake: number | null;
+    pollErrors: number;
+    healthBase: string | null;
+    health: TunnelHealth | null;
+    shown: 'connected' | 'offline' | 'unknown' | null;
+  }
+
   let stopped = false;
-  let child: ChildProcess | null = null;
+  let current: ClientRun | null = null;
   let timer: NodeJS.Timeout | null = null;
+  let retirement: Promise<void> = Promise.resolve();
   /** Consecutive failed attempts, which is what the backoff grows on. */
   let attempts = 0;
-  let lastError = '';
   /** Names this connector in the log, since core and desktop both run one of these. */
   const tag = opts.label ? `${opts.label} tunnel` : 'tunnel';
-  /** When the client last said it could not reach the control plane. */
-  let lastUnreachable = 0;
-  let unreachableReason = '';
-  /** The complaint run currently in progress, if any. See UNREACHABLE_CONFIRM_MS. */
-  let run: UnreachableRun = NO_OUTAGE;
-  /** Epoch ms of the last control-plane poll the client completed. The proof. */
-  let lastHandshake: number | null = null;
-  /** Poll errors already reported, so only new ones reach the log. */
-  let pollErrors = 0;
-  /** When the current client process reached ready, for the first-poll grace period. */
-  let launchedAt = 0;
-  /** The client's local health server, once it has published its port. */
-  let healthBase: string | null = null;
-  /** Last snapshot of what the client says about itself, for the UI. */
-  let health: TunnelHealth | null = null;
-  /** What the UI was last told, so a state is only re-reported when it changes. */
-  let shown: 'connected' | 'offline' | null = null;
 
   const clearTimer = (): void => {
     if (timer) clearTimeout(timer);
     timer = null;
   };
 
-  const showConnected = (): void => {
-    const first = shown !== 'connected';
-    shown = 'connected';
+  const showConnected = (run: ClientRun): void => {
+    if (stopped || current !== run) return;
+    const first = run.shown !== 'connected';
+    run.shown = 'connected';
     if (first) logInfo(`${tag} connected`);
     // Re-reported on every tick, so the UI can show how fresh the proof is.
     opts.report({
       state: 'connected',
-      detail: lastHandshake
-        ? `Connected. Last verified handshake with OpenAI ${ago(lastHandshake)}. Pick the tunnel in ChatGPT.`
+      detail: run.lastHandshake
+        ? `Connected. Last verified handshake with OpenAI ${ago(run.lastHandshake)}. Pick the tunnel in ChatGPT.`
         : 'Connected. Pick the tunnel in ChatGPT.',
-      handshakeAt: lastHandshake,
-      health
+      handshakeAt: run.lastHandshake,
+      health: run.health
     });
   };
 
-  const showOffline = (): void => {
-    if (shown === 'offline') return;
-    shown = 'offline';
-    logWarn(
-      `${tag} offline: ${unreachableReason} (last verified handshake ${ago(lastHandshake)})`
-    );
+  const showOffline = (run: ClientRun): void => {
+    if (stopped || current !== run) return;
+    const first = run.shown !== 'offline';
+    run.shown = 'offline';
+    if (first) {
+      logWarn(`${tag} offline: ${run.unreachableReason} (last verified handshake ${ago(run.lastHandshake)})`);
+    }
+    // The state may be unchanged while the health snapshot advances. Re-report it so the UI
+    // never freezes on the first offline sample.
     opts.report({
       state: 'offline',
-      detail: `This PC cannot reach OpenAI — ${unreachableReason}. Last verified handshake ${ago(lastHandshake)}. ChatGPT cannot use the connector until it is back; the tunnel keeps retrying on its own.`,
-      handshakeAt: lastHandshake,
-      health
+      detail: `This PC cannot reach OpenAI — ${run.unreachableReason}. Last verified handshake ${ago(run.lastHandshake)}. ChatGPT cannot use the connector until it is back; the tunnel keeps retrying on its own.`,
+      handshakeAt: run.lastHandshake,
+      health: run.health
+    });
+  };
+
+  const showUnknown = (run: ClientRun): void => {
+    if (stopped || current !== run) return;
+    run.shown = 'unknown';
+    opts.report({
+      state: 'connecting-tunnel',
+      detail: 'Tunnel client is locally ready, but its OpenAI poll metrics are temporarily unavailable.',
+      handshakeAt: run.lastHandshake,
+      health: run.health
     });
   };
 
@@ -320,27 +318,33 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
    * publishes. Called on the same tick that decides connected-vs-offline, so the
    * numbers on screen are never older than the state next to them.
    */
-  const refreshHealth = async (base: string): Promise<number | null> => {
+  const refreshHealth = async (run: ClientRun): Promise<number | null | undefined> => {
+    const base = run.healthBase;
+    if (!base) return null;
     const [poll, client] = await Promise.all([readPollHealth(base), readClientStatus(base)]);
-    if (poll?.lastSuccessMs) lastHandshake = poll.lastSuccessMs;
+    if (stopped || current !== run) return undefined;
+    if (poll?.lastSuccessMs) run.lastHandshake = poll.lastSuccessMs;
     // A poll completing after the complaints began is proof the link came back, so the
     // run ends here and the blip is never shown to anyone.
-    if (outageRecovered(run, lastHandshake)) run = NO_OUTAGE;
-    health = {
+    if (outageRecovered(run.outage, run.lastHandshake)) {
+      run.outage = NO_OUTAGE;
+      run.unreachableReason = '';
+    }
+    run.health = {
       pollErrors: poll?.errors ?? null,
       uptimeSeconds: client?.uptimeSeconds ?? null,
       route: client?.route ?? null,
       probe: client?.probe ?? null,
       clientVersion: client?.version ?? null
     };
-    if (poll && poll.errors !== null && poll.errors > pollErrors) {
+    if (poll && poll.errors !== null && poll.errors > run.pollErrors) {
       // Rate-limited by definition: only a rising count says anything new. Info, not
       // warn: the client retries these itself, and `showOffline` covers the case where
       // the retries stop working.
       logInfo(
-        `${tag}: ${poll.errors - pollErrors} more poll error(s) from the control plane (${poll.errors} total)`
+        `${tag}: ${poll.errors - run.pollErrors} more poll error(s) from the control plane (${poll.errors} total)`
       );
-      pollErrors = poll.errors;
+      run.pollErrors = poll.errors;
     }
     return poll === null ? null : (poll.lastSuccessMs ?? 0);
   };
@@ -353,26 +357,45 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
    * cycle with nothing completing. One line per run is logged so a genuine outage still
    * leaves a trail, without a paragraph of Go socket text per attempt.
    */
-  const noteUnreachable = (raw: string): void => {
-    lastUnreachable = Date.now();
-    unreachableReason = describeNetworkError(raw);
-    if (run.since === 0) {
-      run = { since: lastUnreachable, handshakeBefore: lastHandshake };
-      logInfo(`${tag}: ${unreachableReason}; the client is retrying`);
+  const noteUnreachable = (run: ClientRun, raw: string): void => {
+    if (stopped || current !== run) return;
+    const complainedAt = Date.now();
+    run.unreachableReason = describeNetworkError(raw);
+    if (run.outage.since === 0) {
+      run.outage = { since: complainedAt, handshakeBefore: run.lastHandshake };
+      logInfo(`${tag}: ${run.unreachableReason}; the client is retrying`);
     }
   };
 
-  const retry = (detail: string): void => {
-    if (stopped) return;
+  /** The caller that wins this CAS is the only restart owner for the process. */
+  const restart = (run: ClientRun, detail: string, terminate: boolean): void => {
+    if (stopped || current !== run) return;
+    current = null;
+    clearTimer();
     attempts += 1;
-    shown = null;
     const wait = Math.min(MAX_BACKOFF_MS, 2000 * 2 ** (attempts - 1));
     opts.report({
       state: 'connecting-tunnel',
       detail: `${detail} Reconnecting in ${Math.round(wait / 1000)}s…`
     });
-    clearTimer();
-    timer = setTimeout(() => void launch(), wait);
+    retirement = (async () => {
+      const retired = !terminate || (await stopTree(run.proc));
+      if (stopped) return;
+      if (!retired) {
+        // Starting B without proof that A stopped would create two owned tunnel trees. Fail
+        // closed and let an explicit reconnect create a fresh supervisor instead.
+        opts.report({
+          state: 'tunnel-unavailable',
+          detail: 'The previous tunnel client could not be stopped safely. Disconnect and reconnect to try again.'
+        });
+        return;
+      }
+      timer = setTimeout(() => {
+        timer = null;
+        void launch();
+      }, wait);
+      timer.unref?.();
+    })();
   };
 
   /**
@@ -384,54 +407,52 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
    * reported and waited out. /readyz cannot distinguish them, because it stays green
    * while the machine is offline.
    *
-   * What can distinguish them is the client's own poll metric: the timestamp of the
-   * last control-plane poll that actually completed. Fresh means a live round trip to
-   * OpenAI happened within the last poll cycle, which is the only honest basis for
-   * saying "connected". The log lines only supply the wording for *why* it is down.
+   * What can distinguish them is the client's own poll metric. A readable metric plus
+   * /readyz is enough for startup readiness while the first long poll is open; its first
+   * timestamp separately verifies the OpenAI link. After that, freshness is the proof
+   * used to detect a lost route. The log lines only supply the wording for *why* it is down.
    */
-  const watch = (base: string): void => {
+  const watch = (run: ClientRun): void => {
+    if (stopped || current !== run || !run.healthBase) return;
     clearTimer();
     timer = setTimeout(
       () => {
         void (async () => {
-          if (stopped) return;
-          const ready = await probe(`${base}/readyz`);
+          if (stopped || current !== run || !run.healthBase) return;
+          const ready = await probe(`${run.healthBase}/readyz`);
+          if (stopped || current !== run) return;
           if (!ready.ok) {
             logWarn(`${tag} went unready: ${ready.detail}`);
-            await stopTree(child);
-            retry(ready.detail || 'The tunnel stopped responding.');
+            restart(run, ready.detail || 'The tunnel stopped responding.', true);
             return;
           }
 
-          const read = await refreshHealth(base);
+          const read = await refreshHealth(run);
+          if (read === undefined || stopped || current !== run) return;
 
-          // A client that has only just started may not have completed its first poll
-          // yet; that is not an outage, so it gets one poll cycle of grace.
-          const since = lastHandshake ?? launchedAt;
-          const stale =
-            read === null
-              ? Date.now() - lastUnreachable < RECOVERY_QUIET_MS
-              : Date.now() - since > POLL_FRESH_MS || outageConfirmed(run, Date.now());
-
-          if (stale) {
-            if (!unreachableReason) unreachableReason = 'it stopped answering';
-            showOffline();
+          const observation = routeObservation(read, run.lastHandshake, run.outage, Date.now());
+          if (observation === 'offline') {
+            if (!run.unreachableReason) run.unreachableReason = 'it stopped answering';
+            showOffline(run);
+          } else if (observation === 'connected') {
+            showConnected(run);
           } else {
-            showConnected();
+            showUnknown(run);
           }
-          watch(base);
+          watch(run);
         })();
       },
-      shown === 'offline' ? OFFLINE_RECHECK_MS : WATCH_INTERVAL_MS
+      run.shown === 'offline' ? OFFLINE_RECHECK_MS : WATCH_INTERVAL_MS
     );
+    timer.unref?.();
   };
 
   const launch = async (): Promise<void> => {
-    if (stopped) return;
+    if (stopped || current) return;
     clearTimer();
-    lastError = '';
     // A stale URL from the previous run would otherwise be read as this run's.
     await fs.rm(healthFile, { force: true }).catch(() => {});
+    if (stopped || current) return;
 
     opts.report({
       state: 'connecting-tunnel',
@@ -457,17 +478,27 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
       detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe']
     });
-    child = proc;
-
-    let done = false;
+    const run: ClientRun = {
+      proc,
+      lastError: '',
+      unreachableReason: '',
+      outage: NO_OUTAGE,
+      lastHandshake: null,
+      pollErrors: 0,
+      healthBase: null,
+      health: null,
+      shown: null
+    };
+    current = run;
 
     const handleLine = (line: string): void => {
+      if (stopped || current !== run) return;
       if (AUTH_FAILURE.test(line)) {
         // A bad key or tunnel ID will not fix itself, so this one is terminal.
-        done = true;
         stopped = true;
+        current = null;
         clearTimer();
-        killTree(proc);
+        retirement = stopTree(proc).then(() => undefined);
         opts.report({
           state: 'auth-failed',
           detail: 'The tunnel rejected the API key or tunnel ID. Check both in Connection settings.'
@@ -492,13 +523,13 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         }
         if (level === 'ERROR' || level === 'FATAL' || level === 'WARN') {
           const errText = event['error'] ? String(event['error']) : '';
-          lastError = `${level} ${message}${errText ? `: ${errText}` : ''}`.slice(0, 400);
+          run.lastError = `${level} ${message}${errText ? `: ${errText}` : ''}`.slice(0, 400);
           if (isUnreachableError(message) || isUnreachableError(errText)) {
             // Retry chatter. noteUnreachable logs one plain line per run rather than a
             // socket dump per attempt, and the state it leads to is decided in `watch`.
-            noteUnreachable(errText || message);
+            noteUnreachable(run, errText || message);
           } else {
-            logWarn(`${tag}: ${lastError}`);
+            logWarn(`${tag}: ${run.lastError}`);
           }
         }
         return;
@@ -506,9 +537,9 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         // Older clients or crash paths may still print plain text.
       }
       if (/\b(error|fatal|warn)\b/i.test(line)) {
-        lastError = line.slice(0, 400);
-        if (isUnreachableError(line)) noteUnreachable(line);
-        else logWarn(`${tag}: ${lastError}`);
+        run.lastError = line.slice(0, 400);
+        if (isUnreachableError(line)) noteUnreachable(run, line);
+        else logWarn(`${tag}: ${run.lastError}`);
       }
     };
 
@@ -516,58 +547,62 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     proc.stderr.on('data', lineReader(handleLine));
 
     proc.on('exit', (code) => {
-      if (stopped || proc !== child) return;
-      done = true;
+      if (stopped || current !== run) return;
       logWarn(`${tag} client exited with code ${code}`);
-      retry(lastError || `Tunnel client stopped (exit ${code}).`);
+      restart(run, run.lastError || `Tunnel client stopped (exit ${code}).`, false);
     });
 
     proc.on('error', (err) => {
-      if (stopped || proc !== child) return;
-      done = true;
+      if (stopped || current !== run) return;
       logError(`${tag} client failed to start: ${err.message}`);
-      retry(`Could not start tunnel-client: ${err.message}`);
+      restart(run, `Could not start tunnel-client: ${err.message}`, true);
     });
 
     // /readyz on the client's own health server is the authoritative "it works"
     // signal; the process being alive proves nothing.
     const deadline = Date.now() + READY_TIMEOUT_MS;
-    while (!done && !stopped && Date.now() < deadline) {
+    while (!stopped && current === run && Date.now() < deadline) {
       const base = await readHealthUrl(healthFile);
+      if (stopped || current !== run) return;
       if (base) {
         const ready = await probe(`${base}/readyz`);
+        if (stopped || current !== run) return;
         if (ready.ok) {
           attempts = 0;
-          shown = null;
-          healthBase = base;
-          launchedAt = Date.now();
-          pollErrors = 0;
-          run = NO_OUTAGE;
-          await refreshHealth(base);
-          if (Date.now() - lastUnreachable < RECOVERY_QUIET_MS) showOffline();
-          else showConnected();
-          watch(base);
+          run.healthBase = base;
+          const read = await refreshHealth(run);
+          if (read === undefined || stopped || current !== run) return;
+          const observation = routeObservation(read, run.lastHandshake, run.outage, Date.now());
+          if (observation === 'offline') {
+            if (!run.unreachableReason) run.unreachableReason = 'it stopped answering';
+            showOffline(run);
+          } else if (observation === 'connected') {
+            showConnected(run);
+          } else {
+            showUnknown(run);
+          }
+          watch(run);
           return;
         }
-        lastError = ready.detail || lastError;
+        run.lastError = ready.detail || run.lastError;
       }
       await delay(1000);
     }
-    if (!done && !stopped) {
-      await stopTree(proc);
-      retry(lastError || 'The tunnel did not become ready within 60 seconds.');
+    if (!stopped && current === run) {
+      restart(run, run.lastError || 'The tunnel did not become ready within 60 seconds.', true);
     }
   };
 
   void launch();
 
   return {
-    healthBase: () => healthBase,
+    healthBase: () => current?.healthBase ?? null,
     stop: async () => {
       stopped = true;
       clearTimer();
-      await stopTree(child);
-      child = null;
+      const active = current;
+      current = null;
+      await Promise.all([retirement, stopTree(active?.proc ?? null)]);
       await fs.rm(workDir, { recursive: true, force: true }).catch(() => {});
     }
   };
@@ -589,17 +624,18 @@ interface ProbeResult {
 }
 
 async function probe(url: string): Promise<ProbeResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 3000);
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3000);
     const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timer);
     // /readyz answers 503 with the reason in the body — "oauth discovery failed: …",
     // "mcp probe failed: …" — which is far more useful than a generic message.
     const body = await res.text().catch(() => '');
     return { ok: res.ok, detail: body.trim().slice(0, 200) };
   } catch {
     return { ok: false, detail: '' };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

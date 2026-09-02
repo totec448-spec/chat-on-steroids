@@ -77,8 +77,33 @@ function checkMessageFile(messagePath) {
   ];
 }
 
+/**
+ * Commits that are already published on the public main line.
+ *
+ * The gate exists to keep a private value from *entering* public history. A commit that is
+ * already on `origin/main` has entered it, and refusing every later local push cannot
+ * unpublish it — it only strands the working clone, because the merge commits GitHub writes
+ * for a merged pull request carry whatever address that account publishes, and no local hook
+ * ever saw them. Those are exempt here; everything a local push would actually add stays
+ * checked. Removing a value from published history is a deliberate rewrite of a public branch,
+ * not something a pre-push hook should be able to demand.
+ *
+ * A missing `origin/main` — a fresh CI checkout, a clone with another remote name — exempts
+ * nothing, so the strict reading is the fallback.
+ */
+function publishedCommits() {
+  const ref = runGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], {
+    allowFailure: true,
+  });
+  if (ref.status !== 0) return new Set();
+  const listed = runGit(['rev-list', 'refs/remotes/origin/main'], { allowFailure: true });
+  if (listed.status !== 0) return new Set();
+  return new Set(String(listed.stdout).split(/\r?\n/).filter(Boolean));
+}
+
 function checkHistory() {
   const failures = [];
+  const published = publishedCommits();
   // Only history that can actually enter the releasable line. `--all` walks every local and
   // remote-tracking ref in the clone, so an unrelated fetched branch — someone else's fork, an
   // abandoned experiment — could fail verification for a clean checked-out branch that never
@@ -98,6 +123,7 @@ function checkHistory() {
 
   for (const commit of commits) {
     if (syntheticPullRequestCommit && commit === syntheticPullRequestCommit) continue;
+    if (published.has(commit)) continue;
     const record = String(
       runGit(['show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce%x00%B', commit]).stdout,
     );

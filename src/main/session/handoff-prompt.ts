@@ -53,8 +53,16 @@ DO NOT — what the next agent should not redo or undo.`;
  * watches this exact generation, and whatever it finally wrote is what gets carried across.
  * So there is nothing here to call, and nothing to get right except the writing.
  */
-export function nativeHandoffPrompt(): string {
+const marker = (kind: 'HANDOFF' | 'RESUME', token: string): string =>
+  token ? `[[CLF-${kind}:${token}]]` : '';
+
+export const sourceContinuationMarker = (token: string): string => marker('HANDOFF', token);
+export const destinationContinuationMarker = (token: string): string => marker('RESUME', token);
+
+export function nativeHandoffPrompt(token = ''): string {
+  const identity = sourceContinuationMarker(token);
   return (
+    (identity ? `${identity}\n\n` : '') +
     'Chat On Steroids is compacting this conversation so a fresh chat can continue the work. ' +
     'Stop whatever you were doing and do only this.\n\n' +
     'Write a handoff brief so a different coding agent can continue this unfinished task in a brand-new ' +

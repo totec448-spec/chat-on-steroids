@@ -42,6 +42,7 @@ import {
   acknowledgeOffers,
   acknowledgeOffersForConversation,
   dormantWorkerNotice,
+  reactivateDormantRunForConversation,
   endedWorkerNotice,
   hasDormantWorkerLeases,
   sleepSilentDetachedWorkers,
@@ -70,14 +71,20 @@ import {
   type CallContext
 } from './call-context.js';
 import {
+  REQUEST_ID_GRACE_MS,
   awaitFreshCallOrigin,
   evidenceWindow,
   freshCallOrigin,
   recordAgentMessage,
   recordToolCall
 } from '../session/recorder.js';
-import { readOverflowText } from '../session/store.js';
-import type { StoredText } from '../../shared/session.js';
+import { requestCorrelation } from '../session/correlation.js';
+import { BLOCKED_CHAT_REFUSAL, anyChatBlocked, isChatBlocked } from '../session/blocked-chats.js';
+import { anyContinuationOpen, compactingConversation } from '../session/continuation.js';
+import { backgroundExecRecoveryNotices } from '../codex/ownership.js';
+import { unattributedRepairEta } from '../bridge.js';
+import { conversationAttachment, readOverflowText } from '../session/store.js';
+import type { StoredText, ToolOutcome } from '../../shared/session.js';
 
 export interface ToolContext {
   roots: Root[];
@@ -192,7 +199,7 @@ export async function guard(name: string, fn: () => Promise<ToolResult>): Promis
         ?.slice(0, 500);
       // A rejected edit, disabled permission, stale cursor, etc. is a normal tool
       // outcome, not evidence that the connector itself is unhealthy.
-      noteOutcomeSafely('rejected');
+      noteOutcomeSafely('tool_rejected');
       logInfo(`tool ${name} rejected in ${elapsed} ms${summary ? `: ${summary}` : ''}`);
     } else {
       noteOutcomeSafely('ok');
@@ -209,10 +216,10 @@ export async function guard(name: string, fn: () => Promise<ToolResult>): Promis
       err instanceof ExecError ||
       err instanceof AgentError
     ) {
-      noteOutcomeSafely('rejected');
+      noteOutcomeSafely('tool_rejected');
       logInfo(`tool ${name} rejected in ${elapsed} ms: ${message}`);
     } else {
-      noteOutcomeSafely('error');
+      noteOutcomeSafely('tool_internal_error');
       logWarn(`tool ${name} failed in ${elapsed} ms: ${message}`);
     }
     return fail(message);
@@ -221,7 +228,7 @@ export async function guard(name: string, fn: () => Promise<ToolResult>): Promis
 
 // noteOutcome is only meaningful inside a call context; guard is also used by tests and
 // by internal paths that have none, and a missing context must not turn into an error.
-function noteOutcomeSafely(outcome: 'ok' | 'rejected' | 'error'): void {
+function noteOutcomeSafely(outcome: ToolOutcome): void {
   try {
     noteOutcome(outcome);
   } catch {
@@ -253,6 +260,13 @@ function noteOutcomeSafely(outcome: 'ok' | 'rejected' | 'error'): void {
  */
 function callerConversation(tool: string, startedAt: number, requestId: string | null): string | null {
   return freshCallOrigin(tool, startedAt, requestId);
+}
+
+/** Publishes both halves of one exact request proof into the call context. */
+function setCallerConversation(context: CallContext, conversationId: string | null): void {
+  context.caller.conversationId = conversationId;
+  const exact = conversationId ? requestCorrelation(context.caller.requestId) : null;
+  context.caller.sessionId = exact?.conversationId === conversationId ? exact.sessionId : null;
 }
 
 /** The only SDK handler context field this layer consumes; request identity comes from ingress ALS. */
@@ -301,6 +315,59 @@ function noteTransportIdentity(transportKey: string | null): void {
       ? 'MCP transport supplied a session id — agent identity could be bound to the transport'
       : 'MCP transport supplied no session id (stateless connector) — agent identity comes from page evidence'
   );
+}
+
+/** Appends same-conversation background reminders without consuming terminal output. */
+function withBackgroundExecRecovery(
+  sessionId: string | null | undefined,
+  result: ToolResult
+): ToolResult {
+  const notices = backgroundExecRecoveryNotices(sessionId);
+  if (notices.length === 0) return result;
+  return {
+    ...result,
+    content: [
+      ...result.content,
+      { type: 'text', text: `\n--- Background command recovery ---\n${notices.join('\n')}` }
+    ]
+  };
+}
+
+/**
+ * Tells a chat whose call could not be attributed what is about to happen to it.
+ *
+ * A broken request-id join is invisible from inside the conversation. The tools answer, the
+ * turn reads normally, and the model has no way to know the app cannot tell who is calling —
+ * and then the page reloads under it mid-answer. Saying so in the result is the difference
+ * between an unexplained interruption and a chat that knows to re-establish its identity
+ * first, which is the one thing that calls the reload off.
+ */
+function withUnattributedNotice(
+  conversationId: string | null | undefined,
+  result: ToolResult
+): ToolResult {
+  if (conversationId) return result;
+  const eta = unattributedRepairEta();
+  if (eta === null) return result;
+  return {
+    ...result,
+    content: [
+      ...result.content,
+      {
+        type: 'text',
+        text:
+          '\n--- Identity notice ---\n' +
+          'This app could not tell which ChatGPT conversation made this call, so it is filed as ' +
+          'Unattributed. Unless a call from this chat arrives with a request id the extension can ' +
+          `confirm, this chat will be reloaded in about ${eta}s to restore the identity path, ` +
+          'losing whatever this turn is still writing. Retrying a call now is worth more than ' +
+          'continuing: one attributed call is what proves the join is back. If that window ' +
+          'closes and your calls are still coming back Unattributed, stop calling tools and ' +
+          'say so in the chat instead — nothing you do from here is being attributed to you, ' +
+          'and the work is about to be lost with the reload.'
+      }
+    ]
+  };
 }
 
 /**
@@ -373,7 +440,7 @@ async function dispatch(
     startedAt: Date.now(),
     transportKey,
     agent: null,
-    caller: { transportKey, requestId, conversationId: null },
+    caller: { transportKey, requestId, conversationId: null, sessionId: null },
     outcome: null,
     evidence: emptyEvidence()
   };
@@ -381,6 +448,20 @@ async function dispatch(
     trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run))
   );
 }
+
+/**
+ * Refused to a chat whose session is being compacted into a fresh chat.
+ *
+ * The brief is the whole point of that window and the one thing the model is asked for, so
+ * the refusal is written to steer a turn that is still busy with its old task straight into
+ * writing it — and to make a chat with an unstoppable turn harmless, since nothing it calls
+ * now can change the machine the brief describes.
+ */
+export const COMPACTION_IN_PROGRESS_REFUSAL =
+  'COMPACTION_IN_PROGRESS: this chat is being compacted into a fresh chat, and no local tool was run. ' +
+  'Nothing will run here until the handoff is done. Make no further tool calls of any kind. The latest ' +
+  'user message asks for the handoff brief: write that brief now, as plain text, and then stop. ' +
+  'Work continues in the replacement chat.';
 
 async function dispatchTracked(
   context: CallContext,
@@ -402,7 +483,7 @@ async function dispatchTracked(
   // request id, identity-sensitive handlers (workspace/session/agents) see it before they
   // touch state. If the page is one tick late this stays null; only handlers that actually
   // require identity wait for their own exact mate. Ordinary absolute reads/execs never wait.
-  context.caller.conversationId = callerConversation(name, startedAt, requestId);
+  setCallerConversation(context, callerConversation(name, startedAt, requestId));
   // Only calls that need an *existing* per-chat workspace before the handler runs are
   // identity-sensitive here. An absolute read or an exec with an explicit absolute workdir is
   // self-contained and must stay fast; if its exact page mate is late, workspace.ts simply
@@ -412,13 +493,19 @@ async function dispatchTracked(
   // the live worker failure that motivated IDENTITY_EVIDENCE_MS arrived ~8 seconds late.
   const identitySensitive = needsWorkspaceIdentity(name, args);
   if (!context.caller.conversationId && identitySensitive && swarmRunning() && requestId) {
-    context.caller.conversationId = await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId });
+    setCallerConversation(
+      context,
+      await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId })
+    );
   }
   // A run that ended leaves an explicit short-lived lease tombstone for each open worker
   // chat. Resolve exact request identity before ordinary tools too while such leases exist;
   // otherwise an explicit-workdir exec could keep mutating after its worker was retired.
   if (!context.caller.conversationId && hasRetiredWorkerLeases() && requestId) {
-    context.caller.conversationId = await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId });
+    setCallerConversation(
+      context,
+      await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId })
+    );
   }
   // Dormant histories are long-lived identity fences, not active slot claims. An old worker tab
   // may still issue a stale server-side call after its run parked, and without exact request-id
@@ -426,8 +513,39 @@ async function dispatchTracked(
   // run successfully. Resolve the exact mate for every call while such worker conversations
   // exist, just as we do for short-lived retired worker leases.
   if (!context.caller.conversationId && hasDormantWorkerLeases() && requestId) {
-    context.caller.conversationId = await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId });
+    setCallerConversation(
+      context,
+      await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId })
+    );
   }
+  // And the user's own block, which needs identity resolved to the same depth as everything
+  // above and used to be the one rule here that read it without ever waiting.
+  //
+  // Attribution waits: an unproven call is held for REQUEST_ID_GRACE_MS and then filed under
+  // whichever conversation the page proves inside that window. Enforcement did not, so a call
+  // that arrived before its page evidence — the first calls of a turn, and every call of a turn
+  // whose wedged page reports late — passed the block check as "no proven owner", ran the tool,
+  // and *then* appeared in the blocked chat's own timeline. That is exactly the failure the user
+  // sees: a chat marked blocked going on using tools, correctly attributed to it while it does.
+  // Enforcement losing a race that attribution wins is not a policy about unknown callers, it is
+  // a bug in how long enforcement is willing to look.
+  //
+  // So look as long as the recorder does, and only when there is a block to enforce: with no
+  // blocked chat this is a `Map.size` check on the way past, and a request id that is already
+  // proven — every later call of a turn — resolves from the registry without waiting at all.
+  // Unproven still means unblocked, as everywhere else here; what changes is that "unproven"
+  // now means the page never proved it, not that the page had not proved it yet.
+  //
+  // A chat being compacted is refused on the same terms, so it waits on the same terms.
+  if (!context.caller.conversationId && (anyChatBlocked() || anyContinuationOpen()) && requestId) {
+    setCallerConversation(
+      context,
+      await awaitFreshCallOrigin(name, startedAt, REQUEST_ID_GRACE_MS, { requestId })
+    );
+  }
+  const supersededConversation = context.caller.conversationId
+    ? (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded'
+    : false;
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.
   //
@@ -435,14 +553,25 @@ async function dispatchTracked(
   // timer: nothing about a run changes while nothing is happening, and this is the moment
   // something is happening. Sleep rather than failure, so being early about a slow worker
   // costs the run nothing — its own next call takes the slot straight back.
-  const quietWorkers = sleepSilentDetachedWorkers();
+  // A superseded frontend is durable historical identity, not liveness. Letting its refused
+  // call pass through the broker bookkeeping used to revive the very worker/chat the store had
+  // just retired, which kept the session card on "active" after A -> B.
+  //
+  // Before any of that: a proven call from a worker whose family was parked when it was
+  // thought asleep takes the free execution slot back for that family, so the liveness
+  // bookkeeping below sees the same run it would have seen had the parking not happened. A
+  // chat the user stopped from the app is refused below anyway and reclaims nothing.
+  if (!supersededConversation && !isFinish && !isChatBlocked(context.caller.conversationId)) {
+    reactivateDormantRunForConversation(context.caller.conversationId);
+  }
+  const quietWorkers = supersededConversation ? [] : sleepSilentDetachedWorkers();
   for (const quiet of quietWorkers) {
     if (quiet.report) await recordAgentMessage(quiet.report, 'sent');
   }
   // And this call is itself first-hand evidence that its own conversation is alive. That is
   // what undoes a worker given up on because its tab went away — the turn never stopped, so
   // the call arrives from a chat the app had written off, and the write-off was wrong.
-  const alive = noteAgentAlive(context.caller.conversationId);
+  const alive = supersededConversation ? null : noteAgentAlive(context.caller.conversationId);
   if (alive?.report) await recordAgentMessage(alive.report, 'sent');
   // A prime message accepted while a worker's tab was closed could not safely be injected while
   // that server-side turn might still be running. If the silence check above has now proved the
@@ -482,14 +611,43 @@ async function dispatchTracked(
   // inbox that rode on the missing result. Every other tool call from the same chat is refused
   // by endedWorkerNotice as before.
   const endedWorker = isFinish ? null : endedWorkerNotice(context.caller.conversationId);
-  const retiredLeaseAmbiguous = hasRetiredWorkerLeases() && !context.caller.conversationId;
-  const dormantLeaseAmbiguous = hasDormantWorkerLeases() && !context.caller.conversationId;
+  // The user's own verdict on this chat, and the only one that outranks every other. It is not
+  // a lifecycle state the broker derived: somebody looked at a rogue turn they could not stop
+  // from the page and stopped it here instead, so it applies to every tool on every surface,
+  // `agents` finish included. A blocked chat has nothing left to finish.
+  const blockedChat = isChatBlocked(context.caller.conversationId);
+  // A chat whose session is on its way to a fresh chat. Compact & Resume interrupts the turn
+  // from the page and waits for the app's in-flight count to reach zero, but neither is a
+  // fact about the model: ChatGPT's Stop control can vanish while the server-side turn goes
+  // on calling tools, and a count of zero between two calls is not a turn that has ended. On
+  // 2026-09-01 that is exactly what happened — the "stopped" turn kept calling tools, the
+  // handoff prompt was typed into it, and the model spent eleven more minutes on its task,
+  // applying patches, before it got round to the brief. So the refusal lives here, where
+  // every call passes: from the moment the continuation is filed until its commit hands the
+  // chat over to `superseded`, chat A gets no tool at all, and each refusal tells the model
+  // the only thing it can usefully do is write the brief.
+  const compacting = !blockedChat && compactingConversation(context.caller.conversationId) !== null;
+  const allowUnattributed = getConfig().multiAgent.allowUnattributedCalls;
+  const retiredLeaseAmbiguous =
+    !allowUnattributed && hasRetiredWorkerLeases() && !context.caller.conversationId;
+  const dormantLeaseAmbiguous =
+    !allowUnattributed && hasDormantWorkerLeases() && !context.caller.conversationId;
   // In a swarm, a relative/defaulted filesystem operation is not safe to execute after the
   // exact caller lookup timed out: its workspace is part of the requested operation. Falling
   // back to the first approved root turns an attribution outage into wrong-project mutation.
   // Refuse and let the model retry once page evidence is healthy instead.
   const result = await runInCallContext(context, () =>
-      dormantWorker
+      blockedChat
+        ? Promise.resolve(fail(BLOCKED_CHAT_REFUSAL))
+        : compacting
+        ? Promise.resolve(fail(COMPACTION_IN_PROGRESS_REFUSAL))
+        : supersededConversation
+        ? Promise.resolve(
+            fail(
+              'CONVERSATION_SUPERSEDED: Compact & Resume replaced this ChatGPT conversation. Its transcript remains readable, but it can no longer execute local tools. Continue only in the replacement chat; no local tool was run.'
+            )
+          )
+        : dormantWorker
         ? Promise.resolve(fail(dormantWorker))
         : retiredWorker
         ? Promise.resolve(
@@ -511,7 +669,7 @@ async function dispatchTracked(
               'CALLER_IDENTITY_REQUIRED: a dormant worker chat still belongs to its prime history, and the connector could not prove this call belongs to a different conversation. No local tool was run. Restore the browser-extension identity path and retry.'
             )
           )
-        : swarmRunning() && identitySensitive && !context.caller.conversationId
+        : !allowUnattributed && swarmRunning() && identitySensitive && !context.caller.conversationId
         ? Promise.resolve(
             fail(
               'CALLER_IDENTITY_REQUIRED: this operation needs this chat’s exact workspace, but the connector could not prove which ChatGPT conversation made the call. Retry after the extension reconnects; no file or command was changed.'
@@ -524,7 +682,7 @@ async function dispatchTracked(
   // only be able to disagree with the stronger answer it waited for.
   if (!context.caller.conversationId) {
     const resolved = callerConversation(name, startedAt, requestId);
-    if (resolved) context.caller.conversationId = resolved;
+    if (resolved) setCallerConversation(context, resolved);
   }
   // Never erase an identity a handler proved more strongly (agents::callerNow). The old
   // post-handler pass could fail to rediscover evidence that callerNow had already reserved
@@ -539,12 +697,14 @@ async function dispatchTracked(
   // retry after a lost result. The SDK exposes the JSON-RPC id, but a model-issued retry is
   // a new MCP request with a new id, so that id cannot prove the previous finish result was
   // seen. The broker therefore re-offers rather than assuming; see acknowledgeOffers.
-  const acknowledgedForConversation = acknowledgeOffersForConversation(
-    context.caller.conversationId,
-    isFinish,
-    startedAt,
-    isFinish
-  );
+  const acknowledgedForConversation = supersededConversation
+    ? null
+    : acknowledgeOffersForConversation(
+        context.caller.conversationId,
+        isFinish,
+        startedAt,
+        isFinish
+      );
   const acknowledged =
     acknowledgedForConversation?.messages ??
     (context.agent ? acknowledgeOffers(context.agent, isFinish, startedAt) : []);
@@ -561,20 +721,29 @@ async function dispatchTracked(
   // Inbox messages are part of the MCP result ChatGPT actually receives. Build the delivered
   // result before recording so session(action=read, tool_call=T…) is genuine wire forensics rather than a
   // subtly earlier internal value that omits the worker report most likely to matter later.
-  const delivered = withInbox(context.caller.conversationId, context.agent, result, isFinish);
+  const delivered = withUnattributedNotice(
+    context.caller.conversationId,
+    withBackgroundExecRecovery(
+      context.caller.sessionId,
+      withInbox(context.caller.conversationId, context.agent, result, isFinish)
+    )
+  );
   const recorderStartedAt = Date.now();
   const recording = recordToolCall({
     tool: name,
     args,
     content: delivered.content,
-    outcome: context.outcome ?? (result.isError ? 'rejected' : 'ok'),
+    // guard() already marks unexpected defects; an unclassified isError is an expected rejection.
+    outcome: context.outcome ?? (result.isError ? 'tool_rejected' : 'ok'),
     durationMs,
     startedAt,
     evidence: context.evidence,
     agent: context.agent,
     bind: context.bindOnAttribution ?? null,
     requestId: context.caller.requestId,
-    conversationId: context.caller.conversationId
+    conversationId: context.caller.conversationId,
+    sessionId: context.caller.sessionId ?? null,
+    endsActivity: isFinish && !result.isError
   });
   // Exact request-id identity needs no browser wait, so make its durable session append part
   // of completing the MCP call. The recorder catches storage failures and returns null, so a

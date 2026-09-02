@@ -19,12 +19,14 @@ import type {
   Handoff,
   SessionEvent,
   SessionSummary,
+  StoredText,
   SwarmState,
   TokenPressure
 } from '../shared/session.js';
-import { ATTRIBUTION_LABELS, TURN_OUTCOME_LABELS, foldProgress } from '../shared/session.js';
+import { ATTRIBUTION_LABELS, CHAT_ACTIVE_MS, TURN_OUTCOME_LABELS, foldProgress } from '../shared/session.js';
 import { chronological } from '../shared/chronology.js';
 import {
+  DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
   DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS
@@ -103,6 +105,14 @@ let detailFor: string | null = null;
 let detailCursor: number | null = null;
 /** The last swarm the app reported, so the header can summarise it without the log. */
 let swarm: SwarmState | null = null;
+/**
+ * ChatGPT conversations the user has blocked from using local tools.
+ *
+ * Live policy the main process owns, keyed by conversation rather than by session, and pushed
+ * with every session list. The renderer only ever mirrors it — pressing the button asks the
+ * main process and repaints from the answer it gets back.
+ */
+let blockedChats = new Set<string>();
 /** Badges the list is currently drawn with. See repaintBadges. */
 let badgeKey = '';
 
@@ -111,6 +121,7 @@ let handoff: Handoff | null = null;
 let handoffFor: string | null = null;
 
 let listTimer: number | undefined;
+let toolActivityTimer: number | undefined;
 let sessionsLoadGeneration = 0;
 let detailLoadGeneration = 0;
 let handoffLoadGeneration = 0;
@@ -130,7 +141,7 @@ interface Badge {
 /** Live word per worker state, in the user's vocabulary rather than the protocol's. */
 const AGENT_BADGE: Record<AgentState, Badge> = {
   invited: { text: 'opening', tone: 'is-active' },
-  active: { text: 'joined', tone: 'is-active' },
+  active: { text: 'active', tone: 'is-active' },
   // Still working, as far as this app knows — only its browser tab is gone. Said as
   // "no tab" rather than "detached" because that is the part a user can act on.
   detached: { text: 'no tab', tone: 'is-active' },
@@ -153,31 +164,88 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  * first badge is durable and comes from the session itself; the second is live and comes
  * from the swarm or the compaction currently reported by the app.
  */
+/**
+ * How long after its session start or last exact attributed tool call a chat still reads as
+ * working.
+ *
+ * Prime owns the run for its whole life, so its agent state alone would light this badge
+ * permanently and say nothing. An open turn was the gate instead, which is exact but too
+ * narrow: when a page loses its answer stream the recorder has no open turn, while the model
+ * behind it goes on calling tools for minutes. That is a chat very much at work, shown as idle
+ * — and the moment a user most wants to see that it is still going.
+ *
+ * The bridge's recovery window is deliberately the shorter of the two, and the authorities remain
+ * separate: this derives display state from the durable session summary; the bridge derives a
+ * browser action from exact observations and attributed calls. The label outliving the reload
+ * window is the point — a chat being reloaded on the app's instruction is mid-repair, and the
+ * badge going dark first is what made that reload look like it came out of nowhere.
+ */
+/** A new session and exact calls stay active for three minutes unless a later final finished them. */
+function recentChatActivity(summary: SessionSummary, now = Date.now()): boolean {
+  const lastActivityAt = Math.max(summary.startedAt, summary.lastToolCallAt ?? 0);
+  return (
+    lastActivityAt > (summary.lastAssistantFinalAt ?? 0) &&
+    now - lastActivityAt < CHAT_ACTIVE_MS
+  );
+}
+
+/** Reload-generated turn boundaries are not activity authority; session start, calls and finals are. */
+function sessionWorking(summary: SessionSummary): boolean {
+  return summary.endedAt === null && recentChatActivity(summary);
+}
+
+/**
+ * Is the Unattributed stream blocked?
+ *
+ * There is no per-chat block to read: the whole point of this row is that the app cannot say
+ * which chat these calls came from, so the only switch that can answer for them is the
+ * app-wide one. Off is a block — a call the app cannot attribute is refused — which is why
+ * the row draws it with the same button and the same word as a blocked chat.
+ */
+function unattributedBlocked(): boolean {
+  return deps.state()?.config.multiAgent.allowUnattributedCalls === false;
+}
+
 function sessionBadges(summary: SessionSummary): Badge[] {
   const badges: Badge[] = [];
   const origin = summary.origin;
   // The one session that is not a chat. Saying so on the row is what stops it reading
   // as a chat that mysteriously lost its name.
-  if (summary.conversationId === null) return [{ text: 'not a chat', tone: '' }];
+  if (summary.conversationId === null) {
+    return unattributedBlocked()
+      ? [{ text: 'blocked', tone: 'is-failed' }, { text: 'not a chat', tone: '' }]
+      : [{ text: 'not a chat', tone: '' }];
+  }
+  // First, and in the failure tone: a blocked chat is the one state on this row that says the
+  // app is actively refusing work, and the user came to the list to find it at a glance.
+  if (blockedChats.has(summary.conversationId)) badges.push({ text: 'blocked', tone: 'is-failed' });
   if (origin?.kind === 'worker') badges.push({ text: origin.agentId ?? 'worker', tone: '' });
   else if (origin?.kind === 'resume') badges.push({ text: 'resumed', tone: '' });
   else if (summary.agents.includes('prime')) badges.push({ text: 'prime', tone: '' });
 
   // Agent ids are reused across runs (`worker-1`, `worker-2`, ...). Matching only by that
   // short id made old worker sessions inherit the *current* run's live badge, so a worker
-  // chat from 20 minutes ago suddenly said "joined" again when a new worker-2 started.
+  // chat from 20 minutes ago suddenly said "active" again when a new worker-2 started.
   // Conversation id is the durable identity of the actual ChatGPT tab, so only that exact
   // worker session may borrow the live swarm state.
   const agent = origin?.agentId
     ? swarm?.agents.find(
-        (entry) => entry.id === origin.agentId && Boolean(entry.conversationId) && entry.conversationId === summary.conversationId
+        (entry) =>
+          entry.id === origin.agentId &&
+          Boolean(entry.conversationId) &&
+          entry.conversationId === summary.conversationId
       )
-    : undefined;
-  if (agent) {
-    badges.push(AGENT_BADGE[agent.state]);
-    return badges;
-  }
-
+    : swarm?.agents.find(
+        (entry) => entry.role === 'prime' && entry.conversationId === summary.conversationId
+      );
+  // Owning a run is not the same as running a turn. Exact chat activity wins; only an idle
+  // worker falls back to its broker lifecycle label.
+  // Exact recorded tool activity belongs to the session, not to the renderer's current swarm
+  // projection. A parked/restarted run can lose its AgentView while the chat still makes calls.
+  const workerStopped = agent?.role === 'worker' && ['sleeping', 'finished', 'failed'].includes(agent.state);
+  if (workerStopped) badges.push(AGENT_BADGE[agent.state]);
+  else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
+  else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
   return badges;
 }
 
@@ -212,10 +280,12 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const share = level && level.limit > 0 ? Math.min(100, (level.estimated / level.limit) * 100) : 0;
   fill.style.width = `${share.toFixed(1)}%`;
   bar.append(fill);
-  bar.title = `~${compactNumber(summary.estimatedTokens)} rough context tokens from messages and tool I/O; transient progress is excluded`;
+  bar.title =
+    `~${compactNumber(summary.contextTokens)} rough tokens in the current chat context; ` +
+    `~${compactNumber(summary.estimatedTokens)} across the full recorded session. Transient progress is excluded.`;
 
   const remove = document.createElement('button');
-  remove.className = 'btn sess-del';
+  remove.className = 'btn sess-action sess-del';
   remove.type = 'button';
   remove.title = 'Delete this recorded session';
   remove.append(icon('i-trash'));
@@ -224,8 +294,90 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     void deleteSession(summary.id);
   });
 
-  row.append(top, sub, bar, remove);
+  const actions: HTMLButtonElement[] = [];
+  if (summary.conversationId === null) {
+    // The same button in the same column as a chat's, because it is the same decision: may
+    // this activity use local tools? It has no conversation to be stored against, so it moves
+    // the app-wide switch — the checkbox on the settings sheet — and nothing else.
+    const blocked = unattributedBlocked();
+    const block = document.createElement('button');
+    block.className = `btn sess-action sess-block${blocked ? ' is-blocked' : ''}`;
+    block.type = 'button';
+    block.title = blocked
+      ? 'Allow unattributed calls: self-contained calls run again even when the app cannot prove which chat sent them'
+      : 'Block unattributed calls: every call the app cannot attribute to a chat is refused and the chat is told to stop';
+    block.append(icon(blocked ? 'i-play' : 'i-ban'));
+    block.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void toggleUnattributedBlock(!blocked);
+    });
+    actions.push(block);
+
+    // The number is deliberately not repeated here. The chat itself is told how many seconds
+    // are left, counted from the open incident; a duration written into this row would be a
+    // second copy of that policy, free to drift from the one the model is actually given.
+    const note = el(
+      'div',
+      'sess-note',
+      blocked
+        ? 'Blocked: a call the app cannot attribute to a chat is refused, and the chat is told to stop.'
+        : 'Each call here tells its chat how long it has to prove its identity, and to stop rather than keep calling if it cannot.'
+    );
+    row.append(top, sub, note, bar, ...actions, remove);
+    return row;
+  }
+  if (summary.conversationId) {
+    // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
+    // here can — it takes this chat's tools away, and a model whose every call is refused with
+    // an instruction to stop finishes its turn on its own.
+    const blocked = blockedChats.has(summary.conversationId);
+    const block = document.createElement('button');
+    block.className = `btn sess-action sess-block${blocked ? ' is-blocked' : ''}`;
+    block.type = 'button';
+    block.title = blocked
+      ? 'Release this chat: its tool calls run again'
+      : 'Block this chat: every tool call it makes is refused and it is told to stop';
+    block.append(icon(blocked ? 'i-play' : 'i-ban'));
+    block.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void toggleSessionBlock(summary.id, !blocked);
+    });
+    actions.push(block);
+
+    const open = document.createElement('button');
+    open.className = 'btn sess-action sess-open';
+    open.type = 'button';
+    open.title = 'Open this chat in Chrome';
+    open.append(icon('i-out'));
+    open.addEventListener('click', (event) => {
+      event.stopPropagation();
+      void run(api.openSessionChat(summary.id));
+    });
+    actions.push(open);
+  }
+
+  row.append(top, sub, bar, ...actions, remove);
   return row;
+}
+
+/**
+ * Blocks or releases the Unattributed stream by moving the one switch that governs it.
+ *
+ * The settings sheet's checkbox is the stored state, and the renderer's save path reads every
+ * control from the DOM — so this presses that checkbox rather than inventing a second way to
+ * write the same setting. One switch, two places to reach it.
+ */
+async function toggleUnattributedBlock(blocked: boolean): Promise<void> {
+  $<HTMLInputElement>('allowUnattributedCalls').checked = !blocked;
+  await deps.save();
+  paintSessions();
+}
+
+async function toggleSessionBlock(id: string, blocked: boolean): Promise<void> {
+  const next = await run(api.setSessionBlocked(id, blocked));
+  if (next === null) return;
+  blockedChats = new Set(next);
+  paintSessions();
 }
 
 async function deleteSession(id: string): Promise<void> {
@@ -278,6 +430,9 @@ async function loadSessions(): Promise<void> {
   }
   sessionTotal = typeof list.total === 'number' ? list.total : list.sessions.length;
   activeId = list.activeId;
+  // Whole-set replacement on every page, older pages included: a block belongs to a
+  // conversation, not to whichever page happened to carry its row.
+  blockedChats = new Set(list.blocked);
   if (loadedOlderSessions) {
     for (const entry of list.pressure) pressure.set(entry.id, entry);
   } else {
@@ -304,6 +459,7 @@ async function loadMoreSessions(): Promise<void> {
     loadedOlderSessions = true;
     sessionTotal = page.total;
     sessionPageCursor = page.nextCursor;
+    blockedChats = new Set(page.blocked);
     for (const entry of page.pressure) pressure.set(entry.id, entry);
     paintSessions();
   } finally {
@@ -333,6 +489,25 @@ function paintSessions(): void {
   $('sessionsFoot').textContent = recording
     ? `${shown}${more}${activeId ? ' · one live now' : ''}`
     : `Recording is off · ${shown}${more}`;
+  scheduleToolActivityExpiry();
+}
+
+/** Repaint once at the nearest activity-window boundary; no polling clock is needed. */
+function scheduleToolActivityExpiry(): void {
+  window.clearTimeout(toolActivityTimer);
+  toolActivityTimer = undefined;
+  if (!visible) return;
+  const now = Date.now();
+  let nearest = Number.POSITIVE_INFINITY;
+  for (const summary of sessions) {
+    const lastToolCallAt = summary.lastToolCallAt;
+    const lastActivityAt = Math.max(summary.startedAt, lastToolCallAt ?? 0);
+    if (!recentChatActivity(summary, now)) continue;
+    const expiry = lastActivityAt + CHAT_ACTIVE_MS;
+    if (expiry > now) nearest = Math.min(nearest, expiry);
+  }
+  if (!Number.isFinite(nearest)) return;
+  toolActivityTimer = window.setTimeout(() => paintSessions(), Math.max(1, nearest - now + 1));
 }
 
 function canonicalMessageKey(event: SessionEvent): string | null {
@@ -464,17 +639,31 @@ function safeRenderedHref(value: string): string | null {
  * semantic Markdown tags, discard executable/form/embed content, strip every attribute by
  * default, and allow only the tiny attribute set that affects normal Markdown semantics.
  */
-export function renderedMessage(html: string, fallback: string): HTMLElement {
-  const box = el('div', 'msg rich');
+/**
+ * One assistant message, as ChatGPT rendered it when that is available and whole, and as its
+ * own markdown source when it is not.
+ *
+ * The two are laid out differently on purpose. Rendered markup carries its own block
+ * structure, so it is flowed (`rich`). Markdown source is plain text whose every line break,
+ * heading and list item is a newline, so it keeps `msg`'s pre-wrap — flowing it would run a
+ * whole brief together into one paragraph.
+ */
+export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
+  const box = el('div', 'msg');
   const safeFallback = fallback.slice(0, MAX_RENDERED_HTML_CHARS);
-  if (!html) {
+  // A capture the store had to cut is markup that stops mid-element — very often inside a
+  // code block, whose wrapper chrome is far larger than the code in it — so it presents part
+  // of the message and ends as an unclosed box. It is not a presentation of this message and
+  // is not shown as one.
+  if (!html || html.truncated || !html.text) {
     box.textContent = safeFallback;
     return box;
   }
+  box.classList.add('rich');
   const template = document.createElement('template');
   // Parsing untrusted captured HTML constructs a second tree before sanitisation. Bound it
   // before innerHTML so a valid but huge recorded turn cannot freeze/OOM the renderer.
-  template.innerHTML = html.slice(0, MAX_RENDERED_HTML_CHARS);
+  template.innerHTML = html.text.slice(0, MAX_RENDERED_HTML_CHARS);
   const visit = (parent: ParentNode): void => {
     for (const node of [...parent.childNodes]) {
       // Namespace elements (SVG/MathML) are not HTMLElements. Checking HTMLElement here
@@ -511,7 +700,10 @@ export function renderedMessage(html: string, fallback: string): HTMLElement {
   };
   visit(template.content);
   box.append(template.content);
-  if (!box.textContent?.trim() && safeFallback) box.textContent = safeFallback;
+  if (!box.textContent?.trim() && safeFallback) {
+    box.classList.remove('rich');
+    box.textContent = safeFallback;
+  }
   return box;
 }
 
@@ -591,7 +783,7 @@ function eventBody(event: SessionEvent): HTMLElement {
     case 'assistant_message': {
       const box = el('div', 'said');
       box.append(el('b', '', event.final ? 'ChatGPT' : 'ChatGPT (partial)'));
-      box.append(renderedMessage(event.renderedHtml?.text ?? '', event.message.text));
+      box.append(renderedMessage(event.renderedHtml, event.message.text));
       return box;
     }
     case 'progress':
@@ -786,7 +978,7 @@ function paintDetail(): void {
       facts.push(`filtered to ${agentFilter === UNATTRIBUTED ? 'unattributed' : agentFilter} — ${filtered.length} matched`);
     }
     if (windowed.omitted > 0) facts.push(`${shown.length} newest rendered`);
-    facts.push(`~${compactNumber(summary.estimatedTokens)} rough context tokens`);
+    facts.push(`~${compactNumber(summary.contextTokens)} rough current-chat context tokens`);
     const level = pressureOf(summary.id);
     if (level && level.level !== 'ok') {
       facts.push(
@@ -945,8 +1137,9 @@ function paintSwarm(state: SwarmState): void {
       ...state.agents.map((agent) => {
         const row = el('div', 'agent');
         const top = el('div', 'model-top');
-        top.append(el('b', '', agent.label || agent.id));
-        top.append(el('span', 'chip', agent.role));
+        const label = agent.label || agent.id;
+        top.append(el('b', '', label));
+        if (label !== agent.id) top.append(el('span', 'chip', agent.id));
         top.append(el('span', `chip is-${agent.state}`, agent.state));
         // Clearing is offered where the agent is, not only as one global reset at the
         // bottom of a settings form. The two rows mean different things and the tooltip
@@ -1025,10 +1218,12 @@ export function chatSettingsPatch(current: Config): {
       // The exposure switch lives with every other ChatGPT tool switch, on Home. This
       // panel keeps only the worker count, so it reads the one control that exists.
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
-      maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8)
+      maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
+      allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
+      recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked
     },
     goal: {
-      enabled: $<HTMLInputElement>('goalEnabled').checked,
+      ...goalSwitches(current.goal),
       // The chosen model is held here rather than in an input, because it is picked from a
       // list and never typed. `current` is the fallback for the first save after a repaint.
       model: goalModel || current.goal.model,
@@ -1037,9 +1232,30 @@ export function chatSettingsPatch(current: Config): {
       prompt: $<HTMLTextAreaElement>('goalPrompt').value.trim() || DEFAULT_GOAL_SYSTEM_PROMPT,
       objectivePrompt:
         $<HTMLTextAreaElement>('goalObjectivePrompt').value.trim() ||
-        DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT
+        DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
+      loopPrompt:
+        $<HTMLTextAreaElement>('goalLoopPrompt').value.trim() || DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
     }
   };
+}
+
+/**
+ * Two checkboxes, one mode.
+ *
+ * Goal and Loop are the two values of a single stored setting, so the pair has to be resolved
+ * rather than read: the click that turns one on leaves the other still checked until the save
+ * comes back and repaints it. The one that *changed* is therefore the one that means something,
+ * which is what `current` is compared against here. Neither checked is simply off, and the mode
+ * is left where it was — a user who switches Loop off and on again should get Loop back.
+ */
+function goalSwitches(current: Config['goal']): { enabled: boolean; mode: Config['goal']['mode'] } {
+  const goalOn = $<HTMLInputElement>('goalEnabled').checked;
+  const loopOn = $<HTMLInputElement>('loopEnabled').checked;
+  const wasGoal = current.enabled && current.mode === 'goal';
+  const wasLoop = current.enabled && current.mode === 'loop';
+  const mode =
+    goalOn && !wasGoal ? 'goal' : loopOn && !wasLoop ? 'loop' : goalOn ? 'goal' : loopOn ? 'loop' : current.mode;
+  return { enabled: goalOn || loopOn, mode };
 }
 
 // --------------------------------------------------------------- the goal loop
@@ -1161,17 +1377,29 @@ function applyGoal(state: AppState, previous?: Config): void {
   const { config } = state;
   const secureStorageAvailable = state.secureStorage?.available ?? true;
   goalModel = config.goal.model;
+  const goalOn = config.goal.enabled && config.goal.mode === 'goal';
+  const loopOn = config.goal.enabled && config.goal.mode === 'loop';
+  const wasGoalOn = previous && previous.goal.enabled && previous.goal.mode === 'goal';
+  const wasLoopOn = previous && previous.goal.enabled && previous.goal.mode === 'loop';
   const goalToggle = $<HTMLInputElement>('goalEnabled');
-  applyChatChecked(goalToggle, config.goal.enabled, previous?.goal.enabled);
+  const loopToggle = $<HTMLInputElement>('loopEnabled');
+  applyChatChecked(goalToggle, goalOn, previous ? Boolean(wasGoalOn) : undefined);
+  applyChatChecked(loopToggle, loopOn, previous ? Boolean(wasLoopOn) : undefined);
   // Goal reads the local recorded transcript. Keep the dependency visible at the switch rather
   // than accepting a click that the config boundary must immediately repair back to off.
   goalToggle.disabled = !config.sessions.record;
+  loopToggle.disabled = !config.sessions.record;
   applyChatValue($<HTMLSelectElement>('goalReasoning'), config.goal.reasoning, previous?.goal.reasoning);
   applyChatValue($<HTMLTextAreaElement>('goalPrompt'), config.goal.prompt, previous?.goal.prompt);
   applyChatValue(
     $<HTMLTextAreaElement>('goalObjectivePrompt'),
     config.goal.objectivePrompt,
     previous?.goal.objectivePrompt
+  );
+  applyChatValue(
+    $<HTMLTextAreaElement>('goalLoopPrompt'),
+    config.goal.loopPrompt,
+    previous?.goal.loopPrompt
   );
   // The one sentence somebody switching this on needs, and the exact words the extension
   // shows under the same switch — two places saying the same thing differently is how a
@@ -1180,10 +1408,24 @@ function applyGoal(state: AppState, previous?: Config): void {
     ? 'Turn on session recording first — Goal needs the recorded conversation to decide what is still missing.'
     : !state.hasGoalKey
       ? 'OpenRouter API key essential for goal feature.'
-      : config.goal.enabled
+      : goalOn
         ? 'A second model reads each finished answer and writes your next message, until it decides the goal is met.'
-        : 'Off — nothing is sent to OpenRouter and nothing is typed into your chats.';
+        : loopOn
+          ? 'Off — Loop has this chat instead. The two cannot run together.'
+          : 'Off — nothing is sent to OpenRouter and nothing is typed into your chats.';
   $('goalHint').classList.toggle('is-warn', !config.sessions.record || !state.hasGoalKey);
+  // The one thing worth saying twice: this one does not stop by itself. Everything else about
+  // it — the key, the model, the recording — is the same sentence the Goal switch already said.
+  $('loopHint').textContent = !config.sessions.record
+    ? 'Turn on session recording first — Loop needs the recorded conversation to write the next message.'
+    : !state.hasGoalKey
+      ? 'OpenRouter API key essential for goal feature.'
+      : loopOn
+        ? 'On — a message is written after every answer and never withheld. Only this switch ends it.'
+        : goalOn
+          ? 'Off — Goal has this chat instead. The two cannot run together.'
+          : 'Off — Goal, but with no way to stop: it keeps prompting until you switch it back off.';
+  $('loopHint').classList.toggle('is-warn', !config.sessions.record || !state.hasGoalKey);
   $('goalModelName').textContent = config.goal.model;
   const goalKey = $<HTMLInputElement>('goalKey');
   goalKey.placeholder = state.hasGoalKey ? '•••••••• stored' : 'sk-or-v1-…';
@@ -1209,7 +1451,7 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalPromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalPrompt').value = DEFAULT_GOAL_SYSTEM_PROMPT;
     await save();
-    toast('Goal prompt restored to default');
+    toast('Goal prompt (no task) restored to default');
   });
   $<HTMLTextAreaElement>('goalObjectivePrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalObjectivePromptEdit').addEventListener('click', () => {
@@ -1221,7 +1463,19 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalObjectivePromptReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('goalObjectivePrompt').value = DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT;
     await save();
-    toast('Goal driver prompt restored to default');
+    toast('Goal prompt (with a task) restored to default');
+  });
+  $<HTMLTextAreaElement>('goalLoopPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
+  $('goalLoopPromptEdit').addEventListener('click', () => {
+    const panel = $('goalLoopPromptPanel');
+    panel.hidden = !panel.hidden;
+    $('goalLoopPromptEdit').textContent = panel.hidden ? 'Edit prompt' : 'Close prompt';
+    if (!panel.hidden) $<HTMLTextAreaElement>('goalLoopPrompt').focus();
+  });
+  $('goalLoopPromptReset').addEventListener('click', async () => {
+    $<HTMLTextAreaElement>('goalLoopPrompt').value = DEFAULT_GOAL_LOOP_SYSTEM_PROMPT;
+    await save();
+    toast('Loop prompt restored to default');
   });
   // The catalogue is fetched on the first press and kept afterwards: the picker closing is
   // not a reason to spend another round trip on a list that changes weekly.
@@ -1275,7 +1529,7 @@ function wireGoal(save: () => Promise<void>): void {
  */
 function applyAutoCompactHint(config: Config): void {
   $('autoCompactHint').textContent = config.compaction.auto
-    ? 'Interrupts the answer at this many tokens, writes a handoff, opens a fresh chat. Once per chat.'
+    ? 'Interrupts an active answer at this many tokens, writes a handoff, and opens a fresh chat.'
     : 'Off — only the Compact & resume button in the ChatGPT tab compacts.';
 }
 
@@ -1293,10 +1547,14 @@ const CHAT_INPUTS = [
   'autoCompact',
   'autoCompactTokens',
   'maWorkers',
+  'allowUnattributedCalls',
+  'recoverAgentTabs',
   'goalEnabled',
+  'loopEnabled',
   'goalReasoning',
   'goalPrompt',
-  'goalObjectivePrompt'
+  'goalObjectivePrompt',
+  'goalLoopPrompt'
 ];
 
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */
@@ -1316,6 +1574,16 @@ export function chatApply(state: AppState, previous?: Config): void {
   applyAutoCompactHint(config);
 
   applyChatValue($<HTMLInputElement>('maWorkers'), String(config.multiAgent.maxWorkers), previous?.multiAgent.maxWorkers);
+  applyChatChecked(
+    $<HTMLInputElement>('allowUnattributedCalls'),
+    config.multiAgent.allowUnattributedCalls,
+    previous?.multiAgent.allowUnattributedCalls
+  );
+  applyChatChecked(
+    $<HTMLInputElement>('recoverAgentTabs'),
+    config.multiAgent.recoverAgentTabs,
+    previous?.multiAgent.recoverAgentTabs
+  );
 
   applyGoal(state, previous);
 
@@ -1346,6 +1614,10 @@ export function chatApply(state: AppState, previous?: Config): void {
 export function chatVisible(next: boolean): void {
   visible = next;
   if (next) void refreshAll();
+  else {
+    window.clearTimeout(toolActivityTimer);
+    toolActivityTimer = undefined;
+  }
 }
 
 async function refreshAll(): Promise<void> {

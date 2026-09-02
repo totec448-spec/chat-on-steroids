@@ -19,7 +19,12 @@ describe('portable browser-backed feature parity', () => {
       // identical on every host. Its only product dependency is recording, not Windows/Desktop.
       expect(config.goal).toEqual(windows.goal);
       expect(config.goal.enabled).toBe(false);
-      expect(config.multiAgent).toEqual({ enabled: true, maxWorkers: 2 });
+      expect(config.multiAgent).toEqual({
+        enabled: true,
+        maxWorkers: 2,
+        allowUnattributedCalls: true,
+        recoverAgentTabs: true
+      });
       expect(browserExtensionRequired(config)).toBe(true);
     }
   );

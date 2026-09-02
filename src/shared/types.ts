@@ -185,8 +185,26 @@ export type GoalReasoning = (typeof GOAL_REASONING_LEVELS)[number];
  * Off by default, and useless without an OpenRouter API key: the key is the credential the
  * whole feature runs on, so the UI says so rather than failing quietly at the first turn.
  */
+/**
+ * Which of the two standing modes the switch runs.
+ *
+ * One field rather than two booleans, because Goal and Loop are mutually exclusive by
+ * construction here: there is nothing to keep in step and no state where both are on. `enabled`
+ * stays the master switch it has always been, so everything that only wants to know whether a
+ * second model may type into a chat keeps reading exactly that.
+ */
+export const GOAL_MODES = ['goal', 'loop'] as const;
+export type GoalMode = (typeof GOAL_MODES)[number];
+
 export interface GoalSettings {
   enabled: boolean;
+  /**
+   * `goal` stops when the job is done; `loop` never stops on its own.
+   *
+   * Only consulted while `enabled` is true. A chat driven solely by its own saved objective
+   * with the switch off runs as `goal`, because Loop is a thing the user switches on.
+   */
+  mode: GoalMode;
   /** An OpenRouter model id, exactly as its `/models` listing spells it. */
   model: string;
   reasoning: GoalReasoning;
@@ -201,6 +219,14 @@ export interface GoalSettings {
    * point, and the person whose chat gets typed into is the one who should own it.
    */
   objectivePrompt: string;
+  /**
+   * Editable loop instruction, used instead of both of the above while the mode is `loop`.
+   *
+   * A third prompt rather than a flag on the other two, because the job is a different one:
+   * the gate and the driver decide whether to speak, and this one only ever decides what to
+   * say. It is combined with a chat's own goal when it has one, exactly as the driver is.
+   */
+  loopPrompt: string;
 }
 
 /**
@@ -211,6 +237,10 @@ export interface MultiAgentSettings {
   enabled: boolean;
   /** Upper bound on workers the prime agent may create. */
   maxWorkers: number;
+  /** Permit self-contained calls when browser evidence cannot identify their conversation. */
+  allowUnattributedCalls: boolean;
+  /** Reopen/reload an active agent chat once when its browser view disappears or goes silent. */
+  recoverAgentTabs: boolean;
 }
 
 export interface Config {
@@ -367,6 +397,62 @@ export interface BridgeStatus {
   present: boolean;
   /** Epoch ms of the last message from the extension, or null. */
   lastSeenAt: number | null;
+  /**
+   * Version of the connected browser extension, learned from its own authenticated requests.
+   *
+   * This is the only place that fact lives. It is null before an extension has ever spoken to
+   * this app process, which is why "no extension version" never means "outdated extension".
+   */
+  extensionVersion: string | null;
+}
+
+/**
+ * Whether a newer release of this app exists, and what has been done about it.
+ *
+ * One record for the whole update subsystem — see src/main/update.ts. `latest` is a version
+ * only when it is genuinely newer than `current`, so nothing downstream compares versions.
+ *
+ * `stage` says what this installation is doing about it, and the pair reads as:
+ * - `latest === null` — up to date, or nothing checked yet.
+ * - `latest` set, `stage: 'idle'` — a new version exists that this installation cannot apply
+ *   for itself (a Linux `.deb`, macOS, a development tree, an unsupported architecture). It is
+ *   a manual download.
+ * - `downloading` / `ready` — it is being fetched, or is fetched and installs on the next start.
+ * - `failed` — the check or the download stopped; `error` says why, and the next check
+ *   tries again. Nothing about the running app is affected either way.
+ *
+ * `checkedAt` is what separates the two silences: null means GitHub has not answered yet in
+ * this run, and only a timestamp lets the UI say "up to date" rather than "nothing to report".
+ */
+export interface UpdateStatus {
+  current: string;
+  latest: string | null;
+  stage: 'idle' | 'checking' | 'downloading' | 'ready' | 'failed';
+  error: string | null;
+  /** When the release API last answered, as epoch ms. Null until it has. */
+  checkedAt: number | null;
+}
+
+/** Where an installation that cannot update itself gets the new version by hand. */
+export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';
+
+/**
+ * Whether `candidate` is a later release than `current`, compared as three numbers.
+ *
+ * String inequality is not enough: a downgrade published by mistake, or a pre-release tag left
+ * as `latest`, would otherwise make this app install an older build over a newer one. It lives
+ * here because the renderer asks the same question of the connected extension's version, and two
+ * copies of a comparison are two chances to read a version difference the wrong way round.
+ */
+export function isNewer(candidate: string, current: string): boolean {
+  const left = candidate.split('.').map(Number);
+  const right = current.split('.').map(Number);
+  for (let index = 0; index < 3; index += 1) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return false;
 }
 
 /**
@@ -395,6 +481,7 @@ export interface AppState {
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */
   bundledTunnelVersion: string | null;
   bridge: BridgeStatus;
+  update: UpdateStatus;
 }
 
 export const DEFAULT_CAPABILITIES: Capabilities = {
