@@ -868,8 +868,11 @@ describe('2025-era clients', () => {
       capabilities: {},
       clientInfo: { name: 'test-client', version: '1.0.0' }
     });
-    if (IS_WINDOWS) expect(coreReply.body.result.instructions).toContain(surfaceDefinition('desktop').connectorName);
-    else expect(coreReply.body.result.instructions).not.toContain(surfaceDefinition('desktop').connectorName);
+    if (IS_WINDOWS || process.platform === 'darwin') {
+      expect(coreReply.body.result.instructions).toContain(surfaceDefinition('desktop').connectorName);
+    } else {
+      expect(coreReply.body.result.instructions).not.toContain(surfaceDefinition('desktop').connectorName);
+    }
 
     const desktopReply = await desktop('initialize', {
       protocolVersion: '2025-06-18',
@@ -1316,8 +1319,8 @@ describe('capability gating', () => {
 
   it('starts a fresh install with every capability effective', () => {
     // This assertion is about the product's fully-enabled fresh-install policy, not the
-    // host running Vitest. macOS/Linux deliberately mask the Windows-only Desktop group at
-    // runtime, so model the platform that actually owns every declared capability.
+    // host running Vitest. Windows has no OS-version floor, so it is the deterministic
+    // representative for a host with every declared capability.
     const config = defaultConfig('win32');
     expect(config.readOnly).toBe(false);
     expect(config.multiAgent.enabled).toBe(true);
@@ -1418,8 +1421,8 @@ describe('desktop capabilities', () => {
   // Seeing the screen changes nothing, so it survives read-only mode; driving the
   // mouse and keyboard can do anything the user can, so it must not.
   it('keeps seeing but not touching in read-only mode', async () => {
-    // Desktop is intentionally Windows-only. Exercise the read-only capability split on the
-    // platform where this surface exists rather than making the result depend on the CI host.
+    // Exercise the read-only capability split on a platform with a native Desktop backend rather
+    // than making the result depend on the CI host.
     const config = { ...defaultConfig('win32'), capabilities: withCaps({ screen: true, control: true }) };
 
     ctx.readOnly = true;
@@ -1470,6 +1473,8 @@ describe('desktop capabilities', () => {
     const schema = JSON.stringify(toolList(await desktop('tools/list')).find((t) => t.name === 'computer'));
     expect(schema).toContain('read_clipboard');
     expect(schema).toContain('write_clipboard');
+    expect(schema).toContain('command+v on macOS');
+    expect(schema).toContain('ctrl+v on Windows/Linux');
   });
 
   it('rejects a malformed action before it reaches the desktop', async () => {

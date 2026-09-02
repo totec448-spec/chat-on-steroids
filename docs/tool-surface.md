@@ -6,21 +6,21 @@ authoritative; `src/main/mcp/surfaces.ts`, `src/main/mcp/tools-core.ts`,
 
 ## Connectors
 
-Chat On Steroids publishes Core on Windows, macOS and Linux. Windows additionally publishes the
-optional Desktop connector. They are separate discovery and permission boundaries and use
+Chat On Steroids publishes Core on Windows, macOS and Linux. Windows and macOS additionally publish
+the optional Desktop connector. They are separate discovery and permission boundaries and use
 separate secret tokenized local paths.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
 | **Chat On Steroids Core** | Approved files, patches, terminal, recorded-session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` |
-| **Chat On Steroids Desktop** | **Windows only:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
+| **Chat On Steroids Desktop** | **Windows/macOS:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
 
-The Desktop connector is optional and Windows-only. Core is the main connector everywhere.
+The Desktop connector is optional on Windows/macOS. Core is the main connector everywhere.
 
 On a fresh current config, all Core tool permissions, session recording and multi-agent mode are
-enabled, while read-only mode is off. Windows also enables Desktop permissions. macOS/Linux mask
+enabled, while read-only mode is off. Windows and macOS also enable Desktop permissions. Linux masks
 Desktop permissions off at runtime while preserving stored choices for a config later reopened on
-Windows. Existing configs keep explicit choices during upgrades; missing legacy permissions are
+Windows or macOS. Existing configs keep explicit choices during upgrades; missing legacy permissions are
 not silently widened.
 
 With the fresh all-on capability snapshot, Core advertises seven schemas:
@@ -128,7 +128,7 @@ cannot be proven.
 
 ## Desktop tools
 
-This section exists only on Windows. macOS/Linux do not advertise or execute these schemas.
+This section exists on Windows and macOS. Linux does not advertise or execute these schemas.
 
 ### `observe`
 
@@ -145,8 +145,8 @@ Executes a bounded batch of desktop actions. The current action set is:
 
 Recent screenshot frames are retained independently; a coordinate action names its frame and
 the helper revalidates target-window geometry immediately before physical input. Semantic refs
-address cached UI Automation elements from one bounded snapshot and fail stale rather than
-rescanning by a reusable RuntimeId. Batches report completed-step and route evidence, including
+address cached UI Automation or AXUIElement objects from one bounded snapshot and fail stale rather
+than rescanning by a reusable native identity. Batches report completed-step and route evidence, including
 the exact failing index on partial failure. An optional compact `verify` postcondition can wait
 for a foreground window, window open/close, or UI control appearance/disappearance and capture
 the resulting state in the same tool call.

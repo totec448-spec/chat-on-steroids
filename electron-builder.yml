@@ -85,6 +85,8 @@ mac:
   icon: build/icon.png
   category: public.app-category.developer-tools
   minimumSystemVersion: "12.0"
+  extendInfo:
+    NSScreenCaptureUsageDescription: Chat On Steroids captures a display or window only when the enabled Desktop connector asks to observe it.
   # v2.0.2 intentionally ships unsigned/unnotarized macOS artifacts. Make that policy
   # deterministic instead of depending on whatever identities or Apple env vars happen to be
   # present on a hosted runner. Remove these two lines when real signing credentials are wired.
@@ -96,6 +98,9 @@ mac:
       to: node_modules
       filter: ['**/*']
   extraResources:
+    - from: resources/packaging/desktop/darwin/${arch}
+      to: desktop
+      filter: ['macos-desktop-addon.node', 'libcos-desktop.dylib']
     - from: resources/packaging/native/darwin/${arch}/node_modules/@img/sharp-libvips-darwin-${arch}/README.md
       to: THIRD-PARTY-NOTICES-sharp-libvips-darwin-${arch}.md
     - from: resources/packaging/tunnel/darwin/${arch}

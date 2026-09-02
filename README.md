@@ -2,7 +2,7 @@
   <img src="extension/icons/icon128.png" width="88" alt="Chat On Steroids icon" />
   <h1>Chat On Steroids</h1>
   <p><strong>Give ChatGPT a controlled bridge to your computer.</strong></p>
-  <p>Local files, commands, durable session history, Compact &amp; Resume, experimental worker chats, and optional Windows desktop control over MCP.</p>
+  <p>Local files, commands, durable session history, Compact &amp; Resume, experimental worker chats, and optional Windows/macOS desktop control over MCP.</p>
   <p>
     <a href="../../releases/latest"><strong>Download</strong></a>
     · <a href="#three-minute-setup">Setup</a>
@@ -19,7 +19,7 @@
   <img src="docs/images/app-chat.jpg" width="92%" alt="Chat On Steroids session timeline" />
 </p>
 
-Chat On Steroids is a Windows, macOS and Linux desktop app that exposes only the folders and capabilities you configure through a local MCP server. You keep using ChatGPT in the browser. The app is the permission boundary and local executor; the companion Chrome extension adds browser-side chat attribution, session capture, richer tool rows, Compact & Resume, and experimental multi-agent coordination. Screen/mouse/keyboard/clipboard automation remains Windows-only and is omitted from the macOS/Linux product surface.
+Chat On Steroids is a Windows, macOS and Linux desktop app that exposes only the folders and capabilities you configure through a local MCP server. You keep using ChatGPT in the browser. The app is the permission boundary and local executor; the companion Chrome extension adds browser-side chat attribution, session capture, richer tool rows, Compact & Resume, and experimental multi-agent coordination. Screen/window observation, accessibility controls, mouse/keyboard and clipboard automation are available on Windows and macOS; Linux currently exposes Core only.
 
 ## Download
 
@@ -29,7 +29,7 @@ Chat On Steroids is a Windows, macOS and Linux desktop app that exposes only the
 | **macOS** | [DMG](../../releases/latest/download/Chat-On-Steroids-macOS-x64.dmg) · [ZIP](../../releases/latest/download/Chat-On-Steroids-macOS-x64.zip) | [DMG](../../releases/latest/download/Chat-On-Steroids-macOS-arm64.dmg) · [ZIP](../../releases/latest/download/Chat-On-Steroids-macOS-arm64.zip) |
 | **Linux** | [AppImage](../../releases/latest/download/Chat-On-Steroids-Linux-x64.AppImage) · [DEB](../../releases/latest/download/Chat-On-Steroids-Linux-x64.deb) | [AppImage](../../releases/latest/download/Chat-On-Steroids-Linux-arm64.AppImage) · [DEB](../../releases/latest/download/Chat-On-Steroids-Linux-arm64.deb) |
 
-Every package is architecture-specific and carries matching Electron/native dependencies, `tunnel-client`, ripgrep and the Chrome extension. Windows uses a per-user-capable assisted installer; macOS ships DMG/ZIP; Linux ships AppImage and Debian packages. **On Debian/Ubuntu, prefer the DEB.** The portable AppImage uses electron-builder's static launcher; if the host disables unprivileged user namespaces, that launcher can fall back to starting Chromium with `--no-sandbox` so the app can still run. On such restrictive hosts, use the DEB when you do not want that AppImage fallback. In packaged builds **Open extension folder** points at a stable per-user copy of the bundled extension, so Chrome's **Load unpacked** path survives AppImage remounts and app upgrades. A standalone [extension zip](../../releases/latest/download/Chat-On-Steroids-Extension.zip) is attached too for manual installs.
+Every package is architecture-specific and carries matching Electron/native dependencies, `tunnel-client`, ripgrep and the Chrome extension. macOS packages additionally carry a thin in-process native Desktop backend for ScreenCaptureKit, AXUIElement and CGEvent; it runs on a Node Worker thread inside the Electron main process so TCC checks and native execution share one authorization subject without blocking the UI. Windows uses a per-user-capable assisted installer; macOS ships DMG/ZIP; Linux ships AppImage and Debian packages. **On Debian/Ubuntu, prefer the DEB.** The portable AppImage uses electron-builder's static launcher; if the host disables unprivileged user namespaces, that launcher can fall back to starting Chromium with `--no-sandbox` so the app can still run. On such restrictive hosts, use the DEB when you do not want that AppImage fallback. In packaged builds **Open extension folder** points at a stable per-user copy of the bundled extension, so Chrome's **Load unpacked** path survives AppImage remounts and app upgrades. A standalone [extension zip](../../releases/latest/download/Chat-On-Steroids-Extension.zip) is attached too for manual installs.
 
 Every release includes [`SHA256SUMS.txt`](../../releases/latest/download/SHA256SUMS.txt). Verify an installer before running it, then compare the printed hash with the matching line in that file:
 
@@ -46,7 +46,7 @@ sha256sum Chat-On-Steroids-Linux-x64.AppImage   # Linux
 
 ### Beta, with real permissions
 
-> **Fresh installs start with the full Core capability set enabled and read-only mode off.** Review the Home permission panel before connecting ChatGPT. **Run commands** can execute arbitrary programs as your logged-in OS user. Windows also starts the optional Desktop permissions enabled; macOS/Linux do not expose Desktop automation at all.
+> **Fresh installs start with the full Core capability set enabled and read-only mode off.** Review the Home permission panel before connecting ChatGPT. **Run commands** can execute arbitrary programs as your logged-in OS user. Windows and macOS also start the optional Desktop permissions enabled; macOS still requires explicit Screen Recording and Accessibility consent from System Settings before those native operations work.
 >
 > Use a project folder, not your whole profile, drive or filesystem root. Work on code that is committed or backed up. Path containment is defence in depth, not a kernel sandbox. Release binaries are currently publisher-unsigned; OS/browser trust prompts are expected. See [Permissions and security boundaries](#permissions-and-security-boundaries) and [`SECURITY.md`](SECURITY.md).
 
@@ -56,7 +56,7 @@ sha256sum Chat-On-Steroids-Linux-x64.AppImage   # Linux
 | --- | --- |
 | Files | Bounded read/search plus preflighted multi-file text patches inside approved roots |
 | Commands | Native shell processes and interactive terminal sessions, when enabled |
-| Desktop | **Windows only:** screenshots, window/control inspection, mouse, keyboard and clipboard permissions |
+| Desktop | **Windows/macOS:** screenshots, window/control inspection, mouse, keyboard and clipboard permissions |
 | Sessions | Local durable history, real tool-call evidence and Compact & Resume |
 | Workers | Experimental prime/worker chats with deterministic local routing |
 | Goal loop | Optional: a second model writes your next message until the goal is met (needs an OpenRouter key) |
@@ -65,7 +65,7 @@ The app has no replacement chat UI and does not host a model. It runs quietly in
 
 ## Requirements
 
-- **Windows 10/11**, **macOS 12 Monterey or newer**, or a modern desktop **Linux** distribution, on x64 or ARM64 matching the downloaded build.
+- **Windows 10/11**, **macOS 12 Monterey or newer**, or a modern desktop **Linux** distribution, on x64 or ARM64 matching the downloaded build. macOS Desktop capture requires 12.3 or newer; Core remains usable on 12.0–12.2.
 - **Chrome 116+** if you want session attribution, Compact & Resume, Overwrite, or worker chats.
 - **Linux:** a working Secret Service/keyring backend such as GNOME Keyring or KWallet when you use stored API keys or the companion extension. Electron's unencrypted `basic_text` fallback is deliberately refused.
 - A ChatGPT workspace where **Developer mode** and custom MCP apps are available on the web. OpenAI currently documents full MCP support, including write/modify actions, as a **beta rollout for Business, Enterprise and Edu**; **Pro** can connect custom MCPs for read/fetch only. Business developer mode is admin/owner controlled, while Enterprise/Edu can additionally use workspace permissions/RBAC. Availability, policy and UI can change, so check OpenAI's current [Developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt) documentation if your workspace differs.
@@ -79,7 +79,7 @@ The recommended connection uses OpenAI's Secure MCP Tunnel. Release builds bundl
 1. Install the build for your CPU and open Chat On Steroids.
 2. **Review permissions**, then approve one or more project folders.
 3. Create an OpenAI Secure MCP Tunnel and a restricted API key with **Tunnels: Read** and **Use**.
-4. In ChatGPT on the web, enable Developer mode and create the Core app. On Windows, create the Desktop app too if you enabled screen/control/clipboard permissions. Your workspace admin may need to grant or enable Developer mode first.
+4. In ChatGPT on the web, enable Developer mode and create the Core app. On Windows or macOS, create the Desktop app too if you enabled screen/control/clipboard permissions. Your workspace admin may need to grant or enable Developer mode first.
 5. In Chat On Steroids, press **Open extension folder**. In `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select that folder. Pairing is automatic.
 
 The Setup tab tracks each hop and only marks it complete once that side of the chain has actually been observed.
@@ -92,7 +92,7 @@ The Setup tab tracks each hop and only marks it complete once that side of the c
 4. In ChatGPT on the web, enable Developer mode from **Settings → Apps → Advanced settings**, or from the workspace Apps area. Business workspaces require an admin/owner; Enterprise/Edu may also require RBAC access from an admin.
 5. Create a custom app, choose **Tunnel**, select the tunnel, review the discovered actions, and publish/enable it as your workspace requires.
 
-For OpenAI tunnels, Core and the optional **Windows-only** Desktop surface use separate tunnel IDs because ChatGPT addresses each custom app as one endpoint.
+For OpenAI tunnels, Core and the optional Desktop surface use separate tunnel IDs because ChatGPT addresses each custom app as one endpoint.
 
 ### Cloudflare quick tunnel
 
@@ -112,15 +112,19 @@ The MCP connector uses ChatGPT's documented Developer mode and Secure MCP Tunnel
 
 Release binaries are not yet publisher-signed, and macOS builds are unnotarized, so Windows SmartScreen, macOS Gatekeeper or your browser may warn about an unverified download. Apple-silicon Mach-O files can contain ad-hoc signatures required by the platform; those do not identify a publisher. Verify the SHA-256 first. On Windows, **More info → Run anyway** is the SmartScreen path; on macOS use the normal system-approved open flow only after verifying the file. If you do not want to run an unverified binary, [build from source](#building) instead.
 
+### macOS Desktop permissions
+
+Desktop automation crosses two independent macOS TCC decisions: Screen Recording for pixels and Accessibility for AXUIElement controls/input. The packaged backend executes inside the Electron main process, so permission checks and native execution share the `Chat On Steroids.app` authorization subject. The Home permission panel reports the backend's live preflights, can request Accessibility from the owning Electron process, and links directly to both macOS settings pages. After changing either permission, fully quit and reopen the app before retrying.
+
 ## Permissions and security boundaries
 
-Fresh installs intentionally start the **Core** surface fully enabled: file/search/write permissions, command execution, session recording and experimental multi-agent mode are on; read-only mode is off. Windows additionally enables the optional Desktop permissions. macOS/Linux force those Desktop capabilities off at runtime while preserving any stored Windows choices in a config moved between machines. Existing installs otherwise keep their stored choices.
+Fresh installs intentionally start the **Core** surface fully enabled: file/search/write permissions, command execution, session recording and experimental multi-agent mode are on; read-only mode is off. Windows and macOS additionally enable the optional Desktop permissions. Linux forces those Desktop capabilities off at runtime while preserving stored choices in a config moved between machines. Existing installs otherwise keep their stored choices.
 
 The important boundaries are simple:
 
 - **File tools are limited to approved folders.** Paths are validated and canonicalised before access. This is application-level containment, not an OS or VM sandbox; same-user filesystem races remain possible.
 - **Commands are not folder-sandboxed.** `exec_command` starts in an approved folder but then runs with your normal logged-in user privileges and can reach anything that account can reach.
-- **Desktop control is Windows-only and not folder-scoped.** Screen capture, mouse/keyboard input and clipboard access apply to the Windows desktop when their permissions are enabled.
+- **Desktop control is not folder-scoped.** Screen capture, mouse/keyboard input and clipboard access apply to the native Windows or macOS desktop when their permissions are enabled. macOS also enforces its Screen Recording and Accessibility grants independently.
 - **The MCP server is loopback-only.** A random secret path protects each local connector. ChatGPT reaches it through the tunnel you configure; treat any complete public tunnel URL as a secret.
 - **Secrets use Electron `safeStorage`**: DPAPI on Windows, Keychain on macOS, and a desktop secret store such as libsecret/KWallet on Linux. The app refuses Linux's unencrypted `basic_text` fallback and explains how to enable a keyring.
 - **The browser bridge is separate and loopback-only.** It exists for the companion extension and does not expose file, command or settings routes.
@@ -134,9 +138,9 @@ Chat On Steroids publishes Core everywhere and an additional Desktop app on Wind
 | Connector | Purpose | Current tool names |
 | --- | --- | --- |
 | **Core** | Approved files, search, patches, terminal, session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` |
-| **Desktop** | **Windows only:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
+| **Desktop** | **Windows/macOS:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
 
-Core declares eight possible names but exposes at most seven at once because `find` is the no-shell search fallback and is mutually exclusive with the command pair. Desktop is optional and Windows-only. Revoking a permission takes effect immediately even if ChatGPT still shows a schema cached earlier; refresh the app in ChatGPT and start a new chat when you change the exposed tool shape.
+Core declares eight possible names but exposes at most seven at once because `find` is the no-shell search fallback and is mutually exclusive with the command pair. Desktop is optional and available on Windows/macOS. Revoking a permission takes effect immediately even if ChatGPT still shows a schema cached earlier; refresh the app in ChatGPT and start a new chat when you change the exposed tool shape.
 
 The public tool contract and permission mapping live in [`docs/tool-surface.md`](docs/tool-surface.md).
 

@@ -387,6 +387,9 @@ describe('cross-platform packaging targets', () => {
       'CFBundleVersion: packageVersion',
       "LSApplicationCategoryType: 'public.app-category.developer-tools'",
       "LSMinimumSystemVersion: '12.0'",
+      'NSScreenCaptureUsageDescription:',
+      "path.join(resources, 'desktop', 'macos-desktop-addon.node')",
+      "path.join(resources, 'desktop', 'libcos-desktop.dylib')",
       "path.join(ptyDir, 'spawn-helper')",
       "path.join(nodeModules, 'tree-sitter', 'prebuilds'",
       "path.join(nodeModules, 'tree-sitter-bash', 'prebuilds'",
@@ -396,7 +399,8 @@ describe('cross-platform packaging targets', () => {
       'walkFiles(contents)',
       "normalized.includes('.app/Contents/MacOS/')",
       "path.basename(file) === 'chrome_crashpad_handler'",
-      'requireThinMachO(file, launched)',
+      "path.basename(file) === 'macos-desktop-addon.node'",
+      'desktopPayload ? \'12.3\'',
       'launchedMachOCount < 6',
       "run('plutil', ['-extract', key, 'raw', plist])",
       "run('codesign', ['--display', '--verbose=4', app]",
@@ -405,10 +409,12 @@ describe('cross-platform packaging targets', () => {
     ]) expect(macSmoke).toContain(marker);
     expect(macSmoke).toContain("requireFile(path.join(resources, 'icon.icns'))");
     expect(macSmoke).toContain("iconBytes.toString('ascii', 0, 4) !== 'icns'");
-
     const packagedRuntime = readFileSync(path.join(root, 'scripts', 'smoke-packaged-runtime.mjs'), 'utf8');
     expect(packagedRuntime).toContain("for (const dependency of ['node-pty', 'tree-sitter', 'tree-sitter-bash'])");
     expect(packagedRuntime).toContain('directories.length !== 1 || directories[0] !== nativeDir');
+    expect(packagedRuntime).toContain("required('desktop/macos-desktop-addon.node')");
+    expect(packagedRuntime).toContain("required('desktop/libcos-desktop.dylib')");
+    expect(packagedRuntime).toContain("addon.handle('{\"op\":\"warm\"}')");
 
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
     const notes = readFileSync(path.join(root, 'docs', 'release-notes', 'v2.0.2.md'), 'utf8');
