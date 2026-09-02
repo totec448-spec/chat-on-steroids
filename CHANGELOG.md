@@ -46,6 +46,10 @@ the app refuses the extension and asks you to reload the matching copy.
   exercises this real addon/dylib path rather than the standalone development CLI protocol probe.
 
 ### Changed
+- **macOS builds now require macOS 13 Ventura or newer.** The bundled OpenAI `tunnel-client` v0.0.14,
+  which the publish pipeline pins to OpenAI's current release, is built for macOS 13; the 12.0 floor
+  of 2.0.2 would have shipped a Connect button that cannot start it. The packaging audit refuses any
+  payload whose deployment target is above the declared minimum, which is how this was caught.
 - **The model is told not to spam browser instances.** A prime that could not get a foreground
   reading out of the browser window it controlled launched a fresh debug instance on a new port
   and profile for every retry. The exec_command description, which every turn
