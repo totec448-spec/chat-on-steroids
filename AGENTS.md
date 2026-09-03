@@ -211,8 +211,8 @@ Do not "restore" these from an older document:
 - `mcp/instructions.ts::coreInstructions()` also still carries a root example shaped like
   `${firstRoot}/src/main.ts`. That silently assumes the approved root *is* the project. Live Core
   tool contracts in `tools-core.ts` are the authority: an approved root is often the **parent** of
-  the project, so every intermediate folder remains explicit (`/totec/chatgpt-local-files/...`,
-  not `/totec/src/...`). There is no model-visible `list_roots` fallback that makes the old example
+  the project, so every intermediate folder remains explicit (`/me/projects/app/...`,
+  not `/me/src/...`). There is no model-visible `list_roots` fallback that makes the old example
   safe; fix the instruction text/tests rather than teaching tools to guess a missing project level.
 - Goal currently continues **completed final answers only**. Older README/working-note wording that
   says an `interrupted` turn is automatically continued is stale against `content.js::GOAL_CONTINUABLE`.
@@ -266,7 +266,7 @@ Do not "restore" these from an older document:
 src/main/index.ts             Electron startup, window/tray, shutdown, security shell
 src/main/shutdown.ts          ordered teardown phases, each bounded, ending in the exit
 src/main/config.ts            validated settings, migrations, defaults, read-only caps
-src/main/platform.ts          host capability projection; Desktop exists only on Windows and macOS ≥ 12.3
+src/main/platform.ts          host capability projection; Desktop exists only on Windows and macOS (ScreenCaptureKit floor 12.3, below the 13.0 app floor)
 src/main/connection.ts        MCP + tunnel lifecycle, per-surface publication & status
 src/main/ipc.ts               every renderer→main operation and main→renderer push
 src/preload/index.ts          the complete renderer-facing API allowlist
@@ -360,7 +360,7 @@ src/main/computer/browser-chords.ts  pure: which chords manage browser tabs/wind
 native/macos-desktop-helper/* shared ScreenCaptureKit, AXUIElement and CGEvent Swift source
 native/macos-desktop-addon/* N-API bridge that runs that Swift backend in the Electron process
 src/main/tunnel/*             index.ts lifecycle · health.ts metrics · locate.ts binaries
-test/*.test.ts                75 tracked Vitest suites, named for the subsystem/boundary they cover
+test/*.test.ts                77 tracked Vitest suites, named for the subsystem/boundary they cover
 vitest.config.ts              test runtime/safety boundary: Node, 30s limits, isolated bridge ports + short in-process evidence wait
 electron.vite.config.ts       exact main/preload/renderer bundle entrypoints; extension is not bundled here
 scripts/*                     build-time icon / tunnel-client / ripgrep fetchers
@@ -383,7 +383,7 @@ durable or externally re-observable fact can reconstruct it.
 | Fact / mechanism | Authoritative owner | Lifetime / durable form | Consumers / invariant |
 | --- | --- | --- | --- |
 | approved roots + permissions + feature toggles | `config.ts` | `userData/config.json`, atomic temp→rename; validated/migrated on every load | `effectiveCapabilities()` is the live permission projection; malformed existing config recovers conservatively, never as fresh-install consent |
-| host capability availability | `platform.ts` + `shared/capabilities.ts` | derived, not stored | Desktop capabilities are impossible off Windows/macOS ≥ 12.3; every newly added capability is root-required until explicitly classified rootless |
+| host capability availability | `platform.ts` + `shared/capabilities.ts` | derived, not stored | Desktop capabilities are impossible off Windows/macOS; every newly added capability is root-required until explicitly classified rootless |
 | secrets | `secrets.ts` | OS `safeStorage`; never config/log/renderer | OpenAI, bridge and OpenRouter credentials never cross into untrusted renderer/page state |
 | small cross-restart control state | `durable.ts` | named `userData/state/*.json`; temp→rename; debounced generations + explicit `writeDurableNow` barriers | swarm, continuations, correlations, bridge commands, Goal ledgers; a failed file must not poison later files or publish a rejected generation |
 | MCP surface shape | `mcp/surfaces.ts` + `server.ts` exposure cache | endpoint lifetime | discovery is a cached schema promise; live permission enforcement is separate and current |
@@ -458,7 +458,7 @@ first?**
 | live browser request-id ownership handshake | `content.js::confirmLiveRequestOwners()` | background `correlate()` → bridge POST `/correlations` → recorder exact call evidence → correlation registry read-back/`confirmed[]` |
 | broken ChatGPT page auto-recovery | all evidence converges on `bridge.ts::queueBrowserRecovery()` | silence: `armSilenceSweep()` → `inspectSilentChats()`; assistant-error: `noteRecoveryObservations()`; unattributed: `noteCallAttribution(null)` → `repairUnattributedChat()`; no-tab: `queueMissingTab()`; Goal: `inspectOwedGoals()` → current `takePendingRepair()` → `background.js::maintain()` → `confirmRepair()` / `failRepairAttempt()` |
 | Goal / Loop after a final answer | bridge POST `/events` durable `acceptGoalReplyNow()` + `content.js::noteGoalTurn()` | `watchGoalTurn()` → `/goal/draft` → `goal.ts::startGoalDraft(...deferStart:true)` → `beginGoalDraft()` / `requestDrivingDecision()` → `content.js::maybeSendGoalReply()` |
-| automatic compaction | `store.ts::autoCompactionReady()` + bridge `chatIsWorking()`/worker fence + `content.js::maybeAutoCompact()` | `startCompact()` → `stopAndSettle()` → bridge `/compact` → `continuation.ts::openContinuationNow()` / `transitionNow()` / `commitContinuationResult()` |
+| automatic compaction | bridge `considerAutomaticCompaction()` (from `grantActivity()`): `store.ts::autoCompactionReady()` + `chatIsWorking()` + worker/blocked fence → `continuation.ts::openContinuationNow(automatic)` | page reads the ticket as `job` → `content.js::maybeResumePendingCompaction()` (raises its tab) → `startCompact()` → `stopAndSettle()` → bridge `/compact`; pickups by phase in `inspectOwedCompactions()`: asking 2 min × 5 then abort, writing 5 min × 3, opening 15 min × 3, each in front |
 | Compact & Resume restart recovery | `continuation.ts::restoreContinuations()` | session metadata ownership → `commitContinuationResult()`/projection repair; browser send ambiguity is resolved by the continuation's durable source/destination send checkpoints |
 | resumed first answer missed by Goal | `content.js::rememberResumeGoalPending()` / `bindResumeGoalTurn()` | `maybeRecoverResumeGoalTurn()` → exact single resume-user-turn + final/Fiber proof → ordinary `noteGoalTurn()`; synthetic `g-resume-<commandId>` is only a stable local turn id when no observed generation id exists |
 | worker lifecycle | `tools-core.ts` `agents` action dispatch | `agents.ts::stageSpawn()` / `stageMessages()` / `stageFinishAgent()` → `persistCriticalSwarmNow()` → staged commit/rollback → bridge worker/revive commands → `background.js::recoverDeferredRevivals()` → exact page liveness back into `agents.ts` |
@@ -1092,7 +1092,24 @@ The recovery proof is intentionally **state-based, not page-turn-id-based**. A r
 replay old final messages carrying historical turn ids, so `recorder.ts` scans for the newest final
 assistant observation whose exact `turnId` is still present in the durable `openTurns` set and has
 no explicit end in the same batch. Only that `recoveredFinal` may append a synthetic
-`turn_end(completed)`. Other historical finals remain transcript backfill. For Goal, a newer stable
+`turn_end(completed)`. Other historical finals remain transcript backfill.
+
+**A completed end the page reported is withdrawn by the server turn calling on.** ChatGPT's
+request id is minted per server turn and outlives the page — reload, lost stream, Stop click. The
+recorder remembers the request ids an open turn called under and, when the page reports that turn
+`completed`, keeps them with the end. A call under one of those ids that *starts* after the
+reported end (`reopenFalselyEndedTurn`) proves the end was the page's, not ChatGPT's: the recorder
+appends an app-authored `turn_start` for the same id (with `detail`), takes the id out of
+`knownTurnEnds` so the real end is accepted later, publishes it as `activeTurnId` again, and the
+bridge retires whatever Goal was drafting for it (`retireGoalDraftsFor` + `forgetGoalWatch`). A call
+that started before the end is an in-flight call finishing late and proves nothing; a different
+request id is a different turn; only `completed` ends are reopened — a stop is the user's, the
+failure outcomes belong to recovery. The proof is process memory: an app restart inside such a turn
+leaves it closed as reported. Live 2026-09-02: a reload mid-turn closed the adopted turn after four
+seconds, the same request id called tools for twenty-four more minutes, and Goal typed the next
+message against an answer never given.
+
+For Goal, a newer stable
 final may also strengthen an earlier uncertain (`unknown|failed|interrupted|stalled`) turn boundary
 when its authored time is at/after that turn's durable start; that marks the canonical assistant
 message `goalEligible` **without fabricating another turn end**. Canonical message upsert keeps
@@ -1216,6 +1233,12 @@ Turn closing is deliberately asymmetric:
 - Stop disappearing merely opens a settle window. If Stop returns, text/native activity changes,
   unanswered connector work remains, or the terminal message does not belong to this exact turn,
   completion is withdrawn;
+- the degraded no-Fiber rule — visible prose after the settle window means `completed` — applies
+  only to a generation this document has seen running (`unwitnessedGeneration`). A turn adopted
+  from the app on reload has no document-side evidence until the Stop control has been seen for
+  it; until then only the page model, an error, a user stop, a new send or the stall budget may
+  close it. Live 2026-09-02: the committed interim prose of a running turn closed the adopted turn
+  four seconds after the reload;
 - a genuinely newer authored user message is a hard boundary for the previous turn, while page
   unload/`closeConversation` alone never invents its outcome.
 
@@ -1389,6 +1412,46 @@ converge there instead of each owning a reload/open loop. The queued record is f
 episode + receipt token and moves `queued -> handed -> done`; only a confirmed browser action is
 "done", and meaningful new activity or turn completion retires only the repair kinds for which that
 fact is actually authoritative.
+
+**An adopted turn is bound only to a section below its question.** `seedResumeBaseline()` treats
+the newest assistant section as the resumed turn's own only when it follows the newest user
+message; a section above the question is a previous, finished answer, and binding the adopted
+turn to it let that answer's end-turn bit close the live turn nine seconds after every reload of
+the 2026-09-03 prime. With no section after the question the turn has no page evidence yet and
+stays open. The `unwitnessedGeneration` flag likewise clears only when Stop is seen over a
+section `generationTurn()` can bind, not on hydration's one-second Stop over an empty transcript.
+
+**The page's word that a turn ended is not enough to write the next Goal message on.** A reloaded
+page reads the transcript's last `end_turn` bit as a finished answer while the same request is
+still calling tools, and a "Message delivery timed out" error closes the local turn the same way
+(2026-09-03: the loop drafted twenty seconds after such an end and the chat ran two requests at
+once). `/goal/draft` therefore files the obligation but refuses the draft with `chat_still_working`
+while the recorder still has the chat's turn open (`chatIsWorking()` — a reopened turn stays open
+until the page reports a real end, and the 2026-09-03 banner reported none), while
+`runningToolCalls()` is non-zero, or while the chat's last attributed call is under `GOAL_QUIET_MS`
+(one minute) old. The page keeps its claim and asks again every `GOAL_RETRY_MS` on the plain wait,
+with no backoff, until the app says the chat has finished. Only the silence ticket (`g-silence-*`)
+is drafted over an open turn: it is the app's own finding that the answer is over. A call that proves
+the ended turn is still running (`recorder.ts::reopenFalselyEndedTurn`) withdraws the obligation
+outright via `retireGoalDraftsFor()`. The silence path is the other half: a Goal/Loop chat gets its
+silence reload, then `GOAL_SILENCE_LISTEN_MS` (one minute) of listening, and only a minute with no
+tool call, no interim row, no message files the `g-silence-*` ticket; any of those re-arms the
+two-minute clock so a chat that stops again later gets the same reload and minute again.
+
+**A reload the page has not come back from is not answered with another.** A 300k-token chat
+takes minutes to load — three, for the 2026-09-03 prime — and `inspectSilentChats()` used to
+reload it again 23 seconds after an unattributed reload had, restarting the load. A chat in
+`awaitingReturn` (set by `confirmRepair()`, cleared by the next `grantActivity()`) keeps its
+silence deadline pushed to `lastBrowserRecoveryAt + BROWSER_RECOVERY_COOLDOWN_MS`; only a page
+that never returns is reloaded when that runs out.
+
+**The DOM layer reads each transcript section once.** `chatgpt-dom.js` keeps a per-section memo
+(`sectionCache`: rows, markdown parts, tool blocks, progress boxes, `interrupted`) that its own
+MutationObserver drops on any subtree, text or relevant attribute change, draining pending records
+synchronously (`takeRecords()`) before every read. Before it, the one-second tick walked the whole
+transcript six to eight times and took every message's text each time — most of a second of main
+thread per second on a 300-turn chat, and the freeze behind the 2026-09-03 prime. Never read
+message text or tool rows around the cache; add a field to the memo instead.
 
 An open semantic turn grants its **conversation** a two-minute silence deadline in `activeUntil`.
 `grantActivity()` arms/pushes it from accepted current-turn evidence and attributed calls;
@@ -1626,9 +1689,13 @@ chat tied to one continuation token/session), and `revive` (the already-bound ex
 conversation + run incarnation + unique wake identity). The deadlines differ because the semantic
 risks differ:
 
-- **Fresh worker before any page owns it:** discovery may make one safe re-delivery after **60s**;
-  nothing irreversible happened. But the worker invitation has an absolute **120s bootstrap
-  lifetime from creation**, so a late handout cannot keep a slot forever.
+- **Fresh worker before any page owns it:** the chat this app opened has **`WORKER_REDEEM_MS`
+  (20s)** to redeem its marker (plus the browser launch window when the app had to start the
+  browser). A page silent past that is dead, not slow: the same single-owner command is opened
+  **once more**, and a second silence fails the slot at once so the workers queued behind it open
+  (2026-09-02, worker-4 held its siblings for ninety seconds). A command still in line has no
+  clock of its own; the worker invitation has an absolute **120s bootstrap lifetime from
+  creation**, so a late handout cannot keep a slot forever.
 - **Fresh worker after redeem:** the page-owned attempt is one-shot. Its lease is bounded by the
   smaller of **90s from claim** and the remaining absolute worker-bootstrap lifetime. A page-reported
   bootstrap failure is terminal rather than a prompt to open another worker chat.
@@ -1747,11 +1814,20 @@ before projection publication or the final continuation-WAL completion write. Re
 the recorder/workspace/Goal/swarm projections and marks the transaction committed; it does **not**
 roll session ownership back to A or reinterpret post-rebind cleanup failure as a failed move. Never implement
 compaction by creating a second session or copying history — the whole feature is continuity
-of one durable id. Automatic compaction is a live level plus page-turn decision: an idle old
-chat never fires merely because it sits above the threshold, a transient pre-send barrier
-failure may retry on a later turn, and the continuation transaction is the sole durable
-authority once either prompt crosses its semantic send boundary. Browser documents,
-`sessionStorage`, local generation ids and command leases are never semantic ownership.
+of one durable id. Automatic compaction is a live level plus liveness decision **made by the
+app**: `bridge.ts::considerAutomaticCompaction()` files the ticket from `grantActivity()` — an
+attributed call or current-turn observation — when the session is over the line and
+`chatIsWorking()`, so a page that has frozen mid-turn (2026-09-03) is still compacted. An idle
+old chat never fires merely because it sits above the threshold; the page's only part is to
+resume the ticket it reads back as `job` (raising its tab first for an automatic one), a
+transient pre-send barrier failure is retried by the app's pickups, and the continuation
+transaction is the sole durable authority once either prompt crosses its semantic send
+boundary. Pickups are phased on the ticket's durable position (`inspectOwedCompactions()`):
+while the prompt is unsent, a raised reload every two minutes, five times, then the ticket is
+abandoned (`handoff_never_sent`) and the next working turn opens a fresh one; while the brief
+is being written, every five minutes, three times; once it has landed, the resume every
+quarter-hour, three times. Browser documents, `sessionStorage`, local generation ids and
+command leases are never semantic ownership.
 
 The rebind also retires A's **execution** authority. Exact request-id proof from A remains useful
 for forensics, but it cannot run a new local tool after S names B: `kernel.ts` refuses it before the
@@ -2649,7 +2725,7 @@ Each has a different persistence boundary.
 | navigation resurrects wrong chat | `background.js` tab registry, `content.js` epoch | `extension`, `content-script` |
 | bridge pairing / connect / stop | `bridge.ts`, `background.js`, `popup.*` | `bridge`, `extension` |
 | Compact & Resume split or lost | `continuation.ts`, `bridge.ts`, `store.ts`, `workspace.ts`, `agents.ts` | `continuation`, `resume` |
-| auto-compaction repeats or never fires | `store.ts` live level, `content.js::maybeAutoCompact`, `continuation.ts` | `content-script`, `continuation`, `resume` |
+| auto-compaction repeats or never fires | `store.ts` live level, `bridge.ts::considerAutomaticCompaction` / `inspectOwedCompactions`, `content.js::maybeResumePendingCompaction`, `continuation.ts` | `bridge`, `content-script`, `continuation`, `resume` |
 | agents spawn/message/finish | `agents.ts`, `tools-core.ts`, `bridge.ts` | `agents`, `swarm`, `bridge` |
 | session UI or main process freezes | `store.ts`, `chronology.ts`, `ipc.ts` read path, `chat.ts` | `session`, retained stress probe |
 | stale render / typed input clobbered | `renderer/main.ts`, `chat.ts` generation guards, `ipc.ts` push order | `ipc`, `renderer-state` |
@@ -2736,7 +2812,7 @@ microseconds-or-never; never copy that value into production browser attribution
 
 ### Where a regression belongs
 
-71 tracked `*.test.ts` suites in the current tree, named for the subsystem or boundary they cover.
+77 tracked `*.test.ts` suites in the current tree, named for the subsystem or boundary they cover.
 Vitest uses real filesystem, real processes and real HTTP in many of them. **Do not maintain this
 count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating this section.
 
@@ -2772,6 +2848,8 @@ count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating 
 | `goal-resume-handoff` | Goal provider-context continuity from **committed resume handoff provenance**; aborted/stale/legacy provenance must not become a false context anchor |
 | `goal` | the goal loop's prompt, privacy boundary, one-draft rule, OpenRouter failures |
 | `ipc` | main<->renderer boundary and payload validation |
+| `macos-desktop-hardening` | source-level invariants of the Swift backend, its build script and the in-process boundary; runs on every host |
+| `macos-computer-live` | opt-in (`COS_LIVE_MACOS_DESKTOP=1`) probe of the real macOS backend on a packaged Mac host |
 | `mcp` | surfaces, handlers, integration — the widest suite |
 | `mcp-inbound` | `x-request-id` extraction and normalization |
 | `mcp-inflight` | request/tool lifetime counters and post-handler settling |

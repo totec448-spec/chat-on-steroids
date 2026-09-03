@@ -299,7 +299,11 @@ export type SessionEvent =
    * for readers working from a cursor that has already consumed it.
    */
   | (BaseEvent & { kind: 'page_tool'; messageId: string; label: string; origin?: number })
-  | (BaseEvent & { kind: 'turn_start' })
+  /**
+   * `detail` names an app-authored reopening: the page reported this turn ended, and a tool
+   * call under the same server turn then proved it had not. Absent on the page's own starts.
+   */
+  | (BaseEvent & { kind: 'turn_start'; detail?: string })
   | (BaseEvent & { kind: 'turn_end'; outcome: TurnOutcome; detail?: string })
   | (BaseEvent & { kind: 'chat_error'; message: StoredText })
   | (BaseEvent & { kind: 'tool_call'; call: ToolCallRecord })

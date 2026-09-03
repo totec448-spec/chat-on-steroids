@@ -776,6 +776,40 @@ describe('the reply', () => {
     expect(view.reply).toBe('');
   });
 
+  /**
+   * What a routed provider actually sent on 2026-09-03, three drafts in a row: the decision,
+   * with its thinking in front of it despite `reasoning.exclude`. Each one failed as
+   * `invalid_goal_decision_json` and the page asked again at once, which is a key being spent
+   * on a reply the app already had. Only the wrapping is removed; the object is validated as
+   * strictly as before.
+   */
+  it('reads the decision out from behind a reasoning block, a fence, or a sentence', async () => {
+    const shapes = [
+      '<think>The user wants the next step.\nCounting: {done: false}</think>\n{"action":"continue","reply":"Run the tests next."}',
+      '```json\n{"action":"continue","reply":"Run the tests next."}\n```',
+      'Here is the decision:\n{"action":"continue","reply":"Run the tests next."}\nDone.'
+    ];
+    for (const [index, content] of shapes.entries()) {
+      const conversationId = `c-wrapped-${index}`;
+      const sessionId = await seed(conversationId);
+      globalThis.fetch = (async () => Response.json({ choices: [{ message: { content } }] })) as never;
+      goal.startGoalDraft({ sessionId, conversationId, turnId: 'g-1' });
+      const view = await settled(conversationId);
+      expect(view.stage, content).toBe('ready');
+      expect(view.reply).toBe(goal.humanReply('Run the tests next.'));
+    }
+  });
+
+  it('still refuses a reply whose only braces are not the decision', async () => {
+    const sessionId = await seed('c-braces-only');
+    globalThis.fetch = (async () =>
+      Response.json({ choices: [{ message: { content: '<think>{"note":"scratch"}</think> nothing else' } }] })) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-braces-only', turnId: 'g-1' });
+    const view = await settled('c-braces-only');
+    expect(view.stage).toBe('failed');
+    expect(view.error).toBe('invalid_goal_decision_json');
+  });
+
   it('accepts the stopping word however the model punctuated it', async () => {
     for (const [index, spelling] of ['no_reply', 'No Reply.', 'NO-REPLY!'].entries()) {
       const id = `c-stop-${index}`;

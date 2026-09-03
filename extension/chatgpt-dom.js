@@ -292,6 +292,112 @@ var CLF_DOM = (() => {
    * Group only sections that explicitly share role + id; id-less sections stay
    * independent because merging those would be a guess.
    */
+  /**
+   * What this layer has already read out of a section, kept until the section changes.
+   *
+   * The content script reads the whole transcript once a second, and several times over: the
+   * recorder's message scan, the presentation pass per assistant turn, the progress and tool
+   * row lookups. Each of those walked every section and took the text of every message on the
+   * page again — six to eight full walks a second, on a page that only ever changes in one
+   * place. On a 300-turn chat that was most of a second of main thread per second, and the
+   * 2026-09-03 prime, over 300k tokens, sat unresponsive for three minutes after every reload.
+   *
+   * A section's rows, tool blocks and progress boxes are therefore read once and kept on the
+   * element. A MutationObserver of our own drops the entry for any section whose subtree or
+   * relevant attributes change, and — because a test, or React inside one frame, can mutate
+   * and read back before the observer's microtask runs — its pending records are drained
+   * synchronously before every cached read. Sections we never see mutate cost nothing after
+   * their first read; the one being streamed into is re-read as it grows, as it always was.
+   */
+  const sectionCache = new WeakMap();
+  let cacheObserver = null;
+  let cacheObserverFailed = false;
+  const CACHE_ATTRIBUTES = [
+    'class',
+    'data-interrupted',
+    'data-message-id',
+    'data-message-author-role',
+    'data-turn',
+    'data-turn-id',
+    'data-testid',
+    'aria-label'
+  ];
+
+  function invalidateFrom(record) {
+    const target = record && record.target;
+    if (!target) return;
+    const element = target.nodeType === 1 ? target : target.parentElement;
+    const section = element && typeof element.closest === 'function' ? element.closest(TURN) : null;
+    if (section) sectionCache.delete(section);
+  }
+
+  function ensureCacheObserver() {
+    if (cacheObserver) return true;
+    if (cacheObserverFailed) return false;
+    try {
+      if (typeof MutationObserver !== 'function' || !document.body) return false;
+      cacheObserver = new MutationObserver((records) => {
+        for (const record of records) invalidateFrom(record);
+      });
+      cacheObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: CACHE_ATTRIBUTES
+      });
+      return true;
+    } catch {
+      cacheObserverFailed = true;
+      cacheObserver = null;
+      return false;
+    }
+  }
+
+  /** The memo for one section, valid as of now. Null when caching is unavailable. */
+  function memoOf(section) {
+    if (!section || !ensureCacheObserver()) return null;
+    for (const record of cacheObserver.takeRecords()) invalidateFrom(record);
+    let memo = sectionCache.get(section);
+    if (!memo) {
+      memo = { rows: null, parts: null, blocks: null, boxes: null, interrupted: null, answers: null };
+      sectionCache.set(section, memo);
+    }
+    return memo;
+  }
+
+  /** The explicit messages of one section: id, the role attribute, text. */
+  function sectionRows(section) {
+    const memo = memoOf(section);
+    if (memo && memo.rows) return memo.rows;
+    const rows = [];
+    for (const node of section.querySelectorAll('[data-message-id]')) {
+      const id = node.getAttribute('data-message-id');
+      if (!id) continue;
+      const roleAttr = node.getAttribute('data-message-author-role') || '';
+      const readable = roleAttr === 'user' || roleAttr === 'assistant';
+      rows.push({ id, roleAttr, text: readable ? messageText(node, roleAttr) : null, node });
+    }
+    if (memo) memo.rows = rows;
+    return rows;
+  }
+
+  /** The authored markdown blocks of one section, for a turn without explicit messages. */
+  function sectionParts(section) {
+    const memo = memoOf(section);
+    if (memo && memo.parts) return memo.parts;
+    const parts = [];
+    for (const markdown of section.querySelectorAll('.markdown')) {
+      if (markdown.closest && markdown.closest('[data-interrupted]')) continue;
+      if (markdown.closest && markdown.closest(TOOL)) continue;
+      if (markdown.closest && markdown.closest(OWN_SURFACES)) continue;
+      const value = text(markdown);
+      if (value && parts[parts.length - 1] !== value) parts.push(value);
+    }
+    if (memo) memo.parts = parts;
+    return parts;
+  }
+
   function turns() {
     return safe(() => {
       const out = [];
@@ -382,17 +488,18 @@ var CLF_DOM = (() => {
       const nodes = turnNodes(turn);
       let explicit = 0;
       for (const section of nodes) {
-        for (const node of section.querySelectorAll('[data-message-id]')) {
-          const id = node.getAttribute('data-message-id');
-          if (!id || seen.has(id)) continue;
-          const role = node.getAttribute('data-message-author-role') || turn.role;
+        for (const row of sectionRows(section)) {
+          if (seen.has(row.id)) continue;
+          const role = row.roleAttr || turn.role;
           if (role !== 'user' && role !== 'assistant') continue;
-          seen.add(id);
+          seen.add(row.id);
           explicit++;
           out.push({
-            id,
+            id: row.id,
             role,
-            text: messageText(node, role),
+            // Read with the section's own role attribute when it has one; a node that carries
+            // none is read under the turn's role, which the cache cannot know in advance.
+            text: row.text !== null ? row.text : messageText(row.node, role),
             turnId: turn.id,
             node: section,
             interrupted: interrupted(turn)
@@ -409,12 +516,8 @@ var CLF_DOM = (() => {
       if (turn.role === 'assistant' && explicit === 0) {
         const parts = [];
         for (const section of nodes) {
-          for (const markdown of section.querySelectorAll('.markdown')) {
-            if (markdown.closest && markdown.closest('[data-interrupted]')) continue;
-            if (markdown.closest && markdown.closest(TOOL)) continue;
-            if (markdown.closest && markdown.closest(OWN_SURFACES)) continue;
-            const value = text(markdown);
-            if (value && parts[parts.length - 1] !== value) parts.push(value);
+          for (const value of sectionParts(section)) {
+            if (parts[parts.length - 1] !== value) parts.push(value);
           }
         }
         if (parts.length > 0) {
@@ -750,7 +853,14 @@ var CLF_DOM = (() => {
 
   function interrupted(turn) {
     return safe(
-      () => turnNodes(turn).some((section) => section.querySelector('[data-interrupted="true"]') !== null),
+      () =>
+        turnNodes(turn).some((section) => {
+          const memo = memoOf(section);
+          if (memo && memo.interrupted !== null) return memo.interrupted;
+          const value = section.querySelector('[data-interrupted="true"]') !== null;
+          if (memo) memo.interrupted = value;
+          return value;
+        }),
       false
     );
   }
@@ -824,6 +934,8 @@ var CLF_DOM = (() => {
     return safe(
       () =>
         turnNodes(turn).flatMap((section) => {
+          const memo = memoOf(section);
+          if (memo && memo.blocks) return memo.blocks;
           const current = [...section.querySelectorAll(TOOL)];
           const found = (current.length > 0 ? current : [...section.querySelectorAll(TOOL_LEGACY)]).filter(
             isToolBlock
@@ -831,7 +943,9 @@ var CLF_DOM = (() => {
           // The two shapes nest — the display-contents wrapper can sit inside the legacy
           // span — and relabelling both would put our icon and title inside our own row.
           // Keep the innermost, which is the element that actually carries the label.
-          return collapseNested(found, true);
+          const blocks = collapseNested(found, true);
+          if (memo) memo.blocks = blocks;
+          return blocks;
         }),
       []
     );
@@ -1284,9 +1398,18 @@ var CLF_DOM = (() => {
   function hideProgress(turn, hidden) {
     return safe(() => {
       for (const section of turnNodes(turn)) {
-        for (const box of section.querySelectorAll('[data-interrupted]')) {
+        const memo = memoOf(section);
+        if (memo && !memo.answers) memo.answers = new Map();
+        const boxes = memo && memo.boxes ? memo.boxes : [...section.querySelectorAll('[data-interrupted]')];
+        if (memo) memo.boxes = boxes;
+        for (const box of boxes) {
           // Restoring is always safe; hiding is not. A box carrying the answer stays.
-          if (hidden && !holdsAnswer(box)) box.setAttribute('data-clf-native-hidden', '1');
+          let holds = memo ? memo.answers.get(box) : undefined;
+          if (holds === undefined) {
+            holds = holdsAnswer(box);
+            if (memo) memo.answers.set(box, holds);
+          }
+          if (hidden && !holds) box.setAttribute('data-clf-native-hidden', '1');
           else box.removeAttribute('data-clf-native-hidden');
         }
       }
@@ -1319,15 +1442,32 @@ var CLF_DOM = (() => {
   }
 
   /** Types into the composer; dedicated fresh-chat automation may replace an autosaved draft. */
-  function insertPrompt(value, replace = false) {
+  /**
+   * Puts `value` in the composer.
+   *
+   * `mode` says what to do with text already there: `false` refuses, `true` replaces it, and
+   * `'append'` writes after it on a new line — a stray character somebody left in the box is
+   * not a reason to hold a finished Goal reply at "sending" (2026-09-03: one letter did).
+   */
+  function insertPrompt(value, mode = false) {
     return safe(() => {
       const box = composer();
       if (!box) return false;
-      if ((box.textContent || '').trim() !== '') {
-        if (!replace) return false;
+      const existing = (box.textContent || '').trim();
+      if (existing !== '') {
+        if (mode === false) return false;
         box.focus();
-        box.replaceChildren();
-        box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+        if (mode === 'append') {
+          const selection = document.getSelection();
+          if (selection) {
+            selection.selectAllChildren(box);
+            selection.collapseToEnd();
+          }
+          value = `\n${value}`;
+        } else {
+          box.replaceChildren();
+          box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
+        }
       }
       box.focus();
       // execCommand still produces the native editing path ChatGPT listens for. Newer

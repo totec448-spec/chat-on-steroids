@@ -34,3 +34,11 @@ docs/android-mcp-brainstorm/
 # Smoke-test scratch fixtures.
 smoke/
 smoke-switch.txt
+HANDOFF.md
+docs/handoff-*.md
+docs/open-issues-*.md
+
+# One-off local experiment scratch.
+one-cycle.ps1
+.one-cycle-*
+proof-*.txt
