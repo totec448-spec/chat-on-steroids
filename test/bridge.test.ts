@@ -46,10 +46,13 @@ const {
   STALE_SWARM_MS,
   BROWSER_PLACEMENT_MS,
   CHAT_SILENCE_MS,
+  GOAL_QUIET_MS,
+  GOAL_SILENCE_LISTEN_MS,
   COMMAND_DEADLINE_MS,
   REVIVAL_ACTIVITY_MS,
   REVIVAL_DEADLINE_MS,
   WORKER_BOOTSTRAP_LIMIT_MS,
+  WORKER_REDEEM_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   startBridge,
@@ -64,6 +67,7 @@ const {
   GOAL_SWITCHES_STATE,
   goalDrivingMode,
   goalObjectiveFor,
+  goalDraftBusy,
   goalPendingReplyFor,
   goalSwitchFor,
   humanReply,
@@ -1112,15 +1116,18 @@ describe('activity feed', () => {
  * which for a worker is the moment that worker starts existing.
  */
 /**
- * When a chat may compact itself.
+ * When a chat is compacted on its own.
  *
  * Two halves, deliberately kept apart. The session store knows the level — this chat is
- * over the configured threshold — and the
- * bridge knows the thing only an open connection can know: whether ChatGPT is answering
- * right now. Both must be true, and the second is the one that keeps an old, enormous chat
- * silent when it is merely opened and read.
+ * over the configured threshold — and the bridge knows the thing only an open connection can
+ * know: whether ChatGPT is answering right now. Both must be true, and the second is the one
+ * that keeps an old, enormous chat silent when it is merely opened and read. The decision is
+ * the app's: it files the durable ticket on the evidence that the chat is working, and the
+ * page resumes the ticket — so a page that has frozen mid-turn is still compacted.
  */
 describe('automatic compaction', () => {
+  const settled = () => new Promise((resolve) => setTimeout(resolve, 25));
+
   const over = (): unknown[] => [
     { kind: 'user_message', time: Date.now(), text: 'x'.repeat(44_000), messageId: 'over-the-line' }
   ];
@@ -1135,7 +1142,7 @@ describe('automatic compaction', () => {
     }
   }
 
-  it('offers the trigger mid-turn and takes it back the moment the answer lands', async () => {
+  it('files the ticket itself for a working chat over the line, once, and never for a finished one', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac01';
     await withThreshold(10_000, async () => {
@@ -1145,20 +1152,36 @@ describe('automatic compaction', () => {
           events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-live' }, ...over()]
         }
       });
+      await settled();
       const working = await request('GET', `/activity?conversationId=${conversationId}`);
-      expect(working.body.autoCompactReady).toBe(true);
+      const sessionId = working.body.sessionId as string;
+      const ticket = continuationForSession(sessionId);
+      expect(ticket).toMatchObject({ automatic: true, state: 'awaiting-summary', from: conversationId });
+      // The page reads the ticket back as its job and resumes it; nothing else is asked of it.
+      expect(working.body.job).toMatchObject({ stage: 'handoff-pending', automatic: true });
 
+      // More work in the same turn is the same ticket.
+      await request('POST', '/events', {
+        body: { conversationId, events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-live' }] }
+      });
+      await settled();
+      expect(continuationForSession(sessionId)?.token).toBe(ticket!.token);
+
+      // Auto Off cancels it; the chat finishing its answer does not earn another one. Still
+      // far over the line, and deliberately untouched: there is nothing left to carry into a
+      // fresh chat once the answer has been written.
+      expect((await request('POST', '/settings', { body: { conversationId, autoCompact: false } })).status).toBe(200);
+      expect((await request('POST', '/settings', { body: { conversationId, autoCompact: true } })).status).toBe(200);
       await request('POST', '/events', {
         body: {
           conversationId,
           events: [{ kind: 'turn_end', time: Date.now(), turnId: 'turn-live', outcome: 'completed' }]
         }
       });
-      const settled = await request('GET', `/activity?conversationId=${conversationId}`);
-      // Still far over the line, and deliberately not offered: there is nothing left to
-      // carry into a fresh chat once the answer has been written.
-      expect(settled.body.tokens).toBeGreaterThan(10_000);
-      expect(settled.body.autoCompactReady).toBe(false);
+      await settled();
+      const finished = await request('GET', `/activity?conversationId=${conversationId}`);
+      expect(finished.body.tokens).toBeGreaterThan(10_000);
+      expect(continuationForSession(sessionId)).toBeNull();
     });
   });
 
@@ -1183,9 +1206,10 @@ describe('automatic compaction', () => {
             events: [{ kind: 'turn_start', time: Date.now(), turnId: 'blocked-turn-live' }, ...over()]
           }
         });
+        await settled();
         const activity = await request('GET', `/activity?conversationId=${conversationId}`);
         expect(activity.body.tokens).toBeGreaterThan(10_000);
-        expect(activity.body.autoCompactReady).toBe(false);
+        expect(continuationForSession(activity.body.sessionId as string)).toBeNull();
         expect(activity.body.context).toMatchObject({ auto: false });
         expect(activity.body.goal).toMatchObject({ enabled: false, own: true, blocked: 'blocked', pending: null });
         expect(pendingCommands().some((command) => command.what.startsWith('resume:'))).toBe(false);
@@ -1236,9 +1260,10 @@ describe('automatic compaction', () => {
           events: [{ kind: 'turn_start', time: Date.now(), turnId: 'worker-turn-live' }, ...over()]
         }
       });
+      await settled();
       const activity = await request('GET', `/activity?conversationId=${conversationId}`);
       expect(activity.body.tokens).toBeGreaterThan(10_000);
-      expect(activity.body.autoCompactReady).toBe(false);
+      expect(continuationForSession(activity.body.sessionId as string)).toBeNull();
       expect(activity.body.context).toMatchObject({ auto: false, threshold: 10_000 });
       expect(pendingCommands().some((command) => command.what.startsWith('resume:'))).toBe(false);
 
@@ -1286,11 +1311,11 @@ describe('automatic compaction', () => {
   });
 
   /**
-   * While the brief is being written the pickup is a five-minute clock with three reloads, so a
-   * glitched writing page costs a quarter of an hour at most rather than three of them. The
-   * ticket itself is never failed by a pickup; it stays open for the page to finish.
+   * Before the prompt has reached ChatGPT the pickup is a two-minute clock with five raised
+   * reloads, and a ticket that still has not been sent after them is abandoned: nothing was
+   * fenced, and the next working turn opens a fresh one. Every pickup asks for the tab in front.
    */
-  it('reloads one automatic ticket at 5-minute checkpoints while the brief is being written', async () => {
+  it('reloads an unsent automatic ticket in front every 2 minutes, then gives it up after five', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -1306,10 +1331,66 @@ describe('automatic compaction', () => {
       });
       const token = filed.body.token as string;
 
+      const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string; focus: boolean } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      await vi.advanceTimersByTimeAsync(2 * 60_000 - 1);
+      expect(await takeRepair()).toBeNull();
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(attempt === 0 ? 1 : 2 * 60_000);
+        const handout = await takeRepair();
+        expect(handout).toMatchObject({ conversationId, reason: 'compaction', focus: true });
+        await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`);
+        expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary' });
+      }
+
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      expect(await takeRepair()).toBeNull();
+      expect(continuationByToken(token)).toMatchObject({ state: 'aborted', error: 'handoff_never_sent' });
+      expect(continuationForSession(filed.body.sessionId as string)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Once the marked prompt is with ChatGPT the pickup is a five-minute clock with three reloads,
+   * so a glitched writing page costs a quarter of an hour at most rather than three of them. The
+   * ticket itself is never failed by a pickup here; it stays open for the page to finish. The
+   * writing phase's three are its own — the asking phase spent none of them.
+   */
+  it('reloads one automatic ticket at 5-minute checkpoints while the brief is being written', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac07';
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [{ kind: 'user_message', time: Date.now(), text: 'generate the huge handoff', messageId: 'm-auto-watch-2' }]
+        }
+      });
+      const filed = await request('POST', '/compact', {
+        body: { conversationId, ticket: true, automatic: true }
+      });
+      const token = filed.body.token as string;
+
       const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
         await sweepStaleSwarm(Date.now());
         return (await request('GET', '/status')).body.repairs?.[0] ?? null;
       };
+      // One asking-phase pickup spent before the page gets the prompt out.
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      const asking = await takeRepair();
+      expect(asking).toMatchObject({ conversationId, reason: 'compaction' });
+      await request('GET', `/status?repaired=${asking!.token}&repairAction=reloaded`);
+
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).body.armed).toBe(true);
+      expect(continuationByToken(token)?.sourceSend.state).toBe('dispatched-unresolved');
+
       await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
       expect(await takeRepair()).toBeNull();
 
@@ -4121,38 +4202,113 @@ describe('a worker chat that never opens', () => {
   });
 
   /**
-   * The two clocks a still-`invited` worker lives under.
+   * A chat that opened and never picked up its marker is opened once more, then failed.
    *
-   * Retrying is only safe because nothing was opened: an unleased command has no tab and no
-   * marker, so the second attempt is the first one. The limit is absolute from the invitation,
-   * so no combination of a late hand-out and a fresh lease can keep the slot past two minutes.
+   * worker-4 on 2026-09-02: the tab loaded as an empty New chat, the bridge held its lease for
+   * the full ninety seconds, and the two workers queued behind it opened only after it was
+   * failed. The re-open is the same command — single-owner, so a late redeem from the first tab
+   * is refused and nothing is typed twice — and it is spent once.
    */
-  it('stops holding a slot invited two minutes after the invitation, however late its chat opens', async () => {
+  it('opens a worker chat once more when the first page never redeems, and fails it after the second silence', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       spawn({ workers: [{ task: 'opens first' }, { task: 'waits behind it' }], caller: { conversationId: PRIME_CHAT } });
-      // worker-1's chat opens and is never redeemed, so worker-2's command cannot be handed out
-      // at all: it has no lease, no page and — before this — no clock either. Its retry at one
-      // minute finds the queue still blocked, and worker-1's own deadline only frees the line at
-      // ninety seconds. Counting worker-2's ninety from *there* would keep the slot invited for
-      // three minutes; the limit is measured from the invitation instead.
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      const first = new URL(opened[0]!).searchParams.get('clf')!;
+
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      // The same command, not a second one: whichever page redeems first owns it.
+      expect(new URL(opened[1]!).searchParams.get('clf')).toBe(first);
       expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-1', 'worker-2']);
 
-      // worker-1's own ninety seconds are up by here and worker-2's chat has just been opened,
-      // so it is the second worker's invitation that is still running.
-      // worker-1's chat is the one that opens; worker-2's command has no page and no lease.
-      await vi.waitFor(() => expect(opened.length).toBeGreaterThan(0));
+      const second = await redeem(first, 'tab-2');
+      expect(second.agent).toBe('worker-1');
+      const late = await request('POST', '/commands/redeem', { body: { id: first, client: 'tab-1' } });
+      expect(late.status).toBe(409);
+      // Owned now: the page's typing budget applies, and the redeem window no longer does.
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
+      expect(opened).toHaveLength(2);
+      expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-1', 'worker-2']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-      await vi.advanceTimersByTimeAsync(WORKER_BOOTSTRAP_LIMIT_MS - 5_000);
+  it('fails a worker whose reopened chat never redeems either, and moves the line on', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'opens first' }, { task: 'waits behind it' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
+      // worker-1 is failed, and worker-2's chat opens in the same beat rather than after ninety seconds.
+      await vi.waitFor(() => expect(opened).toHaveLength(3));
       expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-2']);
+      expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('failed');
+      const next = await redeem(new URL(opened[2]!).searchParams.get('clf')!);
+      expect(next.agent).toBe('worker-2');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-      await vi.advanceTimersByTimeAsync(6_000);
+  /**
+   * The absolute clock a still-`invited` worker lives under.
+   *
+   * A command still in line has no clock of its own; the limit is absolute from the invitation,
+   * so no combination of a late hand-out and a fresh lease can keep the slot past two minutes.
+   */
+  it('stops holding a slot invited two minutes after the invitation, however late its chat opens', async () => {
+    vi.useFakeTimers();
+    const previous = getConfig();
+    try {
+      await saveConfig({ ...previous, multiAgent: { ...previous.multiAgent, maxWorkers: 3 } });
+      await pair();
+      spawn({
+        workers: [{ task: 'opens first' }, { task: 'waits behind it' }, { task: 'waits longest' }],
+        caller: { conversationId: PRIME_CHAT }
+      });
+      expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-1', 'worker-2', 'worker-3']);
+      // Nothing ever redeems. Each worker's chat opens, is opened once more, and fails: worker-1
+      // by forty seconds, worker-2 by eighty, and worker-3's re-open lands at about a hundred.
+      // Counting worker-3's clock from *there* would keep the slot invited past two minutes; the
+      // limit is measured from the invitation instead.
+      let elapsed = 0;
+      const advance = async (ms: number): Promise<void> => {
+        await vi.advanceTimersByTimeAsync(ms);
+        elapsed += ms;
+      };
+      // Each re-open re-leases through a real durable write, which lands after the fake clock has
+      // moved on, so the deadline it arms may need one more tick to fire.
+      const openedSoon = async (count: number): Promise<void> => {
+        try {
+          await vi.waitFor(() => expect(opened).toHaveLength(count), { timeout: 300 });
+        } catch {
+          await advance(1_000);
+          await vi.waitFor(() => expect(opened).toHaveLength(count));
+        }
+      };
+      for (let count = 1; count <= 5; count += 1) {
+        await openedSoon(count);
+        // The browser keeps polling, so no re-open is mistaken for a cold browser launch.
+        await request('GET', '/status');
+        await advance(WORKER_REDEEM_MS + 1_000);
+      }
+      await openedSoon(6);
+      expect(elapsed).toBeLessThan(WORKER_BOOTSTRAP_LIMIT_MS - 5_000);
+      expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-3']);
+
+      await advance(WORKER_BOOTSTRAP_LIMIT_MS + 1_000 - elapsed);
       // No zombie slot left behind: nothing is still owed a tab, and nothing is still invited.
       await vi.waitFor(() => expect(pendingWorkerSpawns()).toEqual([]));
       expect(swarmState().agents.every((agent) => agent.state !== 'invited')).toBe(true);
     } finally {
       vi.useRealTimers();
+      await saveConfig(previous);
     }
   });
 });
@@ -5189,6 +5345,47 @@ describe('unattributed activity recovery', () => {
     }
   });
 
+  /**
+   * A reload the page has not come back from yet is not answered with another. The 300k-token
+   * prime of 2026-09-03 took three minutes to load, and silence reloaded it 23 seconds after an
+   * unattributed reload had — every reload starting the three minutes over. The page gets the
+   * recovery floor to come back; only a page that never does is reloaded when it runs out.
+   */
+  it('gives a freshly reloaded chat the recovery floor to come back before silence reloads it again', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-heavy')]);
+      await events(OTHER, [
+        {
+          kind: 'chat_error',
+          time: Date.now(),
+          text: 'Connection interrupted. Waiting for the complete answer',
+          turnId: 'turn-heavy',
+          recoverable: true
+        }
+      ]);
+      const first = await maintenance();
+      expect(chatOf(first)).toBe(OTHER);
+      expect(first?.reason).toBe('assistant-error');
+      expect(await maintenance(first!.token, 'reloaded')).toBeNull();
+
+      // Two minutes of nothing: the page is still loading. Silence does not pile on.
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+
+      // The floor runs out with the page still gone: now silence's own reload, once.
+      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      const rescue = await maintenance();
+      expect(chatOf(rescue)).toBe(OTHER);
+      expect(rescue?.reason).toBe('silence');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reloads a silent chat over a turn repair that can no longer retire', async () => {
     vi.useFakeTimers();
     try {
@@ -5614,6 +5811,173 @@ describe('unattributed activity recovery', () => {
       await vi.advanceTimersByTimeAsync(50_000);
       await sweepStaleSwarm(Date.now());
       expect(goalPendingReplyFor(OTHER)).toBeNull();
+    } finally {
+      resetGoalStateForTests();
+      await setSecret('openRouterApiKey', '');
+      await saveConfig(previous);
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The other two signs of life, so the listen window is proven against every kind of signal a
+   * working chat gives off: an interim assistant row the fresh page reports, and a message the
+   * user typed. Each pushes the chat back onto its two-minute clock, so a chat that stops
+   * again later gets the same reload and the same minute again — the loop carries on.
+   */
+  for (const [what, sign] of [
+    ['an interim assistant message', (turnId: string) => [{ kind: 'assistant_message', time: Date.now(), turnId, text: 'still on it', renderedHtml: '<p>still on it</p>', messageId: 'a-interim', state: 'streaming', activeNow: true }]],
+    ['a user message', () => [{ kind: 'user_message', time: Date.now(), text: 'carry on', messageId: 'u-alive', authoredNow: true }]]
+  ] as const) {
+    it(`files no Goal ticket when ${what} arrives within the minute, and re-arms the silence clock`, async () => {
+      const previous = getConfig();
+      await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+      await setSecret('openRouterApiKey', 'sk-or-silence');
+      resetGoalStateForTests();
+      vi.useFakeTimers();
+      try {
+        await pair();
+        const turnId = `turn-loop-${what.length}`;
+        await events(OTHER, [openTurn(turnId)]);
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        const handout = await maintenance();
+        expect(handout).toMatchObject({ conversationId: OTHER, reason: 'silence' });
+        expect(await maintenance(handout!.token)).toBeNull();
+
+        await vi.advanceTimersByTimeAsync(20_000);
+        await events(OTHER, sign(turnId));
+        await vi.advanceTimersByTimeAsync(50_000);
+        await sweepStaleSwarm(Date.now());
+        expect(goalPendingReplyFor(OTHER)).toBeNull();
+
+        // Quiet again for the full two minutes: the same reload, the same minute, then the ticket.
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+        await sweepStaleSwarm(Date.now());
+        const again = await maintenance();
+        expect(again).toMatchObject({ conversationId: OTHER, reason: 'silence' });
+        expect(await maintenance(again!.token)).toBeNull();
+        await vi.advanceTimersByTimeAsync(GOAL_SILENCE_LISTEN_MS);
+        await sweepStaleSwarm(Date.now());
+        expect(goalPendingReplyFor(OTHER)?.turnId).toMatch(/^g-silence-/);
+      } finally {
+        resetGoalStateForTests();
+        await setSecret('openRouterApiKey', '');
+        await saveConfig(previous);
+        vi.useRealTimers();
+      }
+    });
+  }
+
+  /**
+   * The page's word that a turn ended is not enough to write on. A reloaded page reads the
+   * transcript's last end_turn bit as a finished answer while the same request is still calling
+   * tools, and "Message delivery timed out" closes the local turn the same way; on 2026-09-03
+   * the loop drafted twenty seconds after such an end and the chat had two requests running in
+   * it. A chat whose tools ran within the last minute is working, and the draft waits — filed,
+   * so no page loses it — until the chat has been quiet for the minute.
+   */
+  it('refuses to draft for a chat whose tools ran within the last minute, then drafts once it is quiet', async () => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await setSecret('openRouterApiKey', 'sk-or-quiet');
+    resetGoalStateForTests();
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-false-end')]);
+      await attributed(OTHER, false, Date.now());
+      await vi.advanceTimersByTimeAsync(28_000);
+      await events(OTHER, [endTurn('turn-false-end', 'completed')]);
+
+      const early = await request('POST', '/goal/draft', {
+        body: { conversationId: OTHER, turnId: 'turn-false-end', clientId: 'tab-1' }
+      });
+      expect(early.status).toBe(409);
+      expect(early.body).toMatchObject({ error: 'chat_still_working', retryable: true });
+      expect(goalPendingReplyFor(OTHER)?.turnId).toBe('turn-false-end');
+      expect(goalDraftBusy(OTHER)).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
+      const quiet = await request('POST', '/goal/draft', {
+        body: { conversationId: OTHER, turnId: 'turn-false-end', clientId: 'tab-1' }
+      });
+      expect(quiet.status).toBe(200);
+    } finally {
+      resetGoalStateForTests();
+      await setSecret('openRouterApiKey', '');
+      await saveConfig(previous);
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The record's own turn is the first thing the draft waits on. On 2026-09-03 the prime's turn
+   * had been reopened by its own tool calls and never ended again — the "Message delivery timed
+   * out" banner produced no turn end — yet the page asked twenty seconds later and was drafted.
+   * Quiet tools alone are not enough while the app still has the turn open.
+   */
+  it('refuses to draft while the app still has the turn open, however quiet the tools are', async () => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await setSecret('openRouterApiKey', 'sk-or-open');
+    resetGoalStateForTests();
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-still-open')]);
+      await attributed(OTHER, false, Date.now());
+      await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS + 5_000);
+
+      const open = await request('POST', '/goal/draft', {
+        body: { conversationId: OTHER, turnId: 'turn-still-open', clientId: 'tab-1' }
+      });
+      expect(open.status).toBe(409);
+      expect(open.body).toMatchObject({ error: 'chat_still_working', retryable: true });
+      expect(goalPendingReplyFor(OTHER)?.turnId).toBe('turn-still-open');
+
+      await events(OTHER, [endTurn('turn-still-open', 'completed')]);
+      const ended = await request('POST', '/goal/draft', {
+        body: { conversationId: OTHER, turnId: 'turn-still-open', clientId: 'tab-1' }
+      });
+      expect(ended.status).toBe(200);
+    } finally {
+      resetGoalStateForTests();
+      await setSecret('openRouterApiKey', '');
+      await saveConfig(previous);
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The silence ticket is the route a chat whose page lost its answer takes to the next message,
+   * and its turn is exactly the one nobody is left to close: the reload, the minute of nothing,
+   * and the ticket are the app's own finding that the answer is over. That draft is not held
+   * behind the open turn.
+   */
+  it('drafts the silence ticket although the lost turn is still open in the record', async () => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await setSecret('openRouterApiKey', 'sk-or-silent-open');
+    resetGoalStateForTests();
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-lost')]);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      const handout = await maintenance();
+      expect(handout).toMatchObject({ conversationId: OTHER, reason: 'silence' });
+      expect(await maintenance(handout!.token)).toBeNull();
+      await vi.advanceTimersByTimeAsync(GOAL_SILENCE_LISTEN_MS);
+      await sweepStaleSwarm(Date.now());
+      const ticket = goalPendingReplyFor(OTHER);
+      expect(ticket?.turnId).toMatch(/^g-silence-/);
+
+      const drafted = await request('POST', '/goal/draft', {
+        body: { conversationId: OTHER, turnId: ticket!.turnId, clientId: 'tab-1', terminalRequired: true }
+      });
+      expect(`${drafted.status} ${JSON.stringify(drafted.body)}`).toMatch(/^200 /);
     } finally {
       resetGoalStateForTests();
       await setSecret('openRouterApiKey', '');

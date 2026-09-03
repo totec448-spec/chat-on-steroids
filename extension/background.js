@@ -1580,7 +1580,8 @@ async function maintain() {
   const repairs = (Array.isArray(reply.data.repairs) ? reply.data.repairs : [])
     .map((entry) => ({
       conversationId: cleanConversationId(entry && entry.conversationId),
-      token: entry && typeof entry.token === 'string' ? entry.token : ''
+      token: entry && typeof entry.token === 'string' ? entry.token : '',
+      focus: Boolean(entry && entry.focus === true)
     }))
     .filter((entry) => entry.conversationId && entry.token);
   const nonDiscardable = new Set(
@@ -1650,7 +1651,7 @@ async function maintain() {
     if (changed) await persistLive().catch(() => undefined);
   }
   if (repairs.length === 0) return clearRetryIfIdle();
-  for (const { conversationId, token } of repairs) {
+  for (const { conversationId, token, focus } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -1669,8 +1670,17 @@ async function maintain() {
     const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
     const repairAction = target ? 'reloaded' : 'reopened';
     try {
+      // A repair the app wants in front of the user — an automatic compaction's pickup — raises
+      // the tab and its window before acting. A background tab is a throttled tab, and the
+      // page this reload brings back has tens of seconds of work to do in it.
+      if (target && focus) {
+        await chrome.tabs.update(target.id, { active: true });
+        if (typeof target.windowId === 'number') await chrome.windows.update(target.windowId, { focused: true });
+      }
       if (target) await chrome.tabs.reload(target.id);
-      else await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` });
+      else {
+        await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}`, active: focus });
+      }
     } catch {
       // A tab changed between the scan and action, or Chrome refused it. Report the exact failed
       // handout so the app can show the failure while keeping the same repair retryable. The
@@ -2202,14 +2212,15 @@ const HANDLERS = {
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
   /**
-   * Raises the exact tab whose owned document has just triggered Goal.
+   * Raises the exact tab whose owned document is about to act on its own — a Goal draft, an
+   * automatic Compact & Resume.
    *
    * The sender is the locator. Never search by conversation and never open a fallback: focus is
-   * only presentation after the content script has independently decided a completed turn is
-   * Goal-worthy. That keeps background visibility out of completion/draft authority and makes a
-   * duplicate tab impossible on this path.
+   * only presentation after the content script has independently decided to act. That keeps
+   * background visibility out of completion/draft/compaction authority and makes a duplicate
+   * tab impossible on this path.
    */
-  async goal_focus(message, sender, source) {
+  async focus_tab(message, sender, source) {
     await load();
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
     const conversationId = cleanConversationId(message.conversationId);
@@ -2400,7 +2411,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'closed',
     'compact',
     'goal_draft',
-    'goal_focus',
+    'focus_tab',
     'goal_ack',
     'goal_objective',
     'goal_open',

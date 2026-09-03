@@ -44,6 +44,7 @@ import {
   goalViewFor,
   pendingGoalReplies,
   retireGoalDrafts,
+  retireGoalDraftsFor,
   setGoalReplyActiveNow,
   setGoalObjectiveNow,
   setGoalSwitchNow,
@@ -199,18 +200,25 @@ export const COMMAND_DEADLINE_MS = 90_000;
 /**
  * The two clocks a worker bootstrap lives under before it is a failure rather than a wait.
  *
- * A bootstrap that has never been handed to a page is the one case where trying again cannot
- * duplicate anything: no tab was opened, no marker exists, so a second attempt is the first
- * attempt. That is `RETRY`. `LIMIT` is absolute and measured from the moment the broker invited
- * the worker, so no combination of a late hand-out and a fresh ninety-second lease can keep a
- * slot `invited` past it — which is exactly what happened to a worker whose command sat unleased
- * for nine minutes holding the last free slot.
+ * `REDEEM` is how long the chat this app opened gets to pick up its instruction. That is the
+ * browser's whole round trip — create the tab, load ChatGPT, run the content script, redeem —
+ * and it takes four to six seconds when it works at all; twenty is the same allowance the
+ * placement offer gives it. A page that has not redeemed by then is not slow, it is dead: a tab
+ * that loaded and never ran the marker (worker-4 on 2026-09-02 sat as an empty New chat for the
+ * full ninety seconds, and the two workers queued behind it opened only after it was failed).
+ * So the chat is opened once more, once, and a second silence fails the slot. This is safe
+ * because `/commands/redeem` is single-owner: whichever page redeems first types, the other is
+ * told there is nothing for it, and the worst case is one blank tab. It is bounded because the
+ * retry is spent once and `LIMIT` is absolute, measured from the moment the broker invited the
+ * worker, so no combination of a late hand-out and a fresh lease keeps a slot `invited` past it
+ * — which is what happened to a worker whose command sat unleased for nine minutes holding the
+ * last free slot.
  *
- * A *leased* command is deliberately not retried. `deliverOne()` opens one chat per command on
- * purpose; a background retry over a page that is merely slow is how this app used to grow
- * duplicate worker tabs minutes after anyone expected them.
+ * Once a page owns the command the attempt is one-shot again: it has `COMMAND_DEADLINE_MS` to
+ * type and name its chat, and a page that redeemed and never typed is a failure, not a prompt
+ * to open another chat.
  */
-const WORKER_BOOTSTRAP_RETRY_MS = 60_000;
+export const WORKER_REDEEM_MS = 20_000;
 export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
 /** A worker may occupy the broker's `waking` state for one short, absolute attempt. */
 /**
@@ -380,11 +388,11 @@ interface Command {
    */
   claimedAt: number | null;
   /**
-   * When the unleased-bootstrap retry was spent, so it is spent once. Memory only.
+   * When a worker bootstrap's one re-open was spent, so it is spent once. Memory only.
    *
    * Not persisted: after a restart the absolute limit is still measured from the persisted
-   * `createdAt`, so the worst a forgotten retry can cost is one more delivery attempt inside a
-   * window that ends at the same instant either way.
+   * `createdAt`, so the worst a forgotten retry can cost is one more open of the same
+   * single-owner command inside a window that ends at the same instant either way.
    */
   retriedAt: number | null;
   /**
@@ -1483,8 +1491,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
                 // own auto-compaction switch projection off even when this worker has no live
                 // recorder attachment yet, so a reload cannot briefly inherit the global
                 // auto=true setting and manufacture a worker compaction attempt.
-                context: contextView(false),
-                autoCompactReady: false
+                context: contextView(false)
               }
             : {}),
           ...(retiredWorker ? { retiredWorker } : {})
@@ -1686,25 +1693,17 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // history and its identity across the move, so a meter reading the lifetime figure
         // would come back full the moment the replacement chat opened and compact it again.
         tokens: summary?.contextTokens ?? 0,
-        // Over the line *and* mid-turn. Both halves matter: the level is what makes it
-        // fire at all, and the liveness is what keeps it off a stale chat that is merely
-        // being opened — see chatIsWorking.
-        // Worker identity is the conversation itself. Compact & Resume deliberately creates a
-        // different conversation, while the continuation transaction only knows how to move a
-        // run's prime binding. Letting a worker auto-compact therefore strands the worker in B
-        // while the broker still authorises A. Workers stay in their chat until the 400k reuse
-        // ceiling makes their next stop terminal.
-        autoCompactReady:
-          !workerBlocked && !superseded && autoCompactionReady(summary) && chatIsWorking(live.conversationId),
-        // What the composer's meter fills against, and what its automatic trigger fires
-        // on. Sent from here rather than worked out in the page so that the bar someone
-        // is watching and the threshold that acts are the same number: a meter that
-        // filled against a figure of its own would show a full bar and do nothing, or
-        // compact a conversation that still looked half empty.
+        // What the composer's meter fills against. Sent from here rather than worked out in the
+        // page so that the bar someone is watching and the threshold that acts are the same
+        // number. The trigger itself is the app's — see considerAutomaticCompaction — and the
+        // page learns of it through `job`, which it resumes.
         // Automatic compaction is a prime/solo-chat policy only. A worker keeps the same
         // conversation until it stops; crossing 400k changes future revive eligibility, not
-        // its conversation identity. Reporting auto=false here prevents the content script
-        // from ever arming its automatic compaction path for a worker in the first place.
+        // its conversation identity. Reporting auto=false here keeps the page's switch honest.
+        // Worker identity is the conversation itself: Compact & Resume deliberately creates a
+        // different conversation, while the continuation transaction only knows how to move a
+        // run's prime binding, so a worker that compacted would be stranded in B while the
+        // broker still authorised A.
         context: contextView(!workerBlocked && !superseded),
         // This chat was opened by the app, so its first user message is not the user's —
         // it is the handoff brief or the worker bootstrap this app typed. The page uses
@@ -2215,6 +2214,31 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         res,
         409,
         { error: 'session_not_recorded', message: 'This chat has no recorded local session to continue from.' },
+        origin
+      );
+    }
+    if (chatStillWorking(id, turnId)) {
+      // Owed, but not yet: the turn the page reported ended is still open here, or still
+      // running tools. The
+      // obligation is filed so a replacement page collects it; the draft itself waits for the
+      // quiet minute, and the page asks again on its next pull.
+      try {
+        await acceptGoalReplyNow({
+          conversationId: id,
+          sessionId,
+          replyId: `turn:${turnId}`.slice(0, 200),
+          turnId,
+          eventSeq: 0,
+          blocked: false
+        });
+      } catch (err) {
+        logWarn(`bridge: Goal turn ${turnId} for ${id} is not durable yet — ${err instanceof Error ? err.message : String(err)}`);
+        return json(res, 503, { error: 'goal_reply_not_durable', retryable: true }, origin);
+      }
+      return json(
+        res,
+        409,
+        { error: 'chat_still_working', retryable: true, message: 'This chat is still working on its answer; the app will draft once it has finished.' },
         origin
       );
     }
@@ -3170,7 +3194,7 @@ export async function sweepStaleSwarm(now = Date.now()): Promise<boolean> {
   // ends of a turn — one an answer that never arrived, one an answer that arrived and was never
   // picked up — and a chat can only ever be in one of those states.
   const goalsQueued = await inspectOwedGoals(now);
-  const compactionsQueued = inspectOwedCompactions(now);
+  const compactionsQueued = await inspectOwedCompactions(now);
   const silenceChanged = silent.queued || silent.spent.length > 0 || goalsQueued || compactionsQueued;
   const runId = currentRunId();
   if (swarmTransferActive() || inFlightMcpRequests() > 0 || observationWritesInFlight > 0) {
@@ -4424,11 +4448,88 @@ interface ActivityGrant {
 
 const activeUntil = new Map<string, ActivityGrant>();
 
+/** Chats reloaded by the app whose page has given no sign of life since. */
+const awaitingReturn = new Set<string>();
+
 /** A semantic turn start arms the silence deadline; later evidence of work pushes it forward. */
 function grantActivity(conversationId: string, sessionId: string, at = Date.now(), window = CHAT_SILENCE_MS): void {
   if (!sessionId) return;
   activeUntil.set(conversationId, { sessionId, until: at + window });
+  awaitingReturn.delete(conversationId);
   armSilenceSweep();
+  void considerAutomaticCompaction(conversationId, sessionId);
+}
+
+/** Chats whose automatic ticket is being filed right now, so one working turn files one. */
+const compactionFilings = new Set<string>();
+
+/**
+ * When each chat's last local tool call was attributed to it, and the quiet a Goal draft needs.
+ *
+ * The page's word that a turn ended is not enough to write the next message on: a reloaded
+ * page reads the transcript's last `end_turn` bit as a finished answer while the same request
+ * is still calling tools, and "Message delivery timed out" closes the local turn the same way.
+ * On 2026-09-03 the loop drafted twenty seconds after such an end, with the chat's last tool
+ * call twenty-eight seconds old, and sent — and the chat then had two requests running in it.
+ * So the app applies the facts only it has, and the draft waits on both. The recorder's own
+ * turn: a turn it reopened stays open until the page reports a real end, and on 2026-09-03 the
+ * page never did — its "Message delivery timed out" banner produced no turn end at all, yet the
+ * page asked for the draft twenty seconds later and got it. And the chat's tools: one that ran
+ * within the last minute is working, whatever the page or the record says. The obligation is
+ * filed either way; a call that proves the turn is still running withdraws it (see
+ * noteCallAttribution), and a turn that really has ended is drafted a minute later at most.
+ *
+ * The one ticket that is not gated on the open turn is silence's own (`g-silence-*`): it is
+ * filed only after two minutes without a call, a reload, and a further minute in which
+ * nothing arrived, which is exactly the route a chat whose page has lost its answer is meant to
+ * take to the next message. Its turn may well still be open in the record — the page that
+ * would have closed it is the page that broke.
+ */
+const lastAttributedCallAt = new Map<string, number>();
+export const GOAL_QUIET_MS = 60_000;
+
+function chatStillWorking(conversationId: string, turnId: string, now = Date.now()): boolean {
+  if (runningToolCalls(conversationId) > 0) return true;
+  if (!turnId.startsWith('g-silence-') && chatIsWorking(conversationId)) return true;
+  const last = lastAttributedCallAt.get(conversationId);
+  return last !== undefined && now >= last && now - last < GOAL_QUIET_MS;
+}
+
+/**
+ * Files the automatic Compact & Resume ticket for a working chat that has crossed the line.
+ *
+ * The decision lives here, on the evidence that a chat is working — an attributed call, a
+ * current-turn observation — because that evidence keeps arriving from a chat whose page has
+ * stopped: a frozen or discarded tab makes no page decision, and until 2026-09-03 the page was
+ * the only place this decision was made, so a chat that most needed compacting was the one that
+ * could not ask for it. The page still does the work; it resumes the ticket on its next pull
+ * (`maybeResumePendingCompaction`), and if no page does, the pickup schedule raises one.
+ *
+ * Still a level plus liveness, exactly as before: an idle chat over the line is never touched
+ * (`chatIsWorking`), a worker or blocked chat never (`goalFencedChat`), and a session already
+ * carrying a continuation is not given a second.
+ */
+async function considerAutomaticCompaction(conversationId: string, sessionId: string): Promise<void> {
+  if (!getConfig().compaction.auto || compactionFilings.has(conversationId)) return;
+  if (goalFencedChat(conversationId) || continuationForSession(sessionId) || !chatIsWorking(conversationId)) return;
+  compactionFilings.add(conversationId);
+  try {
+    const summary = await getSession(sessionId).catch(() => null);
+    if (!summary || summary.conversationId !== conversationId || !autoCompactionReady(summary)) return;
+    if (await conversationWasSuperseded(conversationId)) return;
+    // Re-read after the awaits: the turn may have ended, or a page may have filed by hand.
+    if (!chatIsWorking(conversationId) || continuationForSession(sessionId) || goalFencedChat(conversationId)) return;
+    const opened = await openContinuationNow(sessionId, conversationId, true);
+    rememberToken(sessionId, opened.token);
+    changed();
+    logInfo(
+      `bridge: ${conversationId} is working at ${summary.contextTokens} context tokens — filed auto-compaction ticket ${opened.token.slice(0, 8)}`
+    );
+  } catch (err) {
+    logWarn(`bridge: could not file the auto-compaction ticket for ${conversationId} — ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    compactionFilings.delete(conversationId);
+  }
 }
 
 /**
@@ -4439,7 +4540,7 @@ function grantActivity(conversationId: string, sessionId: string, at = Date.now(
  * few seconds late — an interim, a final, a first tool call — and a message typed under it
  * would be a message about the wrong turn.
  */
-const GOAL_SILENCE_LISTEN_MS = 60_000;
+export const GOAL_SILENCE_LISTEN_MS = 60_000;
 
 /**
  * Files the Goal ticket for a Goal/Loop chat whose silence reload brought nothing back.
@@ -5007,6 +5108,7 @@ function browserRecoveryMonitoring(): boolean {
  */
 function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
   let queued = false;
+  let deferred = false;
   const spent: string[] = [];
   const compacting = new Set(pendingAutomaticContinuations().map((entry) => entry.from));
   for (const [conversationId, grant] of activeUntil) {
@@ -5037,6 +5139,19 @@ function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
     // a chat that had been dead for eighteen minutes unreloaded. Everything else in flight —
     // silence's own action, or a no-tab reopen under its floor — is this path already acting.
     if (held && !TURN_SCOPED_REPAIRS.has(held.reason)) continue;
+    // A reload carried out moments ago, that the page has not yet come back from, is the reload
+    // silence would ask for. A large chat takes minutes to come back — three, for the 300k-token
+    // prime of 2026-09-03 — and a second reload landing on a page still loading starts that wait
+    // over: the silence reload landed 23 seconds after an unattributed one, and the chat froze
+    // for three more minutes. The page gets the recovery floor to come back; its first sign of
+    // life resets the clock as usual, and a page that never returns is reloaded when the floor
+    // has run out.
+    const lastReload = lastBrowserRecoveryAt.get(conversationId) ?? 0;
+    if (awaitingReturn.has(conversationId) && now - lastReload < BROWSER_RECOVERY_COOLDOWN_MS) {
+      grant.until = lastReload + BROWSER_RECOVERY_COOLDOWN_MS;
+      deferred = true;
+      continue;
+    }
     if (queueBrowserRecovery(conversationId, grant.sessionId, `silence:${grant.until}`, 'silence', 0, now)) {
       queued = true;
       logInfo(
@@ -5044,6 +5159,7 @@ function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
       );
     }
   }
+  if (deferred) armSilenceSweep(now);
   return { queued, spent };
 }
 
@@ -5089,46 +5205,65 @@ const GOAL_WATCH_BACKOFF_MS = [2, 2, 5, 10, 15].map((minutes) => minutes * 60_00
 const goalWatch = new Map<string, { replyId: string; dueAt: number; attempts: number }>();
 
 /**
- * The source page gets the first attempt; these are its three remaining pickups.
+ * The browser pickups an automatic ticket gets, by what the ticket is waiting for.
  *
- * Two clocks, by what the ticket is waiting for. While the brief is still being *written*, a
- * glitched page costs the whole run: nothing else is happening in that chat, and a stuck page
- * looks exactly like a slow one. So the checkpoint comes every five minutes and, with three
- * pickups, the writing phase is retried for at most a quarter of an hour. The reload is safe
- * at any point of the writing — it reloads the same exact chat, and the stable marker recovers
- * a brief that is already generated or still generating. The moment the brief has landed the
- * five-minute clock stops with it: opening the replacement chat keeps the slower quarter-hour
- * cadence, which is the interval the user's resume command is leased for.
+ * Three clocks, one per phase, and the phase is read off the ticket's durable position every
+ * sweep. A page holds the ticket only while it is the page doing the work; the moment it stops
+ * being that page — frozen, discarded, closed, mid-reload — the app's pickup is what keeps the
+ * compaction going, and each pickup raises the tab first (a background tab is a throttled one;
+ * that is how the 2026-09-03 source page froze solid while its brief was being written).
  *
- * Page activity never pushes either deadline; `since` is when the ticket opened or was last
- * picked up, and the interval is read off the ticket's *current* state each time.
+ * `asking` — the brief has not been asked for yet. Nothing has reached ChatGPT, so the reload
+ * is free and the wait is short: every two minutes for ten minutes, the tab raised each time, and
+ * the fresh page resumes the ticket the instant it reads it back. Five pickups with no send is a
+ * chat that will not take the prompt — a tab that never comes back, a composer that will not
+ * accept it — and the ticket is abandoned rather than left to nag: the next working turn opens
+ * a fresh one. Which is also what keeps an old chat quiet: a ticket only ever opens on a working
+ * chat, and one that could not be sent expires with its ten minutes.
+ *
+ * `writing` — the marked prompt is with ChatGPT and the brief is being generated. A reload here
+ * loses nothing (the stable marker recovers a brief already generated or still generating) but
+ * the answer takes as long as it takes, so the checkpoint is every five minutes and there are
+ * three of them. The ticket is never failed by a pickup in this phase; it stays collectable.
+ *
+ * `opening` — the brief landed and the replacement chat is owed. The resume command is leased
+ * for a quarter of an hour, so that is the cadence, three times.
+ *
+ * Page activity never pushes any of these; `since` is when the phase began (the ticket's
+ * opening, the prompt's durable dispatch) or when it was last picked up. A phase change resets
+ * the count — the writing phase's three do not include the two the asking phase spent.
  */
-const COMPACTION_WRITING_PICKUP_MS = 5 * 60_000;
-const COMPACTION_PICKUP_MS = 15 * 60_000;
-const COMPACTION_RELOADS = 3;
-const compactionWatch = new Map<string, { token: string; since: number; attempts: number }>();
+type CompactionPhase = 'asking' | 'writing' | 'opening';
+const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: number }> = {
+  asking: { every: 2 * 60_000, attempts: 5 },
+  writing: { every: 5 * 60_000, attempts: 3 },
+  opening: { every: 15 * 60_000, attempts: 3 }
+};
+const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; since: number; attempts: number }>();
 
-function compactionPickupInterval(state: ContinuationView['state']): number {
-  return state === 'awaiting-summary' ? COMPACTION_WRITING_PICKUP_MS : COMPACTION_PICKUP_MS;
+function compactionPhaseOf(entry: ContinuationView): CompactionPhase {
+  if (entry.state !== 'awaiting-summary') return 'opening';
+  return sendUnattempted(entry.sourceSend) ? 'asking' : 'writing';
 }
 
 /**
  * Makes a ticket's next automatic pickup due on the next sweep, within the same bound.
  *
  * The schedule is not otherwise moved by page activity, and this adds no attempts: a pickup
- * brought forward is one of the same three. False when there is no automatic ticket for the
+ * brought forward is one of the phase's own. False when there is no automatic ticket for the
  * chat, the ticket predates this process, or its pickups are exhausted.
  */
 function expediteCompactionPickup(conversationId: string): boolean {
   const entry = pendingAutomaticContinuations().find((candidate) => candidate.from === conversationId);
   if (!entry || compactionWatchFloor === null || entry.openedAt < compactionWatchFloor) return false;
+  const phase = compactionPhaseOf(entry);
   const watch = compactionWatch.get(conversationId);
-  if (watch && watch.token === entry.token) {
-    if (watch.attempts >= COMPACTION_RELOADS) return false;
+  if (watch && watch.token === entry.token && watch.phase === phase) {
+    if (watch.attempts >= COMPACTION_PICKUPS[phase].attempts) return false;
     watch.since = 0;
     return true;
   }
-  compactionWatch.set(conversationId, { token: entry.token, attempts: 0, since: 0 });
+  compactionWatch.set(conversationId, { token: entry.token, phase, attempts: 0, since: 0 });
   return true;
 }
 
@@ -5249,13 +5384,13 @@ async function inspectOwedGoals(now: number): Promise<boolean> {
 }
 
 /**
- * Gives durable auto-compaction tickets their bounded browser pickups.
+ * Gives durable auto-compaction tickets their bounded browser pickups — see COMPACTION_PICKUPS.
  *
- * The ticket has no failure clock. Three unsuccessful checkpoints merely exhaust automatic
- * browser actions; the continuation remains collectable by any later page until Auto Off,
- * explicit cancel, or the marked bootstrap's durable commit in chat B.
+ * Only the asking phase has a failure verdict: a prompt that could not be sent in ten minutes
+ * is abandoned. Past the send the ticket has no clock here; it remains collectable by any later
+ * page until Auto Off, explicit cancel, or the marked bootstrap's durable commit in chat B.
  */
-function inspectOwedCompactions(now: number): boolean {
+async function inspectOwedCompactions(now: number): Promise<boolean> {
   if (compactionWatchFloor === null) return false;
   const owed = new Map(pendingAutomaticContinuations().map((entry) => [entry.from, entry]));
   for (const [conversationId, watch] of compactionWatch) {
@@ -5267,28 +5402,51 @@ function inspectOwedCompactions(now: number): boolean {
   let queued = false;
   for (const entry of owed.values()) {
     if (entry.openedAt < compactionWatchFloor) continue;
+    const phase = compactionPhaseOf(entry);
     let watch = compactionWatch.get(entry.from);
-    if (!watch) {
-      watch = { token: entry.token, attempts: 0, since: entry.openedAt };
+    if (!watch || watch.phase !== phase) {
+      // The clock starts when the phase did, not when this sweep noticed: the ticket's opening
+      // for asking, the durable dispatch stamp for writing. The brief's landing has no stamp
+      // of its own, and at a quarter-hour cadence the sweep's half-minute lag does not matter.
+      const since = phase === 'asking' ? entry.openedAt : phase === 'writing' ? (entry.askedAt ?? now) : now;
+      watch = { token: entry.token, phase, attempts: 0, since };
       compactionWatch.set(entry.from, watch);
     }
-    if (watch.attempts >= COMPACTION_RELOADS || now < watch.since + compactionPickupInterval(entry.state)) continue;
+    const schedule = COMPACTION_PICKUPS[phase];
+    if (now < watch.since + schedule.every) continue;
+    if (watch.attempts >= schedule.attempts) {
+      if (phase !== 'asking') continue;
+      // Ten minutes and five raised reloads without the prompt ever reaching ChatGPT. The
+      // chat's tools were never fenced (that starts at the send), so nothing is stranded by
+      // letting go; what would be stranded is the chat under a ticket it can never discharge.
+      compactionWatch.delete(entry.from);
+      if (repairsInFlight.get(entry.from)?.reason === 'compaction') repairsInFlight.delete(entry.from);
+      try {
+        await abortContinuationNow(entry.token, 'handoff_never_sent');
+        logWarn(
+          `bridge: auto-compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} was never sent after ${schedule.attempts} pickups — giving up; the next working turn opens a fresh one`
+        );
+        changed();
+      } catch (err) {
+        logWarn(`bridge: could not abandon auto-compaction ticket ${entry.token.slice(0, 8)} — ${err instanceof Error ? err.message : String(err)}`);
+      }
+      continue;
+    }
 
     let acted = false;
-    if (entry.state === 'awaiting-summary') {
+    if (phase === 'asking' || phase === 'writing') {
       const held = repairsInFlight.get(entry.from);
       if (held?.state === 'done' && held.reason === 'compaction') repairsInFlight.delete(entry.from);
       else if (held && held.state !== 'done') continue;
       acted = queueBrowserRecovery(
         entry.from,
         entry.sessionId,
-        `compaction:${entry.token}:${watch.attempts}`,
+        `compaction:${entry.token}:${phase}:${watch.attempts}`,
         'compaction',
         0,
         now
       );
     } else if (
-      (entry.state === 'awaiting-chat' || entry.state === 'claimed') &&
       sendUnattempted(entry.destinationSend) &&
       !commands.some((command) => command.spec.type === 'resume' && command.spec.token === entry.token)
     ) {
@@ -5304,7 +5462,7 @@ function inspectOwedCompactions(now: number): boolean {
     watch.since = now;
     queued = true;
     logInfo(
-      `bridge: auto-compaction ticket ${entry.token.slice(0, 8)} pickup ${watch.attempts + 1} of ${COMPACTION_RELOADS + 1}`
+      `bridge: auto-compaction ticket ${entry.token.slice(0, 8)} ${phase} pickup ${watch.attempts} of ${schedule.attempts}`
     );
   }
   return queued;
@@ -5448,9 +5606,19 @@ function noteCallAttribution(
   startedAt: number,
   endsActivity = false,
   lastAssistantFinalAt: number | null = null,
-  requestId: string | null = null
+  requestId: string | null = null,
+  reopenedTurnId: string | null = null
 ): void {
   if (conversationId) {
+    if (currentConversation && !endsActivity) lastAttributedCallAt.set(conversationId, Date.now());
+    // The recorder has just withdrawn a completed end the page reported: the same server turn
+    // went on calling tools. Whatever Goal was drafting for that end — or had filed as owed —
+    // was a reply to an answer that has not been given. The real end, when the page sees it,
+    // files its own obligation.
+    if (reopenedTurnId && retireGoalDraftsFor(conversationId)) {
+      forgetGoalWatch(conversationId);
+      logInfo(`goal: withdrew the decision owed for turn ${reopenedTurnId} of ${conversationId} — the turn is still running`);
+    }
     if (unattributedIncident && !unattributedIncident.proven.has(conversationId)) {
       unattributedIncident.proven.add(conversationId);
       // One suspect fewer is a shorter rung for everybody still waiting. Re-read it now instead
@@ -5661,7 +5829,7 @@ function tickUnattributedIncident(): void {
  */
 async function takePendingRepairs(
   now = Date.now()
-): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason'] }>> {
+): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason']; focus: boolean }>> {
   retireSpentRepairs();
   // The queue can outlive the decision that filled it: a repair queued a minute before the user
   // pressed Block would otherwise still be handed to the browser, and the block's whole promise
@@ -5696,6 +5864,8 @@ async function takePendingRepairs(
     conversationId: string;
     token: string;
     reason: Repair['reason'];
+    /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
+    focus: boolean;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'queued') continue;
@@ -5709,7 +5879,7 @@ async function takePendingRepairs(
       repair,
       `Trying to reload chat to recover ${repairReason(repair)}…`
     );
-    ready.push({ conversationId, token: repair.token, reason: repair.reason });
+    ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction' });
   }
   return ready;
 }
@@ -5726,6 +5896,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
     if (repair.state === 'handed' && repair.token === token) {
       repair.state = 'done';
       lastBrowserRecoveryAt.set(conversationId, Date.now());
+      awaitingReturn.add(conversationId);
       if (repair.reason === 'silence') {
         // The reload is the chat's chance, so the verdict on it waits — not the next maintenance
         // pass. A model writing a long answer makes no durable progress until the answer lands;
@@ -5952,7 +6123,7 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
   if (command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic) {
     // One checkpoint, not a failure trigger. Expiry releases only this browser transport;
     // the auto-compaction ticket remains and the next 15-minute pickup may open it again.
-    return (command.claimedAt ?? command.createdAt) + COMPACTION_PICKUP_MS - now;
+    return (command.claimedAt ?? command.createdAt) + COMPACTION_PICKUPS.opening.every - now;
   }
   if (command.spec.type === 'resume' && command.owner !== null) {
     const continuation = continuationByToken(command.spec.token);
@@ -5960,11 +6131,15 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
   }
   if (command.spec.type === 'worker') {
     // Absolute, from the invitation. Whatever else this command is waiting for, the slot it
-    // holds stops being `invited` by this instant.
+    // holds stops being `invited` by this instant. A command still in line has no clock of its
+    // own: every ending of the command ahead of it calls deliver(), and this limit is the fence.
     const limit = command.createdAt + WORKER_BOOTSTRAP_LIMIT_MS;
-    if (command.claimedAt === null) {
-      const next = command.retriedAt === null ? command.createdAt + WORKER_BOOTSTRAP_RETRY_MS : limit;
-      return Math.min(next, limit) - now;
+    if (command.claimedAt === null) return limit - now;
+    // Opened but not yet redeemed: the page's round trip, not its typing budget. A browser this
+    // app had to start is given its launch window on top, since nothing can redeem before it is up.
+    if (command.owner === null) {
+      const redeemBy = Math.max(command.claimedAt + WORKER_REDEEM_MS, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS);
+      return Math.min(redeemBy, limit) - now;
     }
     return Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit) - now;
   }
@@ -6056,19 +6231,18 @@ function expire(command: Command): void {
     retire(command, 'its worker is bound and running');
     return;
   }
-  // Nothing was ever opened for this one, so trying again is not a second tab — it is the first.
-  // The queue stalling is the normal way to get here: a sibling bootstrap that finished without
-  // an ACK used to leave nothing to advance the line behind it.
+  // The chat opened for it never redeemed the marker. Open it once more, once: the command is
+  // single-owner, so the page that does redeem is the only one that ever types.
   if (
     spec.type === 'worker' &&
-    command.claimedAt === null &&
+    command.claimedAt !== null &&
+    command.owner === null &&
     command.retriedAt === null &&
     Date.now() < command.createdAt + WORKER_BOOTSTRAP_LIMIT_MS
   ) {
     command.retriedAt = Date.now();
-    logWarn(`bridge: ${specKey(spec)} was never handed to a page — trying to open its chat once more`);
-    armDeadline(command);
-    void deliver();
+    logWarn(`bridge: the chat opened for ${specKey(spec)} never picked up its instruction — opening it once more`);
+    void reopenWorkerChat(command);
     return;
   }
   if (spec.type === 'revive' && !revivalFor(spec.agent)) {
@@ -6077,6 +6251,27 @@ function expire(command: Command): void {
   }
   drop(command, command.lastError ?? 'the chat this app opened did not report back in time');
   deliver();
+}
+
+/**
+ * The one re-open of a worker chat that opened and never redeemed.
+ *
+ * A fresh lease first, so the redeem window and the durable record both restart from this
+ * open; a lease that cannot be written ends the command instead, exactly as a first delivery
+ * would. Straight to the OS opener rather than the placement offer: the home page already had
+ * its chance to place this one.
+ */
+async function reopenWorkerChat(command: Command): Promise<void> {
+  if (!(await persistCommandLease(command, null, Date.now()))) {
+    if (commands.includes(command)) {
+      drop(command, 'the chat this app opened did not report back in time');
+      await deliver();
+    }
+    return;
+  }
+  armDeadline(command);
+  changed();
+  await openFreshChatInBrowser(command);
 }
 
 /** Finishes a command that has nothing left to do, timer and all. */
@@ -6757,6 +6952,8 @@ export function resetBridgeForTests(): void {
   bridgeShutdownRequested = false;
   clearUnattributedIncident();
   activeUntil.clear();
+  awaitingReturn.clear();
+  lastAttributedCallAt.clear();
   goalWatch.clear();
   compactionWatch.clear();
   // Re-armed rather than cleared: the seam stands in for a process that has just started

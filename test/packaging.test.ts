@@ -33,6 +33,11 @@ const {
 } = packagingTargets;
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** The notes that ship with this tree's version, so the checks below read what the release will say. */
+const currentReleaseNotes = () => {
+  const { version } = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string };
+  return readFileSync(path.join(root, 'docs', 'release-notes', `v${version}.md`), 'utf8');
+};
 
 function yamlFile(relative: string): any {
   return loadYaml(readFileSync(path.join(root, ...relative.split('/')), 'utf8'));
@@ -366,7 +371,7 @@ describe('cross-platform packaging targets', () => {
 
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
     const security = readFileSync(path.join(root, 'SECURITY.md'), 'utf8');
-    const notes = readFileSync(path.join(root, 'docs', 'release-notes', 'v2.0.2.md'), 'utf8');
+    const notes = currentReleaseNotes();
     for (const document of [readme, security, notes]) {
       expect(document).toContain('--no-sandbox');
       expect(document).toMatch(/unprivileged user namespaces/i);
@@ -396,7 +401,7 @@ describe('cross-platform packaging targets', () => {
     expect(builder.mac.identity).toBeNull();
     expect(builder.mac.notarize).toBe(false);
     expect(builder.mac.category).toBe('public.app-category.developer-tools');
-    expect(builder.mac.minimumSystemVersion).toBe('12.0');
+    expect(builder.mac.minimumSystemVersion).toBe('13.0');
     expect(builder.mac.artifactName).toBe('Chat-On-Steroids-macOS-${arch}.${ext}');
     const nativePrep = readFileSync(path.join(root, 'scripts', 'prepare-packaging-native.mjs'), 'utf8');
     expect(nativePrep).toContain("await chmod(path.join(payloadRoot, 'node-pty', 'prebuilds', prebuildDir, 'spawn-helper'), 0o755)");
@@ -409,7 +414,7 @@ describe('cross-platform packaging targets', () => {
       'CFBundleShortVersionString: packageVersion',
       'CFBundleVersion: packageVersion',
       "LSApplicationCategoryType: 'public.app-category.developer-tools'",
-      "LSMinimumSystemVersion: '12.0'",
+      "LSMinimumSystemVersion: '13.0'",
       'NSScreenCaptureUsageDescription:',
       "path.join(resources, 'desktop', 'macos-desktop-addon.node')",
       "path.join(resources, 'desktop', 'libcos-desktop.dylib')",
@@ -440,10 +445,10 @@ describe('cross-platform packaging targets', () => {
     expect(packagedRuntime).toContain("addon.handle('{\"op\":\"warm\"}')");
 
     const readme = readFileSync(path.join(root, 'README.md'), 'utf8');
-    const notes = readFileSync(path.join(root, 'docs', 'release-notes', 'v2.0.2.md'), 'utf8');
-    expect(readme).toContain('macOS 12 Monterey or newer');
-    expect(notes).toContain('macOS 12');
-    expect(notes).toContain('Monterey or newer');
+    const notes = currentReleaseNotes();
+    expect(readme).toContain('macOS 13 Ventura or newer');
+    expect(notes).toContain('macOS 13');
+    expect(notes).toContain('Ventura or newer');
   });
 
   it('hides Electron helper parentheses from otool-classic without changing the inspected file', () => {

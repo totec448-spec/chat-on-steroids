@@ -9,7 +9,64 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [Unreleased — 2.0.3]
+## [Unreleased]
+
+### Fixed
+- **A reload no longer ends the turn it came back into.** The page bound the resumed turn to
+  the newest assistant section on screen even when that section sat above the newest question,
+  so the previous answer's end-turn bit closed the live turn seconds after every reload while
+  the same request went on calling tools. The resumed turn is now bound only to a section
+  below its question, and the hydration flicker of the Stop control no longer counts as
+  having seen it run.
+- **Large chats no longer freeze the tab.** The page script read the whole transcript six to
+  eight times a second, taking the text of every message each time; a 300k-token chat spent
+  most of every second on that and sat unresponsive for minutes after each reload. Each section
+  is now read once and re-read only when it changes. On a 300-turn transcript the one-second
+  tick fell from about 880 ms to about 115 ms in the test harness.
+- **No second reload on a page that is still loading.** A large chat takes minutes to come
+  back from a reload, and the silence watchdog reloaded it again 23 seconds after an
+  unattributed reload had, starting the load over. A chat that has not shown a sign of life
+  since its last reload now gets the three-minute recovery floor before silence may reload it.
+
+### Changed
+- **Goal waits for a quiet chat.** A reloaded page, or a "Message delivery timed out" error, can
+  report a turn as finished while the same request is still calling tools; the loop then wrote
+  the next message into a chat that was still working and the chat ran two requests at once. The
+  app now refuses to draft while its own record still has the turn open or a local tool ran
+  within the last minute, files the obligation for later, and withdraws it when a call proves
+  the turn never ended; the page keeps asking every 15 seconds until the chat has finished. The
+  silence ticket — two minutes without a call, one reload, one more minute of nothing — is the
+  one route that writes the next message without the page ever reporting an end. After a silence reload,
+  the minute of listening is cancelled by any sign of life — a tool call, an interim row, a
+  message — and re-armed for the next stop.
+- **Goal reads the decision behind a thinking block.** A routed provider answered with its
+  reasoning in front of the JSON three drafts in a row; each failed as unreadable and was asked
+  again at once. The decision is now read out from behind reasoning blocks, code fences and
+  surrounding prose, an unreadable answer is logged with a sample, and page-side retries double
+  their wait per failure of the same turn, from 15 seconds up to 4 minutes.
+- **Goal writes after text already in the composer.** One stray character held a finished reply
+  at "sending" until the user deleted it. The reply now goes in on a new line after whatever is
+  there and is sent at once.
+- **Automatic Compact & Resume is the app's decision.** The ticket is filed on the evidence that
+  a working chat has crossed the line — an attributed call, a current-turn observation — so a
+  page that has frozen mid-turn is still compacted; the page resumes the ticket and raises its
+  own tab first. Pickups follow the ticket's phase: while the prompt is unsent, a reload in front
+  every two minutes, five times, then the ticket is abandoned and the next working turn opens a
+  fresh one; while the brief is being written, every five minutes, three times; once it lands,
+  the replacement opens at once.
+
+## [2.0.3] — 2026-09-02
+
+**A small step towards the infinite loop.**
+
+- **The Loop.** Goal with the exit removed: every finished turn gets its next message until you switch it off.
+- **Improved stability and reliability through auto reloads.** A chat that goes silent, shows an error or loses its tab is reloaded or reopened on its own evidence, and a turn that is still running is never closed early.
+- **macOS computer use.** The optional Desktop connector now ships on macOS, off by default.
+- **Auto update.** Windows and Linux AppImage installs fetch the next release and apply it on the next quit.
+- **Small things.** UI polish, blocked chats, worker recovery, session timeline fixes.
+
+<details>
+<summary>Full list of changes</summary>
 
 ### Added
 - **A blocked chat says so in its composer.** Block is set in the app, and from the ChatGPT page
@@ -35,6 +92,10 @@ the app refuses the extension and asks you to reload the matching copy.
   exercises this real addon/dylib path rather than the standalone development CLI protocol probe.
 
 ### Changed
+- **macOS builds now require macOS 13 Ventura or newer.** The bundled OpenAI `tunnel-client` v0.0.14,
+  which the publish pipeline pins to OpenAI's current release, is built for macOS 13; the 12.0 floor
+  of 2.0.2 would have shipped a Connect button that cannot start it. The packaging audit refuses any
+  payload whose deployment target is above the declared minimum, which is how this was caught.
 - **The model is told not to spam browser instances.** A prime that could not get a foreground
   reading out of the browser window it controlled launched a fresh debug instance on a new port
   and profile for every retry. The exec_command description, which every turn
@@ -53,6 +114,25 @@ the app refuses the extension and asks you to reload the matching copy.
   other chats' tabs" is on, and it now starts off.
 
 ### Fixed
+- **A worker chat that opens and never starts is opened once more, not waited on.** The tab the
+  app opened for a worker loaded as an empty New chat and never picked up its instruction. The
+  app held that page's ninety-second lease to the end, then failed the worker, and only then
+  opened the two workers queued behind it, which is why they appeared two minutes after the
+  prime asked. A fresh worker page now has twenty seconds to redeem its marker; past that the
+  same command is opened again, once, and a second silence fails the slot immediately so the
+  line moves. The command is single-owner, so the page that redeems first is the only one that
+  types. The old "never handed to a page" retry, a leftover from before every ending advanced
+  the queue, is gone.
+- **A reload no longer ends a turn that is still running.** The page reloaded in the middle of a
+  prime's turn — once for a foreign unattributed call, once for a lost stream — adopted the open
+  turn from the app, saw the interim prose ChatGPT had committed and no Stop control, and four
+  seconds later reported the turn completed. The same request id then called tools for another
+  twenty-four minutes, and Goal wrote the next user message against an answer that had never been
+  given. Two changes, one from each side. The page's visible-prose rule now applies only to a
+  turn the document has seen running; an adopted turn waits for ChatGPT's own end-of-turn, an
+  error, a stop, a new send or the ten-minute stall. And the app treats the server turn as the
+  authority: a call under the ended turn's request id that starts after the reported end reopens
+  the turn durably, hands it back to the page, and withdraws the Goal decision drafted for it.
 - **A stopped turn ends the `active` badge.** The badge went dark only on the model's final answer,
   so a chat whose turn the user stopped — the blocked prime of 2026-09-02, stopped right after a
   refused call — read `active` for three more minutes. Any turn end now ends it, the user's stop
@@ -234,6 +314,8 @@ the app refuses the extension and asks you to reload the matching copy.
 - macOS Screen Recording and Accessibility remain independent OS grants. The helper requests no
   privilege at startup, reports a typed error when a live operation lacks consent, and permission
   revocation remains effective without changing the connector schema cached by ChatGPT.
+
+</details>
 
 ## [2.0.2] — 2026-08-26
 

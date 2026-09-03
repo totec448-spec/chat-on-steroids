@@ -1812,6 +1812,64 @@ describe('canonical recorder 1.8', () => {
     }
   });
 
+  /**
+   * Live 2026-09-02: the page reloaded mid-turn, adopted the open turn and reported it
+   * completed four seconds later; the same ChatGPT request id then called tools for another
+   * twenty-four minutes. The request id is per server turn, so a call under the ended turn's
+   * request id that starts after the reported end is proof the end was the page's, not
+   * ChatGPT's. The recorder reopens the turn durably and lets the real end close it later.
+   */
+  it('reopens a turn the page ended while its server turn kept calling tools', async () => {
+    const conversationId = 'conv-false-turn-end';
+    const sessionId = await sessionForConversation(conversationId);
+    const now = Date.now();
+    const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: now, turnId: 'g-false-end' },
+      {
+        kind: 'tool_evidence', time: now, fiberConversationId: conversationId,
+        calls: [
+          { messageId: 'same-0', tool: 'read', order: 0, answered: false, requestId: 'wfr_same_turn' },
+          { messageId: 'next-0', tool: 'read', order: 1, answered: false, requestId: 'wfr_next_turn' }
+        ]
+      }
+    ]);
+    await tool('wfr_same_turn', now + 10);
+    expect(active()).toBe('g-false-end');
+
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_end', time: now + 20, turnId: 'g-false-end', outcome: 'completed' }
+    ]);
+    expect(active()).toBeNull();
+
+    // An in-flight call that merely finished late proves nothing about the end.
+    await tool('wfr_same_turn', now + 15);
+    expect(active()).toBeNull();
+    // Nor does a different server turn: that is a different turn.
+    await tool('wfr_next_turn', now + 30);
+    expect(active()).toBeNull();
+
+    // The same server turn calling on after the end is the turn not having ended.
+    await tool('wfr_same_turn', now + 40);
+    expect(active()).toBe('g-false-end');
+    const starts = await readEvents(sessionId!, { kinds: ['turn_start'] });
+    expect(starts.map((event) => [event.turnId, event.source])).toEqual([
+      ['g-false-end', 'extension'],
+      ['g-false-end', 'app']
+    ]);
+    expect(starts[1]?.kind === 'turn_start' && starts[1].detail).toMatch(/kept calling tools/);
+
+    // Reopened once; the same turn going on is not news, and the real end is accepted.
+    await tool('wfr_same_turn', now + 50);
+    expect(await readEvents(sessionId!, { kinds: ['turn_start'] })).toHaveLength(2);
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_end', time: now + 60, turnId: 'g-false-end', outcome: 'completed' }
+    ]);
+    expect(active()).toBeNull();
+    const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
+    expect(ends.map((event) => event.time)).toEqual([now + 20, now + 60]);
+  });
+
   it('never cross-attributes concurrent same-tool calls from two chats', async () => {
     const now = Date.now();
     const firstId = 'conv-concurrent-a';
