@@ -977,6 +977,7 @@ function endRun(reason: string): void {
   retiredPersist?.();
   const what = `${run.runId} (${[...run.agents.keys()].join(', ')})`;
   run = null;
+  consecutiveWakeFailures.clear();
   logInfo(`multi-agent: ended run ${what} — ${reason}`);
   for (const listener of endListeners) listener(reason, retired);
 }
@@ -2661,6 +2662,11 @@ function returnWakingWorkerToStopped(agent: Agent, sleptAt: number, reason: stri
   return null;
 }
 
+/** Consecutive failed wakes, with no sign of life from the chat between them, that end a worker. */
+export const WAKE_FAILURES_BEFORE_GIVING_UP = 2;
+/** Failed wakes per worker conversation since that chat last proved alive. Memory-only: a restart forgives one. */
+const consecutiveWakeFailures = new Map<string, number>();
+
 /**
  * The browser could not wake this worker, so the slot it was holding goes back.
  *
@@ -2672,12 +2678,36 @@ function returnWakingWorkerToStopped(agent: Agent, sleptAt: number, reason: stri
 export function failWorkerRevival(id: string, why: string): AgentMessage | null {
   const agent = run?.agents.get(id);
   if (!agent || agent.info.state !== 'waking') return null;
+  const chat = agent.info.conversationId ?? id;
+  const strikes = (consecutiveWakeFailures.get(chat) ?? 0) + 1;
+  consecutiveWakeFailures.set(chat, strikes);
+  if (strikes >= WAKE_FAILURES_BEFORE_GIVING_UP && !ceilingCrossed(agent.info)) {
+    // The second failed wake with nothing heard from the chat in between is the verdict on the
+    // chat, not on the browser. On 2026-09-03 worker-7's ChatGPT conversation answered every
+    // load with "This content is unavailable"; four wakes each waited out their deadline and
+    // each told the prime "try once more", which it did — thirty minutes and four prime turns
+    // before it spawned the replacement it could have spawned after the first repeat. A
+    // revivable failure keeps its inbox: the chat calling again brings it back as usual.
+    const failed = failAgent(
+      id,
+      `its chat did not answer ${strikes} revivals in a row (${why})`,
+      `[${id} failed] Its chat did not answer ${strikes} revivals in a row: ${why} Treat it as gone — do not try to ` +
+        'wake it again. Do that part of the work yourself or spawn a replacement worker. Should its chat ever call ' +
+        'in again, you will be told it is back.',
+      { revivable: true }
+    );
+    if (failed) {
+      consecutiveWakeFailures.delete(chat);
+      return failed.report;
+    }
+  }
   const terminal = returnWakingWorkerToStopped(
     agent,
     Date.now(),
     `The browser could not complete its revival: ${why}`
   );
   if (terminal) {
+    consecutiveWakeFailures.delete(chat);
     logWarn(`multi-agent: could not wake ${id}; the chat crossed its context ceiling while revival was in flight`);
     changed();
     return terminal;
@@ -2898,6 +2928,9 @@ export function noteAgentAlive(
   if (!run || !conversationId) return null;
   const agent = boundAgent(conversationId);
   if (!agent) return null;
+  // Any first-hand word from the chat — a call, a turn, or its page — means it can be reached,
+  // so the count of wakes it has failed in a row starts over.
+  consecutiveWakeFailures.delete(conversationId);
   const now = Date.now();
   if (agent.info.role === 'prime') {
     agent.info.lastSeenAt = now;
@@ -3392,6 +3425,27 @@ export function agentInfoForOwnedConversation(conversationId: string): AgentInfo
 }
 
 /**
+ * Whether this conversation is a worker chat this app opened — in any state, ever.
+ *
+ * The owner lookups above answer "who is working here", and deliberately skip a worker that
+ * is over: a finished chat calling tools is not a slot. This answers the other question, the
+ * one the Goal and compaction fences ask: is this a chat the loop may author in, or that a
+ * Compact & Resume may be typed into? A worker chat never becomes an ordinary chat by
+ * finishing. On 2026-09-03 two workers crossed the context ceiling, went terminal, and were
+ * from that moment invisible to `agentForOwnedConversation()`; the auto-compaction fence read
+ * them as plain chats over the line, filed tickets a worker page can never discharge, and
+ * reloaded each working page five times before giving up.
+ */
+export function isWorkerConversation(conversationId: string): boolean {
+  if (!conversationId) return false;
+  const owns = (agents: Map<string, Agent>): boolean =>
+    [...agents.values()].some((agent) => agent.info.role === 'worker' && agent.info.conversationId === conversationId);
+  if (run && owns(run.agents)) return true;
+  for (const dormant of dormantRuns.values()) if (owns(dormant.agents)) return true;
+  return false;
+}
+
+/**
  * Binds a worker to the ChatGPT conversation it is running in, and starts it.
  *
  * This *is* the worker lifecycle transition. Called by the bridge when the extension
@@ -3487,6 +3541,7 @@ function bindWorkerConversation(agent: Agent, conversationId: string): boolean {
 export function resetSwarm(): void {
   const reason = 'the run was cleared in the app';
   endRun(reason);
+  consecutiveWakeFailures.clear();
   const retiredAt = Date.now();
   let retiredDormant = false;
   for (const dormant of dormantRuns.values()) {
@@ -3964,6 +4019,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
 export function resetAgentsForTests(): void {
   run = null;
   dormantRuns.clear();
+  consecutiveWakeFailures.clear();
   unpublishedRun = null;
   activeSpawnStage = null;
   activeFinishStages.clear();

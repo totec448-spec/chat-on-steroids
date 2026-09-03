@@ -420,6 +420,20 @@ describe.runIf(!IS_WINDOWS)('a native POSIX path', () => {
     const error = await expectRefused(path.join(outside, 'secret.txt'));
     expect(error.message).toContain('not inside an approved folder');
     expect(error.message).toContain('/project');
+    expect(error.message).not.toContain('If you meant');
+  });
+
+  it('suggests the approved spelling when a refused path names a root by folder name', async () => {
+    // Nearly every refused path in the recorded sessions was a real file under a root, spelled
+    // from a guessed drive or one folder too high. The refusal now carries the spelling to try;
+    // it resolves nothing itself.
+    const native = await expectRefused(IS_WINDOWS ? 'D:\\project\\sub\\nested.txt' : '/elsewhere/project/sub/nested.txt');
+    expect(native.message).toContain('If you meant the approved folder, its path is /project/sub/nested.txt.');
+    const virtual = await expectRefused('/home/me/Project/sub/nested.txt');
+    expect(virtual.message).toContain('Unknown root "/home"');
+    expect(virtual.message).toContain('If you meant the approved folder, its path is /project/sub/nested.txt.');
+    const root = await expectRefused('/home/me/project');
+    expect(root.message).toContain('its path is /project.');
   });
 
   it('allows POSIX filenames that Windows reserves', async () => {

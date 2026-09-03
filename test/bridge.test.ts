@@ -4886,7 +4886,7 @@ describe('unattributed activity recovery', () => {
     expect(await maintenance(), 'run ownership is not an open Prime turn').toBeNull();
   });
 
-  it('spends one action per missing-tab episode and applies one cooldown across the next episode', async () => {
+  it('reopens a closed tab once per close, immediately, with no floor between closes', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -4899,32 +4899,97 @@ describe('unattributed activity recovery', () => {
       await request('POST', '/closed', { body: { conversationId: WORKER } });
       const first = await maintenance();
       expect(chatOf(first)).toBe(WORKER);
-      expect(await maintenance(first!.token)).toBeNull();
+      expect(first!.reason).toBe('no-tab');
+      expect(await maintenance(first!.token, 'reopened')).toBeNull();
       // Repeated close reporting with no intervening page activity is still the same episode.
       await request('POST', '/closed', { body: { conversationId: WORKER } });
       expect(await maintenance()).toBeNull();
 
-      // The exact page comes back and later disappears again. That is a new episode, but the
-      // per-chat floor still prevents two browser actions from landing back to back.
+      // The exact page comes back and is closed again moments later. A closed tab has no page
+      // the three-minute floor could be protecting, so the second close is reopened at once —
+      // one close, one reopen, however close together they land.
       await events(WORKER, [openTurn('turn-worker-back')]);
       await events(WORKER, [openTurn('turn-worker-2')]);
+      await vi.advanceTimersByTimeAsync(1_000);
       await request('POST', '/closed', { body: { conversationId: WORKER } });
-      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - 1);
-      expect(await maintenance()).toBeNull();
-      await vi.advanceTimersByTimeAsync(1);
-      expect(chatOf(await maintenance())).toBe(WORKER);
+      const second = await maintenance();
+      expect(chatOf(second)).toBe(WORKER);
+      expect(second!.token).not.toBe(first!.token);
     } finally {
       vi.useRealTimers();
     }
   });
 
   /**
-   * Any error the page shows is the page saying nothing more is coming, and it is reloaded for
-   * it — whether the DOM classifier called the error recoverable and whether the page could
-   * name the turn it belongs to decide nothing. What is rationed is the count: one reload per
-   * user turn, released by the next message the user sends. A second error on the same turn is
-   * the same broken turn; the same error on the next turn is that turn's own.
+   * The page's parting word is not the turn. A document being torn down has no Stop control,
+   * so its last observation reads "completed" whatever the server is doing; on 2026-09-03
+   * worker-1 reported exactly that one second before its `/closed` while its request id went on
+   * calling tools. A worker slot that was working when its tab went is what the close detached,
+   * and that is the fact the reopen reads.
    */
+  it('reopens a worker whose page called its turn done a second before the tab closed', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+    const bootstrap = await redeem();
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+    });
+    await events(WORKER, [openTurn('turn-worker-parting'), endTurn('turn-worker-parting', 'completed')]);
+    await request('POST', '/closed', { body: { conversationId: WORKER } });
+
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('detached');
+    const handout = await maintenance();
+    expect(chatOf(handout)).toBe(WORKER);
+    expect(handout!.reason).toBe('no-tab');
+  });
+
+  it('reopens a prime whose page said done while its tools were still being called', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'keep this run resumable' }], caller: { conversationId: PRIME } });
+    await events(PRIME, [openTurn('turn-prime-parting'), endTurn('turn-prime-parting', 'completed')]);
+    // A tool call inside the silence window is this app's own definition of a chat that is
+    // working, and it outranks the page's verdict at the moment of teardown.
+    await attributed(PRIME, false, Date.now());
+    await request('POST', '/closed', { body: { conversationId: PRIME } });
+
+    expect(swarmState().agents.find((agent) => agent.role === 'prime')?.state).toBe('detached');
+    const handout = await maintenance();
+    expect(chatOf(handout)).toBe(PRIME);
+    expect(handout!.reason).toBe('no-tab');
+  });
+
+  /**
+   * A turn-scoped repair is retired only by a later turn ending, so a chat whose tab dies on
+   * the broken turn would hold it forever — and a held repair used to refuse the reopen. The
+   * tab it wanted to reload is gone; the reopen is everything that reload would have done.
+   */
+  it('lets a closed tab supersede a held unattributed repair instead of waiting behind it', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'audit' }], caller: { conversationId: PRIME } });
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', {
+        body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
+      });
+      await events(WORKER, [openTurn('turn-worker-unattributed')]);
+      await unattributed();
+      await vi.advanceTimersByTimeAsync(15_000);
+      const held = await maintenance();
+      expect(chatOf(held)).toBe(WORKER);
+      expect(held!.reason).toBe('unattributed');
+
+      // Handed out but never confirmed: the browser found the tab gone before it could act.
+      await request('POST', '/closed', { body: { conversationId: WORKER } });
+      const reopen = await maintenance();
+      expect(chatOf(reopen)).toBe(WORKER);
+      expect(reopen!.reason).toBe('no-tab');
+      expect(reopen!.token).not.toBe(held!.token);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reloads for any error the page shows, once per user turn', async () => {
     vi.useFakeTimers();
     try {

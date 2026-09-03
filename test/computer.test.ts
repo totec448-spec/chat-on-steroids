@@ -52,8 +52,10 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
   // something else is covering is a picture, not a failure. A window that does not exist
   // at all is still an error, and it has to say so as one.
   it('captures a window that will not come forward, but refuses one that does not exist', async () => {
+    // A closed window is a named code, not a generic helper failure: the model reads
+    // WINDOW_NOT_FOUND and goes back to observe rather than retrying the same id.
     await expect(screenshot({ window: 999_999_999, maxWidth: 320 })).rejects.toThrow(
-      /No window with that id/i
+      /WINDOW_NOT_FOUND: window 999999999 is no longer open/
     );
     const { windows } = await listWindows();
     const background = windows.find((w) => w.state !== 'minimized');

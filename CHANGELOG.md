@@ -12,6 +12,19 @@ the app refuses the extension and asks you to reload the matching copy.
 ## [Unreleased]
 
 ### Fixed
+- **A closed agent tab comes straight back.** Closing a Prime's or worker's tab, or typing another
+  ChatGPT address into it, now reopens that chat at once while a turn is still running in it. The
+  extension did not report a tab that was navigated to another ChatGPT page as gone, the app judged
+  "still running" only by the page's parting word (which is always "done" while a tab is torn
+  down), and a reopen waited up to three minutes behind a floor meant for pages still loading.
+  Every close now logs whether the chat was reopened and, if not, why.
+- **A worker chat stays a worker chat after it finishes.** Two workers that crossed the context
+  ceiling were treated as ordinary chats over the compaction line: the app filed compaction tickets
+  their pages can never act on and reloaded each working page five times before giving up.
+- **A worker whose chat will not answer is replaced, not retried.** The second failed wake in a row
+  with nothing heard from that chat in between now tells the prime to spawn a replacement instead
+  of trying again; a ChatGPT conversation that answered every load with "This content is
+  unavailable" cost four wakes and thirty minutes before the prime gave up on it.
 - **A reload no longer ends the turn it came back into.** The page bound the resumed turn to
   the newest assistant section on screen even when that section sat above the newest question,
   so the previous answer's end-turn bit closed the live turn seconds after every reload while
@@ -29,6 +42,30 @@ the app refuses the extension and asks you to reload the matching copy.
   since its last reload now gets the three-minute recovery floor before silence may reload it.
 
 ### Changed
+- **Session cursors are short tokens.** A cursor used to be base64 JSON, up to a thousand
+  characters with four unfinished messages in it, and every refused session read in the fifty
+  most recent recordings was such a cursor the model had re-typed with a letter transposed. A
+  cursor is now a checksummed token of a few dozen characters; a damaged copy is refused as
+  damaged, a cursor from another recording as belonging to it, and quotes, backticks, an
+  `update_cursor:` label or trailing punctuation around a pasted cursor are ignored.
+- **`read` takes a range per path.** `path:12-40` or `path:12` reads that range of that one path,
+  so several ranges of one file fit in one call; the sandbox used to refuse the colon. A path
+  that does not exist now lists the nearest folder that does, which was the model's next call
+  every time.
+- **A refused path suggests its approved spelling.** `C:\marscraft\src\ui\Hud.js` or
+  `/totec/marscraft/src/ui/Hud.js` is refused with the approved `/marscraft/src/ui/Hud.js` it
+  probably meant; the suggestion resolves nothing by itself.
+- **exec_command says which command in a batch failed** when the exit codes are mixed, and
+  explains `git diff` falling into `--no-index` outside a repository and a backslash-quote that
+  split a PowerShell argument into stray positional parameters.
+- **`agents status` prints each worker's recording id**, so a prime reads a worker with
+  `session action=read` instead of searching recordings by the task text; `finish` without a
+  result says what the result is for.
+- **`computer` accepts punctuation keys** (`-`, `=`, `[`, `]`, `;`, `'`, `,`, `.`, `/`, `\`,
+  backquote) and the common aliases, and an unknown key name lists what is accepted. A capture
+  of a closed window is `WINDOW_NOT_FOUND` rather than a generic helper error, a stale UI ref
+  says to observe the window again, and the keypress description says that browser tab, window
+  and address-bar chords are refused.
 - **Goal waits for a quiet chat.** A reloaded page, or a "Message delivery timed out" error, can
   report a turn as finished while the same request is still calling tools; the loop then wrote
   the next message into a chat that was still working and the chat ran two requests at once. The

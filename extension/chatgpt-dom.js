@@ -244,7 +244,32 @@ var CLF_DOM = (() => {
 
   function transportFailure(value) {
     const line = String(value || '').replace(/\s+/g, ' ').trim();
-    return /^(?:message delivery timed out(?:\. please try again\.?)?(?: retry)?|connection interrupted\.? waiting for the complete answer\.?|unknown error occurred\.?|there was an error generating (?:a|the) response\.?|error in message stream\.?|network error\.?|something went wrong\.?|something went wrong while generating the response(?:\. if this issue persists please contact us through our help center at help\.openai\.com\.?)?\.?)$/i.test(line);
+    return /^(?:message delivery timed out(?:\. please try again\.?)?|connection interrupted\.? waiting for the complete answer\.?|unknown error occurred\.?|there was an error generating (?:a|the) response\.?|error in message stream\.?|network error\.?|something went wrong\.?|something went wrong while generating the response(?:\. if this issue persists please contact us through our help center at help\.openai\.com\.?)?\.?)(?: retry)?$/i.test(line);
+  }
+
+  /**
+   * A visible transport-failure card whose wrapper carries no alert role.
+   *
+   * The live 2026-09-03 renderer put the full help-center failure beside an exact Retry
+   * button, outside assistant markdown and without `role="alert"`. The accessible live
+   * region announced unrelated toast text instead, so the real failure never reached the
+   * session and recovery waited for the two-minute silence fallback. Start from the page's
+   * semantic control and climb only to the nearest whole recognised notice; never search
+   * arbitrary page prose for error wording.
+   */
+  function retryFailure(button) {
+    return safe(() => {
+      const label = (button.innerText || button.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!/^retry$/i.test(label) || !displayed(button)) return null;
+      let node = button.parentElement;
+      for (let up = 0; node && up < 8 && node !== document.body; up++, node = node.parentElement) {
+        if (node.closest && node.closest(OWN_SURFACES)) return null;
+        const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (value.length >= 500) return null;
+        if (displayed(node) && transportFailure(value)) return { text: value, node };
+      }
+      return null;
+    }, null);
   }
 
   /**
@@ -1190,6 +1215,15 @@ var CLF_DOM = (() => {
         // still recorded as session evidence and still authorizes nothing.
         out.push({ text: value, node, turnId: null, recoverable: transportFailure(value) });
         texts.add(value);
+      }
+      // The current full-width failure card has no alert role. Its exact Retry control is
+      // the stable semantic anchor; retryFailure() accepts only the nearest complete notice
+      // whose whole text is already in the narrow transport-failure vocabulary above.
+      for (const button of document.querySelectorAll('button')) {
+        const failure = retryFailure(button);
+        if (!failure || texts.has(failure.text)) continue;
+        texts.add(failure.text);
+        out.push({ ...failure, turnId: null, recoverable: true });
       }
       for (const turn of turns()) {
         if (turn.role !== 'assistant') continue;

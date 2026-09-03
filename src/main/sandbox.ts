@@ -52,6 +52,24 @@ export interface Resolved {
   root: Root;
 }
 
+/**
+ * The approved spelling a refused path most likely meant, or null.
+ *
+ * `C:\\marscraft\\src\\ui\\Hud.js` and `/totec/marscraft/src/ui/Hud.js` both name an approved
+ * root by its folder name somewhere inside them, and in the recorded sessions that is what
+ * nearly every refused path was: a real file under a root, spelled from a guessed drive or one
+ * folder too high. The first segment that names a root wins and the rest is carried over. It
+ * is a suggestion in the error text and never a resolution — nothing is read from it.
+ */
+export function suggestApprovedSpelling(roots: readonly Root[], segments: readonly string[]): string | null {
+  for (const [index, segment] of segments.entries()) {
+    const slug = normaliseRootName(segment);
+    const root = roots.find((candidate) => candidate.name === slug);
+    if (root) return `/${root.name}${segments.slice(index + 1).map((part) => `/${part}`).join('')}`;
+  }
+  return null;
+}
+
 /** Normalises a user-supplied root name into the slug used in virtual paths. */
 export function normaliseRootName(input: string): string {
   const slug = input
@@ -295,9 +313,11 @@ async function normaliseNativePath(roots: readonly Root[], input: string): Promi
     }
   }
   const names = roots.map((r) => `/${r.name}`).join(', ') || '(none approved)';
+  const suggestion = suggestApprovedSpelling(roots, nativeSegments.filter((part) => part.length > 0));
   throw new SandboxError(
     `Native path "${input.trim()}" is not inside an approved folder. ` +
-      `Approved roots: ${names}`
+      `Approved roots: ${names}` +
+      (suggestion ? ` If you meant the approved folder, its path is ${suggestion}.` : '')
   );
 }
 
@@ -338,7 +358,11 @@ export async function resolvePath(
   const root = roots.find((r) => r.name.toLowerCase() === rootName);
   if (!root) {
     const names = roots.map((r) => `/${r.name}`).join(', ') || '(none approved)';
-    throw new SandboxError(`Unknown root "/${segments[0]}". Approved roots: ${names}`);
+    const suggestion = suggestApprovedSpelling(roots, segments.slice(1));
+    throw new SandboxError(
+      `Unknown root "/${segments[0]}". Approved roots: ${names}` +
+        (suggestion ? ` If you meant the approved folder, its path is ${suggestion}.` : '')
+    );
   }
 
   const rootReal = await realRoot(root);
