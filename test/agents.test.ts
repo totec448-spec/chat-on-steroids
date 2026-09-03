@@ -56,6 +56,8 @@ const {
   noteAgentAlive,
   noteAgentContextTokens,
   failWorkerRevival,
+  isWorkerConversation,
+  WAKE_FAILURES_BEFORE_GIVING_UP,
   noteWorkerRevived,
   onReviveRequest,
   pendingWorkerRevivals,
@@ -1466,6 +1468,75 @@ describe('a worker that is sleeping', () => {
     const after = swarmState().agents.find((agent) => agent.id === 'worker-1');
     expect(after?.state).toBe('finished');
     expect(after?.revivable).toBe(false);
+  });
+
+  /**
+   * On 2026-09-03 worker-7's conversation answered every load with "This content is
+   * unavailable". Four wakes each waited out their deadline and each told the prime to try once
+   * more — thirty minutes before it spawned the replacement it could have spawned after the
+   * first repeat. The second failed wake with nothing heard from the chat in between is the
+   * verdict on the chat.
+   */
+  it('ends a worker whose chat fails two wakes in a row, and lets that chat bring it back', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'done');
+    expect(WAKE_FAILURES_BEFORE_GIVING_UP).toBe(2);
+
+    stageMessages(prime, [{ to: 'worker-1', text: 'more work' }]).commit();
+    failWorkerRevival('worker-1', 'the chat this app opened did not report back in time');
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
+
+    stageMessages(prime, [{ to: 'worker-1', text: 'still there?' }]).commit();
+    const report = failWorkerRevival('worker-1', 'the chat this app opened did not report back in time');
+    const gone = swarmState().agents.find((agent) => agent.id === 'worker-1');
+    expect(gone?.state).toBe('failed');
+    expect(freeWorkerSlots()).toBe(3);
+    expect(report?.to).toBe(PRIME_ID);
+    expect(report?.text).toMatch(/2 revivals in a row/);
+    expect(report?.text).toMatch(/spawn a replacement/);
+    expect(report?.text).not.toMatch(/try agents action=message/i);
+    // Its inbox is kept: a revivable failure is a verdict on reachability, not on the work.
+    expect(pendingCount('worker-1')).toBe(2);
+    expect(() => stageMessages(prime, [{ to: 'worker-1', text: 'third try' }])).toThrow();
+
+    // The chat calling in again is first-hand proof it can be reached after all.
+    const back = noteAgentAlive('c-worker-1', 'call');
+    expect(back?.revived).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+  });
+
+  it('forgives a single failed wake once the chat has been heard from since', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'done');
+
+    stageMessages(prime, [{ to: 'worker-1', text: 'more work' }]).commit();
+    failWorkerRevival('worker-1', 'browser could not reopen the chat');
+    // The worker's page reports in between: the count starts over.
+    noteAgentAlive('c-worker-1', 'page');
+
+    stageMessages(prime, [{ to: 'worker-1', text: 'again' }]).commit();
+    failWorkerRevival('worker-1', 'browser could not reopen the chat');
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('sleeping');
+  });
+
+  /**
+   * A worker chat never becomes an ordinary chat by finishing. The owner lookup deliberately
+   * forgets a worker that is over; the Goal and compaction fences must not, or a chat that
+   * crossed the ceiling is compacted like a plain chat over the line (2026-09-03, twice).
+   */
+  it('still counts a finished worker chat as a worker chat', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    expect(isWorkerConversation('c-worker-1')).toBe(true);
+    expect(isWorkerConversation('c-prime')).toBe(false);
+    expect(isWorkerConversation('c-nobody')).toBe(false);
+
+    fillContext('c-worker-1');
+    finishAgent(worker.caller, 'done at the ceiling');
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('finished');
+    expect(isWorkerConversation('c-worker-1')).toBe(true);
   });
 
   it('terminalises a failed in-flight revival if that chat crossed 400k while waking', () => {

@@ -681,6 +681,31 @@ describe('saying what to do next', () => {
     expect(hints[0]).toMatch(/rev-parse --show-toplevel/);
   });
 
+  it('recognises the --no-index fall-through as git diff outside a repository', () => {
+    // Outside a repository `git diff <path>` prints a warning and its whole option list, or
+    // silently compares two named files; neither says "not a repository" in a way that was read.
+    const usage = 'warning: Not a git repository. Use --no-index to compare two paths outside a working tree\nusage: git diff --no-index [<options>] <path> <path>\n\nDiff output format options\n    -p, --patch\n';
+    const hints = execRecoveryHints('git diff -- src/main.js', usage, 'powershell');
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toMatch(/not a git repository/i);
+    expect(hints[0]).toMatch(/--no-index/);
+    expect(hints[0]).toMatch(/rev-parse --show-toplevel/);
+    expect(execRecoveryHints('git diff -- src/main.js', 'diff --git a/src/main.js b/src/main.js\n', 'powershell')).toEqual([]);
+  });
+
+  it('explains a backslash-quote that split the argument instead of ending the line', () => {
+    // The quotes balanced, so PowerShell ran the cmdlet with the remainder as positional
+    // arguments; the refusal names a fragment of the pattern, not the backslash.
+    const output =
+      'Select-String : A positional parameter cannot be found that accepts argument \'click\\\'.\n' +
+      'FullyQualifiedErrorId : PositionalParameterNotFound,Microsoft.PowerShell.Commands.SelectStringCommand';
+    const hints = execRecoveryHints('Get-Content app.js | Select-String -Pattern "addEventListener(\\"click\\")"', output, 'powershell');
+    expect(hints).toHaveLength(1);
+    expect(hints[0]).toMatch(/backslash-quote/);
+    expect(hints[0]).toMatch(/single quotes/);
+    expect(execRecoveryHints('Select-String -Pattern "plain" extra', output, 'powershell')).toEqual([]);
+  });
+
   it('explains an unexpanded glob rather than leaving the code to be guessed at', () => {
     const hints = execRecoveryHints('rg -n x C:\\a\\b*', 'rg: C:\\a\\b*: IO error … (os error 123)');
     expect(hints.join(' ')).toMatch(/PowerShell does not expand/);

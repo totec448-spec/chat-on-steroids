@@ -149,7 +149,9 @@ const computerActionArg = z.discriminatedUnion('type', [
   z
     .object({ type: z.literal('keypress'), keys: z.array(z.string().max(20)).min(1).max(6) })
     .strict()
-    .describe('Press keys together, e.g. ["ctrl","s"] on Windows or ["command","s"] on macOS.'),
+    .describe(
+      'Press keys together, e.g. ["ctrl","s"] (Windows) or ["command","s"] (macOS). Browser tab/window/address-bar chords are refused; use set_value on the address bar.'
+    ),
   z.object({ type: z.literal('focus'), window: windowIdArg }).strict().describe('Bring a window to the front.'),
   z.object({ type: z.literal('wait'), ms: z.number().int().min(0).max(10_000).optional() }).strict().describe('Pause.'),
   z.object({ type: z.literal('read_clipboard') }).strict().describe('Return the clipboard text.'),

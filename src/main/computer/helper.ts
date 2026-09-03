@@ -354,14 +354,26 @@ function Vk([string]$name) {
     'PAGEUP'=0x21; 'PAGEDOWN'=0x22; 'UP'=0x26; 'DOWN'=0x28; 'LEFT'=0x25; 'RIGHT'=0x27;
     'F1'=0x70;'F2'=0x71;'F3'=0x72;'F4'=0x73;'F5'=0x74;'F6'=0x75;
     'F7'=0x76;'F8'=0x77;'F9'=0x78;'F10'=0x79;'F11'=0x7A;'F12'=0x7B;
-    'PRINTSCREEN'=0x2C; 'CAPSLOCK'=0x14
+    'PRINTSCREEN'=0x2C; 'CAPSLOCK'=0x14;
+    'PGUP'=0x21; 'PGDN'=0x22; 'ARROWUP'=0x26; 'ARROWDOWN'=0x28; 'ARROWLEFT'=0x25; 'ARROWRIGHT'=0x27;
+    'META'=0x5B; 'COMMAND'=0x5B; 'OPTION'=0x12; 'INS'=0x2D; 'BKSP'=0x08; 'PAUSE'=0x13;
+    'NUMLOCK'=0x90; 'SCROLLLOCK'=0x91; 'MENU'=0x5D; 'APPS'=0x5D;
+    'F13'=0x7C;'F14'=0x7D;'F15'=0x7E;'F16'=0x7F;'F17'=0x80;'F18'=0x81;
+    'F19'=0x82;'F20'=0x83;'F21'=0x84;'F22'=0x85;'F23'=0x86;'F24'=0x87;
+    'MINUS'=0xBD; '-'=0xBD; 'EQUALS'=0xBB; 'EQUAL'=0xBB; '='=0xBB; 'PLUS'=0xBB;
+    'LBRACKET'=0xDB; 'BRACKETLEFT'=0xDB; '['=0xDB; 'RBRACKET'=0xDD; 'BRACKETRIGHT'=0xDD; ']'=0xDD;
+    'BACKSLASH'=0xDC; '\'=0xDC; 'SEMICOLON'=0xBA; ';'=0xBA; 'QUOTE'=0xDE; 'APOSTROPHE'=0xDE; "'"=0xDE;
+    'COMMA'=0xBC; ','=0xBC; 'PERIOD'=0xBE; '.'=0xBE; 'SLASH'=0xBF; '/'=0xBF;
+    'BACKQUOTE'=0xC0; 'GRAVE'=0xC0; 'TILDE'=0xC0; '~'=0xC0
   }
+  # The backtick cannot be spelled inside this script's own quoting, so it joins the map by code.
+  $map[[string][char]96] = 0xC0
   if ($map.ContainsKey($n)) { return [uint16]$map[$n] }
   if ($n.Length -eq 1) {
     $c = [char]$n
     if (($c -ge 'A' -and $c -le 'Z') -or ($c -ge '0' -and $c -le '9')) { return [uint16][int][char]$c }
   }
-  throw "BAD_KEY: Unknown key: $name"
+  throw "BAD_KEY: Unknown key: $name. Use one character, or a key name: enter, tab, esc, space, backspace, delete, insert, home, end, pageup, pagedown, up, down, left, right, f1-f24, printscreen, or a modifier ctrl, alt, shift, win."
 }
 
 function Get-WindowRows {
@@ -453,11 +465,11 @@ function Remember-UiSnapshot([int64]$id, $root, $elements) {
 function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
   $snapshot = $script:UiSnapshots["s$snapshotId"]
   if ($null -eq $snapshot -or [int64]$snapshot.window -ne $id) {
-    throw "STALE_UI_SNAPSHOT: UI snapshot $snapshotId is no longer active for window $id"
+    throw "STALE_UI_SNAPSHOT: UI snapshot $snapshotId is no longer active for window $id. Call observe on the window again and use a ref from that reply."
   }
   $element = $snapshot.elements[$runtimeKey]
   if ($null -eq $element) {
-    throw "UI_ELEMENT_GONE: the referenced UI element is not part of snapshot $snapshotId"
+    throw "UI_ELEMENT_GONE: the referenced UI element is not part of snapshot $snapshotId. Use a ref printed by that snapshot, or observe the window again."
   }
   try {
     $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$id)
@@ -467,7 +479,7 @@ function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
   if ($null -eq $root) { throw "UIA_FAILED: no accessible window with id $id" }
   try {
     if ((Ui-RuntimeKey $root) -ne [string]$snapshot.rootRuntimeKey) {
-      throw "STALE_UI_SNAPSHOT: window $id no longer has the UIA root from snapshot $snapshotId"
+      throw "STALE_UI_SNAPSHOT: window $id no longer has the UIA root from snapshot $snapshotId. Call observe on the window again and use a ref from that reply."
     }
     # Reading Current is the liveness check. The element object itself is the cached handle;
     # never rescan by RuntimeId, because Microsoft permits RuntimeId reuse over time.
@@ -479,7 +491,7 @@ function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
   } catch {
     $message = $_.Exception.Message
     if ($message -match '^[A-Z0-9_]+:') { throw $message }
-    throw "UI_ELEMENT_GONE: the referenced UI element is no longer present"
+    throw "UI_ELEMENT_GONE: the referenced UI element is no longer present. Call observe on the window again and use a ref from that reply."
   }
 }
 
@@ -615,7 +627,9 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
     $x = [int]$request.region.x; $y = [int]$request.region.y
     $w = [int]$request.region.width; $h = [int]$request.region.height
   } elseif ($null -ne $id) {
-    $r = [Clf]::Rect([int64]$id) -split ','
+    try { $r = [Clf]::Rect([int64]$id) -split ',' } catch {
+      throw "WINDOW_NOT_FOUND: window $id is no longer open, so there is nothing to capture. Call observe what=windows for the current windows."
+    }
     $x = [int]$r[0]; $y = [int]$r[1]; $w = [int]$r[2]; $h = [int]$r[3]
     $focused = ([Clf]::ForegroundId() -eq [int64]$id)
   } elseif ($request.full) {

@@ -80,6 +80,7 @@ import {
   agentForConversation,
   agentInfoForOwnedConversation,
   agentForOwnedConversation,
+  isWorkerConversation,
   bindConversation,
   claimWorkerRevival,
   closableWorkerConversations,
@@ -924,12 +925,12 @@ function conversationId(value: unknown): string | null {
  * rather than treating `run === null` as proof that a chat is solo.
  */
 function goalWorkerChat(id: string): boolean {
-  const agent = agentForOwnedConversation(id);
-  // Active membership is not the whole worker-identity boundary anymore. Once the last worker
-  // stops, its owner history parks and the exact worker chat nevertheless remains a worker
-  // forever (until explicit clear). Goal must not start authoring user turns in it merely because
-  // its run is dormant.
-  return (agent !== null && agent !== PRIME_ID) || retiredWorkerForConversation(id) !== null;
+  // Membership in any state, not the owner lookup: a worker chat remains a worker forever —
+  // parked with its run, finished at the context ceiling, or retired after the run — and the
+  // loop must never author user turns in it, nor a Compact & Resume be typed into it. The owner
+  // lookup deliberately forgets a worker that is over, which is how two ceiling-finished workers
+  // were compacted like plain chats on 2026-09-03.
+  return isWorkerConversation(id) || retiredWorkerForConversation(id) !== null;
 }
 
 /**
@@ -1395,9 +1396,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // Preserve the page's last exact turn verdict before closeConversation removes its live
       // recorder entry. Agent ownership outlives a tab; an open turn is the narrower fact that
       // authorises reopening it.
-      const closedMidTurn = liveConversations().some(
-        (entry) => entry.conversationId === id && (entry.generating || Boolean(entry.activeTurnId))
-      );
+      // Read before closeConversation() forgets the page and endActivity() the ledger: the
+      // page's own open turn, or this app's standing definition of a chat that is working —
+      // an attributed call or current-turn observation inside the silence window.
+      const working =
+        liveConversations().some(
+          (entry) => entry.conversationId === id && (entry.generating || Boolean(entry.activeTurnId))
+        ) || (activeUntil.get(id)?.until ?? 0) > Date.now();
       await closeConversation(id);
       // A browser tab closing is not evidence that the server-side ChatGPT turn has stopped.
       // In particular, after a swarm ends the retired-worker lease is the only authority fence
@@ -1414,7 +1419,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       else if (workerConversationGone(id)) {
         logInfo(`bridge: worker chat ${id} closed — its slot is detached, not ended, until it also goes quiet`);
       }
-      await queueMissingTab(id, closedMidTurn);
+      await queueMissingTab(id, working);
     }
     return json(res, 200, { ok: true }, origin);
   }
@@ -4920,19 +4925,24 @@ function queueBrowserRecovery(
   // a stuck turn-scoped repair, not something one may mute. Its reload does everything theirs
   // would have done, so superseding loses no repair.
   //
-  // Deliberately not extended to `no-tab`, which is chat-scoped like silence, is cleared by
-  // ordinary activity, and therefore cannot be the stuck kind. Letting silence past that one
-  // would only cancel its three-minute floor and reopen tabs faster than the floor allows.
-  const supersedes = reason === 'silence' && TURN_SCOPED_REPAIRS.has(held?.reason as Repair['reason']);
+  // `no-tab` supersedes them for the same reason: the tab those repairs would reload is gone,
+  // and the reopen does everything their reload would have done. Neither supersedes `no-tab`
+  // itself, which ordinary activity clears and which therefore cannot be the stuck kind.
+  const supersedes =
+    (reason === 'silence' || reason === 'no-tab') && TURN_SCOPED_REPAIRS.has(held?.reason as Repair['reason']);
   if (held && held.state !== 'done' && !supersedes) return false;
   // Silence already paid its complete two-minute inactivity boundary. Once genuine new activity
   // starts another episode, layering the unrelated browser-action floor on top delays the next
-  // stuck-page recovery beyond its own contract. Error/no-tab repairs keep that shared floor.
-  // `goal` is exempt for the same reason and a stronger one: it carries its own backoff, which
-  // after the opening step is already longer than the shared floor, so applying both would only
-  // move the user's stated schedule without changing what protects the page.
+  // stuck-page recovery beyond its own contract. Error/unattributed repairs keep that shared
+  // floor. `goal` is exempt for the same reason and a stronger one: it carries its own backoff,
+  // which after the opening step is already longer than the shared floor, so applying both would
+  // only move the user's stated schedule without changing what protects the page. `no-tab` is
+  // exempt because the floor protects a page that is still loading from a second reload, and a
+  // closed tab has no page to protect: on 2026-09-03 a worker the user closed sat under the
+  // floor for two and a half minutes because a silence reopen had landed moments earlier. One
+  // close is one reopen, and it is immediate.
   const notBefore =
-    reason === 'silence' || reason === 'goal' || reason === 'compaction'
+    reason === 'silence' || reason === 'goal' || reason === 'compaction' || reason === 'no-tab'
       ? now
       : Math.max(now, (lastBrowserRecoveryAt.get(conversationId) ?? 0) + BROWSER_RECOVERY_COOLDOWN_MS);
   repairsInFlight.set(conversationId, {
@@ -5469,38 +5479,52 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
 }
 
 /**
- * A final-tab close during one exact open turn is one no-tab recovery episode.
+ * A final-tab close of a chat this app is owed a running turn in is one no-tab recovery episode.
  *
- * Two kinds of chat qualify, for one reason: this app is owed the end of a turn that is still
- * running on OpenAI's servers, and the page that was watching it is gone. For a Prime or Worker
- * that turn is the run's, which is what `recoverAgentTabs` is a preference about. For any other
- * chat the qualification is the one fact that makes it this app's business at all — it has
- * proved at least one MCP call, so the turn still running is running against this connector. A
- * chat that has never called a tool is the user's own browsing: closing it is not a failure, and
- * reopening it would be this app helping itself to a tab nobody asked it to keep.
+ * Whether the app is owed that turn is its own question, not the page's parting word. The page
+ * decides "generating" from the Stop control, and a document being torn down has none: on
+ * 2026-09-03 worker-1's page reported its turn completed one second before its `/closed`, while
+ * the same request id went on calling tools straight through the close. So the answer is the
+ * strongest fact available: the page's own open turn when it has one, an attributed call or
+ * current-turn observation inside the silence window — this app's standing definition of a
+ * chat that is working, read from its activity ledger before the close ends it — or a worker
+ * slot that was working when the tab went (the close itself detached it; a sleeping worker's
+ * tab closing is not an event). A Prime or Worker is what `recoverAgentTabs` is a
+ * preference about; a Goal/Loop chat is always brought back; any other chat qualifies on the one
+ * fact that makes it this app's business — it has proved at least one MCP call. A chat that has
+ * never called a tool is the user's own browsing: closing it is not a failure, and reopening it
+ * would be this app helping itself to a tab nobody asked it to keep.
  *
- * The silence deadline would eventually reopen either of them, but only two minutes after the
- * last sign of life. A closed tab is first-hand proof that the page is gone *now*, and acting on
- * it is the whole difference between a chat that comes straight back and one the user watches
- * fail to.
+ * The silence deadline would eventually reopen any of them, but only two minutes after the last
+ * sign of life. A closed tab is first-hand proof that the page is gone *now*, and acting on it
+ * is the whole difference between a chat that comes straight back and one the user watches
+ * fail to. The episode is stamped with the moment the page went, never with the chat's moving
+ * activity deadline: a detached chat goes on calling tools server-side, and a stamp that tracked
+ * activity would mint a fresh episode — and a second tab — out of the very work this repair
+ * exists to keep alive.
  *
- * The episode is stamped with the moment the page went, never with the chat's moving activity
- * deadline. A detached chat goes on calling tools server-side, so a stamp that tracked activity
- * would mint a fresh episode — and a second tab — out of the very work this repair exists to
- * keep alive.
+ * Every verdict is logged, because "I closed it and nothing happened" is otherwise
+ * indistinguishable from a close the extension never reported.
  */
-async function queueMissingTab(conversationId: string, closedMidTurn: boolean, now = Date.now()): Promise<void> {
-  if (!closedMidTurn) return;
+async function queueMissingTab(conversationId: string, working: boolean, now = Date.now()): Promise<void> {
   const agent = agentInfoForOwnedConversation(conversationId);
   // Read after closeConversation() has ended the session, so `endedAt` is this exact close.
   const session = await findSessionByConversation(conversationId);
-  const eligible = tabRecoveryWanted(conversationId) && (agent ? agent.state === 'detached' : (session?.toolCalls ?? 0) > 0);
-  if (!eligible) return;
-  const wentAt = agent?.detachedAt ?? session?.endedAt ?? now;
-  if (session && queueBrowserRecovery(conversationId, session.id, `no-tab:${wentAt}`, 'no-tab', 0, now)) {
-    logInfo(
-      `bridge: ${agent?.id ?? conversationId} has no tab — asking the browser to open the exact chat once`
-    );
+  const name = agent?.id ?? conversationId;
+  const declined = (why: string): void => {
+    logInfo(`bridge: ${name} closed its last tab — not reopened: ${why}`);
+  };
+  // A chat with no session is not this app's chat; its tab closing is nobody's business here.
+  if (!session) return;
+  if (!tabRecoveryWanted(conversationId)) return declined('tab recovery is off for this chat');
+  if (agent && agent.state !== 'detached') return declined(`its ${agent.role} slot is ${agent.state}, not working`);
+  if (!agent && (session.toolCalls ?? 0) === 0) return declined('it has never called a tool');
+  if (!working && agent?.role !== 'worker') return declined('no turn is running in it');
+  const wentAt = agent?.detachedAt ?? session.endedAt ?? now;
+  if (queueBrowserRecovery(conversationId, session.id, `no-tab:${wentAt}`, 'no-tab', 0, now)) {
+    logInfo(`bridge: ${name} has no tab — asking the browser to open the exact chat once`);
+  } else {
+    declined('a browser action for it is already pending');
   }
 }
 

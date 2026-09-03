@@ -6144,6 +6144,40 @@ describe('how a turn is recorded as having ended', () => {
     expect(failure.turnId).toBe(started.turnId);
   });
 
+  /**
+   * Live 2026-09-03 shape: the red full-width card contained the complete help-center
+   * message and a Retry button, but had neither role=alert nor assistant markdown. The
+   * accessibility announcer exposed a different toast, so alert-only discovery missed the
+   * failure entirely and the chat recovered only when the two-minute silence watch fired.
+   */
+  it('records the complete non-alert help-center Retry card as a transport failure', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-retry-card', []);
+    live.hook.observe();
+    await settle();
+
+    const card = live.document.createElement('div');
+    const copy = live.document.createElement('p');
+    copy.textContent =
+      'Something went wrong while generating the response. If this issue persists please contact us through our help center at help.openai.com. ';
+    const retry = live.document.createElement('button');
+    retry.textContent = 'Retry';
+    card.append(copy, retry);
+    live.document.body.append(card);
+    live.hook.observe();
+    await settle();
+
+    const [failure] = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    const [started] = emitted(live.sent, 'turn_start').map((entry) => entry.event);
+    expect(failure).toMatchObject({
+      text:
+        'Something went wrong while generating the response. If this issue persists please contact us through our help center at help.openai.com. Retry',
+      recoverable: true,
+      turnId: started.turnId
+    });
+  });
+
   it('does not turn ordinary assistant prose into an error because it quotes transport-failure wording', async () => {
     live = await harness();
     startGenerating(live.document);
@@ -6155,6 +6189,26 @@ describe('how a turn is recorded as having ended', () => {
       'I found the earlier failure. The page showed “Connection interrupted. Waiting for the complete answer”, then recovered and kept working.'
     );
 
+    live.hook.observe();
+    await settle();
+
+    expect(emitted(live.sent, 'chat_error')).toEqual([]);
+  });
+
+  it('does not treat an arbitrary Retry control beside prose mentioning a failure as the failure card', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-explaining-retry', []);
+    live.hook.observe();
+    await settle();
+
+    const explanation = live.document.createElement('div');
+    explanation.textContent =
+      'The earlier card said “Something went wrong while generating the response.” Use this only if you want to try that request again. ';
+    const retry = live.document.createElement('button');
+    retry.textContent = 'Retry';
+    explanation.append(retry);
+    live.document.body.append(explanation);
     live.hook.observe();
     await settle();
 

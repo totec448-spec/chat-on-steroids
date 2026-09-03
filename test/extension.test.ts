@@ -2315,6 +2315,40 @@ describe('extension observation journal', () => {
     expect(session.data.tabConversations).toEqual({});
   });
 
+  /**
+   * Typing chatgpt.com into a Prime's tab used to leave that chat bound to the tab until some
+   * later chat happened to be given an id there, so the app never heard the page was gone and
+   * never reopened it (2026-09-03). A full document load of any ChatGPT URL that is concretely
+   * not the chat's own is the chat leaving; its own URL is the ambiguous reload it always was.
+   */
+  it('closes a conversation when its tab does a full navigation to another ChatGPT URL', async () => {
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const closed: string[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/events') return response(200, { sessionId: 'session', stored: 1 });
+      if (url.pathname === '/closed') {
+        closed.push(JSON.parse(String(init.body)).conversationId);
+        return response(200, { ok: true });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({ local, session, fetch });
+    const conversationId = '11111111-2222-3333-4444-555555555555';
+
+    await worker.send({ type: 'bind', conversationId }, 12);
+    // A reload of the chat's own URL is not a departure.
+    await worker.navigateTab(12, `https://chatgpt.com/c/${conversationId}`);
+    expect(closed).toEqual([]);
+    expect(session.data.tabConversations).toEqual({ '12': conversationId });
+
+    await worker.navigateTab(12, 'https://chatgpt.com/');
+    expect(closed).toEqual([conversationId]);
+    expect(session.data.tabConversations).toEqual({});
+  });
+
   it('lets terminal navigation beat a delayed message from the dying document', async () => {
     const conversationId = '11111111-2222-3333-4444-555555555555';
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });

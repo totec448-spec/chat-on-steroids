@@ -1452,6 +1452,15 @@ export function execRecoveryHints(
         'Check with `git rev-parse --show-toplevel`, or set workdir to the folder that actually contains .git. ' +
         'The server instructions list which approved roots are repositories.'
     );
+  } else if (/warning: Not a git repository\. Use --no-index|^usage: git diff --no-index/im.test(outputText)) {
+    // `git diff <paths>` outside a repository falls into --no-index mode, which compares the
+    // named files with each other or, given one path, prints the full option list. Fifteen of
+    // those dumps in the recorded sessions, none of them read as "this is not a repository".
+    hints.push(
+      'That folder is not a git repository. `git diff` there falls into `git diff --no-index`, which compares the ' +
+        'named files with each other or prints its option list, so nothing above is a diff against any commit. ' +
+        'Check with `git rev-parse --show-toplevel`, or set workdir to the folder that actually contains .git.'
+    );
   }
 
   if (
@@ -1486,6 +1495,23 @@ export function execRecoveryHints(
         'above names it, and the rest of the output is a complete answer for the paths that do. ' +
         `Confirm the spelling with ${checkPath} before re-running, and re-run only the ` +
         'missing path rather than the whole search.'
+    );
+  }
+
+  if (
+    powershell &&
+    command.includes('\\"') &&
+    /PositionalParameterNotFound|A positional parameter cannot be found that accepts argument/i.test(outputText) &&
+    !/The string (?:is missing the terminator|starting:)/i.test(outputText)
+  ) {
+    // The quotes balanced out, so PowerShell did run the line — with the double-quoted argument
+    // ended at the backslash-quote and the remainder handed to the cmdlet as extra positional
+    // arguments. The cmdlet's refusal names one of those fragments, not the mistake.
+    hints.push(
+      'PowerShell ended the double-quoted argument at the backslash-quote inside it — a backslash escapes nothing in ' +
+        'PowerShell — and handed the rest of the text to the cmdlet as extra positional arguments, which it refused. ' +
+        'Put a pattern that contains a quote in single quotes, doubling any apostrophe; keep the backslash before the ' +
+        'quote only when a native program should receive it.'
     );
   }
 

@@ -1313,9 +1313,12 @@ Authority begins with Chrome's `MessageSender.documentId`, never a body field. A
 non-retired sender can be adopted by `authorizeDocument()` itself — `register_document` is **not**
 the sole replacement path in today's code — while `registerDocument()` is the one bypass-authorized
 bootstrap that can adopt fresh-reload provisional journal evidence before retiring the old current
-document. `onUpdated(status='loading')` marks the current document terminal speculatively but keeps
-the conversation binding across ChatGPT→ChatGPT reload/navigation; real leave/tab removal releases
-the chat. A current terminal sender gets `tab_closed` unless `terminalPredictionWrong()` positively
+document. `onUpdated(status='loading')` marks the current document terminal speculatively and keeps
+the conversation binding only across a reload of the chat's **own** URL; a full load of any other
+ChatGPT URL (the root, another chat, a project page), a leave to another site, or tab removal
+releases the chat there and then (2026-09-03: typing chatgpt.com into a Prime's tab left it bound
+until some later chat was given an id there, so the app never heard the page was gone). An SPA move
+fires no `loading` status and stays the content script's to prove. A current terminal sender gets `tab_closed` unless `terminalPredictionWrong()` positively
 re-reads the same Chrome tab as ChatGPT, no longer loading, with no `pendingUrl`, and the sender still
 current; only then is the false terminal stamp cleared. Do not document or implement against a
 hypothetical collapsed owner record until code/tests move together. Irreversible browser actions
@@ -1480,10 +1483,17 @@ later unattributed call under one of them opens nothing — the reload is tried 
 however the reloaded page re-labels its local turn, and a *different* request id (the user's next
 message from the phone, say) is a different turn with its own reload. Any `chat_error` the page
 shows queues an `assistant-error` repair — whatever the DOM classifier said about it and whether or
-not the page could name its turn — even while attributed MCP calls continue server-side. An **eligible mid-turn**
-final-tab close may queue `no-tab` when `tabRecoveryWanted()` holds (Goal/Loop chat, or
-`recoverAgentTabs` on): a still-owned detached agent, or an ordinary chat that already has durable
-`toolCalls>0`. Silence reads the same predicate; a silent chat it refuses is spent, not reloaded. The extension owns the final **reload
+not the page could name its turn — even while attributed MCP calls continue server-side. A final-tab close
+may queue `no-tab` when `tabRecoveryWanted()` holds (Goal/Loop chat, or `recoverAgentTabs` on) and
+this app is owed a running turn in that chat. "Owed" is the app's own fact, read in `/closed`
+before the close forgets it: the page's open turn **or** a live `activeUntil` grant (an attributed
+call or current-turn observation inside the silence window), or a Worker slot the close itself
+detached — a document being torn down has no Stop control and reports "completed" whatever the
+server is doing (2026-09-03: worker-1 said so one second before its `/closed` while its request id
+went on calling tools). A Prime or plain chat needs the working fact; a plain chat also needs durable
+`toolCalls>0`; a sleeping worker's tab closing is not an event. `queueMissingTab()` logs every
+verdict, reopen or not, with its reason. Silence reads the same `tabRecoveryWanted()` predicate; a
+silent chat it refuses is spent, not reloaded. The extension owns the final **reload
 existing exact tab vs open exact conversation** choice at action time, so stale app-side tab guesses
 cannot create a duplicate.
 
@@ -1491,8 +1501,11 @@ cannot create a duplicate.
 visible ChatGPT errors, but only a **whole normalized notice** matching `transportFailure()` receives
 `recoverable:true`; ordinary assistant prose that merely quotes those words is not an error. Hidden
 live-region noise and CLF-owned surfaces are ignored, while a generic visible alert may still enter
-the transcript as evidence without granting browser-repair authority. When a transport notice lives
-inside an assistant turn, `content.js` may put it in recorder chronology only after exact section-node
+the transcript as evidence without granting browser-repair authority. A visible failure card may
+carry no alert role or assistant markdown; the exact Retry button is then the semantic anchor, and
+the DOM reader climbs only to the nearest ancestor whose **whole** normalized text matches that same
+transport-failure vocabulary. It never searches arbitrary page prose for those words. When a
+transport notice lives inside an assistant turn, `content.js` may put it in recorder chronology only after exact section-node
 ownership proves which **local generation id** owns it; a reused ChatGPT page turn id is never enough.
 A top-level banner,
 which has no page-turn identity of its own, uses the local generation in which its node first appeared.
@@ -1510,7 +1523,7 @@ machines:
 | `silence` | `inspectSilentChats()` after the semantic-turn `activeUntil` deadline expires — the only qualification is two minutes with no tool call and no page change on a chat that had activity | meaningful new current-turn activity before handoff cancels it; a confirmed reload re-grants the chat `CHAT_SILENCE_MS` (the reload is its chance; a model writing a long answer makes no durable progress until it lands) or, for a Goal/Loop chat, `GOAL_SILENCE_LISTEN_MS` (one minute), and only a second silent window after that spends the one-shot: the stale sweep sleeps a worker, and `fileSilenceGoalTickets()` files a **Goal ticket** for a Goal/Loop chat — the same durable `goal-replies` obligation a finished answer files, under a `g-silence-<time>` turn, which the page collects on its next pull like any restored pending reply, drafts and sends. A turn that ends **failed** re-grants the watch instead of ending it: the page gave up, the model usually did not. A user Stop ends activity and never reaches any of this |
 | `unattributed` | `repairUnattributedChat()` after the recorder opened one 60s post-grace incident and this exact mid-turn chat never joined the incident's `proven` set; refused when the call's request id is already in `unattributedReloadedRequests` | an attributed call proves the request-id join works, or a **later turn ends** and advances outcome-agnostic `endedTurns`; the rationing is per **request id**, not per turn |
 | `assistant-error` | `noteRecoveryObservations()` from any `chat_error`, turn id or not, recoverable or not | the browser carries the repair out, or a **later turn ends** and advances outcome-agnostic `endedTurns`; the broken turn's own end is deliberately pre-counted and does not cancel the repair. The once-per-user-turn budget (`turnRepairSpent`) is charged at **confirm** to the turn the chat is on then — `turnKeyFor()`: the running generation, or `ended:<count>` when none is running — and released the moment the chat is on a different one (read lazily in `queueBrowserRecovery()` as well as on the browser's pass), so a failed turn whose end preceded the reload cannot leave its charge on the turn that starts later. Ordinary server-side attributed calls do not cancel it because they prove attribution, not page-stream health |
-| `no-tab` | `queueMissingTab()` for a final tab that closed mid-turn: a conversation that is **still owned** as a detached agent (under `recoverAgentTabs`), or otherwise an ordinary chat whose session has recorded at least one tool call | page/turn activity after reopening, or the normal agent lifecycle decision |
+| `no-tab` | `queueMissingTab()` for a final tab that closed on a chat this app is owed a turn in: a Worker the close detached, or a Prime/plain chat with the page's open turn or a live activity grant (a plain chat also needs a recorded tool call) — under `recoverAgentTabs`, or always for a Goal/Loop chat | page/turn activity after reopening, or the normal agent lifecycle decision |
 | `goal` | `inspectOwedGoals()` when a `goal-replies` obligation this run accepted is still `pending` and its chat has been quiet for the current backoff step | the obligation is discharged, expired or superseded by a newer reply — or the five-step schedule runs out |
 
 `silence` and `goal` are **chat**-scoped; `unattributed` and `assistant-error` are **turn**-scoped
@@ -1522,9 +1535,10 @@ retired only by a *later* turn ending, so a page that dies on the broken turn ke
 and `inspectSilentChats()` used to read any held repair as "a recovery is already running", which is
 how a chat that had been dead for eighteen minutes was never reloaded. `silence` therefore both
 ignores a held turn-scoped repair and **supersedes** it in `queueBrowserRecovery()`: its reload does
-everything the stuck one would have done. It deliberately does not supersede `no-tab`, which is
-chat-scoped, is cleared by ordinary activity, and so cannot be the stuck kind — superseding it would
-only cancel the three-minute reopen floor.
+everything the stuck one would have done. `no-tab` supersedes a held turn-scoped repair for the same
+reason — the tab that repair would reload is gone, and the reopen is everything it would have done.
+Nothing supersedes `no-tab` itself: it is chat-scoped, ordinary activity clears it, so it cannot be
+the stuck kind.
 
 There is one **current manual-Stop hole** in that turn-scoped rule. An `assistant-error` queued while
 the broken turn is still open snapshots `endedTurns + 1`, `noteRecoveryActivity()` refuses to clear
@@ -1541,14 +1555,16 @@ Failed/interrupted completion remains repairable. That veto remains meaningful u
 crosses the pre-action claim described below; after an action is atomically claimed, Stop cannot
 retroactively un-send a reload already authorized. Do not add a content-side anti-reload flag.
 
-The shared `lastBrowserRecoveryAt` floor is three minutes for error/no-tab/unattributed actions,
-but **`silence` and `goal` bypass it**: those episodes already paid their own complete inactivity
-contract, so `queueBrowserRecovery()` sets `notBefore = now` instead of stacking another unrelated
-wait on top. This distinction is part of the timing contract, not an optimization.
+The shared `lastBrowserRecoveryAt` floor is three minutes for error/unattributed actions,
+but **`silence`, `goal`, `compaction` and `no-tab` bypass it**: the first three already paid their own
+complete inactivity contract, so `queueBrowserRecovery()` sets `notBefore = now` instead of stacking
+another unrelated wait on top, and `no-tab` has nothing the floor could protect — the floor keeps a
+second reload off a page that is still loading, and a closed tab has no page (2026-09-03: a worker
+the user closed waited two and a half minutes under the floor because a silence reopen had landed
+moments earlier). This distinction is part of the timing contract, not an optimization.
 
-`no-tab` is deliberately allowed to **queue immediately from the close** instead of first paying the
-two-minute silence threshold; it still obeys the shared three-minute per-chat action floor when that
-chat was repaired recently. A closed tab is first-hand proof the page is gone *now*. An ordinary chat
+`no-tab` therefore queues **immediately from the close**: no two-minute silence threshold, no
+three-minute floor. One close is one reopen. A closed tab is first-hand proof the page is gone *now*. An ordinary chat
 qualifies on the one fact that makes it this app's business — its session has recorded a tool call,
 so the turn still running server-side is running against this connector. A chat that has never called
 a tool is the user's own browsing and stays closed. The episode is stamped with
@@ -2008,7 +2024,7 @@ High-value transition symbols inside `agents.ts`:
 | pending wake projection | `pendingWorkerRevivals()` |
 | browser takes wake custody before text escapes | `claimWorkerRevival()`; flips the waking row from broker-revivable to browser-owned wake custody |
 | ChatGPT accepted the revived user message | `noteWorkerRevived()`; records delivered message ids but deliberately leaves state `waking` |
-| wake fails/30s expires | `failWorkerRevival()` → `sleeping` with the queued prime message still owed |
+| wake fails/deadline expires | `failWorkerRevival()` → `sleeping` with the queued prime message still owed; the **second** failed wake with no sign of life from that chat in between (`WAKE_FAILURES_BEFORE_GIVING_UP`, counted per worker conversation, reset by `noteAgentAlive()`) → `failAgent(revivable)`: the prime is told to spawn a replacement and not to retry, the inbox is kept, and the chat calling in again brings the worker back |
 | parked prime history becomes live again | `reactivateDormantRunForConversation()` (kernel ingress, parked sleeping worker's proven call only) → private `reactivateDormantRun()`; identity lookup alone never reactivates it |
 
 These functions are downstream of the staged production mutations in `tools-core.ts`; do not call
@@ -2109,7 +2125,12 @@ prime message → broker sleeping→waking + queued inbox row → immediate dura
 No free slot means the send-to-sleeper is refused outright — no inbox row is accepted and nothing
 is typed. A failed browser send or the revival deadline (`REVIVAL_DEADLINE_MS` undelivered,
 `REVIVAL_ACTIVITY_MS` after a proven delivery) puts the worker back to
-`sleeping`, returns the slot and leaves the prime's row queued for a later explicit wake. A
+`sleeping`, returns the slot and leaves the prime's row queued for a later explicit wake — once. The
+second failed wake in a row, with nothing heard from that chat between them, is the verdict on the
+chat: `failWorkerRevival()` fails the worker revivably and tells the prime to spawn a replacement
+rather than try again (2026-09-03: worker-7's conversation answered every load with "This content is
+unavailable"; four wakes each waited out their deadline and each told the prime to retry, thirty
+minutes before it spawned the replacement). Any first-hand word from the chat resets the count. A
 successful browser `sent` ACK is stronger than an ordinary offer because ChatGPT accepted the user
 message, but it is **not** proof the worker reacted: the revive command remains leased and the
 broker remains `waking` until exact worker activity — the first call, or the turn that begins after the sleep — resolves that second boundary. The page re-reporting the settled answer that put the worker to sleep is not a stop: `canStop()` refuses every stop on a `waking` row (2026-09-02: that replay slept two just-woken workers and retired their wake commands while the typed message ran unowned).
@@ -2200,7 +2221,13 @@ the pure mode transition used by both bridge-scoped and app-wide writes: turning
 exact mode; turning the currently running one off disables the driver but leaves the preferred
 `mode` remembered. The bridge owns whether that reducer is applied to a concrete chat override or
 the New Chat/global default; the reducer does not own routing. A worker chat is
-always excluded by `goalWorkerChat()` because its user turns already belong to the prime. A chat
+always excluded by `goalWorkerChat()` because its user turns already belong to the prime — in
+**any** state: `agents.ts::isWorkerConversation()` sees active, parked, finished and failed workers,
+and `retiredWorkerForConversation()` keeps the fence after the run. The owner lookup
+(`agentForOwnedConversation()`) deliberately forgets a worker that is over and must not be used as
+this fence: on 2026-09-03 two ceiling-finished workers passed it, auto-compaction filed tickets a
+worker page can never discharge, and reloaded each page five times before giving up. The same
+`goalFencedChat()` guards `considerAutomaticCompaction()`. A chat
 with a stored objective is active even when the standing switch is off, but then
 `goal.ts::goalDrivingMode()` deliberately falls back to **Goal**, never inherits Loop: a mode that
 cannot stop must be an explicit choice. "Explicit" means the switch **or** the mode the goal was

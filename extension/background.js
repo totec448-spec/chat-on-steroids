@@ -1315,16 +1315,6 @@ async function carryFreshReloadProvisional(tab, documentId) {
   return moved + ackMoved;
 }
 
-async function dropDocumentProvisional(tab, documentId) {
-  if (!Number.isInteger(tab) || !documentId) return 0;
-  const provisional = `tab-${tab}:${documentId}`;
-  const before = journal.length;
-  journal = journal.filter((entry) => entry.provisional !== provisional);
-  const dropped = before - journal.length;
-  if (dropped > 0) await persistJournal();
-  return dropped;
-}
-
 async function adoptFreshReloadProvisional(tab, documentId) {
   if (!Number.isInteger(tab) || !documentId) return 0;
   const from = reloadProvisionalKey(tab);
@@ -2474,9 +2464,13 @@ chrome.tabs.onRemoved.addListener((id) => {
 
 // A tab can survive while its ChatGPT document does not: navigating it to another site kills
 // the content script, so neither pagehide nor any later observer can retire this conversation.
-// onRemoved never fires because the tab itself still exists. Only a URL that is concretely
-// outside ChatGPT is terminal here; `/c/A -> /` remains deliberately ambiguous and is handled
-// by the content script when another concrete conversation id appears.
+// onRemoved never fires because the tab itself still exists. A URL outside ChatGPT is terminal
+// here, and so is a full document load of any ChatGPT URL that is concretely not chat A's own:
+// the root, another chat, a project page. The user typing chatgpt.com into a Prime's tab used to
+// leave A bound to that tab until some later chat happened to be given an id there, so the app
+// never heard that A's page was gone and never reopened it (2026-09-03). A same-chat reload
+// carries A's own URL and stays ambiguous until the replacement document binds; an SPA move,
+// which fires no `loading` status, remains the content script's to prove.
 chrome.tabs.onUpdated.addListener((id, changeInfo) => {
   if (!changeInfo) return;
   const fullNavigation = changeInfo.status === 'loading';
@@ -2491,6 +2485,8 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
     // id-less root reload's provisional journal across the document swap. It is parked under
     // a reload-only key and adopted by the replacement document when it registers. Known-chat
     // navigations do not use this path, so chat A cannot hand its provisional observations to B.
+    // The known chat this tab is concretely leaving for another ChatGPT URL, or null.
+    let departed = null;
     if (fullNavigation && !leftChatGpt) {
       const key = String(id);
       const knownConversation = cleanConversationId(tabConversations[key]);
@@ -2511,12 +2507,12 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
         rootReload = false;
       }
       const documentId = typeof tabDocuments[key] === 'string' ? tabDocuments[key] : null;
-      const targetConversation = conversationFromUrl(targetUrl);
-      if (knownConversation && targetConversation && targetConversation !== knownConversation && documentId) {
-        // This is not an ambiguous reload: Chrome is replacing known chat A with concrete
-        // chat B. Anything still provisional in A's dying document is too old/unbound to be
-        // adopted by B and must be discarded before the replacement document can register.
-        await dropDocumentProvisional(id, documentId);
+      // Not an ambiguous reload: Chrome is replacing known chat A's document with a URL that is
+      // not A's. releaseTab() below retires A here and now — its provisional observations are
+      // too old to be adopted by whatever loads next, and its final tab leaving is the app's
+      // cue to bring it back if a turn is still running in it.
+      if (knownConversation && targetUrl && isChatGptUrl(targetUrl) && conversationFromUrl(targetUrl) !== knownConversation) {
+        departed = knownConversation;
       } else if (!knownConversation && rootReload && documentId) {
         await carryFreshReloadProvisional(id, documentId);
       }
@@ -2525,8 +2521,8 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
     // A full ChatGPT navigation may be a normal reload of the same conversation. Block the
     // dying document immediately, but preserve the conversation until the replacement page
     // binds and proves whether it is the same chat or a different one.
-    if (fullNavigation && !leftChatGpt) return { ok: true, closed: false };
-    return releaseTab(id, null, documentId);
+    if (fullNavigation && !leftChatGpt && !departed) return { ok: true, closed: false };
+    return releaseTab(id, departed, documentId);
   }).catch(() => undefined);
 });
 
