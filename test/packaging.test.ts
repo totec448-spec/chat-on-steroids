@@ -131,6 +131,27 @@ describe('cross-platform packaging targets', () => {
     expect(smoke).toContain('runtime.electron !== expectedElectronVersion');
   });
 
+  it('repairs only the installed app tree for Windows sandbox startup', () => {
+    const config = yamlFile('electron-builder.yml');
+    const installer = readFileSync(path.join(root, 'scripts', 'windows-installer-acl.nsh'), 'utf8');
+
+    expect(config.nsis.include).toBe('scripts/windows-installer-acl.nsh');
+    expect(installer).toContain('!macro customInit');
+    expect(installer).toContain('!macro customInstall');
+    expect(installer).toContain('${FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"');
+    expect(installer).toContain('!insertmacro grantSandboxReadAccess');
+    expect(installer).toContain('$SYSDIR\\icacls.exe');
+    expect(installer).toContain('"$INSTDIR"');
+    expect(installer).toContain('*S-1-15-2-2:(OI)(CI)(RX)');
+    expect(installer).toContain('ExecWait');
+    expect(installer).toContain('${If} ${Errors}');
+    expect(installer).toContain('${If} $0 != 0');
+    expect(installer).toContain('Abort "Windows could not set the folder access needed');
+    expect(installer).not.toMatch(/\/(?:reset|remove|T)\b/i);
+    expect(installer).not.toContain('nsExec::');
+    expect(installer).not.toMatch(/(?:no-sandbox|disable-gpu-sandbox)/i);
+  });
+
   it('assembles every platform artifact in the reusable release workflow', () => {
     const workflow = readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     const parsed = yamlFile('.github/workflows/release.yml');
