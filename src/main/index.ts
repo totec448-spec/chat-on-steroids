@@ -346,7 +346,16 @@ void app.whenReady().then(async () => {
 
   // From here on a second launch may safely focus/recreate the window: renderer security policy
   // is installed and the renderer's fixed IPC methods already have handlers before it can load.
-  registerIpc(() => window);
+  // The same quit the tray's Quit performs. It has to go through `quitting` for the window's
+  // close-to-tray handler to let go: without it, quitting to install would hide the window and
+  // leave the app running, which is exactly the trap the Install button exists to end.
+  registerIpc(
+    () => window,
+    () => {
+      quitting = true;
+      app.quit();
+    }
+  );
   windowActivation.enable();
   windowActivation.request();
   // macOS `activate` can fire on first launch, so do not wire it at module load where it could

@@ -1,6 +1,6 @@
 {
   "name": "chat-on-steroids",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Local coding bridge for ChatGPT over MCP, with native desktop control and approved-folder capability limits.",
   "license": "MIT",
   "author": "Chat On Steroids",

@@ -9,6 +9,23 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.0.5] — 2026-09-04
+
+**The update installs.**
+
+- **An Install update button.** Next to Connect, and in the notice, whenever a verified download
+  is waiting. The app quits, the installer runs, and the app comes back as the new version.
+  Until now the only way to apply an update was a real quit — and this app is closed to the
+  tray, so ending it in the Task Manager instead skipped the handoff entirely and installed
+  nothing, however many times it had been downloaded.
+- **A download is fetched once.** The staged artifact is kept under the release it belongs to and
+  reverified against the release's own published checksums on the next start, instead of being
+  forgotten with the process and refetched — a hundred megabytes per start, forever, for an
+  installation that never quits.
+- **The update notice no longer breaks the window.** The banner between the header and the panels
+  had no row of its own to sit in, so showing it squeezed itself to a sliver of clipped text and
+  pushed the whole window's contents out from under it.
+
 ## [2.0.4] — 2026-09-04
 
 **astra broke me**
