@@ -72,6 +72,8 @@ let currentWindow: {
   isDestroyed: () => boolean;
   webContents: { send: ReturnType<typeof vi.fn> };
 } | null = null;
+/** How many times the IPC layer asked the app to quit so a staged update can be applied. */
+let quitToInstallCalls = 0;
 
 const save = (patch: unknown, base: unknown = getConfig()): Promise<any> =>
   handlers.get('settings:save')!(null, { patch, base }) as Promise<any>;
@@ -105,7 +107,12 @@ beforeAll(async () => {
   onSwarmPersistNow((snapshot) => writeDurableNow('ipc-swarm', snapshot));
   onRetiredWorkersPersist(() => writeDurableSoon('ipc-retired-workers', snapshotRetiredWorkers()));
   onRetiredWorkersPersistNow((snapshot) => writeDurableNow('ipc-retired-workers', snapshot));
-  registerIpc(() => currentWindow as any);
+  registerIpc(
+    () => currentWindow as any,
+    () => {
+      quitToInstallCalls += 1;
+    }
+  );
 });
 
 afterAll(async () => {
@@ -517,6 +524,23 @@ describe('every link the window offers', () => {
 });
 
 /**
+ * The Install button, from the renderer's side of the wire.
+ *
+ * There is one thing to be sure of here: a press with nothing staged must not quit the app. The
+ * button exists because this app is closed to the tray and a quit is rare and deliberate, so a
+ * press that closed the window and installed nothing would be worse than no button at all.
+ */
+describe('installing a downloaded update on request', () => {
+  it('refuses, and does not quit, when nothing has been downloaded', async () => {
+    const before = quitToInstallCalls;
+    const reply = (await handlers.get('update:install')!(null, undefined)) as { ok: boolean; error: string };
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toMatch(/no downloaded update/i);
+    expect(quitToInstallCalls).toBe(before);
+  });
+});
+
+/**
  * OpenRouter publishes twelve ids that begin with `~` — `~deepseek/deepseek-v4-flash-latest`
  * and its siblings — and they are aliases that always resolve to the newest model in a
  * family. The picker lists them because the catalogue does, so a validator that refused the
@@ -723,7 +747,10 @@ describe('renderer pushes after the window is gone', () => {
       }
     } as unknown as import('electron').BrowserWindow;
 
-    registerIpc(() => destroyed);
+    registerIpc(
+      () => destroyed,
+      () => {}
+    );
     expect(() => logInfo('teardown progress written after the window went away')).not.toThrow();
     expect(touchedWebContents).toBe(false);
   });

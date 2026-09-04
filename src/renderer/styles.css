@@ -147,12 +147,23 @@ code {
   font-size: 0.92em;
 }
 
-/* The whole window: header, one scrolling middle, nav. Nothing else grows. */
+/* The whole window: header, an optional notice, one scrolling middle, nav. Nothing else
+   grows. A column rather than fixed grid rows, because the notice between the header and
+   `main` appears and disappears: with a three-row template its row was the one that had to
+   stretch, so a visible notice pushed `main` into an auto row sized to its whole content -
+   the banner clipped to a sliver and the panels overflowing the window under it. In a column
+   only `main` flexes, and the count of siblings above it stops mattering. */
 .app {
   height: 100%;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   background: var(--page);
+}
+
+.app > header,
+.app > .notice,
+.app > nav {
+  flex: none;
 }
 
 /* ------------------------------------------------------------------ header */
@@ -284,6 +295,7 @@ header {
 /* ------------------------------------------------------------------ panels */
 
 main {
+  flex: 1 1 auto;
   min-height: 0;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -522,6 +534,26 @@ main {
   background: var(--red-wash);
   border-radius: var(--pill);
   padding: 2px 8px;
+}
+
+/* The one button in the header that asks for something rather than reporting it. Ink, the
+   single accent this design has, so a waiting update reads as an action next to Connect. */
+.btn-install {
+  background: var(--ink);
+  color: var(--page);
+  padding: 8px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.btn-install:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--page);
+  filter: brightness(1.35);
+}
+
+:root[data-theme='dark'] .btn-install:hover:not(:disabled) {
+  filter: brightness(0.86);
 }
 
 /* ----------------------------------------------------------------- notice */
