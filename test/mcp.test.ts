@@ -1329,6 +1329,80 @@ describe('capability gating', () => {
     expect(textOf(empty)).toMatch(/update_cursor: [A-Za-z0-9_-]+/);
   });
 
+  it('keeps cursors short and refuses a damaged copy as damaged rather than as stale history', async () => {
+    // Every refused session read in the 50 most recent recorded sessions was a long base64
+    // cursor the model had re-typed with a transposed letter or a doubled field. The token is
+    // now short enough to copy, and a copy that does not verify says so instead of "invalid".
+    ctx.sessionTools = true;
+    const recorded = await createSession({ title: 'cursor copy fidelity', conversationId: null });
+    const other = await createSession({ title: 'another recording', conversationId: null });
+    for (let index = 0; index < 4; index++) {
+      const text = `unfinished answer ${index} `.repeat(4);
+      await upsertMessageEvent(recorded.id, {
+        time: 6_000 + index,
+        source: 'extension',
+        kind: 'assistant_message',
+        message: { text, truncated: false, chars: text.length },
+        messageId: `open-message-${index}-${'x'.repeat(60)}`,
+        state: 'streaming',
+        final: false
+      });
+    }
+    const initial = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'read', session_id: recorded.id }
+    });
+    const cursor = /update_cursor: ([A-Za-z0-9_-]+)/.exec(textOf(initial))?.[1];
+    expect(cursor).toBeTruthy();
+    // Four open checkpoints used to cost almost a thousand characters.
+    expect(cursor!.length).toBeLessThan(120);
+
+    const damaged = cursor!.replace(/(\d)(\d)/, '$2$1').replace(/^u(\d)/, 'u$1$1');
+    expect(damaged).not.toBe(cursor);
+    const refused = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'read', session_id: recorded.id, cursor: damaged }
+    });
+    expect(failed(refused)).toBe(true);
+    expect(textOf(refused)).toContain('damaged while being copied');
+    expect(textOf(refused)).toContain('Copy the cursor exactly');
+    expect(textOf(refused)).not.toContain('stale');
+
+    const foreign = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'read', session_id: other.id, cursor }
+    });
+    expect(failed(foreign)).toBe(true);
+    expect(textOf(foreign)).toContain(`does not verify for session ${other.id}`);
+
+    // The ways a model re-types a token it was shown are tolerated.
+    const decorated = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'read', session_id: recorded.id, cursor: `update_cursor: \`${cursor!.toUpperCase()}\`.` }
+    });
+    expect(failed(decorated), textOf(decorated)).toBe(false);
+    expect(textOf(decorated)).toContain('No new recorded activity');
+
+    const wrongAction = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'search', cursor }
+    });
+    expect(failed(wrongAction)).toBe(true);
+    expect(textOf(wrongAction)).toContain('does not verify');
+    const listed = await core('tools/call', { name: 'session', arguments: { action: 'search', query: 'unfinished answer 3' } });
+    const readCursor = /read_cursor: ([A-Za-z0-9_-]+)/.exec(textOf(listed))?.[1];
+    expect(readCursor).toBeTruthy();
+    const readAsSearch = await core('tools/call', { name: 'session', arguments: { action: 'search', cursor: readCursor } });
+    expect(failed(readAsSearch)).toBe(true);
+    expect(textOf(readAsSearch)).toContain('does not verify');
+    const fromSearch = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'read', session_id: recorded.id, cursor: readCursor }
+    });
+    expect(failed(fromSearch), textOf(fromSearch)).toBe(false);
+    expect(textOf(fromSearch)).toMatch(/recorded context/i);
+  });
+
   it('rejects the removed history/status contract and ambiguous read fields', async () => {
     ctx.sessionTools = true;
     const advertised = toolList(await core('tools/list')).find((tool) => tool.name === 'session');
@@ -1865,7 +1939,8 @@ describe('bounded output', () => {
     // The advertised contract has to match the runtime one, or the model learns the rule
     // from a failed call instead of from the tool list.
     const readTool = toolList(await core('tools/list')).find((tool) => tool.name === 'read')!;
-    expect(String(readTool.description)).toMatch(/range applies to every file/i);
+    expect(String(readTool.description)).toMatch(/apply to every file the call resolves to/i);
+    expect(String(readTool.description)).toContain('path:12-40');
     expect(String(readTool.inputSchema.properties.start_line.description)).toMatch(/every file/i);
     expect(String(readTool.inputSchema.properties.end_line.description)).toMatch(/every file/i);
 
@@ -2044,6 +2119,49 @@ describe('bounded output', () => {
     expect(text).toContain('/workspace/nope.txt — ERROR');
     expect(text).toMatch(/Not found/i);
     expect(text).toContain('export const helper = 1;');
+  });
+
+  it('lists the nearest folder that does exist under a missing path', async () => {
+    // A file guessed one folder too high was the most repeated read failure in the recorded
+    // sessions, and every one of them was followed by a listing call. The listing now rides
+    // along with the refusal, from the deepest ancestor that resolved.
+    const reply = await core('tools/call', {
+      name: 'read',
+      arguments: { paths: ['/workspace/src/lib/nested/util.ts'] }
+    });
+    const text = textOf(reply);
+    expect(failed(reply)).toBe(true);
+    expect(text).toMatch(/Not found/i);
+    expect(text).toContain('The nearest existing folder is /workspace/src/lib; it contains: f util.ts');
+    const top = await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/lib/util.ts'] } });
+    expect(textOf(top)).toMatch(/The nearest existing folder is \/workspace; it contains: .*d src, .*f notes\.txt/);
+  });
+
+  it('reads a per-path line range spelled as path:start-end', async () => {
+    // Four reads in the recorded sessions asked for several ranges of one file this way and
+    // were refused for the colon; the spelling is now the range it was meant to be, and a
+    // path without one keeps the call-wide start_line/end_line.
+    const reply = await core('tools/call', {
+      name: 'read',
+      arguments: {
+        paths: ['/workspace/notes.txt:3-4', '/workspace/notes.txt:48', '/workspace/src/app.ts'],
+        start_line: 1,
+        end_line: 1
+      }
+    });
+    const text = textOf(reply);
+    expect(failed(reply), text).toBe(false);
+    expect(text).toContain('lines 3-4');
+    expect(text).toContain('note line 3');
+    expect(text).toContain('note line 4');
+    expect(text).not.toMatch(/^5	note line 5$/m);
+    expect(text).toContain('note line 48');
+    expect(text).toContain('note line 50');
+    expect(text).not.toContain('note line 47');
+    expect(text).toContain('export const name = "app";');
+    expect(text).not.toContain('applied to each of');
+    const backwards = await core('tools/call', { name: 'read', arguments: { paths: ['/workspace/notes.txt:9-3'] } });
+    expect(failed(backwards)).toBe(true);
   });
 
   it('fails when every explicit read target failed, while keeping partial multi-read useful', async () => {
@@ -2958,6 +3076,8 @@ describe('exec_command and write_stdin', () => {
     const brokenText = textOf(broken);
     expect(brokenText).toContain('--- exit code 3 ---');
     expect(brokenText).not.toContain('is a result, not a failure');
+    // One exit code stands for two commands; the note says which one it came from.
+    expect(brokenText).toContain('Batch: command 2 exited 3; the other command exited 0.');
   }, 60_000);
 
   it('uses Codex response and session semantics for quick and interactive commands', async () => {

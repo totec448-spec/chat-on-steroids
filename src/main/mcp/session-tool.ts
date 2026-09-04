@@ -25,11 +25,22 @@ const SEARCH_ROWS = 30;
 const SEARCH_SCAN_SESSIONS = 100;
 const READ_BODY_CHARS = READ_RESULT_CHARS - 5_000;
 const CURSOR_MAX_CHARS = 8_000;
+/** Hex digits kept from a checkpoint hash: an identity for at most four open messages. */
+const CHECKPOINT_HEX = 6;
+/** Hex digits pinning a tool-detail cursor to the exact text it pages. */
+const DETAIL_HEX = 8;
 
 const includeKind = z.enum(['user', 'assistant', 'tools', 'errors', 'agents']);
 type IncludeKind = z.infer<typeof includeKind>;
 const DEFAULT_INCLUDE: IncludeKind[] = ['user', 'assistant', 'tools', 'errors', 'agents'];
 
+/**
+ * One unfinished assistant message the caller has already seen part of.
+ *
+ * `id` is a 6-hex-digit hash of the ChatGPT message id, `hash` the same prefix of the text the
+ * caller was shown. The full message id used to be carried verbatim, which is why an update
+ * cursor with four open messages ran to almost a thousand characters.
+ */
 interface OpenMessageCheckpoint {
   id: string;
   chars: number;
@@ -37,19 +48,15 @@ interface OpenMessageCheckpoint {
 }
 
 type SessionCursor =
-  | { v: 1; kind: 'search'; query: string | null; offset: number }
+  | { kind: 'search'; query: string | null; offset: number }
   | {
-      v: 1;
       kind: 'older';
-      sessionId: string;
       beforeSeq: number;
       snapshot: number;
       include: IncludeKind[];
     }
   | {
-      v: 1;
       kind: 'range';
-      sessionId: string;
       mode: 'timeline' | 'update';
       startSeq: number;
       startOffset: number;
@@ -62,17 +69,13 @@ type SessionCursor =
       open?: OpenMessageCheckpoint[];
     }
   | {
-      v: 1;
       kind: 'update';
-      sessionId: string;
       after: number;
       include: IncludeKind[];
       open: OpenMessageCheckpoint[];
     }
   | {
-      v: 1;
       kind: 'detail';
-      sessionId: string;
       seq: number;
       offset: number;
       hash: string;
@@ -91,59 +94,6 @@ interface SearchMatch {
   anchorSeq: number | null;
   snapshot: number;
 }
-
-const cursorSchema = z.discriminatedUnion('kind', [
-  z.object({
-    v: z.literal(1),
-    kind: z.literal('search'),
-    query: z.string().max(500).nullable(),
-    offset: z.number().int().min(0)
-  }),
-  z.object({
-    v: z.literal(1),
-    kind: z.literal('older'),
-    sessionId: z.string().min(8).max(64),
-    beforeSeq: z.number().int().min(1),
-    snapshot: z.number().int().min(0),
-    include: z.array(includeKind).min(1).max(5)
-  }),
-  z.object({
-    v: z.literal(1),
-    kind: z.literal('range'),
-    sessionId: z.string().min(8).max(64),
-    mode: z.enum(['timeline', 'update']),
-    startSeq: z.number().int().min(1),
-    startOffset: z.number().int().min(0),
-    originStartSeq: z.number().int().min(1),
-    stopBeforeSeq: z.number().int().min(1).nullable(),
-    snapshot: z.number().int().min(0),
-    include: z.array(includeKind).min(1).max(5),
-    olderBeforeSeq: z.number().int().min(1).nullable(),
-    after: z.number().int().min(0).optional(),
-    open: z
-      .array(z.object({ id: z.string().max(160), chars: z.number().int().min(0), hash: z.string().length(16) }))
-      .max(4)
-      .optional()
-  }),
-  z.object({
-    v: z.literal(1),
-    kind: z.literal('update'),
-    sessionId: z.string().min(8).max(64),
-    after: z.number().int().min(0),
-    include: z.array(includeKind).min(1).max(5),
-    open: z
-      .array(z.object({ id: z.string().max(160), chars: z.number().int().min(0), hash: z.string().length(16) }))
-      .max(4)
-  }),
-  z.object({
-    v: z.literal(1),
-    kind: z.literal('detail'),
-    sessionId: z.string().min(8).max(64),
-    seq: z.number().int().min(1),
-    offset: z.number().int().min(0),
-    hash: z.string().length(16)
-  })
-]);
 
 const inputSchema = z
   .object({
@@ -168,7 +118,9 @@ const inputSchema = z
       .min(1)
       .max(CURSOR_MAX_CHARS)
       .optional()
-      .describe('Opaque continuation, older-history, search-result or update checkpoint returned by this tool.')
+      .describe(
+        'A short token this tool printed earlier: update_cursor, continuation_cursor, older_cursor, read_cursor or next_cursor. Copy it exactly; it carries a checksum and a mistyped copy is refused.'
+      )
   })
   .superRefine((input, ctx) => {
     if (input.action === 'search') {
@@ -211,7 +163,8 @@ export function registerSessionTool(reg: SurfaceRegistrar): void {
         'Search and read this app’s local recordings, including other and concurrently running chats. ' +
         'action=search lists the 30 newest sessions when query is omitted, or finds recordings containing a term. ' +
         'action=read requires session_id and returns exact user/assistant text plus compact tool headlines. ' +
-        'Save update_cursor and pass it later to receive only activity not already read; pass a short T… reference as tool_call to inspect exact arguments and result.',
+        'To follow a running chat, pass the update_cursor from the previous read and only activity since then comes back. ' +
+        'Pass a short T… reference as tool_call to inspect exact arguments and result. Cursors are short tokens; copy them exactly.',
       inputSchema,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
     },
@@ -228,8 +181,10 @@ async function searchSessions(queryInput?: string, cursorInput?: string): Promis
   let query = queryInput?.trim() || null;
   let offset = 0;
   if (cursorInput) {
-    const cursor = decodeCursor(cursorInput);
-    if (!cursor || cursor.kind !== 'search') return fail('Invalid session search cursor. Start a new search.');
+    const decoded = decodeCursor(cursorInput, SEARCH_SCOPE);
+    if ('error' in decoded) return fail(decoded.error);
+    const cursor = decoded.cursor;
+    if (cursor.kind !== 'search') return fail('That cursor came from action=read; pass it to read with its session_id, or start a new search.');
     query = cursor.query;
     offset = cursor.offset;
   }
@@ -269,7 +224,7 @@ async function searchSessions(queryInput?: string, cursorInput?: string): Promis
   }
 
   const complete = nextOffset >= sessions.length;
-  const next = complete ? null : encodeCursor({ v: 1, kind: 'search', query, offset: nextOffset });
+  const next = complete ? null : encodeCursor({ kind: 'search', query, offset: nextOffset }, SEARCH_SCOPE);
   const heading = query
     ? `Recorded-session matches for ${JSON.stringify(query)} — newest sessions first`
     : 'Recorded sessions — newest first';
@@ -339,19 +294,20 @@ function formatSearchRow(match: SearchMatch): string {
   const parts = [...match.counts.entries()].map(([kind, count]) => `${kind} ${count}`).join(' · ');
   const readCursor =
     match.anchorSeq && match.snapshot
-      ? encodeCursor({
-          v: 1,
-          kind: 'range',
-          sessionId: match.summary.id,
-          mode: 'timeline',
-          startSeq: match.anchorSeq,
-          startOffset: 0,
-          originStartSeq: match.anchorSeq,
-          stopBeforeSeq: null,
-          snapshot: match.snapshot,
-          include: DEFAULT_INCLUDE,
-          olderBeforeSeq: match.anchorSeq
-        })
+      ? encodeCursor(
+          {
+            kind: 'range',
+            mode: 'timeline',
+            startSeq: match.anchorSeq,
+            startOffset: 0,
+            originStartSeq: match.anchorSeq,
+            stopBeforeSeq: null,
+            snapshot: match.snapshot,
+            include: DEFAULT_INCLUDE,
+            olderBeforeSeq: match.anchorSeq
+          },
+          match.summary.id
+        )
       : null;
   return (
     `${formatSessionRow(match.summary)}\n` +
@@ -370,9 +326,10 @@ async function readSession(
   if (!summary) return fail(`Recorded session ${sessionId} does not exist.`);
 
   if (cursorInput) {
-    const cursor = decodeCursor(cursorInput);
-    if (!cursor || cursor.kind === 'search') return fail('Invalid session read cursor. Start a new read.');
-    if (cursor.sessionId !== sessionId) return fail('This cursor belongs to another recorded session.');
+    const decoded = decodeCursor(cursorInput, sessionId);
+    if ('error' in decoded) return fail(decoded.error);
+    const cursor = decoded.cursor;
+    if (cursor.kind === 'search') return fail('That cursor came from action=search; pass it to search, or read without a cursor for the latest context.');
     if (cursor.kind === 'detail') return readToolDetail(sessionId, cursor.seq, cursor.offset, cursor.hash);
     if (cursor.kind === 'update') return readUpdate(summary, cursor);
     if (cursor.kind === 'older') return readOlder(summary, cursor);
@@ -390,14 +347,7 @@ async function readSession(
   const snapshot = maxSeq(events);
   const items = await timelineItems(sessionId, events.filter((event) => event.seq <= snapshot), include);
   if (items.length === 0) {
-    const update = encodeCursor({
-      v: 1,
-      kind: 'update',
-      sessionId,
-      after: snapshot,
-      include,
-      open: []
-    });
+    const update = encodeCursor({ kind: 'update', after: snapshot, include, open: [] }, sessionId);
     return ok(
       `${sessionHeader(summary)}\n\nNo recorded entries match the selected categories.\n\n` +
         `caught_up: true\nupdate_cursor: ${update}`
@@ -405,9 +355,7 @@ async function readSession(
   }
   const startIndex = choosePageStart(items, items.length);
   const cursor: Extract<SessionCursor, { kind: 'range' }> = {
-    v: 1,
     kind: 'range',
-    sessionId,
     mode: 'timeline',
     startSeq: items[startIndex]!.seq,
     startOffset: 0,
@@ -435,9 +383,7 @@ async function readOlder(
   if (stopIndex === 0) return ok(`${sessionHeader(summary)}\n\nBeginning of recorded history reached.`);
   const startIndex = choosePageStart(items, stopIndex);
   const range: Extract<SessionCursor, { kind: 'range' }> = {
-    v: 1,
     kind: 'range',
-    sessionId: summary.id,
     mode: 'timeline',
     startSeq: items[startIndex]!.seq,
     startOffset: 0,
@@ -476,7 +422,7 @@ async function readUpdate(
     noteCount(0);
     return ok(
       `${sessionHeader(summary)}\n\nNo new recorded activity since checkpoint #${cursor.after}.\n\n` +
-        `caught_up: true\nupdate_cursor: ${encodeCursor(cursor)}`
+        `caught_up: true\nupdate_cursor: ${encodeCursor(cursor, summary.id)}`
     );
   }
   const relevant = events.filter((event) => event.seq > cursor.after && event.seq <= snapshot).sort((a, b) => a.seq - b.seq);
@@ -485,13 +431,11 @@ async function readUpdate(
     const next: Extract<SessionCursor, { kind: 'update' }> = { ...cursor, after: snapshot };
     return ok(
       `${sessionHeader(summary)}\n\nNo new selected activity since checkpoint #${cursor.after}.\n\n` +
-        `caught_up: true\nupdate_cursor: ${encodeCursor(next)}`
+        `caught_up: true\nupdate_cursor: ${encodeCursor(next, summary.id)}`
     );
   }
   const range: Extract<SessionCursor, { kind: 'range' }> = {
-    v: 1,
     kind: 'range',
-    sessionId: summary.id,
     mode: 'update',
     startSeq: items[0]!.seq,
     startOffset: 0,
@@ -548,18 +492,14 @@ async function readRangeFrom(
   }
   const footer: string[] = [];
   if (continuation) {
-    footer.push('caught_up: false', `continuation_cursor: ${encodeCursor(continuation)}`);
+    footer.push('caught_up: false', `continuation_cursor: ${encodeCursor(continuation, summary.id)}`);
   } else {
     if (cursor.olderBeforeSeq !== null && originIndex > 0) {
       footer.push(
-        `older_cursor: ${encodeCursor({
-          v: 1,
-          kind: 'older',
-          sessionId: summary.id,
-          beforeSeq: cursor.olderBeforeSeq,
-          snapshot: cursor.snapshot,
-          include: cursor.include
-        })}`
+        `older_cursor: ${encodeCursor(
+          { kind: 'older', beforeSeq: cursor.olderBeforeSeq, snapshot: cursor.snapshot, include: cursor.include },
+          summary.id
+        )}`
       );
     }
     const reachesSnapshotEnd = cursor.stopBeforeSeq === null;
@@ -567,14 +507,7 @@ async function readRangeFrom(
       const open = await nextOpenCheckpoints(summary.id, allEvents, cursor, items, originIndex, stopIndex);
       footer.push(
         'caught_up: true',
-        `update_cursor: ${encodeCursor({
-          v: 1,
-          kind: 'update',
-          sessionId: summary.id,
-          after: cursor.snapshot,
-          include: cursor.include,
-          open
-        })}`
+        `update_cursor: ${encodeCursor({ kind: 'update', after: cursor.snapshot, include: cursor.include, open }, summary.id)}`
       );
     }
   }
@@ -597,14 +530,11 @@ async function nextOpenCheckpoints(
   const delivered = new Set(items.slice(originIndex, stopIndex).map((item) => item.seq));
   for (const event of allEvents) {
     if (event.kind !== 'assistant_message' || !event.messageId || !delivered.has(event.seq)) continue;
-    if (event.final || event.state === 'final') open.delete(event.messageId);
+    const id = checkpointId(event.messageId);
+    if (event.final || event.state === 'final') open.delete(id);
     else {
       const exact = await expandStored(sessionId, event.message);
-      open.set(event.messageId, {
-        id: event.messageId,
-        chars: exact.text.length,
-        hash: shortHash(exact.text)
-      });
+      open.set(id, { id, chars: exact.text.length, hash: shortHash(exact.text, CHECKPOINT_HEX) });
     }
   }
   return [...open.values()].slice(-4);
@@ -708,7 +638,7 @@ async function updateItems(
       if (regular) items.push(regular);
       continue;
     }
-    const previous = open.get(event.messageId);
+    const previous = open.get(checkpointId(event.messageId));
     if (!previous) {
       const regular = await timelineItem(sessionId, event, selected);
       if (regular) items.push(regular);
@@ -717,7 +647,7 @@ async function updateItems(
     const exact = await expandStored(sessionId, event.message);
     const text = exact.text;
     const prefixMatches =
-      text.length >= previous.chars && shortHash(text.slice(0, previous.chars)) === previous.hash;
+      text.length >= previous.chars && shortHash(text.slice(0, previous.chars), CHECKPOINT_HEX) === previous.hash;
     const when = formatTime(event.time);
     const agent = event.agent ? ` [${event.agent}]` : '';
     const final = event.final || event.state === 'final';
@@ -777,7 +707,7 @@ async function readToolDetail(
     `Attribution: ${event.call.attribution}\n\n` +
     `Arguments (${event.call.args.chars} chars${args.complete ? '' : ', recording incomplete'}):\n${args.text}\n\n` +
     `Result (${event.call.result.chars} chars${result.complete ? '' : ', recording incomplete'}):\n${result.text}${changes}`;
-  const hash = shortHash(whole);
+  const hash = shortHash(whole, DETAIL_HEX);
   if (expectedHash && expectedHash !== hash) return fail('This tool-detail cursor is stale because the recorded call changed. Start the detail read again.');
   if (offset > whole.length) return fail('This tool-detail cursor points past the recorded call.');
   const room = READ_BODY_CHARS;
@@ -787,14 +717,7 @@ async function readToolDetail(
   const nextOffset = offset + take;
   const footer =
     nextOffset < whole.length
-      ? `\n\ncaught_up: false\ncontinuation_cursor: ${encodeCursor({
-          v: 1,
-          kind: 'detail',
-          sessionId,
-          seq,
-          offset: nextOffset,
-          hash
-        })}`
+      ? `\n\ncaught_up: false\ncontinuation_cursor: ${encodeCursor({ kind: 'detail', seq, offset: nextOffset, hash }, sessionId)}`
       : '\n\ncaught_up: true';
   noteDetail(`${toolRef(seq)}${nextOffset < whole.length ? ' continues' : ''}`);
   return ok(boundResult(`${offset > 0 ? `[continuation of ${toolRef(seq)} ${event.call.tool}]\n` : ''}${chunk}${footer}`, READ_RESULT_CHARS));
@@ -899,21 +822,255 @@ function toolRefSeq(ref: string): number | null {
   return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-function shortHash(text: string): string {
-  return createHash('sha256').update(text).digest('hex').slice(0, 16);
+function shortHash(text: string, hex: number): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, hex);
 }
 
-function encodeCursor(cursor: SessionCursor): string {
-  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+function checkpointId(messageId: string): string {
+  return shortHash(messageId, CHECKPOINT_HEX);
 }
 
-function decodeCursor(value: string): SessionCursor | null {
-  try {
-    const raw = Buffer.from(value, 'base64url').toString('utf8');
-    return cursorSchema.parse(JSON.parse(raw)) as SessionCursor;
-  } catch {
-    return null;
+/*
+ * The cursor codec.
+ *
+ * A cursor is retyped by the model on every continuation, and the model does not copy long
+ * opaque strings reliably: in the 50 most recent recorded sessions every one of the 29 refused
+ * session reads was a base64 cursor of 160–990 characters that came back with a transposed
+ * letter, a doubled field or a dropped comma inside the JSON it encoded. The token is therefore
+ * short and made of numbers a model can hold — `u359_uateg_0_k3f9` — and it ends in a checksum
+ * bound to the session id, so a damaged copy is reported as damaged rather than as stale history.
+ *
+ * Alphabet: `[A-Za-z0-9_-]` only, so a cursor survives being pasted into markdown or a URL. The
+ * kind is the first letter: s search, o older, r timeline page, q update-mode page, u update
+ * checkpoint, t tool detail. Fields are `_`-separated; `0` stands for "none" where a sequence
+ * number is optional, which is unambiguous because sequence numbers start at 1.
+ */
+const SEARCH_SCOPE = 'search';
+const CHECK_CHARS = 4;
+const CHECK_ALPHABET = '0123456789abcdefghijklmnopqrstuv';
+const MAX_CURSOR_NUMBER = 1e12;
+const INCLUDE_LETTERS: Record<IncludeKind, string> = { user: 'u', assistant: 'a', tools: 't', errors: 'e', agents: 'g' };
+
+function checksum(scope: string, body: string): string {
+  const digest = createHash('sha256').update(`${scope}\n${body}`).digest();
+  let out = '';
+  for (let index = 0; index < CHECK_CHARS; index++) out += CHECK_ALPHABET[digest[index]! & 31];
+  return out;
+}
+
+function encodeInclude(include: readonly IncludeKind[]): string {
+  return DEFAULT_INCLUDE.filter((kind) => include.includes(kind))
+    .map((kind) => INCLUDE_LETTERS[kind])
+    .join('');
+}
+
+function decodeInclude(text: string): IncludeKind[] | null {
+  if (!/^[uateg]{1,5}$/.test(text) || new Set(text).size !== text.length) return null;
+  return DEFAULT_INCLUDE.filter((kind) => text.includes(INCLUDE_LETTERS[kind]));
+}
+
+function encodeOpen(open: readonly OpenMessageCheckpoint[]): string {
+  return open.length === 0 ? '0' : open.map((entry) => `${entry.id}${entry.hash}${entry.chars}`).join('-');
+}
+
+function decodeOpen(text: string): OpenMessageCheckpoint[] | null {
+  if (text === '0') return [];
+  const entries = text.split('-');
+  if (entries.length > 4) return null;
+  const open: OpenMessageCheckpoint[] = [];
+  for (const entry of entries) {
+    const match = /^([0-9a-f]{6})([0-9a-f]{6})(\d{1,9})$/.exec(entry);
+    if (!match) return null;
+    open.push({ id: match[1]!, hash: match[2]!, chars: Number(match[3]) });
   }
+  return open;
+}
+
+function seqOrNone(value: number | null): string {
+  return value === null ? '0' : String(value);
+}
+
+function cursorBody(cursor: SessionCursor): string {
+  switch (cursor.kind) {
+    case 'search':
+      return `s${cursor.offset}_${cursor.query === null ? '' : Buffer.from(cursor.query, 'utf8').toString('base64url')}`;
+    case 'older':
+      return `o${cursor.beforeSeq}_${cursor.snapshot}_${encodeInclude(cursor.include)}`;
+    case 'range':
+      return cursor.mode === 'update'
+        ? `q${cursor.startSeq}_${cursor.startOffset}_${cursor.originStartSeq}_${cursor.snapshot}_${encodeInclude(cursor.include)}_${cursor.after ?? 0}_${encodeOpen(cursor.open ?? [])}`
+        : `r${cursor.startSeq}_${cursor.startOffset}_${cursor.originStartSeq}_${seqOrNone(cursor.stopBeforeSeq)}_${cursor.snapshot}_${encodeInclude(cursor.include)}_${seqOrNone(cursor.olderBeforeSeq)}`;
+    case 'update':
+      return `u${cursor.after}_${encodeInclude(cursor.include)}_${encodeOpen(cursor.open)}`;
+    case 'detail':
+      return `t${cursor.seq}_${cursor.offset}_${cursor.hash}`;
+  }
+}
+
+function encodeCursor(cursor: SessionCursor, scope: string): string {
+  const body = cursorBody(cursor);
+  return `${body}_${checksum(scope, body)}`;
+}
+
+function cursorNumber(text: string | undefined): number | null {
+  if (text === undefined || !/^\d{1,13}$/.test(text)) return null;
+  const value = Number(text);
+  return value <= MAX_CURSOR_NUMBER ? value : null;
+}
+
+/** A sequence field where `0` spells "none". `undefined` means the field is unreadable. */
+function optionalSeq(text: string | undefined): number | null | undefined {
+  const value = cursorNumber(text);
+  if (value === null) return undefined;
+  return value === 0 ? null : value;
+}
+
+/** The structural read of a checksum-verified body. Null means the body is not a cursor. */
+function parseCursorBody(body: string): SessionCursor | null {
+  const kind = body[0]?.toLowerCase();
+  if (kind === 's') {
+    const match = /^s(\d+)_(.*)$/s.exec(body);
+    const offset = cursorNumber(match?.[1]);
+    if (!match || offset === null) return null;
+    const encoded = match[2]!;
+    if (encoded === '') return { kind: 'search', query: null, offset };
+    if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
+    const query = Buffer.from(encoded, 'base64url').toString('utf8');
+    if (query.length === 0 || query.length > 500) return null;
+    return { kind: 'search', query, offset };
+  }
+  const lower = body.toLowerCase();
+  if (kind === 'o') {
+    const match = /^o(\d+)_(\d+)_([uateg]+)$/.exec(lower);
+    const beforeSeq = cursorNumber(match?.[1]);
+    const snapshot = cursorNumber(match?.[2]);
+    const include = match ? decodeInclude(match[3]!) : null;
+    if (!match || beforeSeq === null || beforeSeq < 1 || snapshot === null || !include) return null;
+    return { kind: 'older', beforeSeq, snapshot, include };
+  }
+  if (kind === 'r') {
+    const match = /^r(\d+)_(\d+)_(\d+)_(\d+)_(\d+)_([uateg]+)_(\d+)$/.exec(lower);
+    const startSeq = cursorNumber(match?.[1]);
+    const startOffset = cursorNumber(match?.[2]);
+    const originStartSeq = cursorNumber(match?.[3]);
+    const stopBeforeSeq = optionalSeq(match?.[4]);
+    const snapshot = cursorNumber(match?.[5]);
+    const include = match ? decodeInclude(match[6]!) : null;
+    const olderBeforeSeq = optionalSeq(match?.[7]);
+    if (
+      !match ||
+      startSeq === null ||
+      startSeq < 1 ||
+      startOffset === null ||
+      originStartSeq === null ||
+      originStartSeq < 1 ||
+      stopBeforeSeq === undefined ||
+      snapshot === null ||
+      !include ||
+      olderBeforeSeq === undefined
+    ) {
+      return null;
+    }
+    return {
+      kind: 'range',
+      mode: 'timeline',
+      startSeq,
+      startOffset,
+      originStartSeq,
+      stopBeforeSeq,
+      snapshot,
+      include,
+      olderBeforeSeq
+    };
+  }
+  if (kind === 'q') {
+    const match = /^q(\d+)_(\d+)_(\d+)_(\d+)_([uateg]+)_(\d+)_([0-9a-f-]+)$/.exec(lower);
+    const startSeq = cursorNumber(match?.[1]);
+    const startOffset = cursorNumber(match?.[2]);
+    const originStartSeq = cursorNumber(match?.[3]);
+    const snapshot = cursorNumber(match?.[4]);
+    const include = match ? decodeInclude(match[5]!) : null;
+    const after = cursorNumber(match?.[6]);
+    const open = match ? decodeOpen(match[7]!) : null;
+    if (
+      !match ||
+      startSeq === null ||
+      startSeq < 1 ||
+      startOffset === null ||
+      originStartSeq === null ||
+      originStartSeq < 1 ||
+      snapshot === null ||
+      !include ||
+      after === null ||
+      !open
+    ) {
+      return null;
+    }
+    return {
+      kind: 'range',
+      mode: 'update',
+      startSeq,
+      startOffset,
+      originStartSeq,
+      stopBeforeSeq: null,
+      snapshot,
+      include,
+      olderBeforeSeq: null,
+      after,
+      open
+    };
+  }
+  if (kind === 'u') {
+    const match = /^u(\d+)_([uateg]+)_([0-9a-f-]+)$/.exec(lower);
+    const after = cursorNumber(match?.[1]);
+    const include = match ? decodeInclude(match[2]!) : null;
+    const open = match ? decodeOpen(match[3]!) : null;
+    if (!match || after === null || !include || !open) return null;
+    return { kind: 'update', after, include, open };
+  }
+  if (kind === 't') {
+    const match = /^t(\d+)_(\d+)_([0-9a-f]+)$/.exec(lower);
+    const seq = cursorNumber(match?.[1]);
+    const offset = cursorNumber(match?.[2]);
+    if (!match || seq === null || seq < 1 || offset === null || match[3]!.length !== DETAIL_HEX) return null;
+    return { kind: 'detail', seq, offset, hash: match[3]! };
+  }
+  return null;
+}
+
+const CURSOR_REPAIR_HINT =
+  'Copy the cursor exactly as the earlier result printed it (update_cursor, continuation_cursor, older_cursor, read_cursor or next_cursor), or leave cursor out to start again.';
+
+/**
+ * Decodes a caller-supplied cursor for one scope: a session id for read cursors, the search
+ * scope for search cursors. Tolerates the ways a model re-types a token — surrounding quotes,
+ * backticks, an `update_cursor:` label, trailing punctuation, letter case outside a search query —
+ * and refuses everything else with a message that says whether the token was damaged.
+ */
+function decodeCursor(raw: string, scope: string): { cursor: SessionCursor } | { error: string } {
+  const text = raw
+    .trim()
+    .replace(/^[`'"“”‘’(\[]+|[`'"“”‘’)\].,;:!]+$/g, '')
+    .replace(/^[a-z_]*cursor\s*[:=]\s*[`'"“”‘’]*/i, '')
+    .trim();
+  const split = /^(.+)_([0-9a-vA-V]{4})$/s.exec(text);
+  if (!split) {
+    return { error: `Not a session cursor. ${CURSOR_REPAIR_HINT}` };
+  }
+  // Everything but a search query is case-insensitive, so the checksum is taken over the
+  // lower-cased body: a cursor pasted back in capitals still verifies.
+  const body = split[1]![0]?.toLowerCase() === 's' ? split[1]! : split[1]!.toLowerCase();
+  const check = split[2]!.toLowerCase();
+  const cursor = parseCursorBody(body);
+  if (!cursor || checksum(scope, body) !== check) {
+    return {
+      error:
+        scope === SEARCH_SCOPE
+          ? `This cursor does not verify: it was damaged while being copied, or it is a read cursor. ${CURSOR_REPAIR_HINT}`
+          : `This cursor does not verify for session ${scope}: it was damaged while being copied, or it belongs to another session_id. ${CURSOR_REPAIR_HINT}`
+    };
+  }
+  return { cursor };
 }
 
 function formatDate(time: number): string {

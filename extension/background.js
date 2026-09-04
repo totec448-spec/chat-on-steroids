@@ -1315,16 +1315,6 @@ async function carryFreshReloadProvisional(tab, documentId) {
   return moved + ackMoved;
 }
 
-async function dropDocumentProvisional(tab, documentId) {
-  if (!Number.isInteger(tab) || !documentId) return 0;
-  const provisional = `tab-${tab}:${documentId}`;
-  const before = journal.length;
-  journal = journal.filter((entry) => entry.provisional !== provisional);
-  const dropped = before - journal.length;
-  if (dropped > 0) await persistJournal();
-  return dropped;
-}
-
 async function adoptFreshReloadProvisional(tab, documentId) {
   if (!Number.isInteger(tab) || !documentId) return 0;
   const from = reloadProvisionalKey(tab);
@@ -1580,7 +1570,8 @@ async function maintain() {
   const repairs = (Array.isArray(reply.data.repairs) ? reply.data.repairs : [])
     .map((entry) => ({
       conversationId: cleanConversationId(entry && entry.conversationId),
-      token: entry && typeof entry.token === 'string' ? entry.token : ''
+      token: entry && typeof entry.token === 'string' ? entry.token : '',
+      focus: Boolean(entry && entry.focus === true)
     }))
     .filter((entry) => entry.conversationId && entry.token);
   const nonDiscardable = new Set(
@@ -1650,7 +1641,7 @@ async function maintain() {
     if (changed) await persistLive().catch(() => undefined);
   }
   if (repairs.length === 0) return clearRetryIfIdle();
-  for (const { conversationId, token } of repairs) {
+  for (const { conversationId, token, focus } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -1669,8 +1660,17 @@ async function maintain() {
     const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
     const repairAction = target ? 'reloaded' : 'reopened';
     try {
+      // A repair the app wants in front of the user — an automatic compaction's pickup — raises
+      // the tab and its window before acting. A background tab is a throttled tab, and the
+      // page this reload brings back has tens of seconds of work to do in it.
+      if (target && focus) {
+        await chrome.tabs.update(target.id, { active: true });
+        if (typeof target.windowId === 'number') await chrome.windows.update(target.windowId, { focused: true });
+      }
       if (target) await chrome.tabs.reload(target.id);
-      else await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` });
+      else {
+        await chrome.tabs.create({ url: `https://chatgpt.com/c/${encodeURIComponent(conversationId)}`, active: focus });
+      }
     } catch {
       // A tab changed between the scan and action, or Chrome refused it. Report the exact failed
       // handout so the app can show the failure while keeping the same repair retryable. The
@@ -2202,14 +2202,15 @@ const HANDLERS = {
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
   /**
-   * Raises the exact tab whose owned document has just triggered Goal.
+   * Raises the exact tab whose owned document is about to act on its own — a Goal draft, an
+   * automatic Compact & Resume.
    *
    * The sender is the locator. Never search by conversation and never open a fallback: focus is
-   * only presentation after the content script has independently decided a completed turn is
-   * Goal-worthy. That keeps background visibility out of completion/draft authority and makes a
-   * duplicate tab impossible on this path.
+   * only presentation after the content script has independently decided to act. That keeps
+   * background visibility out of completion/draft/compaction authority and makes a duplicate
+   * tab impossible on this path.
    */
-  async goal_focus(message, sender, source) {
+  async focus_tab(message, sender, source) {
     await load();
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
     const conversationId = cleanConversationId(message.conversationId);
@@ -2400,7 +2401,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'closed',
     'compact',
     'goal_draft',
-    'goal_focus',
+    'focus_tab',
     'goal_ack',
     'goal_objective',
     'goal_open',
@@ -2463,9 +2464,13 @@ chrome.tabs.onRemoved.addListener((id) => {
 
 // A tab can survive while its ChatGPT document does not: navigating it to another site kills
 // the content script, so neither pagehide nor any later observer can retire this conversation.
-// onRemoved never fires because the tab itself still exists. Only a URL that is concretely
-// outside ChatGPT is terminal here; `/c/A -> /` remains deliberately ambiguous and is handled
-// by the content script when another concrete conversation id appears.
+// onRemoved never fires because the tab itself still exists. A URL outside ChatGPT is terminal
+// here, and so is a full document load of any ChatGPT URL that is concretely not chat A's own:
+// the root, another chat, a project page. The user typing chatgpt.com into a Prime's tab used to
+// leave A bound to that tab until some later chat happened to be given an id there, so the app
+// never heard that A's page was gone and never reopened it (2026-09-03). A same-chat reload
+// carries A's own URL and stays ambiguous until the replacement document binds; an SPA move,
+// which fires no `loading` status, remains the content script's to prove.
 chrome.tabs.onUpdated.addListener((id, changeInfo) => {
   if (!changeInfo) return;
   const fullNavigation = changeInfo.status === 'loading';
@@ -2480,6 +2485,8 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
     // id-less root reload's provisional journal across the document swap. It is parked under
     // a reload-only key and adopted by the replacement document when it registers. Known-chat
     // navigations do not use this path, so chat A cannot hand its provisional observations to B.
+    // The known chat this tab is concretely leaving for another ChatGPT URL, or null.
+    let departed = null;
     if (fullNavigation && !leftChatGpt) {
       const key = String(id);
       const knownConversation = cleanConversationId(tabConversations[key]);
@@ -2500,12 +2507,12 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
         rootReload = false;
       }
       const documentId = typeof tabDocuments[key] === 'string' ? tabDocuments[key] : null;
-      const targetConversation = conversationFromUrl(targetUrl);
-      if (knownConversation && targetConversation && targetConversation !== knownConversation && documentId) {
-        // This is not an ambiguous reload: Chrome is replacing known chat A with concrete
-        // chat B. Anything still provisional in A's dying document is too old/unbound to be
-        // adopted by B and must be discarded before the replacement document can register.
-        await dropDocumentProvisional(id, documentId);
+      // Not an ambiguous reload: Chrome is replacing known chat A's document with a URL that is
+      // not A's. releaseTab() below retires A here and now — its provisional observations are
+      // too old to be adopted by whatever loads next, and its final tab leaving is the app's
+      // cue to bring it back if a turn is still running in it.
+      if (knownConversation && targetUrl && isChatGptUrl(targetUrl) && conversationFromUrl(targetUrl) !== knownConversation) {
+        departed = knownConversation;
       } else if (!knownConversation && rootReload && documentId) {
         await carryFreshReloadProvisional(id, documentId);
       }
@@ -2514,8 +2521,8 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
     // A full ChatGPT navigation may be a normal reload of the same conversation. Block the
     // dying document immediately, but preserve the conversation until the replacement page
     // binds and proves whether it is the same chat or a different one.
-    if (fullNavigation && !leftChatGpt) return { ok: true, closed: false };
-    return releaseTab(id, null, documentId);
+    if (fullNavigation && !leftChatGpt && !departed) return { ok: true, closed: false };
+    return releaseTab(id, departed, documentId);
   }).catch(() => undefined);
 });
 
