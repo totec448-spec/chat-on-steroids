@@ -29,7 +29,16 @@ vi.mock('node:child_process', () => ({
 
 let userData = '';
 let packaged = true;
-vi.mock('electron', () => ({ app: { getPath: () => userData, get isPackaged() { return packaged; } } }));
+const relaunched: Array<{ execPath?: string }> = [];
+vi.mock('electron', () => ({
+  app: {
+    getPath: () => userData,
+    get isPackaged() {
+      return packaged;
+    },
+    relaunch: (options: { execPath?: string }) => relaunched.push(options)
+  }
+}));
 vi.mock('../src/main/logger.js', () => ({ logInfo: () => undefined, logWarn: () => undefined }));
 
 const { APP_VERSION } = await import('../src/main/version.js');
@@ -37,6 +46,7 @@ const { isNewer } = await import('../src/shared/types.js');
 const {
   applyStagedUpdate,
   checkForUpdates,
+  markInstallOnQuit,
   releaseVersion,
   resetUpdateForTests,
   stagedArtifact,
@@ -104,6 +114,7 @@ beforeEach(() => {
   userData = mkdtempSync(path.join(tmpdir(), 'cos-update-'));
   packaged = true;
   spawned.length = 0;
+  relaunched.length = 0;
   resetUpdateForTests();
 });
 
@@ -202,13 +213,14 @@ describe('staging the new version', () => {
     expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
     expect(asked).toEqual(['latest', 'SHA256SUMS.txt', WINDOWS_ASSET]);
 
-    const staged = path.join(userData, 'updates', WINDOWS_ASSET);
+    const staged = path.join(userData, 'updates', NEXT, WINDOWS_ASSET);
     expect(readFileSync(staged, 'utf8')).toBe(body);
     expect(existsSync(`${staged}.part`)).toBe(false);
 
-    // The quit half of the restart: the file that was staged is the one handed over, silently.
+    // The quit half of the restart: the file that was staged is the one handed over, silently,
+    // and without starting the app again behind a user who quit for their own reasons.
     await applyStagedUpdate();
-    expect(spawned).toEqual([{ file: staged, args: ['/S'] }]);
+    expect(spawned).toEqual([{ file: staged, args: ['/S', '--updated'] }]);
   });
 
   /**
@@ -222,7 +234,8 @@ describe('staging the new version', () => {
 
     expect(updateStatus().stage).toBe('failed');
     expect(updateStatus().error).toContain('not the published file');
-    expect(readdirSync(path.join(userData, 'updates'))).toEqual([]);
+    // The `.part` is gone with it: nothing a later quit could find and run is left behind.
+    expect(readdirSync(path.join(userData, 'updates', NEXT))).toEqual([]);
 
     await applyStagedUpdate();
     expect(spawned).toEqual([]);
@@ -313,5 +326,121 @@ describe('one pass at a time, and one more next time the app opens', () => {
     await applyStagedUpdate();
     await applyStagedUpdate();
     expect(spawned).toHaveLength(1);
+  });
+});
+
+/**
+ * The failure this exists for: this app is closed to the tray and can go days without a real
+ * quit, and a staged artifact used to live only in the memory of the process that fetched it.
+ * Every start after that downloaded the same hundred megabytes, staged it, and ended in the
+ * same place - and any start that ended by being killed rather than quit applied none of it.
+ */
+describe('a download that survives the process that fetched it', () => {
+  it('reuses the artifact a previous run already staged instead of fetching it again', async () => {
+    const first = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(first.asked).toEqual(['latest', 'SHA256SUMS.txt', WINDOWS_ASSET]);
+
+    // A new run of the app: same disk, no memory of what the last one did.
+    resetUpdateForTests();
+    const second = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+
+    // The sums are read again — the proof has to be current, not remembered — and the artifact
+    // itself is not. That request is the hundred megabytes.
+    expect(second.asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+
+    await applyStagedUpdate();
+    expect(spawned).toEqual([
+      { file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['/S', '--updated'] }
+    ]);
+  });
+
+  /**
+   * Reuse is never trust. A file that no longer matches what the release publishes - a corrupted
+   * disk, a re-cut release under the same tag - is not adopted and not run; it is fetched again.
+   */
+  it('fetches again when the artifact on disk is not what the release publishes', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    writeFileSync(path.join(userData, 'updates', NEXT, WINDOWS_ASSET), 'something else entirely');
+
+    resetUpdateForTests();
+    const second = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+
+    expect(second.asked).toEqual(['latest', 'SHA256SUMS.txt', WINDOWS_ASSET]);
+    expect(updateStatus().stage).toBe('ready');
+    expect(readFileSync(path.join(userData, 'updates', NEXT, WINDOWS_ASSET), 'utf8')).toBe(second.body);
+  });
+
+  /** A staged build for a release nobody is going to install is not kept alongside the new one. */
+  it('keeps one version staged at a time', async () => {
+    github({ version: '98.0.0' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(readdirSync(path.join(userData, 'updates'))).toEqual(['98.0.0']);
+
+    resetUpdateForTests();
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(readdirSync(path.join(userData, 'updates'))).toEqual([NEXT]);
+  });
+});
+
+/**
+ * The Install button. It applies nothing itself: it records that the user is waiting, and the
+ * quit it triggers runs the same handoff every other quit runs. The difference the flag makes is
+ * the one the user can see - the app comes back.
+ */
+describe('installing on request', () => {
+  it('asks the installer to start the app again', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+
+    expect(markInstallOnQuit()).toBe(true);
+    await applyStagedUpdate();
+    expect(spawned).toEqual([
+      { file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['/S', '--updated', '--force-run'] }
+    ]);
+  });
+
+  it('relaunches an AppImage install itself, having no installer to ask', async () => {
+    const live = path.join(userData, 'Chat-On-Steroids.AppImage');
+    writeFileSync(live, 'the old build');
+    const { body } = github();
+
+    await asPlatform('linux', live, async () => {
+      await checkForUpdates();
+      expect(markInstallOnQuit()).toBe(true);
+      await applyStagedUpdate();
+    });
+
+    expect(readFileSync(live, 'utf8')).toBe(body);
+    expect(relaunched).toEqual([{ execPath: live }]);
+  });
+
+  /** Nothing staged, nothing to do — and above all, no quit. */
+  it('refuses when there is nothing downloaded to install', async () => {
+    github({ version: APP_VERSION });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(markInstallOnQuit()).toBe(false);
+  });
+
+  /** The flag belongs to one press. A later ordinary quit must not reopen the app. */
+  it('does not carry the request into the next quit', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(markInstallOnQuit()).toBe(true);
+    await applyStagedUpdate();
+
+    resetUpdateForTests();
+    spawned.length = 0;
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    await applyStagedUpdate();
+    expect(spawned).toEqual([
+      { file: path.join(userData, 'updates', NEXT, WINDOWS_ASSET), args: ['/S', '--updated'] }
+    ]);
   });
 });

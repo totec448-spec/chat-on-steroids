@@ -726,9 +726,9 @@ function updateSummary({ bridge, update }: AppState): { text: string; tone: Upda
     // is not one the app can update by itself. That is when the button matters.
     lines.push(
       update.stage === 'ready'
-        ? `Chat On Steroids ${update.latest} is downloaded and installs the next time you start the app.`
+        ? `Chat On Steroids ${update.latest} is downloaded and ready. Install it now, or it installs the next time you quit.`
         : update.stage === 'downloading'
-          ? `Chat On Steroids ${update.latest} is downloading. Keep working; it installs on your next start.`
+          ? `Chat On Steroids ${update.latest} is downloading. Keep working; you can install it when it lands.`
           : update.stage === 'failed'
             ? `Chat On Steroids ${update.latest} could not be downloaded: ${update.error ?? 'the download stopped'}.`
             : `Chat On Steroids ${update.latest} is out. This installation has to be updated by hand.`
@@ -767,6 +767,11 @@ function paintUpdate(next: AppState): void {
   const { update } = next;
   $('updateText').textContent = summary.text;
   $<HTMLButtonElement>('updateGet').hidden = !update.latest || update.stage === 'downloading' || update.stage === 'ready';
+  // `ready` is the only state with a verified artifact on disk, and therefore the only one in
+  // which pressing Install can do anything. Both buttons ask the same question of the same fact.
+  const installable = update.stage === 'ready';
+  $<HTMLButtonElement>('updateInstall').hidden = !installable;
+  $<HTMLButtonElement>('installUpdate').hidden = !installable;
   notice.hidden = !summary.notice;
   line.textContent = summary.text;
   line.className = `upline${summary.tone === 'ok' ? ' is-ok' : summary.tone === 'bad' ? ' is-bad' : ''}`;
@@ -1500,6 +1505,21 @@ $('wizExpand').addEventListener('click', () => {
   if (state) apply(state);
 });
 $('updateGet').addEventListener('click', () => void run(api.openLink(RELEASES_PAGE)));
+
+/**
+ * Install the update that is already downloaded.
+ *
+ * The app quits to do it — that is the only moment an installer can replace files nothing is
+ * holding open — so say so before it happens rather than leaving a window that vanishes on a
+ * click looking like a crash. Both buttons are the same action; either can be the one pressed.
+ */
+function installUpdate(): void {
+  toast('Installing the update. Chat On Steroids closes and starts again as the new version.');
+  void run(api.installUpdate());
+}
+
+$('updateInstall').addEventListener('click', installUpdate);
+$('installUpdate').addEventListener('click', installUpdate);
 $('connectBtn').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 

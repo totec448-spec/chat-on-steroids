@@ -63,7 +63,7 @@ import { tokenPressure } from '../shared/session.js';
 import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
 import { openInPreferredBrowser } from './browser.js';
-import { onUpdateChange, updateStatus } from './update.js';
+import { markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
 import {
   getMacOSDesktopAccess,
   onMacOSDesktopAccessChange,
@@ -307,7 +307,7 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
   });
 }
 
-export function registerIpc(getWindow: () => BrowserWindow | null): void {
+export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   handle('state:get', async () => {
     const state = await buildState();
     // Native package smoke uses this as the end-to-end renderer readiness barrier. Unlike
@@ -533,6 +533,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('clipboard:write', async (payload) => {
     const { text } = z.object({ text: z.string().max(1_000_000) }).parse(payload);
     clipboard.writeText(text);
+    return true;
+  });
+
+  // The Install button. The renderer decides nothing about what is installed - it cannot
+  // name a file, a version or a path - it only says "now", and only a staged, digest-checked
+  // artifact makes that mean anything. The quit is what applies it, at the end of the same
+  // shutdown sequence every other quit runs; refusing here is how a press with nothing staged
+  // avoids closing the app for no reason.
+  handle('update:install', async () => {
+    if (!markInstallOnQuit()) throw new Error('There is no downloaded update to install yet');
+    logInfo('update: install requested; quitting to hand the update over');
+    quitToInstall();
     return true;
   });
 
