@@ -15,8 +15,12 @@
  *   promise, so a second call while a download is running joins it rather than starting a
  *   second download of the same file. That is what makes the repeat timer free: a pass that
  *   finds the release it already staged stops at the release call.
- * - **The user restarts, not this app.** A staged update is applied during the ordinary quit
- *   sequence. Nothing here quits, relaunches, or interrupts what the user is doing.
+ * - **The user says when.** A staged update is applied during the ordinary quit sequence, and
+ *   `installStagedUpdate` is the button that starts that quit on purpose. Nothing here quits or
+ *   interrupts anything on its own.
+ * - **A staged artifact outlives the process that fetched it.** It is kept under the version it
+ *   belongs to, so the next start recognises the file it already has and reverifies it rather
+ *   than spending another hundred megabytes on the same installer.
  *
  * **What updates itself, and what does not.** Windows, and Linux installed as an AppImage. A
  * Linux `.deb` is owned by the system package manager and cannot be replaced without root, and
@@ -36,7 +40,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, copyFile, mkdir, rename, rm } from 'node:fs/promises';
-import { createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -104,6 +108,8 @@ const CLEAR: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle',
 let status: UpdateStatus = CLEAR;
 let staged: { version: string; file: string; kind: 'installer' | 'appimage'; target: string } | null = null;
 let pass: Promise<void> | null = null;
+/** Set by `markInstallOnQuit`: the user pressed Install, so bring the app back afterwards. */
+let runAfterInstall = false;
 const listeners = new Set<() => void>();
 
 export function onUpdateChange(listener: () => void): () => void {
@@ -176,11 +182,60 @@ async function runPass(): Promise<void> {
     set({ latest: release.version, stage: 'ready' });
     return;
   }
+  // One read of the release's own checksums, for whichever of the two paths below runs. It is
+  // both the manifest of what the release contains and the proof of what may be executed, so
+  // neither adopting a file nor fetching one happens without it.
+  const expected = (await releaseDigests(release.version)).get(artifact.name);
+  if (!expected) throw new Error(`release ${release.version} publishes no ${artifact.name}`);
+  const carried = await adopt(release.version, artifact.name, expected);
+  if (carried) {
+    staged = { version: release.version, file: carried, kind: artifact.kind, target: artifact.target };
+    set({ latest: release.version, stage: 'ready' });
+    logInfo(`update: ${release.version} was already downloaded and is ready to install`);
+    return;
+  }
   set({ latest: release.version, stage: 'downloading' });
-  const file = await download(release.version, artifact.name);
+  const file = await download(release.version, artifact.name, expected);
   staged = { version: release.version, file, kind: artifact.kind, target: artifact.target };
   set({ stage: 'ready' });
-  logInfo(`update: ${release.version} is staged and installs the next time the app starts`);
+  logInfo(`update: ${release.version} is downloaded and ready to install`);
+}
+
+/** Where one release's artifact is kept. Versioned, so no build is ever taken for another. */
+function stagingDir(version: string): string {
+  return path.join(app.getPath('userData'), 'updates', version);
+}
+
+/** The SHA-256 of a file already on disk. */
+async function fileDigest(file: string): Promise<string> {
+  const hash = createHash('sha256');
+  await pipeline(createReadStream(file), hash);
+  return hash.digest('hex');
+}
+
+/**
+ * The artifact a previous run of this app already fetched and proved, or null for anything else.
+ *
+ * Staging is per version, so this is a question the file system alone can answer and there is no
+ * second record of it to fall out of step. The digest is checked again, against the release's
+ * own published sums rather than anything this app wrote beside the file: what makes an artifact
+ * safe to hand to an installer is that it still matches what the release publishes, and a staged
+ * update can sit here for days before anyone quits.
+ *
+ * Reusing it is not an optimisation. This app lives in the tray and is closed to it, so an
+ * update staged on Monday is applied whenever the user next really quits — and without this,
+ * every start in between refetched the same hundred megabytes to arrive at the same file.
+ */
+async function adopt(version: string, name: string, expected: string): Promise<string | null> {
+  const file = path.join(stagingDir(version), name);
+  if (!existsSync(file)) return null;
+  try {
+    if ((await fileDigest(file)) !== expected) throw new Error('it is not the published file');
+    return file;
+  } catch (err) {
+    logWarn(`update: the staged ${version} download cannot be reused (${(err as Error).message}); fetching it again`);
+    return null;
+  }
 }
 
 /** The one fact the release API is asked for: which version is newest. */
@@ -244,13 +299,11 @@ async function get(url: string, timeout: number, headers: Record<string, string>
  * `.part` until it has passed: the rename is what publishes it, so a download that was
  * interrupted or is not the right file can never be handed to an installer.
  */
-async function download(version: string, name: string): Promise<string> {
-  const expected = (await releaseDigests(version)).get(name);
-  if (!expected) throw new Error(`release ${version} publishes no ${name}`);
-  const dir = path.join(app.getPath('userData'), 'updates');
+async function download(version: string, name: string, expected: string): Promise<string> {
+  const dir = stagingDir(version);
   // One staged build at a time. Anything already here is either this same download starting
   // over or an artifact for a release nobody is going to install now.
-  await rm(dir, { recursive: true, force: true });
+  await rm(path.join(app.getPath('userData'), 'updates'), { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, name);
   const response = await get(assetUrl(version, name), DOWNLOAD_TIMEOUT_MS);
@@ -266,6 +319,25 @@ async function download(version: string, name: string): Promise<string> {
   }
   await rename(`${file}.part`, file);
   return file;
+}
+
+/**
+/**
+ * Records that the user pressed Install, and says whether there was anything to install.
+ *
+ * It deliberately installs nothing itself. The handoff belongs at the end of the ordinary
+ * shutdown sequence and nowhere else: that is what guarantees the bridge has drained, the child
+ * processes are gone and every durable write has landed before an installer starts replacing
+ * files underneath them. All this does is record that the user asked — which is also what makes
+ * the difference between an update applied on the way out of a quit the user wanted for other
+ * reasons, and one they are waiting to come back from.
+ *
+ * The caller quits. This module still never does.
+ */
+export function markInstallOnQuit(): boolean {
+  if (!staged) return false;
+  runAfterInstall = true;
+  return true;
 }
 
 /**
@@ -286,11 +358,18 @@ async function download(version: string, name: string): Promise<string> {
  */
 export async function applyStagedUpdate(): Promise<void> {
   const ready = staged;
+  const relaunch = runAfterInstall;
   staged = null;
+  runAfterInstall = false;
   if (!ready) return;
   try {
     if (ready.kind === 'installer') {
-      const installer = spawn(ready.file, ['/S'], { detached: true, stdio: 'ignore', windowsHide: true });
+      // `--updated` tells the assisted NSIS installer this is an upgrade of the install it
+      // already owns, so it keeps the location and the shortcuts instead of asking about them.
+      // `--force-run` is added only when the user pressed Install and is waiting for the app to
+      // come back; an update applied on the way out of an ordinary quit must not reopen it.
+      const args = relaunch ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
+      const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
       // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
       // child process would take the quit down with it.
       installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
@@ -300,8 +379,15 @@ export async function applyStagedUpdate(): Promise<void> {
       await copyFile(ready.file, next);
       await chmod(next, 0o755);
       await rename(next, ready.target);
+      // No installer to hand the "start it again" to, so this process arranges its own successor.
+      // Electron spawns it as this one exits, which is the app.exit() that ends the shutdown.
+      if (relaunch) app.relaunch({ execPath: ready.target });
     }
-    logInfo(`update: ${ready.version} handed over; the next start of this app is the new version`);
+    logInfo(
+      relaunch
+        ? `update: installing ${ready.version} now; the app starts itself again as the new version`
+        : `update: ${ready.version} handed over; the next start of this app is the new version`
+    );
   } catch (err) {
     // Nothing is retried and nothing is left half-applied. The next app start checks again.
     logWarn(`could not apply the staged ${ready.version} update: ${(err as Error).message}`);
@@ -313,5 +399,6 @@ export function resetUpdateForTests(): void {
   status = CLEAR;
   staged = null;
   pass = null;
+  runAfterInstall = false;
   listeners.clear();
 }

@@ -687,10 +687,21 @@ it('reports a staged update in the Activity line and the header bar', async () =
   const doc = mounted.window.document;
   const line = doc.getElementById('updateLine')!;
   expect(line.className).toBe('upline');
-  expect(line.textContent).toContain('2.0.3 is downloaded and installs the next time');
+  expect(line.textContent).toContain('2.0.3 is downloaded and ready');
   expect(doc.getElementById('updateNotice')!.hidden).toBe(false);
   // There is nothing to fetch by hand once it is on disk.
   expect((doc.getElementById('updateGet') as HTMLButtonElement).hidden).toBe(true);
+  // ...and this is the one state in which there is something to install. Both buttons show,
+  // because a tray app closed to the tray may not see the header for days.
+  expect((doc.getElementById('updateInstall') as HTMLButtonElement).hidden).toBe(false);
+  expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(false);
+
+  // Still downloading is not yet installable: there is no verified file to hand over.
+  const downloading = structuredClone(staged) as any;
+  downloading.update = { ...downloading.update, stage: 'downloading' };
+  mounted.push(downloading);
+  expect((doc.getElementById('updateInstall') as HTMLButtonElement).hidden).toBe(true);
+  expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(true);
 
   const broken = structuredClone(staged) as any;
   broken.update = { current: '2.0.2', latest: null, stage: 'failed', error: 'latest answered 503', checkedAt: null };
@@ -699,6 +710,7 @@ it('reports a staged update in the Activity line and the header bar', async () =
   expect(line.textContent).toContain('503');
   // A check that could not reach GitHub is a diagnostic, not something the user can act on.
   expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
+  expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(true);
 });
 
 /**
