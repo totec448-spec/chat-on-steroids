@@ -429,9 +429,9 @@ describe.runIf(!IS_WINDOWS)('a native POSIX path', () => {
     // it resolves nothing itself.
     const native = await expectRefused(IS_WINDOWS ? 'D:\\project\\sub\\nested.txt' : '/elsewhere/project/sub/nested.txt');
     expect(native.message).toContain('If you meant the approved folder, its path is /project/sub/nested.txt.');
-    const virtual = await expectRefused('/home/me/Project/sub/nested.txt');
-    expect(virtual.message).toContain('Unknown root "/home"');
-    expect(virtual.message).toContain('If you meant the approved folder, its path is /project/sub/nested.txt.');
+    const nested = await expectRefused('/home/me/Project/sub/nested.txt');
+    expect(nested.message).toContain('not inside an approved folder');
+    expect(nested.message).toContain('If you meant the approved folder, its path is /project/sub/nested.txt.');
     const root = await expectRefused('/home/me/project');
     expect(root.message).toContain('its path is /project.');
   });
