@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chat On Steroids companion",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Records your ChatGPT session into the local Chat On Steroids app and labels its MCP tool calls with what they actually did.",
   "minimum_chrome_version": "116",
   "permissions": ["storage", "scripting", "alarms"],

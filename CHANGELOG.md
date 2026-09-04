@@ -9,88 +9,12 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [Unreleased]
+## [2.0.4] — 2026-09-04
 
-### Fixed
-- **A closed agent tab comes straight back.** Closing a Prime's or worker's tab, or typing another
-  ChatGPT address into it, now reopens that chat at once while a turn is still running in it. The
-  extension did not report a tab that was navigated to another ChatGPT page as gone, the app judged
-  "still running" only by the page's parting word (which is always "done" while a tab is torn
-  down), and a reopen waited up to three minutes behind a floor meant for pages still loading.
-  Every close now logs whether the chat was reopened and, if not, why.
-- **A worker chat stays a worker chat after it finishes.** Two workers that crossed the context
-  ceiling were treated as ordinary chats over the compaction line: the app filed compaction tickets
-  their pages can never act on and reloaded each working page five times before giving up.
-- **A worker whose chat will not answer is replaced, not retried.** The second failed wake in a row
-  with nothing heard from that chat in between now tells the prime to spawn a replacement instead
-  of trying again; a ChatGPT conversation that answered every load with "This content is
-  unavailable" cost four wakes and thirty minutes before the prime gave up on it.
-- **A reload no longer ends the turn it came back into.** The page bound the resumed turn to
-  the newest assistant section on screen even when that section sat above the newest question,
-  so the previous answer's end-turn bit closed the live turn seconds after every reload while
-  the same request went on calling tools. The resumed turn is now bound only to a section
-  below its question, and the hydration flicker of the Stop control no longer counts as
-  having seen it run.
-- **Large chats no longer freeze the tab.** The page script read the whole transcript six to
-  eight times a second, taking the text of every message each time; a 300k-token chat spent
-  most of every second on that and sat unresponsive for minutes after each reload. Each section
-  is now read once and re-read only when it changes. On a 300-turn transcript the one-second
-  tick fell from about 880 ms to about 115 ms in the test harness.
-- **No second reload on a page that is still loading.** A large chat takes minutes to come
-  back from a reload, and the silence watchdog reloaded it again 23 seconds after an
-  unattributed reload had, starting the load over. A chat that has not shown a sign of life
-  since its last reload now gets the three-minute recovery floor before silence may reload it.
+**astra broke me**
 
-### Changed
-- **Session cursors are short tokens.** A cursor used to be base64 JSON, up to a thousand
-  characters with four unfinished messages in it, and every refused session read in the fifty
-  most recent recordings was such a cursor the model had re-typed with a letter transposed. A
-  cursor is now a checksummed token of a few dozen characters; a damaged copy is refused as
-  damaged, a cursor from another recording as belonging to it, and quotes, backticks, an
-  `update_cursor:` label or trailing punctuation around a pasted cursor are ignored.
-- **`read` takes a range per path.** `path:12-40` or `path:12` reads that range of that one path,
-  so several ranges of one file fit in one call; the sandbox used to refuse the colon. A path
-  that does not exist now lists the nearest folder that does, which was the model's next call
-  every time.
-- **A refused path suggests its approved spelling.** `C:\marscraft\src\ui\Hud.js` or
-  `/totec/marscraft/src/ui/Hud.js` is refused with the approved `/marscraft/src/ui/Hud.js` it
-  probably meant; the suggestion resolves nothing by itself.
-- **exec_command says which command in a batch failed** when the exit codes are mixed, and
-  explains `git diff` falling into `--no-index` outside a repository and a backslash-quote that
-  split a PowerShell argument into stray positional parameters.
-- **`agents status` prints each worker's recording id**, so a prime reads a worker with
-  `session action=read` instead of searching recordings by the task text; `finish` without a
-  result says what the result is for.
-- **`computer` accepts punctuation keys** (`-`, `=`, `[`, `]`, `;`, `'`, `,`, `.`, `/`, `\`,
-  backquote) and the common aliases, and an unknown key name lists what is accepted. A capture
-  of a closed window is `WINDOW_NOT_FOUND` rather than a generic helper error, a stale UI ref
-  says to observe the window again, and the keypress description says that browser tab, window
-  and address-bar chords are refused.
-- **Goal waits for a quiet chat.** A reloaded page, or a "Message delivery timed out" error, can
-  report a turn as finished while the same request is still calling tools; the loop then wrote
-  the next message into a chat that was still working and the chat ran two requests at once. The
-  app now refuses to draft while its own record still has the turn open or a local tool ran
-  within the last minute, files the obligation for later, and withdraws it when a call proves
-  the turn never ended; the page keeps asking every 15 seconds until the chat has finished. The
-  silence ticket — two minutes without a call, one reload, one more minute of nothing — is the
-  one route that writes the next message without the page ever reporting an end. After a silence reload,
-  the minute of listening is cancelled by any sign of life — a tool call, an interim row, a
-  message — and re-armed for the next stop.
-- **Goal reads the decision behind a thinking block.** A routed provider answered with its
-  reasoning in front of the JSON three drafts in a row; each failed as unreadable and was asked
-  again at once. The decision is now read out from behind reasoning blocks, code fences and
-  surrounding prose, an unreadable answer is logged with a sample, and page-side retries double
-  their wait per failure of the same turn, from 15 seconds up to 4 minutes.
-- **Goal writes after text already in the composer.** One stray character held a finished reply
-  at "sending" until the user deleted it. The reply now goes in on a new line after whatever is
-  there and is sent at once.
-- **Automatic Compact & Resume is the app's decision.** The ticket is filed on the evidence that
-  a working chat has crossed the line — an attributed call, a current-turn observation — so a
-  page that has frozen mid-turn is still compacted; the page resumes the ticket and raises its
-  own tab first. Pickups follow the ticket's phase: while the prompt is unsent, a reload in front
-  every two minutes, five times, then the ticket is abandoned and the next working turn opens a
-  fresh one; while the brief is being written, every five minutes, three times; once it lands,
-  the replacement opens at once.
+- Tool requests.
+- Increased stability.
 
 ## [2.0.3] — 2026-09-02
 
