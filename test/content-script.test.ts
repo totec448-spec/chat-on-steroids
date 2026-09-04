@@ -5739,6 +5739,88 @@ describe('a content script reloaded into a turn already in flight', () => {
    * close the adopted turn four seconds in, and the same request id then called tools for
    * another twenty-four minutes while Goal drafted the next message against nothing.
    */
+  /**
+   * The 2026-09-03 shape. The reload comes back showing the previous exchange and the newest
+   * question, and nothing after it yet: the adopted turn has not written a section. The newest
+   * assistant section on the page is the *previous* answer, finished, with its end-turn bit —
+   * and binding the adopted turn to it closed the turn "completed" nine seconds after every
+   * reload while the same request went on calling tools. A section above the question is not
+   * this turn's; with none after it, the turn stays open until one appears and ends.
+   */
+  it('never binds an adopted turn to an answer that sits above the question it is answering', async () => {
+    live = await harness(
+      'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) },
+      (document) => {
+        userTurn(document, 'turn-old-user', 'fix the recorder', { sent: false });
+        const settled = assistantTurn(document, 'turn-old', []);
+        const answered = document.createElement('div');
+        answered.className = 'markdown';
+        answered.textContent = 'The recorder is fixed.';
+        settled.append(answered);
+        userTurn(document, 'turn-new-user', 'now make it fast', { sent: false });
+        // Hydration's Stop, over a transcript that ends with the question.
+        startGenerating(document, { send: false });
+      }
+    );
+    live.hook.observe();
+    await settle();
+
+    // The page model names the previous answer terminal. It is the previous answer.
+    const settled = live.document.querySelector('[data-turn-id="turn-old"]') as HTMLElement;
+    await bindFiberTurns([{
+      section: settled,
+      turn: {
+        turnId: 'turn-old',
+        endMessageId: 'reload-prev-final',
+        messages: [{
+          messageId: 'reload-prev-final', rawMessageId: 'reload-prev-final', stable: true, order: 1,
+          rawText: 'The recorder is fixed.', renderedHtml: '<p>The recorder is fixed.</p>'
+        }]
+      }
+    }]);
+    await live.hook.flush();
+    await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+
+    // Stop flickers away and stays away through the settle window: still not an end.
+    stopGenerating(live.document);
+    live.hook.observe();
+    await settle();
+    live.advance(live.hook.TURN_SETTLE_MS * 3);
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+
+    // ChatGPT mounts the real answer below the question and finishes it.
+    startGenerating(live.document, { send: false });
+    const next = assistantTurn(live.document, 'turn-new', []);
+    const prose = live.document.createElement('div');
+    prose.className = 'markdown';
+    prose.textContent = 'Made it fast.';
+    next.append(prose);
+    live.hook.observe();
+    await settle();
+    await bindFiberTurns([
+      { section: settled, turn: { turnId: 'turn-old', endMessageId: 'reload-prev-final', messages: [{
+        messageId: 'reload-prev-final', rawMessageId: 'reload-prev-final', stable: true, order: 1,
+        rawText: 'The recorder is fixed.', renderedHtml: '<p>The recorder is fixed.</p>'
+      }] } },
+      { section: next, turn: { turnId: 'turn-new', endMessageId: 'reload-new-final', messages: [{
+        messageId: 'reload-new-final', rawMessageId: 'reload-new-final', stable: true, order: 1,
+        rawText: 'Made it fast.', renderedHtml: '<p>Made it fast.</p>'
+      }] } }
+    ]);
+    await live.hook.flush();
+    await settle();
+    const ends = emitted(live.sent, 'turn_end').map((entry) => entry.event);
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.turnId).toBe('g-old-run-0-4');
+    expect(ends[0]!.outcome).toBe('completed');
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
   it('never closes an adopted turn from visible prose alone', async () => {
     live = await harness(
       'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
@@ -6062,6 +6144,40 @@ describe('how a turn is recorded as having ended', () => {
     expect(failure.turnId).toBe(started.turnId);
   });
 
+  /**
+   * Live 2026-09-03 shape: the red full-width card contained the complete help-center
+   * message and a Retry button, but had neither role=alert nor assistant markdown. The
+   * accessibility announcer exposed a different toast, so alert-only discovery missed the
+   * failure entirely and the chat recovered only when the two-minute silence watch fired.
+   */
+  it('records the complete non-alert help-center Retry card as a transport failure', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-retry-card', []);
+    live.hook.observe();
+    await settle();
+
+    const card = live.document.createElement('div');
+    const copy = live.document.createElement('p');
+    copy.textContent =
+      'Something went wrong while generating the response. If this issue persists please contact us through our help center at help.openai.com. ';
+    const retry = live.document.createElement('button');
+    retry.textContent = 'Retry';
+    card.append(copy, retry);
+    live.document.body.append(card);
+    live.hook.observe();
+    await settle();
+
+    const [failure] = emitted(live.sent, 'chat_error').map((entry) => entry.event);
+    const [started] = emitted(live.sent, 'turn_start').map((entry) => entry.event);
+    expect(failure).toMatchObject({
+      text:
+        'Something went wrong while generating the response. If this issue persists please contact us through our help center at help.openai.com. Retry',
+      recoverable: true,
+      turnId: started.turnId
+    });
+  });
+
   it('does not turn ordinary assistant prose into an error because it quotes transport-failure wording', async () => {
     live = await harness();
     startGenerating(live.document);
@@ -6073,6 +6189,26 @@ describe('how a turn is recorded as having ended', () => {
       'I found the earlier failure. The page showed “Connection interrupted. Waiting for the complete answer”, then recovered and kept working.'
     );
 
+    live.hook.observe();
+    await settle();
+
+    expect(emitted(live.sent, 'chat_error')).toEqual([]);
+  });
+
+  it('does not treat an arbitrary Retry control beside prose mentioning a failure as the failure card', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'turn-explaining-retry', []);
+    live.hook.observe();
+    await settle();
+
+    const explanation = live.document.createElement('div');
+    explanation.textContent =
+      'The earlier card said “Something went wrong while generating the response.” Use this only if you want to try that request again. ';
+    const retry = live.document.createElement('button');
+    retry.textContent = 'Retry';
+    explanation.append(retry);
+    live.document.body.append(explanation);
     live.hook.observe();
     await settle();
 
@@ -9661,12 +9797,13 @@ describe('the fresh chat the app opened', () => {
         ack: () => ({ ok: true })
       },
       (document) => {
+        // The send first, then the section that answers it: the order ChatGPT renders.
+        startGenerating(document);
         assistant = assistantTurn(document, 'turn-finishing-worker', []);
         const partial = document.createElement('div');
         partial.className = 'markdown';
         partial.textContent = 'Final handoff is still streaming';
         assistant.append(partial);
-        startGenerating(document);
         document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
           sends++;
           document.querySelector('#prompt-textarea')!.textContent = '';
@@ -9892,12 +10029,13 @@ describe('the fresh chat the app opened', () => {
         ack: () => ({ ok: true })
       },
       (document) => {
+        // The send first, then the section that answers it: the order ChatGPT renders.
+        startGenerating(document);
         assistant = assistantTurn(document, 'turn-durable-revival-boundary', []);
         const partial = document.createElement('div');
         partial.className = 'markdown';
         partial.textContent = 'Finishing before the revived message';
         assistant.append(partial);
-        startGenerating(document);
         document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
           sends++;
           document.querySelector('#prompt-textarea')!.textContent = '';
@@ -10215,120 +10353,50 @@ describe('the context meter and automatic compaction', () => {
     expect(live.sent.filter((message) => message.type === 'compact')).toEqual([]);
   });
 
-  it('never starts automatic compaction from a worker chat, even if stale global state says ready', async () => {
-    const workerGoal = {
-      enabled: false,
-      hasKey: true,
-      model: 'test-model',
-      objective: '',
-      blocked: 'worker',
-      draft: null
+  /**
+   * The automatic trigger is the app's decision now (bridge `considerAutomaticCompaction`): it
+   * files the ticket on the evidence that a working chat has crossed the line, because that
+   * evidence keeps arriving from a chat whose page has frozen. The page's whole part is to
+   * resume a ticket it reads back — raise its tab, stop the turn, send the prompt once — and
+   * that is what these prove.
+   */
+  function automaticTicket(sendState: string) {
+    return {
+      job: {
+        sessionId: 's1',
+        stage: 'handoff-pending',
+        busy: true,
+        automatic: true,
+        handoffId: null,
+        error: null,
+        sourceSend: { state: sendState, messageId: null }
+      }
     };
-    live = await harness(
-      undefined,
-      {
-        activity: () =>
-          withContext(450_000, settings({ auto: true, threshold: 200_000 }), {
-            autoCompactReady: true,
-            goal: workerGoal
-          }),
-        compact: () => ({ ok: true, data: { started: true, job: null } })
-      },
-      (document) => startGenerating(document)
-    );
-    live.hook.injectControl();
-    await live.hook.pullActivity();
-    await settle();
+  }
 
-    expect(startedCompactions(live)).toEqual([]);
-    const workerSettings = live.hook.settingsView({
-      context: settings({ auto: true, threshold: 200_000 }),
-      goal: workerGoal,
-      compact: { action: 'start', hint: '' },
-      editing: false
-    });
-    expect(workerSettings.tip).toContain('Auto-compaction off');
-    expect(workerSettings.rows.find((row) => row.key === 'autoCompact')?.on).toBe(false);
-  });
-
-  /**
-   * The whole of the stale-chat protection, on the page's side of it.
-   *
-   * The trigger is a level now — "this chat is over the line and still has its one
-   * compaction" — so an old 500k conversation answers yes to that for the rest of its life.
-   * What stops it from compacting the moment it is opened is that nothing is running in it.
-   * The app applies the same rule from the other side; this is the half a reader of
-   * content.js can check.
-   */
-  it('leaves an idle chat alone however far over the line it is', async () => {
+  it('resumes an automatic ticket the app filed: raises the tab, stops the turn, sends once', async () => {
+    let sendState = 'not-attempted';
     live = await harness(undefined, {
-      activity: () => withContext(999_000, settings({ auto: true, threshold: 200_000 }), { autoCompactReady: true }),
-      compact: () => ({ ok: true, data: { started: true, job: null } })
-    });
-    live.hook.injectControl();
-    for (let poll = 0; poll < 5; poll++) await live.hook.pullActivity();
-    await settle();
-
-    expect(startedCompactions(live)).toEqual([]);
-  });
-
-  /**
-   * And the rule that made all of this worth rewriting: a finished answer is the one moment
-   * where compacting is pointless. The work it would carry into the fresh chat has already
-   * been done and answered, so the handoff would summarise a job that is over.
-   */
-  it('does not compact once the answer has landed, even if the app still says yes', async () => {
-    // Off while the turn runs, so this test is about the moment after it: the app goes on
-    // reporting the level (the chat is still over the line) and the page still refuses.
-    let ready = false;
-    live = await harness(undefined, {
-      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }), { autoCompactReady: ready }),
-      compact: () => ({ ok: true, data: { started: true, job: null } })
-    });
-    live.hook.injectControl();
-    // The turn has to be opened the way turns are opened — by a send this document watches
-    // happen. A transcript that merely exists at boot is history, and history is not a turn.
-    startGenerating(live.document);
-    const section = assistantTurn(live.document, 'turn-compact-answered', []);
-    live.hook.observe();
-    await settle();
-    // …and it has to end the way turns end: ChatGPT's own model naming the message that
-    // finished it. This test is about the moment *after* an answer, so the answer has to
-    // exist. A Stop control that merely goes away proves nothing and closes nothing.
-    prose(live.document, section, 'compact-answered-final', 'Here is the answer.');
-    await replyFiber([], [{
-      turnId: 'turn-compact-answered',
-      endMessageId: 'compact-answered-final',
-      calls: [],
-      messages: [{
-        messageId: 'compact-answered-final',
-        rawMessageId: 'compact-answered-final',
-        stable: true,
-        rawText: 'Here is the answer.',
-        renderedHtml: '<p>Here is the answer.</p>'
-      }],
-      activities: []
-    }], null, true, live);
-    await settleTurn(live);
-    ready = true;
-
-    for (let poll = 0; poll < 3; poll++) await live.hook.pullActivity();
-    await settle();
-    expect(startedCompactions(live)).toEqual([]);
-  });
-
-  it('interrupts the turn it is standing in and compacts exactly once', async () => {
-    live = await harness(undefined, {
-      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }), { autoCompactReady: true }),
-      compact: () => ({
-        ok: true,
-        data: {
-          started: true,
-          token: 'tok-auto-1',
-          prompt: 'write the brief and call save_handoff',
-          job: { sessionId: 's1', stage: 'handoff-pending', busy: true, handoffId: null, error: null }
+      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }), automaticTicket(sendState)),
+      compact: (message: Record<string, unknown>) => {
+        if (message.sourceAttempt) {
+          sendState = 'attempted-unresolved';
+          return { ok: true, data: { allowed: true } };
         }
-      })
+        if (message.sourceDispatch) {
+          sendState = 'dispatched-unresolved';
+          return { ok: true, data: { armed: true } };
+        }
+        return {
+          ok: true,
+          data: {
+            started: false,
+            token: 'tok-auto-1',
+            prompt: 'write the brief and call save_handoff',
+            ...automaticTicket(sendState)
+          }
+        };
+      }
     });
     live.hook.injectControl();
     startGenerating(live.document);
@@ -10343,7 +10411,9 @@ describe('the context meter and automatic compaction', () => {
     await settle();
 
     expect(stopped).toBe(true);
-    expect(live.sent.filter((message) => message.type === 'auto_compact_claim')).toEqual([]);
+    expect(live.sent.filter((message) => message.type === 'focus_tab')).toEqual([
+      expect.objectContaining({ type: 'focus_tab' })
+    ]);
     expect(startedCompactions(live)).toHaveLength(1);
     expect(live.sent).toContainEqual(expect.objectContaining({
       type: 'compact',
@@ -10351,35 +10421,47 @@ describe('the context meter and automatic compaction', () => {
       sourceAttempt: true
     }));
 
-    // And not again: the existing continuation/job is the one in-flight authority.
+    // And not again: the ticket's durable send position is the one in-flight authority.
     for (let poll = 0; poll < 4; poll++) await live.hook.pullActivity();
     await settle();
     expect(startedCompactions(live)).toHaveLength(1);
+    expect(live.sent.filter((message) => message.type === 'focus_tab')).toHaveLength(1);
   });
 
   /**
    * Mid-tool-call is mid-turn, and is explicitly allowed. Local calls are not raced: the
    * same settle barrier a manual press goes through waits for them before anything is typed.
    */
-  it('compacts while a local tool call is still running', async () => {
+  it('resumes while a local tool call is still running, and waits for it before typing', async () => {
     let asked = 0;
+    let sendState = 'not-attempted';
     live = await harness(undefined, {
       activity: () => {
         asked++;
         return withContext(205_000, settings({ auto: true, threshold: 200_000 }), {
-          autoCompactReady: true,
+          ...automaticTicket(sendState),
           pendingTools: asked < 3 ? 1 : 0
         });
       },
-      compact: () => ({
-        ok: true,
-        data: {
-          started: true,
-          token: 'tok-auto-2',
-          prompt: 'write the brief and call save_handoff',
-          job: { sessionId: 's1', stage: 'handoff-pending', busy: true, handoffId: null, error: null }
+      compact: (message: Record<string, unknown>) => {
+        if (message.sourceAttempt) {
+          sendState = 'attempted-unresolved';
+          return { ok: true, data: { allowed: true } };
         }
-      })
+        if (message.sourceDispatch) {
+          sendState = 'dispatched-unresolved';
+          return { ok: true, data: { armed: true } };
+        }
+        return {
+          ok: true,
+          data: {
+            started: false,
+            token: 'tok-auto-2',
+            prompt: 'write the brief and call save_handoff',
+            ...automaticTicket(sendState)
+          }
+        };
+      }
     });
     live.hook.injectControl();
     startGenerating(live.document);
@@ -10389,22 +10471,34 @@ describe('the context meter and automatic compaction', () => {
     await live.hook.pullActivity();
     await settle();
 
-    expect(live.sent.filter((message) => message.type === 'auto_compact_claim')).toEqual([]);
     expect(startedCompactions(live)).toHaveLength(1);
     // It waited for the call to finish before typing anything into the composer.
     expect(asked).toBeGreaterThanOrEqual(3);
   });
 
-  it('does not start when the app says this chat is below the live level', async () => {
+  /** A manual ticket is the user's press; resuming it raises nothing. */
+  it('does not raise the tab for a manual ticket it resumes', async () => {
+    let sendState = 'not-attempted';
+    const manual = () => ({ job: { ...automaticTicket(sendState).job, automatic: false } });
     live = await harness(undefined, {
-      activity: () => withContext(250_000, settings({ auto: true, threshold: 200_000 }), { autoCompactReady: false }),
-      compact: () => ({ ok: true, data: { started: true, job: null } })
-    }, (document) => startGenerating(document));
+      activity: () => withContext(50_000, settings({ auto: false }), manual()),
+      compact: (message: Record<string, unknown>) => {
+        if (message.sourceAttempt) {
+          sendState = 'attempted-unresolved';
+          return { ok: true, data: { allowed: true } };
+        }
+        if (message.sourceDispatch) {
+          sendState = 'dispatched-unresolved';
+          return { ok: true, data: { armed: true } };
+        }
+        return { ok: true, data: { started: false, token: 'tok-manual', prompt: 'write the brief', ...manual() } };
+      }
+    });
     live.hook.injectControl();
-    for (let poll = 0; poll < 5; poll++) await live.hook.pullActivity();
+    await live.hook.pullActivity();
     await settle();
-
-    expect(startedCompactions(live)).toEqual([]);
+    expect(startedCompactions(live)).toHaveLength(1);
+    expect(live.sent.filter((message) => message.type === 'focus_tab')).toHaveLength(0);
   });
 });
 
@@ -11520,7 +11614,7 @@ describe('the goal loop', () => {
     live.document.dispatchEvent(new live.window.Event('visibilitychange'));
     await settle(400);
     expect(requested).toBe(0);
-    expect(live.sent.filter((message) => message.type === 'goal_focus')).toHaveLength(0);
+    expect(live.sent.filter((message) => message.type === 'focus_tab')).toHaveLength(0);
   });
 
   /**
@@ -11863,6 +11957,81 @@ describe('the goal loop', () => {
    * went out, the model answered, and the first sign of life the user got was a message
    * appearing in the composer fifteen seconds later.
    */
+  /**
+   * The app answering "still working" is not a failed draft and not a dropped claim. The page
+   * keeps the turn, says so on the bar, and asks again on the plain wait — no backoff, because
+   * nothing was spent — until the app has seen the chat finish.
+   */
+  it('keeps the turn the app still sees working, and asks again on the plain wait', async () => {
+    let asked = 0;
+    let working = true;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      goal_draft: () => {
+        asked += 1;
+        if (working) return { ok: false, error: 'chat_still_working', message: 'This chat is still working on its answer.' };
+        return goalReplies().goal_draft();
+      }
+    });
+    await live.hook.pullActivity();
+
+    const held = live;
+    const timer = held.window.setTimeout;
+    const wakes: Array<() => void> = [];
+    held.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === held.hook.GOAL_RETRY_MS) {
+        wakes.push(fn);
+        return 0;
+      }
+      return timer(fn, ms);
+    }) as typeof held.window.setTimeout;
+
+    await answerATurn(live, 'an end the page believes in');
+    expect(asked).toBe(1);
+    const stage = () => live!.document.querySelector('.clf-stage')?.textContent ?? '';
+    expect(stage()).toContain('still sees this chat working');
+    expect(wakes, 'the page must ask again by itself').toHaveLength(1);
+
+    // Still working: the same wait again, and no backoff on a draft nobody attempted.
+    wakes[0]!();
+    await settle(800);
+    expect(asked).toBe(2);
+    expect(wakes).toHaveLength(2);
+    expect(stage()).not.toContain('Retrying Goal');
+
+    // The app has seen the chat finish: the next ask is the draft.
+    working = false;
+    wakes[1]!();
+    await settle(800);
+    expect(asked).toBe(3);
+    expect(drafts(live)).toHaveLength(3);
+    expect(stage()).not.toContain('still sees this chat working');
+  });
+
+  /**
+   * The transcript is read from a per-section cache now, so the one thing that must hold is
+   * that a change lands before the next read — including a change made in the same frame as
+   * the read, which the cache's observer only hears about afterwards.
+   */
+  it('reads a message edited in place on the very next observation', async () => {
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
+    await live.hook.pullActivity();
+    const section = userTurn(live.document, 'turn-edit', 'first wording', { sent: false });
+    live.hook.observe();
+    await live.hook.flush();
+    await settle();
+    const texts = () => emitted(live!.sent, 'user_message').map((entry) => entry.event.text);
+    expect(texts()).toContain('first wording');
+
+    // Same message node, same id, new text — changed and read back in one frame, before the
+    // cache's observer has heard about it.
+    section.querySelector('.whitespace-pre-wrap')!.textContent = 'second wording';
+    live.hook.observe();
+    await live.hook.flush();
+    await settle();
+    expect(texts()).toContain('second wording');
+  });
+
   it('shows a retryable failure as a retry, and stops saying so once the retry starts', async () => {
     const source = liveFeed();
     live = await harness(`https://chatgpt.com/${'c'}/${CHAT}`, source.replies);
@@ -12120,13 +12289,14 @@ describe('the goal loop', () => {
   });
 
   /**
-   * A half-written message is somebody's.
+   * Text already in the box is written after, never over — and never waited on.
    *
-   * `insertPrompt` refuses a composer that already holds text, so nothing is ever typed over.
-   * The draft waits — and the waiting is bounded, because a message written about a turn two
-   * minutes ago is about a conversation the user has since taken back.
+   * On 2026-09-03 one stray letter in the composer held a finished reply at "sending" until
+   * the user noticed and deleted it. The reply goes in on a new line after whatever is there
+   * and is sent on the same pull; the two-minute wait now only covers a composer that cannot be
+   * written into at all.
    */
-  it('waits for a composer somebody is using, then gives up rather than typing over them', async () => {
+  it('appends the reply after text already in the composer and sends it at once', async () => {
     let sends = () => 0;
     live = await harness(
       `https://chatgpt.com/c/${CHAT}`,
@@ -12134,25 +12304,14 @@ describe('the goal loop', () => {
       (document) => {
         sends = watchSend(document);
         const mine = document.createElement('p');
-        mine.textContent = 'hang on, I was typing';
+        mine.textContent = 's';
         document.querySelector('#prompt-textarea')!.append(mine);
       }
     );
 
     await live.hook.pullActivity();
     await settle();
-    expect(sends()).toBe(0);
-    expect(composerText(live.document)).toBe('hang on, I was typing');
-    // Kept, not spent: the next pull tries again.
-    expect(acks(live)).toEqual([]);
-
-    // Two minutes of somebody else's sentence is long enough. The draft is dropped, and
-    // dropped honestly — the panel says why rather than going quiet.
-    live.advance(3 * 60_000);
-    await live.hook.pullActivity();
-    await settle();
-    expect(sends()).toBe(0);
-    expect(composerText(live.document)).toBe('hang on, I was typing');
+    expect(sends()).toBe(1);
     expect(acks(live)).toHaveLength(1);
   });
 
@@ -12480,8 +12639,8 @@ describe('the goal loop', () => {
     );
     expect(drafts(live)).toHaveLength(1);
     expect(live.document.visibilityState).toBe('hidden');
-    expect(live.sent.filter((message) => message.type === 'goal_focus')).toEqual([
-      expect.objectContaining({ type: 'goal_focus', conversationId: CHAT, turnId: opened })
+    expect(live.sent.filter((message) => message.type === 'focus_tab')).toEqual([
+      expect.objectContaining({ type: 'focus_tab', conversationId: CHAT })
     ]);
   });
 

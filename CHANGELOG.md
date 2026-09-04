@@ -9,6 +9,13 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.0.4] — 2026-09-04
+
+**astra broke me**
+
+- Tool requests.
+- Increased stability.
+
 ## [2.0.3] — 2026-09-02
 
 **A small step towards the infinite loop.**

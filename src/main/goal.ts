@@ -1481,6 +1481,48 @@ function cleanGoalReply(value: string): { text: string; hadControl: boolean } {
   return { text: withoutControl.trim(), hadControl: withoutControl !== withoutInvisible };
 }
 
+/** A reasoning block the provider put in the answer body despite `reasoning.exclude`. */
+const REASONING_BLOCK = /<(think|analysis|reasoning)\b[^>]*>[\s\S]*?<\/\1\s*>/giu;
+/** A markdown fence around the object, with or without a language tag. */
+const CODE_FENCE = /^\s*```[a-z]*\s*([\s\S]*?)\s*```\s*$/iu;
+
+/**
+ * The decision object inside a structured reply, or `undefined` when there is none.
+ *
+ * Strict JSON is asked for and usually delivered, but not always: on 2026-09-03 a routed
+ * provider answered three drafts in a row with a thinking block in the content, and every one
+ * failed as `invalid_goal_decision_json` with the decision sitting right after it. A fenced
+ * object and a sentence before or after the braces are the other two shapes seen. The object
+ * is still what is validated — only the wrapping is removed, and a body with no object in it
+ * is exactly as invalid as before.
+ */
+function decisionObjectIn(text: string): unknown {
+  const parse = (candidate: string): unknown => {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      return undefined;
+    }
+  };
+  const direct = parse(text);
+  if (direct !== undefined) return direct;
+  const unwrapped = text.replace(REASONING_BLOCK, '').trim();
+  const fenced = unwrapped.match(CODE_FENCE);
+  const body = fenced?.[1] ?? unwrapped;
+  const parsed = parse(body);
+  if (parsed !== undefined) return parsed;
+  const open = body.indexOf('{');
+  const close = body.lastIndexOf('}');
+  if (open === -1 || close <= open) return undefined;
+  return parse(body.slice(open, close + 1));
+}
+
+/** The head of an unreadable reply, flattened, for the log line that says it was unreadable. */
+function sample(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > 200 ? `${flat.slice(0, 200)}…` : flat;
+}
+
 /**
  * Converts untrusted model output into the only two states the browser may act on.
  *
@@ -1503,10 +1545,9 @@ function normalizeGoalDecision(raw: string, legacy: boolean): GoalDecision {
     return { action: 'continue', reply: cleaned.text };
   }
 
-  let decision: unknown;
-  try {
-    decision = JSON.parse(trimmed);
-  } catch {
+  const decision = decisionObjectIn(trimmed);
+  if (decision === undefined) {
+    logWarn(`goal: the structured decision was not JSON — ${sample(trimmed)}`);
     return { action: 'invalid', error: 'invalid_goal_decision_json' };
   }
   if (!decision || typeof decision !== 'object' || Array.isArray(decision)) {

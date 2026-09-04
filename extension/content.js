@@ -745,7 +745,6 @@
    * reading rather than a remembered edge, so
    * it goes false again on its own the moment the answer lands.
    */
-  let autoCompactReady = false;
 
   /**
    * The goal loop, as this page sees it.
@@ -769,6 +768,17 @@
    * and this is the near-side half of the same rule.
    */
   let goalTurnId = null;
+  /**
+   * Retries already spent on the claimed turn, and the wait the next one was announced with.
+   *
+   * Each failed draft is a full request — the whole conversation, twenty thousand tokens on a
+   * long chat — so asking again every fifteen seconds for as long as a provider keeps answering
+   * badly is a key being emptied at four requests a minute (2026-09-03: three unreadable
+   * answers in a row, then more). The wait doubles per failure of the same turn, up to four
+   * minutes; a new turn starts at fifteen seconds again.
+   */
+  let goalRetries = 0;
+  let goalRetryWaitMs = 0;
   // The durable pickup episode currently claimed by this document. A stable assistant reply
   // may deliberately be picked up again after Off -> On, so its turn id alone is not the
   // once-key. The app renews acceptedAt for every such episode and publishes it with pending.
@@ -1344,9 +1354,25 @@
    * a half-written answer as the answer.
    */
   function seedResumeBaseline() {
-    const liveTurn = currentAssistantTurn();
+    const turns = CLF_DOM.turns();
+    // The adopted turn's own section, when the page shows one: the newest assistant section,
+    // and only if it comes *after* the newest user message. A turn is the answer to the
+    // question that opened it, so a section above that question is a previous answer — one
+    // ChatGPT already finished, with the end-turn bit to prove it. Taking the newest section
+    // regardless is how the 2026-09-03 prime was closed "completed" nine seconds after every
+    // reload: the page came back showing only the question, the previous answer was bound to
+    // the adopted turn, its terminal message closed it, and the request went on calling tools
+    // behind a page that said the turn was over. With no section after the question, the
+    // adopted turn has no evidence on this page yet and stays open until one appears.
+    let newestUser = -1;
+    let newestAssistant = -1;
+    for (let index = 0; index < turns.length; index++) {
+      if (turns[index].role === 'user') newestUser = index;
+      else if (turns[index].role === 'assistant') newestAssistant = index;
+    }
+    const liveTurn = newestAssistant > newestUser ? turns[newestAssistant] : null;
     const liveNodes = liveTurn ? liveTurn.nodes || [liveTurn.node] : [];
-    baselineSections = assistantSections().filter((node) => liveNodes.indexOf(node) < 0);
+    baselineSections = assistantSections(turns).filter((node) => liveNodes.indexOf(node) < 0);
     baselineMarks = baselineSections.slice(-3).map((node) => ({ node, mark: sectionMark(node) }));
   }
 
@@ -1423,7 +1449,6 @@
     since = 0;
     job = null;
     pendingTools = 0;
-    autoCompactReady = false;
     // An SPA move into another identified chat leaves this document facing a full transcript
     // it has never seen, exactly as a reload does. Until the app has said which of those user
     // messages it already holds, none of them can be read as a send — see resumeIdentityPending.
@@ -1446,6 +1471,8 @@
     // chat must not draft twice. The watch loop itself notices the change on its own tick and
     // exits; what it leaves behind is what this clears.
     goalTurnId = null;
+    goalRetries = 0;
+    goalRetryWaitMs = 0;
     goalTicketId = null;
     goalConfig = null;
     goalDraft = null;
@@ -2047,9 +2074,15 @@
     }
 
     const nowGenerating = CLF_DOM.generating();
-    // The Stop control on screen for a turn this document adopted is the document seeing that
-    // turn run — from here its lifecycle evidence is as good as for a turn it opened itself.
-    if (generating && nowGenerating) unwitnessedGeneration = false;
+    // The Stop control on screen for a turn this document adopted, over a section that turn
+    // is writing, is the document seeing that turn run — from here its lifecycle evidence is
+    // as good as for a turn it opened itself. Stop alone is not: ChatGPT mounts it for a
+    // second or so over an empty transcript while a reloaded page hydrates, and a witness
+    // taken from that flicker let the degraded DOM rule close the adopted turn from the
+    // previous answer's prose once Stop went away again.
+    if (generating && nowGenerating && (!unwitnessedGeneration || generationTurn(observedTurns))) {
+      unwitnessedGeneration = false;
+    }
 
     // The transcript that is already settled goes in first — before this tick can open a
     // new generation. The recorded order used to be the other way round: `turn_start` for
@@ -5404,7 +5437,6 @@
       if (data.retiredWorker && typeof data.retiredWorker === 'object') {
         const worker = String(data.retiredWorker.id || 'worker');
         const reason = String(data.retiredWorker.reason || 'its sub-agent run ended');
-        autoCompactReady = false;
         localError = `${worker} was retired because ${reason}. This chat can no longer use local tools.`;
         if (retirementHandledFor !== forId) {
           retirementHandledFor = forId;
@@ -5527,7 +5559,6 @@
       }
       tokens = Number.isFinite(Number(data.tokens)) ? Number(data.tokens) : 0;
       context = readContext(data.context);
-      autoCompactReady = data.autoCompactReady === true;
       // The goal loop's settings and, while one is running, the draft itself: its stage, the
       // text OpenRouter has streamed so far, and — once it is `ready` — the message to type.
       // Nothing is typed here; maybeSendGoalReply below owns that, after the pull has
@@ -5579,7 +5610,6 @@
     if (current() && CLF_DOM.conversationId() === forId) await maybeResumePendingCompaction(forId, forEpoch);
     if (current() && CLF_DOM.conversationId() === forId) maybeRecoverResumeGoalTurn();
     if (current() && CLF_DOM.conversationId() === forId) maybeRecoverDurableGoalTurn();
-    if (current() && CLF_DOM.conversationId() === forId) await maybeAutoCompact(forId, forEpoch);
     // Same reason, same place: this types into the composer and can wait on the page, and it
     // needs the draft this pull just delivered.
     if (current() && CLF_DOM.conversationId() === forId) await maybeSendGoalReply();
@@ -6122,35 +6152,6 @@
    * write the brief, carry on in a fresh chat. Mid-tool-call counts as mid-turn, and is
    * handled by the same settle barrier a manual press goes through.
    */
-  async function maybeAutoCompact(expectedConversation = conversationId, expectedEpoch = epoch) {
-    const current = () =>
-      alive &&
-      conversationId === expectedConversation &&
-      epoch === expectedEpoch &&
-      CLF_DOM.conversationId() === expectedConversation;
-    if (!current()) return;
-    // Belt-and-suspenders with the bridge role gate. A worker must never start automatic
-    // compaction: its conversation is its durable agent identity and the 400k ceiling only
-    // changes whether the next stop can be revived. A chat the user blocked in the app is
-    // fenced the same way: its tools are refused, and a resume would carry it on without them.
-    if (goalConfig && (goalConfig.blocked === 'worker' || goalConfig.blocked === 'blocked')) return;
-    if (!conversationId || !context || !context.auto || !autoCompactReady) return;
-    // Anything already running owns this chat, including a run started by hand.
-    if (nativeBusy || pressedAt > 0 || localError) return;
-    if (job && job.busy) return;
-    // Three views of liveness, and any of them is enough. `CLF_DOM.generating()` flickers
-    // false between phases of one answer, so demanding all three would miss long turns at
-    // exactly their busiest moments; the local generation flag and the app's durable
-    // activeTurnId cover that gap. An idle or stale chat has none of the three, which is
-    // what lets an old 500k conversation be opened and read without being compacted.
-    if (!generating && !appActiveTurnId && !CLF_DOM.generating()) return;
-
-    // The continuation transaction is already the durable ticket. A page/barrier error stays
-    // local to this document, blocking poll-driven retry churn; the app's 15-minute checkpoint
-    // reloads this exact chat and lets the replacement page collect the same transaction.
-    await startCompact(true);
-  }
-
   /** Local phases of a ChatGPT-native compaction, as the button says them. */
   const NATIVE_PHASE_LABELS = {
     requested: 'Starting…',
@@ -6571,6 +6572,7 @@
       // retried one does not.
       if (!generating && !CLF_DOM.generating() && !goalBusy && !nativeBusy && !(job && job.busy)) {
         goalTurnId = `objective-${Date.now().toString(36)}`;
+        goalRetries = 0;
         setGoalPhase('');
         const forId = conversationId;
         const forEpoch = epoch;
@@ -7268,7 +7270,8 @@
     if (failure) {
       const at = draft && draft.stage === 'failed' ? 2 : (GOAL_STEP_AT[goal.phase] ?? 1);
       if (goal.phase === 'retrying') {
-        return { stage: 'Retrying Goal in 15 seconds', detail: failure, body: '', kind: 'goal', ...bar(at) };
+        const seconds = Math.round((goal.retryMs || GOAL_RETRY_MS) / 1000);
+        return { stage: `Retrying Goal in ${seconds} seconds`, detail: failure, body: '', kind: 'goal', ...bar(at) };
       }
       return { stage: 'The goal loop stopped', detail: failure, body: '', kind: 'goal-error', ...bar(at) };
     }
@@ -7338,6 +7341,7 @@
         ? {
             phase: goalPhase,
             error: goalError,
+            retryMs: goalRetryWaitMs,
             model: goalConfig.model,
             draft: goalDraft,
             opening: composerChat().state === 'new' && Boolean(pendingObjective)
@@ -7477,7 +7481,7 @@
     const view = stageView({
       job,
       goal: goalConfig
-        ? { phase: goalPhase, error: goalError, model: goalConfig.model, draft: goalDraft, opening }
+        ? { phase: goalPhase, error: goalError, retryMs: goalRetryWaitMs, model: goalConfig.model, draft: goalDraft, opening }
         : null
     });
     if (!view) {
@@ -7587,7 +7591,6 @@
       if (policyData.goal && typeof policyData.goal === 'object') goalConfig = policyData.goal;
       if (policyData.context) context = readContext(policyData.context) || context;
       bootstrap = policyData.bootstrap === 'worker' ? 'worker' : bootstrap;
-      autoCompactReady = false;
       pressedAt = 0;
       nativeBusy = false;
       nativePhase = '';
@@ -7685,7 +7688,13 @@
     if (!source || nativeBusy || localError) return;
     if (source.state !== 'not-attempted' && source.state !== 'attempted-unresolved') return;
     if (!alive || conversationId !== forId || epoch !== forEpoch || CLF_DOM.conversationId() !== forId) return;
-    await startCompact(job.automatic === true);
+    const automatic = job.automatic === true;
+    // An automatic ticket is the app's decision about a chat nobody is necessarily looking at,
+    // and a hidden tab is a throttled one: on 2026-09-03 the source page froze solid while the
+    // brief was being written in the background. Raising it first is presentation, not
+    // authority — a refused focus changes nothing about the ticket.
+    if (automatic) void ask({ type: 'focus_tab', conversationId: forId }).catch(() => undefined);
+    await startCompact(automatic);
   }
 
   /**
@@ -7783,7 +7792,7 @@
       pressedAt = 0;
       localError = why;
       // A page/DOM failure is not a verdict on an automatic ticket. Keep it on the
-      // continuation WAL so the next 15-minute reload can collect the same work. A manual
+      // continuation WAL so the app's next pickup reload can collect the same work. A manual
       // press keeps its historical immediate-abort behaviour; the user is still present and
       // can retry it without leaving an invisible job behind.
       if (!automaticTicket) {
@@ -8112,7 +8121,7 @@
   const GOAL_POLL_MS = 1_000;
   /** The ceiling on watching one turn settle before giving up on it quietly. */
   const GOAL_WATCH_MS = 5 * 60_000;
-  /** How long a ready draft waits for a composer somebody else is using. */
+  /** How long a ready draft waits for a composer it cannot write into. */
   const GOAL_TYPING_WINDOW_MS = 2 * 60_000;
   /**
    * How long the loop waits before asking again about a turn whose draft failed.
@@ -8124,6 +8133,8 @@
    * a new generation, this chat left behind.
    */
   const GOAL_RETRY_MS = 15_000;
+  const GOAL_RETRY_CAP_MS = 4 * 60_000;
+  const goalRetryWait = () => Math.min(GOAL_RETRY_CAP_MS, GOAL_RETRY_MS * 2 ** goalRetries);
 
   /** The turn endings worth writing a next message about. See noteGoalTurn for the rest. */
   // Goal answers a finished, non-partial reply and nothing else: `completed` carries Fiber's
@@ -8191,12 +8202,13 @@
     if (goalTurnId === endedTurnId) return;
     if (goalBusy) return;
     goalTurnId = endedTurnId;
+    goalRetries = 0;
     setGoalPhase('');
     // Goal is now authoritative for this exact completed turn. Raising the sender tab is a
     // courtesy after that decision, never an input to it: hidden tabs take this same path and a
     // failed focus request must not stop the draft. Claim goalTurnId first so the visibility
     // change caused by focusing cannot re-enter this turn and request/focus it twice.
-    void ask({ type: 'goal_focus', conversationId, turnId: endedTurnId }).catch(() => undefined);
+    void ask({ type: 'focus_tab', conversationId }).catch(() => undefined);
     void watchGoalTurn(ended, endedTurnId);
   }
 
@@ -8286,6 +8298,7 @@
     if (goalTicketId === ticketId) return;
     goalTicketId = ticketId;
     goalTurnId = pending.turnId;
+    goalRetries = 0;
     setGoalPhase('');
     const forId = conversationId;
     const forEpoch = epoch;
@@ -8381,12 +8394,15 @@
    * which is what stops two retries of the same turn, and the lock is taken only for the
    * request it actually guards.
    */
-  async function retryGoalDraft(forTurn) {
+  async function retryGoalDraft(forTurn, waiting = false) {
     if (goalTurnId !== forTurn) return;
     const forId = conversationId;
     const forEpoch = epoch;
     const current = () => alive && conversationId === forId && epoch === forEpoch && goalTurnId === forTurn;
-    await sleep(GOAL_RETRY_MS);
+    // Waiting for the app to see the chat finish is not a failed draft: it costs nobody a
+    // provider call, so it is asked again on the plain wait and counts toward no backoff.
+    if (!waiting) goalRetries += 1;
+    await sleep(waiting ? GOAL_RETRY_MS : goalRetryWaitMs || GOAL_RETRY_MS);
     // A turn that finished during the wait has taken the claim, and this retry is about an
     // older one. It says nothing and touches nothing: the phase on screen is that turn's now.
     if (!current()) return;
@@ -8419,6 +8435,16 @@
     });
     if (!current()) return;
     if (!reply || reply.ok !== true) {
+      // The app still has this chat working — its record of the turn is open, or a local
+      // tool ran within the last minute — so the end this page saw was not the answer. Not
+      // a failure, and not a released claim either: the obligation is filed app-side, and
+      // this document keeps the turn and asks again on a fixed short wait until the app
+      // says the chat has finished. The bar stays on the settling step meanwhile.
+      if (reply && reply.error === 'chat_still_working') {
+        setGoalPhase('settling', 'the app still sees this chat working');
+        void retryGoalDraft(forTurn, true);
+        return;
+      }
       // The phase is kept rather than collapsed into `failed`: it names the step that
       // stopped, so the bar draws the run where it ended instead of back at the beginning.
       setGoalPhase('requesting', replyError(reply) || 'the app did not answer');
@@ -8497,6 +8523,7 @@
         goalTurnId = draft.turnId;
         retrying = true;
       }
+      if (retrying) goalRetryWaitMs = goalRetryWait();
       setGoalPhase(retrying ? 'retrying' : 'drafting', why);
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
       // The two answers that end a Goal run are `[no reply]` and words to type. This is
@@ -8526,10 +8553,12 @@
     try {
       if (goalTypingSince === 0) goalTypingSince = Date.now();
       setGoalPhase('sending');
-      if (!CLF_DOM.insertPrompt(draft.reply)) {
-        // Somebody is writing in it. Keep the draft and try again on the next pull, until
-        // the window runs out — at which point the message is dropped rather than queued
-        // behind a draft the user may still be working on.
+      // After whatever is already in the box, never instead of it and never blocked by it:
+      // a character left behind is not somebody's draft, and the loop waiting on it was the
+      // loop stopped for no reason. A refusal here is a composer that cannot be written to at
+      // all; keep the draft and try again on the next pull, until the window runs out — at
+      // which point the message is dropped rather than queued forever.
+      if (!CLF_DOM.insertPrompt(draft.reply, 'append')) {
         if (Date.now() - goalTypingSince < GOAL_TYPING_WINDOW_MS) return;
         goalDraft = null;
         setGoalPhase('sending', 'the message box was in use, so nothing was sent');

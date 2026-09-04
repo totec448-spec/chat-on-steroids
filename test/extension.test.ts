@@ -849,9 +849,49 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
 
     await worker.fireAlarm();
     expect(worker.tabsReload).not.toHaveBeenCalled();
-    expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${OTHER}` });
+    expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${OTHER}`, active: false });
+    expect(worker.windowsUpdate).not.toHaveBeenCalled();
     expect(asked).toEqual(['status', `repaired:${OTHER}`]);
     expect(actions).toEqual(['reopened']);
+  });
+
+  /**
+   * A repair the app wants in front of the user — an automatic compaction's pickup — raises the
+   * exact tab and its window before the reload, and opens a missing chat in front. A background
+   * tab is a throttled one, and the page this brings back has a handoff to send.
+   */
+  it('raises the tab first when the app asks for the repair in front, and opens a missing chat in front', async () => {
+    let outstanding: string | null = CHAT;
+    let token = '';
+    let minted = 0;
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/closed') return response(200, { ok: true });
+      if (url.pathname === '/status') {
+        const repaired = url.searchParams.get('repaired');
+        if (repaired && repaired === token) outstanding = outstanding === CHAT ? OTHER : null;
+        if (!outstanding) return response(200, { ok: true, repairs: [] });
+        token = `tok-${(minted += 1)}`;
+        return response(200, { ok: true, repairs: [{ conversationId: outstanding, token, focus: true }] });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(51);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 51);
+
+    await worker.fireAlarm();
+    expect(worker.tabsUpdate).toHaveBeenCalledWith(51, { active: true });
+    expect(worker.windowsUpdate).toHaveBeenCalledWith(7, { focused: true });
+    expect(worker.tabsReload).toHaveBeenCalledWith(51);
+    const raised = worker.tabsUpdate.mock.invocationCallOrder.find(
+      (_order, index) => worker.tabsUpdate.mock.calls[index]?.[1]?.active === true
+    );
+    expect(raised).toBeLessThan(worker.tabsReload.mock.invocationCallOrder[0]!);
+
+    await worker.fireAlarm();
+    expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${OTHER}`, active: true });
   });
 
   it('opens an active agent chat in the same close transaction instead of losing its retry alarm', async () => {
@@ -883,7 +923,7 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     for (let turn = 0; turn < 8; turn++) await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
-    expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${CHAT}` });
+    expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${CHAT}`, active: false });
     expect(asked).toEqual(['status', 'repaired:close-repair']);
     expect(worker.alarmClear).not.toHaveBeenCalled();
   });
@@ -2136,7 +2176,7 @@ describe('extension observation journal', () => {
     await worker.registerTab(73);
     await worker.send({ type: 'bind', conversationId }, 73);
 
-    expect(await worker.send({ type: 'goal_focus', conversationId, turnId: 'generation-owned' }, 73)).toMatchObject({
+    expect(await worker.send({ type: 'focus_tab', conversationId, turnId: 'generation-owned' }, 73)).toMatchObject({
       ok: true,
       focused: true
     });
@@ -2147,7 +2187,7 @@ describe('extension observation journal', () => {
     expect(worker.tabsCreate).not.toHaveBeenCalled();
 
     const other = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-    expect(await worker.send({ type: 'goal_focus', conversationId: other, turnId: 'wrong-chat' }, 73)).toMatchObject({
+    expect(await worker.send({ type: 'focus_tab', conversationId: other, turnId: 'wrong-chat' }, 73)).toMatchObject({
       ok: false,
       error: 'stale_conversation'
     });
@@ -2271,6 +2311,40 @@ describe('extension observation journal', () => {
     );
     await worker.navigateTab(12, 'https://example.com/elsewhere');
 
+    expect(closed).toEqual([conversationId]);
+    expect(session.data.tabConversations).toEqual({});
+  });
+
+  /**
+   * Typing chatgpt.com into a Prime's tab used to leave that chat bound to the tab until some
+   * later chat happened to be given an id there, so the app never heard the page was gone and
+   * never reopened it (2026-09-03). A full document load of any ChatGPT URL that is concretely
+   * not the chat's own is the chat leaving; its own URL is the ambiguous reload it always was.
+   */
+  it('closes a conversation when its tab does a full navigation to another ChatGPT URL', async () => {
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    const closed: string[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/events') return response(200, { sessionId: 'session', stored: 1 });
+      if (url.pathname === '/closed') {
+        closed.push(JSON.parse(String(init.body)).conversationId);
+        return response(200, { ok: true });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({ local, session, fetch });
+    const conversationId = '11111111-2222-3333-4444-555555555555';
+
+    await worker.send({ type: 'bind', conversationId }, 12);
+    // A reload of the chat's own URL is not a departure.
+    await worker.navigateTab(12, `https://chatgpt.com/c/${conversationId}`);
+    expect(closed).toEqual([]);
+    expect(session.data.tabConversations).toEqual({ '12': conversationId });
+
+    await worker.navigateTab(12, 'https://chatgpt.com/');
     expect(closed).toEqual([conversationId]);
     expect(session.data.tabConversations).toEqual({});
   });

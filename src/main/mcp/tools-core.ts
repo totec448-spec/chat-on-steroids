@@ -271,7 +271,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           'a PNG/JPEG/GIF/WebP comes back as an image, and anything else returns its metadata and why it was not decoded. ' +
           'Paths may contain * ? and ** and are expanded here. Every result starts with a header giving size, timestamps and line count. ' +
           `The line-number prefix is display metadata, not file content — strip it before quoting text into apply_patch. ` +
-          `A line range applies to every file the call resolves to. A typical 1,500-line source file fits in the default read: do not pre-paginate it. ` +
+          `start_line/end_line apply to every file the call resolves to; a path may instead carry its own range as path:12-40 or path:12, so several ranges of one file fit in one call. A typical 1,500-line source file fits in the default read: do not pre-paginate it. ` +
           `Batch related paths in one call; only continue from a line when the returned header says more lines follow. The aggregate payload remains bounded at about ${formatBytes(MAX_READ_BYTES)}.`,
         inputSchema: z
           .object({
@@ -306,15 +306,16 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               'TOOL_DISABLED: read is disabled by the current Chat On Steroids permissions. Ask the user to enable reading in the app.'
             );
           }
-          const targets: string[] = [];
+          const targets: ReadTarget[] = [];
           const notes: string[] = [];
-          for (const requested of paths) {
+          for (const item of paths) {
             if (targets.length >= MAX_READ_TARGETS) {
               notes.push(`(stopped expanding at ${MAX_READ_TARGETS} paths)`);
               break;
             }
+            const { path: requested, range } = splitLineRange(item);
             if (!hasGlob(requested)) {
-              targets.push(requested);
+              targets.push({ path: requested, range });
               continue;
             }
             const expanded = await expandGlob(ctx.roots, requested);
@@ -326,7 +327,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               );
               continue;
             }
-            targets.push(...expanded.matches.slice(0, MAX_READ_TARGETS - targets.length));
+            targets.push(
+              ...expanded.matches.slice(0, MAX_READ_TARGETS - targets.length).map((match) => ({ path: match, range }))
+            );
             if (expanded.truncated === 'matches') {
               notes.push(`${requested}: more than ${MAX_GLOB_MATCHES} matches, narrow the pattern`);
             } else if (expanded.truncated === 'scan') {
@@ -349,9 +352,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // sessions, and every one of them was a caller that had already said what it
           // wanted. Globs are still resolved first, since one pattern is what usually turns
           // a single-path call into a multi-path one.
-          if (targets.length > 1 && ranged) {
+          const sharedRange = targets.filter((target) => target.range === null).length;
+          if (sharedRange > 1 && ranged) {
             notes.push(
-              `(start_line/end_line applied to each of the ${targets.length} files this call resolved to; ` +
+              `(start_line/end_line applied to each of the ${sharedRange} files this call resolved to; ` +
                 'every header states the lines actually returned)'
             );
           }
@@ -367,12 +371,12 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               break;
             }
             try {
-              const section = await readOne(target, {
+              const section = await readOne(target.path, {
                 roots: ctx.roots,
                 canRead: caps.read,
                 canBrowse: caps.browse,
-                startLine: start_line,
-                endLine: end_line,
+                startLine: target.range ? target.range.start : start_line,
+                endLine: target.range ? target.range.end : end_line,
                 maxBytes: Math.min(max_bytes ?? DEFAULT_READ_BYTES, remaining),
                 aggregateBytes: remaining
               });
@@ -384,7 +388,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               failures++;
               // One stale or missing path must not destroy the useful reads. The requested
               // virtual path is safe to echo; friendlyError never exposes real paths.
-              sections.push(`--- ${target} — ERROR ---\n${friendlyError(err)}`);
+              const nearby = caps.browse ? await nearestFolderListing(ctx.roots, target.path, err) : '';
+              sections.push(`--- ${target.path} — ERROR ---\n${friendlyError(err)}${nearby}`);
             }
           }
 
@@ -841,9 +846,25 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // `benign` was previously spent only on the error count, leaving the model to read
             // `Process exited with code 1` under an empty body and re-run a search that had
             // already answered. It is the same classification, now also said out loud.
+            // A batch carries one top-line exit code for several commands, and in the recorded
+            // sessions 69 of 91 non-zero batches had at least one command that succeeded. Say
+            // which ones, so the model reruns the failed command and not the whole batch.
+            const mixedBatch =
+              isBatch &&
+              !benign &&
+              batchSections.length === rawCommands.length &&
+              nonZeroSections.length > 0 &&
+              nonZeroSections.length < batchSections.length
+                ? [
+                    `Batch: ${nonZeroSections.map((section) => `command ${section.index} exited ${section.exitCode}`).join(', ')}; ` +
+                      `the other ${batchSections.length - nonZeroSections.length === 1 ? 'command' : `${batchSections.length - nonZeroSections.length} commands`} exited 0. ` +
+                      'The top-line exit code is the first non-zero one.'
+                  ]
+                : [];
             const notes = [
               ...(input.max_output_tokens === undefined ? [] : [MAX_OUTPUT_TOKENS_RETIRED_NOTE]),
               ...commandNotes,
+              ...mixedBatch,
               ...(benign
                 ? isBatch
                   ? nonZeroSections.map(
@@ -1234,7 +1255,11 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         }
 
         if (input.action === 'finish') {
-          if (!input.result) return fail('agents action=finish requires result.');
+          if (!input.result) {
+            return fail(
+              'agents action=finish requires result: the report the prime reads in your place — what you changed, what you verified and what is left. Send it as result and call finish again.'
+            );
+          }
           const staged = stageFinishAgent(await callerNow(startedAt), input.result);
           let accepted = staged.repeat;
           try {
@@ -1309,6 +1334,15 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               : info.state;
         const asleep = state.agents.filter((info) => info.state === 'sleeping' && info.revivable);
         const slots = status.freeWorkerSlots;
+        // The recording id is what `session action=read` wants, and a prime that lacks it
+        // searches recordings by the task text instead — a hundred such searches in the 50
+        // most recent recorded sessions, each answering with the prime's own chat as well.
+        const recordings = new Map<string, string>();
+        for (const info of state.agents) {
+          if (info.id === me.id || !info.conversationId) continue;
+          const summary = await findSessionByConversation(info.conversationId, { requireUnique: true }).catch(() => null);
+          if (summary) recordings.set(info.id, summary.id);
+        }
         return {
           content: [
             {
@@ -1319,11 +1353,15 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   .map(
                     (info) =>
                       `${info.id}  ${info.role}  ${shown(info)}  waiting ${info.pending}  ${info.label}` +
+                      (recordings.has(info.id) ? `\n    recording: ${recordings.get(info.id)}` : '') +
                       (info.result
                         ? `\n    ${info.state === 'failed' ? 'failure' : info.state === 'finished' ? 'result' : 'latest result'}: ${info.result.slice(0, 300)}`
                         : '')
                   )
                   .join('\n') +
+                (recordings.size > 0
+                  ? '\n\nTo see what a worker is doing, session action=read with its recording id; pass the update_cursor from that read next time to get only what is new.'
+                  : '') +
                 (me.id === PRIME_ID
                   ? `\n\n${slots} of your worker slots ${slots === 1 ? 'is' : 'are'} free.` +
                     (asleep.length > 0
@@ -1938,6 +1976,70 @@ interface ReadOneOptions {
   endLine?: number;
   maxBytes: number;
   aggregateBytes: number;
+}
+
+interface ReadTarget {
+  path: string;
+  /** A range the caller attached to this one path, or null for the call-wide range. */
+  range: { start: number; end: number | undefined } | null;
+}
+
+/**
+ * Reads a `path:12-40` or `path:12` suffix off one requested path.
+ *
+ * It is the spelling a model reaches for when it wants several ranges of one file in one
+ * call, and the sandbox used to refuse it as a colon in a path — five calls across the 50 most
+ * recent recorded sessions, each carrying three or four ranges of the same file. Only a suffix
+ * after the last separator counts, so a `C:\\...` drive letter is never read as a range, and
+ * a range that runs backwards is left on the path for the sandbox to refuse as before.
+ */
+function splitLineRange(requested: string): { path: string; range: ReadTarget['range'] } {
+  const match = /^(.*[^\\/:]):(\d{1,9})(?:-(\d{1,9}))?$/.exec(requested);
+  if (!match) return { path: requested, range: null };
+  const start = Number(match[2]);
+  const end = match[3] === undefined ? undefined : Number(match[3]);
+  if (start < 1 || (end !== undefined && end < start)) return { path: requested, range: null };
+  return { path: match[1]!, range: { start, end } };
+}
+
+/** How many entries a not-found error lists from the nearest folder that does exist. */
+const MISSING_PATH_LISTING = 40;
+
+/**
+ * For a path that does not exist, the nearest folder above it that does, listed.
+ *
+ * "Not found" alone sends the model into a listing call it could have been spared: in the 50
+ * most recent recorded sessions the single most repeated read failure was a repository file
+ * guessed one folder too high, followed by a read of the folder to see what was there. Listing
+ * the nearest existing ancestor answers that follow-up in the same reply. It walks up through
+ * the sandbox one level at a time and says nothing unless a folder resolved.
+ */
+async function nearestFolderListing(roots: Root[], requested: string, err: unknown): Promise<string> {
+  if (!(err instanceof SandboxError) || !err.message.startsWith('Not found:')) return '';
+  let candidate = requested;
+  for (let depth = 0; depth < 8; depth++) {
+    const parent = candidate.replace(/[\\/]+[^\\/]+[\\/]*$/, '');
+    if (parent === candidate || parent === '' || /^[A-Za-z]:$/.test(parent)) return '';
+    candidate = parent;
+    let resolved;
+    try {
+      resolved = await resolveIn(roots, candidate);
+    } catch (error) {
+      if (error instanceof SandboxError && error.message.startsWith('Not found:')) continue;
+      return '';
+    }
+    try {
+      const { entries, truncated } = await listDirectoryLevel(resolved.real, resolved.virtual, MISSING_PATH_LISTING, false);
+      const names = entries.map((entry) => `${entry.type === 'directory' ? 'd' : 'f'} ${entry.name}`);
+      const more = truncated ? `, …` : '';
+      return `\nThe nearest existing folder is ${resolved.virtual}${
+        entries.length === 0 ? ', and it is empty.' : `; it contains: ${names.join(', ')}${more}`
+      }`;
+    } catch {
+      return '';
+    }
+  }
+  return '';
 }
 
 /**
