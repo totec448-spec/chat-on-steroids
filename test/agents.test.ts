@@ -314,6 +314,68 @@ describe('spawning a run', () => {
   });
 });
 
+describe('worker models', () => {
+  it('stores the requested model on the worker and hands it to the browser request', () => {
+    const handed: Array<{ id: string; model: string | null }> = [];
+    onSpawnRequest((workers) => handed.push(...workers));
+    const result = spawn({
+      workers: [
+        { label: 'Cheap', task: 'bulk work', model: 'cheap-high-reasoning' },
+        { label: 'Default', task: 'other work' }
+      ],
+      caller: prime
+    });
+    expect(result.created.map((agent) => [agent.id, agent.model])).toEqual([
+      ['worker-1', 'cheap-high-reasoning'],
+      ['worker-2', null]
+    ]);
+    expect(handed).toEqual([
+      expect.objectContaining({ id: 'worker-1', model: 'cheap-high-reasoning' }),
+      expect.objectContaining({ id: 'worker-2', model: null })
+    ]);
+    expect(pendingWorkerSpawns()).toEqual([
+      expect.objectContaining({ id: 'worker-1', model: 'cheap-high-reasoning' }),
+      expect.objectContaining({ id: 'worker-2', model: null })
+    ]);
+  });
+
+  it('treats a blank model as the account default', () => {
+    const result = spawn({ workers: [{ task: 'plain work', model: '   ' }], caller: prime });
+    expect(result.created[0]?.model).toBeNull();
+  });
+
+  it('rejects a malformed model with zero workers created', () => {
+    expect(() =>
+      spawn({ workers: [{ task: 'fine' }, { task: 'bad', model: 'not a slug!' }], caller: prime })
+    ).toThrow(/model.*slug/i);
+    expect(swarmRunning()).toBe(false);
+    expect(swarmState().agents).toEqual([]);
+  });
+
+  it('folds an exact repeat but treats a different model as new work', () => {
+    spawn({ workers: [{ label: 'W', task: 'same task', model: 'model-a' }], caller: prime });
+    const repeat = spawn({ workers: [{ label: 'W', task: 'same task', model: 'model-a' }], caller: prime });
+    expect(repeat.created.map((agent) => agent.id)).toEqual(['worker-1']);
+    const changed = spawn({ workers: [{ label: 'W', task: 'same task', model: 'model-b' }], caller: prime });
+    expect(changed.created.map((agent) => agent.id)).toEqual(['worker-2']);
+    expect(changed.created[0]?.model).toBe('model-b');
+  });
+
+  it('round-trips the model through a snapshot restore and repairs a malformed one', () => {
+    spawn({ workers: [{ label: 'W', task: 'task', model: 'model-a' }], caller: prime });
+    const saved = snapshotSwarm()!;
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.model).toBe('model-a');
+
+    const tampered = snapshotSwarm()!;
+    tampered.agents.find((entry) => entry.info.id === 'worker-1')!.info.model = 'not a slug!';
+    resetAgentsForTests();
+    restoreSwarm(tampered);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.model).toBeNull();
+  });
+});
+
 describe('star topology', () => {
   it('allows worker → prime and prime → worker', () => {
     startSwarm(1);
@@ -1923,7 +1985,7 @@ describe('restart', () => {
 
     expect(swarmState().running).toBe(true);
     expect(snapshotSwarm()?.agents.map((entry) => entry.info.id)).toEqual(['prime', 'worker-1']);
-    expect(pendingWorkerSpawns()).toEqual([{ id: 'worker-1', task: 'inspect topology' }]);
+    expect(pendingWorkerSpawns()).toEqual([{ id: 'worker-1', model: null, task: 'inspect topology' }]);
     expect(ordinary.at(-1)?.agents.map((entry) => entry.info.id)).toEqual(['prime', 'worker-1']);
   });
 

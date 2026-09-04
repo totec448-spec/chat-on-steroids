@@ -240,7 +240,7 @@ describe('the whole move, when it works', () => {
     const stored = await capture(continuation);
     expect(pendingCommands()).toHaveLength(1);
     // Handed to A's browser, not to the OS — and exactly one chat either way.
-    expect(stored.body.placement).toEqual({ id: pendingCommands()[0]!.id });
+    expect(stored.body.placement).toEqual({ id: pendingCommands()[0]!.id, model: null });
     expect(opened).toHaveLength(0);
   });
 });

@@ -563,6 +563,14 @@ export interface AgentInfo {
   role: AgentRole;
   label: string;
   task: string;
+  /**
+   * ChatGPT model slug this worker's chat was opened with, or null for the account default.
+   *
+   * Chosen by the prime at spawn, never by the worker: the model is fixed by the fresh-chat
+   * URL the tab opens with, so a worker keeps it for the life of its conversation, including
+   * across sleep/wake reuse. Null for the prime, which runs in the user's own chat.
+   */
+  model: string | null;
   state: AgentState;
   createdAt: number;
   /**

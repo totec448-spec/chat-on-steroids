@@ -81,6 +81,7 @@ import {
   agentInfoForOwnedConversation,
   agentForOwnedConversation,
   isWorkerConversation,
+  isModelSlug,
   bindConversation,
   claimWorkerRevival,
   closableWorkerConversations,
@@ -336,7 +337,18 @@ function boundBrief(text: string): string {
  * worker's inbox holds at hand-out time. Building both there is what keeps that true.
  */
 type CommandSpec =
-  | { type: 'worker'; agent: string; task: string; runId: string }
+  | {
+      type: 'worker';
+      agent: string;
+      task: string;
+      /**
+       * Requested ChatGPT model slug for the worker's fresh chat, or null for the account
+       * default. URL-level only: it selects which model the opened chat uses and is never
+       * typed into the chat or shown to the model.
+       */
+      model: string | null;
+      runId: string;
+    }
   /**
    * Waking a sleeping worker in the chat it already has.
    *
@@ -463,6 +475,13 @@ export interface BridgeCommand {
   text: string;
   /** Agent this tab will be, when the command comes from multi-agent mode. */
   agent: string | null;
+  /**
+   * Requested ChatGPT model slug for a worker's fresh chat, or null for the account default.
+   *
+   * Carried on the wire so the page opening the tab can select the model in the open URL.
+   * Null for every other command kind.
+   */
+  model: string | null;
   /**
    * The conversation this command is *for*, when it is for one that already exists.
    *
@@ -3509,7 +3528,7 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
       rearmRetainedCommandDeadlines();
       dropSpawnRequestListener?.();
       dropSpawnRequestListener = onSpawnRequest((workers) => {
-        for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task);
+        for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model);
       });
       // The same replay contract for waking a worker that already has a chat. A run restored
       // from disk can hold a worker left in `waking` by a crash mid-revival; registering here
@@ -4146,13 +4165,13 @@ async function cancelAutomaticResumesNow(): Promise<number> {
  * stored: the chat this opens is bound to the slot by the extension's report, and the
  * recovery key exists only if the user asks the app for one after that has failed.
  */
-export function queueWorkerBootstrap(agent: string, task: string): BridgeCommand | null {
+export function queueWorkerBootstrap(agent: string, task: string, model: string | null): BridgeCommand | null {
   const runId = currentRunId();
   // A worker bootstrap is authority for one concrete broker incarnation. There is no safe
   // meaning for one outside a run, and manufacturing an unscoped command here is exactly how
   // stale durable work later becomes somebody else's `worker-1`.
   if (!runId) return null;
-  const command = queue({ type: 'worker', agent, task, runId });
+  const command = queue({ type: 'worker', agent, task, model, runId });
   // Start the clock at broker admission, exactly as a revival does. A bootstrap that never
   // reaches a page is the case that has no other clock at all.
   armDeadline(command);
@@ -4281,13 +4300,17 @@ export function chatUrl(conversationId: string): string {
 }
 
 /** Where the app opens a fresh worker/resume chat. The marker is an id, not a credential. */
-export function commandUrl(id: string): string {
+export function commandUrl(id: string, model?: string | null): string {
   // Both a query and a fragment: ChatGPT is a single-page app that rewrites its own URL
   // during boot, and which of the two survives has changed between builds. The content
   // script accepts either, and redeeming still requires the extension's bearer token —
   // so a copied link, a history entry or a synced tab is worth nothing on its own.
+  // A requested model rides the query only: it selects the chat's model at open and is
+  // never part of the identity the page redeems with. An unknown slug is ChatGPT's to
+  // ignore — the chat then opens with the account default.
   const marker = `clf=${encodeURIComponent(id)}`;
-  return `https://chatgpt.com/?${marker}#${marker}`;
+  const query = model ? `${marker}&model=${encodeURIComponent(model)}` : marker;
+  return `https://chatgpt.com/?${query}#${marker}`;
 }
 
 /**
@@ -4373,7 +4396,7 @@ export const BROWSER_PLACEMENT_MS = 20_000;
 let placementCollector: string | null = null;
 
 /** The one fresh chat currently offered to its home page, and the fallback that outlives it. */
-let placementOffer: { id: string; conversationId: string } | null = null;
+let placementOffer: { id: string; conversationId: string; model: string | null } | null = null;
 let placementTimer: NodeJS.Timeout | null = null;
 
 /** Drops the standing offer and its fallback. Called by every path that ends a command. */
@@ -4394,7 +4417,11 @@ function offerPlacement(command: Command): boolean {
   const home = commandHomeConversation(command.spec);
   if (!home || home !== placementCollector) return false;
   clearPlacementOffer();
-  placementOffer = { id: command.id, conversationId: home };
+  placementOffer = {
+    id: command.id,
+    conversationId: home,
+    model: command.spec.type === 'worker' ? command.spec.model : null
+  };
   placementTimer = setTimeout(() => {
     placementTimer = null;
     placementOffer = null;
@@ -4415,7 +4442,7 @@ function offerPlacement(command: Command): boolean {
  * a second one. If that page fails to act, the fallback above is what recovers it, not a
  * repeated offer.
  */
-function pendingBrowserPlacement(conversationId: string): { id: string } | null {
+function pendingBrowserPlacement(conversationId: string): { id: string; model: string | null } | null {
   const offer = placementOffer;
   if (!offer || offer.conversationId !== conversationId) return null;
   if (!commands.some((entry) => entry.id === offer.id && entry.owner === null)) {
@@ -4423,7 +4450,7 @@ function pendingBrowserPlacement(conversationId: string): { id: string } | null 
     return null;
   }
   placementOffer = null;
-  return { id: offer.id };
+  return { id: offer.id, model: offer.model };
 }
 
 // -------------------------------------------------------- exact browser recovery
@@ -6101,7 +6128,9 @@ async function openFreshChatInBrowser(command: Command): Promise<void> {
     // Stamped whether or not a browser was already running: this process cannot tell the
     // difference, and the window it opens is only ever spent by a browser failing to appear.
     if (!browserPresent()) lastBrowserLaunchAt = Date.now();
-    await openInBrowser(commandUrl(command.id));
+    await openInBrowser(
+      command.spec.type === 'worker' ? commandUrl(command.id, command.spec.model) : commandUrl(command.id)
+    );
   } catch (err) {
     // One command is one browser-open attempt. A rejected opener can never produce an ACK,
     // so leaving the row unleased merely blocks everything behind it until some unrelated
@@ -6403,6 +6432,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
     type: spec.type,
     text,
     agent: spec.type === 'resume' ? null : spec.agent,
+    model: spec.type === 'worker' ? spec.model : null,
     // The fence the page enforces before it types. Only a revival has one: the other two
     // kinds open a chat that does not exist yet, so there is nothing to compare against.
     conversationId: spec.type === 'revive' ? spec.conversationId : null
@@ -6693,7 +6723,15 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
     // already be durable while the leased browser command is still waiting for its retry.
     const workerState = swarmState().agents.find((entry) => entry.id === worker.agent && entry.role === 'worker')?.state;
     if (workerState !== 'invited' && workerState !== 'active') return null;
-    return { type: 'worker', agent: worker.agent, task: worker.task.slice(0, 512 * 1024), runId: worker.runId };
+    // Rows written before worker models existed carry no model; rows with a malformed one
+    // are repaired to the default rather than refused, so a bad slug can never strand a run.
+    return {
+      type: 'worker',
+      agent: worker.agent,
+      task: worker.task.slice(0, 512 * 1024),
+      model: isModelSlug(worker.model) ? worker.model : null,
+      runId: worker.runId
+    };
   }
   if (
     version >= 4 &&

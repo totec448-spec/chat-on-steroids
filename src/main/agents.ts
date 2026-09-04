@@ -133,6 +133,15 @@ const MAX_TASK_CHARS = 4000;
  */
 const MAX_CONTEXT_CHARS = 4000;
 const MAX_LABEL_CHARS = 60;
+/**
+ * How long a ChatGPT model slug in a worker's `model` field may be.
+ *
+ * Slugs are OpenAI's vocabulary, not ours, so this is a transport bound, not a menu: anything
+ * shaped like a slug passes through to the fresh-chat URL untouched, and an unknown slug
+ * simply opens with the account default rather than failing the spawn.
+ */
+const MAX_MODEL_CHARS = 80;
+const MODEL_SLUG_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
 /**
  * How long a detached worker may make no proven tool call before the run puts it to sleep.
@@ -552,6 +561,8 @@ export interface RetiredChat {
 export interface WorkerSpawn {
   id: string;
   task: string;
+  /** Requested ChatGPT model slug, or null for the account default. */
+  model: string | null;
 }
 
 /** Workers that exist but have not joined: their chat is still owed. */
@@ -562,7 +573,7 @@ export function pendingWorkerSpawns(): WorkerSpawn[] {
       (agent) =>
         agent.info.role === 'worker' && agent.info.state === 'invited' && !unpublishedAgents.has(agent)
     )
-    .map((agent) => ({ id: agent.info.id, task: agent.info.task }));
+    .map((agent) => ({ id: agent.info.id, task: agent.info.task, model: agent.info.model }));
 }
 
 /**
@@ -860,13 +871,14 @@ Your task:
 ${task}`;
 }
 
-function makeWorker(id: string, label: string, task: string): Agent {
+function makeWorker(id: string, label: string, task: string, model: string | null): Agent {
   return {
     info: {
       id,
       role: 'worker',
       label,
       task,
+      model,
       state: 'invited',
       createdAt: Date.now(),
       activatedAt: null,
@@ -893,6 +905,7 @@ function makePrime(conversationId: string): Agent {
       role: 'prime',
       label: 'Prime',
       task: 'Coordinates the workers',
+      model: null,
       state: 'active',
       createdAt: Date.now(),
       activatedAt: Date.now(),
@@ -1068,7 +1081,7 @@ export function forgetRetiredWorker(conversationId: string): void {
 // -------------------------------------------------------------------- spawn
 
 export interface SpawnInput {
-  workers: ReadonlyArray<{ label?: string; task: string }>;
+  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null }>;
   /**
    * What every worker in this spawn needs to know, written once.
    *
@@ -1148,6 +1161,37 @@ function settleSpawnStage(stage: SpawnStageState, accepted: boolean): void {
 }
 
 /**
+ * Normalizes a worker's requested ChatGPT model slug: trimmed, or null for the account
+ * default when omitted or blank.
+ *
+ * Malformed input fails the whole spawn rather than opening a worker under a model nobody
+ * asked for: like every other spawn validation, this runs before the first mutation, so a
+ * rejection leaves zero workers behind. A well-formed slug ChatGPT does not recognise is
+ * not ours to refuse — the fresh chat simply opens with the default.
+ */
+function normalizeModel(index: number, value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  const model = value.trim();
+  if (!model) return null;
+  if (!isModelSlug(model)) {
+    throw new AgentError(
+      `Worker ${index + 1}'s model is not a ChatGPT model slug (letters, digits, dot, underscore, hyphen; limit ${MAX_MODEL_CHARS} characters)`
+    );
+  }
+  return model;
+}
+
+/**
+ * Whether a string is shaped like a ChatGPT model slug. The single vocabulary check for
+ * worker models, shared by the broker and the bridge's durable restore: slugs are OpenAI's
+ * vocabulary, so anything shaped like one passes through and an unknown one simply opens
+ * with the account default.
+ */
+export function isModelSlug(value: unknown): value is string {
+  return typeof value === 'string' && MODEL_SLUG_RE.test(value);
+}
+
+/**
  * Plans a worker spawn behind the same durable acceptance boundary used by agents::message.
  *
  * Production must call persistCriticalSwarmNow(), then commit() on success or rollback() on
@@ -1184,7 +1228,7 @@ export function requestWorkerBootstraps(ids: readonly string[]): number {
         !unpublishedAgents.has(agent) &&
         wanted.has(agent.info.id)
     )
-    .map((agent) => ({ id: agent.info.id, task: agent.info.task }));
+    .map((agent) => ({ id: agent.info.id, task: agent.info.task, model: agent.info.model }));
   if (owed.length === 0) return 0;
   if (spawnRequest) spawnRequest(owed);
   else logWarn('multi-agent: no browser extension is paired, so worker chats cannot be opened automatically');
@@ -1228,11 +1272,12 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     if (label.length > MAX_LABEL_CHARS) {
       throw new AgentError(`Worker ${index + 1}'s label is too long (limit ${MAX_LABEL_CHARS} characters)`);
     }
+    const model = normalizeModel(index, worker.model);
     // Composed once, here, and stored as *the* task. Everything downstream — the bootstrap
     // the browser types, the repeated-spawn match, the status table, the snapshot — then
     // sees the same single string a worker actually receives, with no second field to keep
     // in step and no way for the two halves to be delivered apart.
-    return { label, task: briefFor(context, task) };
+    return { label, task: briefFor(context, task), model };
   });
 
   const conversationId = input.caller.conversationId ?? null;
@@ -1326,7 +1371,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
   const createdAgents: Agent[] = [];
   for (const [index, worker] of planned.entries()) {
     const id = ids[index] as string;
-    const agent = makeWorker(id, worker.label || id, worker.task);
+    const agent = makeWorker(id, worker.label || id, worker.task, worker.model);
     activeRun.agents.set(id, agent);
     // A worker starts in the folder the prime was working in, so its first call can use the
     // same shorthand. It is a copy: a worker sent into another project overwrites its own
@@ -1368,17 +1413,19 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
  * worker still gets one; only an exact repetition of work already under way is folded back.
  */
 function matchExistingRequest(
-  requested: ReadonlyArray<{ label: string; task: string }>,
+  requested: ReadonlyArray<{ label: string; task: string; model: string | null }>,
   live: readonly Agent[]
 ): Agent[] | null {
   if (requested.length === 0 || live.length === 0) return null;
-  // An unambiguous encoding of the (label, task) pair rather than a separator character.
+  // An unambiguous encoding of the (label, task, model) triple rather than a separator character.
   // Any separator is only as good as the assumption that it cannot occur in the operands, and
-  // both of these are free text a model wrote; JSON removes the assumption entirely, so
+  // the first two are free text a model wrote; JSON removes the assumption entirely, so
   // ("a", "b c") and ("a b", "c") can never shape-collide into one match. It also keeps this
   // file plain text: the NUL that used to do this job was a literal byte, which made every
-  // text tool treat the source as binary.
-  const shape = (label: string, task: string): string => JSON.stringify([label.trim(), task.trim()]);
+  // text tool treat the source as binary. The model rides along because a retry that asks for
+  // a different model is new intent, not the same request arriving twice.
+  const shape = (label: string, task: string, model: string | null): string =>
+    JSON.stringify([label.trim(), task.trim(), model]);
   const taken = new Set<Agent>();
   const matched: Agent[] = [];
   for (const worker of requested) {
@@ -1387,8 +1434,10 @@ function matchExistingRequest(
     const found = live.find(
       (agent) =>
         !taken.has(agent) &&
-        (shape(agent.info.label, agent.info.task) === shape(worker.label || agent.info.id, worker.task) ||
-          shape(agent.info.label, agent.info.task) === shape(worker.label, worker.task))
+        (shape(agent.info.label, agent.info.task, agent.info.model) ===
+          shape(worker.label || agent.info.id, worker.task, worker.model) ||
+          shape(agent.info.label, agent.info.task, agent.info.model) ===
+            shape(worker.label, worker.task, worker.model))
     );
     if (!found) return null;
     taken.add(found);
@@ -3966,6 +4015,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
     const agent: Agent = {
       info: {
         ...entry.info,
+        model: isModelSlug(entry.info.model) ? entry.info.model : null,
         sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,
         contextTokens: Number.isFinite(entry.info.contextTokens) ? entry.info.contextTokens : 0,
         lastRevivalCommandId:

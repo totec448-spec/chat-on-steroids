@@ -1227,6 +1227,18 @@ function commandMarkerId(value) {
   return id && id.length <= 128 ? id : null;
 }
 
+/**
+ * Requested ChatGPT model slug for a worker's fresh chat, or null for the account default.
+ *
+ * Same vocabulary the app enforces: anything shaped like a slug passes through to the open
+ * URL, anything else is dropped here rather than typed into a URL. An unknown slug is
+ * ChatGPT's to ignore — the chat then opens with the default.
+ */
+function commandModelSlug(value) {
+  const model = typeof value === 'string' ? value.trim() : '';
+  return model && /^[A-Za-z0-9._-]{1,80}$/.test(model) ? model : null;
+}
+
 function deferredRevivalId(value) {
   return commandMarkerId(value);
 }
@@ -2634,7 +2646,9 @@ async function placeSuccessorChat(raw, tabId) {
   // Both a query and a fragment, matching the app's commandUrl(): ChatGPT rewrites its own URL
   // during boot and which of the two survives has changed between builds.
   const marker = `clf=${encodeURIComponent(id)}`;
-  const create = { url: `https://chatgpt.com/?${marker}#${marker}`, windowId: home.windowId, active: true };
+  const model = commandModelSlug(raw && raw.model);
+  const query = model ? `${marker}&model=${encodeURIComponent(model)}` : marker;
+  const create = { url: `https://chatgpt.com/?${query}#${marker}`, windowId: home.windowId, active: true };
   // Directly after the chat it continues, so a handoff reads as one piece of work instead of a
   // tab appended to the far end of a long strip.
   if (typeof home.index === 'number') create.index = home.index + 1;

@@ -106,7 +106,11 @@ Compact & Resume is app/browser orchestration. There is no model-visible `save_h
 Available while multi-agent mode is enabled. It has exactly four actions:
 
 - `spawn` creates worker chats from one shared context plus per-worker tasks. Used once per run:
-  a run that needs a worker again reuses one it already has.
+  a run that needs a worker again reuses one it already has. Each worker takes an optional
+  `model` slug: the worker's chat opens with `?model=<slug>` in its fresh-chat URL, so a prime
+  on a limited model can spawn workers on a cheaper one. Omitted means the account default;
+  a slug ChatGPT does not recognise opens with the default too. The model is fixed for the
+  life of that conversation, including across sleep/wake reuse.
 - `message` sends one message or an all-or-nothing batch. Messaging a sleeping worker is what
   wakes it, in the chat it already has.
 - `status` reports the run and workers, including who is asleep and how many worker slots are free.
