@@ -1058,6 +1058,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 .optional()
                 .describe(
                   'ChatGPT model slug for this worker\'s chat, e.g. a cheaper high-reasoning model while the prime runs on a limited one. Omitted means the account default.'
+                ),
+              reasoning_effort: z
+                .string()
+                .max(20)
+                .optional()
+                .describe(
+                  'Reasoning level for this worker\'s chat: none, minimal, low, medium, high, xhigh, max, ultra. Omitted inherits the default. Never changes the model.'
                 )
             }).strict()
           )
@@ -1173,7 +1180,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 type: 'text' as const,
                 text:
                   (becamePrime ? `This conversation is now the prime agent of run ${runId}. ` : '') +
-                  `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state}${info.model ? `, model ${info.model}` : ''})`).join(', ')}. ` +
+                  `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state}${info.model ? `, model ${info.model}` : ''}${info.reasoningEffort ? `, reasoning ${info.reasoningEffort}` : ''})`).join(', ')}. ` +
                   (invited.length > 0 ? 'New worker chats are opening with their briefs already in them. ' : '') +
                   (sleeping.length > 0
                     ? `${sleeping.map((worker) => worker.id).join(', ')} already finished that earlier piece and is sleeping in its existing chat; wake it with action=message instead of spawning a duplicate. `
@@ -1189,7 +1196,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               run_id: runId,
               self: PRIME_ID,
               became_prime: becamePrime,
-              workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state, model: info.model }))
+              workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state, model: info.model, reasoning_effort: info.reasoningEffort }))
             }
           };
         }
@@ -1361,6 +1368,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                     (info) =>
                       `${info.id}  ${info.role}  ${shown(info)}  waiting ${info.pending}  ${info.label}` +
                       (info.model ? `  model ${info.model}` : '') +
+                      (info.reasoningEffort ? `  reasoning ${info.reasoningEffort}` : '') +
                       (recordings.has(info.id) ? `\n    recording: ${recordings.get(info.id)}` : '') +
                       (info.result
                         ? `\n    ${info.state === 'failed' ? 'failure' : info.state === 'finished' ? 'result' : 'latest result'}: ${info.result.slice(0, 300)}`
@@ -1401,6 +1409,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               role: info.role,
               label: info.label,
               model: info.model,
+              reasoning_effort: info.reasoningEffort,
               state: info.state,
               revivable: info.revivable,
               waiting: info.pending,

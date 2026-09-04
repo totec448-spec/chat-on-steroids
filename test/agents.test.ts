@@ -374,6 +374,54 @@ describe('worker models', () => {
     restoreSwarm(tampered);
     expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.model).toBeNull();
   });
+
+  it('stores reasoning_effort without touching the model', () => {
+    const result = spawn({
+      workers: [{ label: 'High Reasoning', task: 'deep work', reasoning_effort: 'high' }],
+      caller: prime
+    });
+    expect(result.created[0]).toMatchObject({ id: 'worker-1', model: null, reasoningEffort: 'high' });
+    expect(pendingWorkerSpawns()).toEqual([
+      expect.objectContaining({ id: 'worker-1', model: null, reasoningEffort: 'high' })
+    ]);
+  });
+
+  it('rejects an unknown reasoning_effort with zero workers created', () => {
+    expect(() => spawn({ workers: [{ task: 'work', reasoning_effort: 'banana' }], caller: prime })).toThrow(
+      /reasoning_effort must be one of/i
+    );
+    expect(swarmRunning()).toBe(false);
+    expect(swarmState().agents).toEqual([]);
+  });
+
+  it('canonicalizes the level spelling but stores the canonical form', () => {
+    const result = spawn({ workers: [{ task: 'work', reasoning_effort: ' High ' }], caller: prime });
+    expect(result.created[0]?.reasoningEffort).toBe('high');
+  });
+
+  it('folds repeats only when model and reasoning both match', () => {
+    spawn({ workers: [{ label: 'W', task: 'same', reasoning_effort: 'high' }], caller: prime });
+    const repeat = spawn({ workers: [{ label: 'W', task: 'same', reasoning_effort: 'high' }], caller: prime });
+    expect(repeat.created.map((agent) => agent.id)).toEqual(['worker-1']);
+    const changed = spawn({ workers: [{ label: 'W', task: 'same', reasoning_effort: 'low' }], caller: prime });
+    expect(changed.created.map((agent) => agent.id)).toEqual(['worker-2']);
+    expect(changed.created[0]?.reasoningEffort).toBe('low');
+  });
+
+  it('round-trips reasoning_effort through a snapshot restore and repairs a malformed one', () => {
+    spawn({ workers: [{ label: 'W', task: 'task', reasoning_effort: 'high' }], caller: prime });
+    const saved = snapshotSwarm()!;
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.reasoningEffort).toBe('high');
+
+    const tampered = snapshotSwarm()!;
+    // @ts-expect-error a malformed level smuggled past the type system, as disk can hold
+    tampered.agents.find((entry) => entry.info.id === 'worker-1')!.info.reasoningEffort = 'banana';
+    resetAgentsForTests();
+    restoreSwarm(tampered);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.reasoningEffort).toBeNull();
+  });
 });
 
 describe('star topology', () => {
@@ -1985,7 +2033,7 @@ describe('restart', () => {
 
     expect(swarmState().running).toBe(true);
     expect(snapshotSwarm()?.agents.map((entry) => entry.info.id)).toEqual(['prime', 'worker-1']);
-    expect(pendingWorkerSpawns()).toEqual([{ id: 'worker-1', model: null, task: 'inspect topology' }]);
+    expect(pendingWorkerSpawns()).toEqual([{ id: 'worker-1', model: null, reasoningEffort: null, task: 'inspect topology' }]);
     expect(ordinary.at(-1)?.agents.map((entry) => entry.info.id)).toEqual(['prime', 'worker-1']);
   });
 

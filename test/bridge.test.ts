@@ -3698,6 +3698,18 @@ describe('delivering a bootstrap', () => {
     expect(opened[0]).toContain('model=cheap-high-reasoning');
   });
 
+  it('opens a reasoning-only worker with no model param, so the level never selects a model', async () => {
+    await pair();
+    spawn({
+      workers: [{ label: 'High Reasoning', task: 'deep work', reasoning_effort: 'high' }],
+      caller: { conversationId: PRIME_CHAT }
+    });
+    await waitForOpened(1);
+    expect(opened).toEqual([commandUrl(pendingCommands()[0]!.id, null, 'high')]);
+    expect(opened[0]).toContain('reasoning_effort=high');
+    expect(opened[0]).not.toContain('model=');
+  });
+
   it('keeps a dropped worker transport durable until the failed broker state is durable', async () => {
     await pair();
     spawn({ workers: [{ task: 'overflow crash-order worker' }], caller: { conversationId: PRIME_CHAT } });
@@ -3828,7 +3840,7 @@ ${SAMPLE_BRIEF}` }
     const stored = await captureFrom(HOME);
 
     expect(stored.body.stored).toBe(true);
-    expect(stored.body.placement).toEqual({ id: stored.body.commandId, model: null });
+    expect(stored.body.placement).toEqual({ id: stored.body.commandId, model: null, reasoningEffort: null });
     // The whole point: this app did not ask the operating system where its own chat should go.
     expect(opened).toEqual([]);
     expect(pendingCommands()).toEqual([

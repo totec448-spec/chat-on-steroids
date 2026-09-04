@@ -23,7 +23,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { BridgeStatus } from '../shared/types.js';
-import { CHAT_SILENCE_MS, CONTINUATION_MARKER, type SessionEvent, type SessionOrigin } from '../shared/session.js';
+import { CHAT_SILENCE_MS, CONTINUATION_MARKER, isReasoningEffort, type ReasoningEffort, type SessionEvent, type SessionOrigin } from '../shared/session.js';
 import { isChatBlocked } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { getConfig, updateConfig } from './config.js';
@@ -347,6 +347,14 @@ type CommandSpec =
        * typed into the chat or shown to the model.
        */
       model: string | null;
+      /**
+       * Requested reasoning level for the worker's fresh chat, or null to inherit.
+       *
+       * Forwarded as declared creation intent on the open URL, independently of model:
+       * setting a level never selects or changes the model. The app reports the requested
+       * value; only the chat's own picker state proves what ChatGPT applied.
+       */
+      reasoningEffort: ReasoningEffort | null;
       runId: string;
     }
   /**
@@ -475,13 +483,18 @@ export interface BridgeCommand {
   text: string;
   /** Agent this tab will be, when the command comes from multi-agent mode. */
   agent: string | null;
-  /**
-   * Requested ChatGPT model slug for a worker's fresh chat, or null for the account default.
-   *
+  /** Requested ChatGPT model slug for a worker's fresh chat, or null for the account default.
    * Carried on the wire so the page opening the tab can select the model in the open URL.
    * Null for every other command kind.
    */
   model: string | null;
+  /**
+   * Requested reasoning level for a worker's fresh chat, or null to inherit.
+   *
+   * Carried on the wire beside model so the open URL declares both independently.
+   * Null for every other command kind.
+   */
+  reasoningEffort: ReasoningEffort | null;
   /**
    * The conversation this command is *for*, when it is for one that already exists.
    *
@@ -3528,7 +3541,7 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
       rearmRetainedCommandDeadlines();
       dropSpawnRequestListener?.();
       dropSpawnRequestListener = onSpawnRequest((workers) => {
-        for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model);
+        for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort);
       });
       // The same replay contract for waking a worker that already has a chat. A run restored
       // from disk can hold a worker left in `waking` by a crash mid-revival; registering here
@@ -4165,13 +4178,13 @@ async function cancelAutomaticResumesNow(): Promise<number> {
  * stored: the chat this opens is bound to the slot by the extension's report, and the
  * recovery key exists only if the user asks the app for one after that has failed.
  */
-export function queueWorkerBootstrap(agent: string, task: string, model: string | null): BridgeCommand | null {
+export function queueWorkerBootstrap(agent: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): BridgeCommand | null {
   const runId = currentRunId();
   // A worker bootstrap is authority for one concrete broker incarnation. There is no safe
   // meaning for one outside a run, and manufacturing an unscoped command here is exactly how
   // stale durable work later becomes somebody else's `worker-1`.
   if (!runId) return null;
-  const command = queue({ type: 'worker', agent, task, model, runId });
+  const command = queue({ type: 'worker', agent, task, model, reasoningEffort, runId });
   // Start the clock at broker admission, exactly as a revival does. A bootstrap that never
   // reaches a page is the case that has no other clock at all.
   armDeadline(command);
@@ -4300,17 +4313,22 @@ export function chatUrl(conversationId: string): string {
 }
 
 /** Where the app opens a fresh worker/resume chat. The marker is an id, not a credential. */
-export function commandUrl(id: string, model?: string | null): string {
+export function commandUrl(id: string, model?: string | null, reasoningEffort?: ReasoningEffort | null): string {
   // Both a query and a fragment: ChatGPT is a single-page app that rewrites its own URL
   // during boot, and which of the two survives has changed between builds. The content
   // script accepts either, and redeeming still requires the extension's bearer token —
   // so a copied link, a history entry or a synced tab is worth nothing on its own.
   // A requested model rides the query only: it selects the chat's model at open and is
   // never part of the identity the page redeems with. An unknown slug is ChatGPT's to
-  // ignore — the chat then opens with the account default.
+  // ignore — the chat then opens with the account default. Reasoning rides beside it as
+  // declared creation intent, forwarded independently: it never selects or changes the
+  // model, and whether ChatGPT applies it is proven by the chat's own picker state, not
+  // by this URL.
   const marker = `clf=${encodeURIComponent(id)}`;
-  const query = model ? `${marker}&model=${encodeURIComponent(model)}` : marker;
-  return `https://chatgpt.com/?${query}#${marker}`;
+  const params = [marker];
+  if (model) params.push(`model=${encodeURIComponent(model)}`);
+  if (reasoningEffort) params.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
+  return `https://chatgpt.com/?${params.join('&')}#${marker}`;
 }
 
 /**
@@ -4396,7 +4414,7 @@ export const BROWSER_PLACEMENT_MS = 20_000;
 let placementCollector: string | null = null;
 
 /** The one fresh chat currently offered to its home page, and the fallback that outlives it. */
-let placementOffer: { id: string; conversationId: string; model: string | null } | null = null;
+let placementOffer: { id: string; conversationId: string; model: string | null; reasoningEffort: ReasoningEffort | null } | null = null;
 let placementTimer: NodeJS.Timeout | null = null;
 
 /** Drops the standing offer and its fallback. Called by every path that ends a command. */
@@ -4420,7 +4438,8 @@ function offerPlacement(command: Command): boolean {
   placementOffer = {
     id: command.id,
     conversationId: home,
-    model: command.spec.type === 'worker' ? command.spec.model : null
+    model: command.spec.type === 'worker' ? command.spec.model : null,
+    reasoningEffort: command.spec.type === 'worker' ? command.spec.reasoningEffort : null
   };
   placementTimer = setTimeout(() => {
     placementTimer = null;
@@ -4442,7 +4461,7 @@ function offerPlacement(command: Command): boolean {
  * a second one. If that page fails to act, the fallback above is what recovers it, not a
  * repeated offer.
  */
-function pendingBrowserPlacement(conversationId: string): { id: string; model: string | null } | null {
+function pendingBrowserPlacement(conversationId: string): { id: string; model: string | null; reasoningEffort: ReasoningEffort | null } | null {
   const offer = placementOffer;
   if (!offer || offer.conversationId !== conversationId) return null;
   if (!commands.some((entry) => entry.id === offer.id && entry.owner === null)) {
@@ -4450,7 +4469,7 @@ function pendingBrowserPlacement(conversationId: string): { id: string; model: s
     return null;
   }
   placementOffer = null;
-  return { id: offer.id, model: offer.model };
+  return { id: offer.id, model: offer.model, reasoningEffort: offer.reasoningEffort };
 }
 
 // -------------------------------------------------------- exact browser recovery
@@ -6129,7 +6148,9 @@ async function openFreshChatInBrowser(command: Command): Promise<void> {
     // difference, and the window it opens is only ever spent by a browser failing to appear.
     if (!browserPresent()) lastBrowserLaunchAt = Date.now();
     await openInBrowser(
-      command.spec.type === 'worker' ? commandUrl(command.id, command.spec.model) : commandUrl(command.id)
+      command.spec.type === 'worker'
+        ? commandUrl(command.id, command.spec.model, command.spec.reasoningEffort)
+        : commandUrl(command.id)
     );
   } catch (err) {
     // One command is one browser-open attempt. A rejected opener can never produce an ACK,
@@ -6433,6 +6454,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
     text,
     agent: spec.type === 'resume' ? null : spec.agent,
     model: spec.type === 'worker' ? spec.model : null,
+    reasoningEffort: spec.type === 'worker' ? spec.reasoningEffort : null,
     // The fence the page enforces before it types. Only a revival has one: the other two
     // kinds open a chat that does not exist yet, so there is nothing to compare against.
     conversationId: spec.type === 'revive' ? spec.conversationId : null
@@ -6725,11 +6747,13 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
     if (workerState !== 'invited' && workerState !== 'active') return null;
     // Rows written before worker models existed carry no model; rows with a malformed one
     // are repaired to the default rather than refused, so a bad slug can never strand a run.
+    // Reasoning restores under the same rule, against the canonical vocabulary.
     return {
       type: 'worker',
       agent: worker.agent,
       task: worker.task.slice(0, 512 * 1024),
       model: isModelSlug(worker.model) ? worker.model : null,
+      reasoningEffort: isReasoningEffort(worker.reasoningEffort) ? worker.reasoningEffort : null,
       runId: worker.runId
     };
   }

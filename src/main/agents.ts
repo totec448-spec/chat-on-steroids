@@ -83,7 +83,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { AgentInfo, AgentMessage, AgentState, SwarmState } from '../shared/session.js';
+import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
+import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
 import { logInfo, logWarn } from './logger.js';
 import { inheritWorkspace, releasePrimeWorkspace } from './workspace.js';
@@ -563,6 +564,8 @@ export interface WorkerSpawn {
   task: string;
   /** Requested ChatGPT model slug, or null for the account default. */
   model: string | null;
+  /** Requested reasoning level, or null to inherit the default. */
+  reasoningEffort: ReasoningEffort | null;
 }
 
 /** Workers that exist but have not joined: their chat is still owed. */
@@ -573,7 +576,7 @@ export function pendingWorkerSpawns(): WorkerSpawn[] {
       (agent) =>
         agent.info.role === 'worker' && agent.info.state === 'invited' && !unpublishedAgents.has(agent)
     )
-    .map((agent) => ({ id: agent.info.id, task: agent.info.task, model: agent.info.model }));
+    .map((agent) => ({ id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort }));
 }
 
 /**
@@ -871,7 +874,7 @@ Your task:
 ${task}`;
 }
 
-function makeWorker(id: string, label: string, task: string, model: string | null): Agent {
+function makeWorker(id: string, label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): Agent {
   return {
     info: {
       id,
@@ -879,6 +882,7 @@ function makeWorker(id: string, label: string, task: string, model: string | nul
       label,
       task,
       model,
+      reasoningEffort,
       state: 'invited',
       createdAt: Date.now(),
       activatedAt: null,
@@ -906,6 +910,7 @@ function makePrime(conversationId: string): Agent {
       label: 'Prime',
       task: 'Coordinates the workers',
       model: null,
+      reasoningEffort: null,
       state: 'active',
       createdAt: Date.now(),
       activatedAt: Date.now(),
@@ -1081,7 +1086,7 @@ export function forgetRetiredWorker(conversationId: string): void {
 // -------------------------------------------------------------------- spawn
 
 export interface SpawnInput {
-  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null }>;
+  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null; reasoning_effort?: string | null }>;
   /**
    * What every worker in this spawn needs to know, written once.
    *
@@ -1192,6 +1197,28 @@ export function isModelSlug(value: unknown): value is string {
 }
 
 /**
+ * Normalizes a worker's requested reasoning level: trimmed and lowercased, or null to
+ * inherit the default when omitted or blank.
+ *
+ * Unknown values fail the whole spawn rather than opening a worker under a level nobody
+ * asked for: like every other spawn validation, this runs before the first mutation, so
+ * a rejection leaves zero workers behind. There is deliberately no silent downgrade to a
+ * default — a status line claiming one level while the worker runs another is exactly the
+ * lie this refuses to tell.
+ */
+function normalizeReasoningEffort(index: number, value: string | null | undefined): ReasoningEffort | null {
+  if (value === undefined || value === null) return null;
+  const effort = value.trim().toLowerCase();
+  if (!effort) return null;
+  if (!isReasoningEffort(effort)) {
+    throw new AgentError(
+      `Worker ${index + 1}'s reasoning_effort must be one of: ${REASONING_EFFORTS.join(', ')}`
+    );
+  }
+  return effort;
+}
+
+/**
  * Plans a worker spawn behind the same durable acceptance boundary used by agents::message.
  *
  * Production must call persistCriticalSwarmNow(), then commit() on success or rollback() on
@@ -1228,7 +1255,7 @@ export function requestWorkerBootstraps(ids: readonly string[]): number {
         !unpublishedAgents.has(agent) &&
         wanted.has(agent.info.id)
     )
-    .map((agent) => ({ id: agent.info.id, task: agent.info.task, model: agent.info.model }));
+    .map((agent) => ({ id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort }));
   if (owed.length === 0) return 0;
   if (spawnRequest) spawnRequest(owed);
   else logWarn('multi-agent: no browser extension is paired, so worker chats cannot be opened automatically');
@@ -1273,11 +1300,12 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
       throw new AgentError(`Worker ${index + 1}'s label is too long (limit ${MAX_LABEL_CHARS} characters)`);
     }
     const model = normalizeModel(index, worker.model);
+    const reasoningEffort = normalizeReasoningEffort(index, worker.reasoning_effort);
     // Composed once, here, and stored as *the* task. Everything downstream — the bootstrap
     // the browser types, the repeated-spawn match, the status table, the snapshot — then
     // sees the same single string a worker actually receives, with no second field to keep
     // in step and no way for the two halves to be delivered apart.
-    return { label, task: briefFor(context, task), model };
+    return { label, task: briefFor(context, task), model, reasoningEffort };
   });
 
   const conversationId = input.caller.conversationId ?? null;
@@ -1371,7 +1399,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
   const createdAgents: Agent[] = [];
   for (const [index, worker] of planned.entries()) {
     const id = ids[index] as string;
-    const agent = makeWorker(id, worker.label || id, worker.task, worker.model);
+    const agent = makeWorker(id, worker.label || id, worker.task, worker.model, worker.reasoningEffort);
     activeRun.agents.set(id, agent);
     // A worker starts in the folder the prime was working in, so its first call can use the
     // same shorthand. It is a copy: a worker sent into another project overwrites its own
@@ -1413,19 +1441,19 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
  * worker still gets one; only an exact repetition of work already under way is folded back.
  */
 function matchExistingRequest(
-  requested: ReadonlyArray<{ label: string; task: string; model: string | null }>,
+  requested: ReadonlyArray<{ label: string; task: string; model: string | null; reasoningEffort: ReasoningEffort | null }>,
   live: readonly Agent[]
 ): Agent[] | null {
   if (requested.length === 0 || live.length === 0) return null;
-  // An unambiguous encoding of the (label, task, model) triple rather than a separator character.
+  // An unambiguous encoding of the (label, task, model, reasoning) tuple rather than a separator character.
   // Any separator is only as good as the assumption that it cannot occur in the operands, and
   // the first two are free text a model wrote; JSON removes the assumption entirely, so
   // ("a", "b c") and ("a b", "c") can never shape-collide into one match. It also keeps this
   // file plain text: the NUL that used to do this job was a literal byte, which made every
-  // text tool treat the source as binary. The model rides along because a retry that asks for
-  // a different model is new intent, not the same request arriving twice.
-  const shape = (label: string, task: string, model: string | null): string =>
-    JSON.stringify([label.trim(), task.trim(), model]);
+  // text tool treat the source as binary. Model and reasoning ride along because a retry that
+  // asks for a different model or level is new intent, not the same request arriving twice.
+  const shape = (label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): string =>
+    JSON.stringify([label.trim(), task.trim(), model, reasoningEffort]);
   const taken = new Set<Agent>();
   const matched: Agent[] = [];
   for (const worker of requested) {
@@ -1434,10 +1462,10 @@ function matchExistingRequest(
     const found = live.find(
       (agent) =>
         !taken.has(agent) &&
-        (shape(agent.info.label, agent.info.task, agent.info.model) ===
-          shape(worker.label || agent.info.id, worker.task, worker.model) ||
-          shape(agent.info.label, agent.info.task, agent.info.model) ===
-            shape(worker.label, worker.task, worker.model))
+        (shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort) ===
+          shape(worker.label || agent.info.id, worker.task, worker.model, worker.reasoningEffort) ||
+          shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort) ===
+            shape(worker.label, worker.task, worker.model, worker.reasoningEffort))
     );
     if (!found) return null;
     taken.add(found);
@@ -4016,6 +4044,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
       info: {
         ...entry.info,
         model: isModelSlug(entry.info.model) ? entry.info.model : null,
+        reasoningEffort: isReasoningEffort(entry.info.reasoningEffort) ? entry.info.reasoningEffort : null,
         sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,
         contextTokens: Number.isFinite(entry.info.contextTokens) ? entry.info.contextTokens : 0,
         lastRevivalCommandId:
