@@ -158,11 +158,16 @@ if (launchedMachOCount < 6) {
   throw new Error(`Only found ${launchedMachOCount} launchable Mach-O files in ${app}; executable-mode audit is unexpectedly shallow`);
 }
 
-// The release notes promise no publisher/Developer-ID signature. `codesign --verify --deep` is the
-// wrong predicate here: a signed outer bundle with one broken nested signature would fail verify
-// and look "unsigned". Conversely, Apple-Silicon executables can carry ad-hoc LC_CODE_SIGNATURE
-// commands even when there is no publisher identity. Inspect the displayed identity semantics and
-// the whole-bundle CodeResources envelope instead of treating every successful display as trusted.
+// The release notes promise no publisher/Developer-ID signature, and Apple-Silicon executables
+// carry ad-hoc LC_CODE_SIGNATURE commands whether or not anyone signed them, so a successful
+// `codesign --display` proves nothing about trust on its own. Inspect the displayed identity
+// semantics instead.
+//
+// The CodeResources envelope is now passed as a requirement rather than a prohibition. Its
+// absence is what made issue #66 — executables claiming a resource seal the bundle did not have,
+// which macOS treats as damage — and demanding that absence here is why two releases shipped it.
+// The afterPack hook creates the seal and runs the real --verify --deep --strict against the app
+// it just sealed, where a failure can still stop the build before an artifact exists.
 const signature = run('codesign', ['--display', '--verbose=4', app], { allowFailure: true });
 assertNoTrustBearingMacCodeSignature(
   app,

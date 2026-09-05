@@ -34,6 +34,9 @@ extraResources:
 
 npmRebuild: false
 
+# macOS only; a no-op on every other platform. See the hook and the mac.identity note below.
+afterPack: scripts/afterpack-macos-adhoc-seal.mjs
+
 asarUnpack:
   - '**/node_modules/node-pty/**'
   - '**/node_modules/sharp/**'
@@ -90,6 +93,12 @@ mac:
   # v2.0.2 intentionally ships unsigned/unnotarized macOS artifacts. Make that policy
   # deterministic instead of depending on whatever identities or Apple env vars happen to be
   # present on a hosted runner. Remove these two lines when real signing credentials are wired.
+  #
+  # Unsigned still has to mean *coherent*. Every arm64 Mach-O is ad-hoc signed by the linker
+  # whether anyone asks or not, so skipping bundle signing shipped an app whose executables
+  # claimed a resource seal the bundle did not have; macOS calls that damaged and refuses to
+  # launch it (issue #66). afterPack re-seals ad-hoc — no Authority, no TeamIdentifier, still
+  # nothing Gatekeeper will vouch for — and verifies the result.
   identity: null
   notarize: false
   artifactName: Chat-On-Steroids-macOS-${arch}.${ext}

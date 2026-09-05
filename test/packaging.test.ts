@@ -516,37 +516,54 @@ Load command 11
   });
 
   it('allows Apple-Silicon ad-hoc signatures but rejects publisher-bearing macOS signatures', () => {
-    expect(() => assertNoTrustBearingMacCodeSignature('unsigned.app', {
-      status: 1,
-      stdout: '',
-      stderr: 'code object is not signed at all'
-    })).not.toThrow();
+    // The sealed ad-hoc bundle, which is what ships: no Authority, no TeamIdentifier, and the
+    // resource envelope its own executables imply.
     expect(() => assertNoTrustBearingMacCodeSignature('adhoc.app', {
       status: 0,
       stdout: '',
       stderr: 'Identifier=com.example\nSignature=adhoc\nTeamIdentifier=not set\n'
-    })).not.toThrow();
+    }, true)).not.toThrow();
 
     expect(() => assertNoTrustBearingMacCodeSignature('developer-id.app', {
       status: 0,
       stdout: '',
       stderr: 'Signature size=9000\nAuthority=Developer ID Application: Example Corp (TEAM123456)\nTeamIdentifier=TEAM123456\n'
-    })).toThrow(/trust-bearing code signature/);
+    }, true)).toThrow(/trust-bearing code signature/);
     expect(() => assertNoTrustBearingMacCodeSignature('unknown-success.app', {
       status: 0,
       stdout: '',
       stderr: 'Identifier=com.example\n'
-    })).toThrow(/trust-bearing code signature/);
+    }, true)).toThrow(/trust-bearing code signature/);
     expect(() => assertNoTrustBearingMacCodeSignature('inspection-failed.app', {
       status: null,
       stdout: '',
       stderr: 'codesign was terminated unexpectedly'
-    })).toThrow(/inspection failed unexpectedly/);
-    expect(() => assertNoTrustBearingMacCodeSignature('enveloped.app', {
+    }, true)).toThrow(/inspection failed unexpectedly/);
+  });
+
+  /**
+   * Issue #66: the shape that shipped twice and would not launch.
+   *
+   * arm64 Mach-Os are ad-hoc signed by the linker whether anyone asks or not, so a bundle with no
+   * CodeResources is one whose executables claim a resource seal the bundle does not have. macOS
+   * reads that contradiction as damage — with Gatekeeper assessment already disabled, and no
+   * crash report to show for it. This assertion used to *demand* that state, which is why two
+   * releases shipped it and nothing caught them.
+   */
+  it('rejects a bundle whose executables are signed but which has no resource seal', () => {
+    expect(() => assertNoTrustBearingMacCodeSignature('linker-signed.app', {
+      status: 0,
+      stdout: '',
+      stderr: 'Identifier=com.example\nSignature=adhoc\nTeamIdentifier=not set\n'
+    }, false)).toThrow(/no bundle CodeResources envelope/);
+
+    // "Never signed at all" earns the same refusal. The seal is what macOS needs, and a packaged
+    // arm64 app cannot reach that state anyway — the linker signs it regardless.
+    expect(() => assertNoTrustBearingMacCodeSignature('unsigned.app', {
       status: 1,
       stdout: '',
       stderr: 'code object is not signed at all'
-    }, true)).toThrow(/CodeResources signature envelope/);
+    }, false)).toThrow(/no bundle CodeResources envelope/);
   });
 
   it('fails release-existence preflight closed on API errors instead of spending packaging runners', async () => {
