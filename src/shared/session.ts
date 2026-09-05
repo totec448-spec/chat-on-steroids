@@ -558,11 +558,50 @@ export type AgentState =
   | 'finished'
   | 'failed';
 
+/**
+ * Canonical reasoning levels for a worker's chat, shared with the Hermes runtime
+ * vocabulary (hermes_constants.VALID_REASONING_EFFORTS plus "none").
+ *
+ * "none" is a real level — reasoning disabled — and is distinct from null, which means
+ * inherit the account default. This is the single vocabulary authority; the broker, the
+ * bridge restore and the extension all check membership against this list.
+ */
+export const REASONING_EFFORTS = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra'
+] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === 'string' && (REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
 export interface AgentInfo {
   id: string;
   role: AgentRole;
   label: string;
   task: string;
+  /**
+   * Requested reasoning level for this worker's chat, or null to inherit the default.
+   *
+   * Canonical vocabulary shared with the Hermes runtime (VALID_REASONING_EFFORTS plus
+   * "none"). "none" is a real level — reasoning disabled — distinct from null. Stored
+   * where the worker's model is stored and matched, snapshotted and restored the same way.
+   */
+  reasoningEffort: ReasoningEffort | null;
+  /**
+   * ChatGPT model slug this worker's chat was opened with, or null for the account default.
+   *
+   * Chosen by the prime at spawn, never by the worker: the model is fixed by the fresh-chat
+   * URL the tab opens with, so a worker keeps it for the life of its conversation, including
+   * across sleep/wake reuse. Null for the prime, which runs in the user's own chat.
+   */
+  model: string | null;
   state: AgentState;
   createdAt: number;
   /**
