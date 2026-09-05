@@ -1177,6 +1177,8 @@ main {
   padding: 14px 0;
 }
 
+/* Folder access remains editable after onboarding has finished. */
+.wizard.is-tidy .step.is-done[data-step='folder'] .step-body > .step-actions,
 .wizard.is-tidy .step.is-done[data-step='chatgpt'] .step-body > .step-actions {
   display: flex;
 }

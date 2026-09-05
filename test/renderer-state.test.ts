@@ -582,6 +582,33 @@ it('guides rootless setup from the capabilities that actually need a filesystem 
   expect(connect.disabled).toBe(false);
 });
 
+it('keeps folder access discoverable after setup and navigates without granting access', async () => {
+  const addRoot = vi.fn();
+  const mounted = await mountChat({ hasApiKey: true }, [], { addRoot });
+  const connected = structuredClone(mounted.state);
+  connected.status.state = 'connected';
+  connected.status.lastRequestAt = Date.now();
+  connected.bridge.present = true;
+  mounted.push(connected);
+  const doc = mounted.window.document;
+  const styles = doc.createElement('style');
+  styles.textContent = await fs.readFile(path.join(process.cwd(), 'src/renderer/styles.css'), 'utf8');
+  doc.head.append(styles);
+  doc.querySelector<HTMLButtonElement>('[data-tab="setup"]')!.click();
+
+  expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(true);
+  const manage = doc.getElementById('wizManageFolders')!;
+  expect(mounted.window.getComputedStyle(manage.parentElement!).display).not.toBe('none');
+  expect(doc.getElementById('wizFolders')!.textContent).toBe('/repo');
+  manage.click();
+
+  expect(doc.querySelector('.panel.is-active')?.getAttribute('data-panel')).toBe('home');
+  expect(doc.activeElement).toBe(doc.getElementById('addFolder'));
+  expect(doc.getElementById('rootList')!.textContent).toContain('/repo');
+  expect(addRoot).not.toHaveBeenCalled();
+  expect(mounted.calls).toEqual([]);
+});
+
 it('requires a live browser only when a browser-backed feature is actually enabled', async () => {
   const mounted = await mountChat({
     hasApiKey: true,
