@@ -184,6 +184,7 @@ interface PendingHelperRequest {
 }
 
 interface HelperRuntime {
+  generation: number;
   child: ChildProcessWithoutNullStreams;
   stdoutBuffer: string;
   stderrTail: string;
@@ -193,6 +194,7 @@ interface HelperRuntime {
 }
 
 interface MacOSAddonRuntime {
+  generation: number;
   worker: Worker;
   pending: PendingHelperRequest | null;
   exited: boolean;
@@ -206,6 +208,38 @@ let helperQueue: Promise<void> = Promise.resolve();
 let helperGeneration = 0;
 let helperStopping = false;
 const helperRetirements = new Set<Promise<void>>();
+
+// Transport-owned metadata, never accepted from the native protocol. Capture it before
+// resolving a reply: image I/O may yield long enough for another helper to start.
+const helperReplyGeneration = new WeakMap<object, number>();
+
+function stampHelperReply(reply: Record<string, any>, generation: number): Record<string, any> {
+  helperReplyGeneration.set(reply, generation);
+  return reply;
+}
+
+function generationOfReply(reply: Record<string, any>): number {
+  const generation = helperReplyGeneration.get(reply);
+  if (generation === undefined) throw new ComputerError('Desktop reply has no transport identity.');
+  return generation;
+}
+
+function isHelperGenerationActive(generation: number): boolean {
+  if (helperStopping) return false;
+  return useMacOSDesktopAddon()
+    ? macOSAddonRuntime !== null && !macOSAddonRuntime.exited && macOSAddonRuntime.generation === generation
+    : helperRuntime !== null && helperRuntime.child.exitCode === null && helperRuntime.generation === generation;
+}
+
+type ExpectedHelper = { generation: number; code: 'STALE_FRAME' | 'STALE_REF' };
+
+function assertHelperGeneration(generation: number, expected?: ExpectedHelper): void {
+  if (expected && (generation !== expected.generation || !isHelperGenerationActive(generation))) {
+    throw new ComputerError(`${expected.code}: the desktop helper changed. Observe again before retrying.`, {
+      completedCount: 0, failedIndex: 0, completedRoutes: []
+    });
+  }
+}
 
 export function helperTimeoutMs(
   request: Record<string, unknown>,
@@ -305,6 +339,7 @@ async function startHelper(): Promise<HelperRuntime> {
       env: env as NodeJS.ProcessEnv
     });
     const runtime: HelperRuntime = {
+      generation: 0,
       child,
       stdoutBuffer: '',
       stderrTail: '',
@@ -368,7 +403,7 @@ async function startHelper(): Promise<HelperRuntime> {
             })
           );
         } else {
-          pending.resolve(reply);
+          pending.resolve(stampHelperReply(reply, runtime.generation));
         }
       }
     });
@@ -378,7 +413,7 @@ async function startHelper(): Promise<HelperRuntime> {
     child.once('spawn', () => {
       started = true;
       helperRuntime = runtime;
-      helperGeneration += 1;
+      runtime.generation = ++helperGeneration;
       resolve(runtime);
     });
     child.once('error', (error) => {
@@ -538,7 +573,7 @@ async function startMacOSAddon(): Promise<MacOSAddonRuntime> {
   const payload = locateMacOSDesktopAddon();
   macOSAddonStarting = new Promise<MacOSAddonRuntime>((resolve, reject) => {
     const worker = new Worker(MACOS_ADDON_WORKER_SOURCE, { eval: true, workerData: payload });
-    const runtime: MacOSAddonRuntime = { worker, pending: null, exited: false };
+    const runtime: MacOSAddonRuntime = { worker, pending: null, exited: false, generation: 0 };
     let started = false;
     const startupTimer = setTimeout(() => {
       if (started) return;
@@ -550,7 +585,7 @@ async function startMacOSAddon(): Promise<MacOSAddonRuntime> {
         started = true;
         clearTimeout(startupTimer);
         macOSAddonRuntime = runtime;
-        helperGeneration += 1;
+        runtime.generation = ++helperGeneration;
         resolve(runtime);
         return;
       }
@@ -585,7 +620,7 @@ async function startMacOSAddon(): Promise<MacOSAddonRuntime> {
       const record = reply as Record<string, any>;
       const failure = protocolFailure(record);
       if (failure) pending.reject(failure);
-      else pending.resolve(record);
+      else pending.resolve(stampHelperReply(record, runtime.generation));
     });
     worker.once('error', (error) => {
       if (!started) {
@@ -619,8 +654,9 @@ async function startMacOSAddon(): Promise<MacOSAddonRuntime> {
   return macOSAddonStarting;
 }
 
-async function sendMacOSAddonRequest(request: Record<string, unknown>): Promise<Record<string, any>> {
+async function sendMacOSAddonRequest(request: Record<string, unknown>, expected?: ExpectedHelper): Promise<Record<string, any>> {
   const runtime = await startMacOSAddon();
+  assertHelperGeneration(runtime.generation, expected);
   if (runtime.pending) throw new ComputerError('macOS Desktop addon received overlapping requests.');
   return new Promise<Record<string, any>>((resolve, reject) => {
     let pending: PendingHelperRequest;
@@ -686,9 +722,10 @@ export async function stopComputerHelper(): Promise<void> {
   await Promise.allSettled([...helperRetirements]);
 }
 
-async function sendHelperRequest(request: Record<string, unknown>): Promise<Record<string, any>> {
-  if (useMacOSDesktopAddon()) return sendMacOSAddonRequest(request);
+async function sendHelperRequest(request: Record<string, unknown>, expected?: ExpectedHelper): Promise<Record<string, any>> {
+  if (useMacOSDesktopAddon()) return sendMacOSAddonRequest(request, expected);
   const runtime = await startHelper();
+  assertHelperGeneration(runtime.generation, expected);
   if (runtime.pending) throw new ComputerError('Desktop helper received overlapping requests.');
 
   return new Promise<Record<string, any>>((resolve, reject) => {
@@ -711,13 +748,13 @@ async function sendHelperRequest(request: Record<string, unknown>): Promise<Reco
   });
 }
 
-function runHelper(request: Record<string, unknown>): Promise<Record<string, any>> {
+function runHelper(request: Record<string, unknown>, expected?: ExpectedHelper): Promise<Record<string, any>> {
   const queuedAt = Date.now();
   const operation = typeof request['op'] === 'string' ? request['op'] : 'unknown';
   const result = helperQueue.then(async () => {
     const startedAt = Date.now();
     try {
-      return await sendHelperRequest(request);
+      return await sendHelperRequest(request, expected);
     } finally {
       logInfo(
         `desktop timing op=${operation} helper_queue_ms=${startedAt - queuedAt} helper_ms=${Date.now() - startedAt}`
@@ -739,6 +776,7 @@ function runHelper(request: Record<string, unknown>): Promise<Record<string, any
  */
 interface Frame {
   id: number;
+  helperGeneration: number;
   region: Rect;
   scale: number;
   width: number;
@@ -792,8 +830,7 @@ const uiRefs = new Map<
  * outstanding ref is meaningless — and acting on one would click whatever now happens to
  * hold that id. Stamping the generation makes that detectable instead of silent.
  */
-function rememberUiRef(window: number, runtimeKey: string, index: number, snapshotId: number): string {
-  const generation = helperGeneration;
+function rememberUiRef(window: number, runtimeKey: string, index: number, snapshotId: number, generation: number): string {
   const ref = `g${generation}_s${snapshotId}_e${index + 1}`;
   uiRefs.set(ref, { window, runtimeKey, generation, snapshotId });
   while (uiRefs.size > 1000) {
@@ -811,10 +848,7 @@ function uiTarget(ref: string): { window: number; runtimeKey: string; snapshotId
       `UNKNOWN_UI_REF: ${ref}. Call get_window_state or find_ui again and use a ref from that reply.`
     );
   }
-  const helperAlive = useMacOSDesktopAddon()
-    ? macOSAddonRuntime !== null && !macOSAddonRuntime.exited
-    : helperRuntime !== null && helperRuntime.child.exitCode === null;
-  if (!helperAlive || target.generation !== helperGeneration) {
+  if (!isHelperGenerationActive(target.generation)) {
     throw new ComputerError(
       `STALE_REF: ${ref} was issued by a desktop helper that is no longer active, so it no longer identifies anything. Call get_window_state again and use a ref from that reply.`
     );
@@ -832,8 +866,12 @@ function rememberFrame(frame: Frame): void {
   }
 }
 
+function qualifiedFrame(frame: Frame | null, generation = helperGeneration): Frame | null {
+  return frame && frame.helperGeneration === generation && isHelperGenerationActive(generation) ? frame : null;
+}
+
 function frameById(id: number | undefined): Frame | null {
-  return id === undefined ? null : (frames.get(id) ?? null);
+  return qualifiedFrame(id === undefined ? null : (frames.get(id) ?? null));
 }
 
 export async function listWindows(): Promise<{ windows: WindowInfo[]; screen: Rect }> {
@@ -884,6 +922,8 @@ async function findUiLocked(
     maxResults: Math.min(100, Math.max(1, Math.floor(opts.maxResults ?? 30)))
   };
   const reply = suppliedReply ?? (await runHelper(request));
+  const replyGeneration = generationOfReply(reply);
+  frame = qualifiedFrame(frame, replyGeneration);
   const raw = Array.isArray(reply['elements']) ? (reply['elements'] as Array<Record<string, any>>) : [];
   const snapshotId = Number(reply['snapshotId']);
   if (!Number.isInteger(snapshotId) || snapshotId < 1) {
@@ -930,7 +970,7 @@ async function findUiLocked(
     const runtimeKey = String(item['runtimeKey'] ?? '');
     return {
       ref: runtimeKey
-        ? rememberUiRef(windowId, runtimeKey, index, snapshotId)
+        ? rememberUiRef(windowId, runtimeKey, index, snapshotId, replyGeneration)
         : `unavailable-${snapshotId}-${index + 1}`,
       name: String(item['name'] ?? ''),
       role: String(item['role'] ?? ''),
@@ -1122,6 +1162,7 @@ async function screenshotFromReply(
   }
   const frame: Frame = {
     id: nextFrameId++,
+    helperGeneration: generationOfReply(reply),
     region,
     scale,
     width: size.width,
@@ -1169,9 +1210,13 @@ async function screenshotLocked(
   }
 
   let cropRegion: Rect | undefined;
+  let expected: ExpectedHelper | undefined;
   if (opts.crop) {
-    const frame = cropFrame === undefined ? lastFrame : cropFrame;
+    const source = cropFrame === undefined ? lastFrame : cropFrame;
+    const frame = qualifiedFrame(source);
+    if (source && !frame) throw new ComputerError('STALE_FRAME: take a new screenshot before cropping.');
     if (!frame) throw new ComputerError('Take a screenshot first — crop coordinates refer to the most recent frame.');
+    expected = { generation: frame.helperGeneration, code: 'STALE_FRAME' };
     const crop = {
       x: Math.floor(opts.crop.x),
       y: Math.floor(opts.crop.y),
@@ -1221,7 +1266,7 @@ async function screenshotLocked(
       ...(cropRegion === undefined ? {} : { region: cropRegion }),
       ...(opts.window === undefined ? {} : { id: opts.window }),
       ...(opts.full === true ? { full: true } : {})
-    });
+    }, expected);
     // A crop is a fresh capture of visible display pixels, even when its coordinates came
     // from a window-bound frame. Keeping the source window id here would let pixels from an
     // occluding app authorize later input against the covered window. Publish the crop as
@@ -1278,7 +1323,7 @@ export async function actAndCapture(
   } = {}
 ): Promise<ActionResult & { screenshot: Screenshot | null; verification: VerificationResult | null }> {
   return exclusive(async () => {
-    const before = opts.frameId === undefined ? lastFrame : frameById(opts.frameId);
+    const before = opts.frameId === undefined ? qualifiedFrame(lastFrame) : frameById(opts.frameId);
     // capture.crop is expressed in pixels of the screenshot the caller saw, exactly like a
     // coordinate action. Another chat/agent can replace the app-global lastFrame between that
     // screenshot and this call, so using whichever frame happens to be current would crop an
@@ -1426,8 +1471,9 @@ async function actLocked(
     );
   }
   const frame =
-    requestedFrame ?? lastFrame ?? {
+    requestedFrame ?? qualifiedFrame(lastFrame) ?? {
       id: 0,
+      helperGeneration: 0,
       region: { x: 0, y: 0, width: 1, height: 1 },
       scale: 1,
       width: 1,
@@ -1547,6 +1593,11 @@ async function actLocked(
   const clipboard: string[] = [];
   const routes: ActionResult['routes'] = [];
   let completedCount = 0;
+  // Validation above is synchronous; pin its helper through every queued native segment,
+  // including a segment reached after a local wait or clipboard operation.
+  const expected: ExpectedHelper | undefined = needsFrame || uiTargets.size > 0
+    ? { generation: helperGeneration, code: uiTargets.size > 0 ? 'STALE_REF' : 'STALE_FRAME' }
+    : undefined;
   let batch: ReturnType<typeof mapOne>[] = [];
   let batchIndices: number[] = [];
   let reply: Record<string, any> | null = null;
@@ -1573,7 +1624,7 @@ async function actLocked(
               }
             }
           : {})
-      });
+      }, expected);
       helperUsed = true;
       const helperRoutes = Array.isArray(reply['routes']) ? reply['routes'].map(String) : [];
       for (let index = 0; index < sending.length; index++) {
@@ -1658,7 +1709,7 @@ async function actLocked(
   if (!Number.isFinite(sx) || !Number.isFinite(sy)) {
     throw new ComputerError('The desktop helper returned an invalid pointer position.');
   }
-  const current = requestedFrame ?? lastFrame;
+  const current = qualifiedFrame(requestedFrame ?? lastFrame, generationOfReply(reply));
   const image = current
     ? {
         x: Math.round((sx - current.region.x) * current.scale),
