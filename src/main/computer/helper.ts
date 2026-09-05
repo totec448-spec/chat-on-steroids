@@ -56,6 +56,8 @@ public static class Clf {
   const uint MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010;
   const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020, MOUSEEVENTF_MIDDLEUP = 0x0040;
   const uint MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_HWHEEL = 0x1000;
+  // Nonzero when the user has swapped the primary and secondary mouse buttons. See ButtonFlags.
+  const int SM_SWAPBUTTON = 23;
   const uint KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
 
   [DllImport("user32.dll", SetLastError = true)]
@@ -110,11 +112,38 @@ public static class Clf {
     Send(new INPUT[] { Mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, nx, ny, 0) });
   }
 
+  /**
+   * The caller's "left" means the primary button, not the physical one on the left.
+   *
+   * SendInput's flags name physical buttons, and Windows applies the left-handed swap
+   * (SM_SWAPBUTTON) when it turns a physical press into the message an application receives. So
+   * on a swapped mouse MOUSEEVENTF_LEFTDOWN arrives as the *secondary* click, and a default click
+   * opens a context menu instead of activating what it was aimed at -- issue #76. Inverting the
+   * pair here cancels the system's inversion, so a caller asking for "left" always gets whatever
+   * that user's Windows treats as primary.
+   *
+   * Measured on Windows 11 rather than inferred, by injecting into a window the probe owned:
+   * with the swap on, sending LEFTDOWN produced WM_RBUTTONDOWN and sending RIGHTDOWN produced
+   * WM_LBUTTONDOWN.
+   *
+   * Read per call rather than cached: it is a checkbox in Mouse properties and can change while
+   * the app runs, and a stale answer is the same wrong-button bug with a longer fuse. Only the
+   * primary and secondary swap -- middle and the wheel are untouched.
+   *
+   * (No backticks in this comment: the whole script is a String.raw template literal.)
+   */
   static void ButtonFlags(string button, out uint down, out uint up) {
+    bool swapped = GetSystemMetrics(SM_SWAPBUTTON) != 0;
     switch (button) {
-      case "right": down = MOUSEEVENTF_RIGHTDOWN; up = MOUSEEVENTF_RIGHTUP; break;
+      case "right":
+        down = swapped ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_RIGHTDOWN;
+        up = swapped ? MOUSEEVENTF_LEFTUP : MOUSEEVENTF_RIGHTUP;
+        break;
       case "middle": case "wheel": down = MOUSEEVENTF_MIDDLEDOWN; up = MOUSEEVENTF_MIDDLEUP; break;
-      default: down = MOUSEEVENTF_LEFTDOWN; up = MOUSEEVENTF_LEFTUP; break;
+      default:
+        down = swapped ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN;
+        up = swapped ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP;
+        break;
     }
   }
 
