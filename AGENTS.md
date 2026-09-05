@@ -2667,7 +2667,10 @@ reduced to a different path-based subject even when the parent is allowed. Regis
 re-checks, and macOS Screen Recording/Accessibility consent remains an independent OS boundary.
 The helper is prewarmed only when native Desktop capabilities are published; window observation is
 background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
-window geometry; semantic refs bind cached elements to bounded native accessibility snapshots.
+window geometry; semantic refs bind cached elements to bounded native accessibility snapshots. Both also
+retain the producing helper generation, stamped on the transport reply before asynchronous image
+I/O. Frame/ref-based requests recheck that identity at native dispatch, including after local work
+in a batch; helper replacement never transfers an old snapshot to the new instance.
 Visible-pixel crops and window-capture fallbacks are always screen-bound even when their request or
 coordinates named a window; otherwise an occluding app's pixels could be relabelled as the covered
 window. Screen captures compare the exact active-display rectangles with ScreenCaptureKit's snapshot
