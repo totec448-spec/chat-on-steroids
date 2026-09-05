@@ -831,6 +831,48 @@
   opacity: 0.7;
 }
 
+/* Native disclosures keep tool rows usable with a keyboard without a second UI state store. */
+.clf-stream-tool-disclosure > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.clf-stream-tool-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.clf-stream-tool-disclosure > summary::after {
+  content: '';
+  width: 0.35rem;
+  height: 0.35rem;
+  margin: 0.1rem 0.45rem 0.1rem 0.75rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  flex-shrink: 0;
+}
+
+.clf-stream-tool-disclosure[open] > summary::after {
+  transform: rotate(45deg);
+}
+
+.clf-stream-tool-disclosure > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.clf-stream-tool-panel {
+  padding: 0.3rem 0 0.5rem 1.45rem;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  opacity: 0.8;
+}
+
+.clf-stream-tool-change {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
 .clf-stream-tool_call:hover {
   background: transparent;
   opacity: 0.9;
