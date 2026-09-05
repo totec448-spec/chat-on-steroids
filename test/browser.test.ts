@@ -103,6 +103,36 @@ describe('browser-backed ChatGPT commands', () => {
     expect(attempts).toEqual([first, second]);
   });
 
+  it('keeps ChatGPT orchestration tabs active when launching Chrome on Windows', async () => {
+    const chrome = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    const calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+    const url = 'https://chatgpt.com/?clf=worker-marker';
+
+    const opened = await openInPreferredBrowser(url, {
+      platform: 'win32',
+      env: { ProgramFiles: 'C:\\Program Files' },
+      usable: (candidate) => candidate === chrome,
+      launch: async (command, args, cwd) => {
+        calls.push({ command, args, cwd });
+        return { pid: 789 };
+      }
+    });
+
+    expect(opened).toBe(chrome);
+    expect(calls).toEqual([
+      {
+        command: chrome,
+        args: [
+          '--disable-renderer-backgrounding',
+          '--disable-background-timer-throttling',
+          url
+        ],
+        cwd: 'C:\\Program Files\\Google\\Chrome\\Application'
+      }
+    ]);
+    expect(calls[0]?.args).not.toContain('--disable-backgrounding-occluded-windows');
+  });
+
   it('passes only the orchestration URL to a Linux browser, never the AppImage sandbox fallback', async () => {
     const flatpakChrome = '/var/lib/flatpak/exports/bin/com.google.Chrome';
     const calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];

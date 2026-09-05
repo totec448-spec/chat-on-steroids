@@ -153,7 +153,15 @@ export async function openInPreferredBrowser(
   for (const browser of preferredBrowserCandidates(platform, env, options.home)) {
     if (!usable(browser)) continue;
     try {
-      await launch(browser, [url], path.dirname(browser));
+      const args =
+        platform === 'win32'
+          ? [
+              '--disable-renderer-backgrounding',
+              '--disable-background-timer-throttling',
+              url
+            ]
+          : [url];
+      await launch(browser, args, path.dirname(browser));
       return browser;
     } catch (error) {
       lastError = error;
