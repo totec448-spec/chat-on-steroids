@@ -2634,7 +2634,11 @@ async function placeSuccessorChat(raw, tabId) {
   // Both a query and a fragment, matching the app's commandUrl(): ChatGPT rewrites its own URL
   // during boot and which of the two survives has changed between builds.
   const marker = `clf=${encodeURIComponent(id)}`;
-  const create = { url: `https://chatgpt.com/?${marker}#${marker}`, windowId: home.windowId, active: true };
+  const create = {
+    url: `https://chatgpt.com/?${marker}#${marker}`,
+    windowId: home.windowId,
+    active: !(raw && raw.background === true)
+  };
   // Directly after the chat it continues, so a handoff reads as one piece of work instead of a
   // tab appended to the far end of a long strip.
   if (typeof home.index === 'number') create.index = home.index + 1;

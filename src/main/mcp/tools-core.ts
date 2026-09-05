@@ -1127,10 +1127,11 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // And the identity behind it is the exact kind: a generic connector row would let
           // an uninvolved chat that happened to call something else in the same window
           // become the prime of this run.
+          const caller = await callerNow(startedAt, { exact: true });
           const staged = stageSpawn({
             workers: input.workers,
             context: input.context ?? null,
-            caller: await callerNow(startedAt, { exact: true })
+            caller
           });
           let accepted = false;
           try {
@@ -1156,7 +1157,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           const { created, becamePrime, runId } = staged;
           // Browser tabs are a publication side effect, never part of planning. They become
           // visible only after the exact broker revision above is durable.
-          requestWorkerBootstraps(created.map((worker) => worker.id));
+          requestWorkerBootstraps(created.map((worker) => worker.id), caller.conversationId ?? null);
           await adoptAgent(PRIME_ID);
           const invited = created.filter((worker) => worker.state === 'invited');
           const sleeping = created.filter((worker) => worker.state === 'sleeping' && worker.revivable);

@@ -365,7 +365,7 @@ const MAX_DORMANT_RUNS = 16;
  */
 let livenessFloor = 0;
 
-let spawnRequest: ((workers: WorkerSpawn[]) => void) | null = null;
+let spawnRequest: ((workers: WorkerSpawn[], placementHome: string | null) => void) | null = null;
 const listeners = new Set<() => void>();
 const endListeners = new Set<(reason: string, retired: RetiredChat[]) => void>();
 let persist: (() => void) | null = null;
@@ -571,11 +571,11 @@ export function pendingWorkerSpawns(): WorkerSpawn[] {
  * Registration replays whatever is already owed: startup restores the run before the bridge
  * exists, so the restore itself has nobody to ask for a tab.
  */
-export function onSpawnRequest(handler: (workers: WorkerSpawn[]) => void): () => void {
+export function onSpawnRequest(handler: (workers: WorkerSpawn[], placementHome: string | null) => void): () => void {
   spawnRequest = handler;
   const owed = pendingWorkerSpawns();
   if (owed.length > 0) {
-    handler(owed);
+    handler(owed, null);
     logInfo(`multi-agent: ${owed.length} worker chat(s) still owed a tab`);
   }
   return () => {
@@ -1173,7 +1173,7 @@ export function stageSpawn(input: SpawnInput): StagedSpawn {
  * planned first, that exact revision is made durable, and only then are browser tabs requested.
  * A retry after a failed disk barrier is safe because already-running workers are ignored.
  */
-export function requestWorkerBootstraps(ids: readonly string[]): number {
+export function requestWorkerBootstraps(ids: readonly string[], placementHome: string | null = null): number {
   if (!run || ids.length === 0) return 0;
   const wanted = new Set(ids);
   const owed = [...run.agents.values()]
@@ -1186,7 +1186,7 @@ export function requestWorkerBootstraps(ids: readonly string[]): number {
     )
     .map((agent) => ({ id: agent.info.id, task: agent.info.task }));
   if (owed.length === 0) return 0;
-  if (spawnRequest) spawnRequest(owed);
+  if (spawnRequest) spawnRequest(owed, placementHome);
   else logWarn('multi-agent: no browser extension is paired, so worker chats cannot be opened automatically');
   return owed.length;
 }
@@ -3945,7 +3945,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   // this is replayed by onSpawnRequest the moment it registers.
   const stranded = pendingWorkerSpawns();
   if (stranded.length > 0 && spawnRequest) {
-    spawnRequest(stranded);
+    spawnRequest(stranded, null);
     logInfo(`multi-agent: re-requested ${stranded.length} worker chat(s) that were unbound at the restart`);
   }
   const activeAgents = run ? [...run.agents.values()] : [];
