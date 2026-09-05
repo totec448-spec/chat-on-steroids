@@ -4834,12 +4834,33 @@
     return true;
   }
 
-  function streamRow(entry) {
+  /** The same bounded, app-owned metadata drives both disclosure text and repaint identity. */
+  function streamToolDetails(entry) {
+    const tool = typeof entry.tool === 'string' ? entry.tool.slice(0, 160) : 'tool';
+    const outcome = entry.outcome === 'ok' ? 'completed' : entry.outcome === 'error' ? 'failed'
+      : entry.outcome === 'rejected' ? 'refused' : 'unknown';
+    const duration = typeof entry.durationMs === 'number' && Number.isFinite(entry.durationMs) && entry.durationMs >= 0
+      ? ` · ${Math.round(entry.durationMs)} ms` : '';
+    const lines = [{ kind: 'meta', text: `${tool} · ${outcome}${duration}` }];
+    const changes = Array.isArray(entry.changes) ? entry.changes : [];
+    for (const change of changes.slice(0, 12)) {
+      if (!change || typeof change.path !== 'string') continue;
+      const counts = [];
+      if (Number.isFinite(change.added) && change.added >= 0) counts.push(`+${change.added}`);
+      if (Number.isFinite(change.removed) && change.removed >= 0) counts.push(`−${change.removed}`);
+      const path = change.path.length > 1024 ? `${change.path.slice(0, 1023)}…` : change.path;
+      lines.push({ kind: 'change', text: path + (counts.length ? `  ${change.approximate === true ? '≈ ' : ''}${counts.join(' ')}` : '') });
+    }
+    if (changes.length > 12) lines.push({ kind: 'more', text: `${changes.length - 12} more changed files` });
+    return lines;
+  }
+
+  function streamRow(entry, expandedTools) {
     // A reload row that names its turn arrives on the ordinary feed as 'progress' and is
     // painted here among the turn's tool calls. It keeps the repair look — the ↻ and the time —
     // because what it says is what the app did to this tab, not what ChatGPT said.
     if (browserRepairRow(entry) && entry.kind !== 'repair') entry = { ...entry, kind: 'repair' };
-    const row = document.createElement('div');
+    const row = document.createElement(entry.kind === 'tool_call' ? 'summary' : 'div');
     row.className = `clf-stream-row clf-stream-${entry.kind}`;
     row.dataset.clfSeq = String(entry.seq);
 
@@ -4897,7 +4918,24 @@
       when.textContent = clockText(entry.time);
       row.append(when);
     }
-    return row;
+    if (entry.kind !== 'tool_call') return row;
+
+    // Native details supplies mouse/keyboard disclosure semantics. Only metadata already
+    // present on /activity is rendered; raw arguments/results remain in the local store.
+    const disclosure = document.createElement('details');
+    disclosure.className = 'clf-stream-tool-disclosure';
+    disclosure.dataset.clfCall = entry.callId || `seq:${entry.seq}`;
+    disclosure.open = Boolean(expandedTools && expandedTools.has(disclosure.dataset.clfCall));
+    const panel = document.createElement('div');
+    panel.className = 'clf-stream-tool-panel';
+    for (const detail of streamToolDetails(entry)) {
+      const line = document.createElement('div');
+      line.className = `clf-stream-tool-${detail.kind}`;
+      line.textContent = detail.text;
+      panel.append(line);
+    }
+    disclosure.append(row, panel);
+    return disclosure;
   }
 
   /** The app's own reload/reopen notices on this chat, keyed by the seq each one holds. */
@@ -5321,13 +5359,24 @@
             entry.summary && entry.summary.title ? entry.summary.title : '',
             entry.summary && entry.summary.detail ? entry.summary.detail : '',
             entry.summary ? displayMetric(entry.summary) : '',
-            entry.agent || ''
+            entry.agent || '',
+            entry.kind === 'tool_call' ? JSON.stringify(streamToolDetails(entry)) : ''
           ].join(':')
         )
         .join('|');
       if (root.dataset.clfSignature !== signature) {
         root.dataset.clfSignature = signature;
-        root.replaceChildren(...activityRows.map(streamRow));
+        // Expansion belongs to this exact rendered conversation/turn, not a global cache.
+        // Removed calls and resetConversation() discard it with their DOM roots.
+        const disclosures = [...root.querySelectorAll('details.clf-stream-tool-disclosure')];
+        const expanded = new Set(disclosures.filter((node) => node.open).map((node) => node.dataset.clfCall));
+        const focused = disclosures.find((node) => node.querySelector('summary') === document.activeElement)?.dataset.clfCall;
+        root.replaceChildren(...activityRows.map((entry) => streamRow(entry, expanded)));
+        if (focused) {
+          const replacement = [...root.querySelectorAll('details.clf-stream-tool-disclosure')]
+            .find((node) => node.dataset.clfCall === focused);
+          replacement?.querySelector('summary')?.focus({ preventScroll: true });
+        }
       }
       root.dataset.clfStrongKeys = JSON.stringify([...strongStreamIdentityKeys(rendered)]);
       // Hide only the native activity that these exact rows replace. The assistant answer and
