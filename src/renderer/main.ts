@@ -1477,6 +1477,11 @@ $('readOnlyBtn').addEventListener('click', () => {
 
 $('addFolder').addEventListener('click', () => void addFolder());
 $('wizAddFolder').addEventListener('click', () => void addFolder());
+$('wizManageFolders').addEventListener('click', () => {
+  showTab('home');
+  $('foldersCard').scrollIntoView({ block: 'nearest' });
+  $('addFolder').focus({ preventScroll: true });
+});
 
 // Dropping a file anywhere on an Electron window otherwise navigates the whole window to
 // it. Only the Folders card accepts drops, and everything else swallows them.
