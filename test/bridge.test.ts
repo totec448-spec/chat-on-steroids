@@ -8,6 +8,7 @@
  */
 
 import http from 'node:http';
+import { once } from 'node:events';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import { foldProgress, type SessionEvent } from '../src/shared/session.js';
@@ -7918,8 +7919,9 @@ describe('shutting the listener down', () => {
     const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
     const payload = Buffer.from(JSON.stringify({ conversationId: 'cafe0009-0000-4000-8000-000000000009', events: [] }), 'utf8');
 
+    let req!: http.ClientRequest;
     const answered = new Promise<number>((resolve, reject) => {
-      const req = http.request(
+      req = http.request(
         `${base}/events`,
         {
           method: 'POST',
@@ -7927,6 +7929,7 @@ describe('shutting the listener down', () => {
           headers: {
             origin: EXTENSION_ORIGIN,
             authorization: `Bearer ${token}`,
+            expect: '100-continue',
             'content-type': 'application/json',
             'x-extension-protocol': String(BRIDGE_PROTOCOL),
             'content-length': String(payload.length)
@@ -7938,23 +7941,26 @@ describe('shutting the listener down', () => {
         }
       );
       req.on('error', reject);
-      // Headers and half the body only: the handler is now parked inside readBody.
-      req.write(payload.subarray(0, payload.length - 1));
-      setTimeout(() => req.end(payload.subarray(payload.length - 1)), 150);
     });
 
-    // Give the server time to accept the connection and start reading.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // HTTP 100 Continue proves the server accepted the request. Withhold the last byte
+    // ourselves; timer subtraction (150 - 50 ms) is not proof that shutdown drained it.
+    const accepted = once(req, 'continue');
+    req.write(payload.subarray(0, payload.length - 1));
+    await accepted;
     const started = Date.now();
-    await stopBridge();
-    const elapsed = Date.now() - started;
-
-    expect(await answered).toBe(200);
-    agent.destroy();
-    // The drain is real — it waited for the request — but it ends with the request, not with
-    // the force timer 15s later.
-    expect(elapsed).toBeGreaterThanOrEqual(100);
-    expect(elapsed).toBeLessThan(3_000);
+    let stopped = false;
+    const stopping = stopBridge().then(() => { stopped = true; });
+    try {
+      await vi.waitFor(() => expect(bridgePort()).toBeNull());
+      expect(stopped).toBe(false);
+      req.end(payload.subarray(payload.length - 1));
+      expect(await answered).toBe(200);
+      await stopping;
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally {
+      agent.destroy();
+    }
 
     const restarted = await startBridge();
     expect(restarted).not.toBeNull();
