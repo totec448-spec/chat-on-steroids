@@ -67,6 +67,7 @@ win:
       filter: ['**/*']
 
 nsis:
+  include: scripts/windows-installer-acl.nsh
   oneClick: false
   perMachine: false
   buildUniversalInstaller: false
