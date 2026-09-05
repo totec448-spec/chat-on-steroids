@@ -151,6 +151,19 @@ interface Continuation {
   /** Chat A: where the session is attached until the commit lands. */
   from: string;
   openedAt: number;
+  /**
+   * Last sign that this handoff is still being worked, which is what the manual deadline runs on.
+   *
+   * The ten-minute clock is a limit on *waiting*, and it used to be measured from `openedAt` — so
+   * a brief that ChatGPT was still writing was indistinguishable from one nobody had touched. On a
+   * 730k-token chat under Pro reasoning the brief took longer than that, and issue #21 is what
+   * happened next: the running generation was declared dead and auto-compaction then treated the
+   * compaction itself as an eligible turn, stopped it, and started another one.
+   *
+   * Renewed only by real forward progress. A token that has genuinely gone quiet for a full TTL
+   * still expires, so this lengthens nothing for a stalled handoff.
+   */
+  touchedAt: number;
   /** Auto-compaction ticket: survives page/retry clocks until commit or explicit Off/cancel. */
   automatic: boolean;
   /** When the brief request first went on its way; the automatic clock starts here. */
@@ -194,6 +207,8 @@ interface ContinuationRecord {
   from: string;
   to: string | null;
   openedAt: number;
+  /** Absent in snapshots written before the manual deadline counted from activity. */
+  touchedAt?: number;
   /** Absent in records written before durable auto-compaction tickets existed. */
   automatic?: boolean;
   /** Absent in records written before automatic handovers had a deadline. */
@@ -223,6 +238,7 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     from: entry.from,
     to: entry.to,
     openedAt: entry.openedAt,
+    touchedAt: entry.touchedAt,
     automatic: entry.automatic,
     askedAt: entry.askedAt,
     state: entry.state,
@@ -270,6 +286,10 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   // waiting out a window that is already over.
   if (record.state === 'committed' || record.state === 'aborted') endResumeClaim(entry.token);
   entry.to = record.to;
+  // Never let a durable read move the deadline backwards: a snapshot written before this field
+  // existed reports nothing, and reading that as "last touched when it opened" would expire a
+  // handoff that has been progressing since.
+  entry.touchedAt = Math.max(entry.touchedAt, record.touchedAt ?? record.openedAt);
   entry.automatic = record.automatic === true;
   entry.state = record.state;
   entry.summary = record.summary;
@@ -295,6 +315,10 @@ async function transitionNow(
 ): Promise<ContinuationRecord> {
   const current = durableRecord(entry);
   const next = derive(current);
+  // Any semantic transition is forward progress, so it renews the waiting deadline. Without this
+  // the stamp would only ever be set at open and the manual clock would be back to counting from
+  // there — the same bug in a new field.
+  next.touchedAt = Date.now();
   try {
     // Persist the proposed semantic state before publishing it into the live transaction.
     // If the durable boundary rejects, callers still see the previous state and can retry or
@@ -377,7 +401,7 @@ const handoffAsked = (entry: Continuation): boolean =>
 const expired = (entry: Continuation, now = Date.now()): boolean =>
   entry.automatic
     ? entry.askedAt !== null && now - entry.askedAt >= AUTOMATIC_HANDOVER_TTL_MS
-    : now - entry.openedAt >= CONTINUATION_TTL_MS;
+    : now - entry.touchedAt >= CONTINUATION_TTL_MS;
 
 const isOpen = (entry: Continuation): boolean =>
   entry.state !== 'committed' && entry.state !== 'aborted' && !expired(entry);
@@ -418,6 +442,51 @@ export function continuationByToken(token: string): ContinuationView | null {
   sweep();
   const entry = byToken.get(token);
   return entry ? view(entry) : null;
+}
+
+/**
+ * Renews the waiting deadline of a handoff whose chat is demonstrably still working.
+ *
+ * The ten-minute limit exists so a handoff nobody is working on cannot hold a session forever. A
+ * brief ChatGPT is still generating is the opposite of that, and on a large chat under heavy
+ * reasoning it genuinely takes longer — issue #21 watched one declared dead mid-generation, after
+ * which auto-compaction treated the compaction itself as an eligible turn and started another on
+ * top of it.
+ *
+ * Keyed by session and chat rather than by a token the page would have to carry. The page already
+ * proves which conversation it is and the app already knows that chat's session, so nothing new
+ * crosses the bridge — which matters because an extension that has not been reloaded would
+ * otherwise silently lose the renewal and reintroduce the bug for exactly the users least likely
+ * to notice.
+ *
+ * Deliberately narrow, because this is the one call that can extend a deadline:
+ *
+ *  - the session *and* the source chat must both match, so another chat's activity renews nothing;
+ *  - only `awaiting-summary`: once the brief is in, the wait this deadline governs is over;
+ *  - only manual handoffs, since an automatic one runs on its own much longer clock already;
+ *  - only while still open, so a committed or aborted transaction cannot be revived;
+ *  - it moves the clock and nothing else — no state change, no durable write. The stamp reaches
+ *    disk on the next real transition, and losing an unpersisted touch to a crash costs at most
+ *    one TTL, which is the behaviour that already existed.
+ *
+ * A chat that has actually gone quiet for a full TTL still expires; nothing here lengthens the
+ * wait for a stalled handoff.
+ */
+export function touchContinuationForChat(sessionId: string, fromConversationId: string): boolean {
+  if (!sessionId || !fromConversationId) return false;
+  const entry = [...byToken.values()].find(
+    (candidate) =>
+      candidate.sessionId === sessionId &&
+      candidate.from === fromConversationId &&
+      // Only a handoff still waiting for its brief. Once the summary is in, the wait this
+      // deadline governs is over and later states have their own clocks.
+      candidate.state === 'awaiting-summary' &&
+      !candidate.automatic &&
+      isOpen(candidate)
+  );
+  if (!entry) return false;
+  entry.touchedAt = Date.now();
+  return true;
 }
 
 /**
@@ -628,6 +697,7 @@ function makeContinuation(sessionId: string, fromConversationId: string, automat
     sessionId,
     from: fromConversationId,
     openedAt: Date.now(),
+    touchedAt: Date.now(),
     automatic,
     askedAt: null,
     state: 'awaiting-summary',
@@ -1378,6 +1448,8 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       from: raw.from,
       to: typeof raw.to === 'string' && raw.to ? raw.to : null,
       openedAt: raw.openedAt,
+      // Older snapshots have no touch stamp; the open time is the honest floor for them.
+      touchedAt: Number.isFinite(raw.touchedAt) ? Number(raw.touchedAt) : raw.openedAt,
       automatic: raw.automatic === true,
       askedAt: null,
       state: raw.state,

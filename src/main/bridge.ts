@@ -127,6 +127,7 @@ import {
   CONTINUATION_TTL_MS,
   continuationByToken,
   continuationForSession,
+  touchContinuationForChat,
   pendingAutomaticContinuations,
   supersededSourceConversations,
   dispatchContinuationDestinationSendNow,
@@ -1517,6 +1518,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         logWarn(`bridge: resume-shadow repair for ${id} failed — ${err instanceof Error ? err.message : String(err)}`);
       }
     }
+    // A chat that is still generating is a handoff still being written.
+    //
+    // The manual continuation deadline is ten minutes of *waiting*, and a large chat under heavy
+    // reasoning can spend longer than that producing the brief. Issue #21 watched one expire
+    // mid-generation, after which auto-compaction treated the compaction itself as an eligible
+    // turn and started a second one on top of it. This poll is the page's own heartbeat — it runs
+    // at the live cadence exactly while ChatGPT is working — so it is where "still going" is known.
+    //
+    // It renews nothing on its own authority: the helper requires this session and this chat to
+    // own an open, manual, still-awaiting-summary handoff, and a chat that has genuinely gone
+    // quiet for a full deadline still expires.
+    if (live.generating) touchContinuationForChat(live.sessionId, id);
     const summary = await getSession(live.sessionId);
     // Worker chats and user-blocked chats alike: neither may auto-compact — see goalBlockReason.
     const workerBlocked = goalFencedChat(id);

@@ -64,6 +64,7 @@ const {
   dispatchContinuationDestinationSendNow,
   dispatchContinuationSourceSendNow,
   openContinuationNow,
+  touchContinuationForChat,
   releaseContinuationDestinationSendNow,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
@@ -1414,5 +1415,76 @@ describe('the window in which a replacement chat is expected', () => {
       conversationId: 'worker-old-owner',
       state: 'sleeping'
     });
+  });
+});
+
+/**
+ * Issue #21: a handoff that was still being written got declared dead at ten minutes.
+ *
+ * The deadline is a limit on *waiting*, but it was measured from the moment the transaction
+ * opened — so a brief ChatGPT was still generating looked exactly like one nobody had touched.
+ * On a 730k-token chat under Pro reasoning the generation took longer than that, and the reported
+ * consequence was worse than a lost handoff: once the running continuation expired,
+ * auto-compaction treated the compaction itself as an eligible turn, stopped it, and started
+ * another one on top.
+ *
+ * The renewal is deliberately not a longer timeout. A chat that has genuinely gone quiet still
+ * expires on the original clock, which the second test here is for.
+ */
+describe('a handoff still being generated keeps its deadline (issue #21)', () => {
+  it('survives past the deadline while its chat is still generating', async () => {
+    vi.useFakeTimers();
+    try {
+      const summary = await createSession({ title: 'long brief', conversationId: CHAT_A });
+      const opened = await openContinuationNow(summary.id, CHAT_A);
+
+      // Nine minutes in, still generating: the page's own poll says so.
+      vi.setSystemTime(Date.now() + CONTINUATION_TTL_MS - 60_000);
+      expect(touchContinuationForChat(summary.id, CHAT_A)).toBe(true);
+
+      // Past the original deadline, measured from when it opened. Before the fix this was gone.
+      vi.setSystemTime(Date.now() + 2 * 60_000);
+      expect(continuationByToken(opened.token)?.state).toBe('awaiting-summary');
+
+      // And it keeps going for as long as the generation does.
+      expect(touchContinuationForChat(summary.id, CHAT_A)).toBe(true);
+      vi.setSystemTime(Date.now() + CONTINUATION_TTL_MS - 60_000);
+      expect(continuationByToken(opened.token)?.state).toBe('awaiting-summary');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still expires a handoff whose chat has gone quiet', async () => {
+    vi.useFakeTimers();
+    try {
+      const summary = await createSession({ title: 'abandoned brief', conversationId: CHAT_A });
+      const opened = await openContinuationNow(summary.id, CHAT_A);
+
+      // One renewal, then silence for a full deadline. The renewal must not have bought immunity.
+      expect(touchContinuationForChat(summary.id, CHAT_A)).toBe(true);
+      vi.setSystemTime(Date.now() + CONTINUATION_TTL_MS + 1_000);
+      expect(continuationByToken(opened.token)?.state).toBe('aborted');
+
+      // And a dead transaction cannot be renewed back to life.
+      expect(touchContinuationForChat(summary.id, CHAT_A)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('renews only the chat and session that own the handoff', async () => {
+    vi.useFakeTimers();
+    try {
+      const summary = await createSession({ title: 'scoped', conversationId: CHAT_A });
+      await openContinuationNow(summary.id, CHAT_A);
+
+      // Another chat generating, and another session's id, must both renew nothing — otherwise
+      // any busy conversation in the app would hold every open handoff alive.
+      expect(touchContinuationForChat(summary.id, CHAT_B)).toBe(false);
+      expect(touchContinuationForChat('some-other-session', CHAT_A)).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
