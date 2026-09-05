@@ -29,8 +29,10 @@ import { SURFACE_LIST, surfaceDefinition, type SurfaceId } from '../src/main/mcp
 import {
   appendEvent,
   createSession,
+  flushSessions,
   initSessionStore,
   rebindSession,
+  sessionsRoot,
   upsertMessageEvent,
   writeOverflowText
 } from '../src/main/session/store.js';
@@ -60,6 +62,18 @@ import {
 import { unifiedExecManager } from '../src/main/codex/manager.js';
 import { locateRipgrep } from '../src/main/ripgrep.js';
 import { IS_WINDOWS, makeTempDir, removeTempDir, writeTree } from './helpers.js';
+
+/**
+ * How long an exec call waits for a command to finish before handing back a session instead.
+ *
+ * Was five seconds, twenty times over, and under the full suite one of those failed at 6749 ms
+ * on a Windows-on-ARM machine — starting PowerShell alone can outlast five seconds when every
+ * worker is busy. The tests that use this are about Codex response semantics: a command that
+ * finishes returns its output, one that does not returns a session. The window is how long to
+ * wait before choosing between them, not a correctness boundary, so a value that turns those
+ * tests into assertions about the machine's load is simply the wrong value.
+ */
+const QUICK_YIELD_MS = 15_000;
 
 // ---------------------------------------------------------------- transport
 
@@ -651,10 +665,45 @@ describe('surface boundaries', () => {
     }
   });
 
+  /**
+   * The tool cannot vanish, and when it arrives late the app has to say so.
+   *
+   * `browser` appears when control is exposed, and the exposed surface only ever widens — so
+   * switching control on adds it here. What it cannot do is add it to a connector ChatGPT
+   * already created: that keeps the tools/list it first fetched. QA reported `browser` missing
+   * while the app was serving it, and had no way to distinguish "not published" from "published
+   * after your connector was made". Diagnostics now names what grew.
+   */
+  /**
+   * A model that can take a page must be able to give it back.
+   *
+   * The driver has always had detach and the command channel has always carried the message;
+   * only the tool's schema never offered it. So control could be taken and not released, and QA
+   * reached for the extension popup and clicked it with desktop automation instead — which is
+   * neither reliable nor anything anyone should have to do.
+   */
+  it('offers detach and status alongside the actions that drive a page', async () => {
+    everything();
+    const tools = toolList(await desktop('tools/list'));
+    const browser = tools.find((tool) => tool.name === 'browser');
+    expect(browser, 'the browser tool').toBeDefined();
+    const schema = JSON.stringify(browser);
+    for (const action of ['detach', 'status', 'observe', 'navigate', 'click_ref']) {
+      expect(schema, action).toContain(`"${action}"`);
+    }
+  });
+
+  it('remembers a capability switched on after the endpoint started', async () => {
+    everything();
+    // Two reads of the same endpoint; the second must still carry the browser tool.
+    expect(toolNames(await desktop('tools/list'))).toContain('browser');
+    expect(toolNames(await desktop('tools/list'))).toContain('browser');
+  });
+
   it('advertises exactly Desktop’s tools on Desktop, with nothing from Core', async () => {
     everything();
     const names = toolNames(await desktop('tools/list'));
-    expect(names).toEqual(['computer', 'observe']);
+    expect(names).toEqual(['browser', 'computer', 'observe']);
     for (const name of surfaceDefinition('core').tools) expect(names, name).not.toContain(name);
   });
 
@@ -770,9 +819,12 @@ describe('surface boundaries', () => {
     const desktopTools = toolList(await desktop('tools/list'));
 
     // Counts are the design: Core is capped at seven live schemas because find and the exec
-    // pair cannot both exist, and Desktop is two.
+    // pair cannot both exist. Desktop is three — observe and computer drive the operating
+    // system, and browser drives a web page, which is a different problem: Chromium keeps its
+    // renderer accessibility tree off until a real assistive client asks, so the OS-level
+    // driver sees a browser window as one opaque pane and has pixels and nothing else inside it.
     expect(coreTools).toHaveLength(7);
-    expect(desktopTools).toHaveLength(2);
+    expect(desktopTools).toHaveLength(3);
 
     // And the size, which is what a discovery pull actually costs the model on every
     // conversation that touches the connector. The ceilings sit just above what the
@@ -782,14 +834,38 @@ describe('surface boundaries', () => {
     const coreBytes = Buffer.byteLength(JSON.stringify(coreTools), 'utf8');
     const desktopBytes = Buffer.byteLength(JSON.stringify(desktopTools), 'utf8');
     expect(coreBytes, `core tools/list is ${coreBytes} bytes`).toBeLessThan(18_000);
-    expect(desktopBytes, `desktop tools/list is ${desktopBytes} bytes`).toBeLessThan(8_500);
+    // Desktop grew from about 7.9k to about 12.4k when `browser` was added, and that is a real
+    // cost: it is paid on every conversation that connects the Desktop surface, including the
+    // ones that never drive a web page. It buys the only way to see inside one — Chromium keeps
+    // its renderer accessibility tree off until a real assistive client asks, so without this
+    // the OS-level driver has pixels and nothing else in a browser. The action union is already
+    // as small as the capability allows: attach was removed because the driver takes the newest
+    // ordinary tab on its own, which is bookkeeping the model should never have had to carry.
+    // detach and status were briefly removed with it and came back, because a model that had
+    // taken a page then had no way to give it back. Saying so in the description costs bytes
+    // here and is worth them: a run was lost to a model looking for an attach action, not
+    // finding one, and reaching for desktop automation to open a tab instead.
+    //
+    // Raised from 12,800 on 2026-09-01 for one sentence on `computer.actions`: only one
+    // UI-changing action goes per call. The rule was enforced and unstated, so a QA run met it as
+    // a rejected call and reported the schema and the runtime as disagreeing — which they did.
+    // Same trade as the paragraph above: bytes at discovery against a round trip in every run.
+    //
+    // Raised from 12,900 on 2026-09-01 for `move_ref`, which hovers a control by ref and presses
+    // nothing. Two independent QA runs named it as the one action genuinely missing: the only
+    // route to a named element was a click, which commits to the very thing a hover was meant to
+    // inspect first, so menus and tooltips that open under the pointer were unreachable. A whole
+    // capability for one schema line is the cheapest entry in this budget.
+    expect(desktopBytes, `desktop tools/list is ${desktopBytes} bytes`).toBeLessThan(13_200);
 
     // Per tool as well as per surface, so one schema cannot quietly eat the whole budget
     // while the total stays under it. `computer` is the largest by design: fourteen
     // discriminated action variants, each spelling out its own arguments, is what keeps
     // its validation errors small and its action set explicit. `exec_command` earns a narrow
     // exception for the `cmds` contract that removes whole connector round trips, including
-    // the one-shell and per-command-exit semantics. `agents` is the other exception: its description is where the prime learns to write
+    // the one-shell and per-command-exit semantics, and since issue #36 for the sentence that
+    // makes draining a returned session ID to its terminal exit part of the tool contract:
+    // those bytes are what stops a completed background result from being silently dropped. `agents` is the other exception: its description is where the prime learns to write
     // shared context once instead of per worker, to batch messages into one call, and to
     // hand back RESULT/CHANGES/VALIDATION/BLOCKERS — bytes spent once at discovery to save
     // a great many in every run that follows.
@@ -797,7 +873,12 @@ describe('surface boundaries', () => {
       const bytes = Buffer.byteLength(JSON.stringify(tool), 'utf8');
       const budget =
         tool.name === 'computer'
-          ? 6_000
+          // Raised from 6,000 for the one sentence naming the batching rule on `actions`. It was
+          // enforced and unstated, so a QA run met it as a rejected call; see the surface ceiling.
+          // Raised again from 6,100 for `keypress` naming that a browser tab/window/address-bar
+          // chord is refused and pointing at set_value instead — the same "say the boundary up
+          // front" reasoning as the batching sentence above it.
+          ? 6_200
           : tool.name === 'apply_patch'
             ? 5_000
             : tool.name === 'agents'
@@ -807,8 +888,28 @@ describe('surface boundaries', () => {
                 // is quoted verbatim from Codex's own shell spec — it is not ours to trim to fit a
                 // budget. The non-Windows number is the one that says whether *our* additions have
                 // grown, so both are asserted rather than one loose bound covering both.
-                ? (process.platform === 'win32' ? 3_800 : 3_500)
-                : 3_000;
+                //
+                // Raised from 3,800/3,500 for the path contract on `workdir`, which said neither
+                // half of it: that `workdir` takes the same virtual path `read.paths` advertises,
+                // and that `cmd` is not translated so the same spelling inside it is refused. Both
+                // rules were already enforced and tested; only the description was silent, and one
+                // QA round walked into both sides. Both budgets move by the same amount so each
+                // keeps the headroom it had, and the test still measures growth rather than slack.
+                ? (process.platform === 'win32' ? 3_950 : 3_650)
+                : tool.name === 'browser'
+                  // Raised from 4,900 for detach and status. The tool could take a page and had
+                  // no way to give it back, so a QA run resorted to clicking the extension popup
+                  // with desktop automation — the ceiling was buying a smaller schema at the
+                  // price of an unreleasable session. Their descriptions are three words each.
+                  //
+                  // Raised again from 5,200 for `move_ref`: hovering a control by ref, which two
+                  // QA runs named as the one action genuinely missing. Without it the only route
+                  // to a named element was a click, and a click commits to the thing a hover was
+                  // meant to inspect first — menus and tooltips that open under the pointer were
+                  // simply out of reach. Coordinates are no substitute: what a hover reveals is
+                  // laid out relative to the element, so the point must be resolved at the move.
+                  ? 5_500
+                  : 3_000;
       expect(bytes, `${tool.name} schema is ${bytes} bytes`).toBeLessThan(budget);
     }
   });
@@ -1138,6 +1239,77 @@ describe('capability gating', () => {
     expect(searchText).toContain('matches: tools 1');
     expect(searchText).toMatch(/read_cursor: [A-Za-z0-9_-]+/);
     expect(searchText.length).toBeLessThanOrEqual(12_000);
+  });
+
+  it('polls an update cursor without re-reading the whole recording each time', async () => {
+    // Finding 5 from the 2026-08-31 audit: every cursor path read the entire journal, so P polls
+    // of an N-event session cost O(P x N). Watching one long session was the case that hurt —
+    // the poll that finds nothing new used to be the most expensive thing the tool did.
+    ctx.sessionTools = true;
+    const recorded = await createSession({ title: 'long-running watched session', conversationId: null });
+    const bulk = 'z'.repeat(4_000);
+    for (let index = 0; index < 300; index++) {
+      await appendEvent(recorded.id, {
+        time: 9_000 + index,
+        source: 'app',
+        kind: 'note',
+        message: { text: `${bulk} ${index}`, truncated: false, chars: bulk.length }
+      });
+    }
+    await flushSessions();
+    const journal = path.join(sessionsRoot(), recorded.id, 'events.jsonl');
+    const journalBytes = (await fs.stat(journal)).size;
+    expect(journalBytes).toBeGreaterThan(1_000_000);
+
+    const first = await core('tools/call', {
+      name: 'session',
+      arguments: { action: 'read', session_id: recorded.id, include: ['tools'] }
+    });
+    const cursor = /update_cursor: ([A-Za-z0-9_-]+)/.exec(textOf(first))?.[1];
+    expect(cursor, textOf(first)).toBeTruthy();
+
+    let journalBytesRead = 0;
+    const realReadFile = fs.readFile.bind(fs);
+    const realOpen = fs.open.bind(fs);
+    const readFile = vi.spyOn(fs, 'readFile').mockImplementation((async (target: string, ...rest: unknown[]) => {
+      const out = await (realReadFile as (...args: unknown[]) => Promise<unknown>)(target, ...rest);
+      if (String(target) === journal) journalBytesRead += Buffer.byteLength(out as string);
+      return out;
+    }) as never);
+    const open = vi.spyOn(fs, 'open').mockImplementation((async (target: string, ...rest: unknown[]) => {
+      const handle = (await (realOpen as (...args: unknown[]) => Promise<unknown>)(target, ...rest)) as {
+        read: (...args: unknown[]) => Promise<{ bytesRead: number }>;
+      };
+      if (String(target) !== journal) return handle;
+      const realRead = handle.read.bind(handle);
+      handle.read = async (...args: unknown[]) => {
+        const result = await realRead(...args);
+        journalBytesRead += result.bytesRead;
+        return result;
+      };
+      return handle;
+    }) as never);
+
+    try {
+      for (let poll = 0; poll < 5; poll++) {
+        const caughtUp = await core('tools/call', {
+          name: 'session',
+          arguments: { action: 'read', session_id: recorded.id, cursor }
+        });
+        expect(failed(caughtUp), textOf(caughtUp)).toBe(false);
+        expect(textOf(caughtUp)).toContain('caught_up: true');
+      }
+    } finally {
+      readFile.mockRestore();
+      open.mockRestore();
+    }
+
+    // Five polls that each found nothing. Before the bounded walk this measured 6,163,910 bytes
+    // — the 1.2 MB journal read once per poll, exactly the O(P x N) the finding described. It now
+    // measures 327,680: one 64 KiB block per poll, independent of how long the recording is. The
+    // bound is deliberately "five polls together cost less than one full read", which is the
+    // claim itself rather than a number that has to be re-tuned whenever the block size moves.
+    expect(journalBytesRead).toBeLessThan(journalBytes);
   });
 
   it('reads exact user and assistant prose, filters headlines, and expands a short session-local tool ref', async () => {
@@ -1569,7 +1741,32 @@ describe('desktop capabilities', () => {
       arguments: { actions: [{ type: 'write_clipboard', text: 'nope' }] }
     });
     expect(written.body.result?.isError).toBe(true);
-    expect(textOf(written)).toContain('Replace clipboard text permission');
+    expect(textOf(written)).toContain('"Replace clipboard text"');
+  });
+
+  // The read-only branch of the same refusal: caps.control is false because Read-only zeroed
+  // it, not because the checkbox is off, so the refusal must name Read-only and not send the
+  // user hunting for a permission that may already be granted.
+  it('blames Read-only by name instead of the individual permission it overrode', async () => {
+    const config = { ...defaultConfig('win32'), capabilities: withCaps({ screen: true, control: true }) };
+    // Expose `computer` first, the same way a real session would have before Read-only was
+    // switched on mid-run — exposedCaps only ever widens, so a fresh context that starts in
+    // read-only mode never registers the tool at all and there is nothing to call.
+    ctx.readOnly = false;
+    ctx.caps = effectiveCapabilities({ ...config, readOnly: false }, 'win32');
+    expect(toolNames(await desktop('tools/list'))).toContain('computer');
+
+    ctx.readOnly = true;
+    ctx.caps = effectiveCapabilities({ ...config, readOnly: true }, 'win32');
+
+    const clicked = await desktop('tools/call', {
+      name: 'computer',
+      arguments: { actions: [{ type: 'click', x: 5, y: 5 }] }
+    });
+    expect(clicked.body.result?.isError).toBe(true);
+    expect(textOf(clicked)).toContain('Read-only mode is on');
+    expect(textOf(clicked)).toContain('turn Read-only off');
+    expect(textOf(clicked)).not.toContain('enable "Control mouse and keyboard"');
   });
 
   it('marks observing read-only and control destructive', async () => {
@@ -2687,6 +2884,27 @@ describe('exec_command and write_stdin', () => {
     ctx.caps = withCaps({ command: true });
   });
 
+  /**
+   * The advertised contract has to match the enforced one, in both directions.
+   *
+   * `workdir` resolves through the same `resolveIn()` the read tools use, so the virtual path a
+   * model learned from `read.paths` works there; the command text is deliberately not translated,
+   * so the same spelling inside `cmd` is refused. Both behaviours are pinned by the tests around
+   * this one. What this pins is that the *description* still says so — it said neither for a long
+   * time, and QA walked into both sides of the gap in a single round.
+   */
+  it('advertises both halves of the exec path contract on workdir itself', async () => {
+    const listed = await core('tools/list', {});
+    const exec = (listed.body.result?.tools ?? []).find((tool: { name: string }) => tool.name === 'exec_command');
+    const workdir = exec?.inputSchema?.properties?.workdir?.description as string | undefined;
+    expect(workdir, 'exec_command must expose a workdir description').toBeTruthy();
+    // Half one: workdir speaks the same path language read.paths does.
+    expect(workdir).toMatch(/read\.paths/);
+    // Half two: the command text does not, which is the refusal below.
+    expect(workdir).toMatch(/inside cmd are not translated/i);
+    expect(workdir).toMatch(/Defaults to the turn cwd/);
+  });
+
   it('refuses an approved virtual path in opaque shell text instead of running against the drive root', async () => {
     const reply = await core('tools/call', {
       name: 'exec_command',
@@ -2789,7 +3007,7 @@ describe('exec_command and write_stdin', () => {
       arguments: {
         cmd: IS_WINDOWS ? 'Write-Output native-workdir-ok' : "printf '%s\\n' native-workdir-ok",
         workdir: approved,
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       }
     });
     expect(reply.body.result?.isError).not.toBe(true);
@@ -2811,7 +3029,7 @@ describe('exec_command and write_stdin', () => {
             ? "if ($env:OPENAI_API_KEY) { Write-Output 'LEAKED' } else { Write-Output 'SCRUBBED' }"
             : "if [ -n \"${OPENAI_API_KEY:-}\" ]; then printf '%s\\n' LEAKED; else printf '%s\\n' SCRUBBED; fi",
           workdir: '/workspace',
-          yield_time_ms: 5_000
+          yield_time_ms: QUICK_YIELD_MS
         }
       });
       expect(failed(secret), textOf(secret)).toBe(false);
@@ -2831,7 +3049,7 @@ describe('exec_command and write_stdin', () => {
           ? "Get-Command rg -CommandType Application | Select-Object -First 1 -ExpandProperty Source"
           : 'command -v rg',
         workdir: '/workspace',
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       }
     });
     expect(failed(rg), textOf(rg)).toBe(false);
@@ -2851,7 +3069,7 @@ describe('exec_command and write_stdin', () => {
         // contract is the bundled runtime, so this function must never receive the invocation.
         cmd: "function rg { Write-Output 'SHADOWED-RG'; exit 17 }; rg -n needle-from-real-ripgrep rg-shadow-target.txt",
         workdir: '/workspace',
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       }
     });
 
@@ -2877,7 +3095,7 @@ describe('exec_command and write_stdin', () => {
       arguments: {
         cmd: 'rg -n needle-through-the-glob *.rgtxt',
         workdir: '/workspace',
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       }
     });
 
@@ -2902,7 +3120,7 @@ describe('exec_command and write_stdin', () => {
       arguments: {
         cmd: 'rg -n fsops test/computer*.test.ts',
         workdir: '/workspace',
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       }
     });
     expect(failed(glob), textOf(glob)).toBe(false);
@@ -2914,7 +3132,7 @@ describe('exec_command and write_stdin', () => {
       arguments: {
         cmd: String.raw`rg -n "from ['\"][^'\"]*fsops\.js['\"]" test/computer-one.test.ts`,
         workdir: '/workspace',
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       }
     });
     expect(failed(quote), textOf(quote)).toBe(false);
@@ -3022,7 +3240,7 @@ describe('exec_command and write_stdin', () => {
       arguments: {
         cmds: commands,
         workdir: '/workspace',
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       }
     });
     const text = textOf(reply);
@@ -3086,7 +3304,7 @@ describe('exec_command and write_stdin', () => {
       arguments: {
         cmd: IS_WINDOWS ? "Write-Output 'quick-ok'" : "printf '%s\\n' quick-ok",
         workdir: '/workspace',
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       }
     });
     expect(quick.body.result?.isError).not.toBe(true);
@@ -3135,7 +3353,7 @@ describe('exec_command and write_stdin', () => {
 
     const first = await core('tools/call', {
       name: 'write_stdin',
-      arguments: { session_id: sessionId, chars: '\r', yield_time_ms: 5_000 }
+      arguments: { session_id: sessionId, chars: '\r', yield_time_ms: QUICK_YIELD_MS }
     });
     expect(first.body.result?.isError).not.toBe(true);
     expect(textOf(first)).toContain('first=raw-no-newline');
@@ -3143,7 +3361,7 @@ describe('exec_command and write_stdin', () => {
 
     const second = await core('tools/call', {
       name: 'write_stdin',
-      arguments: { session_id: sessionId, chars: 'done\r', yield_time_ms: 5_000 }
+      arguments: { session_id: sessionId, chars: 'done\r', yield_time_ms: QUICK_YIELD_MS }
     });
     expect(second.body.result?.isError).not.toBe(true);
     expect(textOf(second)).toContain('second=done');
@@ -3156,7 +3374,7 @@ describe('exec_command and write_stdin', () => {
     const readApp = IS_WINDOWS ? "Get-Content 'src/app.ts'" : "cat 'src/app.ts'";
     const named = await core('tools/call', {
       name: 'exec_command',
-      arguments: { cmd: readApp, workdir: '/workspace', yield_time_ms: 5_000 }
+      arguments: { cmd: readApp, workdir: '/workspace', yield_time_ms: QUICK_YIELD_MS }
     });
     expect(named.body.result?.isError).not.toBe(true);
     expect(textOf(named)).toContain('export const name = "app";');
@@ -3164,7 +3382,7 @@ describe('exec_command and write_stdin', () => {
 
     const defaulted = await core('tools/call', {
       name: 'exec_command',
-      arguments: { cmd: readApp, yield_time_ms: 5_000 }
+      arguments: { cmd: readApp, yield_time_ms: QUICK_YIELD_MS }
     });
     expect(defaulted.body.result?.isError).not.toBe(true);
     expect(textOf(defaulted)).toContain('export const name = "app";');
@@ -3279,7 +3497,7 @@ describe('exec sessions belong to the chat that opened them', () => {
     const owner = await asChat('wfr_execown_opener', 'write_stdin', {
       session_id: sessionId,
       chars: 'bye\r',
-      yield_time_ms: 5_000
+      yield_time_ms: QUICK_YIELD_MS
     });
     expect(owner.body.result?.isError).not.toBe(true);
     expect(textOf(owner)).toContain('echo=bye');
@@ -3423,7 +3641,7 @@ describe('exec sessions belong to the chat that opened them', () => {
       const owner = await asChat('wfr_execown_new_recycled', 'write_stdin', {
         session_id: recycledId,
         chars: 'owner\r',
-        yield_time_ms: 5_000
+        yield_time_ms: QUICK_YIELD_MS
       });
       expect(owner.body.result?.isError, textOf(owner)).not.toBe(true);
       expect(textOf(owner)).toContain('got=owner');
@@ -3811,4 +4029,149 @@ describe('blocked chats', () => {
     expect(failed(after)).toBe(false);
     expect(textOf(after)).toContain('/workspace/notes.txt');
   });
+});
+
+describe('issue #36 completed exec result drain guard', () => {
+  beforeEach(() => {
+    ctx.readOnly = false;
+    ctx.caps = withCaps({ command: true });
+    resetExecOwnershipForTests();
+  });
+
+  const prove = (requestId: string, conversationId: string) =>
+    observeRequestCorrelation({
+      requestId,
+      conversationId,
+      // Ownership is keyed by session, not conversation — see execSession() in tools-core.ts.
+      // Each conversation gets its own, so the stranger scenario below stays unthrottled by
+      // the owner's backlog.
+      sessionId: `session-${conversationId}`,
+      messageId: `msg-${requestId}`,
+      tool: 'exec_command',
+      observedAt: Date.now()
+    });
+
+  const asChat = (requestId: string, name: string, args: Record<string, unknown>) =>
+    modern('tools/call', { name, arguments: args }, { 'x-request-id': `${requestId}/att1` });
+
+  const callAs = async (
+    conversationId: string,
+    requestId: string,
+    name: string,
+    args: Record<string, unknown>
+  ) => {
+    expect(prove(requestId, conversationId)).toBe('stored');
+    return asChat(requestId, name, args);
+  };
+
+  it('bounds new fan-out, keeps results lossless, and isolates another chat', async () => {
+    const owner = 'conv-exec-drain-owner';
+    const stranger = 'conv-exec-drain-stranger';
+    const threshold = 4;
+    await fs.writeFile(
+      path.join(approved, 'issue36-delayed-exit.cjs'),
+      "setTimeout(() => { console.log('done=' + process.argv[2]); }, 600);\n",
+      'utf8'
+    );
+    await fs.writeFile(path.join(approved, 'issue36-quick.cjs'), "console.log('quick-ok');\n", 'utf8');
+
+    const ids: number[] = [];
+    for (let index = 0; index < threshold; index++) {
+      const started = await callAs(owner, `wfr_issue36_start_${index}`, 'exec_command', {
+        cmd: `node issue36-delayed-exit.cjs ${index}`,
+        workdir: '/workspace',
+        yield_time_ms: 25
+      });
+      expect(started.body.result?.isError, textOf(started)).not.toBe(true);
+      const id = Number(textOf(started).match(/Process running with session ID (\d+)/)?.[1]);
+      expect(Number.isInteger(id)).toBe(true);
+      ids.push(id);
+    }
+
+    await vi.waitFor(
+      () => {
+        for (const id of ids) expect(unifiedExecManager.backgroundState(id)?.exitedUnread).toBe(true);
+      },
+      { timeout: 10_000, interval: 25 }
+    );
+
+    const blocked = await callAs(owner, 'wfr_issue36_blocked', 'exec_command', {
+      cmd: 'node issue36-quick.cjs',
+      workdir: '/workspace',
+      yield_time_ms: QUICK_YIELD_MS
+    });
+    expect(blocked.body.result?.isError).toBe(true);
+    expect(textOf(blocked)).toContain('EXEC_RESULTS_UNREAD');
+    expect(textOf(blocked)).toContain('No child was spawned');
+    for (const id of ids) expect(textOf(blocked)).toContain(String(id));
+
+    // Correlation can arrive shortly after the MCP request starts. The circuit breaker must
+    // use the same bounded attribution path as ownership instead of treating that call as anonymous.
+    const delayedRequestId = 'wfr_issue36_delayed_blocked';
+    const delayedBlockedPromise = asChat(delayedRequestId, 'exec_command', {
+      cmd: 'node issue36-quick.cjs',
+      workdir: '/workspace',
+      yield_time_ms: QUICK_YIELD_MS
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(prove(delayedRequestId, owner)).toBe('stored');
+    const delayedBlocked = await delayedBlockedPromise;
+    expect(delayedBlocked.body.result?.isError).toBe(true);
+    expect(textOf(delayedBlocked)).toContain('EXEC_RESULTS_UNREAD');
+    expect(textOf(delayedBlocked)).toContain('No child was spawned');
+
+    // If page attribution never arrives, an existing unread backlog makes anonymous fallback
+    // unsafe: it could bypass the owner's circuit breaker. Fail closed without spawning.
+    const unproven = await asChat('wfr_issue36_unproven_blocked', 'exec_command', {
+      cmd: 'node issue36-quick.cjs',
+      workdir: '/workspace',
+      yield_time_ms: QUICK_YIELD_MS
+    });
+    expect(unproven.body.result?.isError).toBe(true);
+    expect(textOf(unproven)).toContain('CALLER_IDENTITY_REQUIRED');
+    expect(textOf(unproven)).toContain('no command was run');
+    expect(textOf(unproven)).not.toContain('quick-ok');
+
+    // A different proven conversation has no access to, and is not throttled by, this chat's ids.
+    const other = await callAs(stranger, 'wfr_issue36_stranger', 'exec_command', {
+      cmd: 'node issue36-quick.cjs',
+      workdir: '/workspace',
+      yield_time_ms: QUICK_YIELD_MS
+    });
+    expect(other.body.result?.isError, textOf(other)).not.toBe(true);
+    expect(textOf(other)).toContain('quick-ok');
+    expect(textOf(other)).not.toContain('EXEC_RESULTS_UNREAD');
+
+    const first = await callAs(owner, 'wfr_issue36_drain_0', 'write_stdin', {
+      session_id: ids[0],
+      chars: '',
+      yield_time_ms: 1_000
+    });
+    expect(first.body.result?.isError, textOf(first)).not.toBe(true);
+    expect(textOf(first)).toContain('done=0');
+    expect(textOf(first)).toContain('Process exited with code 0');
+    expect(unifiedExecManager.backgroundState(ids[0]!)).toBeNull();
+
+    // Below the bound, work may continue, but the model is reminded to drain the remaining ids.
+    const allowed = await callAs(owner, 'wfr_issue36_allowed', 'exec_command', {
+      cmd: 'node issue36-quick.cjs',
+      workdir: '/workspace',
+      yield_time_ms: QUICK_YIELD_MS
+    });
+    expect(allowed.body.result?.isError, textOf(allowed)).not.toBe(true);
+    expect(textOf(allowed)).toContain('quick-ok');
+    expect(textOf(allowed)).toContain('3 completed background exec results are still waiting to be consumed');
+    for (const id of ids.slice(1)) expect(textOf(allowed)).toContain(String(id));
+
+    for (let index = 1; index < ids.length; index++) {
+      const drained = await callAs(owner, `wfr_issue36_drain_${index}`, 'write_stdin', {
+        session_id: ids[index],
+        chars: '',
+        yield_time_ms: 1_000
+      });
+      expect(drained.body.result?.isError, textOf(drained)).not.toBe(true);
+      expect(textOf(drained)).toContain(`done=${index}`);
+      expect(textOf(drained)).toContain('Process exited with code 0');
+    }
+  }, 45_000);
 });

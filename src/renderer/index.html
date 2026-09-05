@@ -115,15 +115,25 @@
         <section class="panel is-active" data-panel="home">
           <div class="top">
             <!-- ------------------------------------------------- permissions -->
-            <section class="card">
+            <section class="card card-has-hint">
               <h2>
                 Permissions
                 <span class="acts">
-                  <button class="btn" id="readOnlyBtn" type="button">
+                  <button
+                    class="btn"
+                    id="readOnlyBtn"
+                    type="button"
+                    title="Disables file changes, commands, browser control, mouse/keyboard input and clipboard writes; screenshots and reads still work."
+                  >
                     <svg class="ico" viewBox="0 0 24 24"><use href="#i-lock" /></svg>Read-only
                   </button>
                 </span>
               </h2>
+              <p class="hint" id="readOnlyHint">
+                Read-only disables file changes, commands, browser control, mouse/keyboard input and
+                clipboard writes at once, regardless of which boxes below are checked — screenshots and
+                reads still work. Turn it back off here to restore write access; nothing else can.
+              </p>
               <div class="scroll">
                 <div id="groups"></div>
                 <div class="desktop-access" id="desktopAccess" hidden>
@@ -219,7 +229,7 @@
                 web. Full write/modify MCP is currently available to Business, Enterprise and Edu;
                 Pro custom MCP is limited to read/fetch access.
               </p>
-              <button class="btn" id="wizExpand" type="button" hidden>Show all steps</button>
+              <button class="btn" id="wizExpand" type="button" hidden aria-expanded="false" aria-controls="wizard">Show all steps</button>
             </div>
 
             <ol class="wizard" id="wizard">
@@ -388,6 +398,26 @@
                 dark without it — which made "buried in a settings pane behind a gear" exactly
                 the wrong place for the one-time instructions.
               -->
+              <li class="step" data-step="desktop">
+                <div class="step-mark">
+                  <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
+                </div>
+                <div class="step-body">
+                  <h3>Allow desktop access</h3>
+                  <p id="permIntro">
+                    macOS grants these one at a time, and each one is a different pane in System
+                    Settings. Open a pane, switch Chat On Steroids on, and come back — this list
+                    updates on its own.
+                  </p>
+                  <ol class="perm-list" id="permList"></ol>
+                  <p class="perm-restart" id="permRestart" hidden>
+                    Already switched this on in System Settings? macOS keeps its old answer for
+                    as long as the app is running. Fully quit Chat On Steroids and open it again
+                    to pick up the change.
+                  </p>
+                </div>
+              </li>
+
               <li class="step" data-step="browser">
                 <div class="step-mark">
                   <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
@@ -399,7 +429,7 @@
                     choose <strong>Load unpacked</strong> and pick the folder the button opens. It
                     pairs with this app by itself — there is no code to type.
                   </p>
-                  <p class="hint is-required">
+                  <p class="hint is-required" id="bridgeRequiredHint">
                     <strong>Required for sub-agents:</strong> the companion extension must be loaded
                     and connected in ChatGPT. Without it, Chat On Steroids cannot identify, open or
                     coordinate worker chats.

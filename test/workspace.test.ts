@@ -216,11 +216,11 @@ describe('a worker starting where the prime left off', () => {
     expect(run('worker-1', currentWorkspace)?.virtual).toBe('/workspace/project');
   });
 
-  it('still inherits on a later spawn, once the prime answers to agent:prime', () => {
-    // The regression this exists for: from the second `agents` call onwards the caller is
-    // resolved to `agent:prime` before create_agents runs, while everything the prime
-    // learned is still under `chat:`. Reading only the agent key found nothing and the new
-    // worker silently started with no folder at all.
+  it('inherits from the prime conversation on the first spawn and on every later one', () => {
+    // The regression this exists for: from the second `agents` call onwards the caller is also
+    // resolved to the friendly id `prime`, while everything the prime learned is under `chat:`.
+    // Reading the agent key found nothing and the new worker silently started with no folder.
+    // The prime is conversation-only now, so both spawns read the one key it ever writes.
     setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
     expect(run('prime', () => inheritWorkspace('worker-1', 'conv-prime'))).toBe(true);
     expect(run('prime', () => inheritWorkspace('worker-2', 'conv-prime'))).toBe(true);
@@ -236,9 +236,32 @@ describe('a worker starting where the prime left off', () => {
   });
 
   it('hands over the folder the prime moved to, not the one it started in', () => {
-    setWorkspaceFor('agent:prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+    setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
     setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/other', real: path.join(approved, 'other') });
     expect(primeWorkspace('conv-prime')?.virtual).toBe('/workspace/other');
+  });
+
+  it('ignores a stale agent:prime entirely, so an unrelated later prime cannot inherit it', () => {
+    // The prime used to answer to `agent:prime` as well as its conversation, and this function
+    // reconciled the two. Friendly agent ids are reused by every later run, so that mirror was a
+    // path by which a second, unrelated prime could pick up the first one's folder without either
+    // conversation ever naming it — the same cross-run leak parkAgentWorkspace prevents for
+    // workers. The key is no longer read at all: a prime that has learned nothing inherits
+    // nothing, whatever a leftover entry under that name happens to say.
+    setWorkspaceFor('agent:prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+    expect(primeWorkspace('conv-unrelated-prime')).toBeNull();
+    expect(inheritWorkspace('worker-1', 'conv-unrelated-prime')).toBe(false);
+    expect(workspaceEntries().some((entry) => entry.key === 'agent:worker-1')).toBe(false);
+  });
+
+  it('gives a call that cannot name its conversation no prime workspace to write under', () => {
+    // An unidentified caller fails the same identity boundary as any other chat. It must not be
+    // able to create durable cwd under a reusable friendly id, because the next run's prime
+    // would be handed it.
+    setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+    expect(primeWorkspace(null)).toBeNull();
+    expect(inheritWorkspace('worker-1', null)).toBe(false);
+    expect(workspaceEntries().some((entry) => entry.key.startsWith('agent:'))).toBe(false);
   });
 
   it('lets a worker diverge without dragging the prime along', async () => {

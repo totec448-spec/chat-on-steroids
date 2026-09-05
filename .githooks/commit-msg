@@ -1,2 +1,3 @@
 #!/bin/sh
+. "$(dirname "$0")/lib/find-node.sh"
 exec node scripts/verify-public-history.mjs --message "$1"

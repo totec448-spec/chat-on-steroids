@@ -1,15 +1,24 @@
 import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import path from 'node:path';
 
 const maintainerLogin = 'totec448-spec';
 const safeMaintainerEmail = /^(?:\d+\+)?totec448-spec@users\.noreply\.github\.com$/i;
 
 // Keep the blocked values split so this guard does not contain the data it rejects.
+//
+// `totec` here is the upstream maintainer's own local account; the fork's own contributor
+// carries the same exposure and gets the same treatment — a QA report reached this check with
+// a real `/Users/<name>/…` path and a real machine hostname in it (a code review caught both;
+// this check did not, because the blocklist did not yet know either value existed) and both are
+// now fixed at the source and added here so the same leak cannot recur unnoticed.
 const blockedText = [
   { label: 'private maintainer email', value: ['totec448', 'gmail.com'].join('@') },
   { label: 'Claude session trailer', value: ['Claude', 'Session:'].join('-') },
   { label: 'Claude session URL', value: ['https://claude.ai/code/', 'session_'].join('') },
   { label: 'private Windows user path', value: ['C:', 'Users', 'totec'].join('\\') },
+  { label: 'private macOS user path', value: ['', 'Users', 'maxim', ''].join('/') },
+  { label: 'private machine hostname', value: ['Maxims', 'MacBook', 'Pro'].join('-') },
 ];
 
 function runGit(args, { allowFailure = false, encoding = 'utf8' } = {}) {
@@ -24,6 +33,28 @@ function runGit(args, { allowFailure = false, encoding = 'utf8' } = {}) {
     throw new Error(`git ${args[0] ?? ''} failed${detail ? `: ${detail}` : ''}`);
   }
   return result;
+}
+
+function repositoryOwner() {
+  // Ownership belongs to the repository being checked, not to an outer CI process.
+  // Vitest creates temporary Git repositories for this gate; those child repos inherit
+  // GITHUB_REPOSITORY/GITHUB_WORKSPACE from Actions and must not be mistaken for the fork.
+  const remote = runGit(['config', '--get', 'remote.origin.url'], { allowFailure: true });
+  if (remote.status === 0) {
+    const value = String(remote.stdout ?? '').trim();
+    const match = /(?:github\.com[/:])([^/:\s]+)\/[^/\s]+(?:\.git)?$/i.exec(value);
+    if (match?.[1]) return match[1];
+  }
+
+  const workspace = String(process.env.GITHUB_WORKSPACE ?? '').trim();
+  const fromActions = String(process.env.GITHUB_REPOSITORY ?? '').split('/')[0]?.trim();
+  if (!workspace || !fromActions) return null;
+
+  const normalize = (value) => {
+    const resolved = path.resolve(value);
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  return normalize(process.cwd()) === normalize(workspace) ? fromActions : null;
 }
 
 function findBlockedText(text, location) {
@@ -116,6 +147,12 @@ function checkHistory() {
           .split(/\r?\n/)
           .filter(Boolean)
       : [];
+  // The maintainer's already-public upstream identity is inherited by every fork. It remains
+  // strict in the upstream repository, while fork CI still checks current author, messages,
+  // tracked content, and fork-reachable history for blocked text.
+  const owner = repositoryOwner();
+  const enforceHistoricalMaintainerIdentity =
+    owner === null || owner.toLowerCase() === maintainerLogin;
   // pull_request jobs default to a GitHub-generated merge object that can never enter
   // public history. Its identity belongs to GitHub's test ref, not to the proposed tree.
   const syntheticPullRequestCommit =
@@ -131,8 +168,12 @@ function checkHistory() {
       record.split('\0');
     const location = `commit ${commit}`;
     failures.push(
-      ...checkMaintainerIdentity(authorName, authorEmail, `${location} author`),
-      ...checkMaintainerIdentity(committerName, committerEmail, `${location} committer`),
+      ...(enforceHistoricalMaintainerIdentity
+        ? checkMaintainerIdentity(authorName, authorEmail, `${location} author`)
+        : []),
+      ...(enforceHistoricalMaintainerIdentity
+        ? checkMaintainerIdentity(committerName, committerEmail, `${location} committer`)
+        : []),
       ...findBlockedText(body.join('\0'), `${location} message`),
     );
   }
@@ -157,7 +198,9 @@ function checkHistory() {
     );
     const [taggerName = '', taggerEmail = '', ...body] = record.split('\0');
     failures.push(
-      ...checkMaintainerIdentity(taggerName, taggerEmail, `tag ${tag} tagger`),
+      ...(enforceHistoricalMaintainerIdentity
+        ? checkMaintainerIdentity(taggerName, taggerEmail, `tag ${tag} tagger`)
+        : []),
       ...findBlockedText(body.join('\0'), `tag ${tag} message`),
     );
   }

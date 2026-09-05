@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { desktopAutomationSupported } from '../src/main/platform.js';
 
 const mocks = vi.hoisted(() => {
   const caps = {
@@ -253,6 +254,49 @@ describe('connection surface state', () => {
 
     expect(mocks.starts).toBe(2);
     expect(connection.getStatus().state).toBe('connected');
+  });
+
+  /**
+   * QA: disabling Desktop mid-session made the *next* connector call fail at the tunnel relay
+   * with a raw `tunnel_client_not_connected` instead of this app's own TOOL_DISABLED refusal.
+   * Root cause: the local endpoint's exposed tools are deliberately monotonic (server.ts), but
+   * the Desktop *tunnel* carrying requests to it was being torn down the moment every desktop
+   * capability went off, so a request never reached that TOOL_DISABLED handler at all.
+   *
+   * `surfaceIsUseful` gates Desktop on `desktopAutomationSupported()`, which reads the real host
+   * platform even though `caps` here is mocked — Linux CI never has a Desktop tunnel to publish
+   * in the first place, so `mocks.starts` would stay at 1 (Core only) and every assertion below
+   * would be about a tunnel that never existed. Runs only where Desktop can actually be published.
+   */
+  it.runIf(desktopAutomationSupported())('keeps a published Desktop tunnel up when every desktop permission goes off, instead of tearing down the transport', async () => {
+    mocks.config.tunnel.kind = 'openai';
+    mocks.config.tunnel.desktopTunnelId = 'desktop-tunnel-id';
+    mocks.caps.control = true;
+    const connection = await import('../src/main/connection.js');
+
+    await connection.connect();
+    // Core, then Desktop: both publish on the OpenAI path.
+    expect(mocks.starts).toBe(2);
+    expect(connection.getStatus().surfaces.find((s) => s.id === 'desktop')).toMatchObject({ available: true });
+
+    // The last desktop permission goes off mid-session — the same shape Read-only or a plain
+    // capability toggle produces. The card must say "off" (the live capability truth) without
+    // the tunnel itself stopping.
+    mocks.caps.control = false;
+    await connection.applySettings();
+
+    expect(mocks.tunnelStop).not.toHaveBeenCalled();
+    expect(connection.getStatus().surfaces.find((s) => s.id === 'desktop')).toMatchObject({
+      available: false,
+      state: 'off'
+    });
+
+    // Turning it back on reuses the still-live tunnel instead of paying to restart it — the
+    // "waiting for reconnection" QA had to do before the same operation worked again.
+    mocks.caps.control = true;
+    await connection.applySettings();
+    expect(mocks.starts).toBe(2);
+    expect(mocks.tunnelStop).not.toHaveBeenCalled();
   });
 
   it('prewarms the helper only when a native Desktop capability is published', async () => {

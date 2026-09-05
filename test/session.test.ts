@@ -42,6 +42,7 @@ import {
   pruneSessions,
   readAsset,
   readEvents,
+  readEventsAfter,
   readRecentEvents,
   readHandoff,
   rebindSession,
@@ -211,6 +212,130 @@ describe('session store', () => {
     expect(recent[1]?.kind === 'assistant_message' ? recent[1].message.text : '').toBe('answer revision 7');
   });
 
+  it('answers a sequence checkpoint with exactly what a full read would have left after it', async () => {
+    const summary = await createSession({ title: 'ranged update equivalence' });
+    for (let index = 0; index < 20; index++) {
+      await appendEvent(summary.id, {
+        time: 5_000 + index,
+        source: 'app',
+        kind: 'note',
+        message: { text: `row ${index}`, truncated: false, chars: 5 }
+      });
+    }
+    // Pre-canonical history: one stable ChatGPT message appended once per streaming revision.
+    // Each revision owns a seq an update cursor advances past, so this reader must hand back
+    // every one of them — unlike the presentation tail, which collapses them into one row.
+    for (let index = 0; index < 4; index++) {
+      await appendEvent(summary.id, {
+        time: 5_100 + index,
+        source: 'extension',
+        kind: 'assistant_message',
+        messageId: 'legacy-answer-1',
+        message: { text: `answer revision ${index}`, truncated: false, chars: 17 },
+        final: index === 3
+      } as never);
+    }
+    await flushSessions();
+
+    const all = await readEvents(summary.id);
+    const bySeq = (events: readonly { seq: number }[]): number[] => events.map((event) => event.seq).sort((a, b) => a - b);
+    for (const checkpoint of [0, 1, 17, all.length - 1, all.length]) {
+      const expected = bySeq(all.filter((event) => event.seq > checkpoint));
+      const ranged = await readEventsAfter(summary.id, checkpoint);
+      expect(bySeq(ranged), `checkpoint ${checkpoint}`).toEqual(expected);
+      // A sequence cursor's page is in sequence order, so a caller can advance past its last row.
+      expect(ranged.map((event) => event.seq), `checkpoint ${checkpoint} order`).toEqual(bySeq(ranged));
+    }
+    expect(all.filter((event) => event.kind === 'assistant_message')).toHaveLength(4);
+  });
+
+  it('stops at the checkpoint instead of walking the whole journal behind it', async () => {
+    // The finding this guards: an update cursor used to re-read and re-parse every byte of the
+    // journal on every poll, so P polls of an N-event session cost O(P x N). Returned sequence
+    // numbers cannot tell the two implementations apart — a full read then filtered gives
+    // exactly the same rows — so this measures the bytes actually taken off disk instead.
+    const summary = await createSession({ title: 'ranged update boundedness' });
+    const bulk = 'x'.repeat(4_000);
+    for (let index = 0; index < 300; index++) {
+      await appendEvent(summary.id, {
+        time: 6_000 + index,
+        source: 'app',
+        kind: 'note',
+        message: { text: `${bulk} ${index}`, truncated: false, chars: bulk.length }
+      });
+    }
+    await flushSessions();
+    const journal = path.join(sessionsRoot(), summary.id, 'events.jsonl');
+    const journalBytes = (await fs.stat(journal)).size;
+    expect(journalBytes).toBeGreaterThan(1_000_000);
+
+    const checkpoint = (await readEvents(summary.id)).length;
+    for (let index = 0; index < 3; index++) {
+      await appendEvent(summary.id, {
+        time: 7_000 + index,
+        source: 'app',
+        kind: 'note',
+        message: { text: `after ${index}`, truncated: false, chars: 7 }
+      });
+    }
+    await flushSessions();
+
+    let journalBytesRead = 0;
+    const realReadFile = fs.readFile.bind(fs);
+    const realOpen = fs.open.bind(fs);
+    const readFile = vi.spyOn(fs, 'readFile').mockImplementation((async (target: string, ...rest: unknown[]) => {
+      const out = await (realReadFile as (...args: unknown[]) => Promise<unknown>)(target, ...rest);
+      if (String(target) === journal) journalBytesRead += Buffer.byteLength(out as string);
+      return out;
+    }) as never);
+    const open = vi.spyOn(fs, 'open').mockImplementation((async (target: string, ...rest: unknown[]) => {
+      const handle = (await (realOpen as (...args: unknown[]) => Promise<unknown>)(target, ...rest)) as {
+        read: (...args: unknown[]) => Promise<{ bytesRead: number }>;
+      };
+      if (String(target) !== journal) return handle;
+      const realRead = handle.read.bind(handle);
+      handle.read = async (...args: unknown[]) => {
+        const result = await realRead(...args);
+        journalBytesRead += result.bytesRead;
+        return result;
+      };
+      return handle;
+    }) as never);
+
+    try {
+      const page = await readEventsAfter(summary.id, checkpoint, { maxBytes: 64 * 1024 });
+      expect(page.map((event) => event.seq)).toEqual([checkpoint + 1, checkpoint + 2, checkpoint + 3]);
+    } finally {
+      readFile.mockRestore();
+      open.mockRestore();
+    }
+
+    // Three short rows off the end of a 1 MB journal. A full read would have moved all of it.
+    expect(journalBytesRead).toBeGreaterThan(0);
+    expect(journalBytesRead).toBeLessThan(journalBytes / 4);
+  });
+
+  it('falls back to the full read rather than hand back a page with a hole in it', async () => {
+    // The budget is a safety valve, not a cap on the answer. A checkpoint further back than the
+    // budget can reach must still return every row after it: an update cursor that silently
+    // skipped rows would lose recorded events permanently.
+    const summary = await createSession({ title: 'ranged update fallback' });
+    const bulk = 'y'.repeat(4_000);
+    for (let index = 0; index < 300; index++) {
+      await appendEvent(summary.id, {
+        time: 8_000 + index,
+        source: 'app',
+        kind: 'note',
+        message: { text: `${bulk} ${index}`, truncated: false, chars: bulk.length }
+      });
+    }
+    await flushSessions();
+
+    const all = await readEvents(summary.id);
+    const page = await readEventsAfter(summary.id, 1, { maxBytes: 64 * 1024 });
+    expect(page.map((event) => event.seq)).toEqual(all.filter((event) => event.seq > 1).map((event) => event.seq));
+  });
+
   it('negative-caches unknown current conversation lookups until that exact attachment can be created', async () => {
     const conversationId = `conv-missing-${Date.now()}`;
     const readdir = vi.spyOn(fs, 'readdir');
@@ -286,29 +411,34 @@ describe('session store', () => {
     const conversationId = `conv-deep-catalog-${Date.now()}`;
     const names = Array.from({ length: 5001 }, (_, index) => `catalog-${String(index).padStart(5, '0')}`);
     const targetId = names[names.length - 1] as string;
-    const realReaddir = fs.readdir.bind(fs);
-    const realReadFile = fs.readFile.bind(fs);
     const rootPath = sessionsRoot();
-    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(
-      (async (target: Parameters<typeof fs.readdir>[0], ...args: unknown[]) => {
-        if (String(target) === rootPath) return names;
-        return (realReaddir as (...callArgs: unknown[]) => ReturnType<typeof fs.readdir>)(target, ...args);
+    // This is a synthetic catalog: mock exactly the authoritative root scan and the synthetic
+    // metadata it discovers. Falling back through a saved fs.readdir/readFile function while
+    // Vitest owns the same export can re-enter the spy on Windows and recurse until stack
+    // exhaustion, which then starves unrelated helper/process tests running in parallel.
+    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementationOnce(
+      (async (target: Parameters<typeof fs.readdir>[0]) => {
+        if (String(target) !== rootPath) {
+          throw new Error(`synthetic catalog expected root readdir, got ${String(target)}`);
+        }
+        return names;
       }) as typeof fs.readdir
     );
     const readSpy = vi.spyOn(fs, 'readFile').mockImplementation(
-      (async (target: Parameters<typeof fs.readFile>[0], ...args: unknown[]) => {
+      (async (target: Parameters<typeof fs.readFile>[0]) => {
         const file = String(target);
         const id = path.basename(path.dirname(file));
-        if (file.endsWith('meta.json') && id.startsWith('catalog-')) {
-          return JSON.stringify({
-            ...seedSummary,
-            id,
-            title: id,
-            conversationId: id === targetId ? conversationId : null,
-            chatIds: id === targetId ? [conversationId] : []
-          });
+        if (!file.endsWith('meta.json') || !id.startsWith('catalog-')) {
+          throw new Error(`synthetic catalog expected catalog meta.json, got ${file}`);
         }
-        return (realReadFile as (...callArgs: unknown[]) => ReturnType<typeof fs.readFile>)(target, ...args);
+        return JSON.stringify({
+          ...seedSummary,
+          __historySeq: seedSummary!.events,
+          id,
+          title: id,
+          conversationId: id === targetId ? conversationId : null,
+          chatIds: id === targetId ? [conversationId] : []
+        });
       }) as typeof fs.readFile
     );
 
@@ -327,15 +457,12 @@ describe('session store', () => {
     resetSessionStoreForTests();
 
     const rootPath = sessionsRoot();
-    const realReaddir = fs.readdir.bind(fs);
-    let failedOnce = false;
-    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementation(
-      (async (target: Parameters<typeof fs.readdir>[0], ...args: unknown[]) => {
-        if (!failedOnce && String(target) === rootPath) {
-          failedOnce = true;
-          throw Object.assign(new Error('transient session-root read failure'), { code: 'EBUSY' });
+    const readdirSpy = vi.spyOn(fs, 'readdir').mockImplementationOnce(
+      (async (target: Parameters<typeof fs.readdir>[0]) => {
+        if (String(target) !== rootPath) {
+          throw new Error(`transient catalog test expected root readdir, got ${String(target)}`);
         }
-        return (realReaddir as (...callArgs: unknown[]) => ReturnType<typeof fs.readdir>)(target, ...args);
+        throw Object.assign(new Error('transient session-root read failure'), { code: 'EBUSY' });
       }) as typeof fs.readdir
     );
 
@@ -343,10 +470,11 @@ describe('session store', () => {
       await expect(findSessionByConversation(conversationId, { requireUnique: true })).rejects.toMatchObject({
         code: 'EBUSY'
       });
-      expect((await findSessionByConversation(conversationId, { requireUnique: true }))?.id).toBe(created.id);
     } finally {
+      // The retry below must exercise the real filesystem implementation, not a spy fallback.
       readdirSpy.mockRestore();
     }
+    expect((await findSessionByConversation(conversationId, { requireUnique: true }))?.id).toBe(created.id);
   });
 
   it('numbers events in append order and reads them back unchanged', async () => {
@@ -1312,6 +1440,67 @@ describe('session store', () => {
 
       await appendEvent(summary.id, { time: 3, source: 'extension', kind: 'turn_end', turnId: 't-1', outcome: 'interrupted' });
       await appendEvent(summary.id, { time: 4, source: 'extension', kind: 'turn_start', turnId: 't-2' });
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
+    } finally {
+      await saveConfig(base);
+    }
+  });
+
+  /**
+   * The handoff loop, measured live on 2026-09-04: chat A compacted into B, and B was told to
+   * write its own handoff 1.6 seconds later, having done no work of its own. Three chats in the
+   * chain inside two minutes, each replacement already over the line from the brief alone.
+   *
+   * A resumed chat starts carrying the handoff it was handed, and HANDOFF_BRIEF_RULES targets
+   * 10,000-30,000 tokens for that brief — at or above `autoTokens`' own 10,000 floor. So the
+   * rebind resets contextTokens to 0, the brief lands, and the chat is instantly over the
+   * threshold again through no activity of its own. Compacting it produces another brief of
+   * about the same size, so the next chat is over the line too: a fixpoint that never makes
+   * progress, only new chats.
+   *
+   * The threshold has to measure what this chat accumulated, not what it inherited.
+   */
+  it('does not re-compact a resumed chat that is only carrying the handoff it inherited', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
+    try {
+      const summary = await createSession({ title: 'resumed', conversationId: 'conv-loop-a' });
+      // A crosses the line on its own work and compacts.
+      await appendEvent(summary.id, {
+        time: 1,
+        source: 'extension',
+        kind: 'user_message',
+        messageId: 'u1',
+        message: { text: 'a'.repeat(48_000), truncated: false, chars: 48_000 }
+      });
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
+
+      // The move into B, carrying a brief of its own. 12,000 tokens is inside the range the
+      // brief rules actually ask for, and above the floor the threshold is allowed to take.
+      const inherited = 'b'.repeat(48_000);
+      expect(await rebindSession(summary.id, 'conv-loop-a', 'conv-loop-b', undefined, estimateTokens(inherited))).toBe(true);
+      // The brief itself is what B is carrying, exactly as the bootstrap lands it there.
+      await appendEvent(summary.id, {
+        time: 2,
+        source: 'extension',
+        kind: 'user_message',
+        messageId: 'u2',
+        message: { text: inherited, truncated: false, chars: inherited.length }
+      });
+
+      const resumed = await getSession(summary.id);
+      expect(resumed?.contextTokens).toBeGreaterThanOrEqual(10_000);
+      // …and it must still not compact: none of that is B's own work.
+      expect(autoCompactionReady(resumed)).toBe(false);
+
+      // Once B has genuinely accumulated a threshold's worth of its own, it compacts normally.
+      await appendEvent(summary.id, {
+        time: 3,
+        source: 'extension',
+        kind: 'user_message',
+        messageId: 'u3',
+        message: { text: 'c'.repeat(48_000), truncated: false, chars: 48_000 }
+      });
       expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
     } finally {
       await saveConfig(base);
@@ -2341,6 +2530,57 @@ describe('naming the chats this app opened', () => {
     );
     expect(fresh?.kind === 'tool_call' && fresh.call.attributionMethod).toBe('superseded');
     expect((await listSessions()).filter((entry) => entry.chatIds.includes(oldConversation))).toHaveLength(1);
+  });
+
+  it('does not let a tool call already in flight when a rebind lands re-inflate the meter it just reset', async () => {
+    // A slow call (a browser screenshot, typically) can pass its own superseded check, then
+    // spend real time storing text/images, and only reach appendEvent after Compact & Resume
+    // has already rebound this exact session to a new chat. It is still durable history — kept
+    // on this row — but must not count toward contextTokens, or a rebind's reset is silently
+    // undone by whatever was already in flight, and auto-compaction re-fires almost immediately
+    // in the chat that reset was supposed to give a fresh budget.
+    const oldConversation = 'conv-inflight-before-rebind';
+    const newConversation = 'conv-inflight-after-rebind';
+    const summary = await createSession({ conversationId: oldConversation, title: 'in-flight call race' });
+
+    expect(await rebindSession(summary.id, oldConversation, newConversation)).toBe(true);
+    const afterRebind = await getSession(summary.id);
+    expect(afterRebind?.conversationId).toBe(newConversation);
+    expect(afterRebind?.contextTokens).toBe(0);
+
+    const staleCall = {
+      time: Date.now(),
+      source: 'mcp' as const,
+      kind: 'tool_call' as const,
+      call: {
+        callId: 'in-flight-before-rebind',
+        tool: 'browser',
+        attribution: 'request_id' as const,
+        requestId: 'wfr_inflight_race',
+        // Proven against the conversation this call actually started in, before the rebind —
+        // exactly what a real late completion still carries.
+        conversationId: oldConversation,
+        attributionMethod: 'request_id' as const,
+        args: { text: '{}', truncated: false, chars: 2 },
+        result: { text: 'a screenshot worth of result text', truncated: false, chars: 34 },
+        outcome: 'ok' as const,
+        durationMs: 9872,
+        summary: { title: 'in-flight browser call', tone: 'neutral' as const, kind: 'browse' as const }
+      }
+    };
+    const appended = await appendEvent(summary.id, staleCall);
+    const tokens = eventTokens(appended);
+    expect(tokens).toBeGreaterThan(0);
+
+    const after = await getSession(summary.id);
+    // The whole point: history keeps it, the fresh chat's own meter does not.
+    expect(after?.contextTokens).toBe(0);
+    expect(after?.estimatedTokens).toBe(tokens);
+    expect(
+      (await readEvents(summary.id, { kinds: ['tool_call'] })).some(
+        (event) => event.kind === 'tool_call' && event.call.callId === 'in-flight-before-rebind'
+      )
+    ).toBe(true);
   });
 
   it('does not publish or return stale A→S first-sight state after S durably rebinds to B', async () => {

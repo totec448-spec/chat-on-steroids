@@ -30,7 +30,14 @@ async function download(url, target) {
 
 function extractZip(zipPath, outDir) {
   if (process.platform === 'win32') {
-    execFileSync('tar.exe', ['-xf', zipPath, '-C', outDir], { stdio: 'inherit' });
+    // `tar.exe` on PATH is not reliably the Windows-bundled bsdtar (libarchive), which
+    // understands zip. Git for Windows, MSYS2 and Cygwin all ship a `tar.exe` of their own —
+    // GNU tar — earlier in a typical dev PATH, and GNU tar neither reads zip archives nor,
+    // by default, a `C:\...` path (it reads the colon as a `host:path` remote-tape spec and
+    // fails with "Cannot connect to C: resolve failed"). Invoke the System32 copy by its full
+    // path so this always runs the one tar.exe on a Windows box actually built for this.
+    const systemTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+    execFileSync(systemTar, ['-xf', zipPath, '-C', outDir], { stdio: 'inherit' });
   } else {
     execFileSync('unzip', ['-q', '-o', zipPath, '-d', outDir], { stdio: 'inherit' });
   }

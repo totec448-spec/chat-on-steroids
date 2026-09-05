@@ -642,6 +642,9 @@ it('requires a live browser only when a browser-backed feature is actually enabl
   expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(false);
   expect(doc.getElementById('bridgeState')!.textContent).toContain('Authorized');
   expect(doc.getElementById('bridgeState')!.textContent).not.toContain('Connected.');
+  // QA: a red "Required for sub-agents" paragraph next to a green checkmark and "Connected."
+  // reads as a problem where there is none. Red is for the actually-unmet case, here.
+  expect(doc.getElementById('bridgeRequiredHint')!.classList.contains('is-required')).toBe(true);
 
   const live = structuredClone(mounted.state) as any;
   live.hasApiKey = true;
@@ -650,6 +653,9 @@ it('requires a live browser only when a browser-backed feature is actually enabl
   mounted.push(live);
   expect(browserStep.classList.contains('is-done')).toBe(true);
   expect(doc.getElementById('bridgeState')!.textContent).toContain('Connected.');
+  // Once actually connected, the same paragraph stays as an explanation but drops its
+  // warning-red urgency styling.
+  expect(doc.getElementById('bridgeRequiredHint')!.classList.contains('is-required')).toBe(false);
 
   // Recording and multi-agent are the two independently viable bridge features. Goal is
   // browser-driven too, but it requires a recorded session and cannot run by itself when

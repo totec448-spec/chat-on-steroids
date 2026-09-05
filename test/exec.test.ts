@@ -197,7 +197,12 @@ describe('runCommand', () => {
     const result = await launchCommand(shell!, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], cwd);
     expect(result.pid).toBeGreaterThan(0);
 
-    const deadline = Date.now() + 3000;
+    // Wait for the payload, not for a duration. What this proves is that launchCommand starts
+    // something that runs, and three seconds was a bet on the machine rather than part of the
+    // claim: it failed on a Windows-on-ARM machine during the full suite, where the run is
+    // saturated, while the identical payload launched by hand on the same machine wrote its
+    // marker in 1503 ms. A launch that never executes still fails here, only later.
+    const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       const text = await fs.readFile(marker, 'utf8').catch(() => '');
       if (text === 'launched') return;

@@ -62,8 +62,6 @@ export const MAX_OVERFLOW_ASSET_CHARS = 8 * 1024 * 1024;
 const MAX_LINE_BYTES = 512 * 1024;
 /** How many sessions the UI shows. Lookups and pruning still see every session. */
 const MAX_LISTED_SESSIONS = 200;
-/** Bound for legacy/model-facing full-list scans. Identity and retention use the uncapped cached catalog. */
-const MAX_SCANNED_SESSIONS = 5_000;
 /** Keep the uncapped authoritative scan fast without opening thousands of files at once. */
 const ATTACHMENT_CATALOG_READ_CONCURRENCY = 64;
 
@@ -759,7 +757,7 @@ async function ensureOpen(id: string): Promise<OpenSession> {
   }
 }
 
-function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
+function applyToSummary(summary: SessionSummary, event: SessionEvent, options: { skipContextTokens?: boolean } = {}): void {
   summary.events += 1;
   // Never backwards. A tool call is written once the app knows which chat it belongs to,
   // which can be after the page has already reported the end of the turn it ran in, and
@@ -769,7 +767,12 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   const tokens = eventTokens(event);
   summary.estimatedTokens += tokens;
   // What the attached chat is carrying. Reset by a compaction rebind; see rebindSession.
-  summary.contextTokens += tokens;
+  // A late-attributed call proven to belong to a conversation this session has since moved
+  // away from (see fileToolCall's re-check in recorder.ts) is durable history, not something
+  // the *now-attached* chat is carrying — counting it here would silently re-inflate a meter
+  // a rebind just reset, and a busy in-flight call (a browser screenshot, most often) is
+  // exactly what can still be landing seconds after the compaction that reset it committed.
+  if (!options.skipContextTokens) summary.contextTokens += tokens;
   if (event.kind === 'user_message') summary.userMessages += 1;
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
@@ -824,7 +827,10 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
 export function autoCompactionReady(summary: SessionSummary | null | undefined): boolean {
   if (!summary) return false;
   const config = getConfig().compaction;
-  return config.auto && config.autoTokens > 0 && summary.contextTokens >= config.autoTokens;
+  // Growth, not total. A resumed chat is already carrying its inherited brief; compacting that
+  // again produces an equivalent brief and moves nothing forward. See resumeBaselineTokens.
+  const own = Math.max(0, summary.contextTokens - (summary.resumeBaselineTokens ?? 0));
+  return config.auto && config.autoTokens > 0 && own >= config.autoTokens;
 }
 
 /**
@@ -866,7 +872,20 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
       entry.nextSeq += 1;
       entry.tail.push(full);
       if (entry.tail.length > MAX_EVENT_TAIL) entry.tail.splice(0, entry.tail.length - MAX_EVENT_TAIL);
-      applyToSummary(entry.summary, full);
+      // A tool call's own storage work — text, images — can still be in flight when a Compact
+      // & Resume rebind lands for this exact session, since rebindSession() and this append
+      // share the one queue above but a slow call (a browser screenshot, typically) can already
+      // be past the recorder's own superseded check by then. Both operations are ordered by
+      // that shared queue, so `entry.summary.conversationId` here is never stale: if this
+      // event's own recorded conversation no longer matches it, the call landed after its chat
+      // was superseded. It is still durable history — worth keeping on this exact row — but not
+      // something the *now-attached* chat is carrying, and counting it would silently re-inflate
+      // the auto-compaction meter a rebind just reset, straight back over the threshold.
+      const supersededCall =
+        full.kind === 'tool_call' &&
+        full.call.conversationId !== null &&
+        full.call.conversationId !== entry.summary.conversationId;
+      applyToSummary(entry.summary, full, { skipContextTokens: supersededCall });
       entry.historySeq = full.seq;
       scheduleMeta(entry);
       return full;
@@ -1123,6 +1142,70 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
 }
 
 /**
+ * Walks a session's journal backwards, newest line first, inside a byte budget.
+ *
+ * The one place that knows how to read part of an `events.jsonl` instead of all of it. Both
+ * bounded readers below are the same walk with a different stopping rule — a row cap for the
+ * presentation tail, a sequence checkpoint for the update cursors — so the buffer arithmetic
+ * that makes a reverse line scan correct across 64 KiB block boundaries lives here once.
+ *
+ * `done()` is asked between lines and ends the walk early. The return says why the walk
+ * stopped: `exhaustedBudget` means the budget ran out with the file neither finished nor
+ * `done()`, which is the only outcome where the caller has been handed an incomplete answer
+ * and has to decide what to do about it.
+ */
+async function scanJournalBackwards(
+  sessionId: string,
+  accept: (line: Buffer) => void,
+  options: { done: () => boolean; maxBytes: number; onDamaged: () => void }
+): Promise<{ exhaustedBudget: boolean }> {
+  const file = path.join(sessionDir(sessionId), 'events.jsonl');
+  let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
+  let cursor = 0;
+  let bytes = 0;
+  try {
+    handle = await fs.open(file, 'r');
+    cursor = (await handle.stat()).size;
+    let carry = Buffer.alloc(0);
+    while (cursor > 0 && !options.done() && bytes < options.maxBytes) {
+      const wanted = Math.min(64 * 1024, cursor, options.maxBytes - bytes);
+      if (wanted <= 0) break;
+      cursor -= wanted;
+      const buffer = Buffer.allocUnsafe(wanted);
+      const { bytesRead } = await handle.read(buffer, 0, wanted, cursor);
+      const joined = Buffer.concat([buffer.subarray(0, bytesRead), carry]);
+      bytes += bytesRead;
+      const firstNewline = joined.indexOf(0x0a);
+      if (firstNewline < 0) {
+        // A corrupt/no-newline tail used to repeatedly copy the complete 8 MiB budget:
+        // 64 KiB + 128 KiB + ... . Retain only one maximum event while seeking a boundary.
+        if (joined.length > MAX_LINE_BYTES + 1) options.onDamaged();
+        carry = joined.subarray(0, Math.min(joined.length, MAX_LINE_BYTES + 1));
+        continue;
+      }
+      carry = joined.subarray(0, firstNewline);
+      const complete = joined.subarray(firstNewline + 1);
+      let endAt = complete.length;
+      for (let at = complete.length - 1; at >= 0 && !options.done(); at--) {
+        if (complete[at] !== 0x0a) continue;
+        const line = complete.subarray(at + 1, endAt);
+        if (line.length > 0) accept(line);
+        endAt = at;
+      }
+      if (!options.done() && endAt > 0) accept(complete.subarray(0, endAt));
+    }
+    if (cursor === 0 && !options.done() && carry.length > 0) accept(carry);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    // A session with no journal file yet is complete at zero rows, not truncated.
+    return { exhaustedBudget: false };
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+  return { exhaustedBudget: cursor > 0 && !options.done() };
+}
+
+/**
  * Reads only the newest matching presentation window without materialising the whole JSONL journal.
  *
  * This exists for UI/default-history tails. Full-text search, call expansion and explicit old
@@ -1182,46 +1265,13 @@ export async function readRecentEvents(
     rawTail.push(parsed);
   };
 
-  const file = path.join(sessionDir(sessionId), 'events.jsonl');
-  let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
-  try {
-    handle = await fs.open(file, 'r');
-    let cursor = (await handle.stat()).size;
-    let bytes = 0;
-    let carry = Buffer.alloc(0);
-    while (cursor > 0 && rawTail.length < cap && bytes < readBudget) {
-      const wanted = Math.min(64 * 1024, cursor, readBudget - bytes);
-      if (wanted <= 0) break;
-      cursor -= wanted;
-      const buffer = Buffer.allocUnsafe(wanted);
-      const { bytesRead } = await handle.read(buffer, 0, wanted, cursor);
-      const joined = Buffer.concat([buffer.subarray(0, bytesRead), carry]);
-      bytes += bytesRead;
-      const firstNewline = joined.indexOf(0x0a);
-      if (firstNewline < 0) {
-        // A corrupt/no-newline tail used to repeatedly copy the complete 8 MiB budget:
-        // 64 KiB + 128 KiB + ... . Retain only one maximum event while seeking a boundary.
-        if (joined.length > MAX_LINE_BYTES + 1) damaged += 1;
-        carry = joined.subarray(0, Math.min(joined.length, MAX_LINE_BYTES + 1));
-        continue;
-      }
-      carry = joined.subarray(0, firstNewline);
-      const complete = joined.subarray(firstNewline + 1);
-      let endAt = complete.length;
-      for (let at = complete.length - 1; at >= 0 && rawTail.length < cap; at--) {
-        if (complete[at] !== 0x0a) continue;
-        const line = complete.subarray(at + 1, endAt);
-        if (line.length > 0) accept(line);
-        endAt = at;
-      }
-      if (rawTail.length < cap && endAt > 0) accept(complete.subarray(0, endAt));
+  await scanJournalBackwards(sessionId, accept, {
+    done: () => rawTail.length >= cap,
+    maxBytes: readBudget,
+    onDamaged: () => {
+      damaged += 1;
     }
-    if (cursor === 0 && rawTail.length < cap && carry.length > 0) accept(carry);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-  } finally {
-    await handle?.close().catch(() => undefined);
-  }
+  });
 
   const candidates: SessionEvent[] = [...rawTail];
   for (const message of messages.values()) {
@@ -1233,6 +1283,105 @@ export async function readRecentEvents(
   const selected = candidates.slice(Math.max(0, candidates.length - cap));
   if (damaged > 0) logWarn(`session ${sessionId}: skipped ${damaged} unreadable recent event line(s)`);
   return chronological(selected);
+}
+
+/**
+ * Reads only what a session recorded *after* a sequence checkpoint.
+ *
+ * The session tool's update cursors poll one session over and over, and every poll wants the
+ * same narrow thing: the rows appended since the last poll said it was caught up. Answering
+ * that with `readEvents()` re-read and re-parsed the entire journal each time, so P polls of an
+ * N-event session cost O(P x N) to deliver O(P x new) worth of answer — a long-lived session
+ * being watched all day paid for its whole history on every tick. Sequence numbers only ever
+ * increase down the journal, so a backwards walk can stop at the first row at or below the
+ * checkpoint and never touch anything older.
+ *
+ * The rows are exactly the rows `readEvents()` would have returned after the same filter, and
+ * deliberately so: a canonical message still suppresses the legacy journal snapshot of itself,
+ * but the repeated pre-canonical revisions of one message are *not* collapsed the way
+ * `readRecentEvents()` collapses them. That reader builds a presentation tail, where a long
+ * answer's revisions crowding out earlier turns is a real problem. This one answers a sequence
+ * cursor, where every revision has its own seq the cursor is about to advance past — dropping
+ * them here would make a caught-up cursor mean something different than it did before.
+ *
+ * The budget is a safety valve, not a limit on the answer. If the walk runs out of bytes before
+ * it reaches the checkpoint, this falls back to the full read rather than returning a page with
+ * a silent hole in it: an update cursor that quietly skipped rows would lose recorded events
+ * for good, and no amount of saved I/O is worth that.
+ */
+export async function readEventsAfter(
+  sessionId: string,
+  afterSeq: number,
+  options: Pick<ReadOptions, 'kinds' | 'agent'> & { maxBytes?: number } = {}
+): Promise<SessionEvent[]> {
+  assertSessionId(sessionId);
+  await flushSession(sessionId);
+  const active = open.get(sessionId);
+  const needsMessages =
+    !options.kinds || options.kinds.includes('user_message') || options.kinds.includes('assistant_message');
+  const messages = needsMessages ? active?.messages ?? (await readCanonicalMessages(sessionId)) : new Map<string, MessageEvent>();
+  const canonicalKeys = new Set(messages.keys());
+  const rows: SessionEvent[] = [];
+  let damaged = 0;
+  let reachedCheckpoint = false;
+  const readBudget = Math.max(64 * 1024, Math.min(MAX_RECENT_READ_BYTES, options.maxBytes ?? MAX_RECENT_READ_BYTES));
+
+  const accept = (line: Buffer): void => {
+    if (reachedCheckpoint || line.length === 0) return;
+    if (line.length > MAX_LINE_BYTES) {
+      damaged += 1;
+      return;
+    }
+    let parsed: SessionEvent;
+    try {
+      parsed = JSON.parse(line.toString('utf8')) as SessionEvent;
+    } catch {
+      damaged += 1;
+      return;
+    }
+    if (typeof parsed?.seq !== 'number' || typeof parsed?.kind !== 'string') {
+      damaged += 1;
+      return;
+    }
+    // The stopping rule. Journal order is append order, so the first row at or below the
+    // checkpoint proves every remaining row is older than the caller asked for.
+    if (parsed.seq <= afterSeq) {
+      reachedCheckpoint = true;
+      return;
+    }
+    if (options.kinds && !options.kinds.includes(parsed.kind)) return;
+    if (options.agent && parsed.agent !== options.agent) return;
+    if (parsed.kind === 'user_message' || parsed.kind === 'assistant_message') {
+      const key = messageKey(parsed);
+      if (key && canonicalKeys.has(key)) return;
+    }
+    rows.push(parsed);
+  };
+
+  const { exhaustedBudget } = await scanJournalBackwards(sessionId, accept, {
+    done: () => reachedCheckpoint,
+    maxBytes: readBudget,
+    onDamaged: () => {
+      damaged += 1;
+    }
+  });
+  if (exhaustedBudget && !reachedCheckpoint) {
+    return (await readEvents(sessionId, { from: afterSeq + 1, kinds: options.kinds, agent: options.agent })).filter(
+      (event) => event.seq > afterSeq
+    );
+  }
+
+  for (const message of messages.values()) {
+    if (message.seq <= afterSeq) continue;
+    if (options.kinds && !options.kinds.includes(message.kind)) continue;
+    if (options.agent && message.agent !== options.agent) continue;
+    rows.push(message);
+  }
+  if (damaged > 0) logWarn(`session ${sessionId}: skipped ${damaged} unreadable event line(s) after #${afterSeq}`);
+  // Sequence order, not presentation chronology: this answers a sequence cursor, and its
+  // callers re-derive whatever ordering they present from the page they get back.
+  rows.sort((left, right) => left.seq - right.seq);
+  return rows;
 }
 
 /**
@@ -1391,6 +1540,11 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
             : [],
         contextTokens:
           typeof publicSummary.contextTokens === 'number' ? publicSummary.contextTokens : publicSummary.estimatedTokens,
+        // Absent on summaries written before the baseline existed, and on chats nobody resumed.
+        resumeBaselineTokens:
+          typeof publicSummary.resumeBaselineTokens === 'number' && Number.isFinite(publicSummary.resumeBaselineTokens)
+            ? Math.max(0, Math.floor(publicSummary.resumeBaselineTokens))
+            : 0,
         // Older summaries predate successful-resume provenance. Missing means unknown, never
         // "use lastHandoffId": capture publication happens before the continuation rebind.
         lastCommittedResumeHandoffId:
@@ -1424,10 +1578,6 @@ async function readMetaCheckpoint(id: string): Promise<MetaCheckpoint | null> {
   }
   logWarn(`session ${id}: no valid metadata projection; refusing to treat it as an empty session`);
   return null;
-}
-
-async function readMeta(id: string): Promise<SessionSummary | null> {
-  return (await readMetaCheckpoint(id))?.summary ?? null;
 }
 
 function addAttachment(map: Map<string, Set<string>>, conversationId: string, sessionId: string): void {
@@ -1568,37 +1718,6 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
 }
 
 /**
- * Every readable session, newest first. Live summaries win over what is on disk.
- *
- * Legacy/model-facing bounded list. Do not use this for correctness properties that promise
- * to see every retained session; identity, latest-handoff recovery and retention use the
- * uncapped process catalog instead.
- */
-async function readAllSummaries(): Promise<SessionSummary[]> {
-  assertReady();
-  let names: string[];
-  try {
-    names = await fs.readdir(root);
-  } catch {
-    return [];
-  }
-  const summaries: SessionSummary[] = [];
-  let scanned = 0;
-  for (const name of names) {
-    if (!/^[0-9a-z-]{8,64}$/i.test(name)) continue;
-    if (++scanned > MAX_SCANNED_SESSIONS) {
-      logWarn(`session store: more than ${MAX_SCANNED_SESSIONS} session folders; older ones were not scanned`);
-      break;
-    }
-    const live = open.get(name);
-    const summary = live ? live.summary : await readMeta(name);
-    if (summary) summaries.push({ ...summary });
-  }
-  summaries.sort((a, b) => b.updatedAt - a.updatedAt);
-  return summaries;
-}
-
-/**
  * Every valid session summary, with no maintenance/UI scan cap.
  *
  * Most callers deliberately stop after 5,000 folders so a pathological history cannot make a
@@ -1606,8 +1725,16 @@ async function readAllSummaries(): Promise<SessionSummary[]> {
  * authority. Missing the newest resumable handoff because `readdir()` happened to return that
  * folder after an arbitrary cap can resume the wrong work. Keep the expensive path explicit
  * and use it only where "every session" is part of the contract.
+ *
+ * Request-correlation crash-window reconciliation, deterministic Unattributed repair and
+ * model-facing session search are the same kind of caller: each one's own contract promises to
+ * see every retained session (or, for search, to know when it truly has), so each uses this
+ * instead of a capped list. There used to be a `listAllSessions()` wrapping the capped
+ * `readAllSummaries()` for exactly those three callers, discovered and deleted after a
+ * 2026-08-31 audit found it being read as if it were authoritative — the cap silently turned
+ * "session 5,001" into "does not exist" for callers whose whole job was not to do that.
  */
-async function readEverySummary(): Promise<SessionSummary[]> {
+export async function readEverySummary(): Promise<SessionSummary[]> {
   const catalog = await ensureAttachmentCatalog();
   const summaries = new Map<string, SessionSummary>();
   for (const summary of catalog.summaries.values()) summaries.set(summary.id, summary);
@@ -1692,11 +1819,6 @@ export async function listSessionPage(options: {
 /** Newest first, capped for older internal/UI callers. */
 export async function listSessions(): Promise<SessionSummary[]> {
   return (await listSessionPage({ limit: MAX_LISTED_SESSIONS })).sessions;
-}
-
-/** Full bounded compatibility/model-facing view. Never use it for retention or identity. */
-export async function listAllSessions(): Promise<SessionSummary[]> {
-  return readAllSummaries();
 }
 
 /**
@@ -1929,7 +2051,8 @@ export async function rebindSession(
   id: string,
   fromConversationId: string,
   toConversationId: string,
-  committedResumeHandoffId?: string
+  committedResumeHandoffId?: string,
+  resumeBaselineTokens?: number
 ): Promise<boolean> {
   if (!toConversationId || fromConversationId === toConversationId) return false;
   if (committedResumeHandoffId !== undefined && !/^[0-9a-z-]{8,64}$/i.test(committedResumeHandoffId)) return false;
@@ -1956,6 +2079,13 @@ export async function rebindSession(
         ? [...entry.summary.chatIds]
         : [...entry.summary.chatIds, toConversationId],
       contextTokens: 0,
+      // What B is about to be handed, so the threshold can tell it apart from what B earns.
+      // Absent when the caller cannot say — an unknown baseline is zero, which is exactly the
+      // pre-existing behaviour rather than a guess in either direction.
+      resumeBaselineTokens:
+        typeof resumeBaselineTokens === 'number' && Number.isFinite(resumeBaselineTokens)
+          ? Math.max(0, Math.floor(resumeBaselineTokens))
+          : 0,
       activeTurnId: null,
       ...(committedResumeHandoffId !== undefined
         ? { lastCommittedResumeHandoffId: committedResumeHandoffId }

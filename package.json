@@ -14,13 +14,17 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "npm run verify:ci",
-    "verify:ci": "npm run rg && npm run verify:privacy && npm run typecheck && vitest run --exclude test/mcp-shutdown.test.ts && vitest run test/mcp-shutdown.test.ts",
+    "verify:ci": "npm run rg && npm run verify:privacy && npm run typecheck && npm run electron:ensure && vitest run --exclude test/mcp-shutdown.test.ts && vitest run test/mcp-shutdown.test.ts",
     "verify:privacy": "node scripts/verify-public-history.mjs",
+    "verify:browser": "node scripts/verify-browser-driver.mjs",
+    "verify:compact-chain": "node scripts/verify-compact-chain.mjs",
+    "verify:compaction-release": "node scripts/verify-compaction-release.mjs",
     "verify:tunnel-current": "node scripts/verify-current-tunnel.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "icon": "node scripts/make-icon.mjs",
     "tunnel": "node scripts/fetch-tunnel-client.mjs",
     "rg": "node scripts/fetch-ripgrep.mjs",
+    "electron:ensure": "node scripts/ensure-electron.mjs",
     "packaging:prepare": "node scripts/prepare-packaging-native.mjs",
     "desktop:mac": "node scripts/prepare-macos-desktop-helper.mjs --platform darwin",
     "dist": "node scripts/package.mjs --arch x64,arm64",
@@ -64,5 +68,14 @@
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
     "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "node-pty@1.2.0-beta.15": true,
+    "tree-sitter@0.25.1": true,
+    "tree-sitter-bash@0.25.1": true,
+    "electron@43.4.1": true
   }
 }

@@ -26,7 +26,9 @@ import {
 } from './tunnel/health.js';
 
 import type { Capabilities, Check, Diagnosis, MacOSDesktopAccessStatus } from '../shared/types.js';
-import { surfaceIsUseful } from './mcp/surfaces.js';
+import { surfaceIsUseful, type SurfaceId } from './mcp/surfaces.js';
+import { APP_VERSION, BUILD_REVISION, BUILD_VERSION } from './version.js';
+import { capabilitiesAddedSinceConnectorSnapshot } from './mcp/server.js';
 import { refreshMacOSDesktopAccess } from './computer/index.js';
 
 async function fetchJson(
@@ -190,8 +192,14 @@ export function describeMacOSDesktopAccess(
   return checks;
 }
 
-/** Runs an initialize + tools/list against our own loopback endpoint. */
-async function checkLocalServer(url: string): Promise<Check> {
+/**
+ * Runs an initialize + tools/list against our own loopback endpoint.
+ *
+ * The surface is named because the widening note is per surface: a capability that adds tools to
+ * Core says nothing about Desktop, and reporting it against the wrong connector sends someone to
+ * recreate the one that was never affected.
+ */
+async function checkLocalServer(url: string, surface: SurfaceId): Promise<Check> {
   const init = await fetchJson(url, {
     jsonrpc: '2.0',
     id: 1,
@@ -203,12 +211,17 @@ async function checkLocalServer(url: string): Promise<Check> {
     }
   });
   if (init === null) {
-    return { name: 'Local server', status: 'fail', ok: false, detail: 'No answer on the loopback address.' };
+    return {
+      name: `Local server (${surface === 'core' ? 'Core' : 'Desktop'})`,
+      status: 'fail',
+      ok: false,
+      detail: 'No answer on the loopback address.'
+    };
   }
   const initObj = init.json as { error?: { message?: string } } | null;
   if (init.status >= 400 || initObj?.error) {
     return {
-      name: 'Local server',
+      name: `Local server (${surface === 'core' ? 'Core' : 'Desktop'})`,
       status: 'fail',
       ok: false,
       detail: `initialize failed: HTTP ${init.status} ${initObj?.error?.message ?? init.text.slice(0, 120)}`
@@ -222,18 +235,55 @@ async function checkLocalServer(url: string): Promise<Check> {
   const tools = listObj?.result?.tools;
   if (!Array.isArray(tools)) {
     return {
-      name: 'Local server',
+      name: `Local server (${surface === 'core' ? 'Core' : 'Desktop'})`,
       status: 'fail',
       ok: false,
       detail: `tools/list failed: ${listObj?.error?.message ?? `HTTP ${list?.status ?? 0}`}`
     };
   }
   const names = tools.map((t) => t.name).filter(Boolean);
+  // A tool this server offers is not necessarily a tool ChatGPT can see. A connector keeps the
+  // tools/list it fetched when it was created, so a capability switched on afterwards adds a
+  // tool here that never appears there — QA reported `browser` missing while the app was
+  // serving it, and had no way to tell the two apart. If anything has been added since, say so
+  // here, where the list it is being compared against is on the same line.
+  // Why a tool a user is looking for is not in that list.
+  //
+  // The condition for `browser` lives in the tool's own description, which is only readable once
+  // the tool exists — so when it is missing, nothing says why. A QA run lost its entire priority
+  // section to that silence and had to reason it out from source afterwards. Each reason names
+  // itself here instead, in the same line as the list it is missing from.
+  // Only where the tool belongs. `browser` lives on Desktop, and saying it is absent from Core
+  // is true, useless, and alarming.
+  const missing: string[] = [];
+  if (surface === 'desktop' && !names.includes('browser')) {
+    const caps = effectiveCapabilities(getConfig());
+    if (getConfig().readOnly) {
+      missing.push('`browser` is absent because Read only is on, which withdraws desktop control');
+    } else if (!caps.control) {
+      missing.push('`browser` is absent because "See and use the desktop" is off');
+    } else {
+      missing.push(
+        '`browser` is absent although desktop control is on — this build predates browser control; ' +
+          'check the Build line above against the package you installed'
+      );
+    }
+  }
+  const missingNote = missing.length > 0 ? ` ${missing.join('. ')}.` : '';
+
+  const added = capabilitiesAddedSinceConnectorSnapshot(surface);
+  const staleNote =
+    added.length > 0
+      ? ` Switched on since this endpoint started: ${added.join(', ')}. The tools they add are being served now, but a chat that already loaded this connector keeps the list it saw — start a new chat, and only recreate the connector if that still does not show them.`
+      : '';
   return {
-    name: 'Local server',
+    name: `Local server (${surface === 'core' ? 'Core' : 'Desktop'})`,
     status: 'pass',
     ok: true,
-    detail: `Answers on loopback and offers ${names.length} tool${names.length === 1 ? '' : 's'}: ${names.join(', ')}`
+    detail:
+      `Answers on loopback and offers ${names.length} tool${names.length === 1 ? '' : 's'}: ${names.join(', ')}.` +
+      missingNote +
+      staleNote
   };
 }
 
@@ -295,6 +345,15 @@ function developerMode(seen: number | null, called: number | null): Check {
 
 export async function runDiagnostics(): Promise<Diagnosis> {
   const checks: Check[] = [];
+  // First, because it decides what every line under it means. Two builds can carry the same
+  // version and different code, and a QA run spent itself on an app that predated the feature it
+  // was testing with nothing on screen able to say so.
+  checks.push({
+    name: 'Build',
+    status: 'pass',
+    ok: true,
+    detail: `Chat On Steroids ${BUILD_VERSION} on ${process.platform}-${process.arch}. Release ${APP_VERSION}, commit ${BUILD_REVISION}.`
+  });
   const config = getConfig();
   const caps = effectiveCapabilities(config);
   const status = getStatus();
@@ -330,7 +389,14 @@ export async function runDiagnostics(): Promise<Diagnosis> {
       detail: 'Not running. Press Connect first.'
     });
   } else {
-    checks.push(await checkLocalServer(status.localUrl));
+    // Both surfaces, because they serve different tools and only one of them was ever asked.
+    // Core's list was being reported as though it were the whole server, so a user looking for
+    // `browser` was shown a list it could never appear in — and then told it was missing.
+    checks.push(await checkLocalServer(status.localUrl, 'core'));
+    const desktop = status.surfaces.find((entry) => entry.id === 'desktop');
+    if (desktop?.available && desktop.localUrl) {
+      checks.push(await checkLocalServer(desktop.localUrl, 'desktop'));
+    }
   }
 
   // 3. The tunnel process itself.
@@ -367,7 +433,8 @@ export async function runDiagnostics(): Promise<Diagnosis> {
     //    thinks of us. Read together because the route check needs the client's uptime
     //    to tell "not working" apart from "has not finished starting".
     const [health, client] = await Promise.all([readPollHealth(base), readClientStatus(base)]);
-    checks.push(describeRoute(health, client?.uptimeSeconds ?? null));
+    const routeCheck = describeRoute(health, client?.uptimeSeconds ?? null);
+    checks.push(routeCheck);
 
     if (client) {
       checks.push({

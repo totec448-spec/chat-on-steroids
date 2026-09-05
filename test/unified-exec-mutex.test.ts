@@ -56,6 +56,42 @@ it('does not let a lock attempt barge ahead of an already queued waiter', async 
   }
 });
 
+it('keeps an exited-unread result when the global session cap refuses a new launch', () => {
+  const manager = new UnifiedExecProcessManager(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS);
+  const retainedId = manager.allocateProcessId();
+  const now = Date.now();
+
+  // This tiny fake represents the exact manager state that matters: an exited entry whose
+  // terminal result has not been consumed yet. The old capacity path deleted it to make room.
+  const fakeExitedProcess = {
+    hasExited: () => true,
+    exitedAt: () => now,
+    interactionLock: { tryLock: () => () => {} }
+  };
+  (manager as any).processes.set(retainedId, {
+    process: fakeExitedProcess,
+    processId: retainedId,
+    cwd: '/retained',
+    hookCommand: 'retained completed result',
+    tty: false,
+    initialExecCommandActive: false,
+    startedAt: now,
+    lastUsed: now
+  });
+
+  // retainedId already occupies one reservation. Fill the remaining 63 slots, then reserve
+  // the candidate that would become the 65th. Capacity must reject that candidate rather than
+  // deleting the completed result to make its reservation fit.
+  for (let index = 1; index < MAX_UNIFIED_EXEC_PROCESSES; index++) manager.allocateProcessId();
+  const rejectedId = manager.allocateProcessId();
+
+  expect(() => (manager as any).ensureProcessCapacity(rejectedId)).toThrow(
+    /too many retained or active terminal sessions/
+  );
+  expect(manager.backgroundState(retainedId)?.exitedUnread).toBe(true);
+  expect((manager as any).processes.has(retainedId)).toBe(true);
+});
+
 it('refuses new capacity without evicting a completed unread result', async () => {
   const manager = new UnifiedExecProcessManager(DEFAULT_MAX_BACKGROUND_TERMINAL_TIMEOUT_MS);
   const unreadId = manager.allocateProcessId();
@@ -86,7 +122,7 @@ it('refuses new capacity without evicting a completed unread result', async () =
     while (fillerIds.length < MAX_UNIFIED_EXEC_PROCESSES - 1) fillerIds.push(manager.allocateProcessId());
     const refusedId = manager.allocateProcessId();
     await expect(manager.execCommand(request(refusedId, "console.log('must-not-run')", 100))).rejects.toThrow(
-      `too many retained terminal sessions (limit ${MAX_UNIFIED_EXEC_PROCESSES})`
+      `too many retained or active terminal sessions (limit ${MAX_UNIFIED_EXEC_PROCESSES})`
     );
 
     expect(manager.backgroundState(new Set([unreadId])).exitedUnread).toEqual([

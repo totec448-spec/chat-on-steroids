@@ -183,6 +183,57 @@ describe('the instruction the goal model is given', () => {
     expect(prompt).toContain('Never widen it');
     expect(prompt).toContain('NO_REPLY');
   });
+
+  /**
+   * Nothing in these prompts told the meta-prompter what to do when ChatGPT asks permission to
+   * do something that cannot be undone. It types into a real chat while the user is away, so
+   * "yes, go ahead" to a delete or a force-push is the one answer it can give that the user
+   * cannot take back — and inventing that authority is the failure the rest of the prompt is
+   * already written against, in its most expensive form.
+   */
+  it('refuses an irreversible action the requirements never asked for, in all three prompts', async () => {
+    const { DEFAULT_GOAL_SYSTEM_PROMPT, DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT, DEFAULT_GOAL_LOOP_SYSTEM_PROMPT } =
+      await import('../src/shared/goal.js');
+    for (const prompt of [
+      DEFAULT_GOAL_SYSTEM_PROMPT,
+      DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
+      DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
+    ]) {
+      expect(prompt).toContain('asks permission to do something irreversible');
+      expect(prompt).toContain('force-push');
+      expect(prompt).toContain('cannot be taken back');
+      expect(prompt).toContain('refuse it and point back at what');
+    }
+    // The loop has no NO_REPLY to fall back on, so refusing has to be compatible with its one
+    // rule: it still owes a message every turn.
+    expect(DEFAULT_GOAL_LOOP_SYSTEM_PROMPT).toContain('Refusing is still a message');
+  });
+
+  /**
+   * After a Compact & Resume handover the first message labelled "user" in the new chat is the
+   * brief this app typed, not the person. "Write in the person's own register" then copied the
+   * brief's formal tone into a chat whose owner texts in lowercase.
+   *
+   * The prompts quote the brief's opening sentence verbatim, and that sentence is produced by
+   * resumeBootstrapText(). This is the only thing keeping the two from drifting apart: change
+   * the formatter and the prompts silently start describing a message that no longer exists.
+   */
+  it('tells the three prompts that the handover brief is not the person talking', async () => {
+    const { DEFAULT_GOAL_SYSTEM_PROMPT, DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT, DEFAULT_GOAL_LOOP_SYSTEM_PROMPT } =
+      await import('../src/shared/goal.js');
+    const { resumeBootstrapText } = await import('../src/main/session/handoff.js');
+    const quoted = 'Continuing a Chat On Steroids session that was compacted.';
+    expect(resumeBootstrapText('a brief')).toContain(quoted);
+    for (const prompt of [
+      DEFAULT_GOAL_SYSTEM_PROMPT,
+      DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
+      DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
+    ]) {
+      expect(prompt).toContain(quoted);
+      expect(prompt).toContain('is not the person');
+      expect(prompt).toContain('never take your voice from it');
+    }
+  });
 });
 
 describe('what leaves this machine', () => {

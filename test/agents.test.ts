@@ -35,6 +35,7 @@ const {
   claimWorkerRevival,
   currentRunId,
   dormantWorkerNotice,
+  hasDormantWorkerLeases,
   reactivateDormantRunForConversation,
   failAgent,
   finishAgent,
@@ -89,13 +90,13 @@ const {
   workerRevivalClaimed
 } = await import('../src/main/agents.js');
 const { startMcpServer } = await import('../src/main/mcp/server.js');
-const { runningToolCalls } = await import('../src/main/mcp/call-context.js');
+const { emptyEvidence, runInCallContext, runningToolCalls } = await import('../src/main/mcp/call-context.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { findSessionByConversation, initSessionStore, readRecentEvents, resetSessionStoreForTests } = await import(
   '../src/main/session/store.js'
 );
 const { recordChatObservations, resetRecorderForTests } = await import('../src/main/session/recorder.js');
-const { resetWorkspaces, setWorkspaceFor, workspaceForChat } = await import('../src/main/workspace.js');
+const { resetWorkspaces, setCurrentWorkspace, setWorkspaceFor, workspaceForChat } = await import('../src/main/workspace.js');
 const { DEFAULT_CAPABILITIES } = await import('../src/shared/types.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
@@ -459,10 +460,23 @@ describe('at-least-once delivery', () => {
     startSwarm(1);
     const worker = startWorker('worker-1');
 
-    // Spawn mirrored project A into `agent:prime`. During the live run the prime is resolved
-    // under that agent identity, so an explicit absolute-path call now moves only that key to B.
-    setWorkspaceFor('agent:prime', { virtual: '/root/project-b', real: 'C:\\root\\project-b' });
-    expect(workspaceForChat(PRIME_CHAT)?.virtual).toBe('/root/project-a');
+    // The prime moves to project B mid-run, through a real call context rather than by poking a
+    // key: `agent` is `prime` and the conversation is proven, which is the only shape a prime's
+    // call can have — every path that sets agent=prime resolves the conversation first. The
+    // point of the assertion below is that such a call writes the conversation key, so there is
+    // no second prime identity for the run's end to collapse back.
+    runInCallContext(
+      {
+        startedAt: Date.now(),
+        transportKey: null,
+        agent: PRIME_ID,
+        caller: { transportKey: null, secret: null, requestId: null, conversationId: PRIME_CHAT },
+        outcome: null,
+        evidence: emptyEvidence()
+      } as never,
+      () => setCurrentWorkspace({ virtual: '/root/project-b', real: 'C:\\root\\project-b' })
+    );
+    expect(workspaceForChat(PRIME_CHAT)?.virtual).toBe('/root/project-b');
 
     fillContext('c-worker-1');
     finishAgent(worker.caller, 'done');
@@ -470,9 +484,38 @@ describe('at-least-once delivery', () => {
     expect(acknowledgeOffers(PRIME_ID)).toHaveLength(1);
     expect(releaseQuiescentRun()).toBe(true);
 
-    // After endRun the kernel stops assigning `agent:prime`; the conversation key therefore
-    // has to carry forward the newest workspace rather than reviving the pre-swarm project.
+    // Still project B after the run ends: the move was never held anywhere it had to be
+    // rescued from, so nothing here can revive the pre-swarm project.
     expect(workspaceForChat(PRIME_CHAT)?.virtual).toBe('/root/project-b');
+  });
+
+  it('stops a long-parked run from refusing every call nobody could identify', () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'done');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    // Freshly parked, its sleeping workers are exactly the reason an unproven call is refused:
+    // one of them might be the caller, and nothing in the request says otherwise.
+    expect(hasDormantWorkerLeases()).toBe(true);
+
+    const snapshot = snapshotSwarm()!;
+    const aged = {
+      ...snapshot,
+      dormantRuns: (snapshot.dormantRuns ?? []).map((entry) => ({
+        ...entry,
+        parkedAt: Date.now() - 31 * 60_000
+      }))
+    };
+    resetAgentsForTests();
+    restoreSwarm(aged);
+
+    // The history is untouched and still resumable — this bounds the refusal, not the run.
+    expect(dormantWorkerNotice('c-worker-1')).toMatch(/WORKER_SLEEPING.*worker-1/i);
+    // But it no longer speaks for calls it cannot identify. This was unbounded: a run parked at
+    // any point in the past refused every unproven call for good, and a QA run lost its whole
+    // Desktop surface to a swarm parked days earlier.
+    expect(hasDormantWorkerLeases()).toBe(false);
   });
 
   it('keeps a finished worker as a durable dormant identity rather than retiring its history', () => {
@@ -1165,6 +1208,67 @@ describe('a worker that is sleeping', () => {
       state: 'sleeping',
       conversationId: 'c-worker-b-restore'
     });
+
+    await setEnabled(true);
+  });
+
+  it('discards a restored history that claims a conversation another owner already holds', async () => {
+    // One ChatGPT conversation belongs to exactly one owner, and every dormant identity lookup
+    // depends on it: the runtime scan deliberately returns null rather than pick an owner if it
+    // ever sees the same conversation twice, because picking one would answer a worker-fence or
+    // identity question with a guess. Restore is where a corrupt or hand-edited swarm.json could
+    // introduce that shape, so it is the place the invariant has to be enforced — and this is the
+    // regression that says it still is. It also stands against replacing the scan with a
+    // conversation-keyed index, which would silently let the second claim overwrite the first.
+    await setEnabled(true, 1);
+    const primeB: Caller = { conversationId: 'c-prime-b' };
+
+    startSwarm(1);
+    const workerA = startWorker('worker-1', 'c-worker-contested');
+    finishAgent(workerA.caller, 'A parked');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    spawn({ workers: [{ label: 'B worker', task: 'B history' }], caller: primeB });
+    const workerB = startWorker('worker-1', 'c-worker-b-own');
+    finishAgent(workerB.caller, 'B parked');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const saved = snapshotSwarm()!;
+    expect(saved.dormantRuns).toHaveLength(2);
+    // Forge the impossible shape: B's worker now names the conversation A's worker already owns.
+    const contested = {
+      ...saved,
+      dormantRuns: (saved.dormantRuns ?? []).map((entry, index) =>
+        index === 0
+          ? entry
+          : {
+              ...entry,
+              agents: entry.agents.map((agent) =>
+                agent.info.id === 'worker-1'
+                  ? { ...agent, info: { ...agent.info, conversationId: 'c-worker-contested' } }
+                  : agent
+              )
+            }
+      )
+    };
+
+    resetAgentsForTests();
+    restoreSwarm(contested);
+
+    // The first owner keeps the conversation, and the conflicting history is dropped whole
+    // rather than merged — so the lookup has exactly one answer instead of two.
+    const notice = dormantWorkerNotice('c-worker-contested');
+    // Null is precisely what the runtime lookup answers when it finds two owners for one
+    // conversation, so a null here would mean the conflict survived restore and only the second
+    // line of defence caught it. A real notice means the first line did its job.
+    expect(notice, 'the contested conversation should have exactly one dormant owner').not.toBeNull();
+    expect(notice).toMatch(/WORKER_(SLEEPING|ENDED).*worker-1/i);
+    expect(swarmStateForCaller(prime).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
+      conversationId: 'c-worker-contested'
+    });
+    // B's history is gone entirely, not merged and not partially kept: asking for it now reads
+    // as "no history belongs to this conversation" rather than handing back a half-owned run.
+    expect(() => swarmStateForCaller(primeB)).toThrow(/No sub-agent history belongs to this conversation/);
 
     await setEnabled(true);
   });
@@ -2860,5 +2964,76 @@ describe('through the MCP endpoint', () => {
     expect(structured.run_id).toBeTypeOf('string');
     const worker = (structured.agents as Array<Record<string, unknown>>).find((agent) => agent.id === 'worker-1');
     expect(worker).toMatchObject({ id: 'worker-1', role: 'worker', state: 'active' });
+  });
+
+  describe('the workdir gate scopes to this call, not to whether any swarm exists anywhere', () => {
+    // WORKSPACE_REQUIRED used to fire on swarmRunning() — true the instant *any* run existed
+    // in the app, regardless of whether the calling conversation belonged to it. QA hit this
+    // refusal on the very first, entirely ordinary command of a plain single-chat session, over
+    // and over, only because some unrelated swarm happened to be alive elsewhere. It must gate
+    // on this call's own proven agent membership instead.
+
+    const startCommandEndpoint = async (): Promise<void> => {
+      await endpoint.stop();
+      endpoint = await startMcpServer(() => ({
+        roots: [{ name: 'probe', path: dir }],
+        caps: { ...DEFAULT_CAPABILITIES, command: true },
+        readOnly: false,
+        sessionTools: false,
+        agentTools: true
+      }));
+    };
+
+    /** exec_command with no `workdir`, attributed to `conversationId` the same way the held-call test is. */
+    const execWithNoWorkdir = async (conversationId: string): Promise<string> => {
+      const seq = ++evidenceSeq;
+      const requestId = `wfr_exec_ws_${seq}`;
+      const shell =
+        process.platform === 'win32'
+          ? `${process.env.SystemRoot ?? 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
+          : '/bin/sh';
+      const cmd = process.platform === 'win32' ? "Write-Output 'workspace-gate-ok'" : "printf '%s\\n' workspace-gate-ok";
+      const pending = post(
+        {
+          jsonrpc: '2.0',
+          id: nextId++,
+          method: 'tools/call',
+          params: { name: 'exec_command', arguments: { cmd, shell, yield_time_ms: 5_000 } }
+        },
+        { 'x-request-id': `${requestId}/relay` }
+      );
+      await recordChatObservations(conversationId, [
+        { kind: 'turn_start', time: Date.now(), turnId: `t-${seq}` },
+        {
+          kind: 'tool_evidence',
+          time: Date.now(),
+          turnId: `t-${seq}`,
+          calls: [{ messageId: `m-${seq}`, tool: 'exec_command', order: 0, answered: false, requestId }]
+        }
+      ]);
+      return textOfReply(await pending);
+    };
+
+    it('runs for an ordinary chat that belongs to no swarm, even while an unrelated one is running', async () => {
+      await startCommandEndpoint();
+      startSwarm(1);
+      bindConversation('worker-1', 'c-worker-elsewhere');
+
+      const text = await execWithNoWorkdir('c-ordinary-no-swarm');
+      expect(text).not.toContain('WORKSPACE_REQUIRED');
+      expect(text).toContain('workspace-gate-ok');
+    });
+
+    it('still refuses a genuine swarm member that has no learned workspace of its own', async () => {
+      await startCommandEndpoint();
+      startSwarm(1);
+      bindConversation('worker-1', 'c-worker-needs-workspace');
+
+      const text = await execWithNoWorkdir('c-worker-needs-workspace');
+      expect(text).toContain('WORKSPACE_REQUIRED');
+      // The refusal names the folders it will accept. A worker meets this on its first command,
+      // and "supply an approved workdir" is only actionable if you know which ones exist.
+      expect(text).toContain('Approved roots: /probe');
+    });
   });
 });

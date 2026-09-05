@@ -27,13 +27,27 @@ async function download(url, target) {
   await writeFile(target, Buffer.from(await res.arrayBuffer()));
 }
 
+/**
+ * The tar to run on Windows, by absolute path.
+ *
+ * Windows ships bsdtar in System32, which is what this script wants: it reads zip as well as
+ * tar.gz, and it understands a drive letter. Resolving the bare name through PATH does not
+ * reliably find it — Git for Windows, MSYS2 and Cygwin all put GNU tar ahead of System32, and
+ * GNU tar reads a `C:\...` path as a remote host, failing with "Cannot connect to C: resolve failed".
+ * CI never sees this because a bare runner has no GNU tar; a developer's machine usually does.
+ */
+function windowsTar() {
+  const system32 = path.join(process.env['SystemRoot'] ?? 'C:/Windows', 'System32', 'tar.exe');
+  return existsSync(system32) ? system32 : 'tar.exe';
+}
+
 function extractArchive(archivePath, extension, outDir) {
   if (extension === 'zip') {
-    if (process.platform === 'win32') execFileSync('tar.exe', ['-xf', archivePath, '-C', outDir], { stdio: 'inherit' });
+    if (process.platform === 'win32') execFileSync(windowsTar(), ['-xf', archivePath, '-C', outDir], { stdio: 'inherit' });
     else execFileSync('unzip', ['-q', '-o', archivePath, '-d', outDir], { stdio: 'inherit' });
     return;
   }
-  execFileSync(process.platform === 'win32' ? 'tar.exe' : 'tar', ['-xzf', archivePath, '-C', outDir], { stdio: 'inherit' });
+  execFileSync(process.platform === 'win32' ? windowsTar() : 'tar', ['-xzf', archivePath, '-C', outDir], { stdio: 'inherit' });
 }
 
 async function flattenSingleDirectory(outDir) {

@@ -45,8 +45,8 @@ import {
   endSession,
   findSessionByConversation,
   getSession,
-  listAllSessions,
   readAsset,
+  readEverySummary,
   readEvents,
   readRecentEvents,
   renameSession,
@@ -856,7 +856,7 @@ export async function repairDeterministicAttribution(): Promise<{ sessions: numb
   let repairedSessions = 0;
   let repairedCalls = 0;
 
-  for (const summary of await listAllSessions()) {
+  for (const summary of await readEverySummary()) {
     if (summary.conversationId !== null || summary.title !== 'Unattributed activity') continue;
     const events = await readEvents(summary.id);
     const scannedThroughSeq = events.reduce((highest, event) => Math.max(highest, event.seq), 0);

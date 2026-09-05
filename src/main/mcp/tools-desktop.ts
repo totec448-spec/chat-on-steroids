@@ -31,7 +31,8 @@ import {
 } from '../computer/index.js';
 import { browserTabChord, isBrowserProcess } from '../computer/browser-chords.js';
 import { logInfo } from '../logger.js';
-import { noteCount, noteDetail } from './call-context.js';
+import { currentCall, noteCount, noteDetail } from './call-context.js';
+import { runBrowserCommand } from '../browser-control.js';
 import {
   cropArg,
   fail,
@@ -40,6 +41,7 @@ import {
   mouseButtonArg,
   ok,
   pointArg,
+  toolDisabledMessage,
   windowIdArg,
   type SurfaceRegistrar,
   type ToolContent
@@ -60,6 +62,92 @@ function newBrowserWindowHint(): string {
   return process.platform === 'darwin'
     ? 'open -na "Google Chrome" --args --new-window "$url"'
     : "Start-Process chrome.exe -ArgumentList '--new-window', $url";
+}
+
+/**
+ * The sentence a caller fenced out of a browser window most needs, and never saw.
+ *
+ * `computer` cannot click *into* a web page that has nothing focused yet: the fence asks the
+ * application which control has keyboard focus, a browser answers only when the page exposes one,
+ * and the click that would create that focus is itself what is being fenced. That is the fence
+ * failing closed on honest ignorance of where input would land, which is what it is for — the
+ * macOS helper carries a long note saying so and warning the next reader not to file it as a bug.
+ *
+ * The note is right and the refusal is correct. What neither said is the way out, which exists
+ * and is one tool away: `browser` speaks CDP and needs none of this. A QA run met these refusals
+ * five times in a row against a browser window, re-observing and retrying between each, and the
+ * report's closing judgement was that the app's failures are loud, correct, and read as a pattern
+ * of not working. A refusal that names its own remedy is the cheapest answer to that, and it
+ * costs no fence — this only appends a sentence to a refusal that has already happened.
+ *
+ * Best effort by construction: it runs only on the failure path, and any error looking up the
+ * window is swallowed, because failing to enrich a message is no reason to replace the real
+ * refusal with a worse one.
+ */
+async function browserInputHint(actions: Action[], targetWindow: number | undefined): Promise<string> {
+  try {
+    let focused: number | null = targetWindow ?? null;
+    for (const action of actions) if (action.type === 'focus') focused = action.window;
+    const target =
+      focused === null
+        ? (await activeWindow()).window
+        : ((await listWindows()).windows.find((window) => window.id === focused) ?? null);
+    if (!target || !isBrowserProcess(target.process)) return '';
+    return (
+      ` The window is a browser ("${target.title}"), and desktop input cannot reach a web page ` +
+      'that has no focused control yet — the click that would give it one is the click being ' +
+      'refused. Use the browser tool for the page itself: it drives Chrome directly and needs ' +
+      'no desktop focus.'
+    );
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Refusals that mean "desktop input could not be aimed", which is the browser case above.
+ *
+ * `INPUT_TARGET_REQUIRED` joined them after a QA round hit it twice in four minutes while trying
+ * to drive a browser window. It already names its own remedy and names it well — supply
+ * targetWindow, a window-bound frame, a semantic ref, or focus in the batch — but every one of
+ * those is a way to aim desktop input at a page, and against a browser the better answer is not
+ * to aim desktop input at all.
+ *
+ * `STALE_FRAME` is deliberately absent. That one is about a capture whose geometry moved, which
+ * is a real answer about the screenshot rather than about where input would land, and it says so.
+ */
+const INPUT_FENCE_CODES = [
+  'INPUT_TARGET_LOST',
+  'INPUT_TARGET_REQUIRED',
+  'STALE_UI_SNAPSHOT',
+  'FOCUS_FAILED'
+];
+
+/**
+ * Runs the batch, and on an input-fence refusal against a browser adds the way out.
+ *
+ * A rethrow rather than a mutation, because `ComputerError` carries the partial-batch accounting
+ * a caller needs to know how far it got — losing `completedCount` to improve a sentence would
+ * trade a fact for a nicety. Anything that is not one of those refusals is rethrown untouched.
+ */
+async function withBrowserInputHint<T>(
+  actions: Action[],
+  targetWindow: number | undefined,
+  run: () => Promise<T>
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (!(err instanceof ComputerError)) throw err;
+    if (!INPUT_FENCE_CODES.some((code) => err.message.includes(code))) throw err;
+    const hint = await browserInputHint(actions, targetWindow);
+    if (!hint) throw err;
+    throw new ComputerError(`${err.message}${hint}`, {
+      ...(typeof err.completedCount === 'number' ? { completedCount: err.completedCount } : {}),
+      ...(typeof err.failedIndex === 'number' ? { failedIndex: err.failedIndex } : {}),
+      ...(Array.isArray(err.completedRoutes) ? { completedRoutes: err.completedRoutes } : {})
+    });
+  }
 }
 
 async function browserChordRefusal(actions: Action[]): Promise<string | null> {
@@ -111,6 +199,53 @@ function desktopImageResult(text: string, data: string): { content: ToolContent[
   return result;
 }
 
+/**
+ * Web-page control, which is a different problem from desktop control.
+ *
+ * The desktop driver can already click anywhere in a browser window, but it cannot see a web
+ * page: Chromium keeps its renderer accessibility tree off until a real assistive client asks
+ * for it, so a UIA/AX walk returns the toolbar and one opaque pane. Inside a page the desktop
+ * driver has pixels and nothing else — which is exactly where refs stop being available.
+ *
+ * So this addresses elements by ref from `observe`, and the driver re-resolves a ref against
+ * the live document immediately before acting on it. Coordinates remain available for the
+ * cases refs cannot express, and they are in the screenshot's own pixels: the driver captures
+ * at a scale where one image pixel is one CSS pixel is one input unit.
+ */
+/** One scroll step, bounded the same on both surfaces: the two disagreed, and a page
+ * coordinate is a page coordinate whichever driver moves the pointer. */
+const scrollDeltaArg = z.number().int().min(-10_000).max(10_000);
+
+const browserActionArg = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('observe') }).strict().describe('Page, refs, screenshot.'),
+  // The driver has always been able to let go of a tab and the command channel has always
+  // carried the message; only this schema never offered it, so a model could take control of a
+  // page and had no way to give it back. QA reached for the extension popup instead and clicked
+  // it with desktop automation, which is neither reliable nor what anyone should have to do.
+  z.object({ type: z.literal('detach') }).strict().describe('Let go of the tab.'),
+  z.object({ type: z.literal('status') }).strict().describe('Which tab is held.'),
+  z.object({ type: z.literal('navigate'), url: z.string().min(1).max(2_000) }).strict().describe('Go to a URL.'),
+  z.object({ type: z.literal('back') }).strict().describe('Back.'),
+  z.object({ type: z.literal('forward') }).strict().describe('Forward.'),
+  z.object({ type: z.literal('reload') }).strict().describe('Reload.'),
+  // 32, not 16: refs now carry the observation generation that minted them (e.g. "g12_e4"), so a
+  // stale one from an earlier observation never coincidentally matches a live one after a later
+  // observation recycles the same short index.
+  z.object({ type: z.literal('click_ref'), ref: z.string().min(1).max(32), button: mouseButtonArg.optional() }).strict().describe('Click a ref.'),
+  // The select half is worth its bytes: a native dropdown cannot be driven by clicking, because
+  // Chrome paints it outside the page, and a QA run burned a step discovering that the hard way.
+  z.object({ type: z.literal('set_value'), ref: z.string().min(1).max(32), text: z.string().max(20_000) }).strict().describe('Replace a field by ref. On a select, picks the option with that label or value.'),
+  z.object({ type: z.literal('click'), x: imageCoordinateArg, y: imageCoordinateArg, button: mouseButtonArg.optional() }).strict().describe('Click at pixels.'),
+  z.object({ type: z.literal('double_click'), x: imageCoordinateArg, y: imageCoordinateArg }).strict().describe('Double-click at pixels.'),
+  z.object({ type: z.literal('move'), x: imageCoordinateArg, y: imageCoordinateArg }).strict().describe('Move the pointer.'),
+  z.object({ type: z.literal('move_ref'), ref: z.string().min(1).max(32) }).strict().describe('Hover a ref, pressing nothing.'),
+  z.object({ type: z.literal('drag'), path: z.array(pointArg).min(2).max(64), button: mouseButtonArg.optional() }).strict().describe('Drag along a path.'),
+  z.object({ type: z.literal('scroll'), x: imageCoordinateArg, y: imageCoordinateArg, scroll_x: scrollDeltaArg.optional(), scroll_y: scrollDeltaArg.optional() }).strict().describe('Scroll at a point.'),
+  z.object({ type: z.literal('type'), text: z.string().max(4_000) }).strict().describe('Type into focus.'),
+  z.object({ type: z.literal('keypress'), keys: z.array(z.string().max(20)).min(1).max(6) }).strict().describe('Press keys.'),
+  z.object({ type: z.literal('wait'), ms: z.number().int().min(0).max(10_000).optional() }).strict().describe('Pause.')
+]);
+
 const computerActionArg = z.discriminatedUnion('type', [
   z.object({ type: z.literal('click_ref'), ref: z.string().min(1).max(64) }).strict().describe('Click a control by ref from observe.'),
   z
@@ -141,11 +276,11 @@ const computerActionArg = z.discriminatedUnion('type', [
       x: imageCoordinateArg,
       y: imageCoordinateArg,
       scroll_x: z.number().int().min(-10_000).max(10_000).optional(),
-      scroll_y: z.number().int().min(-10_000).max(10_000).optional()
+      scroll_y: scrollDeltaArg.optional()
     })
     .strict()
     .describe('Scroll at a point.'),
-  z.object({ type: z.literal('type'), text: z.string().max(4000) }).strict().describe('Type text into whatever has focus.'),
+  z.object({ type: z.literal('type'), text: z.string().max(4000) }).strict().describe('Type text into target.'),
   z
     .object({ type: z.literal('keypress'), keys: z.array(z.string().max(20)).min(1).max(6) })
     .strict()
@@ -302,8 +437,17 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           // A bare "what is on screen right now" with no window at all: cheapest possible
           // answer, and the only one that still works when there is no foreground window.
           if (what === 'active' && target === undefined && input.screenshot === false) {
-            const { window, screen } = await activeWindow();
-            if (!window) return ok(prefix(waited, `Desktop ${screen.width}x${screen.height}\nNo foreground window.`));
+            const { window, screen, foregroundIsSelf } = await activeWindow();
+            if (!window) {
+              // "None" and "this app" are different answers, and reporting the second as the
+              // first made a deliberate refusal look like a defect. Chat On Steroids hides its
+              // own windows from everything the model can see, on purpose: it must not be able
+              // to drive the app that is driving it.
+              const reason = foregroundIsSelf
+                ? 'Chat On Steroids itself is in front. Its own windows are never exposed, so there is nothing here to act on — switch to another application first.'
+                : 'No foreground window.';
+              return ok(prefix(waited, `Desktop ${screen.width}x${screen.height}\n${reason}`));
+            }
             return ok(prefix(waited, describeWindow(window)));
           }
 
@@ -329,10 +473,20 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               throw err;
             }
             const shot = await screenshot({ maxWidth: input.max_width });
+            // Why there is no window matters here as much as on the bare query, and this
+            // path was missed when that one was fixed — which is why QA still saw the old
+            // wording. Asked separately because the failure above tells us nothing about it.
+            let selfInFront = false;
+            try {
+              selfInFront = (await activeWindow())?.foregroundIsSelf === true;
+            } catch {
+              // Best effort. This only chooses between two ways of saying the same fallback, and
+              // failing to learn which would be a poor reason to fail the screenshot itself.
+            }
             return desktopImageResult(
               prefix(
                 waited,
-                `No foreground window, so this is the whole primary monitor.\nframe: ${shot.frameId}  ${shot.width}x${shot.height} — pass frameId ${shot.frameId} with any coordinates you read off it`
+                `${selfInFront ? 'Chat On Steroids itself is in front and its own windows are never exposed, so this is the whole primary monitor.' : 'No foreground window, so this is the whole primary monitor.'}\nframe: ${shot.frameId}  ${shot.width}x${shot.height} — pass frameId ${shot.frameId} with any coordinates you read off it`
               ),
               shot.data
             );
@@ -386,19 +540,25 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
       {
         title: 'Control mouse and keyboard',
         description:
-          'Run ordered desktop actions. Prefer refs from observe; pixels require frameId and target geometry is rechecked. ' +
-          'verify waits for a postcondition. Capture and clipboard steps stay in the batch.',
+          'One desktop decision. Prefer refs; pixels need frameId. Pointer/text needs a target; system keys stay global.',
         inputSchema: z
           .object({
-            actions: z.array(computerActionArg).min(1).max(20),
+            actions: z
+              .array(computerActionArg)
+              .min(1)
+              .max(20)
+              // Stated here rather than only in the rejection below: a run was spent discovering
+              // this rule by being refused. Kept terse — this surface has a discovery budget.
+              .describe('One UI-changing action per call; focus/move/wait/clipboard may accompany it.'),
             frameId: z
               .number()
               .int()
               .min(1)
               .optional()
               .describe('Required for coordinate actions or captureCrop.'),
+            targetWindow: windowIdArg.optional(),
             verify: verificationArg.optional(),
-            captureAfter: z.boolean().optional().describe('Return a fresh screenshot after the actions. Default false.'),
+            captureAfter: z.boolean().optional().describe('Capture result; default on for mutations.'),
             captureWindow: windowIdArg.optional().describe('Result capture: this window.'),
             captureFull: z.boolean().optional().describe('Result capture: all monitors.'),
             captureMaxWidth: z
@@ -411,6 +571,20 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
             captureCrop: cropArg.optional().describe('Result crop in the input frame.')
           })
           .superRefine((input, ctx) => {
+            const decisionActions = input.actions.filter((action) =>
+              action.type !== 'wait' &&
+              action.type !== 'read_clipboard' &&
+              action.type !== 'write_clipboard' &&
+              action.type !== 'move' &&
+              action.type !== 'focus'
+            );
+            if (decisionActions.length > 1) {
+              ctx.addIssue({
+                code: 'custom',
+                path: ['actions'],
+                message: 'Use one UI-changing decision per computer call; focus/move/wait/clipboard setup may accompany it.'
+              });
+            }
             if (input.verify) {
               const needsWindow = input.verify.until === 'foreground';
               const needsMatch = input.verify.until !== 'foreground';
@@ -432,7 +606,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               }
             }
             const verifyCapture = input.verify?.capture === 'always' || input.verify?.capture === 'on_change';
-            const willCapture = input.captureAfter === true || verifyCapture;
+            const autoCapture =
+              caps.screen &&
+              input.captureAfter !== false &&
+              input.actions.some((action) =>
+                action.type !== 'wait' && action.type !== 'read_clipboard' && action.type !== 'write_clipboard' && action.type !== 'move'
+              );
+            const willCapture = input.captureAfter === true || verifyCapture || autoCapture;
             const captureFields = ['captureWindow', 'captureFull', 'captureMaxWidth', 'captureCrop'] as const;
             if (!willCapture) {
               for (const field of captureFields) {
@@ -457,16 +637,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           .strict(),
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
       },
-      async ({ actions, frameId, verify, captureAfter, captureWindow, captureFull, captureMaxWidth, captureCrop }) =>
+      async ({ actions, frameId, targetWindow, verify, captureAfter, captureWindow, captureFull, captureMaxWidth, captureCrop }) =>
         guard('computer', async () => {
           // Not reg.guarded: this tool covers two permissions. Pointer and keyboard steps
           // need "control", the clipboard steps need their own, and one blanket refusal
           // would hide which of them the user actually has to switch on.
           if (!caps.control && actions.some((a) => a.type !== 'wait' && !a.type.endsWith('_clipboard'))) {
-            return fail(
-              'TOOL_DISABLED: mouse and keyboard control is disabled by the current Chat On Steroids permissions. ' +
-                'Ask the user to enable "Control mouse and keyboard" in the app, then retry.'
-            );
+            return fail(toolDisabledMessage(ctx.readOnly, 'control', 'mouse and keyboard control', 'Control mouse and keyboard'));
           }
           const parsed: Action[] = [];
           for (const a of actions) {
@@ -507,13 +684,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
                 // schema is cached by ChatGPT, and a tool that quietly changes shape when
                 // a checkbox moves is worse than one that says plainly it is switched off.
                 if (!caps.clipboardRead) {
-                  return fail('TOOL_DISABLED: read_clipboard needs the Read the clipboard permission.');
+                  return fail(toolDisabledMessage(ctx.readOnly, 'clipboardRead', 'read_clipboard', 'Read the clipboard'));
                 }
                 parsed.push({ type: 'read_clipboard' });
                 break;
               case 'write_clipboard':
                 if (!caps.clipboardWrite) {
-                  return fail('TOOL_DISABLED: write_clipboard needs the Replace clipboard text permission.');
+                  return fail(toolDisabledMessage(ctx.readOnly, 'clipboardWrite', 'write_clipboard', 'Replace clipboard text'));
                 }
                 parsed.push({ type: 'write_clipboard', text: a.text });
                 break;
@@ -524,7 +701,11 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           logInfo(`tool computer ${parsed.map((a) => a.type).join(', ')}`);
           noteDetail(parsed.map((a) => a.type).join(', '));
           const verifyCapture = verify?.capture === 'always' || verify?.capture === 'on_change';
-          const wantsCapture = captureAfter === true || verifyCapture;
+          const mutatesDesktop = parsed.some((action) =>
+            action.type !== 'wait' && action.type !== 'read_clipboard' && action.type !== 'write_clipboard' && action.type !== 'move'
+          );
+          const autoCapture = caps.screen && captureAfter !== false && mutatesDesktop;
+          const wantsCapture = captureAfter === true || verifyCapture || autoCapture;
           if ((verify || wantsCapture) && !caps.screen) {
             return fail('TOOL_DISABLED: verification and result capture need the See the screen permission.');
           }
@@ -543,25 +724,30 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
             : undefined;
           // One lock, one operation: the picture that verifies these actions must be taken
           // before anyone else can touch the desktop.
-          const result = await actAndCapture(parsed, {
+          const result = await withBrowserInputHint(parsed, targetWindow, () => actAndCapture(parsed, {
             frameId,
+            targetWindow,
             verify: parsedVerify,
             capture:
               wantsCapture
                 ? {
-                    window: captureWindow,
+                    window: captureWindow ?? (captureFull === true || captureCrop !== undefined ? undefined : targetWindow),
                     full: captureFull,
-                    maxWidth: captureMaxWidth,
+                    maxWidth: captureMaxWidth ?? (autoCapture ? 1600 : undefined),
                     crop: captureCrop,
-                    preferActiveWindow: ctx.privacyScreenshots
+                    preferActiveWindow:
+                      ctx.privacyScreenshots ||
+                      (autoCapture && captureWindow === undefined && targetWindow === undefined && captureFull !== true && captureCrop === undefined)
                   }
                 : undefined
-          });
+          }));
           const cursor = result.cursor;
           const pointer = cursor
             ? cursor.image
               ? `Pointer image: ${cursor.image.x},${cursor.image.y} (frame ${cursor.frameId}, ${cursor.imageSize?.width}x${cursor.imageSize?.height}); desktop: ${cursor.screen.x},${cursor.screen.y}.`
-              : `Pointer desktop: ${cursor.screen.x},${cursor.screen.y}. No screenshot frame is active.`
+              : cursor.frameId === null
+                ? `Pointer desktop: ${cursor.screen.x},${cursor.screen.y}. No screenshot frame is active.`
+                : `Pointer desktop: ${cursor.screen.x},${cursor.screen.y}. It is outside frame ${cursor.frameId}, so it has no position in that image.`
             : 'Pointer position was not queried because this batch used only local wait/clipboard actions.';
           // Clipboard reads are the one action that returns something, so they are quoted
           // back in order rather than folded into the "Done:" line.
@@ -588,7 +774,36 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           const verified = result.verification
             ? `\nVerified ${result.verification.until} in ${result.verification.elapsedMs} ms: ${result.verification.detail}.`
             : '';
-          const done = `Done ${result.completedCount}/${parsed.length} via ${routeSummary}: ${parsed.map((a) => a.type).join(', ')}. ${pointer}${clipboard ? `\n${clipboard}` : ''}${verified}`;
+          const captureFallback = result.captureFallback ? `\nCapture note: ${result.captureFallback}.` : '';
+          // A scroll that reports only "sent" cannot be told apart from an application ignoring
+          // the wheel — and the window server delivers a wheel to whatever is under the pointer,
+          // which need not be the leased window. So say where it landed and whether it travelled.
+          const scroll = result.scroll
+            ? `
+Scroll: ${
+                result.scroll['reachedTarget'] === false
+                  ? `the wheel went to another window (${String(result.scroll['hitRole'] ?? 'unknown role')}, pid ${String(result.scroll['hitPid'] ?? '?')}), not the one leased`
+                  : `reached the leased window (${String(result.scroll['hitRole'] ?? 'unknown role')})`
+              }; ${
+                result.scroll['moved'] === true
+                  ? `it moved, ${String(result.scroll['positionBefore'])} → ${String(result.scroll['positionAfter'])}`
+                  : result.scroll['moved'] === false
+                    ? `nothing moved, still at ${String(result.scroll['positionAfter'])}`
+                    : `whether it moved is unreadable (${String(result.scroll['movedUnknown'] ?? 'no scroller')})`
+              }. ${JSON.stringify(result.scroll)}`
+            : '';
+          // Same reasoning as scroll's `moved`: a click_ref's semantic press can report success
+          // at the accessibility-API level while the control it named never actually changed —
+          // measured against a real System Settings toggle that answered success and stayed put
+          // until a coordinate click on the same spot moved it. Silence here would let that
+          // recur unnoticed on every other control shaped like it.
+          const uiChange =
+            result.uiChanged === true
+              ? '\nClick: the control’s reported value changed.'
+              : result.uiChanged === false
+                ? '\nClick: the accessibility action reported success, but the control’s reported value did not change. Try clicking the same coordinates instead.'
+                : '';
+          const done = `Done ${result.completedCount}/${parsed.length} via ${routeSummary}: ${parsed.map((a) => a.type).join(', ')}. ${pointer}${clipboard ? `\n${clipboard}` : ''}${verified}${captureFallback}${scroll}${uiChange}`;
           const shot = result.screenshot;
           if (shot) {
             return desktopImageResult(
@@ -599,7 +814,174 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           return ok(done);
         })
     );
+
+    /**
+     * Web-page control, carried out by the extension rather than the operating system.
+     *
+     * Everything here goes through the ChatGPT page that issued the call: the app parks one
+     * action, that page collects it on its next activity poll, and the extension's service
+     * worker performs it over the DevTools protocol. The worker is the only part that can hold
+     * such a session, and a DevTools session is the only route to trusted input — events a
+     * content script dispatches are `isTrusted: false` and real pages reject them.
+     *
+     * Refused for ChatGPT's own tabs before anything else, in the driver: the model asking for
+     * this is sitting in one, and a driver able to attach there could drive its own
+     * conversation.
+     */
+    if (exposedCaps.control) reg.register(
+      'browser',
+      {
+        title: 'Control a web page',
+        description:
+          'Drive a web page. observe first: refs plus a screenshot whose pixels are the coordinates. ' +
+          'Prefer refs — re-resolved before use, so a moved element is hit and a vanished one refuses. ' +
+          'No attach step: navigate starts a run, taking the newest ordinary tab or opening ' +
+          'one; ChatGPT tabs are never driven. Needs browser control on in the extension popup.',
+        inputSchema: z.object({ actions: z.array(browserActionArg).min(1).max(20) }).strict(),
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
+      },
+      async (input) =>
+        reg.guarded('control', 'browser', async () => {
+          // The conversation is the address: the action is delivered to the page showing it,
+          // which is the same evidence every identity-sensitive route in this app uses.
+          const conversationId = currentCall()?.caller.conversationId ?? null;
+          if (!conversationId) {
+            return fail(
+              'CALLER_IDENTITY_REQUIRED: browser control is delivered to the ChatGPT page that asked for it, ' +
+                'and this call could not be attributed to a conversation. No browser action was taken.'
+            );
+          }
+
+          // One block per action rather than one flat list, because an earlier observation has
+          // to be removable at the end: the driver keeps only the newest observation's refs
+          // addressable and replaces that map wholesale each time. Printing every observation's
+          // refs hands back a list whose earlier half is already dead, with nothing marking
+          // which half — a model would pick one, be refused, and have no reason why.
+          const blocks: Array<{ observed: boolean; lines: string[] }> = [];
+          let shot: { data: string; width: number; height: number } | null = null;
+          for (const [index, action] of input.actions.entries()) {
+            const reply = await runBrowserCommand(conversationId, action as Record<string, unknown>);
+            if (!reply.ok) {
+              // Stops at the first failure rather than pressing on: later actions were chosen
+              // for a page state that this one did not produce.
+              return fail(
+                // The detail is a sentence written by the driver and often ends in one already;
+                // appending a second full stop produced "let go of.." in a run's report. Small,
+                // but it is the kind of thing that makes an error message look unfinished.
+                `${reply.error ?? 'BROWSER_FAILED'}: ` +
+                  `${(reply.detail ?? 'the browser action did not complete').replace(/\.\s*$/, '')}. ` +
+                  `Completed ${index} of ${input.actions.length}.`
+              );
+            }
+            const data = reply.data ?? {};
+            const rendered = renderBrowserAction(action.type, data);
+            blocks.push({ observed: rendered.observed, lines: rendered.lines });
+            if (rendered.screenshot) shot = rendered.screenshot;
+          }
+
+          const newestObservation = blocks.reduce(
+            (latest, block, index) => (block.observed ? index : latest),
+            -1
+          );
+          const body = blocks
+            .flatMap((block, index) =>
+              block.observed && index !== newestObservation
+                ? ['observe: superseded by a later observation in this call; those refs are gone']
+                : block.lines
+            )
+            .join('\n');
+          if (shot) {
+            return desktopImageResult(
+              `${body}\nScreenshot ${shot.width}x${shot.height}; its pixels are the coordinates for this page.`,
+              shot.data
+            );
+          }
+          return ok(body);
+        })
+    );
   }
+}
+
+/**
+ * One browser action, rendered as the driver answered it.
+ *
+ * Pulled out of the tool so it can be tested. It was inline, reachable only through a live
+ * extension and a real browser, and it silently replaced every reply but observe and status with
+ * the word `ok` — discarding `hit`, `covered`, and the driver build. The driver had a suite that
+ * proved those fields, the helper had one too, and the piece between them had none, so a QA run
+ * found it instead of a test. Being a plain function of its input is what fixes that.
+ */
+export function renderBrowserAction(
+  type: string,
+  data: Record<string, unknown>
+): { observed: boolean; lines: string[]; screenshot?: { data: string; width: number; height: number } } {
+  if (type === 'observe') {
+            const elements = Array.isArray(data['elements']) ? (data['elements'] as Array<Record<string, unknown>>) : [];
+            const picture = data['screenshot'] as { data: string; width: number; height: number } | null | undefined;
+            return ({
+              observed: true,
+              ...(picture && typeof picture.data === 'string' ? { screenshot: picture } : {}),
+              lines: [
+              `page: ${String(data['url'] ?? '')}`,
+              `title: ${String(data['title'] ?? '')}`,
+              ...elements.map(
+                (element) =>
+                  `${String(element['ref'])} ${String(element['role'])} ${JSON.stringify(String(element['name'] ?? ''))}` +
+                  // What the control currently holds. The driver has collected both since it was
+                  // written and neither was ever printed, so a checkbox that is already ticked
+                  // looked exactly like one that is not — and the only way to find out was to
+                  // click it, which is also the way to get it wrong. Same for a field that
+                  // already contains the text a caller is about to set.
+                  `${element['checked'] ? ` checked=${String(element['checked'])}` : ''}` +
+                  `${element['value'] ? ` value=${JSON.stringify(String(element['value']))}` : ''}` +
+                  `${element['disabled'] === true ? ' disabled' : ''} at ${String(element['x'])},${String(element['y'])}`
+              )
+            ] });
+          } else if (type === 'detach' || type === 'status') {
+            // These answer a question about the session rather than doing something to a page,
+            // so "ok" is not an answer. Say which tab is held, or that none is.
+            const attached = data['attached'] === true;
+            const released = data['released'] as Record<string, unknown> | undefined;
+            // The digest of the driver Chrome is actually running. Installing a package
+            // rewrites the extension folder, but Chrome keeps the copy it already loaded until
+            // someone reloads it by hand — so a run can measure old code while reading new
+            // release notes, and has. This is the only place a caller can ask which code
+            // answered, which is why it belongs on the answer that reports the session.
+            const build = data['build'] === undefined || data['build'] === null
+              ? '; driver build unreported'
+              : `; driver build ${String(data['build'])}`;
+            return ({ observed: false, lines: [
+              attached
+                ? `${type}: holding tab ${String(data['tabId'])} — ${String(data['title'] ?? '')} ` +
+                  `(${String(data['url'] ?? '')})` +
+                  // The group is the visible claim that this tab is being driven. Saying it here
+                  // is what lets the caller check that claim instead of a person having to look
+                  // at the tab strip.
+                  (data['groupId'] === null || data['groupId'] === undefined
+                    ? ', not in a driven group'
+                    : `, in driven group ${String(data['groupId'])}`)
+                : released
+                  ? `${type}: let go of tab ${String(released['tabId'])} — ` +
+                    `${String(released['title'] ?? '')} (${String(released['url'] ?? '')}); ` +
+                    'no tab is under control'
+                  : `${type}: no tab is under control`
+            ].map((line) => line + build) });
+          } else {
+            // Everything the driver answered with, rather than the fields this renderer
+            // happens to know about. `ok` threw away three separate pieces of evidence a QA
+            // run needed — `hit`, `covered`, and the driver build — and no test could catch
+            // it, because all three existed and were correct one layer below. A run then
+            // reported working fixes as missing, twice. Reading the answer instead of
+            // enumerating it means the next field a driver adds arrives on its own.
+            const said = Object.entries(data)
+              .filter(([, value]) => value !== undefined)
+              .map(([key, value]) => {
+                const text = value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value);
+                return `${key}=${text.length > 200 ? `${text.slice(0, 200)}…` : text}`;
+              })
+              .join(' ');
+            return ({ observed: false, lines: [`${type}: ${said || 'ok'}`] });
+          }
 }
 
 function prefix(note: string | null, body: string): string {

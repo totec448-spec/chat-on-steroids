@@ -31,6 +31,9 @@ extraResources:
     filter:
       - '**/*'
       - '!**/*.map'
+      # Type declarations describe the driver for this repository's own tooling. A browser
+      # has no use for them and a shipped extension should carry nothing it cannot run.
+      - '!**/*.d.ts'
 
 npmRebuild: false
 

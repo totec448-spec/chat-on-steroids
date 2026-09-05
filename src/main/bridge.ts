@@ -12,7 +12,7 @@
  *     that deliberately does and does not buy
  *   · every other route needs the bearer token issued by /pair, compared in
  *     constant time, and stored encrypted rather than in config.json
- *   · the Origin must be a chrome-extension:// origin, so a web page cannot drive it
+ *   · the Origin must be a chrome-extension:// or moz-extension:// origin, so a web page cannot drive it
  *   · bodies are capped and requests are rate limited
  *
  * It is deliberately not a general control API. It accepts observations about a
@@ -105,6 +105,7 @@ import {
   sleepWorker,
   stageQueuedWorkerRevivals,
   swarmState,
+  swarmStateForCaller,
   swarmTransferActive,
   noteAgentAlive,
   noteAgentContextTokens,
@@ -133,16 +134,21 @@ import {
   dispatchContinuationSourceSendNow,
   openContinuationNow,
   releaseContinuationDestinationSendNow,
+  releaseContinuationSourceSendNow,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
+  touchContinuation,
   sendUnattempted,
   type ContinuationSendState
 } from './session/continuation.js';
 import type { ContinuationView } from './session/continuation.js';
 import { noteResumeOpening } from './session/resume-gate.js';
+import { abandonBrowserCommands, collectBrowserCommand, settleBrowserCommand } from './browser-control.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
-import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
+import { APP_VERSION, BRIDGE_PROTOCOL, BUILD_VERSION } from './version.js';
 import { requestCorrelation } from './session/correlation.js';
+import { execProcessIdsForConversation } from './codex/ownership.js';
+import { unifiedExecManager } from './codex/manager.js';
 import { bindAgentWorkspace } from './workspace.js';
 
 /** Fixed candidates so the extension can find the app without being told a port. */
@@ -495,6 +501,8 @@ const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
 const listeners = new Set<() => void>();
 let extensionVersion: string | null = null;
+/** Six bytes of SHA-256 over the running background.js — see noteExtensionVersion. */
+let extensionBuild: string | null = null;
 let versionWarned = false;
 
 export function onBridgeChange(listener: () => void): () => void {
@@ -600,7 +608,7 @@ function originOf(req: http.IncomingMessage): {
 } {
   const origin = req.headers.origin;
   if (typeof origin !== 'string' || origin === '') return { ok: true, origin: null };
-  if (origin.startsWith('chrome-extension://')) return { ok: true, origin };
+  if (origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://')) return { ok: true, origin };
   return { ok: false, origin: null };
 }
 
@@ -630,9 +638,18 @@ function protocolCompatible(req: http.IncomingMessage): boolean {
 function noteExtensionVersion(req: http.IncomingMessage): void {
   const version = req.headers['x-extension-version'];
   const protocol = extensionProtocol(req);
-  if (typeof version === 'string' && version !== extensionVersion) {
+  const build = req.headers['x-extension-build'];
+  // The manifest version answers "which manifest did Chrome load", which is a different question
+  // from "which code is running" — and on 2026-09-04 a QA session lost most of a day to the gap
+  // between them, bumping the version to force a reload, seeing the app confirm the new version,
+  // and then measuring behaviour only explicable by a worker older than the file on disk. The
+  // build digest is six bytes of SHA-256 over background.js, so `shasum` on the repo's copy
+  // settles it from the app's own log rather than from browser UI nothing can reliably click.
+  const stamp = typeof build === 'string' ? build.slice(0, 16) : null;
+  if (typeof version === 'string' && (version !== extensionVersion || stamp !== extensionBuild)) {
     extensionVersion = version.slice(0, 32);
-    logInfo(`bridge: browser extension ${extensionVersion} connected`);
+    extensionBuild = stamp;
+    logInfo(`bridge: browser extension ${extensionVersion} connected (build ${extensionBuild ?? 'unreported'})`);
   }
   if (!versionWarned && protocol !== null && protocol !== BRIDGE_PROTOCOL) {
     versionWarned = true;
@@ -934,6 +951,35 @@ function goalWorkerChat(id: string): boolean {
 }
 
 /**
+ * Caller-scoped worker status for the browser presentation layer.
+ *
+ * The bridge is polled by every open ChatGPT tab, including unrelated chats. Never hand the
+ * global renderer swarm to the browser: only the prime conversation that owns this history may
+ * see its workers. Worker chats do not need sibling/prime topology for their own presentation.
+ */
+function browserSwarmForPrime(id: string) {
+  if (!getConfig().multiAgent.enabled) return null;
+  if (agentForOwnedConversation(id) !== PRIME_ID) return null;
+  try {
+    const state = swarmStateForCaller({ conversationId: id });
+    return {
+      running: state.running,
+      // Presentation needs names and lifecycle only. Do not ship tasks, conversation ids,
+      // queues or other broker details into the page just to explain a wait.
+      agents: state.agents.map((entry) => ({
+        id: entry.id,
+        role: entry.role,
+        label: entry.label,
+        state: entry.state
+      }))
+    };
+  } catch {
+    // No history belongs to this chat (or it was retired between the ownership check and read).
+    return null;
+  }
+}
+
+/**
  * Is the loop kept out of this chat, and why?
  *
  * Two reasons, one gate. A worker chat is the prime's to write (see goalWorkerChat). A chat
@@ -1011,6 +1057,25 @@ function chatIsWorking(conversationId: string): boolean {
   return Boolean(current && (current.generating || current.activeTurnId));
 }
 
+function backgroundExecForConversation(conversationId: string): {
+  running: number;
+  exitedUnread: number;
+  lastTransitionAt: number | null;
+} {
+  let running = 0;
+  let exitedUnread = 0;
+  let lastTransitionAt: number | null = null;
+  for (const processId of execProcessIdsForConversation(conversationId)) {
+    const state = unifiedExecManager.backgroundState(processId);
+    if (!state) continue;
+    if (state.running) running += 1;
+    if (state.exitedUnread) exitedUnread += 1;
+    lastTransitionAt =
+      lastTransitionAt === null ? state.changedAt : Math.max(lastTransitionAt, state.changedAt);
+  }
+  return { running, exitedUnread, lastTransitionAt };
+}
+
 async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const { ok: originAllowed, origin } = originOf(req);
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -1044,8 +1109,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       {
         app: 'chat-on-steroids',
         version: APP_VERSION,
+        // The version is what peers compare against, and it deliberately stays bare for that.
+        // `build` is what anything asking "which app is actually running" needs, and until now
+        // there was nowhere to ask: the window title carries it but a machine cannot read one,
+        // and a QA run on macOS could not determine the build it was measuring at all. This is
+        // the loopback answer to that question, so a check can be a command instead of a person.
+        build: BUILD_VERSION,
         bridge: BRIDGE_PROTOCOL,
         compatible: protocolCompatible(req),
+        // What the caller said it speaks, so `compatible: false` can be told apart from a real
+        // mismatch. A plain `curl` sends no protocol header and is therefore reported
+        // incompatible — which is true and reads like a fault: a QA run flagged exactly that on a
+        // healthy packaged build, paired and connected. null means "you did not say".
+        spoken: extensionProtocol(req),
         paired: stored !== null && stored !== BROWSER_DISCONNECTED,
         disconnected: stored === BROWSER_DISCONNECTED
       },
@@ -1099,7 +1175,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // user can obtain the token, and with it read recorded ChatGPT activity and queue an
     // "open a fresh chat" command. It can still not read a file, run anything, or change
     // a permission — the bridge has no route that does. A web page cannot: originOf
-    // refuses anything that is not a chrome-extension:// origin, above.
+    // refuses anything that is not a browser-extension origin, above.
     const token = randomBytes(32).toString('base64url');
     await setSecret('bridgeToken', token);
     noteBrowserSeen();
@@ -1383,6 +1459,36 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
   }
 
+  /**
+   * The answer to a browser action, from the page that carried it.
+   *
+   * Deliberately not trusted by id alone: the command is looked up under this conversation, so
+   * a result aimed at another chat, or a late one from a command that already timed out, is
+   * refused rather than resolving somebody else's tool call.
+   */
+  if (route === '/browser/result' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    const id = conversationId(body['conversationId']);
+    if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    const commandId = typeof body['id'] === 'string' ? body['id'] : '';
+    if (!commandId) return json(res, 400, { error: 'bad_request' }, origin);
+    const settled = settleBrowserCommand(id, commandId, {
+      ok: body['ok'] === true,
+      data: body['data'] && typeof body['data'] === 'object'
+        ? (body['data'] as Record<string, unknown>)
+        : undefined,
+      error: typeof body['error'] === 'string' ? body['error'] : undefined,
+      detail: typeof body['detail'] === 'string' ? body['detail'] : undefined
+    });
+    return json(res, 200, { ok: true, settled }, origin);
+  }
+
   if (route === '/closed' && req.method === 'POST') {
     let body: Record<string, unknown>;
     try {
@@ -1393,6 +1499,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (id) {
+      // Anything the browser driver was still waiting on for this conversation is gone with the
+      // page that would have carried it. Given up here rather than left to time out: the wait
+      // was thirty seconds and ended in "the browser took the action but did not report a
+      // result", which describes something that never happened.
+      abandonBrowserCommands(id);
       // Preserve the page's last exact turn verdict before closeConversation removes its live
       // recorder entry. Agent ownership outlives a tab; an open turn is the narrower fact that
       // authorises reopening it.
@@ -1430,6 +1541,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const id = conversationId(url.searchParams.get('conversationId'));
     const since = Number(url.searchParams.get('since') ?? 0);
     const goalClient = (url.searchParams.get('goalClient') ?? '').slice(0, 100);
+    const compactToken = (url.searchParams.get('compactToken') ?? '').slice(0, 128);
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
     const retiredWorker = retiredWorkerForConversation(id);
     const superseded = await conversationWasSuperseded(id);
@@ -1489,6 +1601,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           userAnchors: [],
           nextSince: Number.isFinite(since) ? Math.max(0, since) : 0,
           job: null,
+          swarm: browserSwarmForPrime(id),
           goal: await goalView(),
           ...(goalFencedChat(id) || superseded
             ? {
@@ -1518,6 +1631,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
     }
     const summary = await getSession(live.sessionId);
+    // A browser may legitimately spend longer than the fixed continuation TTL generating a
+    // large handoff. Only the exact armed capture token for this same session/chat can renew it.
+    if (compactToken) touchContinuation(compactToken, live.sessionId, id);
     // Worker chats and user-blocked chats alike: neither may auto-compact — see goalBlockReason.
     const workerBlocked = goalFencedChat(id);
     const requestedSince = Number.isFinite(since) ? Math.max(0, since) : 0;
@@ -1727,6 +1843,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // How this chat's own Compact & Resume is going, so the page can say what is
         // happening instead of spinning.
         job: resumeJobFor(live.sessionId),
+        // Caller-scoped orchestration state for the mutable status panel. Never another prime's run.
+        swarm: browserSwarmForPrime(id),
+        // One browser action, handed to the page that is already polling. Collected here
+        // rather than pushed, so a command can only reach a document that proved it owns
+        // this conversation — the same rule every other identity-sensitive route uses.
+        browserCommand: collectBrowserCommand(id),
         // The goal loop: whether it is on, whether it *can* be on, and whatever draft this
         // chat currently has in flight. The draft's text grows on this feed, which is what
         // the panel above the composer streams — there is no second connection to hold open.
@@ -1738,6 +1860,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // REQUEST_ID_GRACE_MS to file its history cannot change the workspace and must not add
         // a cross-chat 15-second tax to the machine-settle barrier.
         pendingTools: runningToolCalls(live.conversationId),
+        // Returned async exec sessions outlive their MCP handler. Keep this separate from
+        // pendingTools so a long-lived TTY never blocks quiescence/compaction.
+        backgroundExec: backgroundExecForConversation(live.conversationId),
         // Diagnostic only. A finished unattributed call is still being placed into durable
         // history; unknown ownership is conservatively projected onto every chat until that
         // attribution finishes, but this number never gates the compaction prompt.
@@ -1855,6 +1980,21 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const armed = await dispatchContinuationSourceSendNow(checkpointToken);
       return json(res, armed ? 200 : 409, armed ? { armed: true } : { error: 'source_send_reclaimed' }, origin);
     }
+    // The click was armed and ChatGPT took nothing: none of send()'s five acceptance signals
+    // fired within its window, on a chat whose generation this flow had already stopped and
+    // settled. Nothing is re-offered — the prompt may still be with ChatGPT, and that is exactly
+    // what the arming fence refuses to gamble on — but the transaction ends here instead of
+    // sitting armed until the six-hour TTL, which also kept the chat out of browser recovery.
+    if (body['sourceLost'] === true) {
+      const entry = continuationByToken(checkpointToken);
+      if (!entry || entry.from !== id) return json(res, 409, { error: 'no_such_continuation' }, origin);
+      const released = await releaseContinuationSourceSendNow(
+        checkpointToken,
+        'ChatGPT did not take the handoff instruction, and an armed dispatch is never sent twice'
+      );
+      if (released) changed();
+      return json(res, 200, { released }, origin);
+    }
     if (body['sourceAttempt'] === true) {
       const entry = continuationByToken(checkpointToken);
       if (!entry || entry.from !== id) return json(res, 409, { error: 'no_such_continuation' }, origin);
@@ -1912,6 +2052,33 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           commandId: command?.id ?? null
         },
         origin
+      );
+    }
+    // Every request that reaches this line asked to *start* a compaction, and says which keys it
+    // arrived with. Keys only — never a value, so a brief or a conversation id is never written
+    // to the log by this.
+    //
+    // The line exists because a checkpoint lost in transit is invisible from here in exactly the
+    // way that matters: the app falls through to this branch, answers 200 with a plausible
+    // start-compaction reply, and neither end has anything to look at. That has now happened
+    // three times. Twice the service worker dropped a field both ends implemented correctly
+    // (`sourceLost`, and `destinationLost` for two days before it). The third is open as this is
+    // written: a give-up whose page-side call demonstrably held a token, arriving here with
+    // neither the token nor the flag, which is what `compactCheckpointFields` produces when it
+    // decides `message.token` is not a string.
+    //
+    // An earlier version of this logged only when a token survived, and could not see that third
+    // case at all — the shape with nothing left to notice is the one that needed reporting most.
+    // Unconditional is also what makes it useful: `sourceAttempt` and `sourceDispatch` reach this
+    // route with their token intact on every compaction, so their key lists sit in the same log
+    // as the give-up's, and diffing them is the whole diagnosis.
+    logInfo(
+      `bridge: /compact start request — body keys: ${Object.keys(body as Record<string, unknown>).sort().join(', ')}`
+    );
+    if (checkpointToken) {
+      logWarn(
+        `bridge: /compact carried token ${checkpointToken.slice(0, 8)} but matched no checkpoint. ` +
+          'A checkpoint the page reported is not reaching the app; check the service worker forwards it.'
       );
     }
     if (goalWorkerChat(id)) {
@@ -2509,7 +2676,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         409,
         {
           error: 'chat_blocked',
-          message: 'This chat is blocked in the app. Release it there before turning Goal, Loop or auto-compaction on.'
+          // Goal and Loop are genuinely this chat's own setting, so releasing it here really is
+          // what turns them back on. auto-compaction is app-wide - this refusal still applies to
+          // it from a blocked chat's own composer, but releasing this one chat isn't what's
+          // needed; any other, unblocked chat's composer reaches the same global switch.
+          message: 'This chat is blocked in the app. Release it here to turn Goal or Loop back on for it; ' +
+            'auto-compaction is an app-wide setting and can be changed from any other chat\'s composer.'
         },
         origin
       );
@@ -5120,7 +5292,29 @@ function inspectSilentChats(now: number): { queued: boolean; spent: string[] } {
   let queued = false;
   let deferred = false;
   const spent: string[] = [];
-  const compacting = new Set(pendingAutomaticContinuations().map((entry) => entry.from));
+  // Skipped while the compaction is still being chased, and not one sweep longer.
+  //
+  // The skip exists so this pass does not reload a chat out from under a handoff that is still
+  // being worked. Once the phase pickups are spent, nothing is being worked: the compaction
+  // machinery has stopped reloading that chat itself, so the skip is no longer protecting a
+  // transaction — it is only hiding a silent chat from the one check that would notice.
+  //
+  // Measured on macOS on 2026-09-04: six continuations, all stalled at `dispatched-unresolved`
+  // after ChatGPT transport failures, every one with its three `writing` pickups spent. Each chat
+  // then sat for the full six-hour TTL with no compaction pickup left *and* no ordinary silence
+  // recovery, which is a chat that has simply stopped working for the rest of the afternoon with
+  // nothing to say why. The compaction failing is allowed — it depends on ChatGPT's own transport.
+  // Taking an unrelated subsystem down with it is not.
+  //
+  // Letting recovery through is also the repair, not merely the absence of harm: a reloaded page
+  // reads the pending ticket back through `maybeResumePendingCompaction()` and can finish the
+  // handoff that the dead page could not. Nothing is aborted here and no deadline moves; a stalled
+  // transaction simply stops suppressing the check that could rescue it.
+  const compacting = new Set(
+    pendingAutomaticContinuations()
+      .filter((entry) => compactionStillChased(entry))
+      .map((entry) => entry.from)
+  );
   for (const [conversationId, grant] of activeUntil) {
     if (compacting.has(conversationId)) continue;
     if (grant.until > now) continue;
@@ -5257,6 +5451,32 @@ function compactionPhaseOf(entry: ContinuationView): CompactionPhase {
 }
 
 /**
+ * Whether this chat's compaction is still being chased with reloads.
+ *
+ * A chat with pickups left is mid-transaction and must not be reloaded by anything else. A chat
+ * whose pickups are spent is not being reloaded by this machinery at all any more, so treating it
+ * as busy only hides it from the silence check — see the set built in `inspectSilentChats`.
+ *
+ * No watch yet counts as still chasing: the entry is new and `inspectOwedCompactions` arms it on
+ * its next sweep, so answering "given up" in that gap would be wrong about a transaction that has
+ * not had its first attempt.
+ *
+ * Below the watch floor is the exception, and it is not a corner case. The floor is the moment
+ * *this* process started serving, and `inspectOwedCompactions` skips anything older outright —
+ * an obligation this run never accepted. So a continuation restored from disk has no watch and
+ * never will have one: it is not being chased, and "no watch yet" would answer that it is,
+ * suppressing the silence check for the rest of its six-hour life. That is the same wedged chat
+ * this exists to release, reached by the commoner route — the app was restarted while a handoff
+ * was open, which is exactly how the machine that reported it got there.
+ */
+function compactionStillChased(entry: { from: string; openedAt: number }): boolean {
+  if (compactionWatchFloor === null || entry.openedAt < compactionWatchFloor) return false;
+  const watch = compactionWatch.get(entry.from);
+  if (!watch) return true;
+  return watch.attempts < COMPACTION_PICKUPS[watch.phase].attempts;
+}
+
+/**
  * Makes a ticket's next automatic pickup due on the next sweep, within the same bound.
  *
  * The schedule is not otherwise moved by page activity, and this adds no attempts: a pickup
@@ -5347,9 +5567,21 @@ async function inspectOwedGoals(now: number): Promise<boolean> {
     // it is one where the loop is not entitled to act, and reloading it would be this app
     // restarting work the user stopped.
     if (!goalActiveFor(reply.conversationId)) continue;
-    // Compact & Resume owns the chat while it runs: the handoff is being written, the
-    // conversation is about to be replaced, and the obligation travels to the replacement with
-    // everything else. Reloading mid-transaction is the one thing that could lose it.
+    // Compact & Resume owns the chat while it runs: the handoff is being written and the
+    // conversation is about to be replaced. Reloading mid-transaction is the one thing that
+    // could lose an in-flight commit, so this waits it out like every other mid-transaction
+    // caller here.
+    //
+    // Unlike a Goal objective or switch, this exact obligation is deliberately *not* carried to
+    // the replacement once the handoff lands: the reply text it names exists only in the retired
+    // chat's own now-gone document, so a reload of the replacement chat trying to collect it
+    // would find nothing there — a disruptive no-op reload of the chat the user just moved to,
+    // for content that page can never produce. Once the session's conversationId moves past
+    // this row's, the ordinary superseded-session check above forgets it (see forgetGoalWatch).
+    // The cost is one lost nudge; the loop resumes normally on the replacement chat's own next
+    // final reply, which arms its own fresh, genuinely collectible obligation the ordinary way.
+    // ('retires a handoff source from Goal and Loop, including the app watchdog' in
+    // test/bridge.test.ts is the regression that keeps this true.)
     if (continuationForSession(reply.sessionId)) continue;
     let watch = goalWatch.get(reply.conversationId);
     if (!watch) {
@@ -6142,7 +6374,14 @@ function revivalDeadlineAt(command: Command): number {
   return command.createdAt + (revivalDeliveryProven(command) ? REVIVAL_ACTIVITY_MS : REVIVAL_DEADLINE_MS);
 }
 
-function commandDeadlineDelay(command: Command, now = Date.now()): number {
+function commandDeadlineDelay(command: Command, now = Date.now()): number | null {
+  // A revival's first lease belongs to the *browser-open attempt*, not yet to a document. The
+  // exact worker chat may still be rendering the assistant message that contains agents.finish,
+  // so the content script deliberately refuses to redeem until that page is submit-ready. That
+  // wait must survive a tab reload/browser restart without turning ordinary ChatGPT busyness into
+  // a failed broker revival. A redeemed resume is already bounded by its continuation lifetime,
+  // so let that existing state machine remain the outer deadline while ChatGPT exposes chat B.
+  if (waitingForRevivalReadiness(command)) return null;
   if (command.spec.type === 'revive') return revivalDeadlineAt(command) - now;
   if (command.spec.type === 'resume' && continuationByToken(command.spec.token)?.automatic) {
     // One checkpoint, not a failure trigger. Expiry releases only this browser transport;
@@ -6171,8 +6410,17 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
   return claimedAt + COMMAND_DEADLINE_MS - now;
 }
 
-function armDeadline(command: Command, delay = commandDeadlineDelay(command)): void {
+/** Whether this revival is still waiting for its page to become submit-ready; see above. */
+function waitingForRevivalReadiness(command: Command): boolean {
+  return command.spec.type === 'revive' && command.claimedAt !== null && command.owner === null;
+}
+
+function armDeadline(command: Command, delay: number | null = commandDeadlineDelay(command)): void {
   if (command.timer) clearTimeout(command.timer);
+  command.timer = null;
+  // Still waiting for revival readiness (see commandDeadlineDelay): no deadline to arm yet.
+  // The redeem path re-arms with a real number once the page is submit-ready.
+  if (delay === null) return;
   command.timer = setTimeout(() => {
     command.timer = null;
     expire(command);
@@ -6195,6 +6443,9 @@ function rearmRetainedCommandDeadlines(): void {
     )
       continue;
     const remaining = commandDeadlineDelay(command, now);
+    // null: still waiting for revival readiness. Nothing to re-arm yet; the redeem path arms a
+    // real deadline once the page is submit-ready, same as it would have before the restart.
+    if (remaining === null) continue;
     if (remaining > 0) armDeadline(command, remaining);
     else expired.push(command);
   }
@@ -6220,7 +6471,9 @@ function expire(command: Command): void {
   // does not know that. Re-arm for the remainder rather than end a worker that is reading.
   if (spec.type === 'revive') {
     const remaining = commandDeadlineDelay(command);
-    if (remaining > 0) {
+    // null: still waiting for revival readiness — this fired on the earlier wake-attempt
+    // deadline, not the redeemed one. Treat it the same as time still remaining.
+    if (remaining === null || remaining > 0) {
       armDeadline(command, remaining);
       return;
     }
@@ -6528,10 +6781,13 @@ function tidyCommands(): void {
 /** Whether a page is already working on this command, with time still on its deadline. */
 const isLeased = (command: Command): boolean => {
   if (command.claimedAt === null) return false;
-  if (commandDeadlineDelay(command) > 0) return true;
+  const remaining = commandDeadlineDelay(command);
+  // null: still waiting for revival readiness — a page is already working on it, just not
+  // submit-ready yet, so this counts as leased.
+  if (remaining === null || remaining > 0) return true;
   if (command.spec.type !== 'resume') return false;
   const state = continuationByToken(command.spec.token)?.state;
-  return state === 'committing' || state === 'committed';
+  return state === 'claimed' || state === 'committing' || state === 'committed';
 };
 
 /**

@@ -155,56 +155,28 @@ export function inheritWorkspace(toAgent: string, primeConversationId: string | 
 }
 
 /**
- * The prime's workspace, whichever of its two identities is holding it.
+ * The prime's workspace, under the one identity it has.
  *
- * The prime is the one caller that answers to two keys. Its ordinary path calls carry no
- * agent identity — that is deliberate, see `dispatch` — so what they learn is filed under
- * `chat:<conversation>`; its `agents` calls *are* keyed, so by the second spawn onwards
- * `currentCall().agent` is `prime` and `currentWorkspace()` looks under `agent:prime`, which
- * the ordinary calls never wrote to. Reading only one of the two made inheritance work on the
- * first spawn and quietly stop working on every later one.
+ * The prime used to answer to two keys, and this function used to reconcile them: an
+ * `agent:prime` mirror beside `chat:<conversation>`, written back to both on every read. That
+ * design predates `workspaceKey()` preferring the conversation whenever a call has one — and a
+ * prime's calls always do. Every path that can set `currentCall().agent` to `prime` requires a
+ * proven conversation first: ordinary dispatch resolves the agent through `resolve()`, which
+ * returns null without one, and the `agents` tool's own `adoptAgent(PRIME_ID)` runs after a
+ * spawn that throws UNIDENTIFIED_CALLER when the conversation is unknown. So `agent:prime` had
+ * no live writer left; only this function's own mirror wrote it, and only this function and its
+ * release path read it.
  *
- * So try both, and write the answer back to both. After a spawn the two keys agree, and it
- * stops mattering which one the next call arrives under. None of this is visible to a model:
- * there is still no workspace id, and nothing here can be named or set from a tool argument.
+ * Deleting it is not just tidying. A friendly agent id is reused by every later run, so a
+ * surviving `agent:prime` is a path by which an unrelated prime could inherit a previous run's
+ * folder without either conversation ever naming it — the exact cross-run leak that
+ * `parkAgentWorkspace` exists to prevent for workers. A prime with no conversation now has no
+ * workspace, which is the same answer any other unidentified caller gets.
  */
 export function primeWorkspace(primeConversationId: string | null): Workspace | null {
+  if (!primeConversationId) return null;
   prune();
-  // Conversation key first, and it wins a tie: it is the one ordinary path calls actually
-  // write to, while `agent:prime` is only ever the mirror this function left behind at the
-  // last spawn. Newest otherwise, so a prime that has since moved to another project hands
-  // over the folder it moved to rather than the one it started in.
-  const keys = [...(primeConversationId ? [`chat:${primeConversationId}`] : []), 'agent:prime'];
-  let found: Workspace | null = null;
-  for (const key of keys) {
-    const held = workspaces.get(key);
-    if (held && (!found || held.at > found.at)) found = held;
-  }
-  if (!found) return null;
-  for (const key of keys) setWorkspaceFor(key, { virtual: found.virtual, real: found.real });
-  return found;
-}
-
-/**
- * Collapses the live swarm prime's agent-scoped cwd back into its ordinary chat identity.
- *
- * While a run exists, the kernel resolves prime tool calls as `agent:prime`, so that key is
- * the authority for workspace changes made during the run. Once the run ends those same calls
- * go back to `chat:<conversation>`. Recency comparison is the wrong tool at this boundary: two
- * writes may share one millisecond, and the generic primeWorkspace() tie-break deliberately
- * favours the chat key for inheritance. Ending the run is an explicit identity transition, so
- * copy the agent value when present and then remove the temporary key. Removing it also keeps
- * a later run from inheriting a previous run's prime cwd when the new prime has none yet.
- */
-export function releasePrimeWorkspace(primeConversationId: string | null): boolean {
-  prune();
-  const held = workspaces.get('agent:prime');
-  if (!held) return false;
-  if (primeConversationId) {
-    setWorkspaceFor(`chat:${primeConversationId}`, { virtual: held.virtual, real: held.real });
-  }
-  workspaces.delete('agent:prime');
-  return true;
+  return workspaces.get(`chat:${primeConversationId}`) ?? null;
 }
 
 /**

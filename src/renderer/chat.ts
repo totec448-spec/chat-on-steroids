@@ -478,9 +478,16 @@ async function loadMoreSessions(): Promise<void> {
   if (sessionPageLoading || !sessionPageCursor || sessions.length >= sessionTotal) return;
   sessionPageLoading = true;
   const cursor = sessionPageCursor;
+  const generation = sessionsLoadGeneration;
   try {
     const page = await run(api.listSessions({ cursor, limit: SESSION_PAGE_SIZE }));
     if (!page) return;
+    // A hot refresh (loadSessions) can replace the first page and its cursor while this
+    // older-page request is in flight. Committing this response's cursor over that newer one
+    // would silently strand whatever rows sit between the refresh's cursor and this page's
+    // start, with no cursor left able to reach them. Discard instead — the next scroll or hot
+    // refresh already carries the current cursor and will recover the gap on its own.
+    if (generation !== sessionsLoadGeneration || cursor !== sessionPageCursor) return;
     mergeSessionRows(page.sessions);
     loadedOlderSessions = true;
     sessionTotal = page.total;
@@ -1960,6 +1967,11 @@ export function chatApply(state: AppState, previous?: Config): void {
             }`
           : `Listening on 127.0.0.1:${bridge.port ?? '?'} · no browser is authorized or connected yet.`;
   $('bridgeState').classList.toggle('is-warn', browserRequired && (!bridge.present || !secureStorageAvailable));
+  // QA: this paragraph sat in warning red beside a green checkmark and "Connected. Listening
+  // on 127.0.0.1:…" beneath it, which reads as a problem where there is none. The copy is
+  // still worth keeping once connected — it says why the step exists — so only its urgency
+  // styling depends on whether the prerequisite it names is actually still unmet.
+  $('bridgeRequiredHint').classList.toggle('is-required', browserRequired && !bridge.present);
   void showExtensionPath();
 
   if (sessions.length > 0) paintSessions();

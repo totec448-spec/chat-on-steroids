@@ -52,6 +52,7 @@
 
 import { randomBytes } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
+import { estimateTokens } from '../../shared/session.js';
 import { logInfo, logWarn } from '../logger.js';
 import {
   PRIME_ID,
@@ -151,6 +152,9 @@ interface Continuation {
   /** Chat A: where the session is attached until the commit lands. */
   from: string;
   openedAt: number;
+  touchedAt: number;
+  /** Last touch already queued for durable persistence. */
+  lastTouchPersistedAt: number;
   /** Auto-compaction ticket: survives page/retry clocks until commit or explicit Off/cancel. */
   automatic: boolean;
   /** When the brief request first went on its way; the automatic clock starts here. */
@@ -194,6 +198,8 @@ interface ContinuationRecord {
   from: string;
   to: string | null;
   openedAt: number;
+  /** Added after v2.0.2; absent in older durable snapshots. */
+  touchedAt?: number;
   /** Absent in records written before durable auto-compaction tickets existed. */
   automatic?: boolean;
   /** Absent in records written before automatic handovers had a deadline. */
@@ -223,6 +229,7 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     from: entry.from,
     to: entry.to,
     openedAt: entry.openedAt,
+    touchedAt: entry.touchedAt,
     automatic: entry.automatic,
     askedAt: entry.askedAt,
     state: entry.state,
@@ -270,7 +277,11 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   // waiting out a window that is already over.
   if (record.state === 'committed' || record.state === 'aborted') endResumeClaim(entry.token);
   entry.to = record.to;
+  const touchedAt = record.touchedAt ?? record.openedAt;
+  entry.touchedAt = touchedAt;
+  entry.lastTouchPersistedAt = Math.max(entry.lastTouchPersistedAt, touchedAt);
   entry.automatic = record.automatic === true;
+  entry.askedAt = record.askedAt ?? null;
   entry.state = record.state;
   entry.summary = record.summary;
   entry.handoffId = record.handoffId;
@@ -295,6 +306,8 @@ async function transitionNow(
 ): Promise<ContinuationRecord> {
   const current = durableRecord(entry);
   const next = derive(current);
+  // Semantic forward progress renews the waiting lease too.
+  next.touchedAt = Date.now();
   try {
     // Persist the proposed semantic state before publishing it into the live transaction.
     // If the durable boundary rejects, callers still see the previous state and can retry or
@@ -374,10 +387,13 @@ const handoffAsked = (entry: Continuation): boolean =>
  * CONTINUATION_TTL_MS from opening; an automatic one has no clock until it is asked for and
  * AUTOMATIC_HANDOVER_TTL_MS from then.
  */
+// The manual clock reads touchedAt, not openedAt: an entry with recent activity should not
+// expire out from under it merely because it was opened a while ago. The automatic clock
+// deliberately does not — see the `automatic` field's own comment — so it alone reads askedAt.
 const expired = (entry: Continuation, now = Date.now()): boolean =>
   entry.automatic
     ? entry.askedAt !== null && now - entry.askedAt >= AUTOMATIC_HANDOVER_TTL_MS
-    : now - entry.openedAt >= CONTINUATION_TTL_MS;
+    : now - entry.touchedAt >= CONTINUATION_TTL_MS;
 
 const isOpen = (entry: Continuation): boolean =>
   entry.state !== 'committed' && entry.state !== 'aborted' && !expired(entry);
@@ -392,8 +408,11 @@ function sweep(): void {
     if (entry.state === 'committing') continue;
     if (entry.state === 'committed' || entry.state === 'aborted') {
       // Kept briefly so a repeated ack can be answered with "already done" rather than with
-      // a fresh transaction, then forgotten.
-      if (Date.now() - entry.openedAt > CONTINUATION_TTL_MS * 2) byToken.delete(entry.token);
+      // a fresh transaction, then forgotten. Measured from when it settled (touchedAt, which
+      // every transition including this terminal one renews), not from when it opened - a
+      // days-old automatic ticket that finally aborts must still get its own retention window,
+      // not inherit however little of one its age already used up.
+      if (Date.now() - entry.touchedAt > CONTINUATION_TTL_MS * 2) byToken.delete(entry.token);
       continue;
     }
     if (expired(entry)) {
@@ -418,6 +437,35 @@ export function continuationByToken(token: string): ContinuationView | null {
   sweep();
   const entry = byToken.get(token);
   return entry ? view(entry) : null;
+}
+
+/**
+ * Renews only an exact, already-armed handoff generation that is still actively reporting
+ * from the browser. A stale token cannot resurrect itself after a full TTL of silence.
+ *
+ * "Armed" here is the retired boolean's meaning, not the field: the brief request has actually
+ * gone out, which `handoffAsked` already answers from the checkpoint that replaced it.
+ */
+export function touchContinuation(token: string, sessionId: string, conversationId: string): boolean {
+  const entry = byToken.get(token);
+  if (
+    !entry ||
+    entry.sessionId !== sessionId ||
+    entry.from !== conversationId ||
+    entry.state !== 'awaiting-summary' ||
+    !handoffAsked(entry)
+  ) return false;
+
+  const now = Date.now();
+  if (now - entry.touchedAt >= CONTINUATION_TTL_MS) return false;
+  entry.touchedAt = now;
+  // Polling is frequent; persist at most twice a minute. The last durable touch remains
+  // comfortably inside the ten-minute expiry window if the app crashes between writes.
+  if (now - entry.lastTouchPersistedAt >= 30_000) {
+    entry.lastTouchPersistedAt = now;
+    changed();
+  }
+  return true;
 }
 
 /**
@@ -628,6 +676,8 @@ function makeContinuation(sessionId: string, fromConversationId: string, automat
     sessionId,
     from: fromConversationId,
     openedAt: Date.now(),
+    touchedAt: Date.now(),
+    lastTouchPersistedAt: Date.now(),
     automatic,
     askedAt: null,
     state: 'awaiting-summary',
@@ -741,6 +791,47 @@ export async function dispatchContinuationSourceSendNow(token: string): Promise<
     }));
     return true;
   });
+}
+
+/**
+ * Gives up an armed source dispatch that the page proved ChatGPT never took.
+ *
+ * `dispatched-unresolved` is deliberately never replayed: it is written before the click, so a
+ * document that dies there may or may not have left the prompt with ChatGPT, and re-sending
+ * would be the double-send the whole fence exists to prevent. That is right, and this does not
+ * change it — nothing here re-offers the prompt to any page.
+ *
+ * What was missing is the other half. The destination side has had
+ * `releaseContinuationDestinationSendNow` since 2026-09-02, so a replacement chat whose click
+ * never landed hands the brief back at once. The source side had no equivalent, so the same
+ * event left the ticket in `dispatched-unresolved` until AUTOMATIC_HANDOVER_TTL_MS — six hours —
+ * with `handoffAsked()` true, so no pickup could re-ask and the page refusing to retype it. A
+ * 2026-09-04 QA run measured exactly that: three phase pickups fired and expired against a chat
+ * whose composer had never received the prompt. Worse than the stall itself, the chat stays in
+ * `pendingAutomaticContinuations()` the whole time, and `inspectSilentChats()` skips those — so
+ * a chat that is merely wedged also loses browser recovery for the rest of the six hours.
+ *
+ * The evidence is the page's own `send()` returning false, which is not a bare timeout: it
+ * watches five independent acceptance signals — the composer clearing, a new conversation id,
+ * generation starting, the Stop control appearing, and a freshly rendered user message matching
+ * the text — for three seconds. The compaction flow has already stopped generation and waited
+ * for settle before it types, so a landed click flips generating/Stop within milliseconds. None
+ * of the five inside three seconds is the strongest negative this page can produce.
+ *
+ * Aborting rather than releasing is the deliberate asymmetry with the destination half. The
+ * destination can prove nothing was sent (a chat that still has no id cannot have accepted a
+ * message) and so may safely re-offer the brief; here the evidence is strong but not proof, so
+ * the transaction ends instead of being re-armed. Nothing is ever sent twice, and the cost of
+ * being wrong is one abandoned compaction that auto-compaction re-files on the next qualifying
+ * turn — against six hours of a wedged chat with no browser recovery.
+ */
+export async function releaseContinuationSourceSendNow(token: string, reason: string): Promise<boolean> {
+  const entry = byToken.get(token);
+  if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary') return false;
+  // Only the armed-but-unproven state. `sent` has ChatGPT's own marker behind it and is not in
+  // doubt; the earlier states were never dispatched and are reclaimable without this.
+  if (entry.sourceSend.state !== 'dispatched-unresolved') return false;
+  return abortContinuation(token, reason);
 }
 
 /** Binds the marked source prompt to ChatGPT's stable user-message identity. */
@@ -1144,7 +1235,15 @@ async function reconcileCommitting(entry: Continuation, toConversationId: string
 
   let moved = false;
   try {
-    moved = await rebindSession(entry.sessionId, entry.from, toConversationId, entry.handoffId ?? undefined);
+    moved = await rebindSession(
+      entry.sessionId,
+      entry.from,
+      toConversationId,
+      entry.handoffId ?? undefined,
+      // The brief B is opened on. It is B's starting context and none of it is B's own work,
+      // so the compaction threshold has to discount it — see resumeBaselineTokens.
+      estimateTokens(entry.summary)
+    );
   } catch (err) {
     logWarn(`continuation ${entry.token.slice(0, 8)} rebind threw: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -1301,6 +1400,10 @@ export function abortContinuation(token: string, reason: string): boolean {
   if (entry.state === 'committed' || entry.state === 'aborted') return false;
   entry.state = 'aborted';
   entry.error = reason;
+  // Settling is forward progress like any other transition: sweep()'s own terminal-retention
+  // window is measured from here, not from when the transaction opened, so an automatic ticket
+  // that sat waiting for hours does not read as already-ancient the instant it finally expires.
+  entry.touchedAt = Date.now();
   endResumeClaim(entry.token);
   cancelPrimeTransfer(entry.from);
   changed();
@@ -1367,8 +1470,19 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       raw.from.length === 0 || raw.from.length > 256 ||
       !validStates.has(raw.state) ||
       !Number.isFinite(raw.openedAt) ||
-      ((raw.state === 'committed' || raw.state === 'aborted') && now - raw.openedAt >= CONTINUATION_TTL_MS * 2) ||
-      (raw.automatic !== true && now - raw.openedAt >= CONTINUATION_TTL_MS * 2)
+      // Terminal records prune by touchedAt-if-known, matching the live sweep()'s own
+      // terminal-retention window - measured from when the record settled, not from when it
+      // opened. A non-automatic open record prunes the same way, same reasoning as expired()
+      // below. An automatic open record is deliberately exempt from age-pruning here — it
+      // survives page/retry clocks by design — and is judged instead by expired() once restored.
+      ((raw.state === 'committed' || raw.state === 'aborted') &&
+        now -
+          (typeof raw.touchedAt === 'number' && Number.isFinite(raw.touchedAt) ? raw.touchedAt : raw.openedAt) >=
+          CONTINUATION_TTL_MS * 2) ||
+      (raw.automatic !== true &&
+        now -
+          (typeof raw.touchedAt === 'number' && Number.isFinite(raw.touchedAt) ? raw.touchedAt : raw.openedAt) >=
+          CONTINUATION_TTL_MS * 2)
     ) {
       continue;
     }
@@ -1378,6 +1492,9 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       from: raw.from,
       to: typeof raw.to === 'string' && raw.to ? raw.to : null,
       openedAt: raw.openedAt,
+      touchedAt: typeof raw.touchedAt === 'number' && Number.isFinite(raw.touchedAt) ? raw.touchedAt : raw.openedAt,
+      lastTouchPersistedAt:
+        typeof raw.touchedAt === 'number' && Number.isFinite(raw.touchedAt) ? raw.touchedAt : raw.openedAt,
       automatic: raw.automatic === true,
       askedAt: null,
       state: raw.state,
@@ -1474,6 +1591,9 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
         if (!repaired) commitPrimeTransfer(entry.from, entry.to);
         entry.state = 'committed';
         entry.error = null;
+        // Same reasoning as abortContinuation(): this is the moment the record actually settled,
+        // even though the underlying durable commit happened before the crash this is repairing.
+        entry.touchedAt = Date.now();
         logInfo(`continuation ${entry.token.slice(0, 8)} recovered after durable commit`);
       } else if (entry.state === 'committing' && session && session.conversationId === entry.from) {
         if (waitingExpired) {

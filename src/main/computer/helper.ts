@@ -55,6 +55,8 @@ public static class Clf {
   const uint MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004;
   const uint MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010;
   const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020, MOUSEEVENTF_MIDDLEUP = 0x0040;
+  const uint MOUSEEVENTF_XDOWN = 0x0080, MOUSEEVENTF_XUP = 0x0100;
+  const uint XBUTTON1 = 0x0001, XBUTTON2 = 0x0002;
   const uint MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_HWHEEL = 0x1000;
   const uint KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
 
@@ -79,8 +81,16 @@ public static class Clf {
   [DllImport("user32.dll")] static extern bool AttachThreadInput(uint from, uint to, bool attach);
   [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint flags);
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] static extern bool GetCursorInfo(ref CURSORINFO ci);
+  [DllImport("user32.dll")] static extern bool GetIconInfo(IntPtr icon, out ICONINFO info);
+  [DllImport("user32.dll")] static extern bool DrawIconEx(IntPtr hdc, int x, int y, IntPtr icon, int w, int h, uint step, IntPtr brush, uint flags);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
 
   public struct POINT { public int X, Y; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public POINT ptScreenPos; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct ICONINFO { public bool fIcon; public int xHotspot; public int yHotspot; public IntPtr hbmMask; public IntPtr hbmColor; }
   public struct RECT { public int Left, Top, Right, Bottom; }
   delegate bool EnumProc(IntPtr h, IntPtr lp);
 
@@ -110,22 +120,29 @@ public static class Clf {
     Send(new INPUT[] { Mouse(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, nx, ny, 0) });
   }
 
-  static void ButtonFlags(string button, out uint down, out uint up) {
+  /**
+   * The side buttons are one event pair distinguished by mouseData, not their own flags,
+   * which is why the data word has to travel with the flags rather than being zero.
+   */
+  static void ButtonFlags(string button, out uint down, out uint up, out uint data) {
+    data = 0;
     switch (button) {
       case "right": down = MOUSEEVENTF_RIGHTDOWN; up = MOUSEEVENTF_RIGHTUP; break;
       case "middle": case "wheel": down = MOUSEEVENTF_MIDDLEDOWN; up = MOUSEEVENTF_MIDDLEUP; break;
+      case "back": down = MOUSEEVENTF_XDOWN; up = MOUSEEVENTF_XUP; data = XBUTTON1; break;
+      case "forward": down = MOUSEEVENTF_XDOWN; up = MOUSEEVENTF_XUP; data = XBUTTON2; break;
       default: down = MOUSEEVENTF_LEFTDOWN; up = MOUSEEVENTF_LEFTUP; break;
     }
   }
 
   public static void Click(int x, int y, string button, int times) {
     Move(x, y);
-    uint down, up;
-    ButtonFlags(button, out down, out up);
+    uint down, up, data;
+    ButtonFlags(button, out down, out up, out data);
     List<INPUT> batch = new List<INPUT>();
     for (int n = 0; n < times; n++) {
-      batch.Add(Mouse(down, 0, 0, 0));
-      batch.Add(Mouse(up, 0, 0, 0));
+      batch.Add(Mouse(down, 0, 0, data));
+      batch.Add(Mouse(up, 0, 0, data));
     }
     Send(batch.ToArray());
   }
@@ -140,13 +157,50 @@ public static class Clf {
     if (batch.Count > 0) Send(batch.ToArray());
   }
 
+  // Paced and interpolated for the same reason as the macOS helper: a press that moves
+  // immediately reads as a click, and two waypoints are a teleport that never crosses the
+  // system drag threshold. QA saw a Finder drag report success three times while the file
+  // stayed put; Explorer's shell drag has the same requirements.
+  const int DragPressHoldMs = 90;
+  const int DragStepMs = 8;
+  const int DragDropDwellMs = 140;
+  const double DragMaxStep = 8.0;
+  // One budget for the whole path, not per hop. Per hop, a 64-waypoint drag could post
+  // thousands of events and outlast the parent's deadline, and a helper killed mid-drag never
+  // reaches the release below — leaving the button logically held down. Longer paths take
+  // longer strides instead of more time.
+  const int DragMaxTotalSteps = 180;
+
   public static void Drag(int[] xs, int[] ys, string button) {
-    uint down, up;
-    ButtonFlags(button, out down, out up);
+    uint down, up, data;
+    ButtonFlags(button, out down, out up, out data);
+    double total = 0.0;
+    for (int i = 1; i < xs.Length; i++) {
+      double hx = xs[i] - xs[i - 1], hy = ys[i] - ys[i - 1];
+      total += System.Math.Sqrt(hx * hx + hy * hy);
+    }
     Move(xs[0], ys[0]);
-    Send(new INPUT[] { Mouse(down, 0, 0, 0) });
-    for (int i = 1; i < xs.Length; i++) { Move(xs[i], ys[i]); System.Threading.Thread.Sleep(12); }
-    Send(new INPUT[] { Mouse(up, 0, 0, 0) });
+    Send(new INPUT[] { Mouse(down, 0, 0, data) });
+    System.Threading.Thread.Sleep(DragPressHoldMs);
+    int cx = xs[0], cy = ys[0];
+    for (int i = 1; i < xs.Length; i++) {
+      double dx = xs[i] - cx, dy = ys[i] - cy;
+      double distance = System.Math.Sqrt(dx * dx + dy * dy);
+      int steps = (int)System.Math.Ceiling(distance / DragMaxStep);
+      if (total > 0.0 && total / DragMaxStep > DragMaxTotalSteps) {
+        steps = (int)System.Math.Round(DragMaxTotalSteps * distance / total);
+      }
+      if (steps < 1) steps = 1;
+      for (int s = 1; s <= steps; s++) {
+        double progress = (double)s / (double)steps;
+        Move((int)System.Math.Round(cx + dx * progress), (int)System.Math.Round(cy + dy * progress));
+        System.Threading.Thread.Sleep(DragStepMs);
+      }
+      cx = xs[i]; cy = ys[i];
+    }
+    Move(xs[xs.Length - 1], ys[ys.Length - 1]);
+    System.Threading.Thread.Sleep(DragDropDwellMs);
+    Send(new INPUT[] { Mouse(up, 0, 0, data) });
   }
 
   static INPUT Key(ushort vk, bool up) {
@@ -312,10 +366,48 @@ public static class Clf {
     return outW + "," + outH;
   }
 
+  /**
+   * Paints the live pointer into a shot whose top-left is at screen (originX, originY).
+   *
+   * Neither CopyFromScreen nor PrintWindow composites the cursor, while ScreenCaptureKit does
+   * it for us on macOS. Without this the model cannot see where the pointer is, cannot read a
+   * hover state, and cannot confirm from the picture that a move actually landed.
+   *
+   * Drawn at the hotspot rather than the icon origin, because the hotspot is the pixel the
+   * pointer actually addresses — an I-beam or a resize arrow is centred, not top-left, and
+   * drawing at the raw position would put the tip a few pixels off exactly when a coordinate
+   * is being read off the image. Failure here is never fatal: a screenshot without the
+   * pointer is still a screenshot.
+   */
+  static void PaintCursor(Graphics g, int originX, int originY, int w, int h) {
+    CURSORINFO ci = new CURSORINFO();
+    ci.cbSize = Marshal.SizeOf(typeof(CURSORINFO));
+    if (!GetCursorInfo(ref ci)) return;
+    // CURSOR_SHOWING. A hidden pointer — full-screen video, a text field mid-typing — must
+    // not be invented into the picture.
+    if ((ci.flags & 0x00000001) == 0 || ci.hCursor == IntPtr.Zero) return;
+    ICONINFO info;
+    if (!GetIconInfo(ci.hCursor, out info)) return;
+    try {
+      int x = ci.ptScreenPos.X - originX - info.xHotspot;
+      int y = ci.ptScreenPos.Y - originY - info.yHotspot;
+      // Cheap reject only for a pointer nowhere near the shot; DrawIconEx clips the rest.
+      if (x < -256 || y < -256 || x > w + 256 || y > h + 256) return;
+      IntPtr dc = g.GetHdc();
+      try { DrawIconEx(dc, x, y, ci.hCursor, 0, 0, 0, IntPtr.Zero, 0x0003); }
+      finally { g.ReleaseHdc(dc); }
+    } finally {
+      // GetIconInfo hands over two bitmap copies; hCursor itself is shared and is not ours.
+      if (info.hbmMask != IntPtr.Zero) DeleteObject(info.hbmMask);
+      if (info.hbmColor != IntPtr.Zero) DeleteObject(info.hbmColor);
+    }
+  }
+
   public static string Capture(int x, int y, int w, int h, int maxW, string file) {
     using (Bitmap shot = new Bitmap(w, h))
     using (Graphics g = Graphics.FromImage(shot)) {
       g.CopyFromScreen(x, y, 0, 0, new Size(w, h), CopyPixelOperation.SourceCopy);
+      PaintCursor(g, x, y, w, h);
       return SavePng(shot, maxW, file);
     }
   }
@@ -334,6 +426,9 @@ public static class Clf {
       try { ok = PrintWindow(h, dc, 2); }
       finally { g.ReleaseHdc(dc); }
       if (!ok) return "";
+      // The window was rendered off-screen, so the pointer is placed by the window's own
+      // screen rect. Outside it, PaintCursor's bounds check drops it.
+      PaintCursor(g, r.Left, r.Top, w, height);
       return SavePng(shot, maxW, file);
     }
   }
@@ -348,15 +443,21 @@ public static class Clf {
 function Vk([string]$name) {
   $n = $name.ToUpperInvariant()
   $map = @{
-    'CTRL'=0x11; 'CONTROL'=0x11; 'ALT'=0x12; 'SHIFT'=0x10; 'WIN'=0x5B; 'SUPER'=0x5B; 'CMD'=0x5B;
+    'CTRL'=0x11; 'CONTROL'=0x11; 'ALT'=0x12; 'OPTION'=0x12; 'SHIFT'=0x10;
+    'WIN'=0x5B; 'SUPER'=0x5B; 'CMD'=0x5B; 'META'=0x5B;
     'ENTER'=0x0D; 'RETURN'=0x0D; 'TAB'=0x09; 'ESC'=0x1B; 'ESCAPE'=0x1B; 'SPACE'=0x20;
     'BACKSPACE'=0x08; 'DELETE'=0x2E; 'DEL'=0x2E; 'INSERT'=0x2D; 'HOME'=0x24; 'END'=0x23;
     'PAGEUP'=0x21; 'PAGEDOWN'=0x22; 'UP'=0x26; 'DOWN'=0x28; 'LEFT'=0x25; 'RIGHT'=0x27;
+    # The DOM names for the same four keys, which is what browser key vocabulary emits.
+    'ARROWUP'=0x26; 'ARROWDOWN'=0x28; 'ARROWLEFT'=0x25; 'ARROWRIGHT'=0x27;
     'F1'=0x70;'F2'=0x71;'F3'=0x72;'F4'=0x73;'F5'=0x74;'F6'=0x75;
     'F7'=0x76;'F8'=0x77;'F9'=0x78;'F10'=0x79;'F11'=0x7A;'F12'=0x7B;
     'PRINTSCREEN'=0x2C; 'CAPSLOCK'=0x14;
-    'PGUP'=0x21; 'PGDN'=0x22; 'ARROWUP'=0x26; 'ARROWDOWN'=0x28; 'ARROWLEFT'=0x25; 'ARROWRIGHT'=0x27;
-    'META'=0x5B; 'COMMAND'=0x5B; 'OPTION'=0x12; 'INS'=0x2D; 'BKSP'=0x08; 'PAUSE'=0x13;
+    # ARROWUP/DOWN/LEFT/RIGHT, META and OPTION are already keyed above; a hashtable literal
+    # with the same key twice is a PowerShell parse error (DuplicateKeyInHashLiteral), not a
+    # last-write-wins override, so this line only adds what those did not already cover.
+    'PGUP'=0x21; 'PGDN'=0x22;
+    'COMMAND'=0x5B; 'INS'=0x2D; 'BKSP'=0x08; 'PAUSE'=0x13;
     'NUMLOCK'=0x90; 'SCROLLLOCK'=0x91; 'MENU'=0x5D; 'APPS'=0x5D;
     'F13'=0x7C;'F14'=0x7D;'F15'=0x7E;'F16'=0x7F;'F17'=0x80;'F18'=0x81;
     'F19'=0x82;'F20'=0x83;'F21'=0x84;'F22'=0x85;'F23'=0x86;'F24'=0x87;

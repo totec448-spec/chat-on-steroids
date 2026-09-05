@@ -252,6 +252,53 @@ describe('the chat panel cards', () => {
 });
 
 /**
+ * The Permissions card is the only Home card with a static explanatory line between its
+ * header and its scroll box: `#readOnlyHint`, added when read-only mode shipped. The base
+ * two-row `.card` template has only one flexible track, so that line inherited it and was
+ * squeezed toward its 0 minimum by the permission list's own real height — a list that
+ * always needs more than the leftover space — then overflowed its collapsed box over the
+ * first permission row instead of clipping. Same class of bug as the chat panel cards
+ * above (a child added without a matching row), just on Home, and just as invisible to
+ * jsdom: this counts tracks against children rather than measuring the overlap in pixels.
+ */
+describe('the permissions card', () => {
+  function tracks(selector: string): string[] {
+    const declarations = rule(selector);
+    const match = /grid-template-rows:([^;]*)/.exec(declarations);
+    expect(match, `${selector} declares no grid-template-rows`).not.toBeNull();
+    // minmax(0, 1fr) is one track despite its comma.
+    return match![1]!.trim().replace(/minmax\([^)]*\)/g, 'minmax').split(/\s+/);
+  }
+
+  it("gives the hint its own row instead of sharing the scroll box's flexible track", () => {
+    const card = document.getElementById('readOnlyHint')!.closest('.card')!;
+    expect(card.classList.contains('card-has-hint')).toBe(true);
+
+    const list = tracks('.card-has-hint');
+    expect(list).toHaveLength(card.children.length);
+
+    const hintIndex = [...card.children].indexOf(document.getElementById('readOnlyHint')!);
+    const scrollIndex = [...card.children].indexOf(card.querySelector('.scroll')!);
+    expect(list[hintIndex]).toBe('auto');
+    expect(list[scrollIndex]).toBe('minmax');
+    expect(list.filter((track) => track === 'minmax')).toHaveLength(1);
+  });
+
+  /**
+   * The hint's own row fixed the overlap, but not on its own: `.hint` carries no padding —
+   * every other place it appears sits inside a container that already supplies it — and
+   * #readOnlyHint is a direct child of the card instead. Screenshotted at the app's default
+   * size: the text ran flush to the card's left/right edges, 0px in, against the 15px the
+   * header and 16px the permission rows are indented by. Close enough to read as misaligned
+   * rather than as a design choice.
+   */
+  it("indents the hint to match the header and the rows below it, not the card's own edge", () => {
+    const hint = rule('#readOnlyHint');
+    expect(hint).toContain('padding: 0 15px 10px');
+  });
+});
+
+/**
  * A recorded tool call is a `<details>`. A `<details>` whose `display` is changed stops
  * stacking its summary above its body and lays the two out as siblings — which is how the
  * arguments/result panel came to sit beside the row, pinned to the right edge of the card

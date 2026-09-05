@@ -637,3 +637,20 @@ button:focus-visible {
   font-size: 12px;
   line-height: 1.4;
 }
+
+/*
+ * Why browser control could not be switched on.
+ *
+ * A refused permission used to leave no trace: the switch snapped back and said nothing, so a
+ * request the browser was never going to grant looked like a broken control. Uses the same red
+ * the capture rows already use, so a problem reads as a problem here too.
+ */
+.perm-error {
+  margin: 2px 12px 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 11px;
+  line-height: 1.4;
+}

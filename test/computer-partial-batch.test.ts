@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fake = vi.hoisted(() => {
+  // The desktop helper process is fully mocked in this unit test. On a real macOS
+  // runner the production locator still requires an existing executable before it
+  // reaches mocked spawn(), so point the explicit test override at Node itself.
+  // Production behavior is unchanged: packaged/dev helpers must still exist.
+  process.env.COS_MACOS_DESKTOP_HELPER = process.execPath;
   type Listener = { fn: (...args: any[]) => void; once: boolean };
   class Emitter {
     private readonly listeners = new Map<string, Listener[]>();
@@ -90,7 +95,7 @@ describe('desktop partial batch result', () => {
       act([
         { type: 'type', text: 'first' },
         { type: 'type', text: 'second' }
-      ])
+      ], { targetWindow: 42 })
     ).rejects.toMatchObject({
       completedCount: 1,
       failedIndex: 1,
@@ -113,7 +118,7 @@ describe('desktop partial batch result', () => {
       act([
         { type: 'type', text: 'first' },
         { type: 'type', text: 'second' }
-      ])
+      ], { targetWindow: 42 })
     ).rejects.toMatchObject({
       completedCount: 1,
       failedIndex: 1,

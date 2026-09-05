@@ -15,6 +15,35 @@
 export const APP_VERSION = '2.0.5';
 
 /**
+ * The commit this build came from, or 'unknown' outside a build.
+ *
+ * The version alone cannot distinguish two builds, and that gap cost a whole QA run: the app
+ * under test called itself 2.0.2 and predated the feature the run existed to exercise, and
+ * nothing visible could have said so. Substituted at bundle time; the declaration below is what
+ * tests and `tsx` see.
+ */
+declare const __BUILD_REVISION__: string | undefined;
+export const BUILD_REVISION =
+  typeof __BUILD_REVISION__ === 'string' ? __BUILD_REVISION__ : 'unknown';
+
+/**
+ * The version to *show*, as opposed to the version to compare against a release tag.
+ *
+ * `2.0.2` cannot distinguish two builds, and that ambiguity cost a QA run: an app that predated
+ * the feature under test was indistinguishable from one that had it. This carries the commit as
+ * semver build metadata, which is valid semver and ignored by anything that compares versions —
+ * so it can be shown wherever a human or a model reads one.
+ *
+ * A build with no revision says `-dev` rather than pretending to be the release: an unmarked
+ * 2.0.2 that is really somebody's working tree is the exact confusion this exists to end.
+ *
+ * APP_VERSION stays bare where the value must match a published release — the extension download
+ * URL and the bridge's compatibility reply — because those are compared, not read.
+ */
+export const BUILD_VERSION =
+  BUILD_REVISION === 'unknown' ? `${APP_VERSION}-dev` : `${APP_VERSION}+${BUILD_REVISION}`;
+
+/**
  * Standalone extension recovery must stay on the app's own release. Using GitHub's moving
  * `latest` asset can pair an older installed app with a newer, incompatible bridge protocol.
  */

@@ -104,22 +104,26 @@ const AUTH_FAILURE = /\b(401|403|unauthorized|invalid[_ ]api[_ ]key|invalid_requ
  * a local health check that stays green throughout an outage, because from its point
  * of view nothing local has failed.
  */
-const UNREACHABLE =
-  /poll (?:failed|timed out)|no such host|dial tcp|i\/o timeout|connection (was )?(aborted|refused|reset)|network is (unreachable|down)|no route to host|tls handshake timeout|temporary failure in name resolution|forcibly closed/i;
+const CONTROL_PLANE_POLL = /\bpoll (?:failed|timed out(?:;\s*backing off)?)\b/i;
+const UNREACHABLE_NETWORK =
+  /no such host|dial tcp|i\/o timeout|timed out|context deadline exceeded|connection (was )?(aborted|refused|reset)|network is (unreachable|down)|no route to host|tls handshake timeout|temporary failure in name resolution|forcibly closed/i;
 
 /** Turns a Go network error into something worth showing a person. */
 export function describeNetworkError(raw: string): string {
   if (/no such host|name resolution/i.test(raw)) return 'no internet connection';
   if (/connection (was )?(aborted|reset)|forcibly closed/i.test(raw)) return 'the connection dropped';
   if (/refused/i.test(raw)) return 'the connection was refused';
-  if (/timeout/i.test(raw)) return 'the connection timed out';
+  if (/timeout|timed out|context deadline exceeded/i.test(raw)) return 'the connection timed out';
   if (/network is (unreachable|down)|no route to host/i.test(raw)) return 'the network is unreachable';
   return 'a network error';
 }
 
 /** True when this machine can still resolve OpenAI's control plane. */
 export function isUnreachableError(raw: string): boolean {
-  return UNREACHABLE.test(raw);
+  const text = String(raw || '');
+  // A bare Go timeout can come from the local MCP startup probe too. Only the tunnel
+  // client's control-plane poll context is allowed to classify OpenAI as unreachable.
+  return CONTROL_PLANE_POLL.test(text) && UNREACHABLE_NETWORK.test(text);
 }
 
 export async function startTunnel(opts: TunnelStartOptions): Promise<TunnelHandle> {
@@ -607,6 +611,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     }
   };
 }
+
 
 async function readHealthUrl(file: string): Promise<string | null> {
   try {

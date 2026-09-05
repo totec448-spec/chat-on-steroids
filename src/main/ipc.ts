@@ -51,6 +51,7 @@ import {
 } from './session/store.js';
 import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
+import { abortContinuationNow, continuationForSession } from './session/continuation.js';
 import {
   clearAgent,
   onSwarmChange,
@@ -527,6 +528,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return buildState();
   });
 
+  // Re-reads the live TCC verdicts without prompting for anything. The setup step polls this
+  // while a permission is still missing, so a grant made in System Settings turns the row
+  // green on the way back instead of on the next restart — for the permissions macOS lets a
+  // running process observe. Screen Recording is not one of them, which is why the step keeps
+  // saying so until everything is granted.
+  handle('desktop:refreshAccess', async () => {
+    await refreshMacOSDesktopAccess();
+    return buildState();
+  });
+
   handle('log:get', async () => getLog());
   handle('log:text', async () => formatLogForClipboard());
   handle('log:json', async () => formatLogAsJson());
@@ -670,6 +681,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // ever release it.
     const summary = await getSession(id);
     if (summary?.conversationId) setChatBlocked(summary.conversationId, false);
+    // Give up any Compact & Resume this row still owns, for the same reason the block is
+    // released: the thing that could have settled it is about to stop existing. An automatic
+    // continuation has no clock until something asks for it, so one left behind here never
+    // expires, is never swept, and restore deliberately exempts it from age-pruning — it
+    // outlives the app. pendingAutomaticContinuations() would keep naming its conversation, and
+    // the silence sweep skips a conversation that is compacting, so the still-open ChatGPT chat
+    // would lose browser recovery for good. Durably, and before the folder goes, so a crash
+    // between the two cannot leave the record pointing at a session that is already gone.
+    const openContinuation = continuationForSession(id);
+    if (openContinuation) {
+      await abortContinuationNow(openContinuation.token, 'the recorded session it belonged to was deleted in the app');
+    }
     await deleteSession(id);
     logInfo(
       detached.length > 0

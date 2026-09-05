@@ -24,6 +24,8 @@
 (() => {
   'use strict';
 
+  const webext = globalThis.browser ?? globalThis.chrome;
+
   // Static content scripts are not re-run in an already-open tab when an unpacked
   // extension is reloaded/updated. background.js deliberately re-injects this file into
   // those tabs from runtime.onInstalled. The normal static injection can race that recovery
@@ -33,7 +35,7 @@
   // boolean with the note that "a real extension reload invalidates the old isolated world,
   // so its marker disappears with it". It does not. Chrome keys the isolated world by
   // extension id and leaves that JS context standing when the extension reloads; what it
-  // invalidates is `chrome.runtime`. The orphan therefore keeps its globals — including
+  // invalidates is `webext.runtime`. The orphan therefore keeps its globals — including
   // this marker — and the recovery injection from runtime.onInstalled returned at this very
   // line. The document was then left with a recorder that can never send again, which is
   // precisely the state that produces a healthy MCP tunnel, a visibly alive MAIN-world
@@ -62,7 +64,7 @@
       try {
         incumbent.stop();
       } catch {
-        // Best effort. The orphan's loops are inert once its `chrome.runtime` is gone.
+        // Best effort. The orphan's loops are inert once its `webext.runtime` is gone.
       }
     }
     globalThis.__CLF_CONTENT_RECORDER__ = recorderHandle;
@@ -98,7 +100,28 @@
   const ACTIVITY_MS = 2000;
   const IDLE_ACTIVITY_MS = 10_000;
   const HIDDEN_ACTIVITY_MS = 30_000;
-  /** Keep previously proven activity ownership through brief Fiber/feed disagreement. */
+  /** Do not flicker a wait panel for ordinary sub-second/short model pauses. */
+  const WAIT_STATUS_MS = 2500;
+  /**
+   * How long a pending-tool count is worth without fresh confirmation from the app.
+   *
+   * A chat with calls in the air polls every ACTIVITY_MS, so this is thirty consecutive failures:
+   * comfortably past a dropped poll or a worker restart, and nowhere near the ten minutes an app
+   * restart left "Waiting for 2 tool calls" on screen — across a turn that had since completed —
+   * because the process holding those calls had exited and nothing local ever expired the claim.
+   */
+  const PENDING_TOOLS_TRUST_MS = 60_000;
+  /** A completed hidden turn gets a short live-cadence window to converge app-owned prose. */
+  const TERMINAL_ACTIVITY_CONVERGENCE_MS = 10_000;
+  /** Hidden is an idle throttle, not permission to starve live/finalizing work. */
+  function activityPollDelay(input) {
+    if (input.drafting || input.generating || input.finalizing) return LIVE_ACTIVITY_MS;
+    if (input.active) return ACTIVITY_MS;
+    if (input.hidden) return HIDDEN_ACTIVITY_MS;
+    return IDLE_ACTIVITY_MS;
+  }
+  /** Keep previously proven activity ownership, and a previously proven full replacement,
+   * through brief Fiber/feed disagreement. */
   const REPLACEMENT_GRACE_MS = 8000;
   /**
    * User-driven scrolling and ChatGPT's historical virtualization happen in the same burst.
@@ -114,6 +137,7 @@
   const RENDER_STREAM_KEY = 'renderStreamEnabled';
   /** Timestamps are useful for debugging, but too noisy for the normal transcript. */
   const SHOW_TIMES_KEY = 'showStreamTimes';
+  const REPLACE_WORKER_DRAFTS_KEY = 'replaceWorkerDrafts';
   /**
    * Production now starts with transcript overwrite enabled. Tests deliberately start off
    * and opt in case-by-case so renderer regressions do not contaminate unrelated capture
@@ -150,13 +174,24 @@
     return Date.now() - lastPresentationScrollInputAt < PRESENTATION_SCROLL_IDLE_MS;
   }
 
+  async function replaceWorkerDraftsEnabled() {
+    if (!webext || !webext.storage || !webext.storage.local) return false;
+    try {
+      const stored = await webext.storage.local.get([REPLACE_WORKER_DRAFTS_KEY]);
+      return stored[REPLACE_WORKER_DRAFTS_KEY] === true;
+    } catch {
+      // Storage failure is fail-closed: preserve the draft and let the bootstrap fail visibly.
+      return false;
+    }
+  }
+
   async function loadRenderPreference() {
-    if (TEST_MODE || !globalThis.chrome || !chrome.storage || !chrome.storage.local) {
+    if (TEST_MODE || !webext || !webext.storage || !webext.storage.local) {
       renderPreferenceReady = true;
       return;
     }
     try {
-      const stored = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
+      const stored = await webext.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
       if (typeof stored[RENDER_STREAM_KEY] === 'boolean') RENDER_STREAM = stored[RENDER_STREAM_KEY];
       SHOW_TIMES = stored[SHOW_TIMES_KEY] === true;
     } catch {
@@ -406,6 +441,7 @@
    * baselineSections below, so a genuinely new section/action mounted on the same tick Stop first
    * appears is not accidentally classified as history.
    */
+  let completionActionBaselineSections = new WeakSet();
   /**
    * The identity every event of the turn in flight carries.
    *
@@ -514,6 +550,7 @@
   /** Assistant sections present at the end of the last observation. See priorSections. */
   let baselineSections = [];
   /** Sections from the previous observation which already exposed a completed-message action. */
+  let baselineCompletionSections = [];
   /** What the newest of those said then, so a reused section can prove it has moved. */
   let baselineMarks = [];
   /**
@@ -650,6 +687,12 @@
   /** Exact request id -> one durable local turn, null when the retained stream conflicts. */
   const streamRequestTurnOwners = new Map();
   let pulling = false;
+  /** Hidden turn-end refresh that waits behind any activity request already in flight. */
+  let terminalActivityRefreshReady = false;
+  /** End of the bounded live-cadence convergence window for a hidden completed turn. */
+  let terminalActivityConvergeUntil = 0;
+  /** Exact final ChatGPT assistant revision the app-owned stream must converge to. */
+  let terminalActivityExpected = null;
 
   /**
    * `'resume' | 'worker' | null` — whether this chat was opened by the app, and how.
@@ -660,8 +703,22 @@
 
   /** The live state of this chat's Compact & resume job, straight from the app. */
   let job = null;
+  /** Caller-scoped multi-agent state; the bridge only sends this to the owning prime chat. */
+  let swarm = null;
   /** Local tool calls the app still has running. Only ever a hint from /activity. */
   let pendingTools = 0;
+  /**
+   * When the app last confirmed that count. Zero means never, this chat.
+   *
+   * The count is a claim about another process's live memory, and `/activity` is the only thing
+   * that can make it. A failed pull leaves it untouched — correctly, because one dropped poll is
+   * not evidence the work stopped — but nothing ever expired it, so an app that stopped answering
+   * froze the last number it had said and the page went on asserting it. See livePendingTools().
+   */
+  let pendingToolsAt = 0;
+  /** Returned async exec sessions are not in-flight tools; they have their own lifecycle. */
+  let backgroundExec = { running: 0, exitedUnread: 0, lastTransitionAt: null };
+  let lastBackgroundExecTransitionAt = 0;
   let pressedAt = 0;
   let localError = '';
   let retirementHandledFor = null;
@@ -745,6 +802,7 @@
    * reading rather than a remembered edge, so
    * it goes false again on its own the moment the answer lands.
    */
+  let autoCompactReady = false;
 
   /**
    * The goal loop, as this page sees it.
@@ -977,7 +1035,7 @@
   async function sendToWorker(message) {
     if (!alive) return null;
     try {
-      return await chrome.runtime.sendMessage(message);
+      return await webext.runtime.sendMessage(message);
     } catch (err) {
       const text = String(err && err.message ? err.message : err);
       if (text.includes('Extension context invalidated')) alive = false;
@@ -1168,7 +1226,7 @@
         conversationId: conversationId || undefined
       });
       // `ok` means the service worker handled the message, not necessarily that its journal
-      // reached chrome.storage.session. Release page ownership only when the worker says the
+      // reached webext.storage.session. Release page ownership only when the worker says the
       // batch is durable, or pending=0 proves the local app already accepted it all. Keeping
       // an ambiguous batch can replay it, which downstream is designed to tolerate; dropping
       // it here cannot be repaired after a service-worker restart.
@@ -1427,6 +1485,23 @@
     return false;
   }
 
+  /**
+   * Whether the DOM transcript writer will actually journal this rendered row.
+   *
+   * Both that writer and Fiber's deferral gate ask this exact question, and they have to ask it
+   * the same way: Fiber may only stand down for a row this writer genuinely owns. The
+   * retirement and staleness clauses are the ones that never clear — a message id retired on
+   * the way out of a chat stays retired for the life of the tab — so a disagreement there costs
+   * the message permanently rather than for one observation tick.
+   */
+  function domWillJournal(message) {
+    if (!message || !message.id || !message.text) return false;
+    // Left over from a chat this tab has already navigated away from. Not "probably old" — the
+    // section it is in was one this script watched under the previous conversation, so filing
+    // it here would be filing chat A's transcript into chat B.
+    return !retiredMessages.has(message.id) && !isStale(message.node);
+  }
+
   function resetConversation() {
     seenMessages.clear();
     reportedConversationTitle = '';
@@ -1448,7 +1523,15 @@
     streamRequestTurnOwners.clear();
     since = 0;
     job = null;
+    swarm = null;
+    terminalActivityRefreshReady = false;
+    terminalActivityConvergeUntil = 0;
+    terminalActivityExpected = null;
     pendingTools = 0;
+    pendingToolsAt = 0;
+    backgroundExec = { running: 0, exitedUnread: 0, lastTransitionAt: null };
+    lastBackgroundExecTransitionAt = 0;
+    autoCompactReady = false;
     // An SPA move into another identified chat leaves this document facing a full transcript
     // it has never seen, exactly as a reload does. Until the app has said which of those user
     // messages it already holds, none of them can be read as a send — see resumeIdentityPending.
@@ -1491,12 +1574,14 @@
     quietSince = 0;
     quietTurn = null;
     quietOutcome = null;
+    completionActionBaselineSections = new WeakSet();
     turnId = null;
     genNode = null;
     priorSections = new WeakSet();
     priorMarks = [];
     baselineSections = [];
     baselineMarks = [];
+    baselineCompletionSections = [];
     userStopped = false;
     stallReported = false;
     fiberTerminalMessageId = null;
@@ -1640,6 +1725,76 @@
     return '';
   }
 
+  /**
+   * A quiet completed turn whose Fiber object lost end_turn can still have one exact terminal
+   * public message, corroborated by the completed-message action row.
+   *
+   * Scope both Fiber and the final-action row to the generation-owned DOM node whenever one is
+   * known. ChatGPT reuses data-turn-id across later requests and CLF_DOM intentionally groups
+   * those rendered sections for presentation; asking that merged logical turn for "the" Fiber
+   * descriptor or first Copy button makes an old response mask the new one forever.
+   */
+  function fiberQuietTerminal(turn) {
+    if (!turn || !CLF_DOM.completionAction) return null;
+    const nodes = turn.nodes || (turn.node ? [turn.node] : []);
+    const ownedNode = genNode && nodes.includes(genNode) ? genNode : null;
+    const fiber = ownedNode ? fiberTurnForNode(ownedNode) : fiberTurnFor(turn);
+    if (!fiber) return null;
+    if ((fiber.calls || []).some((call) => !call || call.answered !== true)) return null;
+
+    // A single ChatGPT response can grow across several sibling <section> elements. genNode is
+    // intentionally pinned to the first section this local generation touched, and quietTurn is
+    // intentionally a snapshot from the first Stop-gone observation. Neither may therefore be
+    // used as a frozen list of where the response can later finish: the live 2026-08-25
+    // foreground failure put its final prose + Copy action on S2 while both still pointed at S1.
+    //
+    // Refresh the *membership*, not the identity. Every section fiber.js says belongs to this
+    // exact descriptor carries the current scanToken:index stamp, so object identity here is a
+    // stronger join than ChatGPT's reused data-turn-id. Never widen to all nodes of the logical
+    // DOM turn: turns() deliberately groups equal page ids globally for recorder compatibility,
+    // and an old response with a recycled id can still have its stale Copy action mounted.
+    const exactNodes = [];
+    for (const current of CLF_DOM.turns()) {
+      if (current?.role !== 'assistant') continue;
+      for (const node of current.nodes || (current.node ? [current.node] : [])) {
+        if (fiberTurnForNode(node) === fiber) exactNodes.push(node);
+      }
+    }
+    if (exactNodes.length === 0) return null;
+    const messages = (fiber.messages || []).filter((message) => message && message.role !== 'user' && message.rawText);
+    const terminal = messages.length > 0 ? messages[messages.length - 1] : null;
+    const terminalId = terminal?.rawMessageId || terminal?.messageId || null;
+    if (!terminalId) return null;
+
+    // Descriptor equality alone is insufficient. One long response can have an earlier sibling
+    // whose completed-message action is already mounted and a newer sibling whose prose is still
+    // live; using "any Copy in exactNodes" would let the old action certify the new prose during
+    // a transient Stop dropout. Require rendered ownership of the *chosen terminal Fiber
+    // message*, then require the action on that exact sibling only.
+    let terminalNode = null;
+    if (
+      Number.isInteger(terminal.sectionIndex) &&
+      terminal.sectionIndex >= 0 &&
+      terminal.sectionIndex < exactNodes.length
+    ) {
+      terminalNode = exactNodes[terminal.sectionIndex] || null;
+    } else if (CLF_DOM.messagesIn) {
+      // Backward-compatible/fail-closed fallback for a helper reply without sectionIndex (and
+      // for explicit data-message-id renderers): locate the raw model id in one exact sibling.
+      const owners = [];
+      for (const node of exactNodes) {
+        const rendered = CLF_DOM.messagesIn({ role: 'assistant', id: turn.id || null, node, nodes: [node] });
+        if (rendered.some((message) => message && message.role === 'assistant' && message.id === terminalId)) owners.push(node);
+      }
+      if (owners.length === 1) terminalNode = owners[0];
+    }
+    if (!terminalNode) return null;
+    if (completionActionBaselineSections.has(terminalNode)) return null;
+    const action = CLF_DOM.completionAction({ nodes: [terminalNode] });
+    if (!action) return null;
+    return terminalId;
+  }
+
   /** Local recorder generation proven to own this exact rendered error occurrence, if any. */
   function localErrorGeneration(error) {
     const section = sectionOf(error.node);
@@ -1695,6 +1850,16 @@
     // finishing at all, and its visible prose is whatever was committed before the reload.
     // See unwitnessedGeneration.
     if (!fiberPresent && !unwitnessedGeneration && answerText(turn).length > 0) return { outcome: 'completed' };
+    // Fiber normally supplies the exact `end_turn:true` message and refreshFiber() closes from
+    // that immediately. The live 2026-08-25 failure proved that a visibly final response can
+    // occasionally lose that bit while the page still mounts its completed-message action row.
+    // Use that only as *corroboration*, never as a replacement for Fiber: exact turn ownership,
+    // public prose, no unanswered connector call, a fresh completed-message action, and the
+    // existing Stop-gone settle window must all agree. This keeps the old multi-second tool-phase
+    // Stop dropout open, including its transient data-interrupted marker.
+    if (fiberPresent && answerText(turn).length > 0 && fiberQuietTerminal(turn)) {
+      return { outcome: 'completed' };
+    }
     if (turnStalled()) {
       return { outcome: 'stalled', detail: 'no visible output and no progress for ten minutes' };
     }
@@ -1829,11 +1994,10 @@
       return false;
     };
     for (const message of rendered) {
-      if (!message.id || !message.text) continue;
-      // Left over from a chat this tab has already navigated away from. Not "probably
-      // old" — the section it is in was one this script watched under the previous
-      // conversation, so filing it here would be filing chat A's transcript into chat B.
-      if (retiredMessages.has(message.id) || isStale(message.node)) continue;
+      // The single condition under which this loop journals a row. Fiber's deferral gate reads
+      // the same predicate, so it stands down only for a row this writer really does take —
+      // see the comment on renderedUserMessageIds for what happened when the two disagreed.
+      if (!domWillJournal(message)) continue;
       if (message.role === 'user') {
         const key = occurrenceKey(message.id, message.text);
         // Dedupe answers "have we journalled this row?"; authoredNow answers "did this row
@@ -1892,10 +2056,17 @@
     // other named turn by accident. Modern generations always mint/adopt an id; this is the
     // fail-closed guard for stale/legacy/reinjected state.
     const endedTurnId = turnId;
+    // A quiet completed turn whose Fiber object lost end_turn can still have one exact terminal
+    // public message, corroborated by the completed-message action row. Capture that identity
+    // before `generating`/`genNode` are torn down so the post-turn Fiber settle scan may promote
+    // only that message to final. Unknown/interrupted/failed/stopped turns capture nothing.
+    const corroboratedTerminalMessageId =
+      result.outcome === 'completed' && ended ? fiberQuietTerminal(ended) : null;
     generating = false;
     quietSince = 0;
     quietTurn = null;
     quietOutcome = null;
+    completionActionBaselineSections = new WeakSet();
     if (ended && endedTurnId) {
       for (const node of ended.nodes || [ended.node]) {
         if (node) settledGenerations.set(node, { turnId: endedTurnId, mark: sectionMark(node) });
@@ -1917,7 +2088,8 @@
       fiberSettled = {
         pageTurnId: ended?.id || null,
         localTurnId: endedTurnId,
-        pageTurn: ended || null
+        pageTurn: ended || null,
+        terminalMessageId: corroboratedTerminalMessageId || null
       };
       fiberSettleUntil = Date.now() + FIBER_SETTLE_MS;
     }
@@ -1925,10 +2097,35 @@
       void refreshFiber({
         pageTurnId: ended?.id || null,
         localTurnId: endedTurnId,
-        pageTurn: ended || null
+        pageTurn: ended || null,
+        terminalMessageId: corroboratedTerminalMessageId || null
       });
     }
     if (endedTurnId) emit({ kind: 'turn_end', turnId: endedTurnId, ...result });
+    if (endedTurnId && result.outcome === 'completed' && typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      // There are two independent durability boundaries here. First, flushWork can already own
+      // an older queue snapshot while this terminal Fiber scan appends the final revision. Second,
+      // the service worker may answer `durable` once it has journal custody while another drain is
+      // still delivering to the app. Keep the exact final {messageId,text} independent of queue
+      // removal and do not declare convergence until /activity returns that same revision as final.
+      terminalActivityExpected = finalAssistantSnapshot(ended, corroboratedTerminalMessageId);
+      if (terminalActivityExpected) {
+        terminalActivityConvergeUntil = Date.now() + TERMINAL_ACTIVITY_CONVERGENCE_MS;
+        void drainTerminalPageQueue()
+          .then(() => {
+            terminalActivityRefreshReady = true;
+            runTerminalActivityRefresh();
+          })
+          .catch(() => undefined);
+      }
+    }
+    // The compaction turn settling is the moment the brief exists. Read here, from this
+    // generation's own section, while `ended` still names it — a tick later the page is just
+    // a transcript again and this answer is indistinguishable from any other.
+    if (endedTurnId && compactCapture && compactCapture.generation === endedTurnId && !compactCapture.settling) {
+      compactCapture.settling = true;
+      void settleBrief(ended, result.outcome);
+    }
     // Same moment, the other reader: the goal loop wants this turn's answer while `ended`
     // still names its section. It decides for itself whether the turn is one to answer —
     // and waits for it to hold still first. See noteGoalTurn.
@@ -1954,7 +2151,7 @@
     // transcript state during React churn while the same conversation and tab are still
     // alive. Treating that one-frame null as "closed" used to release the background tab
     // mapping and terminalise a bound worker even though its model kept running. Real tab
-    // lifetime is owned by chrome.tabs.onRemoved in background.js; an SPA move is proven
+    // lifetime is owned by webext.tabs.onRemoved in background.js; an SPA move is proven
     // here only when another concrete conversation id replaces the old one.
     if (id && id !== conversationId) {
       // A goal written into a chat that had no id yet, whose opening message is the reason
@@ -2166,6 +2363,11 @@
       // about to write into, so the generation disowned its own section.
       priorSections = new WeakSet(baselineSections);
       priorMarks = baselineMarks;
+      // Same previous-observation boundary as priorSections: by the time Stop first appears the
+      // new response may already have mounted its section and its final action. Snapshotting the
+      // current DOM here would call that genuine new evidence stale. Conversely, every section
+      // that *already* had Copy last observation stays stale even if React remounts the button.
+      completionActionBaselineSections = new WeakSet(baselineCompletionSections);
       turnStartedAt = Date.now();
       lastChangeAt = Date.now();
       // "Wait for this turn to finish" was about a turn that has now been replaced. Keeping
@@ -2262,7 +2464,17 @@
       // identity. DOM rows alone are presentation and never mint durable page_tool ids.
       if (!stallReported && Date.now() - lastChangeAt > STALL_MS) {
         stallReported = true;
-        emit({ kind: 'chat_error', text: 'No visible progress for ten minutes. The turn is still marked as generating.', turnId });
+        let text = 'No visible progress for ten minutes. The turn is still marked as generating.';
+        if (backgroundExec.exitedUnread > 0) {
+          text =
+            `${backgroundExec.exitedUnread} background exec result` +
+            `${backgroundExec.exitedUnread === 1 ? ' is' : 's are'} waiting to be consumed while the turn remains generating.`;
+        } else if (backgroundExec.running > 0) {
+          text =
+            `${backgroundExec.running} background exec session` +
+            `${backgroundExec.running === 1 ? ' is' : 's are'} still running while the turn has made no visible progress for ten minutes.`;
+        }
+        emit({ kind: 'chat_error', text, turnId });
       }
     }
 
@@ -2311,9 +2523,15 @@
       // never a terminal boundary on its own. User stop is already explicit; a new user
       // message is handled above, and Fiber end_turn closes independently in refreshFiber().
       const markerOnlyInterrupted = result.outcome === 'interrupted' && !userStopped;
+      // `interrupted` itself is only an outcome marker, but a *separate* exact completed-message
+      // proof can supply the missing boundary: current generation-owned Fiber descriptor, no
+      // unanswered calls, and this response's fresh Copy-message action. Keep the latched
+      // interrupted outcome for the record, while no longer forcing the user to type another
+      // message merely to prove the already-finished turn ended.
+      const corroboratedTerminalBoundary = markerOnlyInterrupted && Boolean(fiberQuietTerminal(quietTurn || turn));
       if (
         userStopped ||
-        (result.outcome !== 'unknown' && !markerOnlyInterrupted && quietFor >= TURN_SETTLE_MS)
+        ((result.outcome !== 'unknown' && (!markerOnlyInterrupted || corroboratedTerminalBoundary)) && quietFor >= TURN_SETTLE_MS)
       ) {
         // The turn the end is about is the one that was on screen when it went quiet.
         // Re-reading it here would pick up whatever ChatGPT has rendered since, which during
@@ -2366,6 +2584,9 @@
     // generation ever binds to a section further back than that.
     baselineSections = assistantSections(observedTurns);
     baselineMarks = baselineSections.slice(-3).map((node) => ({ node, mark: sectionMark(node) }));
+    baselineCompletionSections = CLF_DOM.completionAction
+      ? baselineSections.filter((node) => Boolean(CLF_DOM.completionAction({ nodes: [node] })))
+      : [];
     maybeRecoverResumeGoalTurn();
     // A revival can be waiting outside the command lease while this exact turn settles. Its
     // readiness depends partly on recorder state (`generating`, pending tools/native work), not
@@ -3258,9 +3479,27 @@
     // gated; the later DOM pass then quite correctly treated it as already recorded and
     // never emitted turn_start. Keep Fiber only for the narrow thing it adds: page-model
     // messages whose stable id is not rendered in the DOM yet.
+    //
+    // "Rendered" has to mean *the DOM recorder will actually journal this*, not merely "a node
+    // with this id exists". Those came apart: the set was built from role+id, while the loop
+    // above only journals a row that also has text and is neither retired nor stale. A row
+    // matching the weaker test but not the stronger one fell between the two writers — the DOM
+    // loop skipped it before it was ever classified as a user message, and Fiber saw its id
+    // here and deferred to a writer that had already declined. Nothing emitted it. A live
+    // macOS session lost two real user messages that way on 2026-09-04, keeping their
+    // assistant answers and tool calls, which is the worst shape for a handoff brief that
+    // treats user messages as its highest authority.
+    //
+    // Textlessness alone is usually survivable: `data-message-id` is published while
+    // `.whitespace-pre-wrap` is still empty on an ordinary send, and the next tick reads the
+    // prose. Retirement and staleness are not, because neither ever clears — so a row that is
+    // still textless when the tab leaves that chat is skipped by this writer for the rest of
+    // the tab's life, and deferring to it lost the message permanently.
+    //
+    // One predicate, written once, used by both readers.
     const renderedUserMessageIds = new Set(
       CLF_DOM.messages()
-        .filter((message) => message.role === 'user' && message.id)
+        .filter((message) => message.role === 'user' && domWillJournal(message))
         .map((message) => message.id)
     );
     for (const turn of answer.turns) {
@@ -3516,7 +3755,11 @@
         // upgrading every message in a completed turn to `final:true` made interim prose look
         // like a sequence of finished answers and could let recovery treat the wrong one as
         // completion evidence.
-        const terminalMessageId = turn.endMessageId;
+        const corroboratedTerminal =
+          !turn.endMessageId && turn === ownedPageTurn && settled?.terminalMessageId
+            ? settled.terminalMessageId
+            : null;
+        const terminalMessageId = turn.endMessageId || corroboratedTerminal;
         const exactTerminal = Boolean(
           terminalMessageId &&
             (message.rawMessageId === terminalMessageId || message.messageId === terminalMessageId)
@@ -4798,9 +5041,40 @@
     return false;
   }
 
-  function completeReplacementForTurn(turn, entries) {
+  /**
+   * Whether the app has the right stable message id but an older text revision than Fiber.
+   *
+   * One ChatGPT message id grows in place while streaming. Identity-complete therefore is not
+   * revision-complete. Positive text disagreement means our replacement is stale, so native
+   * ChatGPT prose must be visible immediately rather than hidden behind replacement grace.
+   */
+  function hasStaleAssistantRevision(turn, entries) {
     const descriptor = fiberTurnFor(turn);
     if (!descriptor) return false;
+    for (const message of descriptor.messages || []) {
+      if (!message || message.role === 'user' || !message.messageId) continue;
+      const pageText = typeof message.rawText === 'string' ? message.rawText : '';
+      if (!pageText) continue;
+      const app = (entries || []).find(
+        (entry) => entry && entry.kind === 'assistant_message' && entry.messageId === message.messageId
+      );
+      if (!app || typeof app.text !== 'string') continue;
+      // Only a *positive* disagreement counts: the page proves more prose for this same id
+      // than the app currently owns, so the replacement is behind the answer it replaces.
+      // The opposite direction is the sticky-overwrite case — one transient Fiber scan that
+      // still describes the previous revision while the app already holds the final one —
+      // and dropping a proven replacement for that would put ChatGPT's own copy back on the
+      // page for a frame and remount the stream root below the reader's position.
+      const pageRevision = terminalRevisionText(pageText);
+      const appRevision = terminalRevisionText(app.text);
+      if (pageRevision !== appRevision && pageRevision.length > appRevision.length) return true;
+    }
+    return false;
+  }
+
+  function completeReplacementForTurn(turn, entries) {
+    const descriptor = fiberTurnFor(turn);
+    if (!descriptor || hasStaleAssistantRevision(turn, entries)) return false;
     const expected = [];
     let assistantModelMessages = 0;
     for (const message of descriptor.messages || []) {
@@ -5315,8 +5589,10 @@
         // produced the visible full-overwrite -> native -> full-overwrite snap on reload and
         // during tool phases. Persistent incompleteness still falls back after the grace.
         const currentCallMissing = hasUnrepresentedFiberCall(turn, rendered);
+        const staleAssistantRevision = hasStaleAssistantRevision(turn, rendered);
         if (
           !currentCallMissing &&
+          !staleAssistantRevision &&
           existing &&
           Number.isFinite(lastComplete) &&
           Date.now() - lastComplete < REPLACEMENT_GRACE_MS
@@ -5335,7 +5611,15 @@
         continue;
       }
 
-      const activityRows = rendered.filter((entry) => entry.kind !== 'assistant_message');
+      // Excluding the native answer keeps this chat's own turn on ChatGPT's own renderer — see
+      // above. That only applies to this document's own turn: unattributed activity (no agent,
+      // the plain per-page feed) and the prime's own activity are both this chat speaking for
+      // itself, so both trust native. A named, non-prime agent is a worker's proven revision,
+      // synced here for swarm coordination with no other document that would ever show it —
+      // exactly what a hidden worker still needs Overwrite to carry while it stays backgrounded.
+      const activityRows = rendered.filter(
+        (entry) => entry.kind !== 'assistant_message' || (entry.agent && entry.agent !== 'prime')
+      );
       const root = existing || document.createElement('div');
       root.className = 'clf-stream';
       if (streamKey) {
@@ -5453,6 +5737,147 @@
     }
   }
 
+  function terminalRevisionText(value) {
+    return typeof value === 'string' ? value.replace(/\r\n?/g, '\n').trim() : '';
+  }
+
+  function finalAssistantSnapshot(turn, corroborated = null) {
+    const descriptor = turn ? fiberTurnFor(turn) : null;
+    const fiberMessages = descriptor && Array.isArray(descriptor.messages) ? descriptor.messages : [];
+    for (let index = fiberMessages.length - 1; index >= 0; index--) {
+      const message = fiberMessages[index];
+      if (!message || message.role === 'user' || !message.messageId || !message.rawText) continue;
+      if (corroborated && message.messageId !== corroborated && message.rawMessageId !== corroborated) continue;
+      return { messageId: String(message.messageId), text: terminalRevisionText(message.rawText) };
+    }
+
+    const messages = turn ? CLF_DOM.messagesIn(turn) : [];
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (!message || message.role !== 'assistant' || !message.id || !message.text) continue;
+      if (corroborated && message.id !== corroborated) continue;
+      return { messageId: String(message.id), text: terminalRevisionText(message.text) };
+    }
+    return null;
+  }
+
+  function clearTerminalActivityConvergence() {
+    terminalActivityConvergeUntil = 0;
+    terminalActivityExpected = null;
+  }
+
+  function terminalActivityCaughtUp() {
+    if (!terminalActivityExpected || !terminalActivityExpected.messageId) return false;
+    const seq = streamMessageSeq.get(terminalActivityExpected.messageId);
+    if (!Number.isFinite(Number(seq))) return false;
+    const entry = streamBySeq.get(seq);
+    return Boolean(
+      entry &&
+        entry.kind === 'assistant_message' &&
+        (entry.final === true || entry.state === 'final') &&
+        terminalRevisionText(entry.text) === terminalActivityExpected.text
+    );
+  }
+
+  function terminalActivityFinalizing() {
+    if (terminalActivityConvergeUntil <= 0) return false;
+    if (terminalActivityCaughtUp() || Date.now() >= terminalActivityConvergeUntil) {
+      clearTerminalActivityConvergence();
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Drain snapshots that arrived while an older flushWork was already in flight.
+   *
+   * flush() snapshots queue.slice(0, 200). A final assistant revision can replace that message
+   * in the live queue after the old batch has already crossed into runtime.sendMessage. Awaiting
+   * the old flush is therefore not enough: once it settles, take a fresh batch until the page has
+   * handed over everything it currently owns. Count-bounded because the page queue itself is.
+   */
+  async function drainTerminalPageQueue() {
+    for (let attempt = 0; attempt < 8 && queue.length > 0; attempt++) {
+      const handedOff = await flush();
+      if (!handedOff) return false;
+    }
+    return queue.length === 0;
+  }
+
+  function runTerminalActivityRefresh() {
+    if (!terminalActivityRefreshReady || pulling) return;
+    terminalActivityRefreshReady = false;
+    void pullActivity()
+      .then(() => {
+        if (!alive || !sameChat()) return;
+        paint();
+        renderStreams();
+        injectStage();
+      })
+      .catch(() => undefined);
+  }
+
+  /** Browser commands already carried, so a re-poll cannot run one twice. */
+  const carriedBrowserCommands = new Set();
+
+  /**
+   * Hands one browser action to the service worker and reports what came back.
+   *
+   * The worker owns the DevTools session because only it can; this page owns nothing here
+   * except the delivery. The result is posted back through the worker as well, since the
+   * pairing token lives there and never in a content script.
+   *
+   * Failure is still an answer. A worker that refuses, throws, or is not there at all has to
+   * settle the command, or the tool call waiting on it sits until it times out with nothing
+   * to explain why.
+   */
+  async function carryBrowserCommand(forConversation, command) {
+    const id = typeof command.id === 'string' ? command.id : '';
+    if (!id || carriedBrowserCommands.has(id)) return;
+    carriedBrowserCommands.add(id);
+    // Bounded: one id per command and commands are one-at-a-time, so this cannot grow, but a
+    // long-lived page should not accumulate them either.
+    if (carriedBrowserCommands.size > 64) {
+      for (const old of carriedBrowserCommands) {
+        carriedBrowserCommands.delete(old);
+        if (carriedBrowserCommands.size <= 32) break;
+      }
+    }
+
+    const action = command.action && typeof command.action === 'object' ? command.action : {};
+    const type = String(action.type || '');
+    let reply;
+    try {
+      if (type === 'observe') {
+        reply = await ask({ type: 'browser_observe', includeScreenshot: action.screenshot !== false });
+      } else if (type === 'attach') {
+        reply = await ask({ type: 'browser_attach', tabId: action.tabId });
+      } else if (type === 'detach') {
+        reply = await ask({ type: 'browser_detach' });
+      } else if (type === 'status') {
+        reply = await ask({ type: 'browser_status' });
+      } else {
+        reply = await ask({ type: 'browser_act', action });
+      }
+    } catch (error) {
+      reply = { ok: false, error: 'BROWSER_UNAVAILABLE', detail: String((error && error.message) || error) };
+    }
+    if (!reply || typeof reply !== 'object') {
+      reply = { ok: false, error: 'BROWSER_UNAVAILABLE', detail: 'the extension worker did not answer' };
+    }
+
+    const { ok, error, detail, ...rest } = reply;
+    await ask({
+      type: 'browser_result',
+      conversationId: forConversation,
+      id,
+      ok: ok === true,
+      data: ok === true ? (rest.result && typeof rest.result === 'object' ? rest.result : rest) : undefined,
+      error: typeof error === 'string' ? error : undefined,
+      detail: typeof detail === 'string' ? detail : undefined
+    }).catch(() => undefined);
+  }
+
   async function pullActivity() {
     if (!CLF_DOM.conversationId()) {
       // A New Chat has no feed: /activity is addressed by conversation, and this composer is
@@ -5469,7 +5894,14 @@
     const forEpoch = epoch;
     const current = () => alive && conversationId === forId && epoch === forEpoch;
     try {
-      const reply = await ask({ type: 'activity', conversationId, since });
+      const reply = await ask({
+        type: 'activity',
+        conversationId,
+        since,
+        ...(compactCapture && typeof compactCapture.token === 'string'
+          ? { compactToken: compactCapture.token }
+          : {})
+      });
       if (!reply || reply.ok !== true || !reply.data) {
         // Keep waiting only for failures that can genuinely mean "the local app/worker is
         // not reachable yet". A structured application refusal is an answer to the identity
@@ -5486,6 +5918,7 @@
       if (data.retiredWorker && typeof data.retiredWorker === 'object') {
         const worker = String(data.retiredWorker.id || 'worker');
         const reason = String(data.retiredWorker.reason || 'its sub-agent run ended');
+        autoCompactReady = false;
         localError = `${worker} was retired because ${reason}. This chat can no longer use local tools.`;
         if (retirementHandledFor !== forId) {
           retirementHandledFor = forId;
@@ -5526,12 +5959,13 @@
       // the turn still working.
       const isWork = (entry) =>
         entry &&
-        entry.turnId === turnId &&
         !browserRepairRow(entry) &&
-        (entry.kind === 'tool_call' ||
-          entry.kind === 'page_tool' ||
-          entry.kind === 'progress' ||
-          entry.kind === 'assistant_message');
+        (entry.kind === 'agent_message' ||
+          (entry.turnId === turnId &&
+            (entry.kind === 'tool_call' ||
+              entry.kind === 'page_tool' ||
+              entry.kind === 'progress' ||
+              entry.kind === 'assistant_message')));
       for (const entry of freshStream) {
         const seq = Number(entry && entry.seq);
         if (!Number.isFinite(seq)) continue;
@@ -5597,7 +6031,36 @@
       const nextSince = Number(data.nextSince);
       if (Number.isFinite(nextSince) && nextSince > since) since = nextSince;
       job = data.job || null;
+      swarm = data.swarm && typeof data.swarm === 'object' ? data.swarm : null;
       pendingTools = Number.isFinite(Number(data.pendingTools)) ? Number(data.pendingTools) : 0;
+      pendingToolsAt = Date.now();
+      const rawBackgroundExec =
+        data.backgroundExec && typeof data.backgroundExec === 'object' ? data.backgroundExec : {};
+      const nextBackgroundExec = {
+        running: Number.isFinite(Number(rawBackgroundExec.running))
+          ? Math.max(0, Number(rawBackgroundExec.running))
+          : 0,
+        exitedUnread: Number.isFinite(Number(rawBackgroundExec.exitedUnread))
+          ? Math.max(0, Number(rawBackgroundExec.exitedUnread))
+          : 0,
+        lastTransitionAt: Number.isFinite(Number(rawBackgroundExec.lastTransitionAt))
+          ? Number(rawBackgroundExec.lastTransitionAt)
+          : null
+      };
+      if (
+        generating &&
+        nextBackgroundExec.lastTransitionAt !== null &&
+        nextBackgroundExec.lastTransitionAt > lastBackgroundExecTransitionAt
+      ) {
+        lastChangeAt = Date.now();
+      }
+      if (nextBackgroundExec.lastTransitionAt !== null) {
+        lastBackgroundExecTransitionAt = Math.max(
+          lastBackgroundExecTransitionAt,
+          nextBackgroundExec.lastTransitionAt
+        );
+      }
+      backgroundExec = nextBackgroundExec;
       // The generation this chat has open in the app, if any. Only ever *read* by
       // resumeOpenTurn(), on the boot pull, and only to work out whether this document is
       // standing in the middle of a turn a previous one opened. See adoptTurnId.
@@ -5608,6 +6071,7 @@
       }
       tokens = Number.isFinite(Number(data.tokens)) ? Number(data.tokens) : 0;
       context = readContext(data.context);
+      autoCompactReady = data.autoCompactReady === true;
       // The goal loop's settings and, while one is running, the draft itself: its stage, the
       // text OpenRouter has streamed so far, and — once it is `ready` — the message to type.
       // Nothing is typed here; maybeSendGoalReply below owns that, after the pull has
@@ -5615,6 +6079,13 @@
       goalConfig = data.goal && typeof data.goal === 'object' ? data.goal : null;
       if (goalConfig) goalDraft = goalConfig.draft || null;
       bootstrap = data.bootstrap === 'resume' || data.bootstrap === 'worker' ? data.bootstrap : null;
+      // One browser action, if the app has one waiting for this conversation. This page is
+      // only the courier: it cannot hold a DevTools session and must never try. Deliberately
+      // not awaited — a browser action can take seconds, and blocking the activity pull on it
+      // would stall the recorder, the relabeller and the wait status for the whole time.
+      if (data.browserCommand && typeof data.browserCommand === 'object') {
+        void carryBrowserCommand(conversationId, data.browserCommand);
+      }
       // The app has this conversation as a resume destination: the continuation committed —
       // from this page's ACK, or from the marker another observation found. Either way the
       // marked message is history now and the gate that kept this document from journaling
@@ -5652,6 +6123,7 @@
       armNextActivityPull();
     } finally {
       pulling = false;
+      runTerminalActivityRefresh();
     }
     // Outside the guard, and last: startCompact runs for tens of seconds and polls this
     // same endpoint while it works, so firing it with `pulling` still set would deadlock
@@ -5659,6 +6131,7 @@
     if (current() && CLF_DOM.conversationId() === forId) await maybeResumePendingCompaction(forId, forEpoch);
     if (current() && CLF_DOM.conversationId() === forId) maybeRecoverResumeGoalTurn();
     if (current() && CLF_DOM.conversationId() === forId) maybeRecoverDurableGoalTurn();
+    if (current() && CLF_DOM.conversationId() === forId) await maybeAutoCompact(forId, forEpoch);
     // Same reason, same place: this types into the composer and can wait on the page, and it
     // needs the draft this pull just delivered.
     if (current() && CLF_DOM.conversationId() === forId) await maybeSendGoalReply();
@@ -6201,6 +6674,37 @@
    * write the brief, carry on in a fresh chat. Mid-tool-call counts as mid-turn, and is
    * handled by the same settle barrier a manual press goes through.
    */
+  async function maybeAutoCompact(expectedConversation = conversationId, expectedEpoch = epoch) {
+    const current = () =>
+      alive &&
+      conversationId === expectedConversation &&
+      epoch === expectedEpoch &&
+      CLF_DOM.conversationId() === expectedConversation;
+    if (!current()) return;
+    // Belt-and-suspenders with the bridge role gate. A worker must never start automatic
+    // compaction: its conversation is its durable agent identity and the 400k ceiling only
+    // changes whether the next stop can be revived. A chat the user blocked in the app is
+    // fenced the same way: its tools are refused, and a resume would carry it on without them.
+    if (goalConfig && (goalConfig.blocked === 'worker' || goalConfig.blocked === 'blocked')) return;
+    if (!conversationId || !context || !context.auto || !autoCompactReady) return;
+    // Anything already running owns this chat, including the exact handoff generation
+    // even if the app-side continuation briefly stops projecting a busy job, and a run
+    // started by hand.
+    if (compactCapture || nativeBusy || pressedAt > 0 || localError) return;
+    if (job && job.busy) return;
+    // Three views of liveness, and any of them is enough. `CLF_DOM.generating()` flickers
+    // false between phases of one answer, so demanding all three would miss long turns at
+    // exactly their busiest moments; the local generation flag and the app's durable
+    // activeTurnId cover that gap. An idle or stale chat has none of the three, which is
+    // what lets an old 500k conversation be opened and read without being compacted.
+    if (!generating && !appActiveTurnId && !CLF_DOM.generating()) return;
+
+    // The continuation transaction is already the durable ticket. A page/barrier error stays
+    // local to this document, blocking poll-driven retry churn; the app's 15-minute checkpoint
+    // reloads this exact chat and lets the replacement page collect the same transaction.
+    await startCompact(true);
+  }
+
   /** Local phases of a ChatGPT-native compaction, as the button says them. */
   const NATIVE_PHASE_LABELS = {
     requested: 'Starting…',
@@ -6572,7 +7076,7 @@
   async function saveObjective(text, mode) {
     if (objectiveBusy) return;
     const which = mode === 'loop' ? 'loop' : 'goal';
-    const goal = String(text || '').trim();
+    const goal = String(text || '').trim().slice(0, MAX_OBJECTIVE_CHARS);
     objectiveBusy = true;
     objectiveError = '';
     renderMenu();
@@ -6985,6 +7489,7 @@
     input.className = 'clf-menu-goal-input';
     input.dataset.clfGoalInput = '1';
     input.rows = 3;
+    input.maxLength = MAX_OBJECTIVE_CHARS;
     input.placeholder = 'What does this chat have to reach?';
     input.value = menuDraft;
     input.disabled = objectiveBusy;
@@ -7236,7 +7741,16 @@
   const COMPACT_STEPS = ['Preparing', 'Writing the handoff', 'Saving it', 'Opening the new chat'];
 
   function stageView(input) {
-    const { job, goal, phase = nativePhase } = input;
+    const {
+      job,
+      goal,
+      swarm: swarmState,
+      pendingTools: toolCount,
+      backgroundExec: execState,
+      generating: isGenerating,
+      quietMs,
+      phase = nativePhase
+    } = input;
     if (job && job.busy) {
       const stage =
         job.stage === 'opening'
@@ -7262,7 +7776,95 @@
               : 0;
       return { stage, detail: '', body: '', kind: 'compact', steps: COMPACT_STEPS, at, done: false };
     }
-    return goalStageView(goal);
+    const goalView = goalStageView(goal);
+    if (goalView) return goalView;
+
+    const quiet = Number.isFinite(Number(quietMs)) ? Math.max(0, Number(quietMs)) : 0;
+    if (quiet < WAIT_STATUS_MS) return null;
+
+    const tools = Number.isFinite(Number(toolCount)) ? Math.max(0, Number(toolCount)) : 0;
+    if (tools > 0) {
+      return {
+        stage: tools === 1 ? 'Waiting for a tool call' : `Waiting for ${tools} tool calls`,
+        detail: tools === 1 ? 'The current operation has not returned yet' : 'Current operations have not returned yet',
+        body: '',
+        kind: 'none',
+        steps: [],
+        at: 0,
+        done: false
+      };
+    }
+
+    if (swarmState && swarmState.running && Array.isArray(swarmState.agents)) {
+      const workers = swarmState.agents.filter((entry) => entry && entry.role === 'worker');
+      const liveStates = new Set(['invited', 'active', 'detached', 'waking']);
+      const activeWorkers = workers.filter((entry) => liveStates.has(entry.state));
+      if (activeWorkers.length > 0) {
+        const finished = workers.filter((entry) => entry.state === 'sleeping' || entry.state === 'finished').length;
+        const failed = workers.filter((entry) => entry.state === 'failed').length;
+        const name = (entry) => String(entry.label || entry.id || 'worker').replace(/\s+/g, ' ').trim().slice(0, 60);
+        const labels = activeWorkers.map(name).filter(Boolean);
+        const summary = [`${finished} finished`, `${activeWorkers.length} running`];
+        if (failed > 0) summary.splice(1, 0, `${failed} failed`);
+        return {
+          stage:
+            activeWorkers.length === 1
+              ? `Worker still running: ${labels[0] || 'worker'}`
+              : `${activeWorkers.length} workers still running`,
+          detail: summary.join(' · '),
+          body: activeWorkers.length > 1 && labels.length > 0 ? `Still working: ${labels.slice(0, 3).join(', ')}` : '',
+          kind: 'none',
+          steps: [],
+          at: 0,
+          done: false
+        };
+      }
+    }
+
+    const unreadProcesses = Number(execState && execState.exitedUnread);
+    if (Number.isFinite(unreadProcesses) && unreadProcesses > 0) {
+      return {
+        stage:
+          unreadProcesses === 1
+            ? '1 completed background result waiting'
+            : `${unreadProcesses} completed background results waiting`,
+        detail: 'Read the final output with write_stdin before starting more background work',
+        body: '',
+        kind: 'none',
+        steps: [],
+        at: 0,
+        done: false
+      };
+    }
+
+    const runningProcesses = Number(execState && execState.running);
+    if (Number.isFinite(runningProcesses) && runningProcesses > 0) {
+      return {
+        stage: runningProcesses === 1 ? 'Background process still running' : `${runningProcesses} background processes still running`,
+        detail: 'The process is still active even though its tool call already returned',
+        body: '',
+        kind: 'none',
+        steps: [],
+        at: 0,
+        done: false
+      };
+    }
+
+    // The page proves only that ChatGPT still owns an open turn and has made no visible
+    // progress through the quiet threshold. Say exactly that; never invent a server/queue.
+    if (isGenerating) {
+      return {
+        stage: 'ChatGPT is still working',
+        detail: 'Waiting for the current response to make visible progress',
+        body: '',
+        kind: 'none',
+        steps: [],
+        at: 0,
+        done: false
+      };
+    }
+
+    return null;
   }
 
   /**
@@ -7529,6 +8131,11 @@
     }
     const view = stageView({
       job,
+      swarm,
+      pendingTools: livePendingTools(),
+      backgroundExec,
+      generating,
+      quietMs: Math.max(0, Date.now() - lastChangeAt),
       goal: goalConfig
         ? { phase: goalPhase, error: goalError, retryMs: goalRetryWaitMs, model: goalConfig.model, draft: goalDraft, opening }
         : null
@@ -7640,6 +8247,7 @@
       if (policyData.goal && typeof policyData.goal === 'object') goalConfig = policyData.goal;
       if (policyData.context) context = readContext(policyData.context) || context;
       bootstrap = policyData.bootstrap === 'worker' ? 'worker' : bootstrap;
+      autoCompactReady = false;
       pressedAt = 0;
       nativeBusy = false;
       nativePhase = '';
@@ -7812,6 +8420,7 @@
       }
       unanswered = 0;
       pendingTools = count;
+      pendingToolsAt = Date.now();
       return count === 0;
     }, TOOL_SETTLE_MS);
     if (!current()) return 'This chat changed while compaction was waiting for local tools.';
@@ -7912,7 +8521,15 @@
         nativeBusy = false;
         nativePhase = 'waiting';
         pressedAt = 0;
-        localError = 'The send result was ambiguous. Nothing will be sent twice; cancel explicitly if ChatGPT never accepted it.';
+        // Tell the app, the way the destination half already tells it. send() does not merely
+        // time out: it watches the composer clearing, a new conversation id, generation
+        // starting, the Stop control appearing and a matching rendered user message, and this
+        // flow stopped and settled the turn before typing, so a landed click would have flipped
+        // one of them at once. Left unreported, this exact state sat armed for the six-hour TTL
+        // with no pickup able to re-ask — and kept the chat out of browser recovery the whole
+        // time. The app ends the transaction; nothing is re-sent, here or anywhere.
+        void ask({ type: 'compact', conversationId: forId, token, sourceLost: true }).catch(() => undefined);
+        localError = 'ChatGPT did not take the handoff instruction. Nothing was sent twice, and this attempt has been given up; compaction will be offered again.';
         renderControl();
         return;
       }
@@ -8151,6 +8768,449 @@
     return seen.join(',');
   }
 
+
+  /**
+   * The compaction turn this tab is watching, and the transaction it belongs to.
+   *
+   * `{ token, conversationId, generation }`, or null when nothing is being watched. This is
+   * the load-bearing part of Compact & Resume: the brief is whatever the model wrote as its
+   * answer, and this is what makes "its answer" a fact rather than a guess.
+   *
+   * The binding is to one *local* generation id — the ids this script mints when it sees a
+   * turn open, which are unique per page load and never reused. Not to "the newest assistant
+   * message", not to "the next thing that appears", not to the longest block on screen: a
+   * conversation that is being compacted is one the user has been talking to for hours, and
+   * every one of those rules can be satisfied by something the model wrote about something
+   * else. Only the generation that this tab started by submitting the handoff prompt may
+   * ever hand a brief to the app, and it may do so once.
+   *
+   * `generation` is null between submitting the prompt and seeing the turn open. That window
+   * is the only place the binding is made, it is bounded by COMPACT_ARM_MS, and the first
+   * generation to open in it is ours by construction: the turn was stopped and the machine
+   * settled before the prompt was submitted, so nothing else is starting one.
+   *
+   * `priorGeneration` is the generation this tab had open when it armed — normally none, and
+   * otherwise the turn that was just stopped to make room for the compaction. It exists for
+   * one case: a reload inside that same unbound window. See `restoreCapture`.
+   */
+  let compactCapture = null;
+  /** One token-idempotent brief POST at a time. */
+  let briefDeliveryBusy = false;
+
+  /** Where the binding is kept so it survives a reload of this tab. */
+  const COMPACT_CAPTURE_KEY = 'clf-compact-capture';
+  /** How long to wait for the submitted prompt to actually open a turn. */
+  const COMPACT_ARM_MS = 60_000;
+
+  function rememberCapture() {
+    try {
+      if (compactCapture) sessionStorage.setItem(COMPACT_CAPTURE_KEY, JSON.stringify(compactCapture));
+      else sessionStorage.removeItem(COMPACT_CAPTURE_KEY);
+    } catch {
+      // A tab with no session storage simply loses the binding on reload, which the reload
+      // path already treats as "cannot prove it, so do not claim it".
+    }
+  }
+
+  /** Forgets a capture only after it was accepted or deliberately abandoned. */
+  function releaseCapture() {
+    const held = compactCapture;
+    compactCapture = null;
+    rememberCapture();
+    return held;
+  }
+
+  /**
+   * Restores the binding after a reload, or gives up on it honestly.
+   *
+   * Called after `resumeOpenTurn`, so `turnId` is already whatever the app says this
+   * conversation still has open. If that is the generation the binding names, the watch
+   * continues exactly as before — the reload cost nothing. If it is not, the compaction turn
+   * ended while this tab was not there to see which output was its own, and there is no
+   * honest way to recover that afterwards: the answer is on screen next to a dozen others
+   * and nothing distinguishes it but a guess. So the transaction is cancelled and the
+   * session stays in this chat, which is the failure the user can act on.
+   */
+  async function restoreCapture() {
+    let stored = null;
+    try {
+      stored = JSON.parse(sessionStorage.getItem(COMPACT_CAPTURE_KEY) || 'null');
+    } catch {
+      stored = null;
+    }
+    if (!stored || !stored.token || stored.conversationId !== conversationId) {
+      compactCapture = null;
+      rememberCapture();
+      return;
+    }
+    // Epochs are document-local. A full reload deliberately adopts the stored binding into
+    // this new document after proving the conversation id still matches; from here onward it
+    // must carry this document's epoch so an A -> B -> A SPA round trip cannot revive it.
+    stored.epoch = epoch;
+    compactCapture = stored;
+    // Once the exact generation settled, its brief is itself durable page state. The app's
+    // capture endpoint is idempotent by token, so a reload after a lost request/response can
+    // safely retry these exact bytes without re-identifying anything from the transcript.
+    if (typeof stored.summary === 'string' && stored.summary.trim()) {
+      nativeBusy = true;
+      nativePhase = 'delivering';
+      renderControl();
+      void deliverCapturedBrief();
+      return;
+    }
+    if (stored.generation) {
+      if (stored.generation === turnId && generating) {
+        nativePhase = 'waiting';
+        renderControl();
+        return;
+      }
+      return void (await abandonCapture(
+        'This tab reloaded while ChatGPT was writing the brief, so the app can no longer tell which answer was it. Nothing was compacted — press Compact & Resume again.'
+      ));
+    }
+
+    // Reloaded between submitting the prompt and seeing the turn open, so the binding was
+    // never made in the old document. The app still holds the open turn for this
+    // conversation, and `resumeOpenTurn` has already adopted it — so the id is available,
+    // it is just not yet claimed.
+    //
+    // It may be claimed only when it is provably not the turn that was stopped to make room
+    // for the compaction: that one can still be the app's open turn, because stopping a turn
+    // and *closing* it are a settle window apart, and adopting it would make some earlier
+    // answer the brief. `priorGeneration` is exactly that id, recorded before the send, so
+    // an open turn that is not it is the one the prompt started.
+    if (generating && turnId && turnId !== stored.priorGeneration) {
+      compactCapture.generation = turnId;
+      rememberCapture();
+      nativePhase = 'waiting';
+      nativeBusy = true;
+      renderControl();
+      return;
+    }
+    await abandonCapture(
+      'This tab reloaded before ChatGPT started answering the compaction request, so the app cannot tell which answer would have been it. Nothing was compacted — press Compact & Resume again.'
+    );
+  }
+
+  /**
+   * Gives up on the watched compaction and withdraws the app-side transaction.
+   *
+   * The session stays in this chat. That is the whole failure mode: every way this can go
+   * wrong ends with the user in the conversation they were already in, told why, with a
+   * button they can press again.
+   */
+  async function abandonCapture(why) {
+    const held = releaseCapture();
+    const current =
+      !held ||
+      (held.conversationId === conversationId &&
+        held.epoch === epoch &&
+        CLF_DOM.conversationId() === held.conversationId);
+    // Navigation already reset the new chat. Do not let an old asynchronous settle path
+    // repaint it or send a cancellation carrying the wrong conversation through the worker.
+    if (!current) return;
+    nativeBusy = false;
+    nativePhase = '';
+    pressedAt = 0;
+    job = null;
+    localError = why;
+    if (held) await ask({ type: 'compact', conversationId: held.conversationId, cancel: true }).catch(() => undefined);
+    if (
+      held &&
+      (held.conversationId !== conversationId || held.epoch !== epoch || CLF_DOM.conversationId() !== held.conversationId)
+    ) {
+      return;
+    }
+    renderControl();
+    void pullActivity();
+  }
+
+  /**
+   * How long everything about the turn has to stop changing before it is taken to be finished.
+   *
+   * Longer than TURN_SETTLE_MS by a wide margin, and deliberately so: the whole reason this
+   * exists is that four seconds of one signal was not evidence. A compaction turn that really
+   * did finish pays this once.
+   */
+  const BRIEF_STABLE_MS = 15_000;
+  /** How often a settling brief is re-read. */
+  const BRIEF_POLL_MS = 1_000;
+  /** The ceiling on watching one brief settle, after which it is given up on honestly. */
+  const BRIEF_WATCH_MS = 10 * 60_000;
+
+  /**
+   * Everything this generation has written so far, re-read rather than remembered.
+   *
+   * The snapshot `finishGeneration` hands over is a set of DOM nodes, and ChatGPT can
+   * remount the section it was writing into while it is still writing. That freezes the
+   * snapshot at whatever it held at the remount, which would read as a brief that has
+   * stopped growing. The transcript's newest assistant answer is the same answer when it
+   * still begins with everything already read; nothing else on screen can satisfy that, so
+   * the prefix is the identity proof and no separate id is needed.
+   *
+   * Never shrinks. A section torn down after the answer was complete would otherwise read
+   * as the brief being retracted, and a shorter text is never the better evidence.
+   */
+  function briefSoFar(ended, known) {
+    const held = finalAnswerText(ended);
+    if (held.length > known.length) return held;
+    const turns = CLF_DOM.turns();
+    const latest = turns.length > 0 ? finalAnswerText(turns[turns.length - 1]) : '';
+    if (known && latest.length > known.length && latest.startsWith(known)) return latest;
+    return held.length >= known.length ? held : known;
+  }
+
+  /**
+   * One reading of everything about this turn that moves while ChatGPT is still working.
+   *
+   * Prose is not the only thing a turn produces, and during the phase that caused all of this
+   * it is the one thing that does *not* move: the model had written 28 characters and spent
+   * the next seven minutes making tool calls. Watching the text alone would have found it
+   * perfectly stable and handed over those 28 characters, so the tool rail is read too — how
+   * many blocks the turn has, and how much each of them currently renders. A call starting, a
+   * result streaming in, a block finishing: each of them changes this string.
+   *
+   * Read from the live transcript as well as from `ended`, because a remount detaches the
+   * snapshot's nodes and a detached node stops changing for the least interesting reason.
+   */
+  function briefActivityMark(ended) {
+    const turns = CLF_DOM.turns();
+    const live = turns.length > 0 ? turns[turns.length - 1] : null;
+    const seen = [];
+    for (const turn of live && (!ended || live.node !== ended.node) ? [ended, live] : [ended]) {
+      if (!turn) continue;
+      const blocks = CLF_DOM.toolBlocks(turn);
+      seen.push(blocks.length);
+      for (const block of blocks) seen.push((block.textContent || '').length);
+    }
+    return seen.join(',');
+  }
+
+  /**
+   * Waits for the brief to stop being written before handing it over.
+   *
+   * `turn_end` is not proof that ChatGPT finished writing. The quiet heuristic that produces
+   * it reads exactly one thing — the stop control staying gone for TURN_SETTLE_MS — and a
+   * long agentic turn makes that control flicker between phases. On 2026-08-23 that closed a
+   * compaction turn 28 characters into its brief: the app stored `TASK`, a newline and
+   * `Continue implementing ` as a whole handoff for a session holding 455 events and 318,422
+   * tokens, opened the replacement chat with it, and the conversation it had just declared
+   * finished went on making tool calls for another seven minutes. The replacement chat could
+   * not tell that document from a complete one — no receiver can — and rebuilt the work from
+   * the filesystem instead.
+   *
+   * So the settled answer is where this starts, not what it delivers. Four signals have to
+   * agree, and hold agreeing for BRIEF_STABLE_MS, before the brief is taken to be the whole
+   * brief: the stop control absent, the answer text no longer growing, the turn's tool rail
+   * no longer moving, and the app reporting no local call still running.
+   *
+   * Every one of the first three can be fooled on its own, and the fourth is why it is here.
+   * The stop control flickers between phases. The text was frozen at 28 characters for seven
+   * minutes. A tool rail goes still in the gap between two calls — and stiller still *during*
+   * one: a build running for three minutes renders one block that does not change a
+   * character, so the whole page looks exactly like a finished turn. Only the app knows the
+   * connector is still holding that call open, and it is the one participant that cannot be
+   * fooled by what the page happens to be rendering.
+   *
+   * An unanswerable app is therefore not zero. `peekPendingTools` returns null when it could
+   * not ask, and reading that as "nothing is running" is precisely the inference that lost a
+   * session; it counts as busy and the watch keeps waiting. Nothing is lost by that: an app
+   * that cannot be asked is an app the brief could not have been delivered to either.
+   *
+   * The window only ever delays a handover; it cannot produce a brief that was not written.
+   * A turn that really did finish pays it once, in seconds, against a whole session.
+   */
+  async function settleBrief(ended, outcome) {
+    // Waiting cannot turn a turn that was cut short into one that finished, and what such a
+    // turn left on screen is not a brief. Refused on its outcome, exactly as before.
+    if (outcome === 'stopped' || outcome === 'interrupted' || outcome === 'failed') {
+      return void (await deliverBrief('', outcome));
+    }
+    const deadline = Date.now() + BRIEF_WATCH_MS;
+    let text = finalAnswerText(ended);
+    let activity = briefActivityMark(ended);
+    let stableSince = Date.now();
+    while (Date.now() < deadline) {
+      await sleep(BRIEF_POLL_MS);
+      // A navigation, a reload or the app withdrawing the transaction has already released
+      // the capture and told the user why. There is nothing left to deliver against.
+      if (
+        !alive ||
+        !sameChat() ||
+        !compactCapture ||
+        compactCapture.conversationId !== conversationId ||
+        compactCapture.epoch !== epoch ||
+        CLF_DOM.conversationId() !== compactCapture.conversationId
+      ) {
+        return;
+      }
+      const nextText = briefSoFar(ended, text);
+      const nextActivity = briefActivityMark(ended);
+      const pending = await peekPendingTools();
+      // Asking took a round trip, and the page may have moved on underneath it.
+      if (
+        !alive ||
+        !sameChat() ||
+        !compactCapture ||
+        compactCapture.conversationId !== conversationId ||
+        compactCapture.epoch !== epoch ||
+        CLF_DOM.conversationId() !== compactCapture.conversationId
+      ) {
+        return;
+      }
+      // Any of these on its own is enough. The stop control being back needs no
+      // corroborating — whatever `turn_end` concluded, the turn is demonstrably still
+      // running — and neither does a call the app says it is still holding open.
+      const busy = CLF_DOM.generating() || pending === null || pending > 0;
+      if (busy || nextText !== text || nextActivity !== activity) {
+        text = nextText;
+        activity = nextActivity;
+        stableSince = Date.now();
+        continue;
+      }
+      if (Date.now() - stableSince >= BRIEF_STABLE_MS) return void (await deliverBrief(text, outcome));
+    }
+    await abandonCapture(
+      'The compaction turn was still going long after it looked finished — still writing, still running ' +
+        'tools, or the app could not be reached to ask — so the app stopped waiting rather than hand over ' +
+        'half a brief. Nothing was compacted; this chat still has its session. Press Compact & Resume again.'
+    );
+  }
+
+  /** Whether a failed capture answer can become true after transport/app recovery. */
+  function retryableBriefReply(reply) {
+    if (!reply) return true;
+    if (reply.data && reply.data.retryable === true) return true;
+    const code = Number(reply.status);
+    // Browser/document ownership failures do not have an HTTP status. In particular a dying
+    // document can be fenced as `stale_document` after ChatGPT has already finished the brief;
+    // keep it in sessionStorage so the replacement document can retry rather than turning a
+    // correct navigation fence into data loss.
+    if (!Number.isFinite(code)) return true;
+    return code === 0 || code === 401 || code === 408 || code === 426 || code === 429 || code >= 500;
+  }
+
+  /**
+   * Retries the exact settled brief until the app accepts or terminally refuses its token.
+   *
+   * `/compact` capture is idempotent: a response can disappear after the app has already
+   * stored the handoff, and presenting the same token again simply returns that same handoff.
+   * Keeping the bytes here until an acknowledgement is therefore what makes the boundary
+   * atomic from the page's point of view. Dropping them before the POST made a transient
+   * worker/app failure strand an already-armed continuation in `awaiting-summary` forever.
+   */
+  async function deliverCapturedBrief() {
+    const held = compactCapture;
+    const brief = held && typeof held.summary === 'string' ? held.summary.trim() : '';
+    if (!held || !brief || briefDeliveryBusy) return;
+    const current = () =>
+      alive &&
+      compactCapture === held &&
+      held.conversationId === conversationId &&
+      held.epoch === epoch &&
+      CLF_DOM.conversationId() === held.conversationId;
+    if (!current()) return;
+
+    briefDeliveryBusy = true;
+    let reply = null;
+    try {
+      reply = await ask({ type: 'compact', conversationId: held.conversationId, token: held.token, summary: brief });
+    } finally {
+      briefDeliveryBusy = false;
+    }
+    // Cancellation/navigation can happen while the request is in flight. The late answer
+    // belongs to the capture object it started with and may not repaint or release a newer one.
+    if (!current()) return;
+
+    if (reply && reply.ok === true) {
+      releaseCapture();
+      nativeBusy = false;
+      nativePhase = '';
+      localError = '';
+      if (reply.data && reply.data.job) job = reply.data.job;
+      renderControl();
+      void pullActivity();
+      return;
+    }
+
+    if (retryableBriefReply(reply)) {
+      // Keep the exact generation-bound bytes in sessionStorage. The normal activity loop is
+      // the retry clock, so there is no second independent timer to race navigation/cancel.
+      nativeBusy = true;
+      nativePhase = 'delivering';
+      pressedAt = 0;
+      localError = replyError(reply) || 'The brief is finished, but the app has not stored it yet. Retrying…';
+      renderControl();
+      return;
+    }
+
+    // A semantic 4xx means this token cannot become valid by waiting. Retire the local copy
+    // rather than replaying a rejected capture forever.
+    releaseCapture();
+    nativeBusy = false;
+    nativePhase = '';
+    pressedAt = 0;
+    job = null;
+    localError = replyError(reply) || 'The app refused the brief, so nothing was moved.';
+    renderControl();
+    void pullActivity();
+  }
+
+  /**
+   * Hands the app the brief for the exact generation that was asked for it.
+   *
+   * The generation binding is released immediately only when there is intentionally no brief.
+   * A valid settled brief is first persisted beside its token, then retried idempotently until
+   * the app acknowledges it. That keeps duplicate observations harmless without making one
+   * dropped POST destroy the only copy that can finish the transaction.
+   */
+  async function deliverBrief(text, outcome) {
+    const held = compactCapture;
+    if (!held) return;
+    const current = () =>
+      alive &&
+      compactCapture === held &&
+      held.conversationId === conversationId &&
+      held.epoch === epoch &&
+      CLF_DOM.conversationId() === held.conversationId;
+    if (!current()) return;
+    const brief = String(text || '').trim();
+    // An interrupted or empty compaction is not a short brief — it is no brief. Half a
+    // handoff reads exactly like a whole one to the chat that receives it, which is why
+    // this is the one place the extension refuses to send something it has.
+    if (!brief || outcome === 'stopped' || outcome === 'interrupted' || outcome === 'failed') {
+      releaseCapture();
+      const why =
+        outcome === 'stopped'
+          ? 'The compaction turn was stopped, so nothing was compacted.'
+          : outcome === 'interrupted' || outcome === 'failed'
+            ? 'ChatGPT did not finish writing the brief, so nothing was compacted.'
+            : 'ChatGPT answered the compaction request with nothing, so nothing was compacted.';
+      nativeBusy = false;
+      nativePhase = '';
+      pressedAt = 0;
+      job = null;
+      localError = why;
+      await ask({ type: 'compact', conversationId: held.conversationId, cancel: true }).catch(() => undefined);
+      if (!alive || held.conversationId !== conversationId || held.epoch !== epoch || CLF_DOM.conversationId() !== held.conversationId) return;
+      renderControl();
+      void pullActivity();
+      return;
+    }
+
+    // First settled observer wins. If another observer runs while delivery is in flight it
+    // reuses these bytes rather than replacing the durable identity with a later DOM reading.
+    if (typeof held.summary !== 'string' || !held.summary.trim()) {
+      held.summary = brief;
+      rememberCapture();
+    }
+    nativeBusy = true;
+    nativePhase = 'delivering';
+    localError = '';
+    renderControl();
+    await deliverCapturedBrief();
+  }
+
   // ---------------------------------------------------------------- goal loop
 
   /**
@@ -8190,6 +9250,9 @@
   // `end_turn` bit, `stopped` is the user's own decision, and interrupted/failed/stalled/unknown
   // are turns with no final answer to continue from — those belong to recovery, not to Goal.
   const GOAL_CONTINUABLE = new Set(['completed']);
+
+  /** How long a specific goal may be. Matches MAX_GOAL_OBJECTIVE_CHARS in src/shared/goal.ts. */
+  const MAX_OBJECTIVE_CHARS = 4000;
 
   /**
    * Browser-local terminal shape only. Goal config/key intentionally do not participate:
@@ -8915,10 +9978,30 @@
    * worker may be revived; it does not say ChatGPT has finished rendering the assistant turn
    * that contains that tool call. The recorder's conservative generation state is the latter.
    */
+  /**
+   * The pending-tool count, but only while the app is still vouching for it.
+   *
+   * `pendingTools` describes work inside the app's process, which this page cannot see for itself.
+   * When the app stops answering, the honest answer is "unknown" — and an unknown must not be
+   * rendered, or acted on, as a fact. Every consumer reads through here rather than the variable:
+   * the stage panel, which otherwise asserts a stale count at the user; the revival gate, which
+   * otherwise refuses to submit for as long as the stale count sits above zero; and the poll
+   * cadence, which otherwise stays at the busy rate forever.
+   *
+   * Deliberately not zeroed on the failed pull itself. One dropped poll says nothing about
+   * whether the work stopped, and a count that flickered off and back on every blip would be a
+   * worse claim than the stale one. It expires on a clock instead.
+   */
+  function livePendingTools() {
+    if (pendingTools <= 0) return 0;
+    if (!pendingToolsAt) return 0;
+    return Date.now() - pendingToolsAt <= PENDING_TOOLS_TRUST_MS ? pendingTools : 0;
+  }
+
   function revivalSubmitReady(target) {
     if (!commandReadinessInitialized || !alive || CLF_DOM.conversationId() !== target) return false;
     if (generating || CLF_DOM.generating()) return false;
-    if (pendingTools > 0 || nativeBusy || goalBusy || (job && job.busy)) return false;
+    if (livePendingTools() > 0 || nativeBusy || goalBusy || (job && job.busy)) return false;
     return Boolean(CLF_DOM.composerSubmitReady && CLF_DOM.composerSubmitReady());
   }
 
@@ -9231,13 +10314,30 @@
     if (await failIfRetargeted()) return;
 
     // The composer is the readiness signal. Page-level `readyState` says whether every
-    // resource finished loading, not whether this editing host is usable, and waiting on it
-    // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
+    // resource finished loading, not whether this editing host is usable.
     const readyComposer = await waitForComposer();
     if (!readyComposer) return void (await fail('ChatGPT never exposed a usable composer for bootstrap'));
     if (await failIfRetargeted()) return;
 
-    if (!CLF_DOM.insertPrompt(boot.text, true)) return void (await fail('ChatGPT refused the inserted text'));
+    const hasExistingDraft = (readyComposer.textContent || '').trim() !== '';
+    let replaceExistingDraft = false;
+    if (hasExistingDraft) {
+      // Only a fresh app-opened command page is eligible. Existing-chat revivals already went
+      // through waitForRevivalSubmitReady(), so their drafts remain protected regardless of
+      // this preference. Redeem + marker/onTarget checks above prove this fresh page belongs
+      // to the app command before any user text may be discarded.
+      const eligibleFreshBootstrap =
+        fromUrl && !openedConversation && !target && (boot.type === 'worker' || boot.type === 'resume');
+      if (eligibleFreshBootstrap) replaceExistingDraft = await replaceWorkerDraftsEnabled();
+      if (await failIfRetargeted()) return;
+      if (!replaceExistingDraft) {
+        return void (await fail('the composer already holds something the user was writing'));
+      }
+    }
+
+    if (!CLF_DOM.insertPrompt(boot.text, replaceExistingDraft)) {
+      return void (await fail('ChatGPT refused the inserted text'));
+    }
     // Give synchronous React/input work one microtask turn to replace the editing host, then
     // re-prove the exact draft before the irreversible send. This used to sleep for 100 ms.
     // Long-hidden Chrome tabs throttle wall-clock timers, so that tiny "stability" delay became
@@ -9414,7 +10514,7 @@
 
   function currentActivityPullDelay() {
     const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-    const active = nativeBusy || Boolean(job && job.busy) || pendingTools > 0;
+    const active = nativeBusy || Boolean(job && job.busy) || livePendingTools() > 0;
     // A goal draft lives entirely on this feed — its streamed text is what the stage panel
     // shows, and the finished message only arrives here — so it polls at the live cadence
     // even in a hidden tab, which is exactly the tab this feature runs in.
@@ -9439,12 +10539,32 @@
       } catch {
         // The next scheduled pass retries after worker/app recovery.
       }
+      const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      const finalizing = terminalActivityFinalizing();
+      const active =
+        generating ||
+        nativeBusy ||
+        Boolean(compactCapture) ||
+        Boolean(job && job.busy) ||
+        livePendingTools() > 0 ||
+        finalizing ||
+        (!hidden && Boolean(swarm && swarm.running)) ||
+        (!hidden && Number(backgroundExec && backgroundExec.running) > 0) ||
+        (!hidden && Number(backgroundExec && backgroundExec.exitedUnread) > 0);
+      // A goal draft lives entirely on this feed — its streamed text is what the stage panel
+      // shows, and the finished message only arrives here — so it polls at the live cadence
+      // even in a hidden tab, which is exactly the tab this feature runs in.
+      const drafting = Boolean(goalDraft) || goalPhase === 'requesting' || goalPhase === 'drafting';
       // Re-arming is a periodic loop, and periodic loops belong to the live page, exactly as
-      // for every(): the harness drives each behaviour through the test hook instead. The
-      // harness's setTimeout runs its callback in a microtask, so a loop re-armed there would
-      // be an unbroken microtask chain that starves the event loop — the next test then waits
-      // forever for a window 'load' event that no macrotask could ever deliver.
-      armNextActivityPull();
+      // for every(): the harness stubs setInterval out so every() never ticks, and drives each
+      // behaviour through the test hook instead. This pull re-arms with setTimeout rather than
+      // setInterval, so it walked straight past that seam — and the harness's setTimeout runs
+      // its callback in a microtask, which turned one background poll into an unbroken
+      // microtask chain that starved the event loop. The next test then waited forever for a
+      // window 'load' event that no macrotask could ever deliver.
+      if (!TEST_MODE) {
+        scheduleActivityPull(activityPollDelay({ drafting, hidden, generating, active, finalizing }));
+      }
     }, Math.max(0, delay));
   }
 
@@ -9478,7 +10598,7 @@
   }
 
   /** Apply popup changes immediately in every open ChatGPT tab. */
-  if (globalThis.chrome && chrome.storage && chrome.storage.onChanged) {
+  if (webext && webext.storage && webext.storage.onChanged) {
     const storageChanged = (changes, areaName) => {
       if (!alive) return;
       if (areaName !== 'local' || !changes) return;
@@ -9497,14 +10617,14 @@
       paint();
       renderStreams();
     };
-    chrome.storage.onChanged.addListener(storageChanged);
-    if (typeof chrome.storage.onChanged.removeListener === 'function') {
-      rememberCleanup(() => chrome.storage.onChanged.removeListener(storageChanged));
+    webext.storage.onChanged.addListener(storageChanged);
+    if (typeof webext.storage.onChanged.removeListener === 'function') {
+      rememberCleanup(() => webext.storage.onChanged.removeListener(storageChanged));
     }
   }
 
   /** Popup commands target this tab directly; no bridge credential is involved. */
-  if (globalThis.chrome && chrome.runtime && chrome.runtime.onMessage) {
+  if (webext && webext.runtime && webext.runtime.onMessage) {
     const runtimeMessage = (message, _sender, sendResponse) => {
       // Recorder takeover revokes every browser-facing control channel, not only observation.
       // A predecessor left registered in this same isolated world can otherwise win a ping or
@@ -9580,9 +10700,9 @@
       }
       return false;
     };
-    chrome.runtime.onMessage.addListener(runtimeMessage);
-    if (typeof chrome.runtime.onMessage.removeListener === 'function') {
-      rememberCleanup(() => chrome.runtime.onMessage.removeListener(runtimeMessage));
+    webext.runtime.onMessage.addListener(runtimeMessage);
+    if (typeof webext.runtime.onMessage.removeListener === 'function') {
+      rememberCleanup(() => webext.runtime.onMessage.removeListener(runtimeMessage));
     }
   }
 
@@ -9656,13 +10776,13 @@
   every(STATUS_MS, checkStatus);
 
   // Only now, with every binding above initialised, does this recorder answer for itself.
-  // `chrome.runtime.id` is the exact orphan test: an invalidated isolated world keeps its
+  // `webext.runtime.id` is the exact orphan test: an invalidated isolated world keeps its
   // globals and its timers but loses that property, so a successor can tell a live
   // recorder it must not disturb from a dead one it must replace.
   recorderHandle.healthy = () => {
     if (!alive) return false;
     try {
-      return !!globalThis.chrome && !!chrome.runtime && typeof chrome.runtime.id === 'string';
+      return !!webext && !!webext.runtime && typeof webext.runtime.id === 'string';
     } catch {
       return false;
     }
@@ -9732,6 +10852,8 @@
       foldBootstrap,
       injectControl,
       injectStage,
+      activityPollDelay,
+      terminalActivityFinalizing,
       pullActivity,
       activityPullDelay,
       currentActivityPullDelay,
@@ -9749,6 +10871,8 @@
       visibleStream,
       /** So a test settles a turn by the real window rather than a copy of the number. */
       TURN_SETTLE_MS,
+      WAIT_STATUS_MS,
+      PENDING_TOOLS_TRUST_MS,
       STALL_MS,
       GOAL_RETRY_MS,
       PRESENTATION_SCROLL_IDLE_MS,

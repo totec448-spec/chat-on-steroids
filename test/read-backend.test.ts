@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { BinaryReadError, listDirectoryLevel, readTextFile, walkFiles } from '../src/main/codex/read-backend.js';
-import { MAX_READ_FILE_BYTES, MAX_WALK_DEPTH } from '../src/main/codex/filesystem.js';
+import { MAX_READ_FILE_BYTES, MAX_WALK_DEPTH, walk } from '../src/main/codex/filesystem.js';
 import { FsOpError } from '../src/main/fsops.js';
 import { rawPromises } from '../src/main/rawfs.js';
 import { DIR_LINK, makeTempDir, removeTempDir, writeTree } from './helpers.js';
@@ -211,6 +211,28 @@ describe('readTextFile', () => {
     } finally {
       await fs.rm(escape, { recursive: true, force: true });
       await fs.rm(outsideTarget, { recursive: true, force: true });
+    }
+  });
+
+  it('never touches an unfollowed directory symlink target, even one that would throw if statted', async () => {
+    // A broken link: the target does not exist, so a stat of it always throws ENOENT. If
+    // walk(...followDirectorySymlinks:false) ever called getMetadata() on this path to classify
+    // it before skipping — the exact boundary readDirectory()'s own docstring says to keep opaque
+    // — that throw would surface as a recorded WalkError. Opacity means it never happens at all.
+    const listedRoot = at('tree');
+    const escape = path.join(listedRoot, 'escape-broken-link');
+    await fs.symlink(path.join(listedRoot, 'does-not-exist'), escape, DIR_LINK);
+    try {
+      const outcome = await walk(listedRoot, {
+        maxDepth: MAX_WALK_DEPTH,
+        maxDirectories: 100,
+        maxEntries: 100,
+        followDirectorySymlinks: false
+      });
+      expect(outcome.errors).toEqual([]);
+      expect(outcome.entries.some((entry) => entry.path === escape)).toBe(false);
+    } finally {
+      await fs.rm(escape, { recursive: true, force: true });
     }
   });
 

@@ -45,6 +45,12 @@
   --red-wash: #fbf0f0;
   --red-line: #eccdcd;
 
+  /* Not-determined: macOS has not been asked yet, which is not the same as refused, and
+     painting it red would tell the user something is broken when nothing is. */
+  --amber: #8a5a00;
+  --amber-wash: #fdf5e7;
+  --amber-line: #eddcbc;
+
   /* Card lift. Barely there on paper, absent in the dark theme below. */
   --lift: 0 1px 1px rgb(12 12 14 / 3%), 0 10px 26px -18px rgb(12 12 14 / 22%);
   /* The switch knob has to read against its own track in both states, and the track
@@ -90,6 +96,10 @@
   --green: #63c795;
   --green-wash: #10201a;
   --green-line: #24402f;
+
+  --amber: #e0b256;
+  --amber-wash: #221b0d;
+  --amber-line: #40331b;
 
   --red: #ef8a8a;
   --red-wash: #241416;
@@ -347,6 +357,26 @@ main {
   overflow: hidden;
 }
 
+/* Permissions is the one card with a static explanatory line between the header and its
+   scroll box (#readOnlyHint). The plain two-row .card template has only one flexible
+   track, so that line inherited it and got squeezed toward its 0 minimum by the group
+   list's own real height, then overflowed its collapsed box over the first permission
+   row instead of clipping. Give this card its own row for the hint, `auto`-sized like the
+   header, so only the actual scroll box takes the flexible track. */
+.card-has-hint {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+/* .hint carries no padding of its own — every other place it appears sits inside a
+   container (a .field, a settings row) that already supplies it. #readOnlyHint is a direct
+   child of the card instead, so without its own it ran flush to the card's edges: 0px
+   left/right against the 15px the header and 16px the permission rows are indented by,
+   which read as misaligned rather than merely close. */
+#readOnlyHint {
+  margin: 0;
+  padding: 0 15px 10px;
+}
+
 .card.drop-target {
   outline: 2px dashed var(--line);
   outline-offset: -6px;
@@ -420,12 +450,32 @@ main {
 }
 
 /* Vertical only. Nothing in this app may scroll sideways: long values are cut
-   with an ellipsis instead, so a card never hides half a line off to the right. */
+   with an ellipsis instead, so a card never hides half a line off to the right.
+
+   The permissions card taught us why a plain clip is not enough: it holds five
+   groups in a box tall enough for three-and-a-bit, so whichever row lands on the
+   fold is sliced mid-line with no scrollbar in sight to explain why (Chromium's
+   overlay scrollbar does not register as a native control, so nothing in the
+   window's own accessibility tree points at it either). A sliced row reads as
+   breakage, not as an invitation. These four layers are the standard scroll-shadow
+   trick: two solid-to-transparent covers that scroll with the content and two
+   theme-tinted shadows fixed to the box itself. Wherever a cover currently sits
+   over a shadow they cancel out — which is exactly true at both true ends of the
+   content and nowhere else — so the fade only ever shows on the edge that still
+   has more behind it, cut content included. */
 .scroll {
   overflow: hidden auto;
   min-height: 0;
   scrollbar-width: thin;
   scrollbar-color: var(--edge) transparent;
+  background:
+    linear-gradient(var(--card) 30%, transparent) center top,
+    linear-gradient(transparent, var(--card) 70%) center bottom,
+    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--ink) 20%, transparent), transparent) center top,
+    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--ink) 20%, transparent), transparent) center bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 24px, 100% 24px, 100% 10px, 100% 10px;
+  background-attachment: local, local, scroll, scroll;
 }
 
 .empty {
@@ -1080,7 +1130,11 @@ main {
 
 .feed {
   padding: 4px 10px 10px;
-  font-size: 11.5px;
+  /* QA: "very small and low contrast". Still a compact monospace log, just no longer at the
+     edge of legibility. Colour hierarchy is unchanged: --soft here for the detail column,
+     --ink already on .what below for the subject, so the one real signal (red = failure)
+     still stands out against both. */
+  font-size: 12.5px;
   color: var(--soft);
   font-family: var(--mono);
 }
@@ -2460,4 +2514,72 @@ nav button.is-sel::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ----------------------------------------------- macOS permission rows (setup step) */
+
+/*
+ * One row per macOS permission, inside the setup step that asks for them.
+ *
+ * Each row states the verdict twice — as a colour and as a word — because a colour alone is
+ * not a status anyone can act on, and a word alone is not one anyone scans. The state comes
+ * from the native backend that performs the protected operation, so what is shown here is
+ * what the OS will actually answer, not what a settings row believes.
+ */
+.perm-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+
+.perm-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--sunk);
+}
+
+.perm-dot { width: 9px; height: 9px; border-radius: var(--pill); background: var(--faint); }
+.perm-row[data-state='granted'] { border-color: var(--green-line); background: var(--green-wash); }
+.perm-row[data-state='granted'] .perm-dot { background: var(--green); }
+.perm-row[data-state='granted'] .perm-pill { color: var(--green); }
+.perm-row[data-state='missing'] { border-color: var(--red-line); background: var(--red-wash); }
+.perm-row[data-state='missing'] .perm-dot { background: var(--red); }
+.perm-row[data-state='missing'] .perm-pill { color: var(--red); }
+.perm-row[data-state='unknown'] { border-color: var(--amber-line); background: var(--amber-wash); }
+.perm-row[data-state='unknown'] .perm-dot { background: var(--amber); }
+.perm-row[data-state='unknown'] .perm-pill { color: var(--amber); }
+
+/*
+ * The action is the whole point of an outstanding row, so it must not be the quietest
+ * thing in it. The base .btn is deliberately faint, which measures 3.1:1 on the amber wash
+ * and 3.0:1 on the red one — under the 4.5:1 that 12px text needs to stay legible. Each
+ * row lends its button the colour its pill already carries: that clears the bar at 5.5:1
+ * and ties the button to the state that put it there. Hover still deepens to --ink, so the
+ * button keeps the feedback every other button in the app gives.
+ */
+.perm-row .btn { border: 1px solid transparent; }
+.perm-row[data-state='unknown'] .btn { color: var(--amber); border-color: var(--amber-line); }
+.perm-row[data-state='missing'] .btn { color: var(--red); border-color: var(--red-line); }
+.perm-row .btn:hover:not(:disabled) { color: var(--ink); }
+
+.perm-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.perm-text strong { font-size: 13px; font-weight: 600; }
+.perm-text span { font-size: 12px; color: var(--soft); line-height: 1.45; }
+.perm-pill { font-size: 11px; font-weight: 600; white-space: nowrap; }
+
+/*
+ * macOS caches a TCC decision for the life of the process, so a permission granted while the
+ * app is running stays invisible to it until a full quit and reopen. That is the single most
+ * common reason someone grants everything and still sees a refusal, so it is said in place
+ * rather than left for the user to discover.
+ */
+.perm-restart {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border: 1px solid var(--amber-line);
+  border-radius: var(--r-sm);
+  background: var(--amber-wash);
+  font-size: 12px;
+  line-height: 1.45;
 }

@@ -50,6 +50,8 @@ import { DEFAULT_TRUNCATION_POLICY, EXEC_OUTPUT_CEILING_POLICY, unifiedExecManag
 import {
   backgroundExecObligations,
   execOwnershipDenied,
+  execProcessIdsForConversation,
+  execTrackedProcessIds,
   forgetExecOwner,
   MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
   noteExecAttended,
@@ -113,7 +115,6 @@ import {
   stageFinishAgent,
   stageMessages,
   stageSpawn,
-  swarmRunning,
   swarmStateForCaller,
   type Caller
 } from '../agents.js';
@@ -145,6 +146,7 @@ import {
   lineNumberArg,
   resolveCwd,
   resolveIn,
+  toolDisabledMessage,
   type SurfaceRegistrar,
   type ToolResult
 } from './kernel.js';
@@ -602,9 +604,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       async ({ patch }) =>
         guard('apply_patch', async () => {
           if (!caps.create && !caps.edit && !caps.move && !caps.deleteFile) {
-            return fail(
-              'TOOL_DISABLED: apply_patch is disabled by the current Chat On Steroids permissions. Ask the user to enable changing files in the app.'
-            );
+            return fail(toolDisabledMessage(ctx.readOnly, 'create', 'apply_patch', 'changing files'));
           }
 
           let args: { patch: string; hunks: Hunk[]; workdir: string | null; environmentId: string | null };
@@ -621,9 +621,16 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             return fail('apply_patch environment selection is unavailable for this turn');
           }
           const workspace = currentWorkspace();
-          if (!workspace && swarmRunning()) {
+          // Scoped to this call's own conversation, not to whether any swarm exists anywhere —
+          // see resolveCwd's own comment in kernel.ts for the measured reason and the fix it
+          // shares this shape with.
+          if (!workspace && currentCall()?.agent) {
+            // Named, for the same reason resolveCwd names them: "use an absolute path" is only
+            // actionable if you know which absolute paths exist.
+            const approved = ctx.roots.map((root) => `/${root.name}`).join(', ');
             return fail(
-              'WORKSPACE_REQUIRED: this multi-agent chat has no proven workspace. Use an absolute path in another tool first so the approved project can be learned.'
+              'WORKSPACE_REQUIRED: this multi-agent chat has no proven workspace. Use an absolute path in another tool first so the approved project can be learned.' +
+                (approved ? ` Approved roots: ${approved}` : '')
             );
           }
           const baseVirtual = workspace?.virtual ?? (ctx.roots[0] ? `/${ctx.roots[0].name}` : null);
@@ -637,6 +644,52 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   }
 
   // ------------------------------------------------------- exec / write_stdin
+
+  /**
+   * Completed exec results are deliberately result-bearing until write_stdin consumes them.
+   * Bound new fan-out once several are already waiting: dropping them would lose output, while
+   * letting the model launch an unbounded replacement wave is the stall reported in issue #36.
+   * The bound itself is MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION, checked once against this
+   * exact session right before spawning — see the exec_command handler below.
+   */
+
+  // `owners` is keyed by the durable session `noteExecOwner` recorded, not the conversation —
+  // see execSession(). Every reader here takes that same session id, exec_command's admission
+  // guard included, so it agrees with what write_stdin already checks against.
+  const unreadExecResultIds = (sessionId: string | null): number[] => {
+    if (!sessionId) return [];
+    return execProcessIdsForConversation(sessionId)
+      .filter((processId) => unifiedExecManager.backgroundState(processId)?.exitedUnread === true)
+      .sort((left, right) => left - right);
+  };
+
+  /**
+   * Whether any tracked session anywhere is holding a completed result.
+   *
+   * Process-wide on purpose, and it reads like an over-reach until you ask what it gates.
+   * It never decides a quota — that is unreadExecResultIds, which is strictly per session. It
+   * decides two things about an *unattributable* call: whether to pay for the bounded wait
+   * that lets a late-arriving identity land, and, if identity still cannot be proven, whether
+   * to refuse. When we do not know who is calling, we cannot know they are not the session that
+   * is already over quota, so refusing is the conservative half of the issue #36 fix; the
+   * alternative lets an unprovable caller launch the unbounded replacement wave that issue
+   * describes. The refusal is not terminal: identity is retried once the extension reconnects.
+   */
+  const anyUnreadExecResults = (): boolean =>
+    execTrackedProcessIds().some(
+      (processId) => unifiedExecManager.backgroundState(processId)?.exitedUnread === true
+    );
+
+  const unreadExecResultNotes = (sessionId: string | null): string[] => {
+    const ids = unreadExecResultIds(sessionId);
+    if (ids.length === 0) return [];
+    const shown = ids.slice(0, 8).join(', ');
+    return [
+      `${ids.length} completed background exec result${ids.length === 1 ? ' is' : 's are'} still waiting to be consumed` +
+        `${shown ? ` (session${ids.length === 1 ? '' : 's'} ${shown})` : ''}. ` +
+        'Use write_stdin on those existing session IDs until each returns its terminal exit before creating more background work.'
+    ];
+  };
 
   if (exposedCaps.command) {
     reg.register(
@@ -669,6 +722,16 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       },
       async (input) =>
         reg.guarded('command', 'exec_command', async () => {
+          // Resolved once, here, so admission and ownership cannot disagree — see execSession().
+          // The quota itself is checked once, against this exact session, right before spawning
+          // (below); re-deriving it here against a still-unproven identity would only pay for
+          // path/shell resolution work on a call this same guard is about to refuse anyway.
+          const owner = await execSession('exec_command');
+          if (!owner && anyUnreadExecResults()) {
+            return fail(
+              'CALLER_IDENTITY_REQUIRED: completed background exec results exist, but this request could not yet be proven to a ChatGPT conversation. Retry after the extension reconnects; no command was run.'
+            );
+          }
           const dir = await resolveCwd(ctx, input.workdir);
           const rawCommands = input.cmd === undefined ? input.cmds! : [input.cmd];
           const isBatch = input.cmd === undefined;
@@ -776,7 +839,6 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               }
             }
 
-            const owner = await execSession('exec_command');
             const unread = backgroundExecObligations(owner).exitedUnread;
             if (unread.length >= MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION) {
               const sessionIds = unread.map((session) => session.processId).join(', ');
@@ -878,7 +940,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                     )
                   : [benignExitNote(boundCommand, shell.shellType, output.exitCode, responseText)]
                 : []),
-              ...execRecoveryHints(rawCommands.join('\n'), responseText, shell.shellType)
+              ...execRecoveryHints(rawCommands.join('\n'), responseText, shell.shellType),
+              ...unreadExecResultNotes(owner)
             ];
             return {
               content: [{ type: 'text' as const, text: withExecNotes(responseText, notes) }],
@@ -940,8 +1003,10 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               durationMs: output.wallTimeMs
             });
             logInfo(`tool write_stdin ${input.session_id} (${(input.chars ?? '').length} chars)`);
+            const responseText = execCommandResponseText(output);
+            const notes = unreadExecResultNotes(asking);
             return {
-              content: [{ type: 'text' as const, text: execCommandResponseText(output) }],
+              content: [{ type: 'text' as const, text: withExecNotes(responseText, notes) }],
               structuredContent: execCommandStructuredOutput(output)
             };
           } catch (error) {

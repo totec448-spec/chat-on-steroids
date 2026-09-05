@@ -465,6 +465,19 @@ export interface SessionSummary {
   /** Rough local estimate for the whole session — never ChatGPT's private counter. */
   estimatedTokens: number;
   /**
+   * What the currently attached chat was *handed* rather than earned: the token cost of the
+   * handoff brief it was resumed with, or absent for a chat nobody resumed.
+   *
+   * Automatic compaction measures growth against this, because a resumed chat starts carrying
+   * a brief the handoff rules deliberately make large — 10,000-30,000 tokens, at or above the
+   * lowest threshold the settings allow. Measuring the raw total instead put every replacement
+   * chat over the line the moment its brief landed, so it was told to write another brief of
+   * about the same size, and the next chat after it too: chats without end and no progress.
+   * Measured live on 2026-09-04 — three chats inside two minutes, the second asked 1.6 seconds
+   * after it was created.
+   */
+  resumeBaselineTokens?: number;
+  /**
    * The same estimate, but only for what the *currently attached* ChatGPT chat is carrying.
    *
    * This is what the composer meter fills against and what automatic compaction fires on,

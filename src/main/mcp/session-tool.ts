@@ -13,7 +13,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SessionEvent, SessionSummary, StoredText } from '../../shared/session.js';
-import { getSession, listAllSessions, readEvents } from '../session/store.js';
+import { getSession, readEverySummary, readEvents, readEventsAfter } from '../session/store.js';
 import { noteCount, noteDetail } from './call-context.js';
 import { expandStored, fail, guard, ok, type SurfaceRegistrar, type ToolResult } from './kernel.js';
 
@@ -189,7 +189,7 @@ async function searchSessions(queryInput?: string, cursorInput?: string): Promis
     offset = cursor.offset;
   }
 
-  const sessions = await listAllSessions();
+  const sessions = await readEverySummary();
   if (sessions.length === 0) return ok('No recorded sessions exist on this machine yet.');
   if (offset >= sessions.length) return ok('No older recorded sessions remain.\nsearch_complete: true');
 
@@ -400,24 +400,33 @@ async function readRange(
   summary: SessionSummary,
   cursor: Extract<SessionCursor, { kind: 'range' }>
 ): Promise<ToolResult> {
+  if (cursor.mode === 'update') {
+    // Continuing an update page is still only ever interested in rows after its checkpoint, so
+    // it takes the same bounded walk readUpdate does rather than re-reading the whole journal.
+    // readRangeFrom only reads this array to decide which delivered assistant messages are still
+    // unfinished, and every row it can deliver is in the page it was handed.
+    const relevant = (await readEventsAfter(summary.id, cursor.after ?? 0)).filter(
+      (event) => event.seq <= cursor.snapshot
+    );
+    const items = await updateItems(summary.id, relevant, cursor.include, cursor.open ?? []);
+    return readRangeFrom(summary, relevant, items, cursor, false);
+  }
   const events = await readEvents(summary.id);
-  const relevant =
-    cursor.mode === 'update'
-      ? events.filter((event) => event.seq > (cursor.after ?? 0) && event.seq <= cursor.snapshot).sort((a, b) => a.seq - b.seq)
-      : events.filter((event) => event.seq <= cursor.snapshot);
-  const items =
-    cursor.mode === 'update'
-      ? await updateItems(summary.id, relevant, cursor.include, cursor.open ?? [])
-      : await timelineItems(summary.id, relevant, cursor.include);
-  return readRangeFrom(summary, events, items, cursor, cursor.mode === 'timeline' && cursor.stopBeforeSeq === null);
+  const relevant = events.filter((event) => event.seq <= cursor.snapshot);
+  const items = await timelineItems(summary.id, relevant, cursor.include);
+  return readRangeFrom(summary, events, items, cursor, cursor.stopBeforeSeq === null);
 }
 
 async function readUpdate(
   summary: SessionSummary,
   cursor: Extract<SessionCursor, { kind: 'update' }>
 ): Promise<ToolResult> {
-  const events = await readEvents(summary.id);
-  const snapshot = maxSeq(events);
+  // The poll that runs over and over. It wants one thing — what was recorded since checkpoint
+  // #after — and reading the whole journal to answer it made every tick cost the session's
+  // entire history. The bounded walk stops at the checkpoint, so a quiet poll reads almost
+  // nothing and a busy one reads only what is new.
+  const fresh = await readEventsAfter(summary.id, cursor.after);
+  const snapshot = maxSeq(fresh);
   if (snapshot <= cursor.after) {
     noteCount(0);
     return ok(
@@ -425,8 +434,7 @@ async function readUpdate(
         `caught_up: true\nupdate_cursor: ${encodeCursor(cursor, summary.id)}`
     );
   }
-  const relevant = events.filter((event) => event.seq > cursor.after && event.seq <= snapshot).sort((a, b) => a.seq - b.seq);
-  const items = await updateItems(summary.id, relevant, cursor.include, cursor.open);
+  const items = await updateItems(summary.id, fresh, cursor.include, cursor.open);
   if (items.length === 0) {
     const next: Extract<SessionCursor, { kind: 'update' }> = { ...cursor, after: snapshot };
     return ok(
@@ -447,7 +455,7 @@ async function readUpdate(
     after: cursor.after,
     open: cursor.open
   };
-  return readRangeFrom(summary, events, items, range, false);
+  return readRangeFrom(summary, fresh, items, range, false);
 }
 
 async function readRangeFrom(

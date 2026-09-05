@@ -10,7 +10,7 @@
 import http from 'node:http';
 import { once } from 'node:events';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
+import { APP_VERSION, BUILD_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import { foldProgress, type SessionEvent } from '../src/shared/session.js';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import type { SwarmSnapshot } from '../src/main/agents.js';
@@ -62,6 +62,7 @@ const {
   unpair
 } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
+const { runBrowserCommand, resetBrowserControlForTests } = await import('../src/main/browser-control.js');
 const {
   GOAL_OBJECTIVES_STATE,
   GOAL_REPLIES_STATE,
@@ -80,6 +81,7 @@ const { createSession, deleteSession, findSessionByConversation, getSession, ini
 );
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordProgress, recordToolCall, REQUEST_ID_GRACE_MS, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
+const { emptyEvidence, runningToolCalls, trackInFlight } = await import('../src/main/mcp/call-context.js');
 const {
   CONTINUATIONS_STATE,
   abortContinuation,
@@ -358,10 +360,23 @@ describe('who is allowed to talk to it', () => {
     // Against the constant, not a literal: what matters is that the handshake reports the
     // build's own version, and a hard-coded number here only ever fails on release day.
     expect(reply.body.version).toBe(APP_VERSION);
+    // The version is what peers compare against and stays bare for that. `build` is what anything
+    // asking "which app is actually running" needs, and there was nowhere to ask: the window title
+    // carries it but no machine can read one, and a QA run on macOS could not determine the build
+    // it was measuring at all. It is a commit from a public repository, offered on a loopback
+    // route that already refuses every web-page origin — so this is identification, not status.
+    expect(reply.body.build).toBe(BUILD_VERSION);
     expect(reply.body.bridge).toBe(BRIDGE_PROTOCOL);
     expect(reply.body.paired).toBe(false);
-    // Identification must not double as a status leak.
-    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired', 'disconnected']);
+    // Identification must not double as a status leak: the list is exact, so nothing about what
+    // the app is currently doing can be added here without this failing first.
+    // `spoken` is what the caller claimed, so a false `compatible` can be told apart from a real
+    // mismatch: a request with no protocol header is incompatible by definition, and a QA run read
+    // that as a fault on a healthy build. null here means the caller said nothing.
+    expect(reply.body.spoken).toBe(BRIDGE_PROTOCOL);
+    expect(Object.keys(reply.body)).toEqual(
+      ['app', 'version', 'build', 'bridge', 'compatible', 'spoken', 'paired', 'disconnected']
+    );
     expect(reply.body.disconnected).toBe(false);
     expect(reply.body.compatible).toBe(true);
   });
@@ -385,6 +400,14 @@ describe('who is allowed to talk to it', () => {
     const reply = await request('OPTIONS', '/events', { auth: null });
     expect(reply.status).toBe(204);
     expect(reply.headers['access-control-allow-origin']).toBe(EXTENSION_ORIGIN);
+    expect(reply.headers['access-control-allow-private-network']).toBe('true');
+  });
+
+  it('answers a Firefox extension preflight without opening the bridge to web pages', async () => {
+    const firefoxOrigin = 'moz-extension://01234567-89ab-cdef-0123-456789abcdef';
+    const reply = await request('OPTIONS', '/events', { origin: firefoxOrigin, auth: null });
+    expect(reply.status).toBe(204);
+    expect(reply.headers['access-control-allow-origin']).toBe(firefoxOrigin);
     expect(reply.headers['access-control-allow-private-network']).toBe('true');
   });
 
@@ -3432,6 +3455,62 @@ describe('delivering a bootstrap', () => {
     }
   });
 
+  /**
+   * Blocking a worker that is in the middle of something still frees its slot.
+   *
+   * The case above blocks an idle worker. This one blocks a worker with a tool call actually
+   * running, which is the shape a QA round named as the one it never reached and the one where
+   * "a broker deadlocks if it is going to": the block is the user's stop, the call is work in
+   * flight, and if freeing the slot waited on the work then a worker whose tools are all refused
+   * would hold the run's only slot until its call gave up.
+   *
+   * It does not, and that is a property worth pinning rather than re-deriving: `sleepAgent`
+   * consults the agent's state and its own finish barrier, never `runningToolCalls`. Reading the
+   * code says so today; this says so after someone edits it.
+   */
+  it('frees a blocked worker’s slot while one of its tool calls is still running', async () => {
+    spawn({ workers: [{ task: 'blocked with work in flight' }], caller: { conversationId: PRIME_CHAT } });
+    const workerChat = 'blocked-mid-call-worker';
+    expect(bindConversation('worker-1', workerChat)).toBe(true);
+    expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
+
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    // A real in-flight registration, through the seam the MCP dispatcher itself uses, so the
+    // call is genuinely counted against this worker's conversation for the whole sweep.
+    const inFlight = trackInFlight(
+      {
+        startedAt: Date.now(),
+        transportKey: null,
+        agent: 'worker-1',
+        caller: { transportKey: null, requestId: 'wfr_blocked_mid_call', conversationId: workerChat },
+        outcome: null,
+        evidence: emptyEvidence()
+      },
+      () => held
+    );
+
+    try {
+      expect(runningToolCalls(workerChat)).toBeGreaterThan(0);
+      setChatBlocked(workerChat, true);
+      await sweepStaleSwarm(Date.now());
+
+      const log = getLog().map((entry) => entry.message);
+      expect(log.some((line) => line.includes('worker-1 is sleeping — The user blocked its chat'))).toBe(true);
+      // The slot, which is the point: with its only worker asleep the run parks, so the next
+      // prime is not refused with AGENTS_BUSY behind a call that may never come back.
+      expect(swarmState().running).toBe(false);
+      // And the call was neither cancelled nor waited on — it is still exactly where it was.
+      expect(runningToolCalls(workerChat)).toBeGreaterThan(0);
+    } finally {
+      release?.();
+      await inFlight;
+      resetBlockedChatsForTests();
+    }
+  });
+
   it('periodically sleeps a silent detached worker and wakes already-queued work without another MCP call', async () => {
     spawn({ workers: [{ task: 'detached silence maintenance' }], caller: { conversationId: PRIME_CHAT } });
     const workerConversation = 'silent-detached-worker';
@@ -3735,10 +3814,13 @@ describe('delivering a bootstrap', () => {
       await Promise.resolve();
       await Promise.resolve();
       await flushDurable();
-      await vi.waitFor(async () => {
-        const after = await readDurable<any>('bridge-commands');
-        expect(after?.commands?.some((entry: any) => entry?.id === workerCommand.id)).toBe(false);
-      });
+      await vi.waitFor(
+        async () => {
+          const after = await readDurable<any>('bridge-commands');
+          expect(after?.commands?.some((entry: any) => entry?.id === workerCommand.id)).toBe(false);
+        },
+        { timeout: 5_000, interval: 25 }
+      );
       const durableBroker = await readDurable<any>('swarm');
       expect(durableBroker?.dormantRuns?.[0]?.agents.find((entry: any) => entry?.info?.id === 'worker-1')?.info?.state).toBe(
         'failed'
@@ -5817,6 +5899,111 @@ describe('unattributed activity recovery', () => {
   });
 
   /**
+   * A continuation this process never adopted is not "being chased" either.
+   *
+   * The compaction watch floor is the instant this run started serving, and `inspectOwedCompactions`
+   * skips anything older outright — so a ticket restored from disk gets no watch, ever. Reading
+   * that absence as "new, about to be armed" made a restarted app suppress the silence check for
+   * the ticket's whole six-hour life: no pickup, no recovery, no explanation. It is the same
+   * wedged chat as the spent-pickups case, by the route users actually take — the app was
+   * restarted while a handoff was open, which is how the machine that reported this got there.
+   */
+  it('restores browser recovery to a chat whose continuation predates this run', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [
+        { kind: 'user_message', time: Date.now(), text: 'generate the huge handoff', messageId: 'm-restart' }
+      ]);
+      const filed = await request('POST', '/compact', {
+        body: { conversationId: OTHER, ticket: true, automatic: true }
+      });
+      const token = filed.body.token as string;
+
+      // A second, so the ticket is strictly older than the floor the restart is about to stamp.
+      // Well inside the two-minute asking cadence, so no pickup is spent here.
+      await vi.advanceTimersByTimeAsync(1_000);
+      // Restarting moves the floor above this ticket, which is what a real restart does to every
+      // continuation on disk.
+      await stopBridge();
+      const restarted = await startBridge();
+      base = `http://127.0.0.1:${restarted}`;
+      await pair();
+
+      await events(OTHER, [openTurn('turn-wedged-across-restart')]);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: OTHER, reason: 'silence' });
+      // Still open: this is the recovery half only, exactly as in the spent-pickups case.
+      expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * A compaction that has stopped being chased stops suppressing this pass.
+   *
+   * The skip is for a handoff still being worked, so nothing reloads a chat out from under it.
+   * Once the phase pickups are spent, the compaction machinery is not reloading that chat either,
+   * and the skip only hides a silent chat from the one check that would notice it.
+   *
+   * Measured on macOS on 2026-09-04: six continuations stalled at `dispatched-unresolved` on
+   * ChatGPT transport failures, every one with its three `writing` pickups spent, each chat then
+   * sitting out the full six-hour TTL with no pickup left and no silence recovery. The same shape
+   * was found once before by a different route — see the deleted-session case in ipc.test.ts.
+   *
+   * The ticket stays open on purpose: this is the recovery half, not a decision to abandon a
+   * handoff early. A reloaded page reads the pending ticket back and can still finish it.
+   */
+  it('restores browser recovery to a chat whose compaction pickups are all spent', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [
+        { kind: 'user_message', time: Date.now(), text: 'generate the huge handoff', messageId: 'm-wedged' }
+      ]);
+      const filed = await request('POST', '/compact', {
+        body: { conversationId: OTHER, ticket: true, automatic: true }
+      });
+      const token = filed.body.token as string;
+
+      const pickup = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return maintenance();
+      };
+
+      // The one asking-phase pickup, spent before the page gets the prompt out.
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      const asking = await pickup();
+      expect(asking).toMatchObject({ conversationId: OTHER, reason: 'compaction' });
+      await request('GET', `/status?repaired=${asking!.token}&repairAction=reloaded`);
+
+      // The prompt goes out and the brief never comes back: the writing phase, three pickups.
+      expect((await request('POST', '/compact', { body: { conversationId: OTHER, token, sourceAttempt: true } })).body.allowed).toBe(true);
+      expect((await request('POST', '/compact', { body: { conversationId: OTHER, token, sourceDispatch: true } })).body.armed).toBe(true);
+      expect(continuationByToken(token)?.sourceSend.state).toBe('dispatched-unresolved');
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        const handout = await pickup();
+        expect(handout).toMatchObject({ conversationId: OTHER, reason: 'compaction' });
+        await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`);
+      }
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      expect(await pickup()).toBeNull();
+
+      // Spent, and the ticket still open. The chat now goes silent with a turn in the air.
+      await events(OTHER, [openTurn('turn-wedged-by-compaction')]);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: OTHER, reason: 'silence' });
+      expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
    * The prime stops writing with no final answer. Two minutes of silence earn the reload; the
    * fresh page shows the same dead turn; one more minute of nothing — no tool call, no page
    * change — and the loop treats it as it treats a finished answer: the chat is owed the next
@@ -6848,6 +7035,111 @@ describe('the goal loop over the bridge', () => {
     expect(second.status).toBe(200);
     expect(second.body.goal.objective).toBe('');
     expect(repairWarnings()).toBe(warningsBefore + 1);
+  });
+
+  /**
+   * Browser control, from the app parking an action to the answer arriving back.
+   *
+   * The driver that performs the action lives in an extension service worker and cannot be
+   * reached from a test, but everything between the caller and that worker can be, and it is
+   * the part with the interesting failure modes: an action handed out twice, a result from
+   * another conversation resolving somebody's call, a late answer to something that already
+   * gave up.
+   */
+  describe('carrying a browser action', () => {
+    const CHAT = 'cafe0005-0000-4000-8000-000000000005';
+
+    async function liveChat() {
+      await pair();
+      await request('POST', '/events', {
+        body: {
+          conversationId: CHAT,
+          events: [{ kind: 'user_message', time: Date.now(), text: 'drive the browser', messageId: 'm-browser-1' }]
+        }
+      });
+    }
+
+    it('hands the action to the page that polls, once, and answers the caller', async () => {
+      await liveChat();
+      resetBrowserControlForTests();
+
+      const pending = runBrowserCommand(CHAT, { type: 'click', x: 10, y: 20 });
+
+      const first = await request('GET', `/activity?conversationId=${CHAT}`);
+      expect(first.status).toBe(200);
+      const carried = first.body.browserCommand;
+      expect(carried).toMatchObject({ action: { type: 'click', x: 10, y: 20 } });
+      expect(typeof carried.id).toBe('string');
+
+      // Handed out once: a second tab showing the same chat must not perform the same click.
+      const second = await request('GET', `/activity?conversationId=${CHAT}`);
+      expect(second.body.browserCommand).toBeNull();
+
+      const settled = await request('POST', '/browser/result', {
+        body: { conversationId: CHAT, id: carried.id, ok: true, data: { clicked: { x: 10, y: 20 } } }
+      });
+      expect(settled.status).toBe(200);
+      expect(settled.body).toMatchObject({ settled: true });
+
+      await expect(pending).resolves.toMatchObject({ ok: true, data: { clicked: { x: 10, y: 20 } } });
+    });
+
+    it('refuses a second action while one is still outstanding', async () => {
+      await liveChat();
+      resetBrowserControlForTests();
+
+      const first = runBrowserCommand(CHAT, { type: 'click', x: 1, y: 1 });
+      // Ordered actions: running two at once means running them in an order nobody chose.
+      await expect(runBrowserCommand(CHAT, { type: 'click', x: 2, y: 2 })).resolves.toMatchObject({
+        ok: false,
+        error: 'BROWSER_BUSY'
+      });
+
+      const feed = await request('GET', `/activity?conversationId=${CHAT}`);
+      await request('POST', '/browser/result', {
+        body: { conversationId: CHAT, id: feed.body.browserCommand.id, ok: true, data: {} }
+      });
+      await expect(first).resolves.toMatchObject({ ok: true });
+    });
+
+    it('refuses a result that names the wrong command or the wrong chat', async () => {
+      await liveChat();
+      resetBrowserControlForTests();
+
+      const pending = runBrowserCommand(CHAT, { type: 'click', x: 3, y: 3 });
+      const feed = await request('GET', `/activity?conversationId=${CHAT}`);
+      const id = feed.body.browserCommand.id;
+
+      // A late answer to something that already gave up, or an id from another run.
+      const wrongId = await request('POST', '/browser/result', {
+        body: { conversationId: CHAT, id: 'bc-not-this-one', ok: true, data: {} }
+      });
+      expect(wrongId.body).toMatchObject({ settled: false });
+
+      // Another chat's page must not be able to resolve this conversation's call.
+      const other = 'cafe0006-0000-4000-8000-000000000006';
+      const wrongChat = await request('POST', '/browser/result', {
+        body: { conversationId: other, id, ok: true, data: {} }
+      });
+      expect(wrongChat.body).toMatchObject({ settled: false });
+
+      await request('POST', '/browser/result', {
+        body: { conversationId: CHAT, id, ok: false, error: 'BROWSER_BAD_REF', detail: 'e3 is no longer on this page' }
+      });
+      // A failure is an answer: the caller learns why rather than waiting for a timeout.
+      await expect(pending).resolves.toMatchObject({
+        ok: false,
+        error: 'BROWSER_BAD_REF',
+        detail: 'e3 is no longer on this page'
+      });
+    });
+
+    it('carries nothing when nothing is waiting', async () => {
+      await liveChat();
+      resetBrowserControlForTests();
+      const feed = await request('GET', `/activity?conversationId=${CHAT}`);
+      expect(feed.body.browserCommand).toBeNull();
+    });
   });
 
   /** The page needs to know three things, and it gets them on the feed it already polls. */
@@ -7965,5 +8257,38 @@ describe('shutting the listener down', () => {
     const restarted = await startBridge();
     expect(restarted).not.toBeNull();
     base = `http://127.0.0.1:${restarted}`;
+  });
+});
+
+describe('issue #35 browser wait-status swarm projection', () => {
+  it('exposes only the owning prime\'s minimal worker lifecycle state', async () => {
+    await pair();
+    const prime = '34343434-3434-4343-8343-343434343434';
+    const workerChat = '45454545-4545-4454-8454-454545454545';
+    const secretTask = 'Audit private implementation details that must not be projected to the browser';
+
+    spawn({
+      workers: [{ label: 'Repository audit', task: secretTask }],
+      caller: { conversationId: prime }
+    });
+    expect(bindConversation('worker-1', workerChat)).toBe(true);
+
+    const primeActivity = await request('GET', `/activity?conversationId=${prime}&since=0`);
+    expect(primeActivity.status).toBe(200);
+    expect(primeActivity.body.swarm).toMatchObject({
+      running: true,
+      agents: expect.arrayContaining([
+        expect.objectContaining({ id: 'prime', role: 'prime' }),
+        expect.objectContaining({ id: 'worker-1', role: 'worker', label: 'Repository audit', state: 'active' })
+      ])
+    });
+    expect(JSON.stringify(primeActivity.body.swarm)).not.toContain(secretTask);
+    for (const entry of primeActivity.body.swarm.agents as Array<Record<string, unknown>>) {
+      expect(Object.keys(entry).sort()).toEqual(['id', 'label', 'role', 'state']);
+    }
+
+    const workerActivity = await request('GET', `/activity?conversationId=${workerChat}&since=0`);
+    expect(workerActivity.status).toBe(200);
+    expect(workerActivity.body.swarm).toBeNull();
   });
 });

@@ -80,6 +80,7 @@ const api = {
   disconnect: () => call<AppState>('connection:disconnect'),
   runDiagnostics: () => call<Diagnosis>('diagnostics:run'),
   requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
+  refreshDesktopAccess: () => call<AppState>('desktop:refreshAccess'),
   getLog: () => call<LogEntry[]>('log:get'),
   getLogText: () => call<string>('log:text'),
   getLogJson: () => call<string>('log:json'),

@@ -267,6 +267,7 @@ class UnifiedExecProcess {
   outputClosed = false;
   cancelled = false;
   private exited = false;
+  private exitedAtMs: number | null = null;
   private exit: number | null = null;
   private failure: string | null = null;
   private openStreams = 0;
@@ -430,6 +431,7 @@ class UnifiedExecProcess {
   private signalExit(exitCode: number | null): void {
     if (!this.exited) {
       this.exited = true;
+      this.exitedAtMs = Date.now();
       this.exit = exitCode;
     }
     if (!this.cancelled) {
@@ -451,6 +453,10 @@ class UnifiedExecProcess {
 
   exitCode(): number | null {
     return this.exit;
+  }
+
+  exitedAt(): number | null {
+    return this.exitedAtMs;
   }
 
   failureMessage(): string | null {
@@ -624,6 +630,15 @@ export interface BackgroundTerminalInfo {
   tty: boolean;
 }
 
+export interface BackgroundTerminalState {
+  processId: number;
+  running: boolean;
+  exitedUnread: boolean;
+  tty: boolean;
+  startedAt: number;
+  changedAt: number;
+}
+
 interface ProcessEntry {
   process: UnifiedExecProcess;
   processId: number;
@@ -631,6 +646,8 @@ interface ProcessEntry {
   hookCommand: string;
   tty: boolean;
   initialExecCommandActive: boolean;
+  startedAt: number;
+  lastUsed: number;
 }
 
 export interface BackgroundExecState {
@@ -700,7 +717,9 @@ export class UnifiedExecProcessManager {
         cwd: request.displayCwd,
         hookCommand: request.hookCommand,
         tty: request.tty,
-        initialExecCommandActive: true
+        initialExecCommandActive: true,
+        startedAt: start,
+        lastUsed: start
       });
     }
 
@@ -858,6 +877,46 @@ export class UnifiedExecProcessManager {
     }
   }
 
+  /**
+   * Non-destructive lifecycle projection for /activity. This never drains output and never
+   * removes an exited process; write_stdin remains the only consumer of the pending result.
+   */
+  backgroundState(processId: number): BackgroundTerminalState | null;
+  /** Non-destructive obligation view for a caller-owned set of retained sessions. */
+  backgroundState(processIds: ReadonlySet<number>): BackgroundExecState;
+  backgroundState(
+    target: number | ReadonlySet<number>
+  ): BackgroundTerminalState | null | BackgroundExecState {
+    if (typeof target === 'number') {
+      const entry = this.processes.get(target);
+      if (!entry) return null;
+      const exited = entry.process.hasExited();
+      return {
+        processId: target,
+        running: !exited,
+        exitedUnread: exited,
+        tty: entry.tty,
+        startedAt: entry.startedAt,
+        changedAt: entry.process.exitedAt() ?? entry.startedAt
+      };
+    }
+    const running: number[] = [];
+    const exitedUnread: Array<{ processId: number; exitCode: number | null }> = [];
+    for (const entry of this.processes.values()) {
+      if (entry.initialExecCommandActive) continue;
+      if (!target.has(entry.processId)) continue;
+      if (entry.process.hasExited()) {
+        exitedUnread.push({ processId: entry.processId, exitCode: entry.process.exitCode() });
+      } else {
+        running.push(entry.processId);
+      }
+    }
+    return {
+      running: running.sort((left, right) => left - right),
+      exitedUnread: exitedUnread.sort((left, right) => left.processId - right.processId)
+    };
+  }
+
   /** Live sessions, oldest id first. */
   listProcesses(): BackgroundTerminalInfo[] {
     return [...this.processes.values()]
@@ -870,25 +929,6 @@ export class UnifiedExecProcessManager {
         pid: entry.process.pid,
         tty: entry.tty
       }));
-  }
-
-  /** Non-destructive obligation view for a caller-owned set of retained sessions. */
-  backgroundState(processIds: ReadonlySet<number>): BackgroundExecState {
-    const running: number[] = [];
-    const exitedUnread: Array<{ processId: number; exitCode: number | null }> = [];
-    for (const entry of this.processes.values()) {
-      if (entry.initialExecCommandActive) continue;
-      if (!processIds.has(entry.processId)) continue;
-      if (entry.process.hasExited()) {
-        exitedUnread.push({ processId: entry.processId, exitCode: entry.process.exitCode() });
-      } else {
-        running.push(entry.processId);
-      }
-    }
-    return {
-      running: running.sort((left, right) => left - right),
-      exitedUnread: exitedUnread.sort((left, right) => left.processId - right.processId)
-    };
   }
 
   /** Exited rows not handled by the starting exec; polling releases these rows. */
@@ -936,13 +976,18 @@ export class UnifiedExecProcessManager {
     return { kind: 'alive', exitCode, processId: entry.processId };
   }
 
-  /** Capacity is admission, never garbage collection: every retained row still owes output. */
+  /**
+   * Hard cap on retained sessions without sacrificing completed output.
+   *
+   * An exited entry is still result-bearing until write_stdin consumes its terminal result.
+   * Evicting one here would silently discard exactly the output issue #36 requires us to keep.
+   * Reservations participate in the cap, so concurrent exec_command calls cannot race past it;
+   * when full, refuse the new launch and leave every existing session available to drain.
+   */
   private ensureProcessCapacity(requestProcessId: number): void {
-    // Reservations participate in the hard cap, so concurrent exec_command calls cannot
-    // each observe one free slot and collectively insert a 65th live process.
     if (this.reservedProcessIds.size > MAX_UNIFIED_EXEC_PROCESSES) {
       throw UnifiedExecError.createProcess(
-        `too many retained terminal sessions (limit ${MAX_UNIFIED_EXEC_PROCESSES}); drain a returned session with write_stdin before starting another`
+        `too many retained or active terminal sessions (limit ${MAX_UNIFIED_EXEC_PROCESSES}); drain completed results with write_stdin or terminate a running session before starting another`
       );
     }
     if (!this.reservedProcessIds.has(requestProcessId)) {

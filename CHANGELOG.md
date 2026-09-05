@@ -9,6 +9,339 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## Unreleased
+
+### Added
+- **ChatGPT can now drive a real web page, not just the desktop.** A `browser` tool talks to the
+  companion extension over the Chrome DevTools protocol — `navigate`, `observe`, `click_ref`,
+  `type`, `scroll`, `drag`, hover, and back/forward/reload — with `isTrusted: true` input a page
+  cannot tell apart from a person, refs that expire the moment a newer observation supersedes
+  them, and a hard refusal list (ChatGPT's own tab, `chrome://`, `file://`, and lookalike
+  addresses judged by parsed identity rather than string prefix) enforced before any action
+  reaches the page. A driven tab is collected into a visibly labelled tab group, carries a
+  debugger banner Chrome itself shows, and draws a pointer overlay so what the model does is
+  never invisible to the person watching. Verified against a real Chromium build, not only unit
+  tests, in `npm run verify:browser`.
+  <!-- The two macOS Desktop connector entries that stood here were removed: they describe work
+       that shipped upstream in 2.0.3, not work on this branch. The macOS changes that *are* this
+       branch's — the three refusal and parity fixes — are in Fixed below, where they belong. -->
+
+### Fixed
+- **A link click that reaches nothing now says so, instead of reporting plain success.** Clicking a
+  link could return `ok` with the page exactly where it was, and nothing in the answer could tell
+  that apart from a link that simply does not navigate. `hit` and `covered` were the previous
+  answer to this and they are blind to the cause: both are computed inside the page, and the thing
+  swallowing the click is outside it. A Chrome-native dialog — the password-manager leak prompt, a
+  permission bubble — is painted by the browser process over the tab and suspends input to it, so
+  `elementFromPoint` cannot see it, `covered` is honestly `false`, and the click is dispatched,
+  reported trusted, and lands nowhere. QA met this twice on a logout button, the second time with
+  the dialog visible on screen. No protocol event announces such a dialog, so it cannot be
+  detected — but its effect can: when a click resolves to a link that should move the page in this
+  tab, the answer now reports whether it did, names the address it did not reach, and says what
+  kind of thing swallows a click invisibly. Nothing is refused and no click behaves differently.
+  The same button was then driven against the live site from a clean profile and worked, with the
+  identical `hit=i covered=false` the failing runs reported — so that signature was never the
+  cause, and the click itself was never broken.
+- **Being fenced out of a browser window now says where to go instead.** Desktop input cannot
+  reach a web page that has no focused control yet: the fence asks the application which control
+  has keyboard focus, a browser answers only when the page exposes one, and the click that would
+  create that focus is itself the click being refused. That is the fence failing closed on honest
+  ignorance of where input would land, which is exactly its job, and it is not being changed. But
+  the way out exists and was never stated — the `browser` tool drives the page over CDP and needs
+  none of this. A QA run met these refusals five times in a row against a browser window,
+  re-observing and retrying between each. `INPUT_TARGET_LOST`, `STALE_UI_SNAPSHOT` and
+  `FOCUS_FAILED` against a browser window now name that remedy, and the original refusal — the
+  partial-batch accounting included — is kept whole in front of it.
+- **Refusals that ask for a folder now name the folders.** `WORKSPACE_REQUIRED` told a caller to
+  supply "an explicit approved workdir" without saying which ones exist, and a worker meets it on
+  its very first command — the second thing that ever happens in its chat. It now lists the
+  approved roots, turning a guess into a choice. The fence itself is unchanged and deliberately so:
+  it looks like it could be skipped when only one root is approved, but the failure it was written
+  for — a run that meant a nested project and rebuilt its parent instead — happened inside a single
+  root, so a root count cannot see that ambiguity.
+- **Chrome's error page is no longer mistaken for the site.** Ask three parts of Chrome what a tab
+  that failed to load is showing and two of them name the site: measured against a dead port,
+  `chrome.tabs` reported the requested address and so did the navigation history, while only the
+  frame tree reported `chrome-error://chromewebdata/`. Every check upstream had been asking one of
+  the two that lie. So a broken tab looked like an ordinary page to the auto-attach that picks one
+  when nothing is attached, and to the guard that re-checks a page the driver is holding. A QA run
+  met the result: straight after `detach` said no tab was under control, the next `observe`
+  silently re-attached and returned the Chrome error page as though it were a real page, with no
+  refusal anywhere. The address is now read from the frame tree, and a tab holding an error page is
+  refused by name — saying which address could not be loaded, rather than reporting a page that
+  isn't there.
+- **A dropdown can now actually be set.** `set_value` was click, select-all, insert — which is
+  right for a text field and cannot work on a native `<select>`, because Chrome paints that
+  dropdown in the browser process, outside the page, where no synthetic event of any kind reaches
+  it. The click opened a popup the driver could not see, the insert went nowhere, and every call
+  still reported success: a QA run tried `click_ref`, keyboard, `set_value` and typing in turn, got
+  no error from any of them, and watched every read-back still say "Please select an option".
+  `set_value` on a select now picks the option by label or by value and fires `input` and `change`,
+  which is what the page would see from a real selection, and an unmatched option is refused by
+  name with the available choices listed instead of silently doing nothing. One honest limit: the
+  option can only be chosen from inside the page, so this is the single action in the browser tool
+  that is not `isTrusted` input — every click, key and drag still is.
+- **Things that reveal themselves on hover can now be hovered.** `move_ref` exists for menus and
+  captions that only appear under the pointer, and on the page that is the canonical example of
+  exactly that it had nothing to aim at: the wrapper is a plain `div` with no role and no link, the
+  caption inside it is hidden until hovered and so counts as unreachable, and the only ref on the
+  whole page was an unrelated footer link. `observe` now also reports elements the page's own
+  stylesheets style on `:hover`. That is the page declaring the element reacts to a pointer, so
+  nothing is exposed that no author asked for — and reading the rule rather than guessing at tag
+  names is what keeps an image-heavy page from flooding the ref list and pushing its real controls
+  out of the budget.
+- **"Waiting for 2 tool calls" no longer outlives the calls, or the app that was running them.**
+  That count describes work inside the app's own process, and only `/activity` can confirm it. A
+  failed poll deliberately leaves the last number alone — one dropped poll is no evidence the work
+  stopped — but nothing ever expired it, so an app that stopped answering froze the last count it
+  had reported and the page went on asserting it. Restarting the app under a live turn left the
+  panel reading "Waiting for 2 tool calls" for over ten minutes, across a turn that had since
+  completed: the calls died with the old process and nothing local said so. An app restart is an
+  ordinary event — the updater performs one. The count now expires if the app has not confirmed it
+  for a minute (thirty consecutive misses at the busy poll rate), and every reader goes through
+  that check rather than the raw number: the stage panel, which was asserting it at the user; the
+  revival gate, which refused to submit while a stale count sat above zero; and the poll cadence,
+  which stayed at the busy rate forever. It expires on a clock rather than zeroing on the first
+  failure, because a count that blinked off at every blip would be a worse claim than a briefly
+  stale one.
+- **The `exec_command` path contract is now advertised, both halves of it.** `read.paths` names the
+  approved root, and `workdir` said only "Working directory for the command", leaving a model to
+  guess whether `exec_command` speaks the same path language. It half does: `workdir` resolves
+  through the same resolver the read tools use, so the virtual path works there, while the command
+  text is deliberately not translated, so the same spelling inside `cmd` is refused. Both rules
+  were already enforced; only the description was silent, and one QA round met both sides of the
+  gap in a single session.
+- **A handoff open across an app restart no longer costs that chat its browser recovery either.**
+  The compaction pickups that reload a chat mid-handoff only ever apply to tickets this run
+  accepted — anything older is skipped, by design, since the obligation predates the process. But
+  "no pickups scheduled" was being read as "new, about to be scheduled", so a continuation restored
+  from disk counted as busy forever and the silence check skipped that chat for the ticket's whole
+  six-hour life. Same wedged chat as below, by the route people actually take: the app restarted
+  while a handoff was open.
+- **A stalled compaction no longer takes browser recovery down with it.** A chat named by an open
+  automatic continuation was skipped by the silence check for the life of that continuation. The
+  skip is there so nothing reloads a page out from under a handoff still being worked — but once
+  the phase's scheduled pickups are spent, the compaction machinery has stopped reloading that
+  chat itself, and the skip is no longer protecting a transaction. It is only hiding a silent chat
+  from the one check that would notice. Measured on macOS: six continuations stalled after ChatGPT
+  transport failures, every one with its `writing` pickups spent, each chat then sitting out the
+  full six-hour deadline with no pickup left *and* no silence recovery — a chat that had simply
+  stopped working for the afternoon with nothing on screen to say why. The compaction failing is
+  allowed, since it depends on ChatGPT's own transport; taking an unrelated subsystem down with it
+  is not. The skip now lasts exactly as long as the chat is still being chased. Nothing is aborted
+  and no deadline moves — and letting recovery through is the repair rather than merely the
+  absence of harm, because a reloaded page reads the pending ticket back and can still finish the
+  handoff the dead page could not.
+- **An automatic compaction whose prompt ChatGPT never took could wedge a chat for six hours.**
+  The instruction is armed in durable state immediately *before* the click, because a page that
+  dies at that moment may or may not have left the prompt with ChatGPT, and re-sending it would
+  be the double-send that fence exists to prevent. What was missing was the other half: when the
+  click demonstrably landed nothing, the page said so only in its own error text and never told
+  the app, so the ticket sat armed until its six-hour deadline. Three scheduled pickups fired and
+  expired against a chat whose message box had never received the prompt, and because the app
+  still counted that chat as mid-compaction, it also skipped it for browser recovery for the whole
+  window. The page now reports it — on the strength of the same five-signal acceptance check it
+  already ran, against a turn this flow had stopped and settled before typing — and the app ends
+  the attempt rather than leaving it armed. Nothing is re-sent, here or anywhere: the cost of
+  being wrong is one abandoned compaction that gets offered again on the next qualifying turn.
+- **The replacement chat's own version of that give-up had never once worked.** When a fresh chat
+  proves nothing left its message box — the documented case is pressing Escape as the brief lands
+  — it is meant to hand the brief straight back so another chat can take it, instead of leaving it
+  claimed for the quarter-hour the lease runs. That report was written, handled correctly at both
+  ends, and silently discarded in between: the extension's background worker rebuilds each
+  request field by field, and this one field was never added to the list, so nothing it said ever
+  reached the app. Two days of a feature that read as working everywhere anyone looked. It works
+  now, and the way a request is assembled changed so the same omission cannot happen quietly
+  again — the fields are named in one list, and a test reads that list against what the page can
+  actually send and fails naming anything with no route.
+- **A checkpoint that goes missing between the browser and the app now says so.** All three cases
+  above were invisible from the app's side: it simply fell through to "start a compaction",
+  answered normally, and left both ends looking correct. Requests on that route now record which
+  fields arrived, so a lost one is a single line in the log rather than a debugging session.
+- **Three desktop refusals told the model to call something that does not exist.**
+  `UNKNOWN_UI_REF`, `STALE_REF` and `STALE_FRAME` all ended with "call `get_window_state` or
+  `find_ui` again" — both internal helper operations, neither reachable from a tool. The one
+  instruction each refusal existed to give named nothing the caller could act on. They now name
+  `observe`, which is what actually issues refs and frames.
+- **macOS said only "unknown key" where Windows listed the keys it takes.** The Windows helper
+  has named valid key names in its `BAD_KEY` refusal since this line began; the macOS helper's
+  terser wording left a model with nothing to correct itself from. Both now list them, each from
+  its own key table — the two platforms genuinely differ, so neither list is a copy of the other.
+- **macOS kept a UI-snapshot history a quarter the size of the one Windows was measured to need.**
+  Sixteen was raised to 96 on Windows after thirteen workers sharing one helper evicted each
+  other's newest snapshot and produced forty stale-snapshot refusals in a single run; the macOS
+  side kept the sixteen that had just been measured as too few. Both are 96 now, and a test pins
+  them together so raising one cannot quietly leave the other behind.
+- **Compact & Resume could loop, undoing its own fresh-chat reset within seconds.** A tool call
+  still in flight when a rebind landed — a slow browser screenshot was the common case — could
+  pass its own attribution check, then only reach the recorder after the session had already
+  moved to the new chat, adding its tokens to the meter the rebind had just reset to zero. On a
+  tool-heavy conversation that was enough to cross the auto-compaction threshold again almost
+  immediately, sending the fresh chat straight back into another compaction, and another, each
+  brief larger than the last. The call is still kept as durable history on the row it belongs to;
+  it just no longer counts toward the chat that didn't make it.
+- **A backgrounded driven tab used to make `browser` scroll and click lie.** Chrome defers
+  compositor work for a tab that is not its window's active one, so a scroll could sit for
+  seconds before landing — doubled, once the tab came back — while the reply had already said
+  `moved: false`; a link opened from that state got a new tab Chrome attributed to whichever tab
+  was actually active, not the one that clicked, so the reply never reported it. The driver now
+  activates the tab first, escalating to a real window switch only on the rare case (a minimized
+  window) that a lighter activation can't reach — and says so, via a new `broughtToFront` field,
+  rather than silently taking focus away from whatever the person was doing.
+- **A capability refusal now names the actual switch to flip.** `TOOL_DISABLED` used to fall back
+  to "enable the permission" when a tool's capability had no custom message configured; it now
+  names the capability's own Settings row (`enable "See the screen"`) by default.
+- **`warm`, `cursor` and `windows` now refuse a field they don't recognize**, the same way `act`
+  already did, instead of silently accepting and ignoring it.
+- **The Permissions card's read-only explanation no longer overlaps or misaligns the list below
+  it.** A grid-row and padding fix keeps it readable and indented to match the header and rows at
+  every window size.
+- **A scrollable card that ends mid-row no longer reads as broken.** The Permissions card holds
+  five permission groups in a box tall enough for three-and-a-bit, and Chromium's overlay
+  scrollbar gives no visible cue that there is more — so whichever row landed on the fold looked
+  sliced off rather than merely scrolled past. Every card's scroll area now fades toward its own
+  background at whichever edge still has more content behind it, and only that edge, so a cut row
+  reads as a fade instead of a clip.
+- **A single-chat session no longer gets refused for a swarm it was never part of.** Running a
+  command with no workdir used to check whether *any* multi-agent run existed anywhere in the
+  app, not whether the calling conversation belonged to one — an ordinary chat could be told
+  `WORKSPACE_REQUIRED: this multi-agent chat has no proven workspace` on its very first command
+  merely because an unrelated swarm happened to be active elsewhere. The check is now scoped to
+  this call's own proven agent membership, the same identity the dispatcher already resolves for
+  every call; a genuine swarm member with no learned folder of its own is still refused exactly as
+  before.
+- **`act_ui`'s `changed` field no longer reports `false` for a control it never actually read.**
+  Chromium answers `AXValue` with an empty string for a control with nothing to say about its own
+  state — checkboxes included, in every state, checked or not — rather than omitting the attribute
+  the way AppKit controls do. Reading an empty string before and after a press "isEqual"s itself,
+  so it always reported `changed: false` ("nothing changed") when the field's own contract calls
+  for omitting it ("nothing to compare"). An empty AXValue is now treated the same as no value at
+  all. This does not fix the click itself: `AXPress` measurably does not register a real click on
+  a Chromium checkbox at all — confirmed general to any Chromium checkbox, not specific to the
+  extension's own popup — while a coordinate click on the identical control works immediately.
+  That is not a bug to patch silently: it is the same shape as the System Settings toggle finding
+  `changed` was built to report in the first place, so the fix is the same one already in place —
+  tell the truth about what happened rather than guess a recovery. Practical guidance for a
+  checkbox inside a Chrome tab specifically: use the `browser` tool's `click_ref`, which reaches
+  Chromium content over the DevTools protocol rather than through this accessibility path.
+- **A driven tab's "Chat On Steroids" tab-group band no longer outlives the session that opened
+  it.** The extension's only record of which group belongs to a live session was plain in-memory
+  state, and Chrome recycles its MV3 service worker on its own after roughly 30 seconds of
+  inactivity — a restart mid-session, or between the last action and someone noticing, wiped that
+  record with no cleanup ever having run for it: the tab kept its blue band with nothing left
+  owning it, and driving a different tab afterward could show two bands at once instead of the
+  old one disappearing. A stale "Chat On Steroids" group is now swept — ungrouped, never closed —
+  before a new one is created, and on the extension's own periodic wake timer, so an abandoned one
+  is caught even if nothing ever attaches again.
+- The native scroll-settle wait now measures the real clock instead of counting requested sleep
+  durations, which had let a documented 120 ms ceiling run past 300 ms on real hardware.
+- **A stale older-session page could permanently strand a scrolled row.** Scrolling for
+  session history started a request against the current cursor; if a hot refresh replaced the
+  first page and its cursor before that older-page response returned, committing the stale
+  response's own cursor over the newer one left no cursor able to reach the rows between them.
+  The pagination loader now discards a response whose generation or cursor no longer matches by
+  the time it resolves, the same fencing the hot-refresh path already had.
+- **A recursive `read` glob touched the target of a directory symlink it was about to skip.**
+  `walk()` re-stat'd every child to classify it, even ones a directory listing had already
+  classified for free — and for an unfollowed symlink, that stat followed the link to its target
+  before then discarding it, reading metadata about a path outside the approved root that the
+  directory-listing boundary is meant to keep opaque. Ordinary entries are now classified from
+  the cheap listing data directly; an unfollowed symlink is skipped without ever touching its
+  target.
+- **Three correctness paths read a UI-capped session list as if it saw every retained session.**
+  Request-correlation crash recovery, deterministic Unattributed-bucket repair, and MCP session
+  search all read a 5,000-folder-capped list; search in particular could report
+  `search_complete: true` while sessions still existed beyond the cap. All three now use the same
+  uncapped catalog identity and retention already relied on.
+- **A multi-agent run's durable snapshot was built before the write it was debounced into.**
+  Every critical or telemetry mutation triggered a full clone of dormant worker histories and
+  agent state before the 300 ms write-coalescing window got a chance to collapse a burst of them
+  into one write. The snapshot is now deferred to the moment a queued write actually flushes.
+- **Deleting a recording no longer costs its chat browser recovery, permanently.** If a Compact
+  & Resume was still open on that row, nothing gave it up — and an automatic one has no clock
+  until something asks for it, so it never expired, was never swept, and survived every restart
+  by design. The app went on treating that ChatGPT chat as mid-compaction, and a chat that is
+  compacting is skipped by the silence sweep, so it never got another recovery reload for the
+  life of the install. Deleting a row now gives up the Compact & Resume it owned, the same way it
+  already released that row's block.
+- **Goal and Loop now refuse an irreversible action nobody asked for.** Nothing in the
+  meta-prompts said what to do when ChatGPT asks permission to delete, overwrite, force-push,
+  send, publish or spend — and the one answer that cannot be taken back is the one it could give
+  while the user is away. All three prompts now say it may only answer what the requirements
+  already decide, and must refuse anything irreversible they do not, pointing back at what was
+  actually asked. The Loop, which owes a message every turn and has no NO_REPLY, is told that
+  refusing is still a message. Installs that never edited their prompt migrate to the new text;
+  an edited prompt is left alone, as always.
+- **A resumed chat no longer talks like the handover brief.** After Compact & Resume the first
+  message labelled "user" in the new chat is the brief this app typed, so "write in the person's
+  own register" copied its formal tone into a chat whose owner writes in lowercase shorthand. The
+  prompts now name that message for what it is — the app's own writing, to be read for the work
+  but never for the voice — and fall back to writing plainly until the person has said something
+  themselves.
+- **A still-running workflow can no longer lose its proven owner to a full request registry.**
+  The registry that binds a ChatGPT request id to its conversation is bounded, and it treated
+  page sightings as the only sign an id was alive. That inverted the guarantee it exists for:
+  the case it was written for is a workflow whose calls keep arriving after the page that proved
+  it was reloaded, compacted or closed — a workflow that can never be sighted again, and so sat
+  first in line to be discarded, while ids nothing had used for hours stayed. A call arriving
+  under an id now counts as that id being alive, so only genuinely untouched ids are dropped.
+- **The prime agent has one working folder identity instead of two.** It used to answer to both
+  its conversation and a reusable `agent:prime` key, with every read reconciling and mirroring
+  between them — a design from before the exact ChatGPT conversation became the authority. No
+  live path could write that mirror any more, and because friendly agent ids are reused by every
+  later run, leaving it in place kept open a shape where an unrelated prime could pick up a
+  previous run's folder without either conversation ever naming it. The prime is now
+  conversation-only, and a call that cannot prove its conversation gets no working folder at all,
+  exactly like any other unidentified caller.
+- **Compact & Resume could hand a chat straight back into another compaction, without end.** A
+  replacement chat starts carrying the handoff brief it was resumed with, and that brief is
+  deliberately large — the handoff rules ask for 10,000-30,000 tokens, at or above the lowest
+  automatic-compaction threshold the settings will accept. Automatic compaction measured the
+  chat's whole context, so the brief alone put the replacement over the line the instant it
+  landed: it was told to write another brief of about the same size, and the chat after it too.
+  Measured on a real machine at a 10,000 threshold: three chats inside two minutes, the second
+  asked to compact 1.6 seconds after it was created, having done no work of its own. The
+  threshold now measures what a chat has accumulated since it was resumed rather than what it
+  inherited, which is the same number for every chat nobody resumed.
+- **A user message could be dropped by both of the extension's two recorders at once.** A user
+  turn is written either by the DOM transcript scan or, when that cannot see it, by the page-model
+  scan — which defers to the DOM one by message id. But the set of "the DOM recorder owns these"
+  was built from a weaker test than the DOM recorder's own: any row whose id was rendered while
+  its text was not, or whose id had been retired when the tab left that chat, was skipped by the
+  first writer before it was ever classified and deferred by the second. Neither wrote it. The
+  textless window is the one every message passes through on an ordinary send and normally heals
+  on the next observation; combined with navigating away it does not, because retirement is
+  permanent by design — a live session lost two real user messages this way, keeping their
+  assistant answers and tool calls, which is the worst possible shape for a handover brief that
+  treats user messages as its highest authority. Both readers now share one predicate.
+- **Watching a long recording no longer costs its whole history on every poll.** The session
+  tool's update cursor answers one question — what was recorded since the last checkpoint — but
+  it read and re-parsed the entire journal to do it, so P polls of an N-event recording cost
+  O(P x N) and the poll that found nothing new was the most expensive thing the tool did. A new
+  bounded reader walks the journal backwards from the end and stops at the checkpoint, reading a
+  single block instead of the whole file: five consecutive no-op polls of a 1.2 MB recording went
+  from 6,163,910 bytes read to 327,680, and that cost no longer grows with the recording. If the
+  checkpoint is further back than the read budget can reach, it falls back to the full read
+  rather than return a page with a hole in it — an update cursor that skipped rows would lose
+  recorded history for good.
+- **A pending Goal reply obligation was silently forgotten across a Compact & Resume handover.**
+  The chat that produced it is retired the instant its own replacement takes over, so an owed
+  Goal decision from just before a handoff was neither collected nor really lost in a way that
+  needed fixing — the loop resumes on the replacement chat's own next reply either way — but the
+  code comment claiming it "travels to the replacement with everything else" was wrong and now
+  says what actually happens and why that is fine.
+- **A continuation that finally settled long after it opened lost its "already done" window
+  instantly.** Retention for a committed or aborted transaction was measured from when it
+  opened, not from when it settled, so a transaction that sat waiting for hours before its own
+  deadline aborted it was already outside its retention window the moment it became terminal — a
+  replayed acknowledgment from the page would have started a fresh transaction instead of getting
+  "already done." Retention is now measured from the settle time every state transition renews.
+
+### Security
+- macOS Screen Recording and Accessibility remain independent OS grants. The helper requests no
+  privilege at startup, reports a typed error when a live operation lacks consent, and permission
+  revocation remains effective without changing the connector schema cached by ChatGPT.
+
 ## [2.0.5] — 2026-09-04
 
 **The update installs.**

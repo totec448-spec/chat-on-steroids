@@ -23,7 +23,8 @@ import { rawPromises as fs } from '../rawfs.js';
 import { inboundRequestId } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
-import type { Capabilities, Root } from '../../shared/types.js';
+import type { Capabilities, Capability, Root } from '../../shared/types.js';
+import { CAPABILITY_LABELS, WRITE_CAPABILITIES } from '../../shared/types.js';
 import { FsOpError, formatBytes, type FileInfo } from '../fsops.js';
 import { logInfo, logWarn } from '../logger.js';
 import {
@@ -133,6 +134,45 @@ export type ToolResult = { content: ToolContent[]; structuredContent?: Record<st
 
 export const ok = (text: string): ToolResult => ({ content: [{ type: 'text', text }] });
 export const fail = (text: string): ToolResult => ({ content: [{ type: 'text', text }], isError: true });
+
+/**
+ * Why a capability is off, in words that name the actual switch to flip.
+ *
+ * `caps[cap]` being false has two different causes that read identically from inside a tool
+ * handler: the individual permission is unchecked, or Read-only zeroed every write capability
+ * regardless of what is individually checked. A refusal that always says "enable the permission"
+ * is wrong for the second case — it blames a checkbox that may already be on, sends the user
+ * looking for the wrong control, and (with browser, command and desktop control all withdrawn at
+ * once) can leave nothing left to reach the one control that actually fixes it. QA hit exactly
+ * that: Read-only disabled Core, browser and desktop input, and every refusal blamed its own
+ * individual permission instead of naming Read-only, the one setting that explains all three.
+ *
+ * The other half of that same defect survived one round longer than the Read-only case: a
+ * caller that passed no `settingLabel` at all — `guarded()` below is the one call site that
+ * never did — fell back to "the permission", naming nothing. QA measured it on `observe` with
+ * Desktop switched off: `TOOL_DISABLED: observe is disabled by the current Chat On Steroids
+ * permissions. Ask the user to enable the permission in the app`, which does not say which one.
+ * `settingLabel` now defaults to the capability's own row label from Settings — the same text
+ * `CAPABILITY_LABELS` already renders beside its checkbox — so a caller only has to override it
+ * for a tool whose name does not match its capability one-to-one (`create` behind `apply_patch`,
+ * for instance); every plain `guarded()` call gets a correct, specific label for free.
+ */
+export function toolDisabledMessage(readOnly: boolean, cap: Capability, name: string, settingLabel?: string): string {
+  if (readOnly && (WRITE_CAPABILITIES as readonly Capability[]).includes(cap)) {
+    return (
+      `TOOL_DISABLED: ${name} is disabled because Read-only mode is on. Read-only turns off every ` +
+      'write capability at once — file changes, commands, browser control, mouse/keyboard input and ' +
+      'clipboard writes — regardless of what is individually checked; screenshots and reads still work. ' +
+      'Ask the user to turn Read-only off in the app, then retry.'
+    );
+  }
+  const label = settingLabel ?? CAPABILITY_LABELS[cap];
+  return (
+    `TOOL_DISABLED: ${name} is disabled by the current Chat On Steroids permissions. ` +
+    `Ask the user to enable "${label}" in the app, then retry. ` +
+    'If the tool list in this conversation is stale, start a new chat.'
+  );
+}
 
 /** Maps runtime errors to short model-facing text without ever exposing real paths. */
 export function friendlyError(err: unknown): string {
@@ -660,13 +700,13 @@ async function dispatchTracked(
         : retiredLeaseAmbiguous
         ? Promise.resolve(
             fail(
-              'CALLER_IDENTITY_REQUIRED: a recently retired worker tab may still be open, and the connector could not prove this call belongs to a different chat. No local tool was run. Reload the extension evidence path or wait for the retired lease to expire.'
+              'CALLER_IDENTITY_REQUIRED: a recently retired worker tab may still be open, and this call carried no proof of which chat made it. No local tool was run. Identity comes from the extension running on the ChatGPT page, so reload this tab and try again — that is the fix, and it is the person at the keyboard who can apply it. Failing that, the retired lease expires half an hour after retirement.'
             )
           )
         : dormantLeaseAmbiguous
         ? Promise.resolve(
             fail(
-              'CALLER_IDENTITY_REQUIRED: a dormant worker chat still belongs to its prime history, and the connector could not prove this call belongs to a different conversation. No local tool was run. Restore the browser-extension identity path and retry.'
+              'CALLER_IDENTITY_REQUIRED: a parked multi-agent run still has sleeping worker chats, and this call carried no proof of which ChatGPT conversation made it. No local tool was run. Identity comes from the extension running on the ChatGPT page, so reload this tab and try again — that is the fix, and it is the person at the keyboard who can apply it. Failing that, the block lifts by itself half an hour after the run was parked.'
             )
           )
         : !allowUnattributed && swarmRunning() && identitySensitive && !context.caller.conversationId
@@ -877,9 +917,32 @@ export async function resolveCwd(ctx: ToolContext, virtualPath: string | undefin
   const workspace = currentWorkspace();
   // Codex treats an explicitly empty workdir exactly like an omitted one.
   const provided = virtualPath !== undefined && virtualPath !== '';
-  if (!provided && !workspace && swarmRunning()) {
+  // `swarmRunning()` used to gate this — whether *any* run exists anywhere in the app, not
+  // whether this call's own conversation is part of one. QA hit it on the very first command
+  // of an entirely ordinary, single-chat session, over and over, because some unrelated swarm
+  // happened to be alive elsewhere — the message says "this multi-agent chat" but nothing had
+  // checked whether it actually was one. `ctx.roots[0]` is the same shared default every
+  // ordinary chat has always defaulted to; a conversation with no swarm membership at all
+  // defaults to it exactly as safely whether some other swarm exists or not. `context.agent` is
+  // resolved once per call, before any handler runs, from this exact conversation's identity
+  // (`agentForCaller`/`resolve()` in agents.ts) — non-null only when *this* call is genuinely a
+  // member of the active run, which is the one case defaulting could reach the wrong project.
+  // Not narrowed to "more than one approved root", though that looks tempting and was tried.
+  //
+  // The reasoning would be that with a single root there is nothing to get wrong, so `roots[0]`
+  // is the only thing the call could mean. The measured failure says otherwise: the run that
+  // meant `…/minecraft-web-demo` and rebuilt the parent Electron app instead was inside one root.
+  // The ambiguity is *which project within* the approved folder, so a root count cannot see it.
+  if (!provided && !workspace && currentCall()?.agent) {
+    // Name the folders. A caller told only that it needs "an explicit approved workdir" has to
+    // guess what one looks like, and a worker meets this on its very first command — the second
+    // thing that ever happens in its chat. Saying which folders exist turns the guess into a
+    // choice, the same way naming a select's options did.
+    const approved = ctx.roots.map((root) => `/${root.name}`).join(', ');
     throw new SandboxError(
-      'WORKSPACE_REQUIRED: this multi-agent chat has no proven workspace. Supply an explicit approved workdir before running a command.'
+      'WORKSPACE_REQUIRED: this multi-agent chat has no proven workspace. Supply an explicit ' +
+        'approved workdir before running a command' +
+        (approved ? `. Approved roots: ${approved}` : '.')
     );
   }
   const target = provided ? virtualPath : (workspace?.virtual ?? (ctx.roots[0] ? `/${ctx.roots[0].name}` : ''));
@@ -908,7 +971,7 @@ export const cropArg = z
     height: z.number().int().min(1).max(100_000)
   })
   .strict();
-export const mouseButtonArg = z.enum(['left', 'right', 'middle']);
+export const mouseButtonArg = z.enum(['left', 'right', 'middle', 'wheel', 'back', 'forward']);
 // ------------------------------------------------------------------ registration
 
 export interface ToolAnnotations {
@@ -993,10 +1056,7 @@ export function createRegistrar(server: McpServer, ctx: ToolContext, surface: Su
     guarded(cap, name, fn) {
       return guard(name, async () => {
         if (!caps[cap]) {
-          return fail(
-            `TOOL_DISABLED: ${name} is disabled by the current Chat On Steroids permissions. ` +
-              'Ask the user to enable the permission in the app, then retry. If the tool list in this conversation is stale, start a new chat.'
-          );
+          return fail(toolDisabledMessage(ctx.readOnly, cap, name));
         }
         return fn();
       });

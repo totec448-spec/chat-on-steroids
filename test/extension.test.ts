@@ -7,6 +7,7 @@
  * restart/durability rules are exercised without needing a Chrome process in CI.
  */
 
+import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -123,10 +124,10 @@ describe('extension release metadata', () => {
     expect(html).not.toContain('id="overwriteBtn"');
     expect(js).toContain("const RENDER_STREAM_KEY = 'renderStreamEnabled';");
     expect(js).toContain("const SHOW_TIMES_KEY = 'showStreamTimes';");
-    expect(js).toContain('chrome.storage.local.set');
+    expect(js).toContain('webext.storage.local.set');
     expect(js).toContain("type: 'overwriteNow'");
     expect(backgroundSource).toContain('async overwriteNow()');
-    expect(backgroundSource).toContain("chrome.tabs.sendMessage(id, { type: 'clf-overwrite-now' })");
+    expect(backgroundSource).toContain("webext.tabs.sendMessage(id, { type: 'clf-overwrite-now' })");
   });
 });
 
@@ -227,6 +228,106 @@ function loadDom(sections: FakeNode[], pathname = '/c/aaaaaaaa-bbbb-cccc-dddd-ee
 function turn(role: 'user' | 'assistant', id: string): FakeNode {
   return new FakeNode({ 'data-testid': 'conversation-turn-1', 'data-turn': role, 'data-turn-id': id });
 }
+
+/**
+ * Chrome Memory Saver discards a background tab after a while, and that takes the content
+ * script with it: the recorder stops, activity polling stops, and fresh request-to-conversation
+ * evidence stops being produced. The app is deliberately conservative without that evidence, so
+ * the visible result is safe calls landing in Unattributed activity and identity-sensitive ones
+ * failing closed — in the middle of a run that was working a moment earlier.
+ *
+ * The decision is made from the app's own activity reply, which already passes through the
+ * worker, so nothing page-side has to learn a new job.
+ */
+describe('holding a tab that is still executing', () => {
+  const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+
+  function activityWorker(data: Record<string, unknown>) {
+    const paired = { token: 'token', port: 8765 };
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/activity') {
+        return response(200, { sessionId: 'session', entries: [], stream: [], nextSince: 0, ...data });
+      }
+      return response(404, {});
+    });
+    return loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+  }
+
+  /** The flag is written only on a change, so an idle poll loop does not talk to the browser. */
+  async function heldAfter(data: Record<string, unknown>) {
+    const worker = activityWorker(data);
+    await worker.send({ type: 'activity', conversationId: CONVERSATION, since: 0 }, 41);
+    await worker.send({ type: 'activity', conversationId: CONVERSATION, since: 0 }, 41);
+    return worker.tabsUpdate.mock.calls.filter(
+      (call) => call[1] && typeof call[1] === 'object' && 'autoDiscardable' in (call[1] as object)
+    );
+  }
+
+  it('holds the owning prime of a running swarm', async () => {
+    const calls = await heldAfter({ swarm: { running: true, agents: [] } });
+    expect(calls).toEqual([[41, { autoDiscardable: false }]]);
+  });
+
+  it('holds a worker chat while its turn is still going', async () => {
+    expect(await heldAfter({ bootstrap: 'worker', generating: true })).toEqual([
+      [41, { autoDiscardable: false }]
+    ]);
+    // A worker chat that has stopped generating is an ordinary tab again.
+    expect(await heldAfter({ bootstrap: 'worker', generating: false })).toEqual([]);
+  });
+
+  it('holds a compaction, outstanding tool calls and unread background output', async () => {
+    expect(await heldAfter({ job: { busy: true } })).toEqual([[41, { autoDiscardable: false }]]);
+    expect(await heldAfter({ pendingTools: 2 })).toEqual([[41, { autoDiscardable: false }]]);
+    expect(await heldAfter({ backgroundExec: { running: 1, exitedUnread: 0 } })).toEqual([
+      [41, { autoDiscardable: false }]
+    ]);
+    // A finished session whose output nobody has read is exactly the case issue #36 is about.
+    expect(await heldAfter({ backgroundExec: { running: 0, exitedUnread: 1 } })).toEqual([
+      [41, { autoDiscardable: false }]
+    ]);
+  });
+
+  /**
+   * The narrowness is the point. Protecting every ChatGPT tab would switch Memory Saver off
+   * for someone who keeps twenty of them open, which is a worse product than the problem.
+   */
+  it('leaves an idle chat alone, however long it sits there', async () => {
+    expect(await heldAfter({})).toEqual([]);
+    expect(await heldAfter({ swarm: { running: false, agents: [] }, generating: false })).toEqual([]);
+    expect(await heldAfter({ pendingTools: 0, backgroundExec: { running: 0, exitedUnread: 0 } })).toEqual([]);
+  });
+
+  it('gives the tab back to Chrome once the work is over', async () => {
+    let running = true;
+    const paired = { token: 'token', port: 8765 };
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/activity') {
+        return response(200, {
+          sessionId: 'session', entries: [], stream: [], nextSince: 0,
+          swarm: { running, agents: [] }
+        });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+
+    await worker.send({ type: 'activity', conversationId: CONVERSATION, since: 0 }, 41);
+    running = false;
+    await worker.send({ type: 'activity', conversationId: CONVERSATION, since: 0 }, 41);
+    await worker.send({ type: 'activity', conversationId: CONVERSATION, since: 0 }, 41);
+
+    expect(
+      worker.tabsUpdate.mock.calls.filter(
+        (call) => call[1] && typeof call[1] === 'object' && 'autoDiscardable' in (call[1] as object)
+      )
+    ).toEqual([[41, { autoDiscardable: false }], [41, { autoDiscardable: true }]]);
+  });
+});
 
 describe('ChatGPT DOM adapter', () => {
   const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -543,6 +644,11 @@ function loadWorker(options: {
     storage: { local: options.local, session: options.session },
     runtime: {
       getManifest: () => ({ version: '1.6.0' }),
+      // Real enough for the build digest to be a real digest: the worker fetches its own source
+      // through this and hashes it, so the header the app reads is the one a `shasum` of the
+      // same file reproduces. Serving a fixed marker instead would make the test agree with
+      // itself and prove nothing about the value that actually ships.
+      getURL: (file: string) => `chrome-extension://test-extension-id/${file}`,
       onMessage: {
         addListener(fn: typeof listener) {
           listener = fn;
@@ -596,8 +702,39 @@ function loadWorker(options: {
       }
     }
   };
-  const fetch = options.fetch ?? (async () => response(503, {}));
-  vm.runInNewContext(backgroundSource, {
+  const appFetch = options.fetch ?? (async () => response(503, {}));
+  // The worker fetches its own source through runtime.getURL to hash it. Serve that from the
+  // real file so the digest a test sees is the digest that ships, and hand everything else to
+  // the test's own stub untouched.
+  const fetch = async (input: string, init?: Record<string, unknown>) => {
+    if (typeof input === 'string' && input.startsWith('chrome-extension://')) {
+      const file = input.slice(input.lastIndexOf('/') + 1);
+      const bytes = await fs.readFile(path.join(process.cwd(), 'extension', file));
+      return { ok: true, status: 200, arrayBuffer: async () => bytes } as unknown as ReturnType<typeof response>;
+    }
+    return appFetch(input, init);
+  };
+  /*
+   * The worker is a module and imports the browser driver at the top, because a service worker
+   * may not import dynamically — the specification forbids it and Chrome refuses at runtime.
+   * This harness evaluates the file as a classic script, where an import statement is a parse
+   * error, so the statement is removed here and the binding supplied instead.
+   *
+   * Removed rather than accommodated by keeping the product dynamic, which is what used to
+   * happen: the import was dynamic so this line would parse, every browser_* message failed in
+   * a real browser, and these tests stayed green throughout because they never execute one.
+   * The check below fails loudly if the import stops looking the way this rewrite expects.
+   */
+  const importPattern = /^import \* as browserDriverModule from '\.\/browser-driver\.js';$/m;
+  if (!importPattern.test(backgroundSource)) {
+    throw new Error(
+      'background.js no longer statically imports browser-driver.js as expected; ' +
+        'update this harness rather than making the worker import dynamically'
+    );
+  }
+  const evaluatable = backgroundSource.replace(importPattern, '');
+
+  vm.runInNewContext(evaluatable, {
     chrome,
     fetch,
     AbortController,
@@ -605,7 +742,24 @@ function loadWorker(options: {
     clearTimeout,
     URL,
     TextEncoder,
-    console
+    // The worker hashes its own source for the build header the app logs. Node's WebCrypto is
+    // the same SubtleCrypto the browser gives it, so the digest here is the shipping digest.
+    crypto: globalThis.crypto,
+    console,
+    // Stubbed: these tests exercise the worker's messaging, never a debugger session. A test
+    // that needs the real driver has the real browser to run in — see verify:browser.
+    browserDriverModule: {
+      installBrowserDriverLifecycle() {},
+      hasBrowserPermissions: async () => false,
+      requestBrowserPermissions: async () => false,
+      browserDriver: {
+        status: () => ({ attached: false, tabId: null, url: null, title: null }),
+        attach: async () => ({ attached: false }),
+        detach: async () => ({ attached: false }),
+        act: async () => ({}),
+        observe: async () => ({})
+      }
+    }
   }, { filename: 'background.js' });
   if (!listener) throw new Error('background.js did not register a message listener');
 
@@ -1165,6 +1319,244 @@ describe('worker settings authority', () => {
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);
+  });
+
+  /**
+   * The give-up report, which has to survive this worker to mean anything.
+   *
+   * The page can prove ChatGPT never took an armed handoff — send() watches five acceptance
+   * signals and none of them fired — and the app ends the transaction on that word alone. This
+   * handler does not forward the message it was given, it rebuilds the request body field by
+   * field, so a field nobody listed here is dropped in silence. `sourceLost` was: the page
+   * reported it, the app was ready for it, and the continuation stayed armed for its six-hour
+   * TTL exactly as before the fix, with the chat kept out of browser recovery the whole time.
+   *
+   * Measured live on 2026-09-04 against a forced send failure: the page reported, the app never
+   * received, `dispatched-unresolved` never became `aborted`. Both halves' own tests passed.
+   */
+  it('forwards the source give-up, so a handoff ChatGPT never took can be ended', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { released: true });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(44);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 44);
+    const token = '0123456789abcdef0123456789abcdef';
+
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true }, 44);
+
+    expect(posted).toEqual([expect.objectContaining({ conversationId: CHAT, token, sourceLost: true })]);
+  });
+
+  /**
+   * The same drop, once for every checkpoint there is, driven from the worker's own list.
+   *
+   * Two fields were lost to this handler in silence — `sourceLost` on the day it was written and
+   * `destinationLost` from 2026-09-02 until 2026-09-04 — and the tests above did not catch
+   * either, because each names the fields somebody thought to name. So this one takes the list
+   * out of the worker and sends every entry in it, which makes the omission that caused both
+   * bugs impossible: a checkpoint the page can send with no route through here fails here.
+   *
+   * `destinationLost` is the one that had been dead longest. The replacement chat proves nothing
+   * left its composer — the user pressed Escape as the brief landed — and the app hands the brief
+   * straight back to a fresh chat instead of leaving it armed. That report never reached the app
+   * once, for two days, while the feature read as working at both ends.
+   */
+  it('forwards every compaction checkpoint it names, and nothing it does not', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { ok: true });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(44);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 44);
+    const token = '0123456789abcdef0123456789abcdef';
+
+    const source = await fs.readFile(path.join(process.cwd(), 'extension', 'background.js'), 'utf8');
+    const listed = (name: string): string[] => {
+      const block = new RegExp(`const ${name} = \\[([^\\]]*)\\]`).exec(source);
+      expect(block, `${name} is not a literal list any more; this test reads it from the source`).not.toBeNull();
+      return [...block![1]!.matchAll(/'([A-Za-z]+)'/g)].map((match) => match[1]!);
+    };
+    const flags = listed('COMPACT_CHECKPOINT_FLAGS');
+    const text = listed('COMPACT_CHECKPOINT_TEXT');
+    // The whole point is coverage of a list that grows, so a shrunken list is itself a failure.
+    expect(flags).toEqual(expect.arrayContaining(['sourceLost', 'destinationLost']));
+    expect(text).toEqual(expect.arrayContaining(['summary', 'sourceMessageId', 'destinationMessageId']));
+
+    for (const flag of flags) await worker.send({ type: 'compact', conversationId: CHAT, token, [flag]: true }, 44);
+    for (const name of text) {
+      await worker.send({ type: 'compact', conversationId: CHAT, token, [name]: `value-for-${name}` }, 44);
+    }
+
+    expect(posted).toHaveLength(flags.length + text.length);
+    flags.forEach((flag, at) => {
+      expect(posted[at], `${flag} never reached the app`).toMatchObject({ token, [flag]: true });
+    });
+    text.forEach((name, at) => {
+      expect(posted[flags.length + at], `${name} never reached the app`).toMatchObject({
+        token,
+        [name]: `value-for-${name}`
+      });
+    });
+
+    // And still an allowlist: a field the page invents does not ride along with a real one.
+    posted.length = 0;
+    await worker.send(
+      { type: 'compact', conversationId: CHAT, token, sourceLost: true, notACheckpoint: true },
+      44
+    );
+    expect(posted[0]).toMatchObject({ token, sourceLost: true });
+    expect(posted[0]).not.toHaveProperty('notACheckpoint');
+  });
+
+  /**
+   * Which code is running, answerable from the app's log rather than from browser UI.
+   *
+   * The manifest version answers a different question, and on 2026-09-04 the difference cost a
+   * QA session most of a day: the version was bumped to force a reload, the app confirmed the
+   * new version, and the behaviour measured afterwards was only explicable by a worker older
+   * than the file on disk. Nothing could tell those apart — the probes that would have live
+   * behind chrome:// pages that synthetic clicks cannot reach.
+   *
+   * So the worker hashes its own source and sends it on every request. This asserts the header
+   * is the digest of the real file, computed independently here, because a header that merely
+   * exists would answer the question wrongly and just as confidently.
+   */
+  it('reports a build digest of its own source, matching the file on disk', async () => {
+    const seen: Array<Record<string, string>> = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      seen.push((init.headers ?? {}) as Record<string, string>);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      return response(200, { ok: true });
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    await worker.registerTab(44);
+
+    const source = await fs.readFile(path.join(process.cwd(), 'extension', 'background.js'));
+    const digest = createHash('sha256').update(source).digest('hex').slice(0, 12);
+
+    // The digest is computed once at worker start and deliberately not awaited by requests, so a
+    // call issued in the same tick legitimately predates it. Retry until it lands rather than
+    // sleeping a guessed interval — the absence of the header is a real, brief, correct state.
+    //
+    // Driven with a message that actually reaches the app: `bind` is settled inside the worker
+    // and posts nothing, so waiting on it would wait forever for a request never made.
+    await vi.waitFor(async () => {
+      seen.length = 0;
+      await worker.send({ type: 'compact', conversationId: CHAT, ticket: true }, 44);
+      expect(seen.some((headers) => typeof headers['x-extension-build'] === 'string')).toBe(true);
+    });
+
+    const stamped = seen.filter((headers) => typeof headers['x-extension-build'] === 'string');
+    expect(stamped.length, 'no request carried x-extension-build').toBeGreaterThan(0);
+    for (const headers of stamped) {
+      expect(headers['x-extension-build'], 'the digest does not match background.js on disk').toBe(digest);
+      // Sent together or the pair cannot be read against each other, which is the entire point.
+      expect(headers['x-extension-version']).toBe('1.6.0');
+    }
+  });
+
+  /**
+   * The connect line is the one that has to be conclusive, so discovery waits for the digest.
+   *
+   * An MV3 worker re-runs its module on every wake and reaches the app almost immediately after,
+   * so a connect racing its own hash was not a rare edge: macOS measured three consecutive
+   * `(build unreported)` connects across half an hour on a perfectly current worker. Unreported
+   * then means "stale pre-feature worker *or* one that woke a moment ago", which is precisely the
+   * ambiguity the digest was added to remove — the diagnostic silently failing in the only
+   * direction anyone consults it for.
+   *
+   * Ordinary requests still take whatever is ready and send no header if that is nothing; only
+   * `hello()` waits, because it is already asynchronous and runs once per discovery. This asserts
+   * the very first request a cold worker makes carries the digest — the exact case that failed.
+   */
+  it('stamps the discovery request even when the worker has only just woken', async () => {
+    const seen: Array<Record<string, string>> = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      seen.push((init.headers ?? {}) as Record<string, string>);
+      return new URL(input).pathname === '/hello'
+        ? response(200, { app: 'chat-on-steroids', paired: true })
+        : response(200, { ok: true });
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });
+    // Nothing is awaited between construction and the first call: this is the cold worker.
+    await worker.registerTab(44);
+    await worker.send({ type: 'compact', conversationId: CHAT, ticket: true }, 44);
+
+    const source = await fs.readFile(path.join(process.cwd(), 'extension', 'background.js'));
+    const digest = createHash('sha256').update(source).digest('hex').slice(0, 12);
+
+    expect(seen.length, 'the worker made no request at all').toBeGreaterThan(0);
+    expect(
+      seen[0]?.['x-extension-build'],
+      'the first request of a cold worker went out unstamped, so the connect line cannot identify it'
+    ).toBe(digest);
+  });
+
+  /**
+   * The invariant both silent drops actually broke: the page can send a checkpoint this worker
+   * has no route for, and nothing anywhere says so.
+   *
+   * `sourceLost` and `destinationLost` were each added to content.js and to bridge.ts, correctly,
+   * and never added to the list in between. Both ends had tests and both passed; the field simply
+   * never arrived, and the app answered 200 from its fall-through branch so even the page saw a
+   * plausible reply. `destinationLost` survived that way from 2026-09-02 to 2026-09-04.
+   *
+   * Neither file's own tests can see this, because the bug is the relationship between two files.
+   * So this reads both: every field content.js puts on a `type: 'compact'` message must either be
+   * one of the request's own always-present fields or be named in the worker's forwarding lists.
+   * Adding a checkpoint to the page and forgetting the worker fails here, by name, immediately.
+   */
+  it('forwards every compaction checkpoint the content script can send', async () => {
+    const page = await fs.readFile(path.join(process.cwd(), 'extension', 'content.js'), 'utf8');
+    const worker = await fs.readFile(path.join(process.cwd(), 'extension', 'background.js'), 'utf8');
+
+    const sent = new Set<string>();
+    for (const call of page.matchAll(/ask\(\{\s*type:\s*'compact'(.*?)\}\)/gs)) {
+      for (const field of call[1]!.matchAll(/(\w+)\s*:/g)) sent.add(field[1]!);
+    }
+    // If this ever comes back empty the regex has drifted and the test is proving nothing.
+    expect(sent.size, 'no compact fields were found in content.js; this test reads it as source').toBeGreaterThan(5);
+
+    const listed = (name: string): string[] => {
+      const block = new RegExp(`const ${name} = \\[([^\\]]*)\\]`).exec(worker);
+      expect(block, `${name} is not a literal list any more`).not.toBeNull();
+      return [...block![1]!.matchAll(/'(\w+)'/g)].map((match) => match[1]!);
+    };
+    const forwarded = new Set([...listed('COMPACT_CHECKPOINT_FLAGS'), ...listed('COMPACT_CHECKPOINT_TEXT')]);
+
+    // Carried unconditionally by the handler rather than as token-paired checkpoints, so they
+    // are routed without appearing in either list.
+    const always = new Set(['type', 'conversationId', 'resume', 'cancel', 'ticket', 'automatic', 'token']);
+
+    const unroutable = [...sent].filter((field) => !always.has(field) && !forwarded.has(field)).sort();
+    expect(
+      unroutable,
+      `content.js sends ${unroutable.join(', ')} on /compact, and background.js forwards none of it — ` +
+        'add each to COMPACT_CHECKPOINT_FLAGS or COMPACT_CHECKPOINT_TEXT'
+    ).toEqual([]);
+
+    // The reverse is not an error — the worker may route a field ahead of the page using it —
+    // but the two that went missing must stay covered from both sides.
+    for (const field of ['sourceLost', 'destinationLost']) {
+      expect(sent.has(field), `content.js no longer sends ${field}`).toBe(true);
+      expect(forwarded.has(field), `background.js no longer forwards ${field}`).toBe(true);
+    }
   });
 
   /**

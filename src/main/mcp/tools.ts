@@ -19,14 +19,17 @@ import { registerCoreTools } from './tools-core.js';
 import { registerDesktopTools } from './tools-desktop.js';
 import { surfaceDefinition, type SurfaceId } from './surfaces.js';
 import { serverInstructions } from './instructions.js';
-import { APP_VERSION } from './../version.js';
+import { BUILD_VERSION } from './../version.js';
 import { toVirtualPath } from '../sandbox.js';
 import { logWarn } from '../logger.js';
 
 export function buildServer(ctx: ToolContext, surface: SurfaceId): McpServer {
   const definition = surfaceDefinition(surface);
   const server = new McpServer(
-    { name: definition.serverName, version: APP_VERSION },
+    // The build, not just the release. This is the one identity that reaches ChatGPT itself, so
+    // a connector talking to the wrong build can be recognised from the other end — which is
+    // precisely what nobody could do when a QA run spent itself on an app without the feature.
+    { name: definition.serverName, version: BUILD_VERSION },
     { capabilities: { tools: {} }, instructions: serverInstructions(ctx, surface) }
   );
 

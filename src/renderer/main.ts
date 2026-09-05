@@ -323,6 +323,185 @@ function paintGroups(): void {
   }
 }
 
+/**
+ * One row per macOS permission the enabled capabilities actually need.
+ *
+ * The verdict is stated as a colour and as a word, because a colour alone is not a status
+ * anyone can act on and a word alone is not one anyone scans. Three states, not two:
+ * `not-determined` means macOS has never been asked, which is not a refusal, and painting it
+ * red would report a fault where there is none.
+ *
+ * The values come from the native backend that performs the protected operation, so this is
+ * what the OS will actually answer rather than what a settings row believes.
+ */
+const MACOS_PERMISSIONS = [
+  {
+    id: 'screen',
+    title: 'Screen Recording',
+    why: 'Needed to take a screenshot or read what is on screen.',
+    pane: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+    action: 'Open Screen Recording'
+  },
+  {
+    id: 'accessibility',
+    title: 'Accessibility',
+    why: 'Needed to click, type and inspect controls in other applications.',
+    pane: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+    action: 'Open Accessibility'
+  }
+] as const;
+
+function paintDesktopPermissions(next: AppState): boolean {
+  const stepNode = step('desktop');
+  const access = next.desktopAccess;
+  const needs = {
+    screen: next.config.capabilities.screen,
+    accessibility: next.config.capabilities.control && !next.config.readOnly
+  };
+  const applies = next.platform?.family === 'macos' && (needs.screen || needs.accessibility);
+  stepNode.hidden = !applies;
+  if (!applies) return true;
+
+  const list = $('permList');
+  const rows: HTMLElement[] = [];
+  let granted = 0;
+  let wanted = 0;
+
+  for (const permission of MACOS_PERMISSIONS) {
+    if (!needs[permission.id]) continue;
+    wanted += 1;
+    // No reading yet is its own state: the backend has not reported, which is not a refusal.
+    const verdict = access ? access[permission.id] : null;
+    const state = verdict === 'granted' ? 'granted' : verdict === 'missing' ? 'missing' : 'unknown';
+    if (state === 'granted') granted += 1;
+
+    const row = document.createElement('li');
+    row.className = 'perm-row';
+    row.dataset.state = state;
+
+    const dot = document.createElement('span');
+    dot.className = 'perm-dot';
+
+    const body = document.createElement('div');
+    body.className = 'perm-text';
+    const title = document.createElement('strong');
+    title.textContent = permission.title;
+    const why = document.createElement('span');
+    why.textContent = permission.why;
+    body.append(title, why);
+
+    const pill = document.createElement('span');
+    pill.className = 'perm-pill';
+    // "Not granted", not "Not allowed". macOS answers CGPreflightScreenCaptureAccess and
+    // AXIsProcessTrusted with a plain boolean and exposes nothing that separates a refusal from
+    // a permission nobody has been asked for — so calling it a refusal asserts something we
+    // cannot know. QA reset the permission entirely and was told it had been refused. The
+    // amber state remains for the case we genuinely have: no answer from the backend yet.
+    pill.textContent =
+      state === 'granted' ? 'Granted' : state === 'missing' ? 'Not granted' : 'Not asked yet';
+
+    row.append(dot, body, pill);
+
+    // A granted permission needs no button; leaving one there invites the user to go and
+    // change something that is already right.
+    if (state !== 'granted') {
+      const open = document.createElement('button');
+      open.className = 'btn';
+      open.type = 'button';
+      open.dataset.link = permission.pane;
+      open.textContent = permission.action;
+      row.append(open);
+    }
+    rows.push(row);
+  }
+
+  list.replaceChildren(...rows);
+  $('permIntro').textContent =
+    granted === wanted
+      ? 'Everything this Mac needs to grant has been granted.'
+      : `${granted} of ${wanted} granted. macOS asks for these one at a time, and each is a ` +
+        'different pane in System Settings. Open a pane, switch Chat On Steroids on, and come ' +
+        'back — this list updates on its own.';
+  // The restart note only earns its space where a restart is actually the remedy.
+  //
+  // It used to appear whenever anything was outstanding, including a permission nobody has ever
+  // been asked for — and then it said "to pick up what you just granted" about something the
+  // user had not granted. A refused permission is the case that matters: that is what a stale
+  // TCC answer looks like from inside a running process after the setting was changed. A
+  // permission still at not-determined needs granting, not restarting, and saying otherwise
+  // sends someone to quit an app instead of ticking the box in front of them.
+  $('permRestart').hidden = !rows.some((row) => row.dataset.state === 'missing');
+  return granted === wanted;
+}
+
+/**
+ * Re-reads the macOS verdicts while a permission is still missing.
+ *
+ * Granting one of these means leaving the app for System Settings and coming back, and a list
+ * that only updates on the next restart makes that trip feel like it failed. So while the
+ * setup step is showing something outstanding, the live verdicts are polled — slowly, because
+ * this crosses into the native backend, and only while there is a reason to.
+ *
+ * It stops on its own the moment everything is granted, and never runs off macOS.
+ */
+let desktopPermissionTimer: number | null = null;
+/** The cadence the armed timer is running at, so a change of speed re-arms it. */
+let desktopPermissionPeriod: number | null = null;
+
+function watchDesktopPermissions(next: AppState, settled: boolean): void {
+  const applies =
+    next.platform?.family === 'macos' &&
+    (next.config.capabilities.screen || (next.config.capabilities.control && !next.config.readOnly));
+  // Told, not read off the DOM. The `is-done` class is written later in this same apply() pass,
+  // so reading it here answered with the previous render — and after a permission was revoked
+  // the fast cadence armed a whole slow period late, exactly when it was most wanted.
+  const outstanding = applies && !settled;
+
+  // Watch in both directions, at two speeds.
+  //
+  // The poll used to stop the moment everything was granted, which made the list one-way: it
+  // noticed a permission appearing and could never notice one going away. QA switched
+  // Accessibility off in System Settings and the app went on showing desktop access as complete
+  // until it was restarted — a green row promising an ability the app no longer had.
+  //
+  // While something is outstanding someone is walking between here and System Settings, so the
+  // fast cadence earns itself. Once everything is granted nobody is waiting on the answer, and
+  // a slow check is enough to stop the list from lying.
+  // 2.5s while something is outstanding, 6s once everything is granted.
+  //
+  // The slow side used to be 30s, which is the whole of the delay QA measured: a revocation took
+  // 40 seconds to appear against an expectation of about thirty, and nothing was broken — the
+  // helper answers correctly the moment TCC changes, measured at 107 sample points with no
+  // instance of a stale grant. The row was simply not being asked often enough. A warm call is
+  // an in-process request to a backend that is already running, so six seconds costs little and
+  // keeps the promise the list makes about updating on its own.
+  const period = outstanding ? 2500 : 6_000;
+  if (!applies) {
+    if (desktopPermissionTimer !== null) {
+      window.clearInterval(desktopPermissionTimer);
+      desktopPermissionTimer = null;
+    }
+    desktopPermissionPeriod = null;
+    return;
+  }
+  if (desktopPermissionTimer !== null && desktopPermissionPeriod === period) return;
+  if (desktopPermissionTimer !== null) window.clearInterval(desktopPermissionTimer);
+  desktopPermissionPeriod = period;
+  desktopPermissionTimer = window.setInterval(async () => {
+    try {
+      // Never prompts. A poll that could raise a system dialog would fire one every few
+      // seconds at whoever left this tab open.
+      // Unwrapped here rather than through run(): that reports a failure as a toast, and a
+      // background poll must never put one on screen every few seconds.
+      const reply = await api.refreshDesktopAccess();
+      if (reply.ok) apply(reply.data);
+    } catch {
+      // The backend may be restarting or missing entirely; the next tick tries again, and
+      // the row simply keeps whatever it last knew.
+    }
+  }, period);
+}
+
 function paintDesktopAccess(next: AppState): void {
   const box = $('desktopAccess');
   const access = next.desktopAccess;
@@ -966,7 +1145,7 @@ function apply(next: AppState): void {
   cards.replaceChildren(...connectorCards(next));
 
   // Step marks: everything before the first unfinished step counts as done.
-  const order = ['folder', 'tunnel', 'key', 'connect', 'chatgpt', 'browser'];
+  const order = ['folder', 'tunnel', 'key', 'connect', 'chatgpt', 'desktop', 'browser'];
   const done = new Set<string>();
   if (config.roots.length > 0 || missingStep(next)?.step !== 'folder') done.add('folder');
   if (!openai || TUNNEL_ID_PATTERN.test(config.tunnel.tunnelId)) done.add('tunnel');
@@ -985,6 +1164,11 @@ function apply(next: AppState): void {
   // only that this extension is allowed to connect; setup is complete when a required browser
   // has actually checked in during this process. If no enabled feature needs the browser,
   // this optional step is hidden and deliberately cannot block the wizard.
+  // Painted first because it also decides whether the step applies at all: off macOS, or
+  // with no Desktop capability enabled, there is nothing to grant and nothing to block on.
+  const desktopSettled = paintDesktopPermissions(next);
+  if (desktopSettled) done.add('desktop');
+  watchDesktopPermissions(next, desktopSettled);
   if (!browserRequired || next.bridge.present) done.add('browser');
   const current = order.find((name) => !done.has(name)) ?? null;
   for (const name of order) {
@@ -1000,6 +1184,11 @@ function apply(next: AppState): void {
   const expand = $<HTMLButtonElement>('wizExpand');
   expand.hidden = !allDone;
   expand.textContent = showAllSteps ? 'Hide finished steps' : 'Show all steps';
+  // The label already says which way it goes, but a label is prose. aria-expanded is the state
+  // itself, which is what an assistive client — or an automation harness driving this app
+  // through accessibility — reads to know whether pressing it did anything. QA pressed this
+  // button, was told the press succeeded, and had no way to tell that nothing had changed.
+  expand.setAttribute('aria-expanded', showAllSteps ? 'true' : 'false');
 
   const needsBinary = config.tunnel.kind !== 'manual';
   $('binaryState').textContent = !needsBinary

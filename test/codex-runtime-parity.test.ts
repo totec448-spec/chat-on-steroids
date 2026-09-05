@@ -263,7 +263,14 @@ describe('Codex unified exec runtime parity', () => {
       shellType: process.platform === 'win32' ? 'powershell' : 'bash',
       hookCommand: 'pipe exit-code parity child',
       processId,
-      yieldTimeMs: 250,
+      // Long enough for the child to finish, because finishing is the premise rather than the
+      // claim: this asserts that a *completed* command yields a null process id, its exit code and
+      // both streams. At 250 ms it was betting that PowerShell and node start that fast, and on a
+      // loaded Windows-on-ARM machine they do not — the run then handed back a process id, which
+      // is the correct answer to a command that has not finished, and the test read it as a
+      // regression. The neighbouring cases keep their short windows: they are the ones proving
+      // that an unfinished command *does* come back with an id.
+      yieldTimeMs: 10_000,
       maxOutputTokens: undefined,
       truncationPolicy,
       cwd: process.cwd(),
@@ -365,7 +372,24 @@ describe('Codex unified exec runtime parity', () => {
     await waitForProcess(instance, processId);
     expect(await instance.terminateProcess(processId)).toBe(true);
 
-    await expect(initial).resolves.toMatchObject({ processId: null });
+    /*
+     * Reported rather than merely asserted, because this failed once on a loaded Linux arm64
+     * runner and left nothing to work from — and it could not be reproduced afterwards, in
+     * twenty-five consecutive runs here or on a second attempt in CI. Reading the code says it
+     * should not be possible: the collector only stops early when the cancel signal and the closed
+     * output agree, and that signal is set in the one place that also marks the process exited.
+     *
+     * So these two numbers are the ones that would settle it. A `wallTimeMs` near the 30s yield
+     * means the collector waited out its deadline and the exit was never seen; a small one with a
+     * null `exitCode` means it stopped early while the process was still considered live, which
+     * would put the fault in the agreement between those two flags.
+     */
+    const settled = await initial;
+    expect(
+      settled.processId,
+      `the first response still names a process: wallTimeMs=${Math.round(settled.wallTimeMs)}, ` +
+        `exitCode=${settled.exitCode}, still listed=${JSON.stringify(instance.listProcesses())}`
+    ).toBeNull();
     expect(instance.listProcesses()).toEqual([]);
   });
 

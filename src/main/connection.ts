@@ -145,7 +145,15 @@ function toolsFor(id: SurfaceId): string[] {
   const caps = effectiveCapabilities(config);
   if (id === 'desktop') {
     const computer = caps.control || caps.clipboardRead || caps.clipboardWrite;
-    return [...(caps.screen ? ['observe'] : []), ...(computer ? ['computer'] : [])];
+    // `browser` was added to this surface and never added here, so the app undercounted its own
+    // tools — "9 total" where the server serves ten. It gates on control exactly as the
+    // registration does, and getting the two out of step is how a display disagrees with a
+    // server about what exists.
+    return [
+      ...(caps.screen ? ['observe'] : []),
+      ...(computer ? ['computer'] : []),
+      ...(caps.control ? ['browser'] : [])
+    ];
   }
   const tools: string[] = [];
   if (caps.read || caps.browse || caps.metadata) tools.push('read');
@@ -433,7 +441,19 @@ async function applySettingsImpl(): Promise<void> {
   }
 
   if (!available) {
-    await stopDesktopTunnel('Turn a desktop permission back on to publish this connector.');
+    // Once published, the tunnel stays up even though the card now reads "off" (set above by
+    // describeSurfaces, from the live capabilities). Tearing it down here severed the
+    // *transport*: the local endpoint's own tools/list is deliberately monotonic and its
+    // handlers already return a clean TOOL_DISABLED while a capability is off (see server.ts),
+    // but a request cannot reach that answer once the tunnel relaying it has been stopped — it
+    // dies at the tunnel with the OpenAI/Cloudflare infrastructure's own tunnel_client_not_
+    // connected instead of this app's product-level explanation. QA found exactly that: the
+    // Desktop connector, mid-session, gave a raw transport error instead of the promised one.
+    // Only skip *starting* a tunnel that was never published in the first place — never
+    // un-publish a live one just because every desktop permission happens to be off right now.
+    if (!desktopTunnel) {
+      await stopDesktopTunnel('Turn a desktop permission back on to publish this connector.');
+    }
     return;
   }
   if (desktopTunnel && desktopTunnelId === config.tunnel.desktopTunnelId) return;

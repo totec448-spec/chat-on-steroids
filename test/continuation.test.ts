@@ -56,6 +56,7 @@ const {
   beginContinuationDestinationSendNow,
   beginContinuationSourceSendNow,
   bindContinuationDestinationMessageNow,
+  bindContinuationSourceMessageNow,
   claimContinuationNow,
   commitContinuation,
   compactingConversation,
@@ -64,7 +65,9 @@ const {
   dispatchContinuationDestinationSendNow,
   dispatchContinuationSourceSendNow,
   openContinuationNow,
+  pendingAutomaticContinuations,
   releaseContinuationDestinationSendNow,
+  releaseContinuationSourceSendNow,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   restoreContinuations,
@@ -825,6 +828,29 @@ describe('the swarm handover', () => {
     expect(swarmRunning()).toBe(true);
   });
 
+  it('retains a terminal record from when it settled, not from when it was opened', async () => {
+    vi.useFakeTimers();
+    const summary = await createSession({ title: 'late-aborting ticket', conversationId: CHAT_A });
+    const opened = await openContinuationNow(summary.id, CHAT_A);
+    const openedAt = Date.now();
+
+    // The transaction sits waiting far longer than its own deadline before anything sweeps it -
+    // a page that never opened, or a process that was asleep. By the time it finally aborts, the
+    // record is already old by openedAt's clock even though it only just settled.
+    vi.setSystemTime(openedAt + CONTINUATION_TTL_MS * 10);
+    expect(continuationByToken(opened.token)?.state).toBe('aborted');
+    expect(Date.now() - openedAt).toBeGreaterThan(CONTINUATION_TTL_MS * 2);
+
+    // Just past its own settle-time retention window, but still deep inside openedAt's: the old
+    // openedAt-measured prune would have deleted this on the very sweep that aborted it above.
+    vi.setSystemTime(Date.now() + 1_000);
+    expect(continuationByToken(opened.token)?.state).toBe('aborted');
+
+    // Now genuinely past two retention windows measured from settling, and it is finally let go.
+    vi.setSystemTime(Date.now() + CONTINUATION_TTL_MS * 2);
+    expect(continuationByToken(opened.token)).toBeNull();
+  });
+
   it('keeps an automatic ticket open past ordinary continuation deadlines and restart', async () => {
     vi.useFakeTimers();
     const summary = await createSession({ title: 'durable auto ticket', conversationId: CHAT_A });
@@ -875,6 +901,52 @@ describe('restart lifetime recovery', () => {
     await restoreContinuations(saved);
     expect(compactingConversation(CHAT_A)).toBeNull();
     expect(continuationForSession(summary.id)).toBeNull();
+  });
+
+  /**
+   * The same wedge as above, ended in seconds rather than six hours.
+   *
+   * The test above is the backstop: an armed dispatch that nobody resolves is eventually given
+   * up by the TTL. A 2026-09-04 QA run measured what that costs when the click simply did not
+   * land — three phase pickups firing and expiring against a chat whose composer had never
+   * received the prompt, and, because `pendingAutomaticContinuations()` still named it and
+   * `inspectSilentChats()` skips those, no browser recovery for the whole window either.
+   *
+   * The page can say so: `send()` watches five acceptance signals and this flow settles the turn
+   * before typing, so none of them inside its window is the strongest negative the page has.
+   * Aborting rather than re-arming is deliberate — the prompt may still be with ChatGPT, and
+   * nothing is ever sent twice.
+   */
+  it('gives up an armed source dispatch the page proves ChatGPT never took', async () => {
+    const summary = await createSession({ title: 'source send lost', conversationId: CHAT_A });
+    const opened = await openContinuationNow(summary.id, CHAT_A, true);
+    expect((await beginContinuationSourceSendNow(opened.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(opened.token)).toBe(true);
+    // Armed: chat A is refused every tool from here until something resolves it.
+    expect(compactingConversation(CHAT_A)?.token).toBe(opened.token);
+
+    expect(await releaseContinuationSourceSendNow(opened.token, 'nothing was taken')).toBe(true);
+
+    // Ended, without waiting out the TTL: the fence is down, the chat is out of the pending set
+    // that was costing it browser recovery, and the record is terminal rather than re-armed.
+    expect(compactingConversation(CHAT_A)).toBeNull();
+    expect(continuationForSession(summary.id)).toBeNull();
+    expect(continuationByToken(opened.token)?.state).toBe('aborted');
+    expect(pendingAutomaticContinuations().some((entry) => entry.token === opened.token)).toBe(false);
+  });
+
+  it('refuses to give up a source dispatch ChatGPT is proven to have taken', async () => {
+    const summary = await createSession({ title: 'source send landed', conversationId: CHAT_A });
+    const opened = await openContinuationNow(summary.id, CHAT_A, true);
+    expect((await beginContinuationSourceSendNow(opened.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(opened.token)).toBe(true);
+    // ChatGPT's own marker landed, so the send is not in doubt and a late "nothing was taken"
+    // from some other document must not tear down a handover that is genuinely under way.
+    expect(await bindContinuationSourceMessageNow(opened.token, 'msg-source-landed')).toBe(true);
+
+    expect(await releaseContinuationSourceSendNow(opened.token, 'nothing was taken')).toBe(false);
+    expect(continuationForSession(summary.id)?.state).toBe('awaiting-summary');
+    expect(compactingConversation(CHAT_A)?.token).toBe(opened.token);
   });
 
   it('keeps a committed record committed when the session has since moved on again', async () => {

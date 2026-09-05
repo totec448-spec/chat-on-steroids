@@ -58,6 +58,17 @@ var CLF_DOM = (() => {
     'button[data-testid="composer-speech-button"], button[data-testid="composer-dictate-button"], ' +
     'button[aria-label^="Dictate" i], button[aria-label^="Voice" i], ' +
     'button[aria-label="Start dictation" i], button[aria-label="Start Voice" i]';
+  /**
+   * A control ChatGPT mounts for a completed assistant message, scoped to that turn.
+   *
+   * `Copy message` is intentionally exact. Code blocks have their own Copy controls while a
+   * response is still streaming, so a generic copy button would turn ordinary interim prose
+   * into false terminal evidence. The current live renderer exposes the accessible label and
+   * recent renderers also used the explicit test id below.
+   */
+  const COMPLETION_ACTION =
+    'button[data-testid="copy-turn-action-button"], button[aria-label="Copy message" i]';
+
   const safe = (fn, fallback) => {
     try {
       const value = fn();
@@ -568,6 +579,23 @@ var CLF_DOM = (() => {
       }
       return out;
     }, []);
+  }
+
+  /**
+   * ChatGPT's completed-message action for exactly this logical assistant turn, if mounted.
+   *
+   * This is corroborating lifecycle evidence only. content.js still requires a quiet turn,
+   * authored assistant prose, a matching healthy Fiber descriptor and no unanswered connector
+   * call before it may use this node as a completion fallback.
+   */
+  function completionAction(turn) {
+    return safe(() => {
+      for (const section of turnNodes(turn)) {
+        const action = section && section.querySelector ? section.querySelector(COMPLETION_ACTION) : null;
+        if (action) return action;
+      }
+      return null;
+    }, null);
   }
 
   /** True while ChatGPT is producing a turn. The stop button is the honest signal. */
@@ -1475,7 +1503,12 @@ var CLF_DOM = (() => {
     }, false);
   }
 
-  /** Types into the composer; dedicated fresh-chat automation may replace an autosaved draft. */
+  /**
+   * Types into the composer. Existing text is preserved unless the caller has already
+   * proven this is an app-owned fresh bootstrap and the persistent replace-drafts option
+   * is enabled. Selection is confined to the composer; the caller still verifies the
+   * exact resulting text before the irreversible Send.
+   */
   /**
    * Puts `value` in the composer.
    *
@@ -1505,7 +1538,7 @@ var CLF_DOM = (() => {
       }
       box.focus();
       // execCommand still produces the native editing path ChatGPT listens for. Newer
-      // composer builds occasionally ignore its return value, so verify the DOM and
+      // composer builds occasionally ignore its return value, so verify in the caller and
       // also emit input so React cannot miss the mutation.
       document.execCommand('insertText', false, value);
       box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
@@ -1618,6 +1651,7 @@ var CLF_DOM = (() => {
     presentationTurns,
     messages,
     messagesIn,
+    completionAction,
     sectionSignature,
     generating,
     stopButton,

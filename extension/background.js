@@ -1,7 +1,7 @@
 /**
  * Service worker: the only part of the extension that talks to the app.
  *
- * The pairing token lives here and in chrome.storage.local, never in a content
+ * The pairing token lives here and in webext.storage.local, never in a content
  * script and never in the page. A content script that were somehow compromised can
  * ask this worker to post observations about the page it is already reading; it
  * cannot read the token, cannot reach the app on its own (the app refuses a
@@ -15,10 +15,13 @@
  * its page: a reload, a navigation or a crash takes its memory with it, and ChatGPT
  * virtualises old turns, so what is gone is often gone for good. So a content script
  * hands an observation over immediately and the durable copy lives here, in
- * chrome.storage.session — which survives this worker being shut down (Chrome does that
+ * webext.storage.session — which survives this worker being shut down (Chrome does that
  * after seconds of idling) and dies with the browser, which is the right lifetime for a
  * record the app has not accepted yet.
  */
+import * as browserDriverModule from './browser-driver.js';
+
+const webext = globalThis.browser ?? globalThis.chrome;
 
 const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
@@ -43,7 +46,7 @@ const TIMED_OUT = 'the app took too long to answer';
 const BRIDGE_PROTOCOL = 12;
 
 /**
- * Journal caps. The byte figure is what actually matters — chrome.storage.session has a
+ * Journal caps. The byte figure is what actually matters — webext.storage.session has a
  * ten-megabyte budget for the whole extension — and the count keeps a pathological run
  * of tiny events from making every write expensive.
  */
@@ -189,7 +192,7 @@ let ackingCommands = false;
  * app-side session and lets `/closed` mean the last live tab really left.
  *
  * Persisted in storage.session because Chrome routinely stops this worker while tabs stay
- * open. `chrome.tabs.onRemoved` wakes it again and can then retire the right conversation.
+ * open. `webext.tabs.onRemoved` wakes it again and can then retire the right conversation.
  */
 let tabConversations = {};
 /** Browser-supplied document owner for each tab, plus bounded retired owners. */
@@ -221,6 +224,8 @@ let settled = [];
 let deferredRevivals = [];
 /** One in-flight same-tab offer per deferred command in this MV3 worker lifetime. */
 const deferredRevivalOffers = new Map();
+/** Which already-open tab a revival prefers over the marked fallback tab it opened, by command id. */
+let revivalPreferences = {};
 /** App says an active agent/recovery episode still needs the maintenance cadence. */
 let recoveryMonitoring = false;
 /** Tabs whose normal auto-discard policy this extension changed for a live agent conversation. */
@@ -240,14 +245,25 @@ function load() {
 }
 
 async function loadOnce() {
-  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox']);
+  const stored = await webext.storage.local.get([
+    'port',
+    'token',
+    'disconnected',
+    'deferredRevivals',
+    'commandAckOutbox',
+    'revivalPreferences'
+  ]);
   port = typeof stored.port === 'number' ? stored.port : null;
   token = typeof stored.token === 'string' ? stored.token : null;
   // Deliberately in `local` rather than `session`: a choice to disconnect that a browser
   // restart undoes is not a choice, it is a delay.
   disconnected = stored.disconnected === true;
   deferredRevivals = Array.isArray(stored.deferredRevivals) ? stored.deferredRevivals.slice(-100) : [];
-  const live = await chrome.storage.session.get([
+  revivalPreferences =
+    stored.revivalPreferences && typeof stored.revivalPreferences === 'object' && !Array.isArray(stored.revivalPreferences)
+      ? { ...stored.revivalPreferences }
+      : {};
+  const live = await webext.storage.session.get([
     'settled',
     'journal',
     'tabConversations',
@@ -297,7 +313,7 @@ async function loadOnce() {
 }
 
 async function persist() {
-  await chrome.storage.local.set({ port, token, disconnected });
+  await webext.storage.local.set({ port, token, disconnected });
 }
 
 let liveWriteQueue = Promise.resolve();
@@ -305,7 +321,7 @@ let liveWriteQueue = Promise.resolve();
 function persistLive() {
   const write = liveWriteQueue.then(() =>
     Promise.all([
-      chrome.storage.session.set({
+      webext.storage.session.set({
         settled: settled.slice(-40),
         tabConversations,
         tabDocuments,
@@ -320,9 +336,10 @@ function persistLive() {
       }),
       // Only small command-control metadata crosses browser restarts. No transcript and no
       // revival text is duplicated into extension storage.
-      chrome.storage.local.set({
+      webext.storage.local.set({
         commandAckOutbox: commandAckOutbox.slice(-200),
-        deferredRevivals: deferredRevivals.slice(-100)
+        deferredRevivals: deferredRevivals.slice(-100),
+        revivalPreferences
       })
     ])
   );
@@ -346,13 +363,13 @@ let journalWriteQueue = Promise.resolve();
 
 async function persistJournalNow() {
   try {
-    await chrome.storage.session.set({ journal });
+    await webext.storage.session.set({ journal });
     durabilityGap = false;
     return true;
   } catch {
     makeRoom(true);
     try {
-      await chrome.storage.session.set({ journal });
+      await webext.storage.session.set({ journal });
       durabilityGap = false;
       return true;
     } catch (err) {
@@ -395,7 +412,7 @@ const ESSENTIAL = new Set(['user_message', 'assistant_message', 'chat_error', 't
 
 /**
  * Cached per-entry serialised size, kept out-of-band so measuring an entry does not
- * mutate the thing we later write to chrome.storage.session.
+ * mutate the thing we later write to webext.storage.session.
  *
  * The old cache lived as `entry.b`. That made every measured entry several bytes larger
  * after it had been measured, so the journal could report itself under the 4 MiB cap
@@ -460,7 +477,7 @@ function gapEntry(source, kind, text) {
  * Both matter and for different reasons: the count keeps a run of tiny events from
  * making every write expensive, and the byte figure is the one Chrome enforces. Being
  * under one while over the other is what quietly turned this journal back into plain
- * RAM, because chrome.storage.session then refused the write.
+ * RAM, because webext.storage.session then refused the write.
  *
  * Progress lines go first, oldest first. Essentials are given up only when dropping
  * every last progress line still leaves the journal over budget — and when that
@@ -850,8 +867,8 @@ function scheduleRetry() {
   if (!retryWanted()) return;
   if (retryAlarmScheduled) return;
   try {
-    if (chrome.alarms && typeof chrome.alarms.create === 'function') {
-      chrome.alarms.create(RETRY_ALARM, { delayInMinutes: RETRY_PERIOD_MIN });
+    if (webext.alarms && typeof webext.alarms.create === 'function') {
+      webext.alarms.create(RETRY_ALARM, { delayInMinutes: RETRY_PERIOD_MIN });
       retryAlarmScheduled = true;
     }
   } catch {
@@ -862,7 +879,7 @@ function scheduleRetry() {
 function clearRetryIfIdle() {
   if (retryWanted()) return;
   try {
-    if (chrome.alarms && typeof chrome.alarms.clear === 'function') void chrome.alarms.clear(RETRY_ALARM);
+    if (webext.alarms && typeof webext.alarms.clear === 'function') void webext.alarms.clear(RETRY_ALARM);
     retryAlarmScheduled = false;
   } catch {
     // No alarms API in narrow test harnesses.
@@ -871,6 +888,18 @@ function clearRetryIfIdle() {
 
 async function hello(candidate) {
   try {
+    // The one path that waits for the digest, because this request is what the app's connect
+    // line is built from and that line has to be able to say which worker it came from — see
+    // workerStampReady.
+    //
+    // The race is a hang guard, not a latency budget, and the number says so. It resolves the
+    // instant the hash lands, which for one local file is milliseconds; the ceiling exists only
+    // so a read that never returns cannot wedge discovery. A first attempt used 250 ms, which
+    // reads like a budget and behaves like one — shrinking it makes the cold-worker regression
+    // fail, because the connect then goes out unstamped, which is the exact ambiguity this await
+    // exists to remove. Nothing has been measured hashing this slowly; the point is that a guard
+    // tight enough to fire on an unlucky machine is a guard that reintroduces the bug it guards.
+    await Promise.race([workerStampReady, new Promise((resolve) => setTimeout(resolve, 5000))]);
     const response = await fetchBounded(`http://127.0.0.1:${candidate}/hello`, {
       cache: 'no-store',
       headers: versionHeaders()
@@ -883,15 +912,63 @@ async function hello(candidate) {
   }
 }
 
+/**
+ * A digest of this worker's own source, so "which code is actually running" is answerable
+ * from outside the browser.
+ *
+ * The manifest version says which *manifest* Chrome loaded, which is not the same question and
+ * was measured not to be: a QA session on 2026-09-04 bumped the version to force a reload, saw
+ * the app log the new version, and spent the session on a checkpoint that the worker was
+ * dropping — a behaviour only explicable by code older than the file on disk. Nothing available
+ * at the time could tell the two apart, because an unpacked reload can pick up a manifest while
+ * the page keeps talking to a worker built from something else, and the browser-side probes that
+ * would settle it live behind chrome:// UI that synthetic clicks cannot reach.
+ *
+ * Six bytes of SHA-256 over background.js answers it in the app's own log. Same shape as the
+ * driver's `stamp()`, which has told the same story about browser-driver.js for a while.
+ *
+ * Computed once here rather than per request. Making `versionHeaders()` async put an extra turn
+ * in front of every call this worker makes, which is real cost for a diagnostic and broke a
+ * timing test that had been honest about the old shape, so ordinary requests still read whatever
+ * is ready and carry no header if that is nothing.
+ *
+ * `hello()` is the exception and awaits it, because the connect line is the whole point. This was
+ * first written to let that line go unstamped too, on the reasoning that the header is missing
+ * "for the few milliseconds the hash takes and present for the rest of the worker's life". That
+ * is wrong about an MV3 worker: the module re-runs on every wake, and the connect is among the
+ * first requests a freshly woken worker makes, so the connect landed inside its own hash window
+ * routinely — measured on macOS as three consecutive `(build unreported)` connects over half an
+ * hour. Unreported then meant "stale pre-feature worker *or* current worker that woke a moment
+ * ago", which is exactly the ambiguity the digest exists to remove. One await, on one path that
+ * is already asynchronous and happens once per discovery, buys back the only line that has to be
+ * conclusive.
+ */
+let workerStampValue = '';
+const workerStampReady = (async () => {
+  try {
+    const source = await (await fetch(webext.runtime.getURL('background.js'))).arrayBuffer();
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', source)).slice(0, 6);
+    workerStampValue = [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  } catch {
+    // A worker that cannot read itself still has a job to do; the header says so rather than
+    // going quiet, because silence is the one answer this diagnostic must never give.
+    workerStampValue = 'unreadable';
+  }
+})();
+
 /** Lets the app say plainly when the two halves are out of step. */
 function versionHeaders() {
   let version = '0';
   try {
-    version = chrome.runtime.getManifest().version;
+    version = webext.runtime.getManifest().version;
   } catch {
     // Not worth failing a request over.
   }
-  return { 'x-extension-version': version, 'x-extension-protocol': String(BRIDGE_PROTOCOL) };
+  return {
+    'x-extension-version': version,
+    'x-extension-protocol': String(BRIDGE_PROTOCOL),
+    ...(workerStampValue ? { 'x-extension-build': workerStampValue } : {})
+  };
 }
 
 /**
@@ -1355,7 +1432,7 @@ function messageEpoch(message) {
 /**
  * Whether a terminal lease was a wrong prediction about a document that is still running.
  *
- * `markTerminal` is speculative by construction: it fires from `chrome.tabs.onUpdated`
+ * `markTerminal` is speculative by construction: it fires from `webext.tabs.onUpdated`
  * the moment Chrome says a navigation is *starting*, and stamps whichever document the tab
  * currently holds. The design then assumed a replacement document would always arrive and
  * clear the stamp. When one does not — an aborted navigation, a redirect that reports a
@@ -1379,7 +1456,7 @@ async function terminalPredictionWrong(id, key, documentId) {
   if (typeof tabDocuments[key] !== 'string' || tabDocuments[key] !== documentId) return false;
   let tab = null;
   try {
-    tab = await chrome.tabs.get(id);
+    tab = await webext.tabs.get(id);
   } catch {
     return false;
   }
@@ -1827,6 +1904,41 @@ function serializeTab(tab, operation) {
   return tracked;
 }
 
+/**
+ * The `/compact` checkpoints this worker will carry, and nothing else.
+ *
+ * Each one is a durable step in the Compact & Resume state machine that only the page can
+ * witness: it claimed the prompt, it armed the click, ChatGPT took it (and which message it
+ * became), or ChatGPT provably did not. The app acts on each, and none of them mean anything
+ * without the token naming the transaction, so the pair always travels together.
+ *
+ * Adding a checkpoint to the page means adding its name here. Everything else the page sends
+ * on this route is deliberately not forwarded.
+ */
+const COMPACT_CHECKPOINT_FLAGS = [
+  'sourceAttempt',
+  'sourceDispatch',
+  'sourceLost',
+  'destinationAttempt',
+  'destinationDispatch',
+  'destinationLost'
+];
+const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId'];
+
+function compactCheckpointFields(message) {
+  if (!message || typeof message.token !== 'string') return {};
+  const fields = {};
+  for (const flag of COMPACT_CHECKPOINT_FLAGS) {
+    if (message[flag] === true) fields[flag] = true;
+  }
+  for (const name of COMPACT_CHECKPOINT_TEXT) {
+    if (typeof message[name] === 'string') fields[name] = message[name];
+  }
+  // The token rides along only when it actually qualifies something, exactly as the
+  // field-by-field spreads it replaces did: a bare token names no step and is not a checkpoint.
+  return Object.keys(fields).length > 0 ? { token: message.token, ...fields } : {};
+}
+
 const HANDLERS = {
   async register_document(_message, sender) {
     const result = await registerDocument(sender, _message);
@@ -1857,7 +1969,7 @@ const HANDLERS = {
       compatible: found ? found.compatible !== false : null,
       appVersion: found ? found.version : null,
       appProtocol: found ? found.bridge : null,
-      extensionVersion: chrome.runtime.getManifest().version,
+      extensionVersion: webext.runtime.getManifest().version,
       extensionProtocol: BRIDGE_PROTOCOL,
       ...(pairingError ? { pairError: pairingError } : {})
     };
@@ -1902,7 +2014,7 @@ const HANDLERS = {
     // manifest.json already authorize URL-filtered tabs.query on these origins.
     let discovered = [];
     try {
-      discovered = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      discovered = await webext.tabs.query({ url: CHATGPT_TAB_URLS });
     } catch {
       discovered = [];
     }
@@ -1917,7 +2029,7 @@ const HANDLERS = {
     let applied = 0;
     for (const id of tabs) {
       try {
-        const result = await chrome.tabs.sendMessage(id, { type: 'clf-overwrite-now' });
+        const result = await webext.tabs.sendMessage(id, { type: 'clf-overwrite-now' });
         if (result && result.ok === true) applied += 1;
       } catch {
         // A tab may be between navigations/reloads and temporarily have no receiver. The
@@ -1937,7 +2049,7 @@ const HANDLERS = {
     await load();
     let active = null;
     try {
-      const found = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      const found = await webext.tabs.query({ active: true, lastFocusedWindow: true });
       active = found && found.length > 0 ? found[0] : null;
     } catch {
       active = null;
@@ -1953,7 +2065,7 @@ const HANDLERS = {
     let page = null;
     if (tab !== null && isChat) {
       try {
-        page = await chrome.tabs.sendMessage(tab, { type: 'clf-page-status' });
+        page = await webext.tabs.sendMessage(tab, { type: 'clf-page-status' });
       } catch {
         // No live recorder in that document: an unreloaded tab from before this extension
         // was loaded, or a page still starting up. Reported as such rather than as an error.
@@ -1963,7 +2075,7 @@ const HANDLERS = {
 
     let chatTabs = 0;
     try {
-      chatTabs = (await chrome.tabs.query({ url: CHATGPT_TAB_URLS })).length;
+      chatTabs = (await webext.tabs.query({ url: CHATGPT_TAB_URLS })).length;
     } catch {
       chatTabs = 0;
     }
@@ -2086,8 +2198,14 @@ const HANDLERS = {
     const query =
       `?conversationId=${encodeURIComponent(message.conversationId)}` +
       `&since=${Number(message.since) || 0}` +
-      `&goalClient=${encodeURIComponent(String(source.tab))}`;
+      `&goalClient=${encodeURIComponent(String(source.tab))}` +
+      `&compactToken=${encodeURIComponent(typeof message.compactToken === 'string' ? message.compactToken : '')}`;
     const result = await call(`/activity${query}`);
+    // Every reply passes through here, so this is where the app's own view of "still running"
+    // is available to act on. Not awaited: the tab flag must never delay an activity reply.
+    if (result && result.ok === true && result.data) {
+      void holdTabForExecution(source.tab, tabIsExecuting(result.data));
+    }
     if (ownsDocument(source) && result.ok && result.data && await acceptBrowserRevival(result.data.revival)) {
       await recoverDeferredRevivals();
     }
@@ -2103,7 +2221,7 @@ const HANDLERS = {
     await load();
     if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
     try {
-      await chrome.scripting.executeScript({
+      await webext.scripting.executeScript({
         target: { tabId: source.tab, documentIds: [source.documentId] },
         world: 'MAIN',
         files: ['fiber.js']
@@ -2131,32 +2249,20 @@ const HANDLERS = {
         cancel: message.cancel === true,
         ticket: message.ticket === true,
         automatic: message.automatic === true,
-        // The capture. `token` names the transaction the page was given when it marked the
-        // compaction turn, and `summary` is that turn's own answer. Both are forwarded
-        // verbatim and only together: the app refuses a brief whose token does not name an
-        // open continuation for this chat, which is what keeps some other tab's text from
-        // ever becoming this session's handoff.
-        ...(typeof message.token === 'string' && typeof message.summary === 'string'
-          ? { token: message.token, summary: message.summary }
-          : {}),
-        ...(typeof message.token === 'string' && message.sourceAttempt === true
-          ? { token: message.token, sourceAttempt: true }
-          : {}),
-        ...(typeof message.token === 'string' && message.sourceDispatch === true
-          ? { token: message.token, sourceDispatch: true }
-          : {}),
-        ...(typeof message.token === 'string' && typeof message.sourceMessageId === 'string'
-          ? { token: message.token, sourceMessageId: message.sourceMessageId }
-          : {}),
-        ...(typeof message.token === 'string' && message.destinationAttempt === true
-          ? { token: message.token, destinationAttempt: true }
-          : {}),
-        ...(typeof message.token === 'string' && message.destinationDispatch === true
-          ? { token: message.token, destinationDispatch: true }
-          : {}),
-        ...(typeof message.token === 'string' && typeof message.destinationMessageId === 'string'
-          ? { token: message.token, destinationMessageId: message.destinationMessageId }
-          : {})
+        // Every checkpoint on this route is token-paired: the field only says anything about
+        // the transaction the token names, so neither is ever forwarded without the other. The
+        // app refuses a brief whose token does not name an open continuation for this chat,
+        // which is what keeps some other tab's text from becoming this session's handoff.
+        //
+        // Named in one list rather than eight hand-copied ternaries, because this body is
+        // rebuilt field by field and a field nobody remembered to list is dropped in silence
+        // with both ends of the feature looking correct. That happened twice: `sourceLost` on
+        // the day it was written, and `destinationLost` from 2026-09-02 until this was found —
+        // in both cases the page reported, the app was ready, and the continuation sat armed
+        // until its six-hour TTL with the chat kept out of browser recovery the whole time.
+        // Still an allowlist, not a passthrough: nothing reaches the app unless it is named
+        // in COMPACT_CHECKPOINT_FLAGS or COMPACT_CHECKPOINT_TEXT below.
+        ...compactCheckpointFields(message)
       })
     });
     // Chat B, for this window. The app produced it inside this very request precisely so that
@@ -2225,10 +2331,10 @@ const HANDLERS = {
       if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
     }
     try {
-      const activated = await chrome.tabs.update(source.tab, { active: true });
+      const activated = await webext.tabs.update(source.tab, { active: true });
       const senderWindow = sender && sender.tab && typeof sender.tab.windowId === 'number' ? sender.tab.windowId : null;
       const windowId = senderWindow ?? (activated && typeof activated.windowId === 'number' ? activated.windowId : null);
-      if (windowId !== null) await chrome.windows.update(windowId, { focused: true });
+      if (windowId !== null) await webext.windows.update(windowId, { focused: true });
     } catch {
       // Focus is a courtesy. The page owns Goal regardless, so browser/UI refusal must not turn
       // a valid hidden completion into a failed continuation.
@@ -2359,6 +2465,41 @@ const HANDLERS = {
     const id = deferredRevivalId(message.id);
     if (!id) return { ok: false, error: 'bad_command_id' };
     const senderTabId = Number.isInteger(source?.tab) ? source.tab : null;
+    const senderUrl = typeof _sender?.tab?.url === 'string' ? _sender.tab.url : '';
+    const senderPendingUrl = typeof _sender?.tab?.pendingUrl === 'string' ? _sender.tab.pendingUrl : '';
+    const knownPreference = revivalPreference(id);
+    const isFallback =
+      senderTabId !== null &&
+      (
+        knownPreference?.fallbackTabId === senderTabId ||
+        revivalReuseAttempted.get(senderTabId) === id ||
+        markerFromUrl(senderUrl) === id ||
+        markerFromUrl(senderPendingUrl) === id
+      );
+    if (isFallback && senderTabId !== null) {
+      let tabs = [];
+      try {
+        tabs = await webext.tabs.query({ url: CHATGPT_TAB_URLS });
+      } catch {
+        tabs = [];
+      }
+      const preferred = tabs.find(
+        (tab) =>
+          tab &&
+          typeof tab.id === 'number' &&
+          tab.id !== senderTabId &&
+          conversationForTab(tab) === conversationId
+      );
+      if (preferred) {
+        await rememberPreferredRevival(id, conversationId, senderTabId, preferred.id);
+        return { ok: true, deferred: true, preferredElsewhere: true };
+      }
+      if (knownPreference?.preferredTabId && knownPreference.preferredTabId !== senderTabId) {
+        // The preferred tab may be between query visibility and document registration. Keep the
+        // fallback fenced until a concrete lifecycle event proves that tab really left.
+        return { ok: true, deferred: true, preferredElsewhere: true };
+      }
+    }
     const remembered = await rememberDeferredRevival(id, conversationId);
     if (remembered && senderTabId !== null) deferredRevivalOffers.set(id, senderTabId);
     return remembered ? { ok: true, deferred: true } : { ok: false, error: 'bad_command_id' };
@@ -2384,10 +2525,204 @@ const HANDLERS = {
     // response itself was lost; the outbox is now the sole retry path.
     await forgetDeferredRevival(message.id);
     return result;
+  },
+
+  /**
+   * Browser control, which lives here because the worker is the only part of the extension
+   * allowed to hold a debugger session — the same reason it is the only part that holds the
+   * pairing token. A content script asks; it never drives.
+   *
+   * Loaded on first use rather than imported at the top. The worker is started for every
+   * ordinary observation and almost none of those touch a browser session, so the driver
+   * should not be on that path; and this file is also evaluated as a plain script by its own
+   * tests, where a static import is a parse error.
+   */
+  async browser_status() {
+    const driver = await browserControl();
+    return { ok: true, granted: await driver.hasBrowserPermissions(), ...(await driver.browserDriver.status()) };
+  },
+  async browser_attach(message) {
+    return browserResult(async (driver) => driver.browserDriver.attach(Number(message.tabId)), 'BROWSER_ATTACH_FAILED');
+  },
+  async browser_detach() {
+    const driver = await browserControl();
+    return { ok: true, ...(await driver.browserDriver.detach()) };
+  },
+  async browser_act(message) {
+    return browserResult(
+      async (driver) => ({ result: await driver.browserDriver.act(message.action) }),
+      'BROWSER_ACTION_FAILED'
+    );
+  },
+  /**
+   * Reports a browser action's outcome back to the app.
+   *
+   * Through the worker because the pairing token lives here and never in a content script —
+   * the same reason every other route the page needs is proxied rather than called directly.
+   */
+  async browser_result(message) {
+    await load();
+    try {
+      return await call('/browser/result', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversationId: String(message.conversationId || ''),
+          id: String(message.id || ''),
+          ok: message.ok === true,
+          data: message.data,
+          error: message.error,
+          detail: message.detail
+        })
+      });
+    } catch (error) {
+      return { ok: false, error: 'bridge_unreachable', detail: String(error?.message ?? error) };
+    }
+  },
+  async browser_observe(message) {
+    return browserResult(
+      async (driver) => driver.browserDriver.observe({ includeScreenshot: message.includeScreenshot !== false }),
+      'BROWSER_OBSERVE_FAILED'
+    );
   }
 };
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+/**
+ * The browser driver, loaded once and only when something actually asks for it.
+ *
+ * Statically imported, because a service worker may not do otherwise: dynamic `import()` is
+ * disallowed on ServiceWorkerGlobalScope by specification, and Chrome refuses it at runtime with
+ * exactly that message. It was dynamic here to keep the module off the hot path of ordinary
+ * observation and to let this file parse where a test evaluates it as a classic script — and
+ * that second reason quietly cost the whole feature: every browser_* message failed in a real
+ * browser while the tests, which never execute an import, stayed green. The test harness stubs
+ * the module now; the product does what the platform allows.
+ */
+let browserLifecycleInstalled = false;
+async function browserControl() {
+  if (!browserLifecycleInstalled) {
+    browserLifecycleInstalled = true;
+    // Registered on first use rather than at load: a session the browser tears down — a closed
+    // tab, Cancel on the debugging banner, DevTools opening — must not leave this worker
+    // believing it still owns one.
+    browserDriverModule.installBrowserDriverLifecycle();
+  }
+  return browserDriverModule;
+}
+
+/** Every browser handler answers the same shape, so one refusal path serves all of them. */
+async function browserResult(run, fallbackCode) {
+  try {
+    const driver = await browserControl();
+    return { ok: true, ...(await run(driver)) };
+  } catch (error) {
+    return { ok: false, error: error?.code ?? fallbackCode, detail: String(error?.message ?? error) };
+  }
+}
+
+/**
+ * Whether a tab is still taking part in a run, judged from the app's own activity reply.
+ *
+ * Exported shape rather than an inline condition because this decides when Chrome is allowed
+ * to reclaim a tab, and a rule that decides that should be readable and testable on its own.
+ *
+ * Deliberately narrow. Protecting every ChatGPT tab would disable Memory Saver for someone
+ * who keeps twenty of them open, which is a worse product than the problem it solves. These
+ * five conditions are the ones where losing the page costs something that cannot be recovered
+ * by looking again later:
+ *
+ *  - the owning prime of a running swarm, which the app only projects to that one chat;
+ *  - a worker chat whose turn is still going;
+ *  - a compaction in flight, which is one generation that cannot be restarted;
+ *  - tool calls the app is waiting on;
+ *  - background exec sessions still running, or finished with output nobody has read.
+ */
+function tabIsExecuting(data) {
+  if (!data || typeof data !== 'object') return false;
+  const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : 0);
+  const exec = data.backgroundExec && typeof data.backgroundExec === 'object' ? data.backgroundExec : {};
+  if (data.swarm && typeof data.swarm === 'object' && data.swarm.running === true) return true;
+  if (data.bootstrap === 'worker' && data.generating === true) return true;
+  if (data.job && typeof data.job === 'object' && data.job.busy === true) return true;
+  if (number(data.pendingTools) > 0) return true;
+  if (number(exec.running) > 0 || number(exec.exitedUnread) > 0) return true;
+  return false;
+}
+
+/**
+ * Tabs currently held back from Chrome's Memory Saver, so the flag is only written on change.
+ *
+ * Kept in session storage, which is exactly the lifetime this needs: it survives the worker
+ * being torn down — MV3 does that routinely — and dies with the browser session, along with the
+ * per-tab `autoDiscardable` state it describes.
+ *
+ * In memory alone it was worse than useless. After a restart the set came back empty, so the
+ * release read `false === false`, skipped the write, and left the tab exempt from Memory Saver
+ * for the rest of the session. Writing unconditionally instead would put a tabs.update on every
+ * idle poll of every chat, which is a lot of calls to undo something that was never done.
+ */
+const heldTabs = new Set();
+let heldTabsLoaded = false;
+
+/** Brings the held set back after a worker restart, once. */
+async function loadHeldTabs() {
+  if (heldTabsLoaded) return;
+  heldTabsLoaded = true;
+  try {
+    const store = globalThis.chrome?.storage?.session ?? globalThis.browser?.storage?.session;
+    if (!store) return;
+    const saved = await store.get('heldTabs');
+    for (const id of Array.isArray(saved?.heldTabs) ? saved.heldTabs : []) {
+      if (Number.isSafeInteger(id)) heldTabs.add(id);
+    }
+  } catch {
+    // Session storage is unavailable on older builds. The set then behaves as it did before:
+    // correct within one worker lifetime, and a tab may keep its hold until the browser closes.
+  }
+}
+
+/** Records the held set so the next worker instance can give these tabs back. */
+async function saveHeldTabs() {
+  try {
+    const store = globalThis.chrome?.storage?.session ?? globalThis.browser?.storage?.session;
+    await store?.set({ heldTabs: [...heldTabs] });
+  } catch {
+    // Never fatal: this is an optimisation of Chrome's memory policy, not a correctness fence.
+  }
+}
+
+/**
+ * Keeps Chrome from reclaiming a tab that is still doing the work.
+ *
+ * Memory Saver discards a background tab after a period of inactivity, which takes the content
+ * script with it: the recorder stops, activity polling stops, and fresh request-to-conversation
+ * evidence stops being produced. The app is deliberately conservative without that evidence, so
+ * the visible symptom is safe calls landing in Unattributed activity and identity-sensitive
+ * ones failing closed with CALLER_IDENTITY_REQUIRED — in the middle of a run that was working.
+ *
+ * `autoDiscardable` covers discarding, which is the case that loses the document. It does not
+ * prevent freezing, and nothing in the extension API does; a frozen tab resumes with its
+ * document intact, so the recorder comes back on its own rather than needing to re-register.
+ *
+ * Failure here is never fatal. The flag is an optimisation of Chrome's memory policy, not a
+ * correctness boundary, and a browser that refuses it leaves exactly the behaviour we have now.
+ */
+async function holdTabForExecution(tabId, executing) {
+  if (!Number.isSafeInteger(tabId) || tabId < 0) return;
+  await loadHeldTabs();
+  const held = heldTabs.has(tabId);
+  if (held === executing) return;
+  try {
+    await webext.tabs.update(tabId, { autoDiscardable: !executing });
+    if (executing) heldTabs.add(tabId);
+    else heldTabs.delete(tabId);
+    await saveHeldTabs();
+  } catch {
+    // An older browser, a tab that just closed, or a build without the property. Leave the
+    // set alone so the next reply tries again rather than believing something it did not do.
+  }
+}
+
+webext.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = message && typeof message.type === 'string' ? HANDLERS[message.type] : null;
   if (!handler) {
     sendResponse({ ok: false, error: 'unknown_message' });
@@ -2429,6 +2764,146 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+function revivalPreference(idValue) {
+  const id = deferredRevivalId(idValue);
+  const raw = id ? revivalPreferences[id] : null;
+  if (
+    !id ||
+    !raw ||
+    typeof raw !== 'object' ||
+    cleanConversationId(raw.conversationId) === null ||
+    !Number.isInteger(raw.fallbackTabId) ||
+    !Number.isInteger(raw.preferredTabId)
+  ) {
+    return null;
+  }
+  return raw;
+}
+
+async function rememberPreferredRevival(idValue, conversationValue, fallbackTabId, preferredTabId) {
+  await load();
+  const id = deferredRevivalId(idValue);
+  const conversationId = cleanConversationId(conversationValue);
+  if (!id || !conversationId || !Number.isInteger(fallbackTabId) || !Number.isInteger(preferredTabId)) return false;
+  revivalPreferences[id] = { conversationId, fallbackTabId, preferredTabId };
+  await persistLive();
+  return true;
+}
+
+async function clearRevivalPreference(idValue) {
+  const id = deferredRevivalId(idValue);
+  if (!id || !Object.prototype.hasOwnProperty.call(revivalPreferences, id)) return false;
+  delete revivalPreferences[id];
+  await persistLive();
+  return true;
+}
+
+/** Drops any preference naming a tab that just closed, so neither end of a stale pairing lingers. */
+function clearRevivalPreferencesForTab(tabId) {
+  if (!Number.isInteger(tabId)) return false;
+  let changed = false;
+  for (const [id, raw] of Object.entries(revivalPreferences)) {
+    if (!raw || typeof raw !== 'object') continue;
+    if (raw.fallbackTabId === tabId || raw.preferredTabId === tabId) {
+      delete revivalPreferences[id];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/** The command marker the app puts in a URL it opens, from either the query or the fragment. */
+function markerFromUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    const fromQuery = url.searchParams.get('clf');
+    if (fromQuery) return fromQuery;
+    const hash = url.hash.startsWith('#') ? url.hash.slice(1) : url.hash;
+    return new URLSearchParams(hash).get('clf');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keeps a revival in the tab that chat is already open in.
+ *
+ * The app opens a URL; the browser makes a tab. That is the right answer for the two
+ * commands that open a chat which does not exist yet, and the wrong one for the command that
+ * names a chat the user may well be looking at right now: waking a worker would leave them
+ * with the same conversation open twice, once per revival, which is exactly the pile of
+ * ChatGPT tabs this whole design exists to avoid.
+ *
+ * So the marker is intercepted at the moment the tab is created — before it has navigated,
+ * loaded ChatGPT, or run a content script — and, if that conversation is already open
+ * somewhere, handed to the document that has it. Revival routing deliberately does not activate
+ * or focus that existing tab: hidden/background delivery is part of the transport contract, and
+ * visibility must not be required for the content document to redeem and submit the wake. The
+ * empty tab the browser just made is closed again only after the existing document claims.
+ *
+ * A ping proves only that an existing recorder is alive. It does not prove command ownership:
+ * while the service worker awaits that ping the newly opened `/c/<id>?clf=...` page can finish
+ * loading and durably redeem the same command. The existing document must therefore redeem the
+ * bridge lease itself and report `claimed:true` before the fallback is removed. Whichever page
+ * wins that durable lease stays alive; a mere health reply can never kill the winner.
+ */
+async function reuseOpenChatTab(openedTabId, conversation, commandId) {
+  await load();
+  let tabs = [];
+  try {
+    tabs = await webext.tabs.query({ url: CHATGPT_TAB_URLS });
+  } catch {
+    return false;
+  }
+  const existing = tabs.filter(
+    (tab) => tab && typeof tab.id === 'number' && tab.id !== openedTabId && conversationForTab(tab) === conversation
+  );
+  if (existing.length === 0) return false;
+  // Presence is enough to establish preference, even if that document is still starting and
+  // cannot answer a ping yet. Persisting this browser-session fence before probing prevents the
+  // marked fallback from winning merely because the already-open worker tab needed another render.
+  try {
+    await rememberPreferredRevival(commandId, conversation, openedTabId, existing[0].id);
+  } catch {
+    // If browser metadata itself cannot be persisted, keep the fallback alive. The content-side
+    // defer custody gate will retry before either document is allowed to redeem/send.
+  }
+  for (const candidate of existing) {
+    try {
+      const alive = await webext.tabs.sendMessage(candidate.id, { type: 'clf-recorder-ping' });
+      if (!alive || alive.ok !== true || alive.recorderVersion !== PAGE_RECORDER_VERSION) continue;
+    } catch {
+      // Two copies of one chat can survive an extension reload differently. A dead first match
+      // must not hide a healthy second one and force a third duplicate to remain open.
+      continue;
+    }
+    let reply = null;
+    try {
+      reply = await webext.tabs.sendMessage(candidate.id, {
+        type: 'clf-run-command',
+        id: commandId,
+        conversationId: conversation
+      });
+    } catch {
+      // It died after the ping but before it could acquire the lease. Try another already-open
+      // copy; if none can claim, the app-opened fallback remains the ordinary delivery path.
+      continue;
+    }
+    if (!reply || reply.ok !== true || reply.claimed !== true) continue;
+
+    // This document now owns the command durably. The marked fallback can no longer redeem it,
+    // so removing that tab cannot destroy the only owner or cause duplicate user-message sends.
+    try {
+      await webext.tabs.remove(openedTabId);
+    } catch {
+      // The fallback may already have been closed by the user. Ownership is still safely here.
+    }
+    await clearRevivalPreference(commandId).catch(() => undefined);
+    return true;
+  }
+  return false;
+}
+
 /**
  * Best current conversation identity for one ChatGPT tab.
  *
@@ -2452,9 +2927,40 @@ function conversationForTab(tab) {
   return cleanConversationId(tabConversations[String(tab.id)]);
 }
 
+// Chrome may fire tabs.onCreated before either url or pendingUrl is populated, then publish
+// the real target on tabs.onUpdated. One marked revival gets exactly one reuse attempt per
+// tab+command: retrying on every loading/status update could hand the same command to the
+// existing document twice, while keying this only by tab id makes a long-lived worker tab's
+// *previous* revival look like fallback authority for every later wake.
+const revivalReuseAttempted = new Map();
+
+function maybeReuseRevivalTab(tabId, url) {
+  if (typeof tabId !== 'number') return false;
+  const conversation = conversationFromUrl(url);
+  const commandId = markerFromUrl(url);
+  // Only ever a marked URL naming a concrete conversation, which is only ever a revival.
+  if (!conversation || !commandId) return false;
+  if (revivalReuseAttempted.get(tabId) === commandId) return false;
+  revivalReuseAttempted.set(tabId, commandId);
+  void reuseOpenChatTab(tabId, conversation, commandId).catch(() => undefined);
+  return true;
+}
+
+// Guarded like every other listener registration here: an older Chrome, or a harness that
+// stubs only the tab APIs this extension used to need, must not fail to load the worker.
+if (webext.tabs && webext.tabs.onCreated && typeof webext.tabs.onCreated.addListener === 'function') {
+  webext.tabs.onCreated.addListener((tab) => {
+    const url = typeof tab?.pendingUrl === 'string' && tab.pendingUrl ? tab.pendingUrl : tab?.url;
+    maybeReuseRevivalTab(tab?.id, url);
+  });
+}
+
 // Document unload is not conversation lifetime. A real tab close is: reload keeps the
 // same tab id, while closing it wakes the service worker and retires only that tab's claim.
-chrome.tabs.onRemoved.addListener((id) => {
+webext.tabs.onRemoved.addListener((id) => {
+  // The flag died with the tab; only our record of it would survive.
+  heldTabs.delete(id);
+  revivalReuseAttempted.delete(id);
   clearDeferredRevivalOffersForTab(id);
   void serializeTab(id, async () => {
     const documentId = await markTerminal(id);
@@ -2471,7 +2977,7 @@ chrome.tabs.onRemoved.addListener((id) => {
 // never heard that A's page was gone and never reopened it (2026-09-03). A same-chat reload
 // carries A's own URL and stays ambiguous until the replacement document binds; an SPA move,
 // which fires no `loading` status, remains the content script's to prove.
-chrome.tabs.onUpdated.addListener((id, changeInfo) => {
+webext.tabs.onUpdated.addListener((id, changeInfo) => {
   if (!changeInfo) return;
   const fullNavigation = changeInfo.status === 'loading';
   const leftChatGpt = typeof changeInfo.url === 'string' && !isChatGptUrl(changeInfo.url);
@@ -2493,7 +2999,7 @@ chrome.tabs.onUpdated.addListener((id, changeInfo) => {
       let targetUrl = typeof changeInfo.url === 'string' ? changeInfo.url : '';
       if (!targetUrl) {
         try {
-          const tab = await chrome.tabs.get(id);
+          const tab = await webext.tabs.get(id);
           targetUrl = typeof tab?.url === 'string' ? tab.url : '';
         } catch {
           targetUrl = '';
@@ -2563,7 +3069,7 @@ function offerDeferredRevivalToTab(entry, tab) {
   if (deferredRevivalOffers.get(id) === tab.id) return true;
   deferredRevivalOffers.set(id, tab.id);
   try {
-    const offered = chrome.tabs.sendMessage(tab.id, {
+    const offered = webext.tabs.sendMessage(tab.id, {
       type: 'clf-run-command',
       id,
       conversationId,
@@ -2577,7 +3083,15 @@ function offerDeferredRevivalToTab(entry, tab) {
         // A claimed response means this document crossed the durable bridge lease and remains
         // the sole owner until ACK. Every other response means this offer did not take custody;
         // allow a later document-registration/recovery signal to retry the same existing tab.
-        if (!reply || reply.ok !== true || reply.claimed !== true) {
+        if (reply && reply.ok === true && reply.claimed === true) {
+          const preference = revivalPreference(id);
+          if (preference) {
+            if (tab.id === preference.preferredTabId) {
+              void webext.tabs.remove(preference.fallbackTabId).catch(() => undefined);
+            }
+            void clearRevivalPreference(id).catch(() => undefined);
+          }
+        } else {
           if (deferredRevivalOffers.get(id) === tab.id) deferredRevivalOffers.delete(id);
         }
       },
@@ -2678,7 +3192,7 @@ function recoverDeferredRevivals() {
 
     let tabs = [];
     try {
-      tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+      tabs = await webext.tabs.query({ url: CHATGPT_TAB_URLS });
     } catch {
       tabs = [];
     }
@@ -2704,7 +3218,7 @@ function recoverDeferredRevivals() {
       const url = deferredRevivalUrl(entry);
       if (!url) continue;
       try {
-        const created = await chrome.tabs.create({ url });
+        const created = await webext.tabs.create({ url });
         if (created && typeof created.id === 'number') tabs.push({ ...created, url });
       } catch {
         // Browser policy/window teardown can reject create; the local marker remains for the next
@@ -2759,7 +3273,7 @@ async function restoreChatgptTab(id) {
 async function restoreOpenChatgptTabs() {
   let tabs = [];
   try {
-    tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+    tabs = await webext.tabs.query({ url: CHATGPT_TAB_URLS });
   } catch {
     return;
   }
@@ -2769,15 +3283,15 @@ async function restoreOpenChatgptTabs() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+webext.runtime.onInstalled.addListener(() => {
   void restoreOpenChatgptTabs().then(() => recoverDeferredRevivals()).catch(() => undefined);
   void load().then(() => {
     scheduleRetry();
   });
 });
 
-if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 'function') {
-  chrome.runtime.onStartup.addListener(() => {
+if (webext.runtime.onStartup && typeof webext.runtime.onStartup.addListener === 'function') {
+  webext.runtime.onStartup.addListener(() => {
     void load()
       .then(() => drainCommandAcks())
       .then(() => drain())
@@ -2790,13 +3304,17 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
   });
 }
 
-if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addListener === 'function') {
-  chrome.alarms.onAlarm.addListener((alarm) => {
+if (webext.alarms && webext.alarms.onAlarm && typeof webext.alarms.onAlarm.addListener === 'function') {
+  webext.alarms.onAlarm.addListener((alarm) => {
     if (!alarm || alarm.name !== RETRY_ALARM) return;
     void drainCommandAcks()
       .then(() => drain())
       .then(() => drainCloses())
       .then(() => maintain())
+      // Catches a "Chat On Steroids" tab group left behind by a session this worker no longer
+      // remembers — the MV3 recycle case sweepStaleDrivenGroups exists for — even when nothing
+      // ever attaches again to trigger the other place it runs.
+      .then(() => browserDriverModule.sweepStaleDrivenGroups())
       .catch(() => undefined)
       .then(() => {
         // Re-armed here and nowhere else. Every other caller of scheduleRetry() finds the

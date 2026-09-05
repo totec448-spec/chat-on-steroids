@@ -117,6 +117,19 @@ export function execOwner(processId: number): string | null {
   return owners.get(processId) ?? null;
 }
 
+/** Live/result-bearing process ids proven to belong to one conversation. */
+export function execProcessIdsForConversation(conversationId: string): number[] {
+  if (!conversationId) return [];
+  return [...owners.entries()]
+    .filter(([, owner]) => owner === conversationId)
+    .map(([processId]) => processId);
+}
+
+/** All process ids still tracked by the ownership fence, including anonymous legacy sessions. */
+export function execTrackedProcessIds(): number[] {
+  return [...owners.keys()];
+}
+
 /** One caller-scoped projection used by reminders, admission and runtime status. */
 export function backgroundExecObligations(sessionId: string | null | undefined): BackgroundExecState {
   if (!sessionId) return { running: [], exitedUnread: [] };

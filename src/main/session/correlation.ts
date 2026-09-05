@@ -15,6 +15,14 @@
  * solely because its browser evidence aged out. A proven owner therefore has no time TTL - and
  * no later observation can move or erase it either.
  *
+ * One bound remains, and it is a memory bound rather than a lifetime one: the in-memory registry
+ * holds MAX_CORRELATIONS ids, and past that the least recently used one is dropped. "Used" means
+ * observed by the page *or* looked up by an arriving call, so an id is only ever a candidate once
+ * nothing has touched it for 50,000 other request ids — which no workflow that is still running
+ * can be. An id dropped that way is not necessarily gone either: restore rebuilds owners from
+ * request_id-attributed tool calls in recorded history, which is where the join was written
+ * down.
+ *
  * A second conversation claiming a proven id is a page that is wrong about itself: a React tree
  * still mounted from the chat before it, a fresh chat whose client-side thread id has not yet
  * become the server's, an id the site reused. The answer to a page that is wrong is to refuse
@@ -25,7 +33,7 @@
  */
 
 import { readDurable, writeDurableSoon } from '../durable.js';
-import { listAllSessions, readRecentEvents } from './store.js';
+import { readEverySummary, readRecentEvents } from './store.js';
 
 export interface RequestCorrelation {
   requestId: string;
@@ -206,7 +214,7 @@ async function restoreRequestCorrelationsOnce(): Promise<void> {
   // is idempotent for the same conversation and still makes contradictions sticky.
   let sessions;
   try {
-    sessions = await listAllSessions();
+    sessions = await readEverySummary();
   } catch (error) {
     // A valid direct snapshot can be restored before the session store is initialized (some
     // tests and narrowly scoped consumers do exactly that). In the real app the store is ready
@@ -284,11 +292,28 @@ export function observeRequestCorrelations(
   return results;
 }
 
-/** Exact request-id lookup. An id no page has proved yet resolves to null. */
+/**
+ * Exact request-id lookup. An id no page has proved yet resolves to null.
+ *
+ * A hit also refreshes the id's place in the eviction order, because being called under is this
+ * registry's other liveness signal and the more reliable one. `merge()` already moves a
+ * re-observed id out of the eviction head; without the same treatment here, the workflow the
+ * header is actually written for — one whose calls keep arriving after the page that proved it
+ * was reloaded, compacted or closed — is the workflow that can never refresh itself again, and
+ * so the first one a full registry discards. Eviction now follows use rather than page chatter.
+ *
+ * In memory only, deliberately. Below the cap the order is invisible: the durable snapshot keeps
+ * every row and restore reconciles it against recorded history regardless. Persisting a
+ * reordering on every lookup would clone the whole registry through the write debounce on the
+ * hottest path there is, to record something nothing reads.
+ */
 export function requestCorrelation(requestId: string | null | undefined): RequestCorrelation | null {
   if (!requestId) return null;
   const held = byRequest.get(requestId);
-  return held ? { ...held } : null;
+  if (!held) return null;
+  byRequest.delete(requestId);
+  byRequest.set(requestId, held);
+  return { ...held };
 }
 
 /**

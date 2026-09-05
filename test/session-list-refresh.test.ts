@@ -268,4 +268,120 @@ describe('visible Chat refresh', () => {
     await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(65));
     expect(w.document.getElementById('sessionsFoot')?.textContent).toContain('65 retained sessions');
   });
+
+  it('discards an older page that resolves after a hot refresh already moved the cursor past it', async () => {
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
+    dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
+    const w = dom.window;
+    Object.assign(globalThis, {
+      window: w,
+      document: w.document,
+      HTMLElement: w.HTMLElement,
+      Element: w.Element,
+      Node: w.Node,
+      DocumentFragment: w.DocumentFragment,
+      HTMLInputElement: w.HTMLInputElement,
+      HTMLSelectElement: w.HTMLSelectElement,
+      HTMLTextAreaElement: w.HTMLTextAreaElement,
+      HTMLButtonElement: w.HTMLButtonElement
+    });
+    if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+
+    // S1..S65 (oldest at the end). A 66th session (S0, newest) arrives after the first page and
+    // its cursor have already been handed out, and after an older-page request for the first
+    // cursor (C60, pointing at S60) is already in flight.
+    const original = Array.from({ length: 65 }, (_, index) =>
+      summary(`2026-08-25-${index.toString(16).padStart(8, '0')}`, 100_000 - index, 0)
+    );
+    const fresh = summary('2026-08-25-fresh', 100_001, 0);
+    const staleCursor = { updatedAt: original[59]!.updatedAt, id: original[59]!.id };
+    // After S0 arrives, the newest-60 page shifts by one; the new cursor points at S58 instead.
+    const freshCursor = { updatedAt: original[58]!.updatedAt, id: original[58]!.id };
+
+    let resolveOlderPage: ((value: any) => void) | null = null;
+    const listCalls: any[] = [];
+    const ok = (data: any) => Promise.resolve({ ok: true as const, data });
+    const api: any = new Proxy(
+      {
+        listSessions: (options: any) => {
+          listCalls.push(options);
+          if (!options?.cursor) {
+            // First-page refresh: the initial load, then the hot refresh once S0 has arrived.
+            const hot = listCalls.filter((c) => !c?.cursor).length > 1;
+            return ok(
+              hot
+                ? { sessions: [fresh, ...original.slice(0, 59)], activeId: fresh.id, pressure: [], total: 66, nextCursor: freshCursor }
+                : { sessions: original.slice(0, 60), activeId: original[0]!.id, pressure: [], total: 65, nextCursor: staleCursor }
+            );
+          }
+          if (options.cursor === staleCursor) {
+            // The in-flight older-page request: deliberately held open until the test resolves it.
+            return new Promise((resolve) => {
+              resolveOlderPage = resolve;
+            });
+          }
+          if (options.cursor === freshCursor) {
+            return ok({ sessions: original.slice(59), activeId: fresh.id, pressure: [], total: 66, nextCursor: null });
+          }
+          throw new Error(`unexpected cursor ${JSON.stringify(options.cursor)}`);
+        },
+        getSession: (id: string) =>
+          ok({ summary: [fresh, ...original].find((entry) => entry.id === id), events: [], total: 0, nextFrom: 0 }),
+        getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
+        onSessionChanged: (listener: () => void) => {
+          changed = listener;
+          return () => undefined;
+        },
+        onSwarmChanged: () => () => undefined
+      },
+      {
+        get(target, prop) {
+          if (prop in target) return (target as any)[prop];
+          return (..._args: any[]) => ok(null);
+        }
+      }
+    );
+    let changed: () => void = () => undefined;
+    Object.defineProperty(w, 'api', { value: api, configurable: true });
+
+    const { chatVisible, initChat } = await import('../src/renderer/chat.js');
+    initChat({ save: async () => undefined, state: () => ({ config: { sessions: { record: true } } }) as any });
+    chatVisible(true);
+    await vi.waitFor(() => expect(listCalls).toHaveLength(1));
+    await vi.waitFor(() =>
+      expect(w.document.getElementById('sessionsFoot')?.textContent).toContain('60 of 65 retained sessions shown')
+    );
+
+    // Scroll to start the older-page request; it stays pending (resolveOlderPage captured).
+    const pane = w.document.getElementById('sessionList')!.closest('.scroll') as HTMLElement;
+    Object.defineProperty(pane, 'clientHeight', { value: 200, configurable: true });
+    Object.defineProperty(pane, 'scrollHeight', { value: 1_000, configurable: true });
+    pane.scrollTop = 800;
+    pane.dispatchEvent(new w.Event('scroll'));
+    await vi.waitFor(() => expect(listCalls).toHaveLength(2));
+    expect(resolveOlderPage).not.toBeNull();
+
+    // A hot refresh (S0 arriving) lands and commits a newer first page and cursor while that
+    // older-page request is still outstanding.
+    changed();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await vi.waitFor(() => expect(listCalls).toHaveLength(3));
+    await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(60));
+
+    // Now the stale older-page response finally arrives, carrying the pre-refresh cursor.
+    resolveOlderPage!({
+      ok: true,
+      data: { sessions: original.slice(60), activeId: original[0]!.id, pressure: [], total: 65, nextCursor: null }
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // It must not have won: the fresh cursor survives, so scrolling still reaches S59..S64.
+    pane.dispatchEvent(new w.Event('scroll'));
+    await vi.waitFor(() => expect(listCalls).toHaveLength(4));
+    expect(listCalls[3]).toEqual({ cursor: freshCursor, limit: 60 });
+    await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(66));
+    const ids = new Set([...w.document.querySelectorAll('#sessionList .sess')].map((el) => el.getAttribute('data-id')));
+    expect(ids.size).toBe(66);
+  });
 });

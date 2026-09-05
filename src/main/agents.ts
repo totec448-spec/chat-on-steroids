@@ -86,7 +86,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, SwarmState } from '../shared/session.js';
 import { getConfig } from './config.js';
 import { logInfo, logWarn } from './logger.js';
-import { inheritWorkspace, releasePrimeWorkspace } from './workspace.js';
+import { inheritWorkspace } from './workspace.js';
 
 export const PRIME_ID = 'prime';
 
@@ -376,6 +376,22 @@ let criticalPersistFlight: Promise<boolean> | null = null;
 let retiredPersist: (() => void) | null = null;
 let retiredPersistNow: ((snapshot: RetiredWorkersSnapshot) => Promise<void>) | null = null;
 const RETIRED_WORKER_TTL_MS = 30 * 60_000;
+/**
+ * How long a parked run's sleeping workers keep the power to refuse calls nobody could identify.
+ *
+ * Not how long the run lives — a dormant run is the user's to resume whenever they like, and
+ * nothing here deletes one. This bounds only the blanket refusal it casts over *unidentified*
+ * calls, which was unbounded: `hasRetiredWorkerLeases` prunes before it answers and this one
+ * checked no clock at all, so a run parked at any point in the past made every call without proof
+ * of identity fail, for good. A QA run met exactly that — the whole Desktop surface refused before
+ * anything reached macOS, because of a swarm parked days earlier.
+ *
+ * The same half hour the retired lease uses, and for the same reason: past it, an unproven call is
+ * far likelier to be an ordinary chat whose extension has not re-attached than a sleeping worker.
+ * What is still protected past it is the thing worth protecting — a relative file operation with
+ * no proven workspace is refused on its own terms, by its own guard.
+ */
+const DORMANT_WORKER_LEASE_TTL_MS = 30 * 60_000;
 const retiredWorkers = new Map<string, RetiredChat>();
 /** Worker objects created by a spawn whose public durable acceptance has not succeeded yet. */
 const unpublishedAgents = new WeakSet<Agent>();
@@ -628,6 +644,18 @@ function dormantRunForPrime(conversationId: string | null | undefined): DormantR
  * Conversation ids are bound exactly once, so a duplicate across owners would indicate
  * corrupted state. Fail closed by returning null rather than choosing an arbitrary owner in
  * that impossible shape.
+ *
+ * The scan stays a scan on purpose. It reads as an unbounded loop on a hot path — a 2026-08-31
+ * audit finding said exactly that and proposed a conversation-keyed index maintained by the
+ * broker instead — but `dormantRuns` is hard-capped at MAX_DORMANT_RUNS and pruned on every
+ * park, so the walk is bounded by a small constant (a real install measured four entries) and
+ * costs microseconds against an MCP call measured in milliseconds. What an index would cost is
+ * the property in the paragraph above: a Map keyed by conversation cannot represent two owners
+ * claiming one conversation, so the second claim would quietly overwrite the first and this
+ * would confidently answer an identity question with a guess. It would also add invalidation
+ * duties to every park, reactivate, prune, rebind and restore path. Speed nobody can measure is
+ * not worth either. ('discards a restored history that claims a conversation another owner
+ * already holds' in test/agents.test.ts covers both lines of defence.)
  */
 function dormantAgentForConversation(
   conversationId: string | null | undefined
@@ -954,10 +982,6 @@ function primeAgent(): Agent {
  */
 function endRun(reason: string): void {
   if (!run) return;
-  // The prime's tool calls switch from `agent:prime` back to its conversation identity the
-  // instant this run disappears. Collapse that temporary workspace identity first so the next
-  // relative path cannot revive the project the chat was using before it spawned workers.
-  releasePrimeWorkspace(run.primeConversationId);
   const retired: RetiredChat[] = [...run.agents.values()]
     // Keep the conversation fence after the active-run tombstone disappears. A terminal
     // worker is still a worker chat: `finish` stops its broker role, not the ChatGPT turn or
@@ -990,7 +1014,6 @@ function endRun(reason: string): void {
 function parkRun(reason: string): boolean {
   if (!run || workingWorkers().length > 0) return false;
   const current = run;
-  releasePrimeWorkspace(current.primeConversationId);
   dormantRuns.set(current.primeConversationId, {
     primeConversationId: current.primeConversationId,
     startedAt: current.startedAt,
@@ -1133,7 +1156,6 @@ function settleSpawnStage(stage: SpawnStageState, accepted: boolean): void {
       run = null;
     } else if (stage.resumedDormant) {
       const current = run;
-      releasePrimeWorkspace(current.primeConversationId);
       dormantRuns.set(stage.resumedDormant.primeConversationId, {
         ...stage.resumedDormant,
         agents: current.agents,
@@ -3291,7 +3313,11 @@ export function closableWorkerConversations(keep: number): string[] {
 
 /** Any dormant worker conversation remains an identity fence, reusable or terminal. */
 export function hasDormantWorkerLeases(): boolean {
+  const cutoff = Date.now() - DORMANT_WORKER_LEASE_TTL_MS;
   for (const dormant of dormantRuns.values()) {
+    // Parked long enough ago that refusing every unidentified call in its name costs more than it
+    // protects. The run itself stays exactly where it is, resumable.
+    if (dormant.parkedAt < cutoff) continue;
     if (
       [...dormant.agents.values()].some(
         (agent) => agent.info.role === 'worker' && Boolean(agent.info.conversationId)

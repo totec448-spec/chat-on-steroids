@@ -175,6 +175,7 @@ The MCP connector uses ChatGPT's documented Developer mode and Secure MCP Tunnel
 - **Extension version mismatch:** reload the unpacked extension after every app update.
 - **`agents` says `UNIDENTIFIED_CALLER`:** use that conversation in the paired browser so the extension can observe its request id. The app will not guess identity from the active tab.
 - **`COMPACTION_IN_PROGRESS` in a chat:** that chat is being handed off. Let it write the brief; work continues in the replacement.
+- **A chat stops responding after an automatic compaction:** the handoff was asked for but the reply never arrived, usually because ChatGPT's own transport dropped it. Reload the tab — the app keeps the ticket and a fresh page picks it up. The app also reloads such a chat for you while **Recover other chats’ tabs** is on.
 - **OS warning about an unverified app:** expected for the unsigned beta. Verify `SHA256SUMS.txt` before overriding.
 - **Linux says secure credential storage is unavailable:** unlock GNOME Keyring or KWallet and restart the app.
 - **Tunnel unavailable:** point Advanced settings at an explicit `tunnel-client` or `cloudflared`, or use the bundled copy.

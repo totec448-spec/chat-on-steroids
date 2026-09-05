@@ -1019,7 +1019,12 @@ describe('repairing a bash-style escaped quote', () => {
 
     const argv = (commandLine: string): string[] => {
       writeFileSync(driver, `${commandLine}\n`, 'utf8');
-      return execFileSync('powershell.exe', ['-NoProfile', '-File', driver], { encoding: 'utf8' })
+      // -ExecutionPolicy Bypass because this asks PowerShell how it splits a command
+      // line, not whether the machine allows scripts. Without it the test inherits
+      // whichever policy the caller happened to have: it passes when run from a shell
+      // that already relaxed it, and fails on a default machine with "the execution of
+      // scripts is disabled" — which says nothing about the code under test.
+      return execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', driver], { encoding: 'utf8' })
         .split(/\r?\n/)
         .filter((line) => line !== '');
     };
@@ -1028,7 +1033,7 @@ describe('repairing a bash-style escaped quote', () => {
     // Win32 command line and its CommandLineToArgvW round trip, which is what ripgrep and every
     // other program here goes through; a .ps1 called in-process receives .NET strings directly
     // and would answer a question nobody asked.
-    const exe = `& 'powershell.exe' -NoProfile -File '${probe}'`;
+    const exe = `& 'powershell.exe' -NoProfile -ExecutionPolicy Bypass -File '${probe}'`;
     const call = `${exe} "state === \\"starting" second`;
     const repaired = repairPowerShellQuoting(call, 'powershell');
     expect(repaired.cmd).toBe(`${exe} 'state === \\"starting' second`);
@@ -1213,7 +1218,11 @@ describe('a pipeline stopped early by Select-Object -First', () => {
     expect(run(`${generator} | Select-Object -First 5 | Out-Null`)).not.toBe(0);
     // -Wait drains instead of stopping, which is the remedy the note hands the model.
     expect(run(`${generator} | Select-Object -First 5 -Wait | Out-Null`)).toBe(0);
-  });
+    // Two PowerShell starts, and the second one drains all twenty thousand lines rather than
+    // cutting the pipeline — that is the whole point of the second assertion. On a loaded arm64
+    // Windows machine that has twice run past the default thirty seconds and failed as a timeout,
+    // which says nothing about pipelines. The count stays; the budget is the part that was wrong.
+  }, 120_000);
 });
 
 describe('git grep, which spends exit 1 on "found nothing" like every other search', () => {

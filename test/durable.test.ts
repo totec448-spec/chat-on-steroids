@@ -9,7 +9,8 @@ import {
   readDurable,
   resetDurableForTests,
   writeDurableNow,
-  writeDurableSoon
+  writeDurableSoon,
+  writeDurableSoonLazy
 } from '../src/main/durable.js';
 
 const cleanup: string[] = [];
@@ -89,5 +90,27 @@ describe('durable state commit boundary', () => {
 
     await expect(flushDurable()).rejects.toMatchObject({ code: 'EBUSY' });
     await expect(readDurable('continuations')).resolves.toEqual({ token: 'safe' });
+  });
+
+  it('builds a lazy snapshot exactly once per debounce window, not once per call collapsed into it', async () => {
+    await tempStore();
+    let produced = 0;
+    const produce = () => {
+      produced += 1;
+      return { generation: produced };
+    };
+
+    // A burst of mutations inside one window - agents.changed() firing on every critical or
+    // telemetry event is the production shape this models. writeDurableSoon would have paid to
+    // build every one of these snapshots even though only the last is ever written.
+    writeDurableSoonLazy('probe', produce);
+    writeDurableSoonLazy('probe', produce);
+    writeDurableSoonLazy('probe', produce);
+    expect(produced).toBe(0);
+
+    await flushDurable();
+
+    expect(produced).toBe(1);
+    await expect(readDurable('probe')).resolves.toEqual({ generation: 1 });
   });
 });

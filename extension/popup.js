@@ -1,3 +1,5 @@
+const webext = globalThis.browser ?? globalThis.chrome;
+
 /**
  * Status UI, and the one place that answers "where did the stream stop?".
  *
@@ -14,10 +16,12 @@
 const $ = (id) => document.getElementById(id);
 const RENDER_STREAM_KEY = 'renderStreamEnabled';
 const SHOW_TIMES_KEY = 'showStreamTimes';
+const REPLACE_WORKER_DRAFTS_KEY = 'replaceWorkerDrafts';
 const POLL_MS = 1500;
 
 let overwriteEnabled = true;
 let showTimes = false;
+let replaceWorkerDrafts = false;
 let latest = { status: null, tab: null };
 let openedOnFailure = false;
 
@@ -305,8 +309,8 @@ function paintDetails(status, info) {
 
 async function refresh() {
   const [status, info] = await Promise.all([
-    chrome.runtime.sendMessage({ type: 'status' }),
-    chrome.runtime.sendMessage({ type: 'tabStatus' }).catch(() => null)
+    webext.runtime.sendMessage({ type: 'status' }),
+    webext.runtime.sendMessage({ type: 'tabStatus' }).catch(() => null)
   ]);
   latest = { status, tab: info };
 
@@ -356,11 +360,16 @@ function syncOverwrite() {
 }
 
 async function loadPreferences() {
-  const stored = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
+  const stored = await webext.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY, REPLACE_WORKER_DRAFTS_KEY]);
   overwriteEnabled = stored[RENDER_STREAM_KEY] !== false;
   showTimes = stored[SHOW_TIMES_KEY] === true;
+  replaceWorkerDrafts = stored[REPLACE_WORKER_DRAFTS_KEY] === true;
   syncOverwrite();
   $('timeToggle').checked = showTimes;
+  $('replaceDraftToggle').checked = replaceWorkerDrafts;
+  // The browser-control row reflects a browser permission rather than a stored preference, so
+  // it has to be read on open. Without this it only ever painted after somebody clicked it.
+  await syncBrowserControl();
 }
 
 /** Puts one value on the clipboard and says so in place, without moving anything. */
@@ -396,13 +405,13 @@ $('more').addEventListener('toggle', () => paintDetails(latest.status, latest.ta
 
 $('retryBtn').addEventListener('click', async () => {
   $('retryBtn').disabled = true;
-  await chrome.runtime.sendMessage({ type: 'pair' });
+  await webext.runtime.sendMessage({ type: 'pair' });
   $('retryBtn').disabled = false;
   await refresh();
 });
 
 $('unpairBtn').addEventListener('click', async () => {
-  await chrome.runtime.sendMessage({ type: 'unpair' });
+  await webext.runtime.sendMessage({ type: 'unpair' });
   await refresh();
 });
 
@@ -411,19 +420,169 @@ $('overwriteToggle').addEventListener('change', async () => {
   overwriteEnabled = $('overwriteToggle').checked === true;
   syncOverwrite();
   try {
-    await chrome.storage.local.set({ [RENDER_STREAM_KEY]: overwriteEnabled });
+    await webext.storage.local.set({ [RENDER_STREAM_KEY]: overwriteEnabled });
     // The toggle is the action. Enabling it immediately pulls the latest app timeline into
     // every known ChatGPT tab; there is deliberately no second "Overwrite now" button.
-    if (overwriteEnabled) await chrome.runtime.sendMessage({ type: 'overwriteNow' });
+    if (overwriteEnabled) await webext.runtime.sendMessage({ type: 'overwriteNow' });
   } catch {
     overwriteEnabled = previous;
     syncOverwrite();
   }
 });
 
+/**
+ * Browser control is the one switch that changes what the extension is allowed to do.
+ *
+ * Chrome only shows a permission prompt from a real user gesture, which is why this lives in
+ * the popup rather than in a settings round trip: the click that turns it on *is* the consent.
+ * Turning it off both revokes the permissions and drops any live session, so "off" means the
+ * capability is gone, not merely unused.
+ */
+/**
+ * Chrome answers a callback and returns nothing; Firefox returns a promise and ignores the
+ * callback. Waiting only for the callback waits forever on Firefox, which this extension
+ * supports, so whichever the browser actually hands back is accepted.
+ */
+/*
+ * What browser control still asks for at runtime.
+ *
+ * `debugger` is deliberately absent, and this is the whole reason the switch used to be
+ * unusable: Chrome does not accept `debugger` in optional_permissions. It drops the entry when
+ * the manifest loads, so a later request for it comes back "Only permissions specified in the
+ * manifest may be requested" — verified against Chrome 152. Every request here failed on that
+ * one entry, the failure was swallowed, and the toggle simply snapped back off. `debugger` is a
+ * required permission now; site and tab access stay optional, which is what actually decides
+ * whether this extension can read a page.
+ */
+const BROWSER_CONTROL_PERMISSIONS = {
+  permissions: ['tabs', 'tabGroups'],
+  origins: ['<all_urls>']
+};
+
+/**
+ * Shows why browser control could not be switched on, or clears it.
+ *
+ * A permission refusal used to be invisible: the switch flipped back and said nothing, so a
+ * request Chrome was never going to grant looked like a broken control. The message is the
+ * browser's own wherever there is one, because a summary loses the detail that makes it fixable.
+ */
+function showBrowserControlError(message) {
+  const node = document.getElementById('browserControlError');
+  if (!node) return;
+  node.textContent = message ?? '';
+  node.hidden = !message;
+}
+
+/** The reason the last permission call failed, for the popup to show rather than hide. */
+let lastPermissionError = null;
+
+function browserPermissions(method) {
+  lastPermissionError = null;
+  return new Promise((resolve) => {
+    const api = webext?.permissions;
+    if (!api?.[method]) return resolve(false);
+    try {
+      const returned = api[method](BROWSER_CONTROL_PERMISSIONS, (granted) => {
+        // Kept, not discarded: a refusal the user cannot see reads as a broken switch, which is
+        // exactly how a permission Chrome would never grant went unnoticed.
+        lastPermissionError = webext.runtime.lastError?.message ?? null;
+        resolve(Boolean(granted));
+      });
+      if (returned && typeof returned.then === 'function') {
+        returned.then(
+          (granted) => resolve(Boolean(granted)),
+          (error) => {
+            lastPermissionError = error?.message ?? String(error);
+            resolve(false);
+          }
+        );
+      }
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function syncBrowserControl() {
+  // Whether the browser knows this permission at all, which is not the same as holding it.
+  // `chrome.debugger` does not exist until the permission is granted, so testing for that
+  // object would hide the switch that grants it and make the feature unreachable — measured
+  // in a real Edge run, where the popup saw no debugger API before granting.
+  const supported = await new Promise((resolve) => {
+    try {
+      const returned = webext.permissions.contains({ permissions: ['debugger'] }, (held) => {
+        resolve(!webext.runtime.lastError && typeof held === 'boolean');
+      });
+      if (returned && typeof returned.then === 'function') {
+        returned.then(() => resolve(true), () => resolve(false));
+      }
+    } catch {
+      resolve(false);
+    }
+  });
+  $('browserControlToggle').closest('.row').hidden = !supported;
+  if (!supported) return;
+  try {
+    const status = await webext.runtime.sendMessage({ type: 'browser_status' });
+    const on = status?.granted === true;
+    $('browserControlToggle').checked = on;
+    $('browserControlToggle').closest('.row')?.classList.toggle('on', on);
+    // A worker that answers with a failure is not the same as one that says "not granted", and
+    // the switch cannot show the difference. It showed off for both, which is how a worker that
+    // could not load the driver at all looked exactly like a permission nobody had granted.
+    showBrowserControlError(
+      status?.ok === false && status?.error
+        ? `Browser control is unavailable: ${status.error}`
+        : null
+    );
+  } catch (error) {
+    $('browserControlToggle').checked = false;
+    showBrowserControlError(
+      `Browser control could not be read from the extension worker: ${error?.message ?? String(error)}`
+    );
+  }
+}
+
+$('browserControlToggle').addEventListener('change', async () => {
+  const wanted = $('browserControlToggle').checked === true;
+  try {
+    if (wanted) {
+      if (!(await browserPermissions('request'))) {
+        $('browserControlToggle').checked = false;
+        showBrowserControlError(
+          lastPermissionError
+            ? `Browser control could not be enabled: ${lastPermissionError}`
+            : 'Browser control could not be enabled. The browser declined the permission request.'
+        );
+      } else {
+        showBrowserControlError(null);
+      }
+    } else {
+      showBrowserControlError(null);
+      // Stop first, then revoke: revoking under a live session would leave a debugger
+      // attachment this extension can no longer address, and the banner with it.
+      await webext.runtime.sendMessage({ type: 'browser_detach' }).catch(() => null);
+      await browserPermissions('remove');
+    }
+  } finally {
+    await syncBrowserControl();
+  }
+});
+
+$('replaceDraftToggle').addEventListener('change', async () => {
+  const previous = replaceWorkerDrafts;
+  replaceWorkerDrafts = $('replaceDraftToggle').checked === true;
+  try {
+    await webext.storage.local.set({ [REPLACE_WORKER_DRAFTS_KEY]: replaceWorkerDrafts });
+  } catch {
+    replaceWorkerDrafts = previous;
+    $('replaceDraftToggle').checked = replaceWorkerDrafts;
+  }
+});
+
 $('timeToggle').addEventListener('change', async () => {
   showTimes = $('timeToggle').checked === true;
-  await chrome.storage.local.set({ [SHOW_TIMES_KEY]: showTimes });
+  await webext.storage.local.set({ [SHOW_TIMES_KEY]: showTimes });
 });
 
 // A popup is open for seconds at a time and the three stages move within those seconds.

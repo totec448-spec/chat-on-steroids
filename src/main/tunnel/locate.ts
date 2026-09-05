@@ -155,9 +155,10 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
 function bundledDir(): string | null {
   const packaged = process.resourcesPath ? path.join(process.resourcesPath, 'tunnel') : null;
   if (packaged && existsSync(packaged)) return packaged;
-  // Source: src/main/tunnel -> repo root is three levels up.
-  // Packaged/compiled dev output keeps the same main/tunnel nesting under dist.
-  const dev = path.resolve(__dirname, '..', '..', '..', 'resources', 'tunnel');
+  // electron-vite bundles every main-process module into one out/main/index.js, so
+  // __dirname here is out/main regardless of this file's own src/main/tunnel nesting —
+  // two levels up is the repo root, matching ripgrep.ts's own dev-mode resolution below.
+  const dev = path.resolve(__dirname, '..', '..', 'resources', 'tunnel');
   return existsSync(dev) ? dev : null;
 }
 

@@ -8,6 +8,7 @@ import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
 import { initLogFile, logError, logInfo, logWarn } from './logger.js';
+import { BUILD_VERSION } from './version.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
 import { setBrowserOpener, shutdownBridge, startBridge } from './bridge.js';
@@ -34,7 +35,14 @@ import {
   type RetiredWorkersSnapshot,
   type SwarmSnapshot
 } from './agents.js';
-import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
+import {
+  flushDurable,
+  initDurableStore,
+  readDurable,
+  writeDurableNow,
+  writeDurableSoon,
+  writeDurableSoonLazy
+} from './durable.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { stopComputerHelper } from './computer/index.js';
@@ -102,7 +110,9 @@ function createWindow(): void {
     autoHideMenuBar: true,
     // Painted before the renderer loads, so a dark window never flashes white.
     backgroundColor: getConfig().ui.theme === 'dark' ? '#0e0e11' : '#ffffff',
-    title: 'Chat On Steroids',
+    // The window carries it too, because that is the one place nobody has to go looking. Two
+    // builds with the same name and version is how a QA run came to measure the wrong app.
+    title: `Chat On Steroids ${BUILD_VERSION}`,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -112,6 +122,26 @@ function createWindow(): void {
       // The renderer only ever loads our own local files.
       webSecurity: true
     }
+  });
+
+  /*
+   * Keep the title the app chose, not the document's.
+   *
+   * Electron hands the renderer's <title> to the window as soon as the page loads, which
+   * replaces the option set above — so the build identity was gone before anyone could read it.
+   * Measured on macOS against a package built from a known commit: the window read
+   * "Chat On Steroids", no version, no commit, and every attempt to check which build was running
+   * came back with nothing.
+   *
+   * That is the one thing this title exists to say. Two builds with the same name and version is
+   * how a QA run came to measure the wrong app, and the protection against it had been inert the
+   * whole time — silently, which is why it took a run that went looking to find it.
+   *
+   * Refusing the event is what keeps it: without preventDefault Electron overwrites the title on
+   * every document-title change, so setting it once after load would only last until the next one.
+   */
+  window.on('page-title-updated', (event) => {
+    event.preventDefault();
   });
 
   window.once('ready-to-show', () => {
@@ -227,10 +257,37 @@ function refreshTray(): void {
 
 app.on('second-instance', windowActivation.request);
 
+/** Whether startup got as far as bringing up the bridge and connection. */
+let startedControlPlane = false;
+
+/**
+ * Connects, and says so if it cannot.
+ *
+ * `void connect()` discarded the failure: no message, no retry, and from the outside a connector
+ * that answers `tunnel_client_not_connected` forever. QA hit exactly that after restarting with
+ * a permission revoked, and could not press Connect by hand because this app deliberately makes
+ * its own window unautomatable — so an automated run had no way out at all.
+ *
+ * Logged rather than retried here. A failing connect usually needs something a retry cannot
+ * supply, and a silent loop would hide that as thoroughly as the discarded rejection did; the
+ * Activity panel and the Health check are where someone can act on it.
+ */
+function autoConnect(): void {
+  void connect().catch((error: unknown) => {
+    logError(
+      `automatic connect failed: ${(error as Error)?.message ?? String(error)}. ` +
+        'Press Connect in the app, or run the health check to see which link is broken.'
+    );
+  });
+}
+
 void app.whenReady().then(async () => {
   // This guard is intentionally before even app.getPath/init* calls. A secondary instance, or a
   // primary that was told to quit before ready, must never touch the primary's shared userData.
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
+  // Named once, first, so every line below it in a log or a bug report is attributable to a
+  // specific build. Version alone cannot do that: two builds carry the same one.
+  logInfo(`Chat On Steroids ${BUILD_VERSION} starting on ${process.platform}-${process.arch}`);
   const userData = app.getPath('userData');
   initLogFile(path.join(userData, 'app.log'));
   initConfigPath(userData);
@@ -296,7 +353,11 @@ void app.whenReady().then(async () => {
   // dependency. Multi-agent can be enabled from Settings without restarting the process;
   // keeping both sinks wired from startup guarantees the first spawn can cross its durable
   // acceptance barrier even when this launch began with multi-agent disabled.
-  onSwarmPersist(() => writeDurableSoon(SWARM_STATE, snapshotSwarm()));
+  // Lazy: a dormant-history-heavy snapshot is expensive to build, and changed() fires on
+  // every critical/telemetry mutation. writeDurableSoonLazy defers snapshotSwarm() to the
+  // moment a queued generation actually flushes, so a burst inside one 300ms debounce window
+  // builds it once instead of once per mutation that fired inside that window.
+  onSwarmPersist(() => writeDurableSoonLazy(SWARM_STATE, snapshotSwarm));
   onSwarmPersistNow((snapshot) => writeDurableNow(SWARM_STATE, snapshot));
 
   // A multi-agent run outlives this process. Restoring it before the bridge starts
@@ -381,6 +442,7 @@ void app.whenReady().then(async () => {
   if (getConfig().sessions.record || getConfig().multiAgent.enabled) {
     void startBridge();
   }
+  startedControlPlane = true;
   // Retention governs recordings already stored on disk, independent of whether recording is
   // currently enabled. The tray app can stay alive for days, so run once now and keep a coarse
   // maintenance timer rather than making expiry depend on the next process restart.
@@ -391,14 +453,37 @@ void app.whenReady().then(async () => {
     onError: (err) => logError(`session pruning failed: ${err.message}`)
   });
 
-  if (getConfig().ui.autoConnect) void connect();
+  if (getConfig().ui.autoConnect) autoConnect();
 
   // Never awaited: an unreachable GitHub, a slow download or a broken release must not delay a
   // window that is already on screen. Everything it learns arrives through the ordinary state
   // push, every failure ends inside it, and its own timer keeps it running for a tray app that
   // is never restarted.
   startUpdateChecks();
-});
+})
+  /*
+   * Startup is one long chain, and it had nothing to catch a throw.
+   *
+   * Anything that rejected before the end simply stopped the rest of it, silently: no bridge, no
+   * connect, no message. QA restarted the app with Accessibility switched off and found the UI
+   * did not come back and both tunnels answered `tunnel_client_not_connected` — a control plane
+   * that never started, reported as if it had started and then failed.
+   *
+   * Two things follow. A failure is now logged instead of becoming an unhandled rejection
+   * nobody sees, and the control plane is brought up regardless, because a permission the user
+   * revoked in System Settings must not be able to take the app's own connection down with it.
+   * If it was already started this is a no-op.
+   */
+  .catch((error: unknown) => {
+    logError(`startup did not finish: ${(error as Error)?.message ?? String(error)}`);
+    if (startedControlPlane || windowActivation.isDisabled()) return;
+    try {
+      if (getConfig().sessions.record || getConfig().multiAgent.enabled) void startBridge();
+      if (getConfig().ui.autoConnect) autoConnect();
+    } catch (secondary) {
+      logError(`could not start the control plane after a failed startup: ${(secondary as Error)?.message}`);
+    }
+  });
 
 app.on('before-quit', () => {
   if (!ownsAppRuntime(hasSingleInstanceLock)) return;

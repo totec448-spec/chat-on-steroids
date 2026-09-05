@@ -128,11 +128,16 @@ const DESKTOP: SurfaceDefinition = {
     'See and control this computer desktop, including its clipboard. ' +
     'Use for: taking a screenshot, reading what is on screen, listing and finding windows, inspecting buttons, fields and other UI controls, ' +
     'clicking, typing, pressing keys, scrolling and dragging in native applications, ' +
-    'and reading the clipboard or copying and pasting text between programs.',
+    'and reading the clipboard or copying and pasting text between programs. ' +
+    // Browser control was added to this surface and never described here. A query that misses
+    // is indistinguishable to the model from a capability that does not exist, so the words
+    // someone would actually use for driving a web page have to appear.
+    'It can also drive a web page in Chrome: opening a URL, clicking links and buttons, ' +
+    'filling in web forms, scrolling a page, going back and forward, and reading what is on it.',
   cardSummary:
-    'Screenshots, windows, mouse/keyboard control and the clipboard. Optional — connect it only if you want desktop automation.',
+    'Screenshots, windows, mouse/keyboard control, the clipboard, and driving web pages in Chrome. Optional — connect it only if you want desktop or browser automation.',
   required: false,
-  tools: ['observe', 'computer']
+  tools: ['observe', 'computer', 'browser']
 };
 
 export const SURFACES: Record<SurfaceId, SurfaceDefinition> = { core: CORE, desktop: DESKTOP };

@@ -170,7 +170,7 @@ describe('cross-platform packaging targets', () => {
     expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
     expect(workflow).toContain('Install generated DEB on target distro');
     expect(workflow).toContain('Launch installed DEB normally under Xvfb');
-    expect(workflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids');
+    expect(workflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 45s xvfb-run -a /usr/bin/chat-on-steroids');
     expect(workflow).toContain('Execute generated static-runtime AppImage');
     expect(workflow).toContain('Verify generated macOS archives');
     expect(workflow).toContain('hdiutil verify "$dmg"');
@@ -223,7 +223,7 @@ describe('cross-platform packaging targets', () => {
     expect(debGui).toContain('XDG_DATA_HOME="$deb_smoke_root/data"');
     expect(debGui).toContain('XDG_STATE_HOME="$deb_smoke_root/state"');
     expect(debGui).toContain('xvfb-run -a /usr/bin/chat-on-steroids');
-    expect(debGui).toContain('--kill-after=5s 12s');
+    expect(debGui).toContain('--kill-after=5s 45s');
     expect(debGui).toContain("grep -Fq '[info] app started' deb-gui.log");
     expect(debGui).toContain("grep -Fq '[info] window loaded' deb-gui.log");
     expect(debGui).toContain("grep -Fq '[info] renderer state ready' deb-gui.log");
@@ -238,7 +238,11 @@ describe('cross-platform packaging targets', () => {
     expect(appImageGui).toContain('xvfb-run -a "$appimage"');
     expect(appImageGui).toContain('normal_smoke_root="$(mktemp -d)"');
     expect(appImageGui).toContain('fallback_smoke_root="$(mktemp -d)"');
-    expect(appImageGui).toContain('rm -rf "$fake_bin" "$normal_smoke_root" "$fallback_smoke_root"');
+    expect(appImageGui).toContain('cleanup_path_with_retries()');
+    expect(appImageGui).toContain('cleanup_path_with_retries "$fake_bin"');
+    expect(appImageGui).toContain('cleanup_path_with_retries "$normal_smoke_root"');
+    expect(appImageGui).toContain('cleanup_path_with_retries "$fallback_smoke_root"');
+    expect(appImageGui).toContain('rm -rf "$target" 2>/dev/null || true');
     expect(appImageGui).toContain('HOME="$smoke_root/home"');
     expect(appImageGui).toContain('XDG_CONFIG_HOME="$smoke_root/config"');
     expect(appImageGui).toContain('XDG_CACHE_HOME="$smoke_root/cache"');
@@ -246,7 +250,7 @@ describe('cross-platform packaging targets', () => {
     expect(appImageGui).toContain('XDG_STATE_HOME="$smoke_root/state"');
     expect(appImageGui).toContain("printf '#!/bin/sh\\nexit 1\\n' > \"$fake_bin/unshare\"");
     expect(appImageGui).toContain('PATH="$launch_path"');
-    expect(appImageGui).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a "$appimage" >"$log"');
+    expect(appImageGui).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 45s xvfb-run -a "$appimage" >"$log"');
     expect(appImageGui).toContain("grep -Fq '[info] app started' \"$log\"");
     expect(appImageGui).toContain("grep -Fq '[info] window loaded' \"$log\"");
     expect(appImageGui).toContain("grep -Fq '[info] renderer state ready' \"$log\"");
@@ -349,8 +353,8 @@ describe('cross-platform packaging targets', () => {
     expect(releaseWorkflow).toContain('PATH="$launch_path"');
     expect(releaseWorkflow).toContain('run_appimage_smoke normal "$normal_smoke_root" "$PATH" appimage-normal-gui.log');
     expect(releaseWorkflow).toContain('run_appimage_smoke forced-fallback "$fallback_smoke_root" "$fake_bin:$PATH" appimage-fallback-gui.log');
-    expect(releaseWorkflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a "$appimage" >"$log"');
-    expect(releaseWorkflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids');
+    expect(releaseWorkflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 45s xvfb-run -a "$appimage" >"$log"');
+    expect(releaseWorkflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 45s xvfb-run -a /usr/bin/chat-on-steroids');
     expect(releaseWorkflow).toContain("grep -Fq '[info] app started' \"$log\"");
     expect(releaseWorkflow).toContain("grep -Fq '[info] window loaded' \"$log\"");
     expect(releaseWorkflow).toContain("test \"$(dpkg-deb --field \"$deb\" Package)\" = chat-on-steroids");

@@ -208,12 +208,17 @@ jobs:
             "$deb_smoke_root/data" \
             "$deb_smoke_root/state"
           set +e
+          # 45s, not 12s. The window has to appear under xvfb and the renderer has to report
+          # ready, and one run failed with a log holding nothing but a library warning — the app
+          # had simply not got there yet on a loaded runner. Four runs either side of it passed
+          # with no application change between them, so the budget was the variable. A GUI smoke
+          # that fails for being hurried teaches nobody anything.
           HOME="$deb_smoke_root/home" \
           XDG_CONFIG_HOME="$deb_smoke_root/config" \
           XDG_CACHE_HOME="$deb_smoke_root/cache" \
           XDG_DATA_HOME="$deb_smoke_root/data" \
           XDG_STATE_HOME="$deb_smoke_root/state" \
-          CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids >deb-gui.log 2>&1
+          CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 45s xvfb-run -a /usr/bin/chat-on-steroids >deb-gui.log 2>&1
           status=$?
           set -e
           cat deb-gui.log
@@ -247,8 +252,20 @@ jobs:
           fake_bin="$(mktemp -d)"
           normal_smoke_root="$(mktemp -d)"
           fallback_smoke_root="$(mktemp -d)"
+          cleanup_path_with_retries() {
+            target="$1"
+            for attempt in 1 2 3 4 5; do
+              rm -rf "$target" 2>/dev/null && return 0
+              sleep 0.2
+            done
+            # Cleanup is not product evidence. A process that created one last profile file
+            # after the smoke already proved renderer readiness must not turn the release red.
+            rm -rf "$target" 2>/dev/null || true
+          }
           cleanup() {
-            rm -rf "$fake_bin" "$normal_smoke_root" "$fallback_smoke_root"
+            cleanup_path_with_retries "$fake_bin"
+            cleanup_path_with_retries "$normal_smoke_root"
+            cleanup_path_with_retries "$fallback_smoke_root"
           }
           trap cleanup EXIT
           printf '#!/bin/sh\nexit 1\n' > "$fake_bin/unshare"
@@ -271,7 +288,7 @@ jobs:
             XDG_DATA_HOME="$smoke_root/data" \
             XDG_STATE_HOME="$smoke_root/state" \
             PATH="$launch_path" \
-            CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a "$appimage" >"$log" 2>&1
+            CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 45s xvfb-run -a "$appimage" >"$log" 2>&1
             status=$?
             set -e
             cat "$log"
@@ -317,12 +334,20 @@ jobs:
       - name: Package standalone extension
         run: |
           set -euo pipefail
-          (cd extension && zip -qr ../release/Chat-On-Steroids-Extension.zip . -x '*.map')
+          # Type declarations describe the driver for this repository's tooling; a browser
+          # cannot run them and a shipped add-on should carry nothing it cannot run.
+          (cd extension && zip -qr ../release/Chat-On-Steroids-Extension.zip . -x '*.map' -x '*.d.ts')
           zip -q release/Chat-On-Steroids-Extension.zip LICENSE
           node -e "const m=require('./extension/manifest.json'),p=require('./package.json');if(m.version!==p.version)throw new Error('Extension '+m.version+' does not match app '+p.version)"
-          for required in manifest.json background.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
+          for required in manifest.json background.js browser-driver.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
             unzip -Z1 release/Chat-On-Steroids-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
           done
+          # And nothing that only exists for the build: a stray declaration file here means the
+          # published add-on ships it, which is how this was caught in the first place.
+          if unzip -Z1 release/Chat-On-Steroids-Extension.zip | grep -q '\.d\.ts$'; then
+            echo "Extension zip carries TypeScript declarations" >&2
+            exit 1
+          fi
 
       - name: Create SHA-256 checksums
         run: |

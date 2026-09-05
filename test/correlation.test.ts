@@ -166,6 +166,40 @@ describe('request correlation ownership', () => {
     expect(requestCorrelation('wfr_fill_0')).toBeNull();
   });
 
+  it('keeps the owner of a workflow whose calls are still arriving after its page went quiet', () => {
+    // The permanence contract's hardest case, and the one the header is written for: the MCP
+    // side keeps issuing calls under a request id after the page that proved it was reloaded,
+    // compacted or closed. No further page observation is ever coming, so observation order
+    // alone parks that workflow at the eviction head — the registry would discard precisely the
+    // owner least able to refresh itself, while ids nobody is using any more stay. A lookup is
+    // the other liveness signal, so being called under counts as being alive.
+    const liveId = 'wfr_still_calling';
+    const correlation = (requestId: string, observedAt: number) => ({
+      requestId,
+      conversationId: 'conv-live',
+      sessionId: 'session-a',
+      messageId: `msg-${requestId}`,
+      tool: 'read',
+      observedAt
+    });
+
+    // The live workflow is the oldest insertion and is never observed again.
+    observeRequestCorrelations([
+      correlation(liveId, 1),
+      ...Array.from({ length: 49_999 }, (_, index) => correlation(`wfr_quiet_${index}`, index + 2))
+    ]);
+
+    // Its calls keep arriving. This is the only evidence it will ever produce again.
+    expect(requestCorrelation(liveId)?.conversationId).toBe('conv-live');
+
+    // One more id forces an eviction. It must not be this one.
+    observeRequestCorrelation(correlation('wfr_newest', 100_001));
+
+    expect(requestCorrelation(liveId)?.conversationId).toBe('conv-live');
+    // The id nothing has touched since it was stored is the one that goes.
+    expect(requestCorrelation('wfr_quiet_0')).toBeNull();
+  });
+
   it('restores proven request ownership from durable state after an app restart', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'clf-correlation-'));
     try {

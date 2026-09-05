@@ -80,6 +80,8 @@ export interface ReadDirectoryEntry {
   fileName: string;
   isDirectory: boolean;
   isFile: boolean;
+  /** From the `Dirent` itself — no extra stat. A symlink always has `isDirectory`/`isFile` false. */
+  isSymlink: boolean;
 }
 
 /** `CreateDirectoryOptions`. */
@@ -278,7 +280,7 @@ export async function readDirectory(path: string): Promise<ReadDirectoryEntry[]>
     const isLink = dirent.isSymbolicLink();
     const isDirectory = !isLink && dirent.isDirectory();
     const isFile = !isLink && dirent.isFile();
-    entries.push({ fileName: dirent.name, isDirectory, isFile });
+    entries.push({ fileName: dirent.name, isDirectory, isFile, isSymlink: isLink });
   }
   return entries;
 }
@@ -385,18 +387,35 @@ export async function walk(root: string, options: WalkOptions): Promise<WalkOutc
       entryCount += 1;
 
       const path = nodePath.join(directory, entry.fileName);
-      let metadata: FileMetadata;
-      try {
-        metadata = await getMetadata(path);
-      } catch (error) {
-        if (!pushWalkError(outcome, state, path, errorMessage(error))) return outcome;
-        continue;
+      // A symlink not being followed is skipped without ever touching its target: readDirectory()
+      // deliberately kept it opaque (see its docstring), and re-statting it here merely to
+      // classify something we are about to discard would leak the same metadata that opacity was
+      // for. When it is a directory symlink being followed, a stat is genuinely required to know
+      // whether the target is a directory at all. Everything else — the overwhelming majority of
+      // entries in an ordinary walk — is already classified by the Dirent readDirectory() read,
+      // so no per-entry stat is needed at all.
+      let isDirectory: boolean;
+      let isFile: boolean;
+      if (entry.isSymlink) {
+        if (!options.followDirectorySymlinks) continue;
+        let metadata: FileMetadata;
+        try {
+          metadata = await getMetadata(path);
+        } catch (error) {
+          if (!pushWalkError(outcome, state, path, errorMessage(error))) return outcome;
+          continue;
+        }
+        if (!metadata.isDirectory) continue;
+        isDirectory = true;
+        isFile = false;
+      } else {
+        isDirectory = entry.isDirectory;
+        isFile = entry.isFile;
       }
-      if (metadata.isSymlink && (!options.followDirectorySymlinks || !metadata.isDirectory)) continue;
 
       let kind: WalkEntryKind;
-      if (metadata.isDirectory) kind = 'directory';
-      else if (metadata.isFile) kind = 'file';
+      if (isDirectory) kind = 'directory';
+      else if (isFile) kind = 'file';
       else continue;
 
       if (!reserveWalkResponseBytes(outcome, state, pathByteLength(path))) return outcome;

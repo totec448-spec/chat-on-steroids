@@ -133,6 +133,8 @@ interface Hook {
   foldBootstrap(): void;
   injectControl(): void;
   injectStage(): void;
+  activityPollDelay(input: { drafting: boolean; hidden: boolean; generating: boolean; active: boolean; finalizing: boolean }): number;
+  terminalActivityFinalizing(): boolean;
   pullActivity(): Promise<void>;
   activityPullDelay(input: Record<string, boolean>): number;
   currentActivityPullDelay(): number;
@@ -148,6 +150,8 @@ interface Hook {
   visibleStream(entries: Array<Record<string, any>>, groupId?: string | null): Array<Record<string, any>>;
   /** How long the stop button must stay gone before content.js calls a turn finished. */
   TURN_SETTLE_MS: number;
+  WAIT_STATUS_MS: number;
+  PENDING_TOOLS_TRUST_MS: number;
   /** Test seam for the no-visible-progress fallback. */
   STALL_MS: number;
   /** How long a failed Goal draft waits before it asks again. */
@@ -199,7 +203,8 @@ const PAGE = `<!doctype html><html><body>
 async function harness(
   url = 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
   replies: Record<string, (message: Record<string, any>) => unknown> = {},
-  before: (document: Document, dom: JSDOM) => void = () => undefined
+  before: (document: Document, dom: JSDOM) => void = () => undefined,
+  storageSeed: Record<string, any> = {}
 ): Promise<Harness> {
   const dom = new JSDOM(PAGE, { url, runScripts: 'outside-only', pretendToBeVisual: true });
   const window = dom.window as unknown as Window & typeof globalThis & Record<string, any>;
@@ -261,6 +266,15 @@ async function harness(
       }
     },
     storage: {
+      // Only replaceWorkerDraftsEnabled() reads this today, and it fails closed (false) on
+      // any storage error or absence. The empty default keeps every other test's behaviour
+      // exactly what it was before this existed; a test about the preference itself
+      // overrides `local.get` from its own `before()` hook.
+      local: {
+        async get() {
+          return storageSeed;
+        }
+      },
       onChanged: {
         addListener(listener: (changes: Record<string, any>, areaName: string) => void) {
           storageListeners.add(listener);
@@ -356,6 +370,11 @@ async function harness(
  * back the brief the watched generation produced, and withdrawing an abandoned one. Only the
  * first is a compaction being started, so counting the raw messages counts a page that did
  * its job twice.
+ *
+ * The exclusions are a list rather than a positive test for "opening", so every new checkpoint
+ * on this route has to be added here or it silently reads as a second start. `sourceLost` and
+ * `destinationLost` are the give-ups: the page telling the app ChatGPT took nothing, which is
+ * the opposite of starting anything.
  */
 const startedCompactions = (harness: Harness): any[] =>
   harness.sent.filter(
@@ -366,9 +385,11 @@ const startedCompactions = (harness: Harness): any[] =>
       !message.summary &&
       !message.sourceAttempt &&
       !message.sourceDispatch &&
+      !message.sourceLost &&
       !message.sourceMessageId &&
       !message.destinationAttempt &&
       !message.destinationDispatch &&
+      !message.destinationLost &&
       !message.destinationMessageId
   );
 
@@ -400,6 +421,53 @@ describe('one synchronous page snapshot per observer turn', () => {
     live.hook.observe();
 
     expect(reads).toBe(1);
+  });
+});
+
+/**
+ * What insertPrompt() does with text somebody has already left in the composer.
+ *
+ * The three modes are a safety decision, not a convenience: the composer is the user's own
+ * editing host, and this app types into it. `false` refuses rather than clobber a draft; `true`
+ * is for the callers that own the box outright; `'append'` exists because refusing was itself a
+ * bug — on 2026-09-03 a single stray letter left in the composer held a *finished* Goal reply at
+ * "sending" forever, because the reply could never be written and never be given up on either.
+ *
+ * Appending has to leave the person's own characters intact and put the app's text after them,
+ * or the cure is worse than the bug it fixed.
+ */
+describe('writing into a composer that is not empty', () => {
+  it('refuses by default, replaces on request, and appends after the stray text', async () => {
+    live = await harness();
+    const dom = (live.window as any).CLF_DOM;
+    const box = live.document.querySelector('#prompt-textarea')!;
+    const text = () => (box.textContent || '');
+
+    // Default: a draft in the box is the user's, and this app does not overwrite it.
+    box.replaceChildren();
+    box.append(Object.assign(live.document.createElement('p'), { textContent: 'x' }));
+    expect(dom.insertPrompt('app-written reply', false)).toBe(false);
+    expect(text()).toBe('x');
+
+    // Replace: for the callers that own the composer outright.
+    expect(dom.insertPrompt('app-written reply', true)).toBe(true);
+    expect(text()).toContain('app-written reply');
+    expect(text()).not.toContain('x');
+
+    // Append: the stray character survives and the reply goes after it, which is the whole
+    // point — the reply is finished and must be sendable without destroying what was there.
+    box.replaceChildren();
+    box.append(Object.assign(live.document.createElement('p'), { textContent: 'x' }));
+    expect(dom.insertPrompt('app-written reply', 'append')).toBe(true);
+    const after = text();
+    expect(after).toContain('x');
+    expect(after).toContain('app-written reply');
+    expect(after.indexOf('x')).toBeLessThan(after.indexOf('app-written reply'));
+
+    // An empty composer is not the interesting case, but it must still work in every mode.
+    box.replaceChildren();
+    expect(dom.insertPrompt('into an empty box', 'append')).toBe(true);
+    expect(text()).toContain('into an empty box');
   });
 });
 
@@ -1666,6 +1734,60 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     const revisions = emitted(live.sent, 'assistant_message').map((entry) => entry.event);
     expect(revisions).toHaveLength(2);
     expect(new Set(revisions.map((entry) => entry.messageId))).toEqual(new Set(['assistant-first-interim-raw-id']));
+  });
+
+  /**
+   * The gap a live macOS QA session lost two real user messages to, on 2026-09-04.
+   *
+   * There are two independent writers for a user message, and the Fiber one defers to the DOM
+   * one by id: `renderedUserMessageIds` is meant to say "the DOM recorder owns these". But the
+   * set was built from `role === 'user' && message.id`, while the DOM loop only actually
+   * journals a row that also has text and is neither retired nor stale. Any row satisfying the
+   * weaker predicate but not the stronger one therefore fell between them: the DOM loop skipped
+   * it before it was ever classified, and Fiber — which had the text from the page model all
+   * along — saw its id in the set and deferred. Nothing emitted it, and nothing ever would.
+   *
+   * `data-message-id` is set on the container while `.whitespace-pre-wrap` is still empty, so
+   * this is a normal render window ChatGPT passes through on every send, not an exotic state.
+   */
+  it('records a user message the DOM exposed an id for but no text, instead of both writers deferring', async () => {
+    live = await harness();
+    const section = userTurn(live.document, 'page-turn-idless-text', 'the message the DOM cannot read yet');
+    // Exactly the render window: the id is published, the prose is not painted yet.
+    const body = section.querySelector('.whitespace-pre-wrap')!;
+    body.textContent = '';
+
+    live.hook.observe();
+    await settle();
+    // The DOM writer cannot journal a row it cannot read, and says so by emitting nothing.
+    expect(emitted(live.sent, 'user_message')).toHaveLength(0);
+
+    await replyFiber([], [{
+      turnId: 'page-turn-idless-text',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      calls: [],
+      messages: [{
+        messageId: 'm-page-turn-idless-text',
+        rawMessageId: 'm-page-turn-idless-text',
+        role: 'user',
+        stable: true,
+        createTime: 1_787_165_090_700,
+        rawText: 'the message the DOM cannot read yet',
+        renderedHtml: ''
+      }],
+      activities: []
+    }]);
+    await live.hook.flush();
+    await settle();
+
+    // Fiber must not defer to a writer that demonstrably did not write. The page model has the
+    // text; that is the whole reason this second path exists.
+    const users = emitted(live.sent, 'user_message').map((entry) => entry.event);
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({
+      messageId: 'm-page-turn-idless-text',
+      text: 'the message the DOM cannot read yet'
+    });
   });
 
   it('records a page-model user message even when the DOM has not exposed data-message-id yet', async () => {
@@ -4274,6 +4396,69 @@ describe('navigating from one chat to another', () => {
       'the second chat’s question'
     ]);
     expect(messages[1]!.conversationId).toBe('bbbbbbbb-cccc-dddd-eeee-ffffffffffff');
+  });
+
+  /**
+   * The variant that loses a message for good, and the one the 2026-09-04 macOS session hit:
+   * a textless render window that is still open when the tab leaves the chat.
+   *
+   * Textlessness on its own is survivable — the next observation reads the prose. Retirement is
+   * not: `retiredMessages` and `staleNodes` are deliberately never cleared by
+   * resetConversation(), because a row retired on the way out of chat A must never be re-filed
+   * under chat B. So a row that was still textless when the tab left is skipped by the DOM
+   * writer for the rest of the tab's life, however completely it renders later.
+   *
+   * Fiber is the writer that covers exactly this: the page model for A carries the prose the
+   * DOM never gave up. It only covers it if its deferral gate agrees with what the DOM writer
+   * actually does. Deferring on the weaker role+id test meant nobody wrote the row, and no
+   * later pass could.
+   */
+  it('records a message left textless when the tab navigated away, which the DOM writer can never journal', async () => {
+    live = await harness();
+    const opening = userTurn(live.document, 'turn-a1', 'the question caught mid-render');
+    // The ordinary send window: the id is published, the prose is not painted yet.
+    opening.querySelector('.whitespace-pre-wrap')!.textContent = '';
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'user_message')).toHaveLength(0);
+
+    // Leaving retires everything this tab watched under A — including the row it could not read.
+    live.dom.reconfigure({ url: CHAT_B });
+    live.hook.observe();
+    await settle();
+    opening.remove();
+    live.hook.observe();
+    await settle();
+
+    // Back in A, fully rendered this time. The DOM writer still declines: the id is retired.
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    live.hook.observe();
+    await settle();
+    userTurn(live.document, 'turn-a1', 'the question caught mid-render', { sent: false });
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'user_message')).toHaveLength(0);
+
+    await replyFiber([], [{
+      turnId: 'turn-a1',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      calls: [],
+      messages: [{
+        messageId: 'm-turn-a1',
+        rawMessageId: 'm-turn-a1',
+        role: 'user',
+        stable: true,
+        createTime: 1_787_165_090_900,
+        rawText: 'the question caught mid-render',
+        renderedHtml: ''
+      }],
+      activities: []
+    }]);
+    await live.hook.flush();
+    await settle();
+
+    const texts = emitted(live.sent, 'user_message').map((entry) => entry.event.text);
+    expect(texts).toEqual(['the question caught mid-render']);
   });
 
   /**
@@ -8990,7 +9175,12 @@ describe('the Compact & resume control', () => {
     await settle();
     const compacts = live.sent.filter((message) => message.type === 'compact');
     expect(startedCompactions(live)).toHaveLength(1);
-    expect(compacts.at(-1)).toMatchObject({ cancel: true });
+    // The cancel happened, and by position among the presses rather than by being the last
+    // message on the wire: this harness never simulates ChatGPT accepting the first send, so the
+    // page also reports that give-up, and that report is deliberately fire-and-forget (as the
+    // destination half's has always been) and can land either side of the cancel. What this test
+    // is about is that the second press cancelled instead of starting a second compaction.
+    expect(compacts.some((message) => message.cancel === true)).toBe(true);
     expect(live.window.sessionStorage.getItem('clf-compact-capture')).toBeNull();
   });
 
@@ -9069,6 +9259,62 @@ describe('the Compact & resume control', () => {
     await settle();
 
     expect(order).toEqual(['claim', 'arm', 'send']);
+  });
+
+  /**
+   * The armed click that ChatGPT did not take, reported instead of left sitting.
+   *
+   * `dispatched-unresolved` is written before the click and is deliberately never replayed, so
+   * for a long time the page's only answer to a failed send was a local error asking the user to
+   * cancel by hand. A 2026-09-04 QA run measured what that costs unattended: the ticket sat
+   * armed against its six-hour TTL while three phase pickups fired and expired, and because the
+   * chat stayed in the app's pending-automatic set it lost browser recovery for the whole window
+   * too. The destination half had reported exactly this since 2026-09-02; only the source half
+   * stayed quiet.
+   *
+   * `send()` is not a bare timeout — it watches the composer clearing, a new conversation id,
+   * generation starting, the Stop control appearing and a matching rendered user message — and
+   * this harness deliberately simulates none of them, which is the same evidence the live page
+   * has when nothing was taken. What must *not* happen is a second submit: the report ends the
+   * transaction, it does not re-offer the prompt.
+   */
+  it('tells the app when ChatGPT took nothing, rather than leaving the click armed', async () => {
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null } }),
+      compact: (message) => {
+        if (message.sourceAttempt) return { ok: true, data: { allowed: true } };
+        if (message.sourceDispatch) return { ok: true, data: { armed: true } };
+        if (message.sourceLost) return { ok: true, data: { released: true } };
+        return {
+          ok: true,
+          data: {
+            started: true,
+            token: 'tok-lost',
+            prompt: 'write the brief and call save_handoff',
+            job: { sessionId: 's1', stage: 'handoff-pending', busy: true, handoffId: null, error: null }
+          }
+        };
+      }
+    });
+    live.hook.injectControl();
+    // Nothing wires acceptance to the click here, so send() gets none of its five signals.
+    const sends = watchSend(live.document);
+
+    await live.hook.startCompact();
+    await settle();
+
+    // It did click once — the arming fence is upstream of this and is not what is under test.
+    expect(sends()).toBe(1);
+    expect(live.sent).toContainEqual(expect.objectContaining({
+      type: 'compact',
+      token: 'tok-lost',
+      sourceLost: true
+    }));
+    // And exactly once: a give-up that repeats would be its own kind of noise.
+    expect(live.sent.filter((message) => message.type === 'compact' && message.sourceLost === true)).toHaveLength(1);
+    // Never a second submit. This is the whole reason the report ends the transaction rather
+    // than handing the prompt back to a page.
+    expect(sends()).toBe(1);
   });
 
   it('re-presses a handoff left holding the claim, and never one that armed the click', async () => {
@@ -9232,6 +9478,43 @@ describe('the field above the composer', () => {
     }));
     await live.hook.pullActivity();
     await settle();
+    expect(live.document.querySelector('.clf-stage')).toBeNull();
+  });
+
+  /**
+   * The count describes another process's memory, so it is only as good as the last answer.
+   *
+   * Restarting the app under a live turn left this panel reading "Waiting for 2 tool calls" for
+   * over ten minutes, across a turn that had since completed: the calls died with the old
+   * process, every subsequent pull failed, and a failed pull deliberately leaves the number
+   * alone. Nothing expired it, so the page kept asserting a fact about a process that no longer
+   * existed. An app restart is an ordinary event — the updater performs one.
+   *
+   * A single dropped poll still changes nothing, which is why this expires on a clock rather
+   * than zeroing on the first failure: a count that blinked off at every blip would be a worse
+   * claim than a briefly stale one.
+   */
+  it('stops asserting a pending-tool count once the app has stopped confirming it', async () => {
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 2 } })
+    });
+    await live.hook.pullActivity();
+    await settle();
+    live.advance(live.hook.WAIT_STATUS_MS * 2);
+    live.hook.injectStage();
+    expect(live.document.querySelector('.clf-stage')?.textContent).toContain('Waiting for 2 tool calls');
+
+    // The app goes away. Every pull fails from here, so nothing refreshes the count.
+    live.reply.set('activity', () => ({ ok: false, error: 'unreachable' }));
+    await live.hook.pullActivity();
+    await settle();
+    live.hook.injectStage();
+    expect(live.document.querySelector('.clf-stage')?.textContent).toContain('Waiting for 2 tool calls');
+
+    live.advance(live.hook.PENDING_TOOLS_TRUST_MS + 1);
+    await live.hook.pullActivity();
+    await settle();
+    live.hook.injectStage();
     expect(live.document.querySelector('.clf-stage')).toBeNull();
   });
 
@@ -10318,7 +10601,10 @@ describe('the fresh chat the app opened', () => {
         document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
           document.querySelector('#prompt-textarea')!.textContent = '';
         });
-      }
+      },
+      // The preference this test is actually about: off by default, this bootstrap would hit
+      // the "composer already holds something the user was writing" refusal instead.
+      { replaceWorkerDrafts: true }
     );
     await settle(200);
 
@@ -10487,6 +10773,198 @@ describe('the context meter and automatic compaction', () => {
     await live.hook.pullActivity();
     await settle();
     expect(live.sent.filter((message) => message.type === 'compact')).toEqual([]);
+  });
+
+  it('never starts automatic compaction from a worker chat, even if stale global state says ready', async () => {
+    const workerGoal = {
+      enabled: false,
+      hasKey: true,
+      model: 'test-model',
+      objective: '',
+      blocked: 'worker',
+      draft: null
+    };
+    live = await harness(
+      undefined,
+      {
+        activity: () =>
+          withContext(450_000, settings({ auto: true, threshold: 200_000 }), {
+            autoCompactReady: true,
+            goal: workerGoal
+          }),
+        compact: () => ({ ok: true, data: { started: true, job: null } })
+      },
+      (document) => startGenerating(document)
+    );
+    live.hook.injectControl();
+    await live.hook.pullActivity();
+    await settle();
+
+    expect(startedCompactions(live)).toEqual([]);
+    const workerSettings = live.hook.settingsView({
+      context: settings({ auto: true, threshold: 200_000 }),
+      goal: workerGoal,
+      compact: { action: 'start', hint: '' },
+      editing: false
+    });
+    expect(workerSettings.tip).toContain('Auto-compaction off');
+    expect(workerSettings.rows.find((row) => row.key === 'autoCompact')?.on).toBe(false);
+  });
+
+  /**
+   * The whole of the stale-chat protection, on the page's side of it.
+   *
+   * The trigger is a level now — "this chat is over the line and still has its one
+   * compaction" — so an old 500k conversation answers yes to that for the rest of its life.
+   * What stops it from compacting the moment it is opened is that nothing is running in it.
+   * The app applies the same rule from the other side; this is the half a reader of
+   * content.js can check.
+   */
+  it('leaves an idle chat alone however far over the line it is', async () => {
+    live = await harness(undefined, {
+      activity: () => withContext(999_000, settings({ auto: true, threshold: 200_000 }), { autoCompactReady: true }),
+      compact: () => ({ ok: true, data: { started: true, job: null } })
+    });
+    live.hook.injectControl();
+    for (let poll = 0; poll < 5; poll++) await live.hook.pullActivity();
+    await settle();
+
+    expect(startedCompactions(live)).toEqual([]);
+  });
+
+  /**
+   * And the rule that made all of this worth rewriting: a finished answer is the one moment
+   * where compacting is pointless. The work it would carry into the fresh chat has already
+   * been done and answered, so the handoff would summarise a job that is over.
+   */
+  it('does not compact once the answer has landed, even if the app still says yes', async () => {
+    // Off while the turn runs, so this test is about the moment after it: the app goes on
+    // reporting the level (the chat is still over the line) and the page still refuses.
+    let ready = false;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }), { autoCompactReady: ready }),
+      compact: () => ({ ok: true, data: { started: true, job: null } })
+    });
+    live.hook.injectControl();
+    // The turn has to be opened the way turns are opened — by a send this document watches
+    // happen. A transcript that merely exists at boot is history, and history is not a turn.
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'turn-compact-answered', []);
+    live.hook.observe();
+    await settle();
+    // …and it has to end the way turns end: ChatGPT's own model naming the message that
+    // finished it. This test is about the moment *after* an answer, so the answer has to
+    // exist. A Stop control that merely goes away proves nothing and closes nothing.
+    prose(live.document, section, 'compact-answered-final', 'Here is the answer.');
+    await replyFiber([], [{
+      turnId: 'turn-compact-answered',
+      endMessageId: 'compact-answered-final',
+      calls: [],
+      messages: [{
+        messageId: 'compact-answered-final',
+        rawMessageId: 'compact-answered-final',
+        stable: true,
+        rawText: 'Here is the answer.',
+        renderedHtml: '<p>Here is the answer.</p>'
+      }],
+      activities: []
+    }], null, true, live);
+    await settleTurn(live);
+    ready = true;
+
+    for (let poll = 0; poll < 3; poll++) await live.hook.pullActivity();
+    await settle();
+    expect(startedCompactions(live)).toEqual([]);
+  });
+
+  it('interrupts the turn it is standing in and compacts exactly once', async () => {
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true, threshold: 200_000 }), { autoCompactReady: true }),
+      compact: () => ({
+        ok: true,
+        data: {
+          started: true,
+          token: 'tok-auto-1',
+          prompt: 'write the brief and call save_handoff',
+          job: { sessionId: 's1', stage: 'handoff-pending', busy: true, handoffId: null, error: null }
+        }
+      })
+    });
+    live.hook.injectControl();
+    startGenerating(live.document);
+    const stop = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+    let stopped = false;
+    stop.addEventListener('click', () => {
+      stopped = true;
+      stopGenerating(live!.document);
+    });
+
+    await live.hook.pullActivity();
+    await settle();
+
+    expect(stopped).toBe(true);
+    expect(live.sent.filter((message) => message.type === 'auto_compact_claim')).toEqual([]);
+    expect(startedCompactions(live)).toHaveLength(1);
+    expect(live.sent).toContainEqual(expect.objectContaining({
+      type: 'compact',
+      token: 'tok-auto-1',
+      sourceAttempt: true
+    }));
+
+    // And not again: the existing continuation/job is the one in-flight authority.
+    for (let poll = 0; poll < 4; poll++) await live.hook.pullActivity();
+    await settle();
+    expect(startedCompactions(live)).toHaveLength(1);
+  });
+
+  /**
+   * Mid-tool-call is mid-turn, and is explicitly allowed. Local calls are not raced: the
+   * same settle barrier a manual press goes through waits for them before anything is typed.
+   */
+  it('compacts while a local tool call is still running', async () => {
+    let asked = 0;
+    live = await harness(undefined, {
+      activity: () => {
+        asked++;
+        return withContext(205_000, settings({ auto: true, threshold: 200_000 }), {
+          autoCompactReady: true,
+          pendingTools: asked < 3 ? 1 : 0
+        });
+      },
+      compact: () => ({
+        ok: true,
+        data: {
+          started: true,
+          token: 'tok-auto-2',
+          prompt: 'write the brief and call save_handoff',
+          job: { sessionId: 's1', stage: 'handoff-pending', busy: true, handoffId: null, error: null }
+        }
+      })
+    });
+    live.hook.injectControl();
+    startGenerating(live.document);
+    const stop = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+    stop.addEventListener('click', () => stopGenerating(live!.document));
+
+    await live.hook.pullActivity();
+    await settle();
+
+    expect(live.sent.filter((message) => message.type === 'auto_compact_claim')).toEqual([]);
+    expect(startedCompactions(live)).toHaveLength(1);
+    // It waited for the call to finish before typing anything into the composer.
+    expect(asked).toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not start when the app says this chat is below the live level', async () => {
+    live = await harness(undefined, {
+      activity: () => withContext(250_000, settings({ auto: true, threshold: 200_000 }), { autoCompactReady: false }),
+      compact: () => ({ ok: true, data: { started: true, job: null } })
+    }, (document) => startGenerating(document));
+    live.hook.injectControl();
+    for (let poll = 0; poll < 5; poll++) await live.hook.pullActivity();
+    await settle();
+
+    expect(startedCompactions(live)).toEqual([]);
   });
 
   /**
@@ -12842,7 +13320,15 @@ describe('the goal loop', () => {
     live.window.addEventListener('message', onAsk);
     try {
       stopGenerating(live.document);
-      await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+      // Wait for the ask, not for a duration. This used to be a flat 10 ms, which is a bet that
+      // the machine is fast: the same commit passed on the arm64 runner and failed on the x64 one
+      // in the same release build, scans still 0. Waiting on the condition keeps what the test
+      // proves — if the observer never requests the terminal Fiber reply, scans stays 0 and this
+      // gives up after roughly two seconds and fails exactly as before.
+      for (let round = 0; round < 200 && scans === 0; round++) {
+        await settle(50);
+        await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+      }
       await settle(1200);
     } finally {
       live.window.removeEventListener('message', onAsk);
@@ -13815,5 +14301,239 @@ describe('the goal loop', () => {
       expect(view.objective.summary.endsWith('…')).toBe(true);
       expect(view.objective.summary).not.toMatch(/\s…$/);
     });
+  });
+});
+
+describe('issues #34/#35 hidden worker and proactive wait status', () => {
+  const CHAT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const MESSAGE = 'hidden-worker-result';
+
+  /** One assistant message in the exact DOM shape this file's global harness expects. */
+  function assistantProse(document: Document, section: HTMLElement, id: string, text: string): HTMLElement {
+    const message = document.createElement('div');
+    message.setAttribute('data-message-id', id);
+    message.setAttribute('data-message-author-role', 'assistant');
+    const body = document.createElement('div');
+    body.className = 'markdown';
+    body.textContent = text;
+    message.append(body);
+    section.append(message);
+    return body;
+  }
+
+  /** Persistent MAIN-world Fiber reply for every scan this test causes, not one hand-made frame. */
+  function installFiberResponder(section: HTMLElement, read: () => { text: string; final: boolean }): () => void {
+    const window = live!.window as any;
+    // Same reason replyFiber() does this: the harness makes the script's own waits instant, so
+    // askFiber()'s give-up timer would fire as a microtask before jsdom could ever deliver the
+    // postMessage this responder answers on. Every scan would time out and no Fiber descriptor
+    // would exist, which is not the behaviour under test. Real timers for the responder's life.
+    const instant = window.setTimeout;
+    window.setTimeout = (fn: () => void, ms: number) => globalThis.setTimeout(fn, ms);
+    const onAsk = (event: any) => {
+      if (!event.data || event.data.source !== 'clf-fiber-ask') return;
+      const scanToken = event.data.nonce;
+      const current = read();
+      section.setAttribute('data-clf-fiber-turn', `${scanToken}:0`);
+      window.dispatchEvent(
+        new window.MessageEvent('message', {
+          data: {
+            source: 'clf-fiber-reply',
+            nonce: event.data.nonce,
+            scanToken,
+            v: 10,
+            scanOk: true,
+            rows: [],
+            turns: [
+              {
+                index: 0,
+                turnId: 'hidden-worker-turn',
+                conversationId: CHAT,
+                endMessageId: current.final ? MESSAGE : null,
+                calls: [],
+                activities: [],
+                messages: [
+                  {
+                    messageId: MESSAGE,
+                    rawMessageId: MESSAGE,
+                    role: 'assistant',
+                    // The stale-overwrite regression starts from a revision that was already
+                    // proven safe enough to own presentation. The app entry may still be streaming;
+                    // this mirrors the existing sticky-overwrite regression.
+                    stable: true,
+                    order: 0,
+                    rawText: current.text,
+                    renderedHtml: `<p>${current.text}</p>`
+                  }
+                ]
+              }
+            ]
+          },
+          source: window
+        })
+      );
+    };
+    window.addEventListener('message', onAsk);
+    return () => {
+      window.removeEventListener('message', onAsk);
+      window.setTimeout = instant;
+    };
+  }
+
+  /**
+   * Lets jsdom actually deliver the Fiber postMessage task and the promise chains it feeds.
+   *
+   * settle() only drains microtasks, which is enough for the app's own await chains but never
+   * enough for a page-context message round trip. This is the macrotask equivalent.
+   */
+  const fiberSettle = async (rounds = 40): Promise<void> => {
+    for (let round = 0; round < rounds; round++) {
+      await new Promise<void>((resolve) => { globalThis.setTimeout(resolve, 1); });
+    }
+  };
+
+  it('treats hidden as an idle throttle rather than starving live or finalizing work', async () => {
+    live = await harness();
+    expect(
+      live.hook.activityPollDelay({ drafting: false, hidden: true, generating: true, active: true, finalizing: false })
+    ).toBe(750);
+    expect(
+      live.hook.activityPollDelay({ drafting: false, hidden: true, generating: false, active: true, finalizing: true })
+    ).toBe(750);
+    expect(
+      live.hook.activityPollDelay({ drafting: false, hidden: true, generating: false, active: false, finalizing: false })
+    ).toBe(30_000);
+  });
+
+  it('renders authoritative wait state only after a quiet threshold and never over live prose', async () => {
+    live = await harness();
+    const worker = {
+      enabled: true,
+      running: true,
+      agents: [
+        { id: 'prime', role: 'prime', label: 'Prime', state: 'active' },
+        { id: 'worker-1', role: 'worker', label: 'Repository audit', state: 'sleeping' },
+        { id: 'worker-2', role: 'worker', label: 'macOS validation', state: 'active' },
+        { id: 'worker-3', role: 'worker', label: 'Windows retry', state: 'failed' }
+      ]
+    };
+
+    expect(
+      live.hook.stageView({ job: null, goal: null, swarm: worker, pendingTools: 0, backgroundExec: { running: 0 }, generating: false, quietMs: 1000 })
+    ).toBeNull();
+
+    expect(
+      live.hook.stageView({ job: null, goal: null, swarm: worker, pendingTools: 0, backgroundExec: { running: 0 }, generating: false, quietMs: 5000 })
+    ).toMatchObject({
+      stage: 'Worker still running: macOS validation',
+      detail: '1 finished · 1 failed · 1 running',
+      done: false
+    });
+
+    expect(
+      live.hook.stageView({ job: null, goal: null, swarm: null, pendingTools: 0, backgroundExec: { running: 0 }, generating: true, quietMs: 5000 })
+    ).toMatchObject({
+      stage: 'ChatGPT is still working',
+      detail: 'Waiting for the current response to make visible progress'
+    });
+
+    expect(
+      live.hook.stageView({ job: null, goal: null, swarm: null, pendingTools: 2, backgroundExec: { running: 0 }, generating: true, quietMs: 5000 })
+    ).toMatchObject({
+      stage: 'Waiting for 2 tool calls',
+      detail: 'Current operations have not returned yet',
+      done: false
+    });
+
+
+    expect(
+      live.hook.stageView({ job: null, goal: null, swarm: null, pendingTools: 0, backgroundExec: { running: 0, exitedUnread: 3 }, generating: true, quietMs: 5000 })
+    ).toMatchObject({
+      stage: '3 completed background results waiting',
+      detail: 'Read the final output with write_stdin before starting more background work',
+      done: false
+    });
+  });
+
+  it('releases a stale hidden Overwrite revision, then reconverges without a visibility wake', async () => {
+    let complete = false;
+    let postCompletePulls = 0;
+    const partial = 'First few words';
+    const final = 'First few words and the complete worker result.';
+    const activity = () => {
+      if (complete) postCompletePulls += 1;
+      // The first pull after terminal observation is deliberately stale: service-worker
+      // custody can complete while another app drain is still in flight. The next live-cadence
+      // pull is the convergence this regression requires.
+      const caughtUp = complete && postCompletePulls >= 2;
+      return {
+        ok: true,
+        data: {
+          entries: [],
+          stream: [
+            {
+              seq: caughtUp ? 11 : 10,
+              origin: 10,
+              time: caughtUp ? 200 : 100,
+              kind: 'assistant_message',
+              turnId: null,
+              agent: 'worker-1',
+              messageId: MESSAGE,
+              text: caughtUp ? final : partial,
+              state: caughtUp ? 'final' : 'streaming',
+              final: caughtUp
+            }
+          ],
+          job: null
+        }
+      };
+    };
+
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, { activity });
+    renderingOn();
+    const section = assistantTurn(live.document, 'hidden-worker-turn', []);
+    const body = assistantProse(live.document, section, MESSAGE, partial);
+    const removeFiber = installFiberResponder(section, () => ({ text: complete ? final : partial, final: complete }));
+    try {
+      startGenerating(live.document);
+      // Establish the exact DOM↔Fiber message identity before asking Overwrite to own the turn.
+      await live.hook.refreshFiber();
+      await live.hook.pullActivity();
+      live.hook.renderStreams();
+      expect(overwriteText(section)).toContain(partial);
+
+      Object.defineProperty(live.document, 'visibilityState', { configurable: true, value: 'hidden' });
+      complete = true;
+      body.textContent = final;
+      // Model the hidden native final mutation deterministically. A real MutationObserver causes
+      // this scan; the harness drives the same refresh explicitly so the test does not race it.
+      await live.hook.refreshFiber();
+      live.hook.renderStreams();
+      expect(overwriteText(section)).toBe('');
+      expect(section.textContent).toContain(final);
+      stopGenerating(live.document);
+      live.hook.observe();
+      live.advance(live.hook.TURN_SETTLE_MS * 2);
+      live.hook.observe();
+      await fiberSettle();
+
+      expect(postCompletePulls).toBeGreaterThanOrEqual(1);
+      // Fiber now proves that this same message id contains more prose than the app-owned
+      // revision. Do not keep the stale replacement through REPLACEMENT_GRACE_MS: expose the
+      // native final answer until the app catches up.
+      expect(overwriteText(section)).toBe('');
+      expect(section.textContent).toContain(final);
+      expect(live.hook.terminalActivityFinalizing()).toBe(true);
+
+      // Model the next live-cadence convergence pull. No visibilitychange occurs anywhere.
+      await live.hook.pullActivity();
+      await fiberSettle(4);
+      live.hook.renderStreams();
+      expect(live.hook.terminalActivityFinalizing()).toBe(false);
+      expect(overwriteText(section)).toContain(final);
+      expect(live.document.visibilityState).toBe('hidden');
+    } finally {
+      removeFiber();
+    }
   });
 });

@@ -58,7 +58,22 @@ export const EXEC_COMMAND_CMD_DESCRIPTION = LAUNCHES_WINDOWS_POWERSHELL_5
 export const EXEC_COMMAND_CMDS_DESCRIPTION =
   'Sequential shell commands to run in one shell session. Use this for related checks instead of separate exec_command calls. Each command gets a labeled output section and exit code; all commands run after ordinary non-zero exits, and the overall exit code is the first non-zero code.';
 
-export const EXEC_COMMAND_WORKDIR_DESCRIPTION = 'Working directory for the command. Defaults to the turn cwd.';
+/**
+ * Both halves of the path contract, on the parameter the caller is already looking at.
+ *
+ * A model learns the root name from `read.paths` ("Paths inside the live approved roots:
+ * /chatgpt_homelab") and then has to guess whether `exec_command` speaks the same language. It
+ * half does, and the old wording said neither half: `workdir` *is* resolved through the same
+ * `resolveIn()` the read tools use, so a virtual path works there — while the command text is
+ * deliberately not translated, so that same path written inside `cmd` earns
+ * `INVALID_COMMAND_PATH`. Both rules were already enforced and tested; only the description was
+ * silent, and QA hit the gap from both sides in one round.
+ *
+ * On the parameter rather than in the session instructions, for the reason given above:
+ * `tools/list` is re-sent every turn, the instructions are read once.
+ */
+export const EXEC_COMMAND_WORKDIR_DESCRIPTION =
+  'Working directory, as an app path in the approved roots — the form read.paths takes, e.g. /my-project. Defaults to the turn cwd. Paths inside cmd are not translated: keep them relative to it.';
 
 export const EXEC_COMMAND_TTY_DESCRIPTION =
   'True allocates a PTY for the command; false or omitted uses plain pipes.';
@@ -93,9 +108,10 @@ export const EXEC_COMMAND_LOGIN_DESCRIPTION =
     : 'True runs the shell with -l/-i semantics; false disables them. Defaults to true.';
 
 export const WRITE_STDIN_DESCRIPTION =
-  'Writes characters to an existing unified exec session and returns recent output. Keep polling a returned session ID until its terminal result; after a transient wait failure, retry this same session ID rather than starting replacement work.';
+  'Writes characters to an existing unified exec session and returns recent output. Poll the same session until it returns its terminal exit; a transient wait/read failure is not permission to abandon the session and lose its final output — retry this same session ID rather than starting replacement work.';
 
-export const WRITE_STDIN_SESSION_ID_DESCRIPTION = 'Identifier of the running unified exec session.';
+export const WRITE_STDIN_SESSION_ID_DESCRIPTION =
+  'Identifier of the unified exec session. Keep using this same ID until its terminal result has been consumed.';
 
 export const WRITE_STDIN_CHARS_DESCRIPTION =
   'Bytes to write to stdin. Defaults to empty, which polls without writing.';

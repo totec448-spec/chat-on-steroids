@@ -700,6 +700,31 @@ describe('session IPC contracts', () => {
     expect(isChatBlocked(conversationId)).toBe(false);
   });
 
+  it('gives up an open continuation when the row that owned it is deleted', async () => {
+    // The same reasoning as the block release above, and the case that made it matter: an
+    // automatic continuation has no clock until something asks for it, so one whose session was
+    // deleted never expires, is never swept, and is deliberately exempt from restore's
+    // age-pruning — it outlives the app. pendingAutomaticContinuations() keeps naming its
+    // conversation, and inspectSilentChats() skips a conversation that is compacting, so that
+    // still-open ChatGPT chat silently loses browser recovery for the life of the install.
+    const { openContinuationNow, pendingAutomaticContinuations, continuationForSession, resetContinuationsForTests } =
+      await import('../src/main/session/continuation.js');
+    resetContinuationsForTests();
+    const conversationId = 'dddddddd-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'compacting then deleted', conversationId });
+    await openContinuationNow(session.id, conversationId, true);
+    expect(continuationForSession(session.id)).not.toBeNull();
+    expect(pendingAutomaticContinuations().map((entry) => entry.from)).toContain(conversationId);
+
+    const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+    expect(deleted.ok, deleted.error).toBe(true);
+
+    expect(continuationForSession(session.id)).toBeNull();
+    // The live chat this named must not stay permanently "compacting" to the silence sweep.
+    expect(pendingAutomaticContinuations().map((entry) => entry.from)).not.toContain(conversationId);
+    resetContinuationsForTests();
+  });
+
   it('reports the blocked set with every session list, so one paint marks every row', async () => {
     const { resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
     resetBlockedChatsForTests();

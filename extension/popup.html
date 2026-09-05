@@ -83,6 +83,19 @@
         <input id="overwriteToggle" type="checkbox" checked />
         <span class="track" aria-hidden="true"><span class="thumb"></span></span>
       </label>
+      <label class="row" for="replaceDraftToggle" title="Discard a restored New Chat draft when an app-owned worker or fresh resume bootstraps. Existing-chat drafts stay protected.">
+        <svg class="ico"><use href="#i-pen" /></svg>
+        <span class="name">Replace worker drafts</span>
+        <input id="replaceDraftToggle" type="checkbox" />
+        <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      </label>
+      <label class="row" for="browserControlToggle" title="Let the app drive other browser tabs: real clicks and keystrokes through the DevTools protocol, with a visible pointer. The browser asks for site access the first time. ChatGPT's own tabs, browser pages and local files are always refused.">
+        <svg class="ico"><use href="#i-pen" /></svg>
+        <span class="name">Browser control</span>
+        <input id="browserControlToggle" type="checkbox" />
+        <span class="track" aria-hidden="true"><span class="thumb"></span></span>
+      </label>
+      <p class="perm-error" id="browserControlError" hidden></p>
       <label class="row" for="timeToggle">
         <svg class="ico"><use href="#i-clock" /></svg>
         <span class="name">Timestamps</span>

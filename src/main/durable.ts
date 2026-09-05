@@ -23,7 +23,9 @@ const RETRY_MAX_MS = 5_000;
 let root = '';
 interface PendingWrite {
   generation: number;
-  value: unknown;
+  /** Deferred to flush time, so a debounce window that collapses many calls into one write
+   *  materializes the value exactly once - not once per call that got collapsed away. */
+  produce: () => unknown;
 }
 
 const pending = new Map<string, PendingWrite>();
@@ -60,7 +62,11 @@ export async function readDurable<T>(name: string): Promise<T | null> {
 }
 
 function nextWrite(value: unknown): PendingWrite {
-  return { generation: nextGeneration++, value };
+  return { generation: nextGeneration++, produce: () => value };
+}
+
+function nextWriteLazy(produce: () => unknown): PendingWrite {
+  return { generation: nextGeneration++, produce };
 }
 
 function enqueue(write: () => Promise<void>): Promise<void> {
@@ -96,10 +102,13 @@ async function flushOne(name: string, slot: PendingWrite): Promise<void> {
   const tmp = `${target}.tmp`;
   try {
     await fs.mkdir(root, { recursive: true });
-    if (slot.value === null) {
+    // Materialize now, once, right before it is actually needed - not at every call that
+    // queued a write and got collapsed into this one generation by the debounce window.
+    const value = slot.produce();
+    if (value === null) {
       await fs.rm(target, { force: true });
     } else {
-      await fs.writeFile(tmp, JSON.stringify(slot.value), 'utf8');
+      await fs.writeFile(tmp, JSON.stringify(value), 'utf8');
       await fs.rename(tmp, target);
     }
   } catch (err) {
@@ -119,6 +128,21 @@ async function flushOne(name: string, slot: PendingWrite): Promise<void> {
 export function writeDurableSoon(name: string, value: unknown): void {
   if (!root) return;
   pending.set(name, nextWrite(value));
+  if (timers.has(name)) return;
+  schedule(name, WRITE_DELAY_MS);
+}
+
+/**
+ * `writeDurableSoon`, but for a caller whose snapshot itself is expensive to build.
+ *
+ * `writeDurableSoon(name, value)` still requires `value` up front, so a chatty caller pays
+ * to build a snapshot on every call even though the debounce window is about to discard all
+ * but the last one. `produce` runs exactly once, at the moment a queued generation actually
+ * flushes - once per debounce window landed, not once per call that queued into it.
+ */
+export function writeDurableSoonLazy(name: string, produce: () => unknown): void {
+  if (!root) return;
+  pending.set(name, nextWriteLazy(produce));
   if (timers.has(name)) return;
   schedule(name, WRITE_DELAY_MS);
 }
