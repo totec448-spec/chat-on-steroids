@@ -2496,6 +2496,140 @@ describe('the app-owned chronological stream', () => {
     }
   });
 
+  it('exposes bounded metadata through native, keyboard-operable tool disclosures', async () => {
+    const withDetails = () => {
+      const payload = activity();
+      Object.assign(payload.data.stream.find((entry) => entry.seq === 4)!, {
+        changes: [{ path: 'src/third.ts', added: 2, removed: 1 }],
+        args: 'private-argument-sentinel', result: 'private-result-sentinel'
+      });
+      return payload;
+    };
+    live = await harness(undefined, { activity: withDetails });
+    renderingOn();
+    const section = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(section, 'wfr-app-stream');
+    live.hook.renderStreams();
+    const details = overwriteRows(section, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
+    expect(details).toHaveLength(2);
+    const disclosure = details.find((node) => node.textContent?.includes('Read third.ts'))!;
+    const summary = disclosure.querySelector('summary')!;
+    expect(summary.classList.contains('clf-stream-tool_call')).toBe(true);
+    expect(disclosure.open).toBe(false);
+    summary.click();
+    expect(disclosure.open).toBe(true);
+    expect(disclosure.querySelector('.clf-stream-tool-panel')?.textContent).toContain('read_file · completed · 3 ms');
+    expect(disclosure.textContent).toContain('src/third.ts  +2 −1');
+    expect(disclosure.textContent).not.toContain('private-argument-sentinel');
+    expect(disclosure.textContent).not.toContain('private-result-sentinel');
+    summary.click();
+    expect(disclosure.open).toBe(false);
+  });
+
+  it('keeps only the same calls expanded when activity rows are repainted', async () => {
+    live = await harness(undefined, { activity });
+    renderingOn();
+    const section = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(section, 'wfr-app-stream');
+    live.hook.renderStreams();
+    const first = overwriteRows(section, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
+    expect(first).toHaveLength(2);
+    first[0]!.querySelector('summary')!.click();
+    first[0]!.querySelector('summary')!.focus();
+    live.hook.setShowTimes(true);
+    live.hook.renderStreams();
+    const second = overwriteRows(section, 'details.clf-stream-tool-disclosure') as HTMLDetailsElement[];
+    expect(second[0]).not.toBe(first[0]);
+    expect(second.map((node) => node.open)).toEqual([true, false]);
+    expect(live.document.activeElement).toBe(second[0]!.querySelector('summary'));
+    expect(second[0]!.dataset.clfCall).toBe(first[0]!.dataset.clfCall);
+  });
+
+  it('refreshes details when the authoritative activity tail is replaced', async () => {
+    let revision = 0;
+    const withDetails = () => {
+      const payload = activity();
+      Object.assign(payload.data, { resetActivity: true });
+      Object.assign(payload.data.stream.find((entry) => entry.seq === 4)!, {
+        durationMs: revision ? 8 : 3,
+        changes: [{ path: revision ? 'src/revised.ts' : 'src/third.ts', added: revision, removed: 0 }]
+      });
+      return payload;
+    };
+    live = await harness(undefined, { activity: withDetails });
+    renderingOn();
+    const section = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(section, 'wfr-app-stream');
+    live.hook.renderStreams();
+    const before = overwriteRows(section, 'details').find((node) => node.textContent?.includes('Read third.ts')) as HTMLDetailsElement;
+    expect(before).toBeDefined();
+    before.querySelector('summary')!.click();
+    revision++;
+    await live.hook.pullActivity();
+    live.hook.renderStreams();
+    const after = overwriteRows(section, 'details').find((node) => node.textContent?.includes('Read third.ts')) as HTMLDetailsElement;
+    expect(after.open).toBe(true);
+    expect(after.textContent).toContain('8 ms');
+    expect(after.textContent).toContain('src/revised.ts');
+    expect(after.textContent).not.toContain('src/third.ts');
+  });
+
+  it('bounds changed paths, escapes markup and does not invent a successful outcome', async () => {
+    const withDetails = () => {
+      const payload = activity();
+      Object.assign(payload.data.stream.find((entry) => entry.seq === 4)!, {
+        outcome: undefined, durationMs: null,
+        changes: Array.from({ length: 14 }, (_, index) => ({
+          path: index === 0 ? '<img src=x onerror=alert(1)>' : `src/file-${index}.ts`,
+          added: index === 0 ? -1 : index, removed: 0, approximate: true
+        }))
+      });
+      return payload;
+    };
+    live = await harness(undefined, { activity: withDetails });
+    renderingOn();
+    const section = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(section, 'wfr-app-stream');
+    live.hook.renderStreams();
+    const panel = overwriteRows(section, '.clf-stream-tool-panel').find((node) => node.textContent?.includes('unknown'))!;
+    expect(panel).toBeDefined();
+    expect(panel.querySelectorAll('.clf-stream-tool-change')).toHaveLength(12);
+    expect(panel.textContent).toContain('2 more changed files');
+    expect(panel.textContent).toContain('<img src=x onerror=alert(1)>');
+    expect(panel.querySelector('img')).toBeNull();
+    expect(panel.textContent).not.toContain('0 ms');
+    expect(panel.textContent).not.toContain('+-1');
+    expect(panel.textContent).toContain('≈');
+  });
+
+  it('does not carry expansion into a different conversation with reused call ids', async () => {
+    live = await harness(undefined, { activity });
+    renderingOn();
+    const section = assistantTurn(live.document, turnId, []);
+    await bindFiberRequest(section, 'wfr-app-stream');
+    live.hook.renderStreams();
+    const original = overwriteRows(section, 'details')[0] as HTMLDetailsElement;
+    expect(original).toBeDefined();
+    original.querySelector('summary')!.click();
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-cccc-dddd-eeee-ffffffffffff' });
+    live.hook.observe();
+    await settle();
+    live.document.querySelector('#thread')!.replaceChildren();
+    const replacement = assistantTurn(live.document, turnId, []);
+    live.hook.observe();
+    await settle();
+    await bindFiberTurns([{ section: replacement, turn: {
+      turnId, conversationId: 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff',
+      calls: [{ messageId: 'fiber-wfr-app-stream', tool: 'read_file', order: 0, answered: true, requestId: 'wfr-app-stream' }]
+    } }]);
+    await live.hook.pullActivity();
+    live.hook.renderStreams();
+    const disclosures = overwriteRows(replacement, 'details') as HTMLDetailsElement[];
+    expect(disclosures).toHaveLength(2);
+    expect(disclosures.every((node) => !node.open)).toBe(true);
+    expect(original.isConnected).toBe(false);
+  });
+
   /**
    * A reload of an open turn is part of that turn's story. The app names the turn on the row,
    * and the page paints it where it happened, among the turn's tool calls, with the repair look
@@ -2534,6 +2668,8 @@ describe('the app-owned chronological stream', () => {
     ]);
     const reload = overwriteRows(section, '.clf-stream-repair');
     expect(reload).toHaveLength(1);
+    expect(reload[0]!.tagName).toBe('DIV');
+    expect(reload[0]!.closest('details')).toBeNull();
     expect(reload[0]!.querySelector('.clf-stream-icon')?.textContent).toBe('↻');
     expect(reload[0]!.querySelector('.clf-when')?.textContent ?? '').not.toBe('');
     // In the turn, so not also hung between turns.
