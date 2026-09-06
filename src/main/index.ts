@@ -1,16 +1,18 @@
+import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
 /**
  * Main process entry: window, tray, and the security posture for the renderer.
  */
 
 import path from 'node:path';
-import { app, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session, shell } from 'electron';
+import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, screen, session, shell } from 'electron';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
+import { startChatModelDiscovery } from './chat-models.js';
 import { initLogFile, logError, logInfo, logWarn } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
-import { setBrowserOpener, shutdownBridge, startBridge } from './bridge.js';
+import { setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { flushSessions, initSessionStore, pruneSessions } from './session/store.js';
 import {
   flushRecorder,
@@ -58,7 +60,7 @@ import {
 import { startSessionRetentionMaintenance } from './session/retention.js';
 import { runShutdownSequence } from './shutdown.js';
 import { applyStagedUpdate, startUpdateChecks } from './update.js';
-import { windowLayoutForWorkArea } from './window-layout.js';
+import { UI_BASE_ZOOM, windowLayoutForWorkArea } from './window-layout.js';
 import { openInPreferredBrowser } from './browser.js';
 import {
   createWindowActivationGate,
@@ -104,6 +106,7 @@ function createWindow(): void {
     backgroundColor: getConfig().ui.theme === 'dark' ? '#0e0e11' : '#ffffff',
     title: 'Chat On Steroids',
     webPreferences: {
+      zoomFactor: UI_BASE_ZOOM,
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
@@ -114,15 +117,25 @@ function createWindow(): void {
     }
   });
 
+  // A tray close keeps this process alive. Warm the same account-owned catalog
+  // whenever the window actually becomes visible, not just on process startup.
+  window.on('show', () => {
+    if (!quitting) void startChatModelDiscovery().catch(error => logWarn(`model discovery on window open: ${error.message}`));
+  });
   window.once('ready-to-show', () => {
     // A renderer can finish loading after Cmd+Q has already entered bounded teardown. Never let
     // that late native event make the app visible again while `will-quit` is draining.
-    if (!quitting) window?.show();
+    if (!quitting) showWindow();
   });
 
   // A renderer that fails to load leaves a blank window with no other clue, so
   // record it where the diagnostics panel can show it.
   window.webContents.on('did-finish-load', () => logInfo('window loaded'));
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || input.key !== 'F11' || input.isAutoRepeat) return;
+    event.preventDefault();
+    window?.setFullScreen(!window.isFullScreen());
+  });
   window.webContents.on('did-fail-load', (_event, code, description) =>
     logError(`window failed to load (${code}): ${description}`)
   );
@@ -171,8 +184,35 @@ function showWindow(): void {
   }
   if (window.isMinimized()) window.restore();
   window.show();
+  // Launch, tray reopen and native activation share the same work-area presentation.
+  // Apply the final native state after showing the hidden window. Its initial outer bounds
+  // already fill the work area, so first paint also uses the requested full-size layout.
+  // Preserve an explicit F11 fullscreen choice; ordinary opens retain the title bar.
+  if (!window.isFullScreen()) window.maximize();
   window.focus();
 }
+
+setFinishNotifier((title, body, sessionId, turnId) => {
+  if (window?.isFocused() || !Notification.isSupported()) return false;
+  const write = (): void => {
+    showWindow();
+    if (!window) return;
+    const target = window.webContents;
+    const open = (): void => { if (!target.isDestroyed()) target.send('session:write', sessionId); };
+    if (target.isLoadingMainFrame()) target.once('did-finish-load', open); else open();
+  };
+  const notice = new Notification({ title, body, actions: [
+    { type: 'button', text: 'Send Automatic Goal' }, { type: 'button', text: 'Write Directly' }
+  ] });
+  notice.on('click', write);
+  notice.on('action', (details) => {
+    if (details.actionIndex === 0) void requestSessionFinishGoal(sessionId, turnId).catch(error => logWarn(`Finish goal: ${error.message}`));
+    else if (details.actionIndex === 1) write();
+  });
+  notice.show();
+  return true;
+});
+setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
 
 // Electron promises `second-instance` only after its own `ready`, not after our async startup.
 // Until CSP/permission handlers and IPC are installed below, a re-launch is only a focus request

@@ -1,3 +1,4 @@
+import type { ReasoningEffort } from './session.js';
 /** Types shared between the main process and the renderer. No runtime logic here. */
 
 /**
@@ -116,6 +117,14 @@ export interface TunnelSettings {
 }
 
 export interface UiPrefs {
+  backgroundChats?: boolean;
+  /** Actual app-owned tabs to retain; active work and drafts stay protected. Omitted uses workers + 2. */
+  tabsToKeepOpen?: number;
+  finishTool?: boolean;
+  planBackend?: 'chatgpt' | 'api';
+  finishAction?: 'notify' | 'goal';
+  finishLeadMinutes?: number;
+  developerMode?: boolean;
   minimizeToTray: boolean;
   autoConnect: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
@@ -196,7 +205,16 @@ export type GoalReasoning = (typeof GOAL_REASONING_LEVELS)[number];
 export const GOAL_MODES = ['goal', 'loop'] as const;
 export type GoalMode = (typeof GOAL_MODES)[number];
 
+export type GoalBackend = 'api' | 'chatgpt' | 'templates';
 export interface GoalSettings {
+  /** Optional active-turn Goal impulses; zero disables them. */
+  impulseMinutes?: number;
+  /** Include bounded recorded tool arguments/results in Goal decision context. */
+  includeToolCalls?: boolean;
+  helperModel?: string;
+  helperReasoning?: ReasoningEffort;
+  backend?: GoalBackend;
+  loopBackend?: 'api' | 'chatgpt';
   enabled: boolean;
   /**
    * `goal` stops when the job is done; `loop` never stops on its own.
@@ -234,6 +252,8 @@ export interface GoalSettings {
  * by accident: several ChatGPT tabs driving the same filesystem is a real risk.
  */
 export interface MultiAgentSettings {
+  defaultModel?: string;
+  defaultReasoning?: ReasoningEffort | '';
   enabled: boolean;
   /** Upper bound on workers the prime agent may create. */
   maxWorkers: number;

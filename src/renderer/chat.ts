@@ -1,16 +1,19 @@
+import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel } from './chat-models.js';
+import { marked } from 'marked';
+import { createAgentPanel } from './agent-panel.js';
+import { preserveTimelineViewport } from './timeline-scroll.js';
+import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
+import { initContextMeter, paintContextMeter } from './context-meter.js';
+import { isAstraModel } from '../shared/chat-models.js';
+import type { InputImage, InputAutomation } from '../shared/input.js';
+import type { InputEntry } from '../main/session/input.js';
+import type { LocalProject } from '../shared/projects.js';
+import type { TaskProgress } from '../shared/task-progress.js';
 /**
- * The Chat panel: recorded sessions, their timeline, the brief a compaction left behind,
- * and the three numbers those need. The switches that decide what ChatGPT can reach live
- * in the Home permission list, and pairing the extension is a Setup step.
- *
- * This is a viewer, not a second ChatGPT client, and not a place a compaction is started:
- * a session is compacted by the chat it lives in, from the button the extension puts beside
- * ChatGPT's composer. Everything here arrives through the same fixed IPC channels as the
- * rest of the renderer.
- *
- * The timeline is drawn from what the recorder actually stored. Where a value is a
- * local estimate rather than a fact — token counts above all — the UI says so, because
- * the whole point of this panel is to be more honest than the wall of "Called tool".
+ * Desktop chat workspace: recorded prose/tool truth, exact-session controls and a composer.
+ * The extension remains the ChatGPT transport; main owns permissions, delivery, Goal and
+ * compaction. The renderer crosses only the fixed preload API and scopes async views to
+ * the selected session generation. Token and cost values remain explicitly estimates.
  */
 
 import type {
@@ -38,7 +41,7 @@ import {
   MAX_GOAL_SYSTEM_PROMPT_CHARS
 } from '../shared/goal.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactNumber, el, icon, run, toast } from './dom.js';
+import { $, ago, clockTime, compactNumber, el, filterSettingsSections, icon, run, toast } from './dom.js';
 
 const api = window.api;
 
@@ -104,11 +107,60 @@ let sessionPageLoading = false;
 let loadedOlderSessions = false;
 let activeId: string | null = null;
 let selectedId: string | null = null;
+let newChatSelected = true;
+let selectedProjectId: string | null = null;
+let projects: LocalProject[] = [];
+const collapsedProjects = new Set<string>();
+const projectVisibleCounts = new Map<string, number>();
+const PROJECT_TASK_PAGE_SIZE = 5;
+function draftKey(): string { return selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
+let selectionGeneration = 0;
+let pendingNewInput: { id: string; generation: number } | null = null;
+let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
+const expandedWorkers = new Set<string>();
+const inputDrafts = new Map<string, string>();
+const imageDrafts = new Map<string, InputImage[]>();
+const startingInputs = new Map<string, InputEntry>();
+const visibleInputIds = new Set<string>();
+// Window-local presentation only: a new incident or changed status is visible again.
+const dismissedRecoveryNotices = new Map<string, string>();
+// Dismisses presentation only; durable cancellation and late receipts remain in the outbox.
+const INPUT_NOTICE_KEY = 'dismissed-input-notices';
+const dismissedInputNotices = new Set<string>((() => {
+  try {
+    const saved: unknown = JSON.parse(window.localStorage.getItem(INPUT_NOTICE_KEY) ?? '[]');
+    return Array.isArray(saved) ? saved.filter((id): id is string => typeof id === 'string' && id.length <= 64).slice(-100) : [];
+  } catch { return []; }
+})());
+function dismissInputNotice(id: string): void {
+  dismissedInputNotices.add(id);
+  try { window.localStorage.setItem(INPUT_NOTICE_KEY, JSON.stringify([...dismissedInputNotices].slice(-100))); }
+  catch { /* A storage failure still allows dismissal for this window lifetime. */ }
+  void refreshInputQueue();
+}
+function rememberDraft(): void { inputDrafts.set(draftKey(), $<HTMLTextAreaElement>('chatInput').value); }
+function restoreDraft(): void { cancelGoalRequest(); cancelTaskPlan(); $('taskPlanPreview').hidden = true; $('taskPlanPreview').replaceChildren(); $('activeGoalRow').hidden = true; $('recoveryStatus').hidden = true; $<HTMLTextAreaElement>('chatInput').value = inputDrafts.get(draftKey()) ?? ''; const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = 'off'; delete automation.dataset.edited; $<HTMLTextAreaElement>('sessionObjective').value = ''; delete $('sessionObjective').dataset.edited; delete $('sessionObjective').dataset.sessionId; paintComposerImages(); }
+function paintComposerImages(): void {
+  const key = draftKey();
+  const images = imageDrafts.get(key) ?? [];
+  const box = $('composerImages'); box.hidden = !images.length; box.replaceChildren();
+  images.forEach((image, index) => {
+    const tile = el('div', 'composer-image');
+    const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name;
+    const remove = el('button', 'image-remove', '×'); remove.setAttribute('type', 'button'); remove.setAttribute('aria-label', `Remove ${image.name}`);
+    remove.addEventListener('click', () => { imageDrafts.set(key, images.filter((_entry, at) => at !== index)); paintComposerImages(); });
+    tile.append(preview, remove); box.append(tile);
+  });
+  paintDeliveryControls();
+}
+
 let events: SessionEvent[] = [];
 let totalEvents = 0;
 /** The session whose `events`/cursor pair belongs together. */
 let detailFor: string | null = null;
 let detailCursor: number | null = null;
+let historyBefore: number | null = null;
+let historyLoading = false;
 /** The last swarm the app reported, so the header can summarise it without the log. */
 let swarm: SwarmState | null = null;
 /**
@@ -187,12 +239,16 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  * badge going dark first is what made that reload look like it came out of nowhere.
  */
 /**
- * A new session and exact calls stay active for three minutes unless a later turn end finished
+ * Pro uses the bridge's live ten-minute activity deadline.
+ * Other sessions and exact calls stay active for three minutes unless a later turn end finished
  * them — the model's final answer, or the turn ending any other way, the user's stop included.
  * A refused call in a blocked chat still counts as the call it was: the badge is how the user
  * sees that something is still trying, and it goes dark the moment the turn is stopped.
  */
 function recentChatActivity(summary: SessionSummary, now = Date.now()): boolean {
+  if (summary.activityExpiresAt !== undefined) {
+    return summary.activityExpiresAt !== null && now < summary.activityExpiresAt;
+  }
   const lastActivityAt = Math.max(summary.startedAt, summary.lastToolCallAt ?? 0);
   const finishedAt = Math.max(summary.lastAssistantFinalAt ?? 0, summary.lastTurnEndAt ?? 0);
   return lastActivityAt > finishedAt && now - lastActivityAt < CHAT_ACTIVE_MS;
@@ -283,32 +339,29 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 
   const top = el('div', 'sess-top');
   const title = el('b', '', summary.title || 'Untitled session');
-  title.title = summary.title;
-  const when = el('em', '', ago(summary.updatedAt));
-  top.append(title, when);
-
-  const bits: string[] = [
-    `${summary.userMessages} message${summary.userMessages === 1 ? '' : 's'}`,
-    `${summary.toolCalls} tool${summary.toolCalls === 1 ? '' : 's'}`
-  ];
-  if (summary.errors > 0) bits.push(`${summary.errors} error${summary.errors === 1 ? '' : 's'}`);
-  if (summary.agents.length > 0)
-    bits.push(`${summary.agents.length} agent${summary.agents.length === 1 ? '' : 's'}`);
-  const sub = el('div', 'sess-sub');
-  for (const badge of sessionBadges(summary)) {
-    sub.append(el('span', `chip${badge.tone ? ` ${badge.tone}` : ''}`, badge.text));
+  top.append(title);
+  const badges = sessionBadges(summary);
+  row.title = [summary.title || 'Untitled session', ...badges.map((badge) => badge.text), ago(summary.updatedAt)].join(' · ');
+  const showTip = () => {
+    document.getElementById('sessionTooltip')?.remove();
+    const tip = el('div', 'session-tooltip', row.title);
+    tip.id = 'sessionTooltip'; tip.setAttribute('role', 'tooltip');
+    const bounds = row.getBoundingClientRect();
+    tip.style.left = `${Math.min(bounds.right + 10, window.innerWidth - 290)}px`;
+    tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
+    document.body.append(tip);
+  };
+  row.addEventListener('pointerenter', showTip);
+  row.addEventListener('pointerleave', () => document.getElementById('sessionTooltip')?.remove());
+  row.addEventListener('click', () => document.getElementById('sessionTooltip')?.remove());
+  const status = badges.find((badge) => badge.tone);
+  if (status) {
+    const indicator = el('span', `session-status ${status.tone}`);
+    indicator.title = status.text;
+    indicator.setAttribute('aria-label', status.text);
+    top.append(indicator);
   }
-  sub.append(el('span', 'sess-bits', bits.join(' · ')));
-
-  const level = pressureOf(summary.id);
-  const bar = el('div', `bar${level ? ` is-${level.level}` : ''}`);
-  const fill = el('i');
-  const share = level && level.limit > 0 ? Math.min(100, (level.estimated / level.limit) * 100) : 0;
-  fill.style.width = `${share.toFixed(1)}%`;
-  bar.append(fill);
-  bar.title =
-    `~${compactNumber(summary.contextTokens)} rough tokens in the current chat context; ` +
-    `~${compactNumber(summary.estimatedTokens)} across the full recorded session. Transient progress is excluded.`;
+  const actionBar = el('div', 'sess-actions');
 
   const remove = document.createElement('button');
   remove.className = 'btn sess-action sess-del';
@@ -339,17 +392,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     });
     actions.push(block);
 
-    // The number is deliberately not repeated here. The chat itself is told how many seconds
-    // are left, counted from the open incident; a duration written into this row would be a
-    // second copy of that policy, free to drift from the one the model is actually given.
-    const note = el(
-      'div',
-      'sess-note',
-      blocked
-        ? 'Blocked: a call the app cannot attribute to a chat is refused, and the chat is told to stop.'
-        : 'Each call here tells its chat how long it has to prove its identity, and to stop rather than keep calling if it cannot.'
-    );
-    row.append(top, sub, note, bar, ...actions, remove);
+    actionBar.append(...actions, remove);
+    row.append(top, actionBar);
     return row;
   }
   if (summary.conversationId) {
@@ -382,7 +426,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     actions.push(open);
   }
 
-  row.append(top, sub, bar, ...actions, remove);
+  actionBar.append(...actions, remove);
+  row.append(top, actionBar);
   return row;
 }
 
@@ -443,8 +488,9 @@ function mergeSessionRows(rows: SessionSummary[]): void {
 
 async function loadSessions(): Promise<void> {
   const generation = ++sessionsLoadGeneration;
-  const list = await run(api.listSessions({ limit: SESSION_PAGE_SIZE }));
+  const [list, catalog] = await Promise.all([run(api.listSessions({ limit: SESSION_PAGE_SIZE })), run(api.listProjects())]);
   if (!list || generation !== sessionsLoadGeneration) return;
+  if (catalog) projects = catalog;
   // Once older pages have been requested, a hot refresh only replaces/updates the newest page.
   // Throwing the older rows away here would make scrolling history vanish every 400 ms while a
   // live chat is recording. Before pagination begins, replacing the first page is cheaper and
@@ -469,9 +515,9 @@ async function loadSessions(): Promise<void> {
     detailFor = null;
     detailCursor = null;
   }
-  if (selectedId === null) selectedId = activeId ?? sessions[0]?.id ?? null;
   paintSessions();
   await loadDetail();
+  void refreshInputQueue();
 }
 
 async function loadMoreSessions(): Promise<void> {
@@ -502,11 +548,96 @@ function maybePageSessions(): void {
   }
 }
 
+let diagnosticsExpanded = false;
+
 function paintSessions(): void {
+  document.getElementById('sessionTooltip')?.remove();
   const list = $('sessionList');
-  list.replaceChildren(...sessions.map(sessionRow));
+  const children = new Map<string, SessionSummary[]>();
+  const ids = new Set(sessions.map((entry) => entry.id));
+  for (const entry of sessions) {
+    if (entry.origin?.kind !== 'worker') continue;
+    const parent = entry.origin.fromSessionId;
+    const key = parent && ids.has(parent) && parent !== entry.id ? parent : 'other-workers';
+    children.set(key, [...(children.get(key) ?? []), entry]);
+  }
+  const rows: HTMLElement[] = [];
+  // A task and its expanded workers are one sidebar item for project pagination.
+  const projectRows = new Map<string, Array<{ rows: HTMLElement[]; selected: boolean }>>();
+  const diagnostics: SessionSummary[] = [];
+  const group = (key: string, workers: SessionSummary[], parentRow?: HTMLElement, target = rows): void => {
+    const button = el('button', 'worker-toggle');
+    button.append(icon('i-chev'));
+    button.title = `${workers.length} sub-agents · ${workers.filter(sessionWorking).length} active`;
+    button.setAttribute('aria-label', `${expandedWorkers.has(key) ? 'Collapse' : 'Expand'} ${workers.length} sub-agents`);
+    button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
+    button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
+    if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
+    if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
+  };
+  for (const entry of sessions) {
+    if (entry.origin?.kind === 'worker') continue;
+    if (!entry.conversationId) { diagnostics.push(entry); continue; }
+    const target: HTMLElement[] = entry.projectId ? [] : rows;
+    const row = sessionRow(entry); target.push(row);
+    const workers = children.get(entry.id); if (workers) group(entry.id, workers, row, target);
+    if (entry.projectId) {
+      const tasks = projectRows.get(entry.projectId) ?? [];
+      tasks.push({ rows: target, selected: entry.id === selectedId || workers?.some(worker => worker.id === selectedId) === true });
+      projectRows.set(entry.projectId, tasks);
+    }
+  }
+  const otherWorkers = children.get('other-workers') ?? [];
+  if (otherWorkers.length) {
+    const history = document.createElement('details'); history.className = 'session-diagnostics';
+    history.open = expandedWorkers.has('other-workers');
+    history.append(el('summary', '', `Sub-agent history · ${otherWorkers.length}`));
+    history.append(...otherWorkers.map(sessionRow));
+    history.addEventListener('toggle', () => { if (history.isConnected) history.open ? expandedWorkers.add('other-workers') : expandedWorkers.delete('other-workers'); });
+    rows.push(history);
+  }
+  const projectIds = [...new Set([...projects.map(project => project.id), ...projectRows.keys()])];
+  const projectSections: HTMLElement[] = [];
+  for (const id of projectIds) {
+    const project = projects.find(row => row.id === id);
+    const section = document.createElement('details'); section.className = 'project-group'; section.dataset.projectId = id;
+    section.open = !collapsedProjects.has(id);
+    const heading = el('summary', 'project-heading');
+    const label = el('span', 'project-name', project?.name ?? 'Unavailable project');
+    heading.title = project?.path ?? 'Unavailable project';
+    heading.append(icon('i-folder'), label); section.append(heading);
+    section.addEventListener('toggle', () => { if (section.isConnected) section.open ? collapsedProjects.delete(id) : collapsedProjects.add(id); });
+    if (project) {
+      const create = el('button', 'btn project-new'); create.append(icon('i-plus')); create.setAttribute('type', 'button'); create.dataset.newProject = id;
+      create.title = 'New chat in this project'; create.setAttribute('aria-label', create.title);
+      create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); }); heading.append(create);
+    }
+    const tasks = projectRows.get(id) ?? [];
+    const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
+    const shown = tasks.filter((task, index) => index < count || task.selected);
+    section.append(...shown.flatMap(task => task.rows));
+    if (shown.length < tasks.length) {
+      const more = el('button', 'btn project-show-more', 'Show more') as HTMLButtonElement;
+      more.type = 'button'; more.setAttribute('aria-label', `Show more tasks in ${project?.name ?? 'this project'}`);
+      more.addEventListener('click', () => { projectVisibleCounts.set(id, count + PROJECT_TASK_PAGE_SIZE); paintSessions(); });
+      section.append(more);
+    }
+    projectSections.push(section);
+  }
+  if (diagnostics.length) {
+    const disclosure = document.createElement('details');
+    disclosure.className = 'session-diagnostics';
+    disclosure.open = diagnosticsExpanded;
+    disclosure.append(el('summary', '', `Unattributed activity · ${diagnostics.length}`));
+    disclosure.append(...diagnostics.map(sessionRow));
+    disclosure.addEventListener('toggle', () => { diagnosticsExpanded = disclosure.open; });
+    rows.push(disclosure);
+  }
+  // Projects must remain discoverable without scrolling through the entire ungrouped history.
+  list.replaceChildren(...projectSections, ...rows);
+  agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
   badgeKey = badgeSignature();
-  $('sessionsEmpty').hidden = sessions.length > 0;
+  $('sessionsEmpty').hidden = sessions.length > 0 || projects.length > 0;
 
   const recording = deps.state()?.config.sessions.record === true;
   const retained = `${sessionTotal} retained session${sessionTotal === 1 ? '' : 's'}`;
@@ -529,7 +660,7 @@ function scheduleToolActivityExpiry(): void {
     const lastToolCallAt = summary.lastToolCallAt;
     const lastActivityAt = Math.max(summary.startedAt, lastToolCallAt ?? 0);
     if (!recentChatActivity(summary, now)) continue;
-    const expiry = lastActivityAt + CHAT_ACTIVE_MS;
+    const expiry = summary.activityExpiresAt ?? lastActivityAt + CHAT_ACTIVE_MS;
     if (expiry > now) nearest = Math.min(nearest, expiry);
   }
   if (!Number.isFinite(nearest)) return;
@@ -564,11 +695,303 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
   events = folded.slice(Math.max(0, folded.length - MAX_TIMELINE_ROWS));
 }
 
-async function loadDetail(): Promise<void> {
+let controlsGeneration = 0;
+let controlledSessionId: string | null = null;
+let controlledTurnId: string | null = null;
+let controlledSelection = -1;
+let controlledStopPending = false;
+let controlledFinishWaiting = false;
+let controlledQueueAtFinish = false;
+let controlledCanInject = false;
+let pendingComposerInputs: InputEntry[] = [];
+let inputQueueGeneration = 0;
+let goalIntentGeneration = 0;
+let goalProgress: (Omit<TaskProgress, 'phase'> & { phase: string; selection: number; inputId?: string }) | null = null;
+function cancelGoalRequest(): void {
+  const requestId = goalProgress?.requestId;
+  goalProgress = null;
+  if (requestId) void api.cancelTaskRequest?.(requestId);
+  paintGoalProgress();
+}
+type GoalDraftPresentation = { stage: string; model: string; text: string; error: string | null };
+let goalDraftView: GoalDraftPresentation | null = null;
+let finishGoalDraftView: GoalDraftPresentation | null = null;
+function paintGoalProgress(): void {
+  let row = document.getElementById('goalLifecycle');
+  if (!row) { row = el('div', 'queued-input'); row.id = 'goalLifecycle'; row.setAttribute('role', 'status'); $('activeGoalRow').before(row); }
+  const progress = goalProgress?.selection === selectionGeneration ? goalProgress : null;
+  const entry = progress?.inputId ? pendingComposerInputs.find(item => item.id === progress.inputId) : undefined;
+  const finishDraft = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? finishGoalDraftView : null;
+  const draft = finishDraft ?? (controlledSessionId === selectedId && controlledSelection === selectionGeneration ? goalDraftView : null);
+  const off = $<HTMLSelectElement>('chatAutomation').value === 'off';
+  if (off && !finishDraft) { row.hidden = true; row.replaceChildren(); row.setAttribute('aria-busy', 'false'); return; }
+  let phase = progress?.phase ?? '';
+  let text = progress?.text ?? '', error = progress?.error;
+  if (entry) { phase = entry.state; error = entry.error ?? undefined; }
+  if (draft && (!off || finishDraft) && (finishDraft || !['saving', 'failed'].includes(phase))) { phase = draft.stage; text = draft.text; error = draft.error ?? undefined; }
+  const labels: Record<string, string> = { saving: 'Saving task…', saved: 'Task saved · waiting for the next completed answer',
+    preparing: 'Preparing the opening message…', generating: 'Generating the opening message…', ready: 'Message ready · awaiting ChatGPT delivery',
+    sending: 'Preparing a continuation…', answering: 'Generating a continuation…', queued: 'Opening message queued',
+    browser: 'Sending opening message to ChatGPT…', sent: 'Opening message sent', tool: 'Opening message delivered to the active turn',
+    failed: 'Task could not continue', cancelled: 'Opening message cancelled', paused: 'Automation paused · task text preserved', 'no-reply': 'Goal reached' };
+  if (phase === 'retrying') { text = ''; error = undefined; }
+  labels.retrying = `Provider busy · retry ${progress?.attempt ?? ''}${progress?.retryAt ? ' at ' + new Date(progress.retryAt).toLocaleTimeString() : ''}`;
+  row.hidden = !phase; if (!phase) return;
+  const busy = ['saving', 'preparing', 'generating', 'retrying', 'sending', 'answering', 'browser', 'queued', 'ready'].includes(phase) && !error;
+  row.setAttribute('aria-busy', String(busy));
+  const marker = el('span', busy ? 'session-status is-working' : 'session-status');
+  const body = el('div', 'queue-label'); body.append(el('span', '', error ? `${labels.failed}: ${error}` : labels[phase] ?? phase));
+  if (text && ['generating', 'answering', 'preparing'].includes(phase)) { const preview = el('pre', 'goal-live-preview', text.slice(-8000)); body.append(preview); }
+  row.replaceChildren(marker, body);
+}
+const cancelledStarts = new Set<string>();
+const queuedFollowup = (entry: InputEntry): boolean => entry.mode === 'finish' || (entry.mode === 'after-turn' && !!entry.sessionId && entry.purpose !== 'decision');
+function pendingComposerInput(): InputEntry | undefined {
+  return [...startingInputs.values(), ...pendingComposerInputs].find(entry => (!queuedFollowup(entry) || entry.state === 'browser') && ['queued', 'browser'].includes(entry.state) &&
+    (selectedId ? (entry.sessionId ?? entry.deliveredSessionId) === selectedId :
+      (pendingNewInput?.generation === selectionGeneration && pendingNewInput.id === entry.id) || (!entry.sessionId && !entry.deliveredSessionId && entry.purpose !== 'decision')));
+}
+let durationTimer: number | undefined;
+function paintDeliveryControls(): void {
+  paintGoalProgress();
+  const working = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledTurnId !== null;
+  const queueAtFinish = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledQueueAtFinish;
+  const canInject = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledCanInject;
+  $('queueAtFinish').hidden = !queueAtFinish;
+  $('afterTurnLabel').textContent = queueAtFinish ? 'Queue at Session finish' : 'After this turn';
+  const generate = $<HTMLButtonElement>('generateFinishGoal');
+  const queued = [...startingInputs.values(), ...pendingComposerInputs].some(entry =>
+    (entry.sessionId ?? entry.deliveredSessionId) === selectedId && ['queued', 'browser', 'tool'].includes(entry.state));
+  generate.hidden = !working || !controlledFinishWaiting || queued || controlledStopPending || !!finishGoalDraftView;
+  generate.disabled = generate.dataset.busy === `${selectedId}:${controlledTurnId}`;
+  const sendOption = $<HTMLSelectElement>('sendMode').querySelector('option[value="auto"]');
+  if (sendOption) sendOption.textContent = canInject ? 'Inject now' : 'Send';
+  if (!canInject && !queueAtFinish) $<HTMLSelectElement>('sendMode').value = 'auto';
+  const pending = pendingComposerInput();
+  const stop = (working || !!pending) && !$<HTMLTextAreaElement>('chatInput').value.trim() && !(imageDrafts.get(draftKey())?.length);
+  // Hover selects delivery for the next message. Clicking the empty-composer
+  // Stop still acts immediately; there is no second Stop action in the menu.
+  $('sendOptions').hidden = !canInject && !queueAtFinish;
+  const send = $<HTMLButtonElement>('chatSend');
+  send.disabled = !!preparedPlan && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()));
+  send.dataset.action = stop ? 'stop' : 'send';
+  send.setAttribute('aria-label', stop ? (controlledStopPending ? 'Stop requested' : 'Stop turn') : 'Send message');
+  if (stop && !working && pending) send.setAttribute('aria-label', 'Cancel delivery');
+  if (preparedPlan && !stop) send.setAttribute('aria-label', 'Send first stage');
+  send.classList.toggle('is-plan-ready', !!preparedPlan && !stop);
+  send.title = stop && !working && pending ? 'Cancel delivery' : preparedPlan && !stop ? 'Send first stage' : '';
+  send.classList.toggle('is-stop', stop);
+  for (const button of $('sendOptions').querySelectorAll<HTMLElement>('[data-delivery]')) {
+    button.setAttribute('aria-checked', String(button.dataset.delivery === $<HTMLSelectElement>('sendMode').value));
+  }
+}
+function dockAction(label: string, symbol: string, click: () => void): HTMLButtonElement {
+  const button = el('button', 'dock-action') as HTMLButtonElement;
+  button.type = 'button'; button.title = label; button.setAttribute('aria-label', label);
+  button.append(icon(symbol)); button.onclick = click; return button;
+}
+function paintActiveGoal(): void {
+  const row = $('activeGoalRow');
+  const mode = $<HTMLSelectElement>('chatAutomation').value;
+  row.hidden = !selectedId || mode === 'off';
+  if (row.hidden) { row.replaceChildren(); return; }
+  const objective = $<HTMLTextAreaElement>('sessionObjective').value.trim();
+  const label = el('span', 'queue-label', `${mode === 'loop' ? 'Loop' : 'Pursuing goal'}${objective ? ' · ' + objective : ''}`);
+  label.title = objective;
+  row.replaceChildren(icon('i-pulse'), label,
+    dockAction('Pause automation', 'i-power', () => { const select = $<HTMLSelectElement>('chatAutomation'); select.value = 'off'; select.dispatchEvent(new Event('change')); }),
+    dockAction('Edit task', 'i-pencil', () => { $<HTMLDetailsElement>('composerSettings').open = true; $<HTMLTextAreaElement>('sessionObjective').focus(); }));
+}
+let planGeneration = 0;
+let planMode = false;
+let planRequestId: string | null = null;
+let preparedPlan: { selection: number; text: string; stages: string[]; sending: boolean } | null = null;
+function cancelTaskPlan(): void {
+  if (planRequestId) void api.cancelTaskRequest?.(planRequestId);
+  planRequestId = null;
+  preparedPlan = null;
+  ++planGeneration; planMode = false;
+  $('taskPlanPreview').hidden = true; $('taskPlanPreview').replaceChildren();
+  const button = $<HTMLButtonElement>('createPlan');
+  delete button.dataset.busy; button.removeAttribute('aria-busy');
+  $<HTMLTextAreaElement>('chatInput').placeholder = 'Ask anything…';
+  paintTaskActions();
+  paintDeliveryControls();
+}
+async function createTaskPlan(backend: 'api' | 'chatgpt'): Promise<void> {
+  const input = $<HTMLTextAreaElement>('chatInput'), text = input.value.trim();
+  planMode = true; paintTaskActions();
+  if (!text) { input.placeholder = 'Describe the task to turn into a plan…'; input.focus(); return; }
+  const generation = ++planGeneration, selection = selectionGeneration;
+  const preview = $('taskPlanPreview'); preview.hidden = false;
+  preview.replaceChildren(el('span', 'muted', 'Creating plan…'));
+  const button = $<HTMLButtonElement>('createPlan');
+  const caption = button.querySelector('span')!; const previous = caption.textContent;
+  button.dataset.busy = 'true'; button.setAttribute('aria-busy', 'true'); caption.textContent = 'Creating plan…'; paintTaskActions();
+  const requestId = crypto.randomUUID();
+  if (planRequestId) void api.cancelTaskRequest?.(planRequestId);
+  planRequestId = requestId;
+  const unsubscribe = api.onTaskProgress?.(progress => {
+    if (progress.requestId !== requestId || generation !== planGeneration || selection !== selectionGeneration) return;
+    const label = progress.phase === 'retrying' ? `Provider busy · retry ${progress.attempt ?? ''}${progress.retryAt ? ' at ' + new Date(progress.retryAt).toLocaleTimeString() : ''}` : progress.phase === 'cancelled' ? 'Plan cancelled' : progress.phase === 'preparing' ? 'Preparing plan…' : progress.phase === 'ready' ? 'Plan ready' : progress.phase === 'failed' ? 'Plan failed' : 'Writing plan…';
+    preview.replaceChildren(el('span', 'muted', label));
+    if (progress.text || progress.error) preview.append(el('pre', 'task-progress-text', progress.error || progress.text));
+  });
+  let stages: string[] | null;
+  try {
+    const result = await api.draftTaskPlan(text, backend, requestId);
+    stages = result.ok ? result.data : null;
+    if (!result.ok && generation === planGeneration && selection === selectionGeneration) {
+      const error = el('div', 'muted', result.error === 'invalid_goal_decision_json' ? 'The planner response could not be read.' : result.error);
+      error.title = result.error; preview.replaceChildren(error);
+    }
+  }
+  finally { unsubscribe?.(); if (planRequestId === requestId) planRequestId = null; if (generation === planGeneration) { delete button.dataset.busy; button.removeAttribute('aria-busy'); caption.textContent = previous; paintTaskActions(); } }
+  if (generation !== planGeneration || selection !== selectionGeneration) return;
+  if (!stages) { preview.hidden = false; preview.append(el('div', 'muted', 'Send again to retry, or cancel the plan.')); return; }
+  if (input.value.trim() !== text) { preview.hidden = true; toast('Your draft changed; generate a plan from the updated task.'); return; }
+  preparedPlan = { selection, text, stages, sending: false };
+  paintPreparedPlan();
+  paintDeliveryControls();
+}
+function paintPreparedPlan(): void {
+  const plan = preparedPlan;
+  if (!plan) return;
+  const preview = $('taskPlanPreview'); preview.hidden = false;
+  preview.replaceChildren(...plan.stages.map((stage, index) => {
+    const row = el('div', 'plan-stage');
+    const heading = el('div', 'plan-stage-heading');
+    const label = el('span', 'stage-number', String(index + 1)); label.setAttribute('aria-label', `Stage ${index + 1}`);
+    const text = el('span', 'queue-label', stage); text.title = stage;
+    const field = document.createElement('textarea'); field.value = stage; field.maxLength = 16000; field.hidden = true;
+    field.setAttribute('aria-label', `Edit stage ${index + 1}`);
+    const error = el('span', 'stage-error', 'Enter text or delete this stage.'); error.id = `planStageError-${index}`; error.hidden = !!stage.trim();
+    const validate = () => { error.hidden = !!field.value.trim(); field.setAttribute('aria-invalid', String(!error.hidden)); paintDeliveryControls(); };
+    field.setAttribute('aria-describedby', error.id); field.setAttribute('aria-invalid', String(!error.hidden));
+    field.oninput = () => { plan.stages[index] = field.value; text.textContent = field.value; text.title = field.value; validate(); };
+    const edit = dockAction(`Edit stage ${index + 1}`, 'i-pencil', () => {
+      field.hidden = !field.hidden; edit.setAttribute('aria-expanded', String(!field.hidden)); if (!field.hidden) field.focus();
+    });
+    edit.setAttribute('aria-expanded', 'false');
+    const remove = dockAction(`Delete stage ${index + 1}`, 'i-trash', () => {
+      if (plan.sending) return;
+      plan.stages.splice(index, 1);
+      if (plan.stages.length) { paintPreparedPlan(); paintDeliveryControls(); } else cancelTaskPlan();
+    });
+    edit.disabled = remove.disabled = field.disabled = plan.sending;
+    heading.title = index === 0 ? 'Send starts this stage. Remaining stages arrive one at a time at Session finish or after a completed answer.' : 'Delivered at Session finish or after a completed answer, following the preceding stage.';
+    heading.append(label, text, edit, remove); row.append(heading, field, error); return row;
+  }));
+}
+async function sendPreparedPlan(): Promise<void> {
+  const plan = preparedPlan;
+  if (!plan || plan.sending) return;
+  if (plan.selection !== selectionGeneration || $<HTMLTextAreaElement>('chatInput').value.trim() !== plan.text) { cancelTaskPlan(); return; }
+  const tasks = plan.stages.map(stage => stage.trim());
+  if (!tasks.length || tasks.some(task => !task) || JSON.stringify(tasks).length > 12000) { toast('Keep every stage nonempty and the plan below 12,000 characters.'); return; }
+  plan.sending = true; paintPreparedPlan();
+  try {
+    const sent = await sendComposer(undefined, tasks);
+    if (preparedPlan === plan && sent) cancelTaskPlan();
+  } finally {
+    if (preparedPlan === plan) { plan.sending = false; paintPreparedPlan(); paintDeliveryControls(); }
+  }
+}
+function paintTaskActions(): void {
+  const objective = $<HTMLTextAreaElement>('sessionObjective');
+  const save = $<HTMLButtonElement>('saveSessionObjective');
+  const off = $<HTMLSelectElement>('chatAutomation').value === 'off';
+  objective.hidden = off;
+  document.querySelector<HTMLLabelElement>('label[for="sessionObjective"]')!.hidden = off;
+  save.hidden = off;
+  const saved = objective.dataset.saved === objective.value && !!objective.value.trim();
+  save.disabled = objective.disabled || !objective.value.trim() || save.dataset.busy === 'true' || saved;
+  save.querySelector('span')!.textContent = save.dataset.busy === 'true' ? 'Saving…' : saved ? 'Saved' : 'Save task';
+  const text = $<HTMLTextAreaElement>('chatInput').value.trim();
+  for (const id of ['createPlan']) {
+    const button = $<HTMLButtonElement>(id);
+    button.disabled = false;
+    button.setAttribute('aria-pressed', String(planMode));
+    button.querySelector('span')!.textContent = planMode ? 'Cancel plan' : 'Create plan';
+    button.title = planMode ? 'Return to a normal message; keep your draft' : text ? 'Split your message into editable stages' : 'Write a message in the composer first';
+  }
+}
+function paintAutomationSwitch(): void {
+  paintGoalProgress();
+  paintActiveGoal();
+  const select = $<HTMLSelectElement>('chatAutomation');
+  for (const button of $('automationSwitch').querySelectorAll<HTMLButtonElement>('[data-mode]')) {
+    button.setAttribute('aria-checked', String(button.dataset.mode === select.value));
+    button.disabled = select.disabled;
+  }
+  $<HTMLSelectElement>('sessionObjectiveMode').value = select.value === 'loop' ? 'loop' : 'goal';
+  const loop = select.value === 'loop';
+  document.querySelector('label[for="sessionObjective"]')!.textContent = loop ? 'Loop instructions' : 'Goal';
+  $<HTMLTextAreaElement>('sessionObjective').placeholder = loop ? 'What should each continuation focus on?' : 'What should this chat achieve?';
+  paintTaskActions();
+}
+async function refreshSessionControls(): Promise<void> {
+  const id = selectedId, generation = ++controlsGeneration;
+  const menu = $('sessionControls');
+  paintAutomationSwitch();
+  if (!id) { controlledSessionId = null; controlledTurnId = null; paintDeliveryControls(); menu.hidden = false;
+    $<HTMLTextAreaElement>('sessionObjective').disabled = false;
+    paintTaskActions();
+    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    return; }
+  const controls = await run(api.getSessionControls(id));
+  if (generation !== controlsGeneration || id !== selectedId) return;
+  controlledSessionId = id;
+  controlledSelection = selectionGeneration;
+  controlledTurnId = controls?.activeTurnId ?? null;
+  goalDraftView = controls?.goalDraft ?? null;
+  finishGoalDraftView = controls?.finishGoalDraft ?? null;
+  controlledStopPending = controls?.stopPending === true;
+  controlledFinishWaiting = controls?.finishWaiting === true;
+  controlledQueueAtFinish = controls?.queueAtFinish === true;
+  controlledCanInject = controls?.canInject ?? controlledTurnId !== null;
+  paintDeliveryControls();
+  paintStateLine();
+  menu.hidden = !controls;
+  $('compactSession').hidden = false;
+  if (!controls) return;
+  const objective = $<HTMLTextAreaElement>('sessionObjective');
+  if (objective.dataset.sessionId !== id || !objective.dataset.edited) {
+    objective.value = controls.objective;
+    objective.dataset.saved = controls.objective;
+    objective.dataset.sessionId = id;
+    delete objective.dataset.edited;
+    $<HTMLSelectElement>('sessionObjectiveMode').value = controls.automation === 'loop' ? 'loop' : 'goal';
+  }
+  objective.disabled = !!controls.blocked;
+  paintTaskActions();
+  const draftMode = $<HTMLSelectElement>('chatAutomation');
+  if (!draftMode.dataset.edited) draftMode.value = controls.automation;
+  paintAutomationSwitch();
+  $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
+  $('cancelCompaction').hidden = !controls.job?.busy;
+  $('sessionControlStatus').textContent = controls.blocked === 'worker' ? 'This sub-agent is managed by its prime.' : controls.blocked === 'blocked' ? 'This chat is blocked.' : controls.job?.busy ? 'Compaction is running in ChatGPT.' : '';
+}
+
+async function navigateHistory(before: number | null, prepend = false): Promise<void> {
+  const selected = selectedId;
+  const selection = selectionGeneration;
+  historyBefore = before;
+  detailCursor = null;
+  const loading = loadDetail(true, prepend);
+  const generation = detailLoadGeneration;
+  await loading;
+  if (selectedId !== selected || selectionGeneration !== selection || detailLoadGeneration !== generation) return;
+  if (!prepend) $('chatBody').scrollTop = before === null ? $('chatBody').scrollHeight : 0;
+}
+async function loadDetail(navigate = false, prepend = false): Promise<void> {
   const wanted = selectedId;
+  if (wanted !== null && historyBefore !== null && detailFor === wanted && !navigate) { void refreshSessionControls(); paintDetail(); return; }
   const generation = ++detailLoadGeneration;
+  void refreshSessionControls();
   if (wanted === null) {
     handoffLoadGeneration++;
+    historyBefore = null;
     events = [];
     totalEvents = 0;
     detailFor = null;
@@ -576,9 +999,11 @@ async function loadDetail(): Promise<void> {
     paintDetail();
     return;
   }
-  const incremental = detailFor === wanted && detailCursor !== null;
+  if (detailFor !== wanted) historyBefore = null;
+  // Live deltas must not evict a historical page while the user is reading it.
+  const incremental = historyBefore === null && detailFor === wanted && detailCursor !== null;
   const detail = await run(
-    api.getSession(wanted, incremental ? { from: detailCursor!, limit: MAX_TIMELINE_ROWS } : { limit: MAX_TIMELINE_ROWS })
+    api.getSession(wanted, incremental ? { from: detailCursor!, limit: MAX_TIMELINE_ROWS } : { ...(historyBefore !== null ? { before: historyBefore } : {}), limit: prepend ? MAX_TIMELINE_ROWS / 2 : MAX_TIMELINE_ROWS })
   );
   if (!detail || generation !== detailLoadGeneration || selectedId !== wanted) return;
   // User/assistant prose is canonical in messages.json, while structured page activity stays
@@ -590,7 +1015,15 @@ async function loadDetail(): Promise<void> {
   if (incremental) mergeDetailDelta(detail.events);
   else {
     const folded = chronological(foldProgress(detail.events));
-    events = folded.slice(Math.max(0, folded.length - MAX_TIMELINE_ROWS));
+    if (prepend) {
+      const boundary = historyBefore!;
+      const retained = events.filter(event => event.seq >= boundary).slice(0, MAX_TIMELINE_ROWS - folded.length);
+      events = chronological(foldProgress([...folded, ...retained]));
+      // Keep the newly requested history reachable even if one retained answer exceeds
+      // the text budget by itself. The bounded page then starts at the older content.
+      let textCost = events.reduce((sum, event) => sum + eventTextCost(event), 0);
+      while (events.length > folded.length && textCost > MAX_TIMELINE_TEXT_CHARS) textCost -= eventTextCost(events.pop()!);
+    } else events = folded.slice(Math.max(0, folded.length - MAX_TIMELINE_ROWS));
     detailFor = wanted;
   }
   detailCursor =
@@ -674,6 +1107,15 @@ function safeRenderedHref(value: string): string | null {
  * heading and list item is a newline, so it keeps `msg`'s pre-wrap — flowing it would run a
  * whole brief together into one paragraph.
  */
+export function renderedMarkdown(source: string): HTMLElement {
+  // Fiber's canonical text can be complete while a background provider tab still
+  // paints its first words. Render this revision directly; captured DOM HTML is
+  // never evidence that it contains the current message revision.
+  const text = source.slice(0, MAX_RENDERED_HTML_CHARS);
+  const html = marked.parse(text, { async: false, gfm: true });
+  return renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
+}
+
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
   const box = el('div', 'msg');
   const safeFallback = fallback.slice(0, MAX_RENDERED_HTML_CHARS);
@@ -726,6 +1168,16 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   };
   visit(template.content);
   box.append(template.content);
+  // Tables wrap to the transcript column. Extremely wide structural tables retain
+  // their own horizontal scroll instead of widening/clipping the whole conversation.
+  for (const table of box.querySelectorAll('table')) {
+    const viewport = el('div', 'markdown-table');
+    viewport.tabIndex = 0;
+    viewport.setAttribute('role', 'region');
+    viewport.setAttribute('aria-label', 'Table');
+    table.replaceWith(viewport);
+    viewport.append(table);
+  }
   if (!box.textContent?.trim() && safeFallback) {
     box.classList.remove('rich');
     box.textContent = safeFallback;
@@ -812,27 +1264,63 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>): HTMLElem
   return box;
 }
 
-function eventBody(event: SessionEvent): HTMLElement {
+function hasLaterModelActivity(time: number): boolean {
+  return events.some(event => event.time > time && ['assistant_message', 'tool_call', 'page_tool', 'agent_message'].includes(event.kind));
+}
+
+function paintInputReceipt(row: HTMLElement, item: ReturnType<typeof timelineItems>[number]): void {
+  if (item.kind !== 'event' || item.event.kind !== 'user_message') return;
+  const receipt = row.querySelector<HTMLElement>('.input-receipt');
+  if (!receipt) return;
+  receipt.hidden = hasLaterModelActivity(item.event.time);
+  receipt.parentElement?.classList.toggle('has-input-receipt', !receipt.hidden);
+}
+
+function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean }): HTMLElement {
   switch (event.kind) {
     case 'session_start':
       return el('p', 'meta', `Session started — ${event.title}`);
     case 'user_message': {
       const box = el('div', 'said is-user');
       box.append(el('b', '', 'You'));
-      box.append(textBlock('msg', event.message.text, event.message.truncated, event.message.chars));
+      box.append(textBlock('msg', event.authoredText ?? event.message.text, event.authoredText === undefined && event.message.truncated, event.authoredText?.length ?? event.message.chars));
+      if (event.inputDelivery) {
+        box.classList.add('has-input-receipt');
+        const receipt = el('span', 'input-receipt');
+        const label = event.inputDelivery === 'offered' ? 'Sent to the active turn · awaiting receipt' : 'Delivery confirmed';
+        receipt.title = label; receipt.setAttribute('aria-label', label);
+        receipt.append(icon(event.inputDelivery === 'offered' ? 'i-clock' : 'i-check'));
+        box.append(receipt);
+      }
+      const assets = event.assets?.filter(asset => asset.mimeType === 'image/webp').slice(0, 4) ?? [];
+      if (assets.length && (context?.id || selectedId)) {
+        const id = context?.id ?? selectedId!, generation = selectionGeneration;
+        const attachments = el('div', 'message-attachments');
+        void (async () => {
+          for (const asset of assets) {
+            const data = await run(api.getSessionImage(id, asset.id));
+            if (context ? !context.current() : id !== selectedId || generation !== selectionGeneration) return;
+            if (!data) { attachments.append(el('p', 'meta', 'Image unavailable')); continue; }
+            const image = document.createElement('img');
+            image.src = data; image.alt = 'User attachment'; image.loading = 'lazy';
+            attachments.append(image);
+          }
+        })();
+        box.append(attachments);
+      }
       return box;
     }
     case 'assistant_message': {
       const box = el('div', 'said');
       box.append(el('b', '', event.final ? 'ChatGPT' : 'ChatGPT (partial)'));
-      box.append(renderedMessage(event.renderedHtml, event.message.text));
+      box.append(renderedMarkdown(event.message.text));
       return box;
     }
     case 'progress':
       return el('p', 'meta is-progress', event.message.text);
     case 'page_tool': {
       const line = el('p', 'meta is-progress thinking-line');
-      line.append(icon('i-bolt', 'ico thinking-ico'), el('span', '', event.label));
+      line.append(icon('i-globe', 'ico thinking-ico'), el('span', '', event.label));
       return line;
     }
     case 'turn_start':
@@ -845,8 +1333,13 @@ function eventBody(event: SessionEvent): HTMLElement {
       );
       return line;
     }
-    case 'chat_error':
-      return textBlock('meta is-bad', event.message.text, event.message.truncated, event.message.chars);
+    case 'chat_error': {
+      const notice = el('div', 'chat-error-notice');
+      notice.setAttribute('role', 'status');
+      const title = el('strong', '', 'ChatGPT reported a problem');
+      notice.append(title, textBlock('msg', event.message.text, event.message.truncated, event.message.chars));
+      return notice;
+    }
     case 'tool_call':
       return toolBody(event);
     case 'note':
@@ -859,15 +1352,32 @@ function eventBody(event: SessionEvent): HTMLElement {
      * broken log — the one impression a session recorder cannot afford to give.
      */
     case 'agent_message': {
-      const box = el('div', 'said');
+      const box = document.createElement('details');
+      box.className = 'agent-communication';
       // Which end of the message this record is. The same message is written once here and
       // once in the other agent's session, so without this a pair reads as two messages.
       box.title =
         event.delivery === 'sent'
           ? `Sent by ${event.from}; recorded when the app accepted it`
           : `Received by ${event.to}; recorded when it acknowledged delivery`;
-      box.append(el('b', '', `${event.from} → ${event.to}`));
+      const summary = el('summary');
+      const worker = event.from === 'prime' ? event.to : event.from;
+      const avatar = el('span', 'agent-avatar', worker.replace(/^worker-/, ''));
+      avatar.dataset.color = String([...worker].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6);
+      avatar.setAttribute('aria-hidden', 'true');
+      summary.append(avatar, el('span', '', communicationTitle(event)));
+      const communicationKey = `agent:${context?.id ?? selectedId}:${event.seq}`;
+      box.open = openTools.has(communicationKey);
+      box.addEventListener('toggle', () => { if (box.open) openTools.add(communicationKey); else openTools.delete(communicationKey); });
+      box.append(summary);
       box.append(textBlock('msg', event.message.text, event.message.truncated, event.message.chars));
+      if (!context) {
+        const matches = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && entry.origin.agentId === worker);
+        if (matches.length === 1) {
+          const open = el('button', 'btn', 'Open sub-agent chat'); open.setAttribute('type', 'button');
+          open.onclick = () => void agentPanel?.open(matches[0]!.id); box.append(open);
+        }
+      }
       return box;
     }
     case 'handoff':
@@ -887,7 +1397,10 @@ function eventRow(event: SessionEvent): HTMLElement {
   time.textContent = clockTime(event.time);
   time.title = new Date(event.time).toLocaleString();
   const body = el('div', 'ev-body');
-  if (event.agent) body.append(el('span', 'chip', event.agent));
+  const currentWorker = sessions.find(session => session.id === selectedId)?.origin;
+  if (event.agent && event.agent !== 'prime' && !(currentWorker?.kind === 'worker' && currentWorker.agentId === event.agent)) {
+    body.append(el('span', 'chip', event.agent));
+  }
   body.append(eventBody(event));
   // A refused call from a chat Compact & Resume already replaced is not a placement failure:
   // its request id proved exactly which chat it came from, and that chat's stopped turn simply
@@ -915,6 +1428,7 @@ function eventRow(event: SessionEvent): HTMLElement {
  */
 function paintAgentFilter(): void {
   const box = $('chatAgentFilter');
+  if (!deps.state()?.config.ui.developerMode) { box.hidden = true; agentFilter = null; return; }
   const named = [...new Set(events.flatMap((event) => (event.agent ? [event.agent] : [])))].sort();
   const anyUnattributed = events.some((event) => !event.agent);
   // A filter belongs to the session it was chosen in. Carrying it across a selection
@@ -992,7 +1506,7 @@ function boundedTimeline(source: SessionEvent[]): { shown: SessionEvent[]; omitt
     chars += cost;
     start -= 1;
   }
-  return { shown: source.slice(start), omitted: start };
+  return { shown: foldAgentCommunication(source.slice(start)), omitted: start };
 }
 
 // ------------------------------------------------------------ compaction rows
@@ -1192,7 +1706,7 @@ function compactionRow(block: CompactionBlock): HTMLElement {
   }
   if (block.brief) {
     raw.append(el('h4', '', block.brief.final ? 'Summary' : 'Summary (still writing)'));
-    raw.append(renderedMessage(block.brief.renderedHtml, block.brief.message.text));
+    raw.append(renderedMarkdown(block.brief.message.text));
   }
   if (block.handoff) {
     raw.append(
@@ -1239,6 +1753,8 @@ function itemSignature(item: TimelineItem): string {
   const parts: Array<string | number> = [event.seq, event.time, event.kind, event.agent ?? ''];
   switch (event.kind) {
     case 'user_message':
+      parts.push(event.message.chars, event.authoredText ?? '', event.inputDelivery ?? '');
+      break;
     case 'progress':
     case 'chat_error':
     case 'note':
@@ -1278,54 +1794,122 @@ function itemKey(item: TimelineItem): string {
   return item.kind === 'compaction' ? `compaction:${item.block.token}` : `event:${item.event.seq}`;
 }
 
-function paintDetail(): void {
-  const summary = sessions.find((s) => s.id === selectedId) ?? null;
-  $('chatTitle').textContent = summary ? summary.title || 'Untitled session' : 'No session selected';
+/** One activity disclosure between authored messages; communication keeps its own identity inside. */
+const toolGroups = new Map<string, HTMLDetailsElement>();
+/** Keep retained scroll containers mounted: rebuilding a feed must not restart
+ * disclosure animations or detach a result while the user is scrolling it. */
+function reconcileChildren(parent: Element, children: HTMLElement[]): void {
+  const keep = new Set<Node>(children);
+  for (const old of [...parent.childNodes]) if (!keep.has(old)) old.remove();
+  let cursor = parent.firstChild;
+  for (const child of children) {
+    if (child !== cursor) parent.insertBefore(child, cursor);
+    cursor = child.nextSibling;
+  }
+}
+function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGroups): HTMLElement[] {
+  const grouped: HTMLElement[] = [], retained = new Set<string>();
+  for (let i = 0; i < rows.length;) {
+    if (!rows[i]!.matches('.ev-tool_call, .ev-page_tool, .ev-agent_message')) { grouped.push(rows[i++]!); continue; }
+    let end = i + 1;
+    while (end < rows.length && rows[end]!.matches('.ev-tool_call, .ev-page_tool, .ev-agent_message') && rows[end]!.dataset.activityBoundary === rows[i]!.dataset.activityBoundary) end++;
+    if (end - i === 1) { grouped.push(rows[i++]!); continue; }
+    const key = `group:${scope}:${rows[i]!.dataset.timelineKey}`;
+    retained.add(key);
+    let group = groups.get(key);
+    if (!group) {
+      group = document.createElement('details'); group.className = 'tool-group';
+      group.dataset.timelineKey = key;
+      const summary = document.createElement('summary');
+      summary.append(el('span', 'activity-symbol'), el('span', 'activity-title'), icon('i-chev', 'ico activity-chevron'));
+      group.append(summary, el('div', 'tool-group-body'));
+      group.addEventListener('toggle', () => { if (group!.open) openTools.add(key); else openTools.delete(key); });
+      group.open = openTools.has(key) || rows.slice(i, end).some((row) => row.querySelector('details[open]')); groups.set(key, group);
+    }
+    const latest = rows[end - 1]!;
+    const latestHead = latest.querySelector('.tool > summary, .agent-communication > summary, .thinking-line');
+    const label = latestHead?.querySelector('b, span:not(.agent-avatar)')?.textContent || 'Activity';
+    group.querySelector('.activity-title')!.textContent = label;
+    group.querySelector('summary')!.title = `${end - i} actions · ${label}`;
+    const symbol = latestHead?.querySelector('svg, .agent-avatar');
+    group.querySelector('.activity-symbol')!.replaceChildren(...(symbol ? [symbol.cloneNode(true)] : []));
+    reconcileChildren(group.lastElementChild!, rows.slice(i, end));
+    grouped.push(group); i = end;
+  }
+  for (const key of groups.keys()) if (!retained.has(key)) groups.delete(key);
+  return grouped;
+}
 
+function paintDetail(): void {
+  paintStateLine();
+  const summary = sessions.find((s) => s.id === selectedId) ?? null;
+  applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, summary?.selectedModel ?? null);
+  const config = deps.state()?.config;
+  if (config) paintContextMeter(summary, config, confirmedComposerModel());
+  $('chatTitle').textContent = summary ? summary.title || 'Untitled session' : 'New chat';
+
+  paintDeliveryControls();
   paintAgentFilter();
   const filtered = visibleEvents();
   const windowed = boundedTimeline(filtered);
   const shown = windowed.shown;
 
-  // The scroller is the card body, not the list: a live session appends to the bottom,
-  // so stay pinned there unless the user has scrolled up to read something — and if they
-  // have, put them back exactly where they were instead of letting the rebuild jump.
+  // Preserve the visible logical row when late transcript revisions change the
+  // height above it; retaining absolute scrollTop would move the reader's content.
   const pane = $('chatBody');
-  const atBottom = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 40;
-  const was = pane.scrollTop;
+  const restoreViewport = preserveTimelineViewport(pane, $('timeline'));
   const timelineRows: HTMLElement[] = [];
-  if (windowed.omitted > 0) {
-    timelineRows.push(
-      el(
-        'p',
-        'timeline-window-note',
-        `${windowed.omitted} earlier row${windowed.omitted === 1 ? '' : 's'} kept on disk — showing the newest bounded window`
-      )
-    );
+  if (selectedId && historyBefore !== null) {
+    const navigation = el('div', 'timeline-window-note');
+    const latest = el('button', 'btn small', 'Back to latest');
+    latest.dataset.history = 'latest';
+    latest.addEventListener('click', () => void navigateHistory(null));
+    navigation.append(latest);
+    timelineRows.push(navigation);
   }
   const keep = new Set<string>();
+  let activityBoundary = '';
+  const recovery = [...shown].reverse().find(event => event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:'));
+  const recoveryStatus = $('recoveryStatus');
+  const recoverySession = selectedId;
+  const recoveryRevision = recovery?.kind === 'progress' ? JSON.stringify([recovery.progressId, recovery.time, recovery.message.text]) : '';
+  recoveryStatus.hidden = !recovery || Date.now() - recovery.time > 120000 || (!!recoverySession && dismissedRecoveryNotices.get(recoverySession) === recoveryRevision);
+  recoveryStatus.replaceChildren();
+  if (!recoveryStatus.hidden && recovery?.kind === 'progress') recoveryStatus.append(icon('i-pulse'), el('span', 'queue-label', recovery.message.text),
+    dockAction('Dismiss recovery notice', 'i-x', () => {
+      if (recoverySession) dismissedRecoveryNotices.set(recoverySession, recoveryRevision);
+      recoveryStatus.hidden = true; recoveryStatus.replaceChildren();
+    }));
   for (const item of timelineItems(shown)) {
+    if (item.kind === 'compaction' || !['tool_call', 'page_tool', 'agent_message'].includes(item.event.kind)) activityBoundary = itemKey(item);
+    if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
+    if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && ['session_start', 'session_end', 'turn_start', 'turn_end', 'note'].includes(item.event.kind)) continue;
     const key = itemKey(item);
     const sig = itemSignature(item);
     keep.add(key);
     const cached = rowCache.get(key);
     if (cached && cached.sig === sig) {
+      cached.row.dataset.activityBoundary = activityBoundary;
+      paintInputReceipt(cached.row, item);
       timelineRows.push(cached.row);
       continue;
     }
     const row = item.kind === 'compaction' ? compactionRow(item.block) : eventRow(item.event);
+    row.dataset.timelineKey = key;
+    row.dataset.activityBoundary = activityBoundary;
+    paintInputReceipt(row, item);
     rowCache.set(key, { sig, row });
     timelineRows.push(row);
   }
   for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
-  $('timeline').replaceChildren(...timelineRows);
-  $('timelineEmpty').hidden = shown.length > 0;
-  pane.scrollTop = atBottom ? pane.scrollHeight : was;
+  reconcileChildren($('timeline'), groupToolRows(timelineRows));
+  $('timelineEmpty').hidden = timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
+  restoreViewport();
 
   const facts: string[] = [];
   if (summary) {
     facts.push(`${totalEvents} event${totalEvents === 1 ? '' : 's'}`);
-    if (events.length < totalEvents) facts.push(`showing the last ${events.length}`);
+    if (events.length < totalEvents) facts.push(`showing a bounded page of ${events.length}`);
     if (agentFilter !== null) {
       facts.push(`filtered to ${agentFilter === UNATTRIBUTED ? 'unattributed' : agentFilter} — ${filtered.length} matched`);
     }
@@ -1344,6 +1928,7 @@ function paintDetail(): void {
     }
   }
   $('chatFoot').textContent = facts.join(' · ');
+  $('chatFoot').hidden = !deps.state()?.config.ui.developerMode;
   $('chatFoot').classList.toggle('is-warn', pressureOf(selectedId ?? '')?.level === 'huge');
 }
 
@@ -1384,10 +1969,14 @@ function paintHandoff(): void {
  * "what is happening".
  */
 function paintStateLine(): void {
+  window.clearTimeout(durationTimer);
+  durationTimer = undefined;
   const note = $('chatState');
   const { text, tone } = stateLine();
   note.textContent = text;
   note.className = `subhead-note${tone ? ` ${tone}` : ''}`;
+  note.classList.toggle('is-working', text.startsWith('Working'));
+  if (visible && text.startsWith('Working for ')) durationTimer = window.setTimeout(paintStateLine, 1000);
   repaintBadges();
 }
 
@@ -1409,6 +1998,21 @@ function badgeSignature(): string {
 }
 
 function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad' } {
+  if (!deps.state()?.config.ui.developerMode) {
+    const summary = sessions.find(entry => entry.id === selectedId);
+    if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
+    const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
+    const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
+    const turnId = active ?? lastBoundary?.turnId;
+    if (!turnId) return { text: '', tone: '' };
+    const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
+      : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
+    const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
+    if (startedAt === undefined) return { text: active ? 'Working…' : '', tone: '' };
+    if (!active && endedAt === undefined) return { text: '', tone: '' };
+    const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
+    return { text: `${active ? 'Working' : 'Worked'} for ${seconds >= 60 ? `${Math.floor(seconds / 60)}m ` : ''}${seconds % 60}s`, tone: '' };
+  }
   // Recording follows the conversation the browser can see. A tool call arrives over the
   // connector carrying nothing that identifies its caller, so work driven from the phone,
   // from another browser or from another machine can only be recorded as what it is:
@@ -1504,6 +2108,7 @@ function paintSwarm(state: SwarmState): void {
           const clear = el('button', 'btn btn-quiet agent-clear');
           clear.append(icon('i-x'));
           clear.dataset.clear = agent.id;
+          if (agent.runId) clear.dataset.runId = agent.runId;
           clear.title =
             agent.role === 'prime'
               ? 'Clear session — ends this run and every worker in it'
@@ -1570,6 +2175,8 @@ export function chatSettingsPatch(current: Config): {
       autoTokens: threshold
     },
     multiAgent: {
+      defaultModel: $<HTMLSelectElement>('workerModel').value,
+      defaultReasoning: $<HTMLSelectElement>('workerReasoning').value as Config['multiAgent']['defaultReasoning'],
       // The exposure switch lives with every other ChatGPT tool switch, on Home. This
       // panel keeps only the worker count, so it reads the one control that exists.
       enabled: $<HTMLInputElement>('homeMaEnabled').checked,
@@ -1578,7 +2185,12 @@ export function chatSettingsPatch(current: Config): {
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked
     },
     goal: {
-      ...goalSwitches(current.goal),
+      enabled: current.goal.enabled, mode: current.goal.mode,
+      includeToolCalls: $<HTMLInputElement>('goalIncludeToolCalls').checked,
+      backend: $<HTMLSelectElement>('goalBackend').value as Config['goal']['backend'],
+      loopBackend: $<HTMLSelectElement>('loopBackend').value as Config['goal']['loopBackend'],
+      helperModel: $<HTMLSelectElement>('helperModel').value || current.goal.helperModel || 'gpt-5.6-sol',
+      helperReasoning: ($<HTMLSelectElement>('helperReasoning').value || current.goal.helperReasoning || 'high') as Config['goal']['helperReasoning'],
       // The chosen model is held here rather than in an input, because it is picked from a
       // list and never typed. `current` is the fallback for the first save after a repaint.
       model: goalModel || current.goal.model,
@@ -1592,25 +2204,6 @@ export function chatSettingsPatch(current: Config): {
         $<HTMLTextAreaElement>('goalLoopPrompt').value.trim() || DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
     }
   };
-}
-
-/**
- * Two checkboxes, one mode.
- *
- * Goal and Loop are the two values of a single stored setting, so the pair has to be resolved
- * rather than read: the click that turns one on leaves the other still checked until the save
- * comes back and repaints it. The one that *changed* is therefore the one that means something,
- * which is what `current` is compared against here. Neither checked is simply off, and the mode
- * is left where it was — a user who switches Loop off and on again should get Loop back.
- */
-function goalSwitches(current: Config['goal']): { enabled: boolean; mode: Config['goal']['mode'] } {
-  const goalOn = $<HTMLInputElement>('goalEnabled').checked;
-  const loopOn = $<HTMLInputElement>('loopEnabled').checked;
-  const wasGoal = current.enabled && current.mode === 'goal';
-  const wasLoop = current.enabled && current.mode === 'loop';
-  const mode =
-    goalOn && !wasGoal ? 'goal' : loopOn && !wasLoop ? 'loop' : goalOn ? 'goal' : loopOn ? 'loop' : current.mode;
-  return { enabled: goalOn || loopOn, mode };
 }
 
 // --------------------------------------------------------------- the goal loop
@@ -1730,20 +2323,13 @@ function applyChatChecked(input: HTMLInputElement, value: boolean, previous: boo
 /** Writes the goal block from app state. Called from chatApply, so it never guesses. */
 function applyGoal(state: AppState, previous?: Config): void {
   const { config } = state;
+  applyChatChecked($<HTMLInputElement>('goalIncludeToolCalls'), config.goal.includeToolCalls === true, previous?.goal.includeToolCalls);
+  const automation = $<HTMLSelectElement>('chatAutomation');
+  automation.disabled = !config.sessions.record;
+  automation.title = config.sessions.record ? 'Continue this chat automatically' : 'Enable session recording to use Goal or Loop';
+  paintAutomationSwitch();
   const secureStorageAvailable = state.secureStorage?.available ?? true;
   goalModel = config.goal.model;
-  const goalOn = config.goal.enabled && config.goal.mode === 'goal';
-  const loopOn = config.goal.enabled && config.goal.mode === 'loop';
-  const wasGoalOn = previous && previous.goal.enabled && previous.goal.mode === 'goal';
-  const wasLoopOn = previous && previous.goal.enabled && previous.goal.mode === 'loop';
-  const goalToggle = $<HTMLInputElement>('goalEnabled');
-  const loopToggle = $<HTMLInputElement>('loopEnabled');
-  applyChatChecked(goalToggle, goalOn, previous ? Boolean(wasGoalOn) : undefined);
-  applyChatChecked(loopToggle, loopOn, previous ? Boolean(wasLoopOn) : undefined);
-  // Goal reads the local recorded transcript. Keep the dependency visible at the switch rather
-  // than accepting a click that the config boundary must immediately repair back to off.
-  goalToggle.disabled = !config.sessions.record;
-  loopToggle.disabled = !config.sessions.record;
   applyChatValue($<HTMLSelectElement>('goalReasoning'), config.goal.reasoning, previous?.goal.reasoning);
   applyChatValue($<HTMLTextAreaElement>('goalPrompt'), config.goal.prompt, previous?.goal.prompt);
   applyChatValue(
@@ -1756,31 +2342,6 @@ function applyGoal(state: AppState, previous?: Config): void {
     config.goal.loopPrompt,
     previous?.goal.loopPrompt
   );
-  // The one sentence somebody switching this on needs, and the exact words the extension
-  // shows under the same switch — two places saying the same thing differently is how a
-  // missing key turns into a support question.
-  $('goalHint').textContent = !config.sessions.record
-    ? 'Turn on session recording first — Goal needs the recorded conversation to decide what is still missing.'
-    : !state.hasGoalKey
-      ? 'OpenRouter API key essential for goal feature.'
-      : goalOn
-        ? 'A second model reads each finished answer and writes your next message, until it decides the goal is met.'
-        : loopOn
-          ? 'Off — Loop has this chat instead. The two cannot run together.'
-          : 'Off — nothing is sent to OpenRouter and nothing is typed into your chats.';
-  $('goalHint').classList.toggle('is-warn', !config.sessions.record || !state.hasGoalKey);
-  // The one thing worth saying twice: this one does not stop by itself. Everything else about
-  // it — the key, the model, the recording — is the same sentence the Goal switch already said.
-  $('loopHint').textContent = !config.sessions.record
-    ? 'Turn on session recording first — Loop needs the recorded conversation to write the next message.'
-    : !state.hasGoalKey
-      ? 'OpenRouter API key essential for goal feature.'
-      : loopOn
-        ? 'On — a message is written after every answer and never withheld. Only this switch ends it.'
-        : goalOn
-          ? 'Off — Goal has this chat instead. The two cannot run together.'
-          : 'Off — Goal, but with no way to stop: it keeps prompting until you switch it back off.';
-  $('loopHint').classList.toggle('is-warn', !config.sessions.record || !state.hasGoalKey);
   $('goalModelName').textContent = config.goal.model;
   const goalKey = $<HTMLInputElement>('goalKey');
   goalKey.placeholder = state.hasGoalKey ? '•••••••• stored' : 'sk-or-v1-…';
@@ -1898,14 +2459,18 @@ function applyAutoCompactHint(config: Config): void {
  * every other switch that decides what ChatGPT can reach, and saves from there.
  */
 const CHAT_INPUTS = [
+  'goalIncludeToolCalls',
+  'planBackend',
+  'finishTool', 'finishAction', 'finishLeadMinutes', 'workerModel', 'workerReasoning', 'backgroundChats',
+  'goalBackend',
+  'loopBackend',
+  'helperModel', 'helperReasoning',
   'sessRetain',
   'autoCompact',
   'autoCompactTokens',
   'maWorkers',
   'allowUnattributedCalls',
   'recoverAgentTabs',
-  'goalEnabled',
-  'loopEnabled',
   'goalReasoning',
   'goalPrompt',
   'goalObjectivePrompt',
@@ -1915,6 +2480,8 @@ const CHAT_INPUTS = [
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */
 export function chatApply(state: AppState, previous?: Config): void {
   const { config, bridge } = state;
+  paintContextMeter(sessions.find(session => session.id === selectedId) ?? null, config, confirmedComposerModel());
+  applyChatModels(config, previous);
 
   // `sessRecord` is painted by the renderer's own apply(): it lives in the Home
   // permission list now, with every other switch that decides what ChatGPT can reach.
@@ -1940,6 +2507,12 @@ export function chatApply(state: AppState, previous?: Config): void {
     previous?.multiAgent.recoverAgentTabs
   );
 
+  applyChatValue($<HTMLSelectElement>('workerModel'), config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel);
+  applyChatValue($<HTMLSelectElement>('workerReasoning'), config.multiAgent.defaultReasoning ?? '', previous?.multiAgent.defaultReasoning);
+  applyChatValue($<HTMLSelectElement>('goalBackend'), config.goal.backend ?? 'chatgpt', previous?.goal.backend);
+  applyChatValue($<HTMLSelectElement>('loopBackend'), config.goal.loopBackend ?? 'chatgpt', previous?.goal.loopBackend);
+  applyChatValue($<HTMLSelectElement>('helperModel'), config.goal.helperModel ?? 'gpt-5.6-sol', previous?.goal.helperModel);
+  applyChatValue($<HTMLSelectElement>('helperReasoning'), config.goal.helperReasoning ?? 'high', previous?.goal.helperReasoning);
   applyGoal(state, previous);
 
   // Extension bridge. Connecting is automatic, so this reports rather than asks.
@@ -1971,6 +2544,7 @@ export function chatVisible(next: boolean): void {
   if (next) void refreshAll();
   else {
     window.clearTimeout(toolActivityTimer);
+    window.clearTimeout(durationTimer);
     toolActivityTimer = undefined;
   }
 }
@@ -1984,8 +2558,276 @@ async function refreshAll(): Promise<void> {
 /** Sessions change on every recorded event, so the reload is coalesced. */
 function scheduleReload(): void {
   if (!visible) return;
-  window.clearTimeout(listTimer);
-  listTimer = window.setTimeout(() => void loadSessions(), 400);
+  // Continuous streaming must not starve the receipt that selects a new chat.
+  if (listTimer !== undefined) return;
+  listTimer = window.setTimeout(() => { listTimer = undefined; void loadSessions(); }, 400);
+}
+
+async function refreshInputQueue(): Promise<void> {
+  const request = ++inputQueueGeneration;
+  const selection = selectionGeneration;
+  const [all, pausedHelpers] = await Promise.all([run(api.listInputs()), run(api.listPausedHelpers())]);
+  if (!all || selection !== selectionGeneration || request !== inputQueueGeneration) return;
+  pendingComposerInputs = all;
+  for (const id of dismissedInputNotices) if (!all.some(entry => entry.id === id)) dismissedInputNotices.delete(id);
+  paintDeliveryControls();
+  const pending = pendingNewInput;
+  const delivered = pending && all.find((entry) => entry.id === pending.id && entry.state === 'sent' && entry.deliveredSessionId);
+  if (delivered?.deliveredSessionId && pending && pending.generation === selectionGeneration && newChatSelected && selectedId === null &&
+      !$<HTMLTextAreaElement>('chatInput').value.trim() && !(imageDrafts.get(draftKey())?.length)) {
+    let summary = sessions.find((entry) => entry.id === delivered.deliveredSessionId);
+    if (!summary) summary = (await run(api.getSession(delivered.deliveredSessionId, { limit: 1 })))?.summary ?? undefined;
+    if (summary && pendingNewInput === pending && selection === selectionGeneration &&
+        !$<HTMLTextAreaElement>('chatInput').value.trim() && !(imageDrafts.get(draftKey())?.length)) {
+      pendingNewInput = null;
+      mergeSessionRows([summary]);
+      selectSession(summary.id);
+      return;
+    }
+  }
+  const belongsToSelection = (entry: { id: string; sessionId: string | null; deliveredSessionId?: string | null }): boolean => selectedId === null
+    ? pendingNewInput?.generation === selectionGeneration && entry.id === pendingNewInput.id
+    : (entry.sessionId ?? entry.deliveredSessionId) === selectedId;
+  const queuedTasks = all.filter(entry => belongsToSelection(entry) && queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state));
+  const queueSession = selectedId;
+  const reorder = async (from: string, to: string, after: boolean) => {
+    if (!queueSession || selectedId !== queueSession) return;
+    const ids = queuedTasks.filter(row => row.state === 'queued').map(row => row.id);
+    if (from === to || !ids.includes(from) || !ids.includes(to)) return;
+    ids.splice(ids.indexOf(from), 1);
+    ids.splice(ids.indexOf(to) + Number(after), 0, from);
+    const saved = await run(api.reorderQueuedInputs(queueSession, ids));
+    if (saved === false) toast('The queue changed during the move. Try again.');
+    void refreshInputQueue();
+  };
+  const taskList = $('finishQueue'); taskList.hidden = queuedTasks.length === 0;
+  const oldCards = new Map([...taskList.children].map(node => [(node as HTMLElement).dataset.inputId, node as HTMLElement]));
+  const dragging = !!taskList.querySelector('.is-dragging');
+  reconcileChildren(taskList, queuedTasks.map(entry => {
+    const existing = oldCards.get(entry.id);
+    if (dragging && existing) return existing;
+    if (entry.state === 'queued' && existing?.querySelector('textarea') && existing.contains(document.activeElement)) return existing;
+    const card = el('div', 'queued-input'); card.dataset.inputId = entry.id;
+    const label = el('span', 'queue-label', entry.text); label.title = `${entry.state === 'queued' ? (entry.mode === 'after-turn' ? 'After the next completed answer' : 'At Session finish or after a completed answer') : 'Awaiting receipt'} · ${entry.text}`;
+    card.append(icon('i-clock'), label);
+    if (entry.state === 'queued') {
+      const queueSessionSummary = sessions.find(row => row.id === selectedId);
+      const selection = queueSessionSummary?.selectedModel;
+      if (entry.mode === 'finish' && selection?.conversationId === queueSessionSummary?.conversationId && isAstraModel(selection?.model, selection?.reasoningEffort)) {
+        const delivery = el('button', 'btn queue-delivery', entry.afterTurn === true ? 'Also after turn' : 'Finish only') as HTMLButtonElement;
+        delivery.type = 'button';
+        delivery.setAttribute('aria-label', 'Also send this task as a new message after Astra finishes its turn');
+        delivery.setAttribute('aria-pressed', String(entry.afterTurn === true));
+        delivery.title = entry.afterTurn === true ? 'At Session Finish, or as a new message after verified turn completion' : 'Only inside the Session Finish tool result; never start a new turn';
+        delivery.onclick = async () => {
+          delivery.disabled = true;
+          await run(api.editQueuedInput(entry.id, entry.text, entry.afterTurn !== true));
+          void refreshInputQueue();
+        };
+        card.append(delivery);
+      }
+      label.draggable = true;
+      label.tabIndex = 0;
+      label.title = 'Drag to reorder. Alt + Up/Down also moves this task.';
+      label.ondragstart = event => {
+        card.classList.add('is-dragging');
+        event.dataTransfer?.setData('application/x-cos-queued-input', `${queueSession}:${entry.id}`);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+      };
+      label.ondragend = () => { card.classList.remove('is-dragging'); void refreshInputQueue(); };
+      card.ondragover = event => {
+        if (event.dataTransfer?.types.includes('application/x-cos-queued-input')) {
+          event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+        }
+      };
+      card.ondrop = event => {
+        const value = event.dataTransfer?.getData('application/x-cos-queued-input') ?? '';
+        if (!queueSession || !value.startsWith(`${queueSession}:`)) return;
+        event.preventDefault();
+        void reorder(value.slice(queueSession.length + 1), entry.id, event.clientY > card.getBoundingClientRect().top + card.getBoundingClientRect().height / 2);
+      };
+      label.onkeydown = event => {
+        if (!event.altKey || !['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+        event.preventDefault();
+        const ids = queuedTasks.filter(row => row.state === 'queued').map(row => row.id);
+        const next = ids[ids.indexOf(entry.id) + (event.key === 'ArrowDown' ? 1 : -1)];
+        if (next) void reorder(entry.id, next, event.key === 'ArrowDown');
+      };
+      const edit = dockAction('Edit queued task', 'i-pencil', () => {});
+      edit.onclick = () => {
+        const field = document.createElement('textarea'); field.value = entry.text; field.maxLength = 16000; field.setAttribute('aria-label', 'Queued task');
+        const save = el('button', 'btn', 'Save'); save.setAttribute('type', 'button');
+        save.onclick = async () => { if (await run(api.editQueuedInput(entry.id, field.value))) void refreshInputQueue(); };
+        card.classList.add('is-editing'); card.replaceChildren(field, save); field.focus();
+      };
+      const cancel = dockAction('Remove queued task', 'i-trash', () => {}); cancel.onclick = async () => { await run(api.cancelInput(entry.id)); void refreshInputQueue(); };
+      card.append(edit, cancel);
+    }
+    return card;
+  }));
+  // Active unbound sends still occupy the global admission limit after New Chat or
+  // restart. Show that existing outbox authority, without reviving terminal drafts.
+  const unbound = (entry: InputEntry) => selectedId === null && !entry.sessionId && !entry.deliveredSessionId && entry.purpose !== 'decision' && ['queued', 'browser'].includes(entry.state);
+  const notice = (entry: InputEntry) => (belongsToSelection(entry) || (selectedId === null && !entry.sessionId && !entry.deliveredSessionId)) && entry.purpose !== 'decision' &&
+    ['failed', 'cancelled'].includes(entry.state) && !!entry.error && !dismissedInputNotices.has(entry.id);
+  const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && !(entry.state === 'tool' && entry.historyRecorded) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) &&
+    (notice(entry) || unbound(entry) || selectedId !== null || (entry.projectId ?? null) === selectedProjectId) &&
+    (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !entry.historyRecorded)));
+  for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
+  $('inputQueue').replaceChildren(...rows.map((entry) => {
+    const row = el('div', 'pending-message');
+    row.classList.toggle('is-delivered', !entry.error && ['sent', 'tool'].includes(entry.state));
+    row.classList.toggle('is-delivery-error', !!entry.error || entry.state === 'failed');
+    row.dataset.inputId = entry.id;
+    if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
+    visibleInputIds.add(entry.id);
+    if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
+    const status = entry.error || (entry.state === 'failed' ? 'Delivery not confirmed' : entry.state === 'decision' ? 'Preparing follow-up' : entry.state === 'browser' ? 'Delivery confirmation pending' : entry.state === 'tool' ? 'Sent to the active turn · awaiting receipt' : entry.dueAt > Date.now() ? `Scheduled ${new Date(entry.dueAt).toLocaleString()}` : 'Queued');
+    row.append(el('div', 'pending-message-text', entry.text));
+    if (entry.images?.length) {
+      const images = el('div', 'pending-images');
+      for (const image of entry.images) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; images.append(preview); }
+      row.append(images);
+    }
+    const receipt = el('span', 'pending-message-status');
+    receipt.title = status; receipt.setAttribute('aria-label', status);
+    if (entry.error || entry.state === 'failed') {
+      receipt.textContent = status;
+    }
+    else receipt.append(icon(['sent', 'tool'].includes(entry.state) ? 'i-check' : 'i-clock'));
+    receipt.hidden = !entry.error && ['sent', 'tool'].includes(entry.state) && hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt);
+    row.append(receipt);
+    if (notice(entry)) {
+      row.append(dockAction('Dismiss delivery notice', 'i-x', () => dismissInputNotice(entry.id)));
+      const retry = dockAction('Retry delivery', 'i-retry', () => {});
+      retry.classList.add('delivery-retry');
+      retry.title = 'Restore this message to the composer for review and sending';
+      retry.onclick = () => {
+        const input = $<HTMLTextAreaElement>('chatInput');
+        if (input.value.trim() || imageDrafts.get(draftKey())?.length) { toast('Send or clear your current draft before retrying this message.'); return; }
+        input.value = entry.text;
+        if (entry.images?.length) imageDrafts.set(draftKey(), [...entry.images]);
+        rememberDraft(); paintComposerImages(); paintDeliveryControls(); input.focus();
+        dismissInputNotice(entry.id);
+      };
+      row.append(retry);
+    }
+    if (['queued', 'browser'].includes(entry.state)) {
+      const cancel = dockAction('Cancel delivery', 'i-x', () => {});
+      cancel.onclick = async () => {
+        cancel.disabled = true;
+        const result = await run(api.cancelInput(entry.id));
+        if (result) dismissInputNotice(entry.id);
+        void refreshInputQueue();
+      };
+      row.append(cancel);
+    }
+    if (entry.state === 'queued' && entry.error?.startsWith('Message queued. Browser startup failed:')) {
+      const retry = dockAction('Retry browser', 'i-retry', () => {});
+      retry.classList.add('delivery-retry');
+      retry.onclick = async () => { retry.setAttribute('disabled', ''); await run(api.retryInputBrowser(entry.id)); void refreshInputQueue(); };
+      row.append(retry);
+    }
+    return row;
+  }));
+  $('timelineEmpty').hidden = events.length > 0 || rows.length > 0;
+  for (const helper of pausedHelpers ?? []) {
+    if (helper.sourceSessionId !== selectedId) continue;
+    const row = el('div', 'queued-input');
+    row.append(el('span', '', 'Helper delivery was not confirmed. Its old chat may still be running.'));
+    const retry = el('button', 'btn', 'Start a new helper');
+    retry.setAttribute('type', 'button');
+    retry.onclick = async () => {
+      retry.setAttribute('disabled', '');
+      const accepted = await run(api.retryHelper(helper.id, helper.sourceSessionId));
+      if (accepted) toast('New helper authorized for this chat');
+      else toast('This helper has changed. Refreshing its status.');
+      void refreshInputQueue();
+    };
+    row.append(retry);
+    $('inputQueue').append(row);
+  }
+}
+async function stopCurrentTurn(): Promise<void> {
+  const id = selectedId, turnId = controlledTurnId, generation = selectionGeneration;
+  if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
+  controlledStopPending = true; paintDeliveryControls();
+  try { await run(api.stopSessionTurn(id, turnId)); }
+  finally { if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; void refreshSessionControls(); } }
+}
+async function sendComposer(delivery?: 'finish', plan?: string[]): Promise<boolean | void> {
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const key = draftKey();
+  const projectId = selectedId ? sessions.find(row => row.id === selectedId)?.projectId ?? null : selectedProjectId;
+  const images = imageDrafts.get(key) ?? [];
+  const text = plan?.[0] ?? (input.value.trim() || (images.length ? 'Please look at the attached images.' : ''));
+  if ($<HTMLButtonElement>('chatSend').disabled) return;
+  if (!text) {
+    const target = selectedId, selection = selectionGeneration;
+    const sameSelection = () => selectedId === target && selectionGeneration === selection;
+    await refreshSessionControls();
+    if (!sameSelection()) return;
+    // An actual turn takes precedence over queued follow-ups. Stop never silently
+    // becomes cancellation of a different pending input in that same chat.
+    if (target && controlledSessionId === target && controlledSelection === selection && controlledTurnId) {
+      await stopCurrentTurn(); return;
+    }
+    const pending = pendingComposerInput();
+    if (pending && ['queued', 'browser'].includes(pending.state)) {
+      const wasStarting = startingInputs.has(pending.id);
+      if (wasStarting) cancelledStarts.add(pending.id);
+      const cancelled = await run(api.cancelInput(pending.id));
+      if (cancelled) {
+        startingInputs.delete(pending.id);
+        pendingComposerInputs = pendingComposerInputs.filter(row => row.id !== pending.id);
+        dismissInputNotice(pending.id);
+        paintDeliveryControls();
+      } else {
+        cancelledStarts.delete(pending.id);
+        if (sameSelection()) { await refreshSessionControls(); if (sameSelection()) await stopCurrentTurn(); }
+      }
+      void refreshInputQueue();
+    }
+    return;
+  }
+  const modelSettings = confirmedComposerModel();
+  if (!modelSettings) { toast('Reload model choices and select an available model and thinking effort before sending.'); return false; }
+  const sessionId = selectedId;
+  const generation = selectionGeneration;
+  const chosenMode = delivery ?? $<HTMLSelectElement>('sendMode').value;
+  const mode = chosenMode === 'after-turn' && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledQueueAtFinish ? 'finish' : chosenMode;
+  const dueAt = Date.now();
+  const id = crypto.randomUUID();
+  const authoredDraft = input.value;
+  startingInputs.set(id, { id, sessionId, projectId, text, images, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
+    dueAt, ...modelSettings, state: 'queued', owner: null, createdAt: dueAt, conversationId: null });
+  input.value = ''; input.style.height = 'auto'; inputDrafts.delete(key);
+  if (sessionId === null) pendingNewInput = { id, generation };
+  void refreshInputQueue();
+  paintDeliveryControls();
+  try {
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, images, stages: plan?.slice(1), objective: mode === 'finish' ? undefined : $<HTMLTextAreaElement>('sessionObjective').value.trim() || undefined, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    if (cancelledStarts.has(id)) return;
+    if (!result) {
+      if (selectedId === sessionId && selectionGeneration === generation && !input.value) input.value = authoredDraft;
+      else if (!inputDrafts.get(key)) inputDrafts.set(key, authoredDraft);
+      if (pendingNewInput?.id === id) pendingNewInput = null;
+      return;
+    }
+    // The accepted IPC result is newer than any queue read started before it. Keep
+    // that durable row visible while the next listing crosses the process boundary.
+    inputQueueGeneration++;
+    pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== result.id), result];
+    if (sessionId === null && selectionGeneration === generation && pendingNewInput?.id === id && result.automation &&
+        $<HTMLSelectElement>('chatAutomation').value !== result.automation)
+      await run(api.setInputAutomation(result.id, $<HTMLSelectElement>('chatAutomation').value as InputAutomation));
+    if (selectedId === sessionId && selectionGeneration === generation && (!input.value.trim())) { input.value = ''; inputDrafts.delete(key); if (imageDrafts.get(key) === images) imageDrafts.delete(key); paintComposerImages(); }
+    if (sessionId === null && selectionGeneration === generation) pendingNewInput = { id: result.id, generation };
+    $('composerStatus').textContent = '';
+    input.style.height = 'auto';
+    void refreshInputQueue();
+    return true;
+  } finally { cancelledStarts.delete(id); startingInputs.delete(id); paintDeliveryControls(); void refreshInputQueue(); }
 }
 
 // ------------------------------------------------------------------- wiring
@@ -1998,7 +2840,14 @@ function scheduleReload(): void {
  * the selected state instead. That is what keeps a property sheet from reading as a third
  * view of this session.
  */
+export function openChatView(name: string): void {
+  showView(name);
+}
+
 function showView(name: string): void {
+  $('composer').hidden = name === 'settings';
+  $('composerDock').hidden = name === 'settings';
+  $('inputQueue').hidden = name !== 'timeline';
   for (const button of $('chatView').querySelectorAll<HTMLButtonElement>('[data-view]')) {
     button.classList.toggle('is-sel', button.dataset.view === name);
   }
@@ -2008,41 +2857,285 @@ function showView(name: string): void {
   $('chatSettingsBtn').classList.toggle('is-on', name === 'settings');
 }
 
-/** Timeline or Compaction — whichever the gear was opened over. */
-let lastContentView = 'timeline';
+function selectSession(id: string): void {
+  rememberDraft();
+  selectionGeneration++;
+  newChatSelected = false;
+  selectedId = id;
+  const selected = sessions.find(row => row.id === id);
+  applyComposerSessionModel(`${id}:${selectionGeneration}`, selected?.selectedModel ?? null);
+  const parent = selected?.origin?.kind === 'worker' ? selected.origin.fromSessionId : null;
+  if (parent) expandedWorkers.add(parent);
+  selectedProjectId = (parent ? sessions.find(row => row.id === parent)?.projectId : selected?.projectId) ?? null;
+  if (selectedProjectId) collapsedProjects.delete(selectedProjectId);
+  $<HTMLTextAreaElement>('chatInput').placeholder = 'Ask anything…';
+  restoreDraft();
+  detailFor = null;
+  detailCursor = null;
+  forgetTimelineRows();
+  handoff = null;
+  handoffFor = null;
+  paintSessions();
+  void loadDetail();
+  void refreshInputQueue();
+}
 
-/** The gear toggles: pressing it again returns to the view the user came from. */
-function toggleSettings(): void {
-  const settings = document.querySelector<HTMLElement>('#chatBody > .view[data-view="settings"]');
-  showView(settings && !settings.hidden ? lastContentView : 'settings');
+function selectNewChat(projectId: string | null = null): void {
+  rememberDraft(); selectionGeneration++; pendingNewInput = null;
+  newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  applyComposerSessionModel(null, null);
+  inputDrafts.delete(draftKey()); imageDrafts.delete(draftKey());
+  $('inputQueue').replaceChildren();
+  restoreDraft(); showView('timeline'); paintSessions(); void loadDetail();
+  if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+    $('composer').animate?.([{ opacity: 0.45 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
+  }
+  $<HTMLTextAreaElement>('chatInput').placeholder = projectId ? `Message in ${projects.find(project => project.id === projectId)?.name ?? 'project'}…` : 'Ask anything…';
+  $<HTMLTextAreaElement>('chatInput').focus();
 }
 
 export function initChat(next: Deps): void {
   deps = next;
+  const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
+  agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
+  agentToggle.setAttribute('aria-label', 'Toggle sub-agent side panel'); agentToggle.setAttribute('aria-expanded', 'false');
+  $('themeBtn').before(agentToggle);
+  const agentToolGroups = new Map<string, HTMLDetailsElement>();
+  agentPanel = createAgentPanel({
+    host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: agentToggle,
+    load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
+    render: (source, id, current) => {
+      let boundary = '';
+      const rows = boundedTimeline(source).shown.flatMap(event => {
+        if (!['tool_call', 'page_tool', 'agent_message'].includes(event.kind)) boundary = `event:${event.seq}`;
+        if (!['user_message', 'assistant_message', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
+        const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
+        row.dataset.timelineKey = `event:${event.seq}`; row.dataset.activityBoundary = boundary;
+        body.append(eventBody(event, { id, current })); row.append(body); return [row];
+      });
+      return groupToolRows(rows, `pane:${id}`, agentToolGroups);
+    }
+  });
+  initChatModels(() => {
+    const config = deps.state()?.config;
+    if (config) paintContextMeter(sessions.find(session => session.id === selectedId) ?? null, config, confirmedComposerModel());
+  });
+  $('queueAtFinish').addEventListener('click', () => {
+    if ($('queueAtFinish').hidden) return;
+    $<HTMLSelectElement>('sendMode').value = 'after-turn';
+    const input = $<HTMLTextAreaElement>('chatInput');
+    if (input.value.trim() || imageDrafts.get(draftKey())?.length) void sendComposer('finish');
+    else { input.focus(); paintDeliveryControls(); }
+  });
+  $('sendOptions').addEventListener('click', event => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>('[data-delivery]');
+    if (!button || $('sendOptions').hidden) return;
+    $<HTMLSelectElement>('sendMode').value = button.dataset.delivery!;
+    paintDeliveryControls();
+  });
+  $('automationSwitch').addEventListener('click', (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-mode]');
+    if (!button || button.disabled) return;
+    const select = $<HTMLSelectElement>('chatAutomation');
+    select.value = button.dataset.mode!;
+    select.dispatchEvent(new Event('change'));
+  });
+  $('chatAutomation').addEventListener('change', async () => {
+    goalIntentGeneration++;
+    const select = $<HTMLSelectElement>('chatAutomation');
+    cancelGoalRequest();
+    if (select.value === 'off') goalDraftView = null;
+    select.dataset.edited = 'true'; paintAutomationSwitch();
+    const id = selectedId, generation = selectionGeneration;
+    const mode = select.value as InputAutomation;
+    if (!id) {
+      const pending = pendingNewInput;
+      if (pending?.generation === generation) await run(api.setInputAutomation(pending.id, mode));
+      return;
+    }
+    select.disabled = true; paintAutomationSwitch();
+    try { await run(api.setSessionAutomation(id, mode)); }
+    finally {
+      select.disabled = false;
+      if (id === selectedId && generation === selectionGeneration) { delete select.dataset.edited; void refreshSessionControls(); }
+      paintAutomationSwitch();
+    }
+  });
+  $('sessionObjective').addEventListener('input', () => { cancelGoalRequest(); goalIntentGeneration++; $('sessionObjective').dataset.edited = 'true'; delete $('sessionObjective').dataset.saved; paintTaskActions(); });
+  $('sessionObjectiveMode').addEventListener('change', () => { cancelGoalRequest(); goalIntentGeneration++; $('sessionObjective').dataset.edited = 'true'; delete $('sessionObjective').dataset.saved; paintTaskActions(); });
+  for (const buttonId of ['saveSessionObjective'] as const) {
+    $(buttonId).addEventListener('click', async () => {
+      const id = selectedId;
+      const objective = $<HTMLTextAreaElement>('sessionObjective');
+      if (!id) {
+        const draft = objective.value, mode = $<HTMLSelectElement>('sessionObjectiveMode').value as 'goal' | 'loop';
+        if (!draft.trim()) return;
+        const settings = confirmedComposerModel();
+        if (!settings) { toast('Reload model choices and select an available model and thinking effort before sending.'); return; }
+        const selection = selectionGeneration, intent = goalIntentGeneration, requestId = crypto.randomUUID();
+        const projectId = selectedProjectId;
+        const { model, reasoningEffort } = settings;
+        const automation = $<HTMLSelectElement>('chatAutomation');
+        automation.value = mode;
+        automation.dataset.edited = 'true'; paintAutomationSwitch();
+        goalProgress = { requestId, selection, phase: 'preparing', text: '' };
+        const button = $<HTMLButtonElement>(buttonId); button.dataset.busy = 'true'; paintTaskActions(); paintGoalProgress();
+        const current = () => selectedId === null && selectionGeneration === selection && goalIntentGeneration === intent && objective.value === draft && automation.value === mode;
+        try {
+          const result = await api.draftGoalOpening(draft.trim(), mode, requestId);
+          const opening = result.ok ? result.data : null;
+          if (!result.ok && current() && goalProgress?.requestId === requestId) goalProgress.error = result.error;
+          if (!current()) { if (goalProgress?.requestId === requestId) { goalProgress.phase = 'paused'; paintGoalProgress(); } return; }
+          if (!opening) { if (goalProgress?.requestId === requestId) { goalProgress.phase = 'failed'; goalProgress.error ||= 'Opening message generation failed'; paintGoalProgress(); } return; }
+          const dueAt = Date.now(), inputId = crypto.randomUUID();
+          const entry: InputEntry = { id: inputId, sessionId: null, projectId, text: opening.reply, objective: draft.trim(), automation: mode,
+            mode: 'auto', dueAt, model, reasoningEffort, state: 'queued', owner: null, createdAt: dueAt, conversationId: null };
+          startingInputs.set(inputId, entry); pendingNewInput = { id: inputId, generation: selection };
+          goalProgress = { requestId, selection, inputId, phase: 'queued', text: '' }; paintDeliveryControls();
+          try {
+            const accepted = await run(api.sendInput(entry));
+            if (accepted) { inputQueueGeneration++; pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== inputId), accepted];
+              // Off may arrive while sendInput is still validating/enqueuing, before
+              // the outbox row exists. Reconcile that same pending intent after acceptance.
+              if (selectionGeneration === selection && pendingNewInput?.id === inputId && automation.value !== mode)
+                await run(api.setInputAutomation(inputId, automation.value as InputAutomation));
+              if (current()) objective.dataset.saved = draft;
+            } else if (goalProgress?.requestId === requestId) { goalProgress.phase = 'failed'; goalProgress.error = 'Opening message could not be queued'; }
+          } finally { startingInputs.delete(inputId); paintDeliveryControls(); void refreshInputQueue(); }
+        } finally { delete button.dataset.busy; paintTaskActions(); }
+        return;
+      }
+      if (objective.dataset.sessionId !== id) return;
+      const selection = selectionGeneration, draft = objective.value;
+      const text = objective.value.trim();
+      if (!text) return;
+      const mode = $<HTMLSelectElement>('sessionObjectiveMode').value as 'goal' | 'loop';
+      const button = $<HTMLButtonElement>(buttonId); button.dataset.busy = 'true'; paintTaskActions();
+      const requestId = crypto.randomUUID(); goalProgress = { requestId, selection, phase: 'saving', text: '' }; paintGoalProgress();
+      try {
+        const saved = await run(api.setSessionObjective(id, text, mode));
+        if (goalProgress?.requestId === requestId) { goalProgress.phase = saved ? 'saved' : 'failed'; if (!saved) goalProgress.error = 'Task could not be saved'; paintGoalProgress(); }
+        if (saved && selectedId === id && selectionGeneration === selection && objective.value === draft &&
+            $<HTMLSelectElement>('sessionObjectiveMode').value === mode) { delete objective.dataset.edited; objective.dataset.saved = objective.value; }
+      } finally {
+        delete button.dataset.busy; paintTaskActions();
+        if (selectedId === id) void refreshSessionControls();
+      }
+    });
+  }
+  for (const [buttonId, cancel] of [['compactSession', false], ['cancelCompaction', true]] as const) {
+    $(buttonId).addEventListener('click', async () => {
+      const id = selectedId; if (!id) return;
+      const button = $<HTMLButtonElement>(buttonId); button.disabled = true;
+      try { await run(cancel ? api.cancelSessionCompaction(id) : api.compactSession(id)); }
+      finally { button.disabled = false; if (selectedId === id) void refreshSessionControls(); }
+    });
+  }
+  const appendImages = (key: string, chosen: InputImage[] | null | undefined): void => {
+    if (!chosen?.length) return;
+    const combined = [...(imageDrafts.get(key) ?? []), ...chosen];
+    if (combined.length > 4) { toast('Attach up to four images per message'); return; }
+    imageDrafts.set(key, combined); if (draftKey() === key) paintComposerImages();
+  };
+  $('attachImages').addEventListener('click', async () => {
+    const key = draftKey();
+    appendImages(key, await run(api.chooseImages()));
+  });
+  $('generateFinishGoal').addEventListener('click', async () => {
+    const button = $<HTMLButtonElement>('generateFinishGoal'), id = selectedId, turnId = controlledTurnId;
+    if (!id || !turnId || button.hidden || button.disabled || controlledSessionId !== id || controlledSelection !== selectionGeneration) return;
+    const owner = `${id}:${turnId}`;
+    button.dataset.busy = owner; paintDeliveryControls();
+    try { await run(api.generateFinishGoal(id, turnId)); }
+    finally {
+      if (button.dataset.busy === owner) delete button.dataset.busy;
+      if (selectedId === id) void refreshSessionControls();
+      else paintDeliveryControls();
+    }
+  });
+  $('composer').addEventListener('dragover', event => {
+    if (!event.dataTransfer?.types.includes('Files')) return;
+    event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
+  });
+  $('composer').addEventListener('drop', async event => {
+    if (!event.dataTransfer?.types.includes('Files')) return;
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer.files), key = draftKey();
+    if (!files.length) return;
+    if (files.length + (imageDrafts.get(key)?.length ?? 0) > 4) { toast('Attach up to four images per message'); return; }
+    appendImages(key, await run(api.dropImages(files)));
+  });
+  api.onWriteSession?.(id => { selectSession(id); $<HTMLTextAreaElement>('chatInput').focus(); });
+  $('newChat').addEventListener('click', () => {
+    selectNewChat();
+  });
+  $('addProject').addEventListener('click', async () => {
+    const button = $<HTMLButtonElement>('addProject'); button.disabled = true;
+    const generation = selectionGeneration;
+    try {
+      const project = await run(api.addProject());
+      if (!project) return;
+      // The picker published a newer durable catalog. A list refresh started before it
+      // may still return an empty catalog and otherwise erase this sidebar group.
+      ++sessionsLoadGeneration;
+      projects = [...projects.filter(row => row.id !== project.id), project];
+      collapsedProjects.delete(project.id);
+      if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
+    } finally { button.disabled = false; }
+  });
+  $('settingsSearch').addEventListener('input', () => {
+    filterSettingsSections(document.querySelector<HTMLElement>('[data-view="settings"]')!, $<HTMLInputElement>('settingsSearch').value);
+  });
+  const composerMenus = [...document.querySelectorAll<HTMLDetailsElement>('.composer-menu, .session-controls')];
+  document.addEventListener('click', (event) => {
+    for (const menu of composerMenus) if (!menu.contains(event.target as Node) || ((event.target as HTMLElement).closest('button') && !(event.target as HTMLElement).closest('[data-keep-menu]'))) menu.open = false;
+  });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
+  $('chatInput').addEventListener('input', () => {
+    const hasText = !!$<HTMLTextAreaElement>('chatInput').value.trim();
+    if (planRequestId || preparedPlan || (planMode && !hasText)) { cancelTaskPlan(); planMode = hasText; }
+    const input = $<HTMLTextAreaElement>('chatInput'); input.style.height = 'auto'; input.style.height = `${Math.min(220, input.scrollHeight)}px`;
+    paintDeliveryControls(); paintTaskActions();
+  });
+  $('chatInput').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if ($<HTMLTextAreaElement>('chatInput').value.trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
+  });
+  $('composerSettings').addEventListener('toggle', paintTaskActions);
+  initContextMeter();
+  $('createPlan').addEventListener('click', () => { if (planMode) cancelTaskPlan(); else void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); });
+  $('composer').addEventListener('submit', (event) => { event.preventDefault(); if (preparedPlan) void sendPreparedPlan(); else if (planMode) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); } else void sendComposer(); });
 
   $('sessionList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');
     if (!row?.dataset.id || row.dataset.id === selectedId) return;
-    selectedId = row.dataset.id;
-    detailFor = null;
-    detailCursor = null;
-    // A different session is a different set of calls; nothing here should arrive open.
-    forgetTimelineRows();
-    handoff = null;
-    handoffFor = null;
-    paintSessions();
-    void loadDetail();
+    pendingNewInput = null;
+    selectSession(row.dataset.id);
   });
   $('sessionList').closest<HTMLElement>('.scroll')?.addEventListener('scroll', maybePageSessions);
+  // Only deliberate upward navigation fetches history, never a layout restoration.
+  const historyPane = $('chatBody');
+  let historyIntent: string | null = null;
+  const loadAtTop = () => {
+    if (!historyIntent || historyIntent !== selectedId || historyLoading || historyPane.scrollTop > 80 || !selectedId || detailFor !== selectedId) return;
+    historyIntent = null;
+    const windowed = boundedTimeline(visibleEvents());
+    const boundaryRows = windowed.omitted > 0 && windowed.shown.length ? windowed.shown : events;
+    const before = boundaryRows.length ? Math.min(...boundaryRows.map(event => event.seq)) : 1;
+    if (before <= 1) return;
+    historyLoading = true;
+    void navigateHistory(before, true).finally(() => { historyLoading = false; });
+  };
+  historyPane.addEventListener('wheel', event => { historyIntent = event.deltaY < 0 ? selectedId : null; loadAtTop(); }, { passive: true });
+  historyPane.addEventListener('pointerdown', () => { historyIntent = selectedId; });
+  historyPane.addEventListener('keydown', event => { historyIntent = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ? selectedId : null; loadAtTop(); });
+  historyPane.addEventListener('scroll', loadAtTop, { passive: true });
 
   $('chatView').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-view]');
     if (!button?.dataset.view) return;
-    lastContentView = button.dataset.view;
     showView(button.dataset.view);
   });
 
-  $('chatSettingsBtn').addEventListener('click', () => toggleSettings());
 
   $('chatAgentFilter').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-agent]');
@@ -2074,7 +3167,7 @@ export function initChat(next: Deps): void {
     const button = target.closest<HTMLElement>('[data-clear]');
     const id = button?.dataset.clear;
     if (!id) return;
-    const outcome = await run(api.clearAgent(id));
+    const outcome = await run(api.clearAgent(id, button?.dataset.runId));
     if (!outcome) return;
     paintSwarm(outcome.swarm);
     toast(
@@ -2102,5 +3195,9 @@ export function initChat(next: Deps): void {
   });
 
   api.onSessionChanged(scheduleReload);
+  api.onTaskProgress(progress => {
+    if (!goalProgress || progress.requestId !== goalProgress.requestId || goalProgress.selection !== selectionGeneration) return;
+    Object.assign(goalProgress, progress); paintGoalProgress();
+  });
   api.onSwarmChanged(paintSwarm);
 }

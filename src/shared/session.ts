@@ -179,6 +179,9 @@ export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
 };
 
 export interface ToolCallRecord {
+  /** Recorded model evidence, when known; absence is not the current picker selection. */
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
   callId: string;
   tool: string;
   attribution: CallAttribution;
@@ -230,6 +233,9 @@ export function normalizedToolOutcome(
 }
 
 interface BaseEvent {
+  /** Selection verified for this exact delivered native message, never enqueue intent. */
+  model?: string;
+  reasoningEffort?: ReasoningEffort;
   /** 1-based, strictly increasing within a session. Ordering never relies on time. */
   seq: number;
   time: number;
@@ -246,6 +252,13 @@ export type SessionEvent =
       kind: 'user_message';
       message: StoredText;
       messageId?: string;
+      /** Exact app outbox identity, attached after a tool handout or proven native delivery. */
+      inputId?: string;
+      /** Tool handout remains unconfirmed until a later exact invocation proves receipt. */
+      inputDelivery?: 'offered' | 'confirmed';
+      /** Original app-authored text, excluding transport-only control instructions. */
+      authoredText?: string;
+      assets?: AssetRef[];
       /** First sequence assigned to this stable website message; revisions keep this anchor. */
       origin?: number;
     })
@@ -265,6 +278,8 @@ export type SessionEvent =
       messageId?: string;
       /** ChatGPT's canonical rendered representation captured from the page. */
       renderedHtml?: StoredText;
+      /** Public provider object UUID. Evidence for identity drift; not a canonical key or turn owner. */
+      providerMessageId?: string;
       state?: MessageState;
       /** Compatibility mirror for older consumers; equivalent to state === 'final'. */
       final: boolean;
@@ -289,7 +304,7 @@ export type SessionEvent =
    * event written before this model existed, or by a page whose commentary had no readable
    * identity, is still a plain standalone caption.
    */
-  | (BaseEvent & { kind: 'progress'; message: StoredText; progressId?: string; origin?: number })
+  | (BaseEvent & { kind: 'progress'; message: StoredText; progressId?: string; origin?: number; finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number } })
   /**
    * Visible ChatGPT-native tool activity that never passed through this MCP server.
    *
@@ -371,7 +386,7 @@ export type NewSessionEvent = SessionEvent extends infer Event
  * queued to the conversation that command became.
  */
 export interface SessionOrigin {
-  kind: 'resume' | 'worker';
+  kind: 'resume' | 'worker' | 'helper' | 'desktop';
   /** The session this chat continues. Null when the source session no longer exists. */
   fromSessionId: string | null;
   /** Agent id for a worker chat ("worker-1"). Null for a resume. */
@@ -398,6 +413,8 @@ function clip(text: string, max: number): string {
  * chat already knows what the chat is for, so the name comes from there instead.
  */
 export function originTitle(origin: SessionOrigin, source: string | null): string {
+  if (origin.kind === 'desktop') return source || 'New chat';
+  if (origin.kind === 'helper') return 'Task helper';
   if (origin.kind === 'worker') {
     const who = origin.agentId ?? 'worker';
     const task = clip(origin.task, 60);
@@ -410,6 +427,10 @@ export function originTitle(origin: SessionOrigin, source: string | null): strin
 }
 
 export interface SessionSummary {
+  /** Latest proven native picker selection; scoped to its frontend, never worker creation intent. */
+  selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
+  /** Explicit local project; durable across frontend conversation replacement. */
+  projectId?: string;
   id: string;
   title: string;
   /**
@@ -447,6 +468,8 @@ export interface SessionSummary {
    * on metadata written before this field existed.
    */
   lastTurnEndAt?: number | null;
+  /** Runtime-only activity deadline from the bridge; null means no current activity grant. */
+  activityExpiresAt?: number | null;
   /**
    * Start time of the newest successful worker finish report in this session.
    *
@@ -492,6 +515,19 @@ export interface SessionSummary {
   lastTurnOutcome: TurnOutcome | null;
   /** Durable open-turn projection. Undefined only on pre-1.8.8 metadata. */
   activeTurnId?: string | null;
+  /** Constant-size projection of app finish receipts for the most recently started turn. */
+  finishTurn?: {
+    turnId: string;
+    conversationId: string | null;
+    startedAt: number;
+    notified: boolean;
+    released: boolean;
+    decisionRevision: string | null;
+    workSeq: number;
+    decisionSeq: number;
+    decisionInputRevision: string | null;
+    decisionAt?: number;
+  } | null;
   /** Agents seen in this session, prime first. Empty when no swarm ran. */
   agents: string[];
   /** Set only for a chat this app opened itself. Null for one the user started. */
@@ -558,11 +594,54 @@ export type AgentState =
   | 'finished'
   | 'failed';
 
+/**
+ * Canonical reasoning levels for a worker's chat, shared with the Hermes runtime
+ * vocabulary (hermes_constants.VALID_REASONING_EFFORTS plus "none").
+ *
+ * "none" is a real level — reasoning disabled — and is distinct from null, which means
+ * inherit the account default. This is the single vocabulary authority; the broker, the
+ * bridge restore and the extension all check membership against this list.
+ */
+export const REASONING_EFFORTS = [
+  'pro', // ChatGPT browser Power tier; never forwarded as an API reasoning effort.
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra'
+] as const;
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number];
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+  return typeof value === 'string' && (REASONING_EFFORTS as readonly string[]).includes(value);
+}
+
 export interface AgentInfo {
+  /** Broker owner projection. IDs such as worker-1 are local to this incarnation. */
+  runId?: string;
+  primeConversationId?: string;
   id: string;
   role: AgentRole;
   label: string;
   task: string;
+  /**
+   * Requested reasoning level for this worker's chat, or null to inherit the default.
+   *
+   * Canonical vocabulary shared with the Hermes runtime (VALID_REASONING_EFFORTS plus
+   * "none"). "none" is a real level — reasoning disabled — distinct from null. Stored
+   * where the worker's model is stored and matched, snapshotted and restored the same way.
+   */
+  reasoningEffort: ReasoningEffort | null;
+  /**
+   * ChatGPT model slug this worker's chat was opened with, or null for the account default.
+   *
+   * Chosen by the prime at spawn, never by the worker: the model is fixed by the fresh-chat
+   * URL the tab opens with, so a worker keeps it for the life of its conversation, including
+   * across sleep/wake reuse. Null for the prime, which runs in the user's own chat.
+   */
+  model: string | null;
   state: AgentState;
   createdAt: number;
   /**
@@ -811,7 +890,17 @@ export function foldProgress(events: readonly SessionEvent[]): SessionEvent[] {
     }
     out[index] = null;
   }
-  return out.filter((event): event is SessionEvent => event !== null);
+  // A Stop click receipt is not provider completion. Reconcile the existing status
+  // only from this exact turn's observed stopped event, including old stored rows.
+  const stopped = new Set(events.filter(event => event.source === 'extension' && event.kind === 'turn_end' &&
+    event.outcome === 'stopped' && event.turnId).map(event => event.turnId));
+  return out.filter((event): event is SessionEvent => event !== null).map(event => {
+    if (event.source !== 'app' || event.kind !== 'progress' || !event.turnId ||
+        event.progressId !== `finish-release:${event.turnId}` || !stopped.has(event.turnId) ||
+        !event.message.text.startsWith('Stop requested.')) return event;
+    const text = 'Stopped. ChatGPT confirmed that generation stopped.';
+    return { ...event, message: { text, chars: text.length, truncated: false } };
+  });
 }
 
 export interface TokenPressure {

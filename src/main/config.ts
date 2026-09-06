@@ -1,3 +1,4 @@
+import { REASONING_EFFORTS } from '../shared/session.js';
 /**
  * Non-secret settings, stored as one small JSON file in the app's userData folder.
  * No database: there are at most a handful of roots and a dozen booleans.
@@ -127,6 +128,12 @@ const DEFAULT_COMPACTION: CompactionSettings = {
  */
 export const DEFAULT_GOAL_MODEL = 'z-ai/glm-5.3';
 const DEFAULT_GOAL: GoalSettings = {
+  backend: 'chatgpt',
+  loopBackend: 'chatgpt',
+  impulseMinutes: 0,
+  includeToolCalls: false,
+  helperModel: 'gpt-5.6-sol',
+  helperReasoning: 'high',
   enabled: false,
   // The mode a fresh install runs the moment somebody flips the switch. Goal, because it is
   // the one that can end by itself: a loop that never stops is a deliberate choice, not a
@@ -251,6 +258,13 @@ const configSchema = z.object({
     binaryPath: z.string().max(4096)
   }),
   ui: z.object({
+    developerMode: z.boolean().optional(),
+    finishTool: z.boolean().optional(),
+    planBackend: z.enum(['chatgpt', 'api']).optional(),
+    finishAction: z.enum(['notify', 'goal']).optional(),
+    finishLeadMinutes: z.number().int().min(3).max(5).optional(),
+    backgroundChats: z.boolean().optional().default(false),
+    tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
     privacyScreenshots: z.boolean().optional().default(false),
@@ -295,6 +309,8 @@ const configSchema = z.object({
   multiAgent: z
     .object({
       enabled: z.boolean().optional().default(DEFAULT_MULTI_AGENT.enabled),
+    defaultModel: z.string().max(80).optional(),
+    defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
       maxWorkers: z.number().int().min(1).max(8).optional().default(DEFAULT_MULTI_AGENT.maxWorkers),
       allowUnattributedCalls: z.boolean().optional().default(DEFAULT_MULTI_AGENT.allowUnattributedCalls),
       recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs)
@@ -306,7 +322,13 @@ const configSchema = z.object({
   // every root and permission in it intact.
   goal: z
     .object({
+      impulseMinutes: z.number().int().min(0).max(60).optional().default(0).catch(0),
+      includeToolCalls: z.boolean().optional().default(false),
       enabled: z.boolean().optional().default(DEFAULT_GOAL.enabled),
+      backend: z.enum(['api', 'chatgpt', 'templates']).optional().default('chatgpt'),
+      loopBackend: z.enum(['api', 'chatgpt']).optional().default('chatgpt'),
+      helperModel: z.string().trim().min(1).max(80).optional().default('gpt-5.6-sol').catch('gpt-5.6-sol'),
+      helperReasoning: z.enum(REASONING_EFFORTS).optional().default('high').catch('high'),
       // Repaired rather than rejected for the same reason `reasoning` below is: a config
       // written by a version that knows one more mode than this one must not send every root
       // and permission in the file through conservative recovery over a single word.
@@ -360,7 +382,7 @@ const configSchema = z.object({
         .catch(DEFAULT_GOAL.loopPrompt)
     })
     .optional()
-    .default({ ...DEFAULT_GOAL })
+    .default({ ...DEFAULT_GOAL, backend: 'chatgpt', loopBackend: 'chatgpt', impulseMinutes: 0, includeToolCalls: false, helperModel: 'gpt-5.6-sol', helperReasoning: 'high' })
 });
 
 /**
@@ -596,9 +618,17 @@ async function persistConfig(next: Config): Promise<Config> {
  * Config objects and letting the later write silently erase the earlier change.
  */
 export function updateConfig(
-  update: (latest: Config) => Config | Promise<Config>
+  update: (latest: Config) => Config | Promise<Config>,
+  afterPublish?: (next: Config, previous: Config) => void | Promise<void>
 ): Promise<Config> {
-  const operation = mutationQueue.then(async () => persistConfig(await update(current)));
+  const operation = mutationQueue.then(async () => {
+    const previous = current;
+    const next = await persistConfig(await update(previous));
+    // Keep dependent durable retirement inside the same settings transaction;
+    // the next On cannot overtake a published Off's cancellation work.
+    await afterPublish?.(next, previous);
+    return next;
+  });
   mutationQueue = operation.then(
     () => undefined,
     () => undefined

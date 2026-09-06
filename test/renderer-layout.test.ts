@@ -17,12 +17,15 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { filterSettingsSections } from '../src/renderer/dom.js';
 
 let document: Document;
 let css = '';
 let chatSource = '';
+let browserPreferencesSource = '';
 
 beforeAll(async () => {
+  browserPreferencesSource = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'browser-preferences.ts'), 'utf8');
   const [html, styles, chat] = await Promise.all([
     fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8'),
     fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'styles.css'), 'utf8'),
@@ -33,6 +36,46 @@ beforeAll(async () => {
   chatSource = chat;
 });
 
+it('searches whole settings sections without empty headings, orphaned controls or lost conditional visibility', () => {
+  const view = document.querySelector<HTMLElement>('[data-view="settings"]')!;
+  const sections = [...view.querySelectorAll<HTMLElement>('.settings-section-title')];
+  const conditional = document.getElementById('goalModels')!;
+  expect(conditional.hidden).toBe(true);
+  filterSettingsSections(view, '  SESSION FINISH  ');
+  expect(sections.filter(section => !section.hidden).map(section => section.textContent)).toEqual(['Keep the turn open']);
+  for (const section of sections) expect((section.nextElementSibling as HTMLElement).hidden).toBe(section.hidden);
+  expect(document.getElementById('finishAction')!.closest('.pane')!.hasAttribute('hidden')).toBe(false);
+  expect(document.getElementById('goalKey')!.closest('.pane')!.hasAttribute('hidden')).toBe(true);
+  filterSettingsSections(view, 'no-such-setting-123');
+  expect(sections.every(section => section.hidden)).toBe(true);
+  expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(false);
+  filterSettingsSections(view, '');
+  expect(sections.every(section => !section.hidden && !(section.nextElementSibling as HTMLElement).hidden)).toBe(true);
+  expect(conditional.hidden).toBe(true);
+  expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(true);
+});
+
+it('exposes Goal tool context as an opt-in setting wired into the existing form', () => {
+  const toggle = document.getElementById('goalIncludeToolCalls') as HTMLInputElement;
+  expect(toggle.type).toBe('checkbox');
+  expect(toggle.checked).toBe(false);
+  expect(toggle.closest('label')?.textContent).toContain('recorded tool arguments and results');
+  expect(chatSource).toContain("includeToolCalls: $<HTMLInputElement>('goalIncludeToolCalls').checked");
+  expect(chatSource).toContain("applyChatChecked($<HTMLInputElement>('goalIncludeToolCalls')");
+});
+
+it('keeps the context circle in the gear group rather than an auto-placed composer grid cell', () => {
+  const group = document.getElementById('composerSettings')!.parentElement!;
+  expect(group.classList.contains('composer-options')).toBe(true);
+  expect(document.getElementById('contextMeter')!.parentElement).toBe(group);
+  expect(document.getElementById('contextMeterInfo')!.parentElement?.id).toBe('contextMeter');
+});
+
+it('does not expose a periodic Astra continuation outside session_finish', () => {
+  expect(document.getElementById('goalImpulseMinutes')).toBeNull();
+  expect(chatSource).not.toContain("number('goalImpulseMinutes'");
+});
+
 /** The declarations of one selector, whitespace-normalised. */
 function rule(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -41,21 +84,21 @@ function rule(selector: string): string {
 }
 
 describe('the session card header', () => {
+  it('indents rendered project tasks once and gives worker children their additional depth', () => {
+    expect(rule('.project-group > .sess, .project-group > .worker-group, .project-show-more')).toContain('margin-left: 20px');
+    expect(rule('.worker-group')).toContain('padding-left: 16px');
+    expect(css).not.toContain('.project-group .session-row');
+  });
   /**
    * A gear, and nothing that starts work. Compact & resume is pressed in the ChatGPT tab,
    * because the chat is what writes the brief — a button here would be a second way to
    * start the one thing that must happen exactly once.
    */
-  it('carries the gear and no action that starts a compaction', () => {
-    const header = document.querySelector('#chatTitle')!.closest('h2')!;
-    const acts = header.querySelector('.acts')!;
-    const gear = document.getElementById('chatSettingsBtn');
-    expect(gear).not.toBeNull();
-    expect(acts.contains(gear!)).toBe(true);
-    for (const id of ['resumeBtn', 'compactBtn', 'cancelCompact']) {
-      expect(document.getElementById(id), `#${id} is back`).toBeNull();
-    }
-    expect(acts.querySelectorAll('.btn.is-primary')).toHaveLength(0);
+  it('keeps the title beside connection status and chat controls in the composer', () => {
+    const header = document.querySelector('#chatTitle')!.closest('header')!;
+    expect(header.contains(document.getElementById('live'))).toBe(true);
+    expect(document.getElementById('sessionControls')!.closest('#composerSettings')).not.toBeNull();
+    expect(header.querySelector('.session-controls')).toBeNull();
   });
 
   /**
@@ -76,21 +119,20 @@ describe('the session card header', () => {
    * made the row wider than the window; giving it its own is what makes the fit provable
    * rather than a matter of how long the session title happens to be.
    */
-  it('moves the view switcher out of the header row', () => {
-    const header = document.querySelector('#chatTitle')!.closest('h2')!;
+  it('keeps legacy view navigation hidden outside the header', () => {
+    const header = document.querySelector('#chatTitle')!.closest('header')!;
     const view = document.getElementById('chatView')!;
     expect(header.contains(view)).toBe(false);
-    expect(view.closest('.subhead')).not.toBeNull();
-    expect(view.closest('.subhead')!.previousElementSibling).toBe(header);
+    expect(view.hidden).toBe(true);
   });
 
   it('lets the title shrink and never the actions', () => {
     expect(rule('.acts')).toContain('flex: none');
-    const title = rule('.card > h2 > span:first-child');
+    const title = rule('#chatTitle');
     expect(title).toContain('min-width: 0');
     expect(title).toContain('text-overflow: ellipsis');
     // The title is the first child of the header, which is what that selector relies on.
-    expect(document.querySelector('#chatTitle')!.closest('h2')!.firstElementChild!.id).toBe('chatTitle');
+    expect(document.querySelector('#chatTitle')!.closest('header')!.firstElementChild!.id).toBe('chatTitle');
   });
 
   it('has a place to say what is happening without opening the Activity log', () => {
@@ -107,10 +149,10 @@ describe('the session card header', () => {
  * the part that must survive a narrow row, and the counts are the part that yields.
  */
 describe('a session row', () => {
-  it('keeps its chips whole and lets the counts truncate', () => {
-    expect(rule('.sess-sub')).toContain('display: flex');
-    expect(rule('.sess-sub .chip')).toContain('flex: none');
-    const bits = rule('.sess-bits');
+  it('keeps status visible and lets the title truncate', () => {
+    expect(rule('.sess-top')).toContain('display: flex');
+    expect(rule('.session-status')).toContain('flex: none');
+    const bits = rule('.sess-top b');
     expect(bits).toContain('min-width: 0');
     expect(bits).toContain('text-overflow: ellipsis');
   });
@@ -150,28 +192,26 @@ describe('a session row', () => {
 });
 
 describe('the session-row chat actions', () => {
-  it('renders current-chat pressure separately from the session lifetime total', () => {
+  it('keeps current-chat pressure in the conversation detail', () => {
     expect(chatSource).toContain('compactNumber(summary.contextTokens)');
-    expect(chatSource).toContain('compactNumber(summary.estimatedTokens)');
-    expect(chatSource).toContain('across the full recorded session');
     expect(chatSource).toContain('rough current-chat context tokens');
   });
 
   it('reserves all three top-right hit targets instead of laying the timestamp underneath them', () => {
-    expect(rule('.sess-action')).toContain('position: absolute');
-    expect(rule('.sess-top em')).toContain('margin-right: 84px');
+    expect(rule('.sess-action')).not.toContain('position: absolute');
+    expect(rule('.sess-actions')).toContain('flex: none');
   });
 
   it('opens and blocks only recorded conversations, and never selects or deletes the adjacent row', () => {
     expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}openSessionChat\(summary\.id\)/);
-    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,800}toggleSessionBlock\(summary\.id/);
+    expect(chatSource).toMatch(/if \(summary\.conversationId\)[\s\S]{0,2000}toggleSessionBlock\(summary\.id/);
     expect(chatSource).toMatch(/open\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
     expect(chatSource).toMatch(/block\.addEventListener\('click',[\s\S]{0,120}event\.stopPropagation\(\)/);
   });
 
   it('keeps a block visible without hovering, because it is state and not just an action', () => {
-    expect(rule('.sess-action')).toContain('opacity: 0');
-    expect(rule('.sess-block.is-blocked')).toContain('opacity: 1');
+    expect(rule('.session-status.is-failed')).toContain('background: var(--red)');
+    expect(chatSource).toContain("indicator.setAttribute('aria-label', status.text)");
   });
 
   /**
@@ -191,7 +231,7 @@ describe('the session-row chat actions', () => {
     // Same word and same tone as a blocked chat: one state, read the same way down the list.
     expect(chatSource).toMatch(/unattributedBlocked\(\)[\s\S]{0,120}text: 'blocked', tone: 'is-failed'/);
     // And the row says what it is, on its own line, because no other row needs explaining.
-    expect(rule('.sess-note')).toContain('font-size: 11px');
+    expect(rule('.session-diagnostics > summary')).toContain('cursor: pointer');
   });
 });
 
@@ -223,18 +263,20 @@ describe('the chat panel cards', () => {
     return match![1]!.trim().replace(/minmax\([^)]*\)/g, 'minmax').split(/\s+/);
   }
 
-  it('gives the sessions card one row per child', () => {
-    const card = document.getElementById('sessionList')!.closest('.card')!;
-    expect(card.classList.contains('is-session')).toBe(false);
-    expect(tracks("[data-panel='chat'] .card")).toHaveLength(card.children.length);
+  it('keeps conversations in the persistent sidebar outside the chat canvas', () => {
+    const list = document.getElementById('sessionList')!;
+    expect(list.closest('.sidebar')).not.toBeNull();
+    expect(list.closest('[data-panel]')).toBeNull();
   });
 
   it('gives the session card one row per child, including its navigation row', () => {
-    const card = document.getElementById('chatTitle')!.closest('.card')!;
-    // Header, subhead, body, foot. If a child is added, the template must grow with it.
-    expect(card.children.length).toBe(4);
+    const card = document.getElementById('chatBody')!.closest('.card')!;
+    // Subhead, scrolling conversation, finish-task cards, composer and footer.
+    const layoutChildren = [...card.children].filter(child => child.id !== 'chatSettingsBtn');
+    expect(layoutChildren.length).toBe(5);
+    expect(document.getElementById('inputQueue')!.closest('#chatBody')).not.toBeNull();
     expect(card.classList.contains('is-session')).toBe(true);
-    expect(tracks("[data-panel='chat'] .card.is-session")).toHaveLength(card.children.length);
+    expect(tracks("[data-panel='chat'] .card.is-session")).toHaveLength(layoutChildren.length);
   });
 
   /**
@@ -242,8 +284,8 @@ describe('the chat panel cards', () => {
    * `.subhead`, an empty Compaction view pushed the switcher into the middle of the card.
    */
   it('gives the flexible track to the body, not to the navigation row', () => {
-    const card = document.getElementById('chatTitle')!.closest('.card')!;
-    const bodyIndex = [...card.children].indexOf(document.getElementById('chatBody')!);
+    const card = document.getElementById('chatBody')!.closest('.card')!;
+    const bodyIndex = [...card.children].filter(child => child.id !== 'chatSettingsBtn').indexOf(document.getElementById('chatBody')!);
     expect(bodyIndex).toBeGreaterThan(-1);
     const list = tracks("[data-panel='chat'] .card.is-session");
     expect(list[bodyIndex]).toBe('minmax');
@@ -328,11 +370,11 @@ describe('the settings sheet', () => {
   /** The row's action never shrinks; its explanation is the thing that ellipsizes. */
   it('never shrinks the button in a settings row', () => {
     expect(rule('.setting .btn')).toContain('flex: 0 0 auto');
-    expect(rule('.setting-text em')).toContain('text-overflow: ellipsis');
+    expect(rule('.setting-text em')).toContain('white-space: normal');
   });
 
   it('is settings rows and nothing else to read', () => {
-    const pane = document.querySelector('.view[data-view="settings"] .pane')!;
+    const pane = document.querySelector('.view[data-view="settings"]')!;
     expect(pane.querySelectorAll('h3')).toHaveLength(0);
     // One explanation per row, one clause long.
     for (const row of pane.querySelectorAll('.setting')) {
@@ -353,9 +395,10 @@ describe('the settings sheet', () => {
    * first thing to meet.
    */
   it('puts the goal key above the model picker', () => {
-    const pane = document.querySelector('.view[data-view="settings"] .pane')!;
+    const pane = document.querySelector('.view[data-view="settings"]')!;
     const order = [...pane.querySelectorAll('[id^="goal"]')].map((node) => node.id);
-    expect(order.indexOf('goalEnabled')).toBeGreaterThanOrEqual(0);
+    expect(document.getElementById('goalEnabled')).toBeNull();
+    expect(document.getElementById('chatAutomation')!.closest('#composerSettings')).not.toBeNull();
     expect(order.indexOf('goalKey')).toBeLessThan(order.indexOf('goalPick'));
     expect(order.indexOf('goalPick')).toBeLessThan(order.indexOf('goalReasoning'));
     expect(order.indexOf('goalReasoning')).toBeLessThan(order.indexOf('goalPromptEdit'));
@@ -367,7 +410,7 @@ describe('the settings sheet', () => {
 
   /** One threshold. Three inputs for the same number is three ways to disagree. */
   it('asks for a single compaction threshold', () => {
-    const pane = document.querySelector('.view[data-view="settings"] .pane')!;
+    const pane = document.querySelector('.view[data-view="settings"]')!;
     const numbers = [...pane.querySelectorAll('input[type="number"]')].map((input) => input.id);
     expect(numbers).toEqual(['sessRetain', 'autoCompactTokens', 'maWorkers']);
     for (const id of ['sessAdvisory', 'sessLimit']) {
@@ -381,10 +424,16 @@ describe('the settings sheet', () => {
    * fires on kept whatever was typed until the pane was repainted, and then dropped it.
    */
   it('saves every field it shows', () => {
-    const pane = document.querySelector('.view[data-view="settings"] .pane')!;
+    const pane = document.querySelector('.view[data-view="settings"]')!;
     const listened = /const CHAT_INPUTS[^=]*=\s*\[([^\]]*)\]/.exec(chatSource);
     expect(listened, 'CHAT_INPUTS is gone or renamed').not.toBeNull();
-    for (const input of pane.querySelectorAll<HTMLInputElement>('input')) {
+    for (const input of pane.querySelectorAll<HTMLInputElement>('.pane input')) {
+      if (input.id === 'browserOverwrite' || input.id === 'browserDurations') {
+        const variable = input.id === 'browserOverwrite' ? 'overwrite' : 'durations';
+        expect(browserPreferencesSource).toContain(`('${input.id}')`);
+        expect(browserPreferencesSource).toContain(`${variable}.addEventListener('change'`);
+        continue;
+      }
       // A credential is the one exception, and it is an exception on purpose: it is written
       // on blur through its own channel rather than saved with the settings snapshot, so
       // that a half-typed key never travels. It still has to be wired to something.
@@ -418,8 +467,8 @@ describe('the session timeline', () => {
 });
 
 describe('the window as a whole', () => {
-  it('keeps the Home activity strip shorter than the three setup/status cards', () => {
-    expect(rule("[data-panel='home']")).toContain('grid-template-rows: 300px minmax(0, 1fr)');
+  it('keeps workspace settings in a scrollable column', () => {
+    expect(rule("[data-panel='home']")).toContain('overflow-y: auto');
   });
 
   /**
@@ -437,7 +486,9 @@ describe('the window as a whole', () => {
   });
 
   it('never scrolls sideways', () => {
-    expect(css).not.toMatch(/overflow-x:\s*(auto|scroll)/);
+    // Wide authored tables may scroll locally; the surrounding app must not.
+    const horizontal = [...css.matchAll(/([^{}]+)\{[^{}]*overflow-x:\s*(?:auto|scroll)[^{}]*\}/g)];
+    expect(horizontal.map(match => match[1]!.trim())).toEqual(['.msg.rich .markdown-table']);
     expect(css).not.toMatch(/overflow:\s*(auto|scroll)\s+/);
     // The one scrolling surface in the app is vertical only.
     expect(rule('.scroll')).toContain('overflow: hidden auto');

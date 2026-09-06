@@ -1,3 +1,11 @@
+import type { ChatModelCatalog } from '../shared/chat-models.js';
+import type { TaskProgress } from '../shared/task-progress.js';
+import type { BrowserPreferences } from '../shared/browser-preferences.js';
+import type { SessionControlsView } from '../main/bridge.js';
+import type { InputImage } from '../shared/input.js';
+import type { UsageOverview } from '../shared/usage.js';
+import type { InputArgs, InputEntry } from '../main/session/input.js';
+import type { LocalProject } from '../shared/projects.js';
 /**
  * The entire renderer-facing API.
  *
@@ -64,6 +72,9 @@ export interface SessionDetail {
 }
 
 const api = {
+  chooseImages: () => call<InputImage[]>('sessions:images'),
+  dropImages: (files: File[]) => call<InputImage[]>('sessions:dropImages', { paths: files.map(file => webUtils.getPathForFile(file)) }),
+  getUsage: () => call<UsageOverview>('usage:get'),
   getState: () => call<AppState>('state:get'),
   saveSettings: (patch: SettingsPatch, base: SettingsPatch) => call<AppState>('settings:save', { patch, base }),
   addRoot: () => call<AppState>('roots:add'),
@@ -94,8 +105,34 @@ const api = {
   // named action; there is still no channel that takes a path or a command.
   listSessions: (options?: { cursor?: SessionListCursor; limit?: number }) =>
     call<SessionList>('sessions:list', options ?? {}),
-  getSession: (id: string, options?: { from?: number; limit?: number }) =>
+  listProjects: () => call<LocalProject[]>('projects:list'),
+  addProject: () => call<LocalProject | null>('projects:add'),
+  getSessionImage: (id: string, assetId: string) => call<string | null>('sessions:image', { id, assetId }),
+  getSession: (id: string, options?: { from?: number; before?: number; limit?: number }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),
+  stopSessionTurn: (id: string, expectedTurnId: string) => call<SessionControlsView>('sessions:stopTurn', { id, expectedTurnId }),
+  releaseSessionFinish: (id: string, expectedTurnId: string) => call<SessionControlsView>('sessions:releaseFinish', { id, expectedTurnId }),
+  generateFinishGoal: (id: string, expectedTurnId: string) => call<string>('sessions:generateFinishGoal', { id, expectedTurnId }),
+  getChatModels: () => call<ChatModelCatalog>('chatModels:get'),
+  browserPreferences: (patch: Partial<BrowserPreferences> = {}) => call<BrowserPreferences>('browser:preferences', patch),
+  requestChatModels: () => call<ChatModelCatalog>('chatModels:request'),
+  getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
+  setSessionAutomation: (id: string, automation: SessionControlsView['automation']) => call<SessionControlsView>('sessions:automation', { id, automation }),
+  setSessionObjective: (id: string, text: string, mode: 'goal' | 'loop') => call<SessionControlsView>('sessions:objective', { id, text, mode }),
+  compactSession: (id: string) => call<SessionControlsView>('sessions:compact', { id }),
+  cancelSessionCompaction: (id: string) => call<SessionControlsView>('sessions:cancelCompaction', { id }),
+  draftTaskPlan: (text: string, backend: 'api' | 'chatgpt', requestId?: string) => call<string[]>('sessions:plan', { text, backend, requestId }),
+  sendInput: (input: InputArgs) => call<InputEntry>('sessions:send', input),
+  retryInputBrowser: (id: string) => call<InputEntry | null>('sessions:retryBrowser', { id }),
+  listInputs: () => call<InputEntry[]>('sessions:outbox'),
+  listPausedHelpers: () => call<Array<{ id: string; sourceSessionId: string }>>('sessions:pausedHelpers'),
+  retryHelper: (id: string, sourceSessionId: string) => call<boolean>('sessions:retryHelper', { id, sourceSessionId }),
+  editQueuedInput: (id: string, text: string, afterTurn?: boolean) => call<boolean>('sessions:editInput', { id, text, afterTurn }),
+  reorderQueuedInputs: (sessionId: string, ids: string[]) => call<boolean>('sessions:reorderInputs', { sessionId, ids }),
+  cancelInput: (id: string) => call<boolean>('sessions:cancelInput', { id }),
+  setInputAutomation: (id: string, mode: 'off' | 'goal' | 'loop') => call<boolean>('sessions:inputAutomation', { id, mode }),
+  setZoom: (factor: number) => call<number>('window:zoom', { factor }),
+  getZoom: () => call<number>('window:getZoom'),
   openSessionChat: (id: string) => call<boolean>('sessions:openChat', { id }),
   // Stops a chat this app cannot stop in the page: every tool call it has already been proved
   // to own is refused until it is released. Returns the whole blocked set, so one press
@@ -116,7 +153,7 @@ const api = {
   resetSwarm: () => call<SwarmState>('swarm:reset'),
   // Clearing the prime ends the run; clearing a worker frees that slot. Which of the two
   // happened comes back in the result — the renderer does not decide it.
-  clearAgent: (id: string) => call<ClearAgentResult>('swarm:clearAgent', id),
+  clearAgent: (id: string, runId?: string) => call<ClearAgentResult>('swarm:clearAgent', { id, runId }),
 
   onStateChanged: (listener: (state: AppState) => void): (() => void) => {
     const wrapped = (_event: unknown, state: AppState): void => listener(state);
@@ -133,6 +170,19 @@ const api = {
     ipcRenderer.on('session:changed', wrapped);
     return () => ipcRenderer.removeListener('session:changed', wrapped);
   },
+  onWriteSession: (listener: (id: string) => void): (() => void) => {
+    const wrapped = (_event: unknown, id: string): void => listener(id);
+    ipcRenderer.on('session:write', wrapped);
+    return () => ipcRenderer.removeListener('session:write', wrapped);
+  },
+  onTaskProgress: (listener: (progress: TaskProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: TaskProgress): void => listener(progress);
+    ipcRenderer.on('task:progress', wrapped);
+    return () => ipcRenderer.removeListener('task:progress', wrapped);
+  },
+  cancelTaskRequest: (requestId: string) => call<boolean>('tasks:cancel', { requestId }),
+  draftGoalOpening: (text: string, mode: 'goal' | 'loop', requestId: string) =>
+    call<{ reply: string; model: string }>('sessions:goalOpening', { text, mode, requestId }),
   onSwarmChanged: (listener: (state: SwarmState) => void): (() => void) => {
     const wrapped = (_event: unknown, state: SwarmState): void => listener(state);
     ipcRenderer.on('swarm:changed', wrapped);

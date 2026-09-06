@@ -38,6 +38,7 @@ import {
   MAX_USER_MESSAGE_CHARS,
   MAX_ASSET_BYTES,
   appendEvent,
+  observeSessionModel,
   conversationAttachment,
   createSession,
   conversationWasSuperseded,
@@ -296,7 +297,7 @@ async function initializeSessionForConversation(
     known ??
     (await createSession({
       conversationId,
-      title: origin ? await titleForOrigin(origin) : title,
+      title: origin && origin.kind !== 'desktop' ? await titleForOrigin(origin) : title,
       origin
     }));
   if (origin && !known) pendingOrigins.delete(conversationId);
@@ -403,7 +404,7 @@ async function promoteGenericTitle(sessionId: string, title?: string): Promise<v
   const next = title?.trim();
   if (!next) return;
   const summary = await getSession(sessionId);
-  if (!summary || summary.origin || summary.title !== 'ChatGPT session') return;
+  if (!summary || (summary.origin && summary.origin.kind !== 'desktop') || summary.title !== 'ChatGPT session') return;
   await renameSession(sessionId, next);
   notifyChanged();
 }
@@ -418,7 +419,7 @@ async function promoteConversationTitle(sessionId: string, title?: string): Prom
   const next = title?.trim().slice(0, 200);
   if (!next) return;
   const summary = await getSession(sessionId);
-  if (!summary || summary.origin || summary.title === next) return;
+  if (!summary || (summary.origin && summary.origin.kind !== 'desktop') || summary.title === next) return;
   if (summary.title === 'ChatGPT session') {
     await renameSession(sessionId, next);
     notifyChanged();
@@ -472,8 +473,17 @@ async function applyOrigin(sessionId: string, conversationId: string): Promise<v
   const summary = await getSession(sessionId);
   // Already stamped: a worker's bootstrap can be acknowledged more than once, and a
   // second stamp would rename a session that has since become the user's to name.
-  if (!summary || summary.origin) return;
-  await setSessionOrigin(sessionId, origin, await titleForOrigin(origin)).catch((err: Error) =>
+  if (!summary) return;
+  if (summary.origin) {
+    // Older workers omitted their prime link. Repair only that missing relation from
+    // exact broker ownership; keep the user's title and original task unchanged.
+    if (summary.origin.kind === 'worker' && origin.kind === 'worker' &&
+        summary.origin.agentId === origin.agentId && !summary.origin.fromSessionId && origin.fromSessionId) {
+      await setSessionOrigin(sessionId, { ...summary.origin, fromSessionId: origin.fromSessionId }, summary.title);
+    }
+    return;
+  }
+  await setSessionOrigin(sessionId, origin, origin.kind === 'desktop' ? summary.title : await titleForOrigin(origin)).catch((err: Error) =>
     logWarn(`could not name the ${origin.kind} session: ${err.message}`)
   );
   logInfo(`session ${sessionId} named for the ${origin.kind} chat this app opened`);
@@ -1319,7 +1329,8 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         filed?.lastAssistantFinalAt ?? null,
         // The one thing an unattributed call still carries: the server turn it belongs to.
         input.requestId ?? null,
-        reopenedTurnId
+        reopenedTurnId,
+        filed
       );
     } catch (err) {
       logWarn(`call attribution listener failed: ${(err as Error).message}`);
@@ -1421,7 +1432,8 @@ let attributionListener:
       endsActivity: boolean,
       lastAssistantFinalAt: number | null,
       requestId: string | null,
-      reopenedTurnId: string | null
+      reopenedTurnId: string | null,
+      filedSession: SessionSummary | null
     ) => void)
   | null = null;
 
@@ -1436,7 +1448,8 @@ export function setCallAttributionListener(
         lastAssistantFinalAt: number | null,
         requestId: string | null,
         /** The turn this call reopened, when it proved the page's completed end false. */
-        reopenedTurnId: string | null
+        reopenedTurnId: string | null,
+        filedSession: SessionSummary | null
       ) => void)
     | null
 ): void {
@@ -1515,6 +1528,7 @@ async function storeImage(sessionId: string, base64: string, mimeType: string): 
 /** One observation from the ChatGPT page. Validated by the bridge before it lands. */
 export interface ChatObservation {
   kind:
+    | 'model_selection'
     | 'conversation_title'
     | 'user_message'
     | 'assistant_message'
@@ -1524,6 +1538,9 @@ export interface ChatObservation {
     | 'chat_error'
     | 'tool_evidence';
   time: number;
+  /** Current native selection evidence, not a historical message or requested worker model. */
+  model?: string;
+  reasoningEffort?: import('../../shared/session.js').ReasoningEffort;
   /** True when `time` is ChatGPT's own authored create_time, not local observation time. */
   authoredTime?: boolean;
   /** True only for the newest DOM user row that this document proved was just sent. */
@@ -1534,6 +1551,8 @@ export interface ChatObservation {
   /** ChatGPT's already-rendered authored markup for this same logical message. */
   renderedHtml?: string;
   messageId?: string;
+  /** Raw public provider message UUID, retained as evidence, never used to guess ownership. */
+  providerMessageId?: string;
   turnId?: string;
   final?: boolean;
   state?: 'streaming' | 'final';
@@ -1628,7 +1647,7 @@ export function recordChatObservations(
 ): Promise<{
   sessionId: string | null;
   stored: number;
-  activity: { meaningful: boolean; working: boolean; terminal: boolean };
+  activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; toolStartedAt?: number; endedTurnId?: string };
   goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
 }> {
   const prior = observationChains.get(conversationId) ?? Promise.resolve();
@@ -1713,6 +1732,7 @@ async function recordSupersededMessages(
             : {}),
           messageId: item.messageId,
           state,
+          ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           final: state === 'final'
         },
         { preferTime: item.authoredTime === true }
@@ -1731,10 +1751,10 @@ async function recordChatObservationsNow(
 ): Promise<{
   sessionId: string | null;
   stored: number;
-  activity: { meaningful: boolean; working: boolean; terminal: boolean };
+  activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; toolStartedAt?: number; endedTurnId?: string };
   goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
 }> {
-  const activity = { meaningful: false, working: false, terminal: false };
+  const activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; toolStartedAt?: number; endedTurnId?: string } = { meaningful: false, working: false, terminal: false };
   if (!recordingEnabled()) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   if (!conversations.has(conversationId)) {
     const lineage = await supersededLineage(conversationId);
@@ -1804,6 +1824,9 @@ async function recordChatObservationsNow(
       ...(agent ? { agent } : {})
     };
     switch (item.kind) {
+      case 'model_selection':
+        if (item.model) await observeSessionModel(sessionId, conversationId, item.model, item.time, item.reasoningEffort);
+        break;
       case 'conversation_title':
         await promoteConversationTitle(sessionId, item.text);
         break;
@@ -1819,7 +1842,7 @@ async function recordChatObservationsNow(
         }, { preferTime: item.authoredTime === true });
         if (!written.changed) continue;
         if (item.authoredNow === true) {
-          activity.meaningful = true;
+          activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
           activity.working = true;
         }
         break;
@@ -1869,6 +1892,7 @@ async function recordChatObservationsNow(
           messageId: item.messageId,
           state,
           final: state === 'final',
+          ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
         }, { preferTime: item.authoredTime === true });
         if (
@@ -1890,7 +1914,7 @@ async function recordChatObservationsNow(
           recoveredGoalSeen = true;
         }
         if (!written.changed && item !== recoveredFinal) continue;
-        if (terminalActivity || workingActivity) activity.meaningful = true;
+        if (terminalActivity || workingActivity) { activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time); }
         if (terminalActivity) activity.terminal = true;
         if (workingActivity) activity.working = true;
         if (item === recoveredFinal && item.turnId) {
@@ -1923,8 +1947,12 @@ async function recordChatObservationsNow(
         break;
       }
       case 'page_tool': {
+        const newlyObserved = !!live && !!item.messageId && !live.pageTools.has(item.messageId);
         const written = await recordPageTool(sessionId, live, item, base);
         if (!written) continue;
+        if (newlyObserved && item.turnId === live?.turnId && live.turnStartedAt !== null && item.time >= live.turnStartedAt) {
+          activity.toolStartedAt = Math.max(activity.toolStartedAt ?? 0, item.time);
+        }
         break;
       }
       case 'chat_error':
@@ -1933,7 +1961,7 @@ async function recordChatObservationsNow(
           kind: 'chat_error',
           message: await storeText(sessionId, item.text ?? '', 2000)
         });
-        activity.meaningful = true;
+        activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
         break;
       case 'turn_start':
         // Lifecycle without a durable local id is not a lifecycle boundary a later reader
@@ -1961,7 +1989,7 @@ async function recordChatObservationsNow(
           live.turnRequestIds = new Set<string>();
           live.endedTurn = null;
         }
-        activity.meaningful = true;
+        activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
         activity.working = true;
         break;
       // Also not stored, and for the same reason: this is the page describing which calls
@@ -1987,6 +2015,7 @@ async function recordChatObservationsNow(
         // As above, durable journal state owns idempotency; in-memory state follows it.
         if (live) {
           const endedStartedAt = live.turnId === item.turnId ? live.turnStartedAt : null;
+          if (live.turnId === item.turnId) activity.endedTurnId = item.turnId;
           live.knownTurnEnds.add(item.turnId);
           live.openTurns.delete(item.turnId);
           live.lastTurnOutcome = item.outcome ?? 'unknown';
@@ -2004,8 +2033,11 @@ async function recordChatObservationsNow(
             live.turnId = null;
           }
         }
-        activity.meaningful = true;
-        if (item.outcome !== 'unknown') activity.terminal = true;
+        if (item.outcome !== 'unknown') {
+          activity.meaningful = true;
+          activity.at = Math.max(activity.at ?? 0, item.time);
+          activity.terminal = true;
+        }
         break;
     }
     stored++;
@@ -2040,7 +2072,8 @@ export async function recordProgress(
   progressId: string,
   text: string,
   anchor?: { seq: number; time: number },
-  turnId?: string | null
+  turnId?: string | null,
+  finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number }
 ): Promise<{ seq: number; time: number } | null> {
   if (!recordingEnabled() || !progressId) return null;
   const time = anchor?.time ?? Date.now();
@@ -2053,6 +2086,7 @@ export async function recordProgress(
     source: 'app',
     kind: 'progress',
     progressId,
+    ...(finishControl ? { finishControl } : {}),
     ...(anchor ? { origin: anchor.seq } : {}),
     ...(turnId ? { turnId } : {}),
     message: await storeText(sessionId, text, 4000)
