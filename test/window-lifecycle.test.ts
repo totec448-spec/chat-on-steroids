@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import {
   createWindowActivationGate,
   ownsAppRuntime,
@@ -8,6 +10,52 @@ import {
 } from '../src/main/window-lifecycle.js';
 
 describe('native window activation', () => {
+  it('launches through the same maximized presentation as native reopen and preserves explicit fullscreen', () => {
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+    const present = source.slice(source.indexOf('function showWindow()'), source.indexOf('\nsetFinishNotifier(', source.indexOf('function showWindow()'))).replace('function showWindow(): void', 'function showWindow()');
+    const operations: string[] = [];
+    const state = { minimized: false, fullscreen: false };
+    const native = { isMinimized: () => state.minimized, isFullScreen: () => state.fullscreen,
+      restore: () => operations.push('restore'), maximize: () => operations.push('maximize'),
+      show: () => operations.push('show'), focus: () => operations.push('focus') };
+    const createWindow = vi.fn();
+    const context = vm.createContext({ window: native, quitting: false, createWindow });
+    vm.runInContext(present + '\nshowWindow();', context);
+    expect(operations.splice(0)).toEqual(['show', 'maximize', 'focus']);
+    state.minimized = true;
+    vm.runInContext('showWindow()', context);
+    expect(operations.splice(0)).toEqual(['restore', 'show', 'maximize', 'focus']);
+    state.minimized = false; state.fullscreen = true;
+    vm.runInContext('showWindow()', context);
+    expect(operations.splice(0)).toEqual(['show', 'focus']);
+    context.quitting = true;
+    vm.runInContext('showWindow()', context);
+    expect(operations).toEqual([]);
+
+    let ready!: () => void;
+    const startup = source.slice(source.indexOf("  window.once('ready-to-show'"), source.indexOf('  // A renderer that fails', source.indexOf("  window.once('ready-to-show'")));
+    const showWindow = vi.fn();
+    const launch = vm.createContext({ window: { once: (_event: string, listener: () => void) => { ready = listener; } }, quitting: false, showWindow });
+    vm.runInContext(startup, launch);
+    ready(); expect(showWindow).toHaveBeenCalledTimes(1);
+    launch.quitting = true; ready(); expect(showWindow).toHaveBeenCalledTimes(1);
+  });
+  it('starts background catalog discovery on each actual show, including tray reopen, and never during quit', async () => {
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+    const listener = source.slice(source.indexOf("  window.on('show'"), source.indexOf("  window.once('ready-to-show'"));
+    let show!: () => void;
+    const start = vi.fn(async () => ({}));
+    const context = vm.createContext({ window: { on: (event: string, callback: () => void) => {
+      expect(event).toBe('show'); show = callback;
+    } }, quitting: false, startChatModelDiscovery: start, logWarn: vi.fn() });
+    vm.runInContext(listener, context);
+    show(); await Promise.resolve();
+    show(); await Promise.resolve();
+    expect(start).toHaveBeenCalledTimes(2);
+    context.quitting = true;
+    show();
+    expect(start).toHaveBeenCalledTimes(2);
+  });
   it('never bootstraps shared state from a secondary or already-quitting process', () => {
     expect(ownsAppRuntime(true)).toBe(true);
     expect(ownsAppRuntime(false)).toBe(false);

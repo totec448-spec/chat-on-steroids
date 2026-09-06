@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <title>Chat On Steroids</title>
@@ -24,6 +24,7 @@
         <g id="i-steps"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" /></g>
         <g id="i-pulse"><path d="M3 12h4l3 8 4-16 3 8h4" /></g>
         <g id="i-folder"><path d="M3 7a1 1 0 0 1 1-1h5l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z" /></g>
+        <g id="i-image"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m4 17 5-5 4 4 3-3 4 4"/></g>
         <g id="i-plus"><path d="M12 5v14M5 12h14" /></g>
         <g id="i-eye">
           <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
@@ -33,6 +34,7 @@
         <g id="i-monitor">
           <rect x="3" y="4" width="18" height="12" rx="1.5" /><path d="M9 20h6M12 16v4" />
         </g>
+        <g id="i-globe"><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18M5 7h14M5 17h14" /></g>
         <g id="i-terminal">
           <rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M13 15h4" />
         </g>
@@ -41,7 +43,9 @@
           <rect x="4.5" y="10.5" width="15" height="9.5" rx="2" /><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" />
         </g>
         <g id="i-copy"><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 5.5h-11v11" /></g>
+        <g id="i-retry"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6" /></g>
         <g id="i-check"><path d="M5 12.5 10 17.5 19 7" /></g>
+        <g id="i-clock"><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></g>
         <g id="i-chev"><path d="M9.5 5.5 16 12l-6.5 6.5" /></g>
         <g id="i-out"><path d="M13 5h6v6" /><path d="M19 5 11 13" /><path d="M18 14.5V19H5V6h4.5" /></g>
         <g id="i-trash">
@@ -62,16 +66,56 @@
         <g id="i-search"><circle cx="11" cy="11" r="6" /><path d="M15.4 15.4 20 20" /></g>
         <g id="i-gear">
           <circle cx="12" cy="12" r="3" />
-          <path
-            d="M12 3.5h0a1 1 0 0 1 1 1v.9a7 7 0 0 1 1.9.8l.6-.6a1 1 0 0 1 1.4 0l.5.5a1 1 0 0 1 0 1.4l-.6.6a7 7 0 0 1 .8 1.9h.9a1 1 0 0 1 1 1v.7a1 1 0 0 1-1 1h-.9a7 7 0 0 1-.8 1.9l.6.6a1 1 0 0 1 0 1.4l-.5.5a1 1 0 0 1-1.4 0l-.6-.6a7 7 0 0 1-1.9.8v.9a1 1 0 0 1-1 1h-.7a1 1 0 0 1-1-1v-.9a7 7 0 0 1-1.9-.8l-.6.6a1 1 0 0 1-1.4 0l-.5-.5a1 1 0 0 1 0-1.4l.6-.6a7 7 0 0 1-.8-1.9h-.9a1 1 0 0 1-1-1v-.7a1 1 0 0 1 1-1h.9a7 7 0 0 1 .8-1.9l-.6-.6a1 1 0 0 1 0-1.4l.5-.5a1 1 0 0 1 1.4 0l.6.6a7 7 0 0 1 1.9-.8v-.9a1 1 0 0 1 1-1Z"
-          />
+          <polygon points="18.560,9.283 18.918,10.403 20.889,10.592 20.889,13.408 18.918,13.597 18.560,14.717 18.021,15.762 19.281,17.290 17.290,19.281 15.762,18.021 14.717,18.560 13.597,18.918 13.408,20.889 10.592,20.889 10.403,18.918 9.283,18.560 8.238,18.021 6.710,19.281 4.719,17.290 5.979,15.762 5.440,14.717 5.082,13.597 3.111,13.408 3.111,10.592 5.082,10.403 5.440,9.283 5.979,8.238 4.719,6.710 6.710,4.719 8.238,5.979 9.283,5.440 10.403,5.082 10.592,3.111 13.408,3.111 13.597,5.082 14.717,5.440 15.762,5.979 17.290,4.719 19.281,6.710 18.021,8.238" />
         </g>
       </defs>
     </svg>
 
-    <div class="app">
+    <div class="app" data-screen="chat">
+      <aside class="sidebar">
+        <button class="btn" id="backToChat" type="button" hidden>← Back to chat</button>
+        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
+        <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>New chat</button>
+      <nav id="tabs" aria-label="Settings navigation" hidden>
+        <button class="is-sel" data-tab="home" type="button">
+          <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Workspace
+        </button>
+        <button data-tab="usage" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Usage</button>
+<button data-tab="setup" type="button">
+          <svg class="ico" viewBox="0 0 24 24"><use href="#i-steps" /></svg>Setup
+          <span class="badge" id="setupBadge" hidden></span>
+        </button>
+        <button data-tab="settings" type="button">
+          <svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg>Agents &amp; automation
+        </button>
+        <button data-tab="activity" type="button">
+          <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Activity
+        </button>
+      </nav>          <section class="sidebar-sessions">
+            <h2>
+              Conversations
+              <span class="acts">
+                <button class="btn project-add" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder">+</button>
+                <button class="btn" id="chatRefresh" type="button">
+                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh
+                </button>
+              </span>
+            </h2>
+            <div class="scroll">
+              <div id="sessionList"></div>
+              <p class="empty" id="sessionsEmpty" hidden>
+                Nothing recorded yet. Turn on recording in Settings, pair the Chrome extension,
+                and this fills up as you work in ChatGPT.
+              </p>
+            </div>
+            <p class="foot" id="sessionsFoot"></p>
+          </section>
+
+        <div class="sidebar-bottom"><button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button><span class="zoom-controls"><button class="btn" id="zoomOut" type="button" aria-label="Zoom out">−</button><button class="btn" id="zoomReset" type="button" title="Reset zoom">100%</button><button class="btn" id="zoomIn" type="button" aria-label="Zoom in">+</button></span></div>
+      </aside>
       <!-- ------------------------------------------------------------ header -->
       <header>
+        <span id="chatTitle">New chat</span>
         <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
         <span class="title">
           Chat On Steroids
@@ -111,8 +155,24 @@
       </div>
 
       <main>
+        <section class="panel usage-panel" data-panel="usage">
+          <div class="settings-heading"><span class="eyebrow">YOUR ACTIVITY</span><h1>Usage</h1><p>Model availability and the work recorded in this workspace.</p></div>
+          <p class="muted usage-status" id="usageStatus" role="status">Calculating recorded tool usage…</p><div class="usage-summary" id="usageSummary"></div>
+          <section class="usage-section"><h2>Token activity per day</h2><div id="usageHeatmap" class="usage-heatmap"></div><p class="muted">Estimated context processed per tool call · last 52 weeks</p></section>
+          <section class="usage-section"><h2>Cost estimate per day</h2>
+            <details id="usageFormulaDetails"><summary>Edit cost formula</summary>
+            <p id="usageFormula" class="muted"></p>
+            <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 5 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
+            <label class="setting"><span class="setting-text"><b>Context times unique tool calls, divided by</b><em>Changes estimated tokens and costs.</em></span><input id="usageDivisor" aria-label="Usage token divisor" type="number" min="0.01" step="0.01" value="2" /></label>
+            <label class="setting"><span class="setting-text"><b>Cached-input cost multiplier</b><em>Applied after each model's cached-input rate.</em></span><input id="usageMultiplier" aria-label="Cached-input cost multiplier" type="number" min="0" step="0.01" value="1.2" /></label>
+            <div id="usageRates"></div></details>
+            <p id="usageCost" class="muted">Set per-model cached-input rates to compare costs.</p><div id="usageDays"></div>
+          </section>
+          <section class="usage-section"><h2>Remaining usage per model <button class="btn" id="refreshUsage" type="button">Refresh</button></h2><p class="muted">Reported by ChatGPT. Shared pools and feature quotas are listed separately. Missing data means not reported.</p><div id="modelUsage"></div></section>
+        </section>
         <!-- ============================================================ Home -->
-        <section class="panel is-active" data-panel="home">
+        <section class="panel" data-panel="home">
+          <div class="settings-heading"><h1>Workspace</h1><p>Choose what ChatGPT can access and keep your connection healthy.</p></div>
           <div class="top">
             <!-- ------------------------------------------------- permissions -->
             <section class="card">
@@ -213,6 +273,7 @@
         <!-- =========================================================== Setup -->
         <section class="panel scroll" data-panel="setup">
           <div class="sheet">
+            <div class="settings-heading"><h1>Setup</h1><p>Connect your workspace to ChatGPT.</p></div>
             <div class="lede">
               <p>
                 Six steps, once. Custom MCP apps need ChatGPT <strong>Developer mode</strong> on the
@@ -372,6 +433,11 @@
                        on when it decides whether to load a connector's tools at all, so both are
                        given as copyable text rather than described. -->
                   <div class="connectors" id="connectorCards"></div>
+                  <div class="plugin-permission-step">
+                    <strong>Before you start: choose “Allow all actions”</strong>
+                    <p>In ChatGPT, open Settings → Plugins (or Apps), select this plugin, and set its action permissions to <b>Allow all actions</b>. Repeat for the Desktop plugin if you added it.</p>
+                    <p>This lets ChatGPT use the plugin without asking for each action. Otherwise, approval prompts can pause Goal, Loop and agent tasks. Your folder and tool permissions in this app still apply.</p>
+                  </div>
                   <div class="step-actions">
                     <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/#settings/Apps">
                       <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open Apps
@@ -452,69 +518,26 @@
                 <label class="inline"><input type="checkbox" id="autoConnect" /> Connect automatically at startup</label>
                 <label class="inline"><input type="checkbox" id="minimizeToTray" /> <span id="minimizeToTrayCopy">Keep running when closed</span></label>
                 <label class="inline" id="privacyScreenshotsSetting"><input type="checkbox" id="privacyScreenshots" /> Privacy screenshots: default to the active window instead of the whole monitor</label>
+                <label class="inline"><input type="checkbox" id="developerMode" /> Developer mode: show turn boundaries and recovery events</label>
               </div>
             </details>
           </div>
         </section>
 
         <!-- ============================================================ Chat -->
-        <section class="panel" data-panel="chat">
+        <section class="panel is-active" data-panel="chat">
           <!-- --------------------------------------------------- sessions -->
-          <section class="card">
-            <h2>
-              Sessions
-              <span class="acts">
-                <button class="btn" id="chatRefresh" type="button">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh
-                </button>
-              </span>
-            </h2>
-            <div class="scroll">
-              <div id="sessionList"></div>
-              <p class="empty" id="sessionsEmpty" hidden>
-                Nothing recorded yet. Turn on recording in Settings, pair the Chrome extension,
-                and this fills up as you work in ChatGPT.
-              </p>
-            </div>
-            <p class="foot" id="sessionsFoot"></p>
-          </section>
-
           <!-- ------------------------------------------------ session body -->
-          <!--
-            `is-session` is load-bearing, not decoration. This card has four children
-            where every other card has three, and the stylesheet has to know which row
-            gets the flexible track. Getting that wrong is what put the view switcher in
-            the middle of an empty card and painted the timeline over the header.
-          -->
+          <!-- The main session grid keeps transcript scrolling separate from the composer. -->
           <section class="card is-session">
-            <!--
-              Two rows on purpose. All five controls plus the session title used to share
-              one flex row, and at the window's own default size that pushed "Compact &
-              resume" — the primary action of this card — entirely off the right edge. The
-              title ellipsizes; the primary actions never shrink; the view switcher, which
-              is navigation rather than an action, gets its own slim row below.
-            -->
-            <!--
-              A gear and nothing else. Compact & Resume is pressed in the ChatGPT tab, next
-              to the composer, because the chat is what writes the brief — a second button
-              here would be a second way to start the one thing that must happen once.
-              Settings is a property sheet for the whole feature, not a third view of this
-              session, so it hangs off the gear rather than sitting in the switcher.
-            -->
-            <h2>
-              <span id="chatTitle">No session selected</span>
-              <span class="acts">
-                <button class="btn btn-icon" id="chatSettingsBtn" type="button" title="Chat settings">
-                  <svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>
-                </button>
-              </span>
-            </h2>
+            <button id="chatSettingsBtn" type="button" hidden>Chat settings</button>
             <div class="subhead">
-              <span class="seg" id="chatView">
+              <span class="seg" id="chatView" hidden>
                 <button class="is-sel" data-view="timeline" type="button">Timeline</button>
                 <button data-view="compact" type="button">Handoff</button>
               </span>
               <span class="subhead-note" id="chatState"></span>
+
             </div>
 
             <div class="scroll" id="chatBody">
@@ -523,9 +546,9 @@
                 <!-- Only shown while a multi-agent run has agents in this session. -->
                 <div class="seg" id="chatAgentFilter" hidden></div>
                 <div id="timeline"></div>
+                <div id="inputQueue" class="input-queue" aria-live="polite"></div>
                 <p class="empty" id="timelineEmpty">
-                  No events for this session yet. Tool calls are recorded here as they happen;
-                  what ChatGPT shows on screen arrives from the browser extension.
+                  <svg class="ico welcome-mark" viewBox="0 0 24 24"><use href="#i-mark" /></svg><span>What would you like to build?</span>
                 </p>
               </div>
 
@@ -552,7 +575,36 @@
                 the rest of the once-only work already lives.
               -->
               <div class="view" data-view="settings" hidden>
+                <div class="settings-heading"><h1>Agents &amp; automation</h1><p>Fine-tune your workspace and the way your agents work.</p><label class="sr-only" for="settingsSearch">Search settings</label><input id="settingsSearch" type="search" placeholder="Search settings…" /></div>
+                <p id="settingsSearchEmpty" class="muted" role="status" hidden>No settings match your search.</p>
+                <h2 class="settings-section-title">Continuation sources</h2>
                 <div class="pane">
+                  <div class="setting"><span class="setting-text"><b>Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option><option value="templates">Offline · No API cost</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
+                  <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
+                  <label class="setting"><span class="setting-text"><b>Include tool details in Goal and handoffs</b><em>Goal receives recorded tool arguments and results. Handoff briefs retain tool details.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
+                  </div>
+                <h2 class="settings-section-title">Keep the turn open</h2>
+                <div class="pane">
+                  <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>Session finish</b><em>Ask Astra to keep the turn open for your next instruction. Tool changes refresh the connector automatically after 20 seconds.</em></span><input id="finishTool" type="checkbox" /></label>
+                  <div class="setting"><span class="setting-text"><b>When ChatGPT is wrapping up</b><em>Automatic follow-ups use your Loop instructions and selected Loop source.</em></span><select id="finishAction"><option value="notify">Notify me · Write or Generate Goal</option><option value="goal">Generate and inject Goal</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>Requested notice</b><em>A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
+                  </div>
+                <h2 class="settings-section-title">ChatGPT models</h2>
+                <div class="pane">
+                  <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span><button class="btn" id="refreshChatModels" type="button">Refresh</button></div>
+                  <div class="setting"><span class="setting-text"><b>Default sub-agent model</b><em>Confirmed in ChatGPT before a worker starts.</em></span><select id="workerModel"><option value="" disabled>No observed choices</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
+                  </div>
+                <h2 class="settings-section-title">Browser & history</h2>
+                <div class="pane">
+                  <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
+                  <p class="muted">Keeps as many app chat tabs as your worker limit. Above that, the longest-idle chats close after one minute without work. Active turns and unsent drafts stay open.</p>
+                  <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>
+                  <label class="setting"><span class="setting-text"><b>Show durations in ChatGPT</b><em>Uses the same preference as the extension popup.</em></span><input id="browserDurations" type="checkbox" disabled /></label>
+                  <div class="setting"><span class="setting-text"><b>Browser preferences</b><em id="browserPreferencesStatus" role="status">Refresh to read the browser's current preferences.</em></span><button id="browserPreferencesRefresh" class="btn" type="button">Refresh browser preferences</button></div>
                   <div class="setting">
                     <span class="setting-text">
                       <b>Keep recordings</b>
@@ -561,13 +613,6 @@
                     <input id="sessRetain" class="num" type="number" min="0" max="3650" step="1" />
                     <span class="unit">days</span>
                   </div>
-
-                  <!--
-                    One number, not three. "Suggest at", "urgent at" and "compact at" were
-                    separate inputs measuring the same estimate, so the meter could turn red
-                    somewhere the trigger would never fire. This is the threshold; the meter
-                    is derived from it.
-                  -->
                   <div class="setting">
                     <span class="setting-text">
                       <b>Compact automatically</b>
@@ -577,38 +622,9 @@
                     <span class="unit">tokens</span>
                     <span class="sw"><input type="checkbox" id="autoCompact" /><i></i></span>
                   </div>
-
-                  <!--
-                    The goal loop.
-
-                    One block because these controls make one decision: a second model,
-                    given this conversation, writing the next user message when ChatGPT stops.
-                    The key comes first because nothing below it works without one - the
-                    switch says so in its own hint rather than leaving somebody to find out
-                    from a failure in the browser.
-                  -->
-                  <div class="setting">
-                    <span class="setting-text">
-                      <b>Goal</b>
-                      <em id="goalHint"></em>
-                    </span>
-                    <span class="sw"><input type="checkbox" id="goalEnabled" /><i></i></span>
                   </div>
-
-                  <!--
-                    Loop is Goal with the stop taken away, which is why it is a second switch
-                    on the same block rather than a section of its own: same key, same model,
-                    same reasoning. Turning either one on turns the other off - there is one
-                    mode stored, and these two controls are the two values it can hold.
-                  -->
-                  <div class="setting">
-                    <span class="setting-text">
-                      <b>Loop</b>
-                      <em id="loopHint"></em>
-                    </span>
-                    <span class="sw"><input type="checkbox" id="loopEnabled" /><i></i></span>
-                  </div>
-
+                <h2 class="settings-section-title">API provider</h2>
+                <div class="pane">
                   <div class="field">
                     <label for="goalKey">OpenRouter API key</label>
                     <input id="goalKey" type="password" spellcheck="false" placeholder="sk-or-v1-…" autocomplete="off" />
@@ -620,12 +636,6 @@
                       </button>
                     </div>
                   </div>
-
-                  <!--
-                    The catalogue is several hundred models long and changes weekly, so it is
-                    not fetched until somebody actually asks to change the one in use - and
-                    then twenty at a time, newest release first.
-                  -->
                   <div class="setting">
                     <span class="setting-text">
                       <b>Model</b>
@@ -656,10 +666,13 @@
                     </select>
                   </div>
 
+                  </div>
+                <h2 class="settings-section-title">Continuation prompts</h2>
+                <div class="pane">
                   <div class="setting">
                     <span class="setting-text">
                       <b>Goal prompt, no task</b>
-                      <em>Used while Goal is on in a chat that carries no task of its own. There is no goal to hand over, so the model reads the requirements out of your own messages in the chat, keeps ChatGPT going against them, and answers NO_REPLY once they are all met.</em>
+                      <em>Reads the goal from your messages and stops when it is complete.</em>
                     </span>
                     <button class="btn" id="goalPromptEdit" type="button">Edit prompt</button>
                   </div>
@@ -676,7 +689,7 @@
                   <div class="setting">
                     <span class="setting-text">
                       <b>Goal prompt, with a task</b>
-                      <em>Used instead of the above once a chat carries a task of its own. The task itself is sent word for word underneath this prompt on every single turn — it is the requirements, and ChatGPT's account of them does not count. Stops once the task is completely done. This is also the prompt that writes the opening message of a chat you start from a task.</em>
+                      <em>Uses the objective saved in the chat controls. Stops when every requirement is met.</em>
                     </span>
                     <button class="btn" id="goalObjectivePromptEdit" type="button">Edit prompt</button>
                   </div>
@@ -693,7 +706,7 @@
                   <div class="setting">
                     <span class="setting-text">
                       <b>Loop prompt</b>
-                      <em>Used instead of both of the above whenever Loop is on — one prompt for both cases, because Loop never stops and so never has to decide whether the job is done. A task, if the chat has one, is sent underneath it exactly as above; without one the job is read out of your messages. A message goes out every turn until you switch Loop off.</em>
+                      <em>Writes the next instruction after each answer, until you turn Loop off.</em>
                     </span>
                     <button class="btn" id="goalLoopPromptEdit" type="button">Edit prompt</button>
                   </div>
@@ -707,6 +720,9 @@
                     </div>
                   </div>
 
+                  </div>
+                <h2 class="settings-section-title">Workers & recovery</h2>
+                <div class="pane">
                   <div class="setting">
                     <span class="setting-text">
                       <b>Sub-agent workers</b>
@@ -727,7 +743,7 @@
                   <label class="setting">
                     <span class="setting-text">
                       <b>Recover other chats’ tabs</b>
-                      <em>Reopen a missing chat, or reload a silent one once, for workers, primes and plain chats that have called tools. Goal and Loop chats are always recovered regardless. Duplicate chats are never opened.</em>
+                      <em>Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.</em>
                     </span>
                     <input id="recoverAgentTabs" type="checkbox" />
                   </label>
@@ -739,7 +755,73 @@
                 </div>
               </div>
             </div>
-            <p class="foot" id="chatFoot"></p>
+            <div class="composer-dock" id="composerDock"><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
+            <form class="composer" id="composer">
+              <label class="sr-only" for="chatInput">Message ChatGPT</label>
+              <div id="composerImages" class="composer-images" hidden></div><textarea id="chatInput" rows="1" maxlength="16000" placeholder="Ask anything…"></textarea>
+              <div class="composer-toolbar">
+                <details class="composer-menu" id="attachmentMenu">
+                  <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
+                  <div class="composer-popover">
+                    <button id="attachImages" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-image" /></svg>Add images</button>
+                    <button id="composerFolder" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Share a folder</button>
+                  </div>
+                </details>
+                <div class="composer-options">
+                  <details class="composer-menu" id="composerSettings">
+                    <summary aria-label="Chat options" title="Chat options"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg></summary>
+                    <div class="composer-popover">
+                      <div class="automation-switch" id="automationSwitch" role="radiogroup" aria-label="Chat mode">
+                        <button type="button" role="radio" aria-checked="true" data-mode="off" data-keep-menu="true">Off</button>
+                        <button type="button" role="radio" aria-checked="false" data-mode="goal" data-keep-menu="true">Goal</button>
+                        <button type="button" role="radio" aria-checked="false" data-mode="loop" data-keep-menu="true">Loop</button>
+                        </div><select hidden id="chatAutomation" aria-label="Chat automation"><option value="off">Off</option><option value="goal">Goal</option><option value="loop">Loop</option></select>
+              <div id="sessionControls" hidden>
+                <div class="session-controls-menu">
+                  <label for="sessionObjective">This chat's goal</label>
+                  <textarea id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
+                  <button id="saveSessionObjective" data-keep-menu="true" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check" /></svg><span>Save task</span></button>
+                  <select hidden id="sessionObjectiveMode" aria-label="Goal behavior"><option value="goal">Goal · stop when complete</option><option value="loop">Loop · keep going</option></select>
+                  <button id="createPlan" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg><span>Create plan</span></button>
+                  <button id="queueAtFinish" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-clock" /></svg><span>Queue at Session finish</span></button>
+                  <button id="compactSession" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-copy" /></svg><span>Compact &amp; resume</span></button>
+                  <button id="cancelCompaction" type="button" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg><span>Cancel compaction</span></button>
+                  <p id="sessionControlStatus" role="status"></p>
+                </div>
+              </div>
+                    </div>
+                  </details>
+                <div class="context-meter" id="contextMeter">
+                  <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><circle class="context-track" cx="8" cy="8" r="6"/><circle id="contextMeterArc" cx="8" cy="8" r="6" stroke-dasharray="0 37.7"/></svg>
+                  </button>
+                  <div id="contextMeterInfo" role="tooltip">Session context · estimated</div>
+                </div>
+                </div>
+                <details class="composer-menu model-menu" id="modelMenu">
+                  <summary><span id="composerModelLabel">Model</span><svg class="ico picker-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></summary>
+                  <div class="composer-popover">
+                    <div class="power-header"><div class="power-caption"><strong id="composerPowerTitle">Choose a level</strong><span id="composerPowerModel">Observed models</span></div><button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 7l-3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+                    </div><p id="composerModelStatus" class="muted" role="status" hidden></p>
+                    <div id="composerModelChoices" role="group" aria-label="Model"></div><div id="composerPowerChoices" role="group" aria-label="Thinking effort"></div><label hidden>Model<select id="composerModel" aria-label="ChatGPT model"><option value="" disabled>No observed choices</option></select></label>
+                    <label hidden>Reasoning<select id="composerReasoning" aria-label="Reasoning effort"><option value="" disabled>No observed choices</option></select></label>
+                  </div>
+                </details>
+                <button class="btn" id="generateFinishGoal" type="button" hidden>Generate Goal</button>
+                <div class="send-control">
+                  <div class="send-options" id="sendOptions" hidden>
+                    <div class="delivery-choices" role="radiogroup" aria-label="Message delivery">
+                      <button type="button" role="radio" aria-checked="true" data-delivery="auto">Inject now<svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
+                      <button type="button" role="radio" aria-checked="false" data-delivery="after-turn"><span id="afterTurnLabel">After this turn</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
+                    </div>
+                    <select id="sendMode" aria-label="Message delivery" hidden><option value="auto">Send</option><option value="after-turn">After this turn</option></select>
+                  </div>
+                  <button class="send-button" id="chatSend" type="submit" aria-label="Send message"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
+                </div>
+              </div>
+              <p id="composerStatus" role="status" aria-live="polite"></p>
+            </form>
+            <p class="foot" id="chatFoot" hidden></p>
           </section>
         </section>
 
@@ -774,21 +856,7 @@
       </main>
 
       <!-- --------------------------------------------------------------- nav -->
-      <nav id="tabs">
-        <button class="is-sel" data-tab="home" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Home
-        </button>
-        <button data-tab="setup" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-steps" /></svg>Setup
-          <span class="badge" id="setupBadge" hidden></span>
-        </button>
-        <button data-tab="chat" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg>Chat
-        </button>
-        <button data-tab="activity" type="button">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Activity
-        </button>
-      </nav>
+
     </div>
 
     <script type="module" src="./main.ts"></script>

@@ -1,3 +1,6 @@
+import { goalWorkerChat } from '../bridge.js';
+import { announceSessionFinish } from '../session/finish.js';
+import { getConfig } from '../config.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
  *
@@ -104,6 +107,7 @@ import { locateRipgrep } from '../ripgrep.js';
 import { ensureDevToolchain } from '../toolchain.js';
 import {
   agentForCaller,
+  currentRunId,
   noteAgentContextTokens,
   persistCriticalSwarmNow,
   PRIME_ID,
@@ -878,7 +882,19 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                     )
                   : [benignExitNote(boundCommand, shell.shellType, output.exitCode, responseText)]
                 : []),
-              ...execRecoveryHints(rawCommands.join('\n'), responseText, shell.shellType)
+              // A batch parses each command independently. Its earlier mutations may already
+              // have succeeded when a later command has a syntax error: never tell the caller
+              // to rerun the whole batch on the strength of that one diagnostic. Completed
+              // authenticated sections also keep source text printed by a successful read from
+              // becoming an invented shell failure. With incomplete framing, abstain.
+              ...(isBatch
+                ? nonZeroSections.flatMap((section) =>
+                    execRecoveryHints(rawCommands[section.index - 1] ?? '', section.text, shell.shellType)
+                      .map((hint) => `Command ${section.index}: ${hint}`)
+                  )
+                : output.exitCode !== null && output.exitCode !== 0
+                  ? execRecoveryHints(rawCommands[0] ?? '', responseText, shell.shellType)
+                  : [])
             ];
             return {
               content: [{ type: 'text' as const, text: withExecNotes(responseText, notes) }],
@@ -959,6 +975,20 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   // ---------------------------------------------------------------- session
 
   if (reg.sessionToolsExposed) registerSessionSearchReadTool(reg);
+  if (reg.ctx.exposedFinishTool ?? getConfig().ui.finishTool === true) {
+    reg.register('session_finish', {
+      description: 'For Astra only. Use this tool only when a user prompt explicitly requests it. Signal that you are approaching task completion; receive queued user instructions before any finish action. While HELD, follow attached instructions and call again before finishing. Each call waits at most 25 seconds.',
+      inputSchema: z.object({ summary: z.string().min(1).max(1000) }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
+    }, async ({ summary }) => {
+      if (!getConfig().ui.finishTool) return { content: [{ type: 'text' as const, text: 'RELEASED: The user disabled finish hold. You may write your final answer.' }] };
+      const caller = currentCaller();
+      if (!caller.sessionId || !caller.conversationId) return fail('Exact session identity is required');
+      if (goalWorkerChat(caller.conversationId)) return fail('Session finish hold is not applicable to workers or decision helpers. Workers report with agents action=finish; decision helpers answer normally.');
+      return guard('session_finish', async () => ({ content: [{ type: 'text', text: await announceSessionFinish(caller.sessionId!, summary) }] }));
+    });
+  }
+
 
   // ----------------------------------------------------------------- agents
 
@@ -1050,7 +1080,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 .min(1)
                 .max(4000)
                 .describe(
-                  'This worker\'s job: objective, relevant files, constraints and expected handoff.'
+                  'This worker\'s job: objective, relevant files, constraints and expected handoff. Model and reasoning are predefined by the user in app settings.'
                 )
             }).strict()
           )
@@ -1166,7 +1196,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 type: 'text' as const,
                 text:
                   (becamePrime ? `This conversation is now the prime agent of run ${runId}. ` : '') +
-                  `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state})`).join(', ')}. ` +
+                  `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state}${info.model ? `, model ${info.model}` : ''}${info.reasoningEffort ? `, reasoning ${info.reasoningEffort}` : ''})`).join(', ')}. ` +
                   (invited.length > 0 ? 'New worker chats are opening with their briefs already in them. ' : '') +
                   (sleeping.length > 0
                     ? `${sleeping.map((worker) => worker.id).join(', ')} already finished that earlier piece and is sleeping in its existing chat; wake it with action=message instead of spawning a duplicate. `
@@ -1182,7 +1212,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               run_id: runId,
               self: PRIME_ID,
               became_prime: becamePrime,
-              workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state }))
+              workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state, model: info.model, reasoning_effort: info.reasoningEffort }))
             }
           };
         }
@@ -1230,8 +1260,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // Reopening a sleeping worker's chat is a browser side effect, so it happens only
           // after the broker revision that reserved its slot is durable — exactly as a spawn's
           // tabs do. Nothing has been typed into that chat yet at this point.
-          if (woken.length > 0) requestWorkerRevivals(woken);
-          for (const message of sent) await recordAgentMessage(message, 'sent');
+          const runId = caller.conversationId ? currentRunId(caller.conversationId) : null;
+          if (woken.length > 0 && runId) requestWorkerRevivals(woken, runId);
+          for (const message of sent) await recordAgentMessage(message, 'sent', caller.conversationId);
           return {
             content: [
               {
@@ -1285,7 +1316,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             throw error;
           }
           const { info, report, repeat } = staged;
-          if (report) await recordAgentMessage(report, 'sent');
+          if (report) await recordAgentMessage(report, 'sent', info.conversationId);
           // A retry is answered as a retry. Repeating "marked finished" would read as a
           // second finish and invite the model to keep going until it gets a different
           // answer, which is how one lost result became a queue of identical reports.
@@ -1353,6 +1384,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   .map(
                     (info) =>
                       `${info.id}  ${info.role}  ${shown(info)}  waiting ${info.pending}  ${info.label}` +
+                      (info.model ? `  model ${info.model}` : '') +
+                      (info.reasoningEffort ? `  reasoning ${info.reasoningEffort}` : '') +
                       (recordings.has(info.id) ? `\n    recording: ${recordings.get(info.id)}` : '') +
                       (info.result
                         ? `\n    ${info.state === 'failed' ? 'failure' : info.state === 'finished' ? 'result' : 'latest result'}: ${info.result.slice(0, 300)}`
@@ -1392,6 +1425,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               id: info.id,
               role: info.role,
               label: info.label,
+              model: info.model,
+              reasoning_effort: info.reasoningEffort,
               state: info.state,
               revivable: info.revivable,
               waiting: info.pending,

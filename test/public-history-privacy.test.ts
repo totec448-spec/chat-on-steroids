@@ -135,6 +135,44 @@ describe('public-history privacy gate', () => {
     expect(result.stdout).toContain('privacy check passed');
   });
 
+  it.each([
+    'https://github.com/totec448-spec/chat-on-steroids.git',
+    'git@github.com:totec448-spec/chat-on-steroids.git',
+    'ssh://git@github.com/totec448-spec/chat-on-steroids'
+  ])('recognizes canonical main under an arbitrary remote name (%s)', (url) => {
+    const repository = makeRepository();
+    execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/example/fork.git'], { cwd: repository });
+    execFileSync('git', ['remote', 'add', 'published', url], { cwd: repository });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Already public canonical commit', ['totec448', 'gmail.com'].join('@'));
+    execFileSync('git', ['update-ref', 'refs/remotes/published/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Local clean change', safeEmail);
+    expect(verify(repository).status).toBe(0);
+    commit(repository, 'New unpublished unsafe identity', ['totec448', 'gmail.com'].join('@'));
+    expect(verify(repository).status).toBe(1);
+  });
+
+  it.each([
+    'https://github.com/example/chat-on-steroids.git',
+    'https://github.com/totec448-spec/chat-on-steroids-extra.git',
+    'https://github.com.example/totec448-spec/chat-on-steroids.git'
+  ])('does not trust an unrelated upstream URL (%s)', (url) => {
+    const repository = makeRepository();
+    execFileSync('git', ['remote', 'add', 'upstream', url], { cwd: repository });
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repository });
+    commit(repository, 'Unpublished identity', ['totec448', 'gmail.com'].join('@'));
+    execFileSync('git', ['update-ref', 'refs/remotes/upstream/main', 'HEAD'], { cwd: repository });
+    expect(verify(repository).status).toBe(1);
+  });
+
+  it('does not fall back to fork history when canonical main has not been fetched', () => {
+    const repository = makeRepository();
+    execFileSync('git', ['remote', 'add', 'upstream', 'https://github.com/totec448-spec/chat-on-steroids.git'], { cwd: repository });
+    commit(repository, 'Only published on a fork', ['totec448', 'gmail.com'].join('@'));
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], { cwd: repository });
+    expect(verify(repository).status).toBe(1);
+  });
+
   it('still rejects unsafe identity a push would add ahead of origin/main', () => {
     const repository = makeRepository();
     const privateEmail = ['totec448', 'gmail.com'].join('@');

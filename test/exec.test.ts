@@ -187,7 +187,7 @@ describe('runCommand', () => {
     expect(Date.now() - started).toBeLessThan(1000);
   });
 
-  it.runIf(IS_WINDOWS)('actually executes a launched PowerShell payload, not only reporting spawn', async () => {
+  it.runIf(IS_WINDOWS)('actually executes a launched PowerShell payload', async () => {
     const shell = findPowerShell();
     expect(shell).not.toBeNull();
     const marker = path.join(cwd, 'launch-marker.txt');

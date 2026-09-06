@@ -1,12 +1,14 @@
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { launchCommand } from './exec.js';
+import { launchCommand, runPowerShell } from './exec.js';
 
 type Exists = (candidate: string) => boolean;
 type Launch = typeof launchCommand;
 
 export interface PreferredBrowserOpenOptions {
+  /** Start the owned helper without activating its Windows startup window. */
+  backgroundStartup?: boolean;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
   home?: string;
@@ -14,6 +16,8 @@ export interface PreferredBrowserOpenOptions {
   usable?: Exists;
   /** Test seam for launch failure/retry ordering. */
   launch?: Launch;
+  /** Test seam for the Windows minimized startup wrapper. */
+  powershell?: typeof runPowerShell;
 }
 
 function isExecutableBrowser(candidate: string, platform: NodeJS.Platform): boolean {
@@ -148,12 +152,37 @@ export async function openInPreferredBrowser(
   const env = options.env ?? process.env;
   const usable = options.usable ?? ((candidate: string) => isExecutableBrowser(candidate, platform));
   const launch = options.launch ?? launchCommand;
+  // These switches only affect a newly started Chrome process; handing a URL to an
+  // existing instance cannot change its policy. Memory Saver exclusions alone do not
+  // prevent background timer/renderer throttling of long-running orchestration tabs.
+  const args = [
+    ...(platform === 'win32' ? ['--disable-renderer-backgrounding', '--disable-background-timer-throttling'] : []),
+    ...(options.backgroundStartup ? ['--start-maximized'] : []),
+    url
+  ];
   let lastError: unknown = null;
 
   for (const browser of preferredBrowserCandidates(platform, env, options.home)) {
     if (!usable(browser)) continue;
     try {
-      await launch(browser, [url], path.dirname(browser));
+      // A windowless Chrome exits once extensions load unless the profile has a
+      // persistent background app. Launch the marked helper itself so its tab
+      // owns browser lifetime; the extension adopts that same tab, never a second.
+      const cwd = (platform === 'win32' ? path.win32 : path.posix).dirname(browser);
+      if (options.backgroundStartup && platform === 'win32') {
+        // Start-Process joins ArgumentList; supply one correctly quoted Windows
+        // command line. PowerShell literals are a separate escaping boundary.
+        const literal = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+        const argument = (value: string): string => `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1')}"`;
+        if ([browser, ...args].some(value => value.includes('\0'))) throw new Error('Browser launch contains a null byte');
+        const script = `$ErrorActionPreference='Stop'; Start-Process -FilePath ${literal(browser)} -ArgumentList ${literal(args.map(argument).join(' '))} -WorkingDirectory ${literal(cwd)} -WindowStyle Minimized`;
+        // runPowerShell hides its own console. The child gets a real minimized
+        // startup request, not Node's console-only windowsHide flag. No -Wait:
+        // the owned helper tab, not this wrapper, keeps the browser alive.
+        const result = await (options.powershell ?? runPowerShell)(script, cwd, 10_000);
+        if (result.timedOut || result.exitCode !== 0) throw new Error(`Background browser launch failed: ${result.stderr.slice(0, 300) || 'PowerShell did not complete'}`);
+      }
+      else await launch(browser, args, cwd);
       return browser;
     } catch (error) {
       lastError = error;

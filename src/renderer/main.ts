@@ -1,3 +1,5 @@
+import { initUsage, refreshUsage } from './usage.js';
+import { initBrowserPreferences } from './browser-preferences.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
  *
@@ -27,7 +29,7 @@ import {
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, el, icon, run, shortAgo, toast } from './dom.js';
-import { chatApply, chatSettingsPatch, chatVisible, initChat } from './chat.js';
+import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatView } from './chat.js';
 
 declare global {
   interface Window {
@@ -109,21 +111,58 @@ let showAllSteps = false;
 // ------------------------------------------------------------------- tabs
 
 function showTab(name: string): void {
+  const settings = name !== 'chat';
+  document.querySelector<HTMLElement>('.app')!.dataset.screen = settings ? 'settings' : 'chat';
+  document.querySelector<HTMLElement>('.sidebar-brand')!.hidden = settings;
+  $('workspaceSettings').hidden = settings;
+  if (name === 'usage') void refreshUsage();
+  $('tabs').hidden = !settings;
+  $('backToChat').hidden = !settings;
+  document.querySelector<HTMLElement>('.sidebar-sessions')!.hidden = settings;
+  $('newChat').hidden = settings;
+  if (name === 'settings') openChatView('settings');
+  else if (name === 'chat') openChatView('timeline');
+
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
   }
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
-    panel.classList.toggle('is-active', panel.dataset.panel === name);
+    panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
   // The Chat panel is the only one that costs anything to keep fresh, so it only
   // reloads while it is on screen.
-  chatVisible(name === 'chat');
+  chatVisible(name === 'chat' || name === 'settings');
   // A feed that was appended to while its panel was hidden could not be scrolled then —
   // a hidden element has no scroll height. Pin it now that it has one, so a panel always
   // opens on the newest line rather than on whatever was oldest in the buffer.
   for (const id of FEEDS) stickToNewest(id);
 }
 
+$('backToChat').addEventListener('click', () => showTab('chat'));
+$('workspaceSettings').addEventListener('click', () => showTab('home'));
+$('chatSettingsBtn').addEventListener('click', () => showTab('settings'));
+$('sessionList').addEventListener('click', () => showTab('chat'));
+$('newChat').addEventListener('click', () => showTab('chat'));
+$('composerFolder').addEventListener('click', () => $('addProject').click());
+let zoomFactor = 1;
+let zoomEdited = false;
+void api.getZoom().then(result => {
+  if (zoomEdited || !result.ok || typeof result.data !== 'number' || !Number.isFinite(result.data)) return;
+  zoomFactor = result.data;
+  $('zoomReset').textContent = `${Math.round(zoomFactor * 100)}%`;
+});
+async function zoom(next: number): Promise<void> {
+  zoomEdited = true;
+  const result = await run(api.setZoom(Math.min(1.5, Math.max(.75, next))));
+  if (result !== null) { zoomFactor = result; $('zoomReset').textContent = `${Math.round(result * 100)}%`; }
+}
+$('zoomOut').addEventListener('click', () => void zoom(zoomFactor - .1));
+$('zoomIn').addEventListener('click', () => void zoom(zoomFactor + .1));
+$('zoomReset').addEventListener('click', () => void zoom(1));
+document.addEventListener('keydown', (event) => {
+  if (!(event.ctrlKey || event.metaKey) || !['+', '=', '-', '0'].includes(event.key)) return;
+  event.preventDefault(); void zoom(event.key === '0' ? 1 : zoomFactor + (event.key === '-' ? -.1 : .1));
+});
 $('tabs').addEventListener('click', (event) => {
   const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
   if (button?.dataset.tab) showTab(button.dataset.tab);
@@ -403,8 +442,14 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       binaryPath: $<HTMLInputElement>('binaryPath').value.trim()
     },
     ui: {
+      finishTool: $<HTMLInputElement>('finishTool').checked,
+      planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
+      finishAction: $<HTMLSelectElement>('finishAction').value as 'notify' | 'goal',
+      finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
+      backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
+      developerMode: $<HTMLInputElement>('developerMode').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
       theme: over.theme ?? previous.ui.theme
     },
@@ -725,7 +770,9 @@ function updateSummary({ bridge, update }: AppState): { text: string; tone: Upda
     // installation - a Linux .deb, macOS, a development tree, an architecture with no artifact -
     // is not one the app can update by itself. That is when the button matters.
     lines.push(
-      update.stage === 'ready'
+      update.stage === 'checking'
+        ? 'Checking for the latest update…'
+        : update.stage === 'ready'
         ? `Chat On Steroids ${update.latest} is downloaded and ready. Install it now, or it installs the next time you quit.`
         : update.stage === 'downloading'
           ? `Chat On Steroids ${update.latest} is downloading. Keep working; you can install it when it lands.`
@@ -766,7 +813,7 @@ function paintUpdate(next: AppState): void {
   }
   const { update } = next;
   $('updateText').textContent = summary.text;
-  $<HTMLButtonElement>('updateGet').hidden = !update.latest || update.stage === 'downloading' || update.stage === 'ready';
+  $<HTMLButtonElement>('updateGet').hidden = !update.latest || update.stage === 'checking' || update.stage === 'downloading' || update.stage === 'ready';
   // `ready` is the only state with a verified artifact on disk, and therefore the only one in
   // which pressing Install can do anything. Both buttons ask the same question of the same fact.
   const installable = update.stage === 'ready';
@@ -875,7 +922,13 @@ function apply(next: AppState): void {
     previousState?.config.tunnel.desktopTunnelId
   );
   applyValue($<HTMLInputElement>('binaryPath'), config.tunnel.binaryPath, previousState?.config.tunnel.binaryPath);
+  $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
+  applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
+  applyValue($<HTMLSelectElement>('finishAction'), config.ui.finishAction ?? 'notify', previousState?.config.ui.finishAction);
+  applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
+  applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
+  applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked(
     $<HTMLInputElement>('minimizeToTray'),
     config.ui.minimizeToTray,
@@ -1576,6 +1629,7 @@ $('removeApiKey').addEventListener('click', async () => {
 for (const id of [
   'autoConnect',
   'minimizeToTray',
+  'developerMode',
   'privacyScreenshots',
   'tunnelKind',
   'tunnelId',
@@ -1601,12 +1655,14 @@ async function refresh(): Promise<void> {
 }
 
 buildGroups();
+initUsage();
+initBrowserPreferences();
 initChat({ save: () => save(), state: () => state });
 
 void (async () => {
   await refresh();
   // A first run has nothing set up, so open on the wizard rather than an empty Home.
-  if (state && missingStep(state)?.step === 'folder') showTab('setup');
+  showTab(state && missingStep(state)?.step === 'folder' ? 'setup' : 'chat');
   const entries = await run(api.getLog());
   for (const entry of entries ?? []) addLogLine(entry);
   const swarm = await run(api.getSwarm());

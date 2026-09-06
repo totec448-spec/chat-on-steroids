@@ -48,12 +48,12 @@ var CLF_DOM = (() => {
   const CONNECTOR = '[aria-label="Open tool call list" i]';
   const STOP =
     'button[data-testid="stop-button"], button[data-testid="composer-stop-button"], ' +
-    'button[aria-label="Stop streaming"], button[aria-label="Stop generating"]';
+    'button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop answering"]';
   const SEND = 'button[data-testid="send-button"], form button[aria-label^="Send" i]';
   /** The composer's own trailing controls, where the send and dictation buttons live. */
   const TRAILING =
     '[data-testid="composer-trailing-actions"], [data-testid="composer-footer-actions"], ' +
-    '[grid-area="trailing"]';
+    '[class~="[grid-area:trailing]"]';
   const SPEECH =
     'button[data-testid="composer-speech-button"], button[data-testid="composer-dictate-button"], ' +
     'button[aria-label^="Dictate" i], button[aria-label^="Voice" i], ' +
@@ -570,6 +570,41 @@ var CLF_DOM = (() => {
     }, []);
   }
 
+  /** A pre-Send draft lease lasts only for this operation and these exact DOM nodes. */
+  function captureComposerDraft(value, stillCurrent = () => true) {
+    const box = composer(), host = composerBox() || composerActions()?.host;
+    const insertedText = box?.textContent;
+    let touched = false;
+    let files = [];
+    const events = ['input', 'change', 'keydown', 'pointerdown', 'paste', 'drop'];
+    const changed = event => { if (event.isTrusted) touched = true; };
+    for (const name of events) host?.addEventListener(name, changed, true);
+    const same = () => !touched && stillCurrent() && composer() === box && box?.isConnected && box.textContent === insertedText;
+    return {
+      attachments(nodes) { if (same()) files = [...nodes]; },
+      async clear() {
+        if (!same() || !host) return false;
+        const current = [...host.querySelectorAll('button[aria-label]')].filter(node => composerFileName(node));
+        if (current.length !== files.length || current.some(node => !files.includes(node)) ||
+            host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]')) return false;
+        for (const node of current) {
+          if (!same() || !node.isConnected) return false;
+          node.click();
+        }
+        if (current.length) await new Promise(resolve => {
+          let observer, timer;
+          const finish = () => { observer?.disconnect(); clearTimeout(timer); resolve(); };
+          const check = () => { if (!same() || !hasComposerAttachments()) finish(); };
+          observer = new MutationObserver(check);
+          observer.observe(host, { childList: true, subtree: true, attributes: true });
+          timer = setTimeout(finish, 1500); check();
+        });
+        return same() && !hasComposerAttachments() && clearPromptExact(value);
+      },
+      dispose() { for (const name of events) host?.removeEventListener(name, changed, true); }
+    };
+  }
+
   /** True while ChatGPT is producing a turn. The stop button is the honest signal. */
   function generating() {
     return safe(() => document.querySelector(STOP) !== null, false);
@@ -577,6 +612,18 @@ var CLF_DOM = (() => {
 
   function stopButton() {
     return safe(() => document.querySelector(STOP), null);
+  }
+
+  /** Only a visible, enabled native Stop control may end a proven turn. */
+  function stopGeneration(stillCurrent) {
+    if (typeof stillCurrent !== 'function' || !stillCurrent()) return false;
+    const button = stopButton();
+    if (!button || !button.isConnected || button.disabled || button.getAttribute('aria-disabled') === 'true' ||
+        button.hidden || button.closest('[hidden],[inert]') || button.getClientRects().length === 0) return false;
+    const style = getComputedStyle(button);
+    if (style.display === 'none' || style.visibility === 'hidden' || !stillCurrent()) return false;
+    button.click();
+    return true;
   }
 
   /** The page-owned Send control, exposed so content.js can witness an actual submission. */
@@ -1198,7 +1245,22 @@ var CLF_DOM = (() => {
     return safe(() => {
       const out = [];
       const texts = new Set();
+      // Live provider access throttling is a dialog, not a broken transport. Match
+      // its semantic heading and notice together; quoted assistant prose is not it.
+      for (const node of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
+        if (node.closest(OWN_SURFACES) || node.closest('[aria-hidden="true"]') || !node.getClientRects().length) continue;
+        const heading = node.querySelector('h1,h2,h3,[role="heading"]');
+        if (!/^too many requests$/i.test((heading?.textContent || '').trim())) continue;
+        const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
+        if (value.length >= 500 || !/temporarily limited.*access/i.test(value) || !/few minutes/i.test(value)) continue;
+        const headingText = heading.textContent.trim();
+        const notice = value.startsWith(headingText) ? `${headingText} ${value.slice(headingText.length).trim()}` : value;
+        out.push({ text: notice, node, turnId: null, recoverable: false, blocking: true });
+        texts.add(value);
+      }
       for (const node of document.querySelectorAll('[role="alert"]')) {
+        if (node.closest('[aria-hidden="true"]')) continue;
+        if (out.some(error => error.blocking && error.node.contains(node))) continue;
         if (node.closest && node.closest(OWN_SURFACES)) continue;
         if (!displayed(node)) continue;
         const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
@@ -1324,7 +1386,10 @@ var CLF_DOM = (() => {
       // The row that holds several controls, not the wrapper around this one button.
       // Capped: climbing all the way to <body> because every ancestor happens to have one
       // child would put our control somewhere it has no business being.
-      let host = anchor.parentElement;
+      // The native trailing area owns both the model picker and submit controls.
+      // Voice now has a nested wrapper with two children (button + description),
+      // so child count alone would stop below the model picker and never find it.
+      let host = explicit || anchor.parentElement;
       for (let up = 0; up < 3 && host && host !== explicit && host.children.length < 2 && host.parentElement; up++) {
         host = host.parentElement;
       }
@@ -1527,41 +1592,45 @@ var CLF_DOM = (() => {
     }, false);
   }
 
-  async function send() {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true } = {}) {
     try {
       const box = composer();
-      if (!box) return false;
-      const submitted = (box.textContent || '').trim();
+      if (!box || !box.isConnected || !stillCurrent() || generating() || stopButton()) return false;
+      if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return false;
+      // Rich editors use adjacent paragraphs for newlines; textContent concatenates
+      // their words. Preserve those boundaries when matching the rendered user message.
+      const submitted = (typeof box.innerText === 'string' ? box.innerText : [...box.childNodes]
+        .map((node) => (node.textContent || '') + (/^(P|DIV|BR)$/.test(node.nodeName) ? '\n' : '')).join('')).trim();
       if (!submitted) return false;
-      const compact = (value) => String(value || '').replace(/\s+/g, '');
+      const compact = (value) => String(value || '').replace(/\s+/g, ' ').trim();
       const expected = compact(submitted);
       const beforeConversation = conversationId();
       const beforeGenerating = generating();
       const beforeStop = stopButton();
-      const priorUserNodes = new Set(
-        messages()
-          .filter((message) => message.role === 'user' && message.node)
-          .map((message) => message.node)
-      );
+      const priorUsers = messages().filter((message) => message.role === 'user');
+      const priorUserNodes = new Set(priorUsers.map((message) => message.node));
+      const priorUserIds = new Set(priorUsers.map((message) => message.id).filter(Boolean));
 
       // click()/dispatchEvent() only prove that JavaScript ran, not that ChatGPT accepted a
       // prompt. Observe for a page-owned consequence instead of sleeping and re-sampling on a
       // clock. Composer clear and a freshly rendered matching user message are direct submit
-      // evidence; a newly assigned conversation id or a generation/Stop transition covers
-      // editor variants that leave the rich-text value mounted while React starts the turn.
+      // evidence. Navigation alone is not acceptance: the user can open an unrelated chat
+      // while an already-clicked submit is still pending. A fresh chat's assigned id is
+      // accepted only with the exact new user message, not a Stop button in another chat.
       const accepted = () => {
-        const current = composer();
-        if (current && (current.textContent || '').trim() === '') return true;
         const currentConversation = conversationId();
-        if (currentConversation && currentConversation !== beforeConversation) return true;
-        if (!beforeGenerating && generating()) return true;
-        if (!beforeStop && stopButton()) return true;
+        if (beforeConversation && currentConversation !== beforeConversation) return false;
         const visible = messages();
         for (let at = visible.length - 1; at >= 0; at--) {
           const message = visible[at];
           if (message.role !== 'user') continue;
-          if (!priorUserNodes.has(message.node) && compact(message.text) === expected) return true;
+          if (!priorUserNodes.has(message.node) && !priorUserIds.has(message.id) && compact(message.text) === expected) return true;
         }
+        if (currentConversation !== beforeConversation) return false;
+        const current = composer();
+        if (current === box && box.isConnected && (current.textContent || '').trim() === '') return true;
+        if (!beforeGenerating && generating()) return true;
+        if (!beforeStop && stopButton()) return true;
         return false;
       };
 
@@ -1577,6 +1646,7 @@ var CLF_DOM = (() => {
           resolve(value);
         };
         const check = () => {
+          if (!stillCurrent() || (beforeConversation && conversationId() !== beforeConversation)) return finish(false);
           if (accepted()) finish(true);
         };
 
@@ -1587,11 +1657,16 @@ var CLF_DOM = (() => {
           characterData: true,
           attributes: true
         });
-        timer = setTimeout(() => finish(false), 3000);
+        // Observe this one click through late React acceptance; never click again. The
+        // upper bound remains below the app's command lease/deadline.
+        const timeout = Number.isFinite(acceptanceTimeoutMs) ? Math.max(1, Math.min(30000, acceptanceTimeoutMs)) : 30000;
+        timer = setTimeout(() => { check(); finish(false); }, timeout);
 
         try {
           const button = document.querySelector(SEND);
-          if (button && !button.disabled) {
+          if (button && (button.disabled || button.getAttribute('aria-disabled') === 'true')) return finish(false);
+          if (!stillCurrent()) return finish(false);
+          if (button) {
             button.click();
           } else {
             const key = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
@@ -1610,7 +1685,332 @@ var CLF_DOM = (() => {
     }
   }
 
+  /** Native ChatGPT photo input, observed as #upload-photos. Sending waits for every tile. */
+  const composerFileName = (button) => /^Remove file(?: \d+)?: (.+)$/.exec(button.getAttribute('aria-label') || '')?.[1];
+  function hasComposerAttachments() {
+    const host = composerBox() || composerActions()?.host;
+    return !!host && (!!host.querySelector('[data-inline-file-uploading], [role="progressbar"]') ||
+      [...host.querySelectorAll('button[aria-label]')].some(button => composerFileName(button)));
+  }
+  /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
+  function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
+    return safe(() => {
+      const shown = node => node && !node.closest('[hidden],[aria-hidden="true"]') && node.getClientRects().length > 0;
+      const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => shown(panel) &&
+        text(document.getElementById(panel.getAttribute('aria-labelledby'))).trim() === 'Plugins');
+      if (panels.length !== 1) return null;
+      const panel = panels[0];
+      const headings = [...panel.querySelectorAll('h1,h2,h3,[role="heading"]')].filter(node => shown(node) && text(node) === connectorName);
+      if (!expectedAppId && headings.length !== 1) return null;
+      // Settings uses adjacent label/value divs. textContent concatenates App Id with
+      // its value (and the following label), destroying the identity delimiter.
+      const body = (panel.innerText || text(panel, 400000)).slice(0, 400000);
+      const ids = [...body.matchAll(/App Id\s+(asdk_app_[a-zA-Z0-9_-]+)/g)];
+      const versions = [...body.matchAll(/Version Id\s+(asdk_app_v_[a-zA-Z0-9_-]+)/g)];
+      if (ids.length !== 1 || (expectedAppId && ids[0][1] !== expectedAppId)) return null;
+      const refresh = [...panel.querySelectorAll('button')].filter(node => shown(node) && text(node) === 'Refresh');
+      const identity = { appId: ids[0][1], versionId: versions.length === 1 ? versions[0][1] : null, connectorName,
+        refresh: refresh.length === 1 ? refresh[0] : null };
+      const copies = [...panel.querySelectorAll('button')].filter(node => shown(node) && (text(node) === 'Copy input schema' || node.getAttribute('aria-label') === 'Copy input schema'));
+      const normalize = value => String(value).replace(/\s+/g, ' ').trim();
+      const tools = [];
+      for (const copy of copies.slice(0, 17)) {
+        let block = copy.parentElement;
+        while (block?.parentElement && block.parentElement !== panel &&
+          [...block.parentElement.querySelectorAll('button')].filter(node => text(node) === 'Copy input schema' || node.getAttribute('aria-label') === 'Copy input schema').length === 1) block = block.parentElement;
+        const raw = block?.innerText || block?.textContent || '';
+        const marker = raw.toUpperCase().indexOf('INPUT SCHEMA');
+        if (marker < 0) return { ...identity, tools: null };
+        const prefix = raw.slice(0, marker).trim();
+        const names = [...new Set([...(block?.querySelectorAll('*') || [])].filter(node => node.children.length === 0)
+          .map(node => text(node)).filter(name => /^[a-z][a-z0-9_]{0,79}$/.test(name) && prefix.startsWith(name)))];
+        if (names.length !== 1) return { ...identity, tools: null };
+        const name = names[0], expected = expectedTools.find(tool => tool.name === name);
+        const description = prefix.slice(name.length).trim().replace(/^(?:(?:PUBLIC|READ ONLY|READ|WRITE|OPEN WORLD|CLOSED WORLD|DESTRUCTIVE|IDEMPOTENT|OUTPUT SCHEMA RECOMMENDED)\s*)+/, '').trim();
+        const schemaText = raw.slice(marker + 'INPUT SCHEMA'.length).replace(/^\s*Copy input schema\s*/, '');
+        const start = schemaText.indexOf('{');
+        let end = -1, depth = 0, quoted = false, escaped = false;
+        for (let i = start; i >= 0 && i < Math.min(schemaText.length, 200000); i++) {
+          const char = schemaText[i];
+          if (quoted) { if (escaped) escaped = false; else if (char === '\\') escaped = true; else if (char === '"') quoted = false; }
+          else if (char === '"') quoted = true;
+          else if (char === '{') depth++;
+          else if (char === '}' && --depth === 0) { end = i + 1; break; }
+        }
+        if (start < 0 || end < 0) return { ...identity, tools: null };
+        tools.push({ name, description: expected && normalize(description) === normalize(expected.description) ? expected.description : description, inputSchema: JSON.parse(schemaText.slice(start, end)) });
+      }
+      return { ...identity,
+        tools: copies.length > 0 && copies.length <= 16 && new Set(tools.map(tool => tool.name)).size === tools.length ? tools : null };
+    }, null);
+  }
+  function pluginInstalledButtons(connectorName) {
+    return safe(() => {
+      const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
+        text(document.getElementById(panel.getAttribute('aria-labelledby'))).trim() === 'Plugins');
+      if (panels.length !== 1) return null;
+      // Installed settings rows are buttons, not the links in the /plugins catalog.
+      // Match the name's own leaf so adjacent permission text cannot alter identity.
+      const rows = [...panels[0].querySelectorAll('button')].filter(button => !button.disabled && button.getClientRects().length > 0 &&
+        button.querySelector('[data-testid="plugin-icon-wrapper"]'));
+      if (!rows.length) return null;
+      return rows.filter(button => [...button.querySelectorAll('*')].some(node => !node.children.length && text(node) === connectorName));
+    }, null);
+  }
+  function pluginManagementIdle() {
+    return safe(() => ![...document.querySelectorAll('textarea,input:not([type="hidden"]),[contenteditable="true"]')].some(node => node.getClientRects().length > 0 && String(node.value || node.textContent || '').trim()), false);
+  }
+  async function uploadImages(images, stillCurrent = () => true, draft = null) {
+    if (!images?.length) return true;
+    if (!Array.isArray(images) || images.length > 4 || !stillCurrent() || hasComposerAttachments()) return false;
+    const input = document.querySelector('input#upload-photos[type="file"][accept="image/*"]');
+    if (!input) return false;
+    const priorTiles = new Set((composerBox() || composerActions()?.host)?.querySelectorAll('button[aria-label]') || []);
+    const transfer = new DataTransfer();
+    try {
+      for (const image of images) {
+        if (typeof image.name !== 'string' || !/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/.test(image.dataUrl) || image.dataUrl.length > 512100) return false;
+        const raw = atob(image.dataUrl.split(',')[1]);
+        const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
+        transfer.items.add(new File([bytes], image.name, { type: 'image/webp' }));
+      }
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch { return false; }
+    return new Promise((resolve) => {
+      let observer, timer;
+      const finish = (ok) => { observer?.disconnect(); clearTimeout(timer); resolve(ok); };
+      const check = () => {
+        if (!stillCurrent()) return finish(false);
+        const host = composerBox() || composerActions()?.host;
+        if (!host) return;
+        // ChatGPT's remove control names the complete filename. Each requested image
+        // needs its own new tile; a substring or an old same-name tile is no upload ACK.
+        const tiles = [...host.querySelectorAll('button[aria-label]')].filter((button) => !priorTiles.has(button) && composerFileName(button));
+        // Every attached file must belong to this input. A newly added user attachment
+        // cannot be silently included just because the requested subset finished uploading.
+        if (tiles.length > images.length) return finish(false);
+        const ownedTiles = [...tiles];
+        const attached = images.every((image) => {
+          const index = tiles.findIndex((button) => composerFileName(button) === image.name);
+          if (index < 0) return false;
+          tiles.splice(index, 1);
+          return true;
+        });
+        if (attached && !host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]') && sendButton() && !sendButton().disabled) {
+          draft?.attachments(ownedTiles);
+          finish(true);
+        }
+      };
+      observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
+      timer = setTimeout(() => finish(false), 60000);
+      check();
+    });
+  }
+
+  const CHAT_EFFORT_LABELS = { none: 'Instant', medium: 'Medium', high: 'High', xhigh: 'Extra High', pro: 'Pro' };
+  const normalizeModelLabel = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
+  /** One visible picker adapter for discovery and application; DOM ordinals are authoritative. */
+  function modelPickerAccess(stillCurrent) {
+    const shown = (node) => node && !node.closest('[aria-hidden="true"]') && node.getClientRects().length > 0;
+    const picker = () => document.querySelector('[data-testid="composer-intelligence-picker-content"]');
+    const items = () => [...(picker()?.querySelectorAll('[role="menuitemradio"]') || [])].filter(shown);
+    const trigger = () => [...(composerActions()?.host?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
+      .filter(shown).find((node) => /(?:Instant|Medium|High|Pro|Thinking effort)/i.test(node.textContent || ''));
+    const wait = (read, timeoutMs = 3000) => new Promise((resolve) => {
+      let observer, timer;
+      const finish = (value) => { observer?.disconnect(); clearTimeout(timer); resolve(value); };
+      const check = () => { if (!stillCurrent()) return finish(null); const value = read(); if (value) finish(value); };
+      observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      timer = setTimeout(() => finish(null), timeoutMs); check();
+    });
+    const power = () => picker()?.querySelector('[role="menuitem"][aria-label="Power"]');
+    // Latest is a routing choice, not a model identity. At Pro the native badge
+    // explicitly names the generation (observed: 6 Pro versus explicit 5.6 Pro).
+    const latestProModel = () => {
+      const label = picker()?.querySelector('[role="menuitem"][aria-label="Select model"]')?.textContent?.trim();
+      const match = label?.match(/^(?:GPT[- ]?)?(\d+(?:\.\d+)?)\s*Pro$/i);
+      return match ? `GPT-${match[1]} Pro` : null;
+    };
+    const current = () => {
+      if (power()?.getAttribute('aria-disabled') === 'true') return null;
+      const description = (power()?.getAttribute('aria-describedby') || '').split(/\s+/).map((id) => document.getElementById(id)?.textContent || '').join(' ');
+      const match = description.match(/(Instant|Medium|Extra High|High|Pro),\s*(\d+) of (\d+)/i);
+      if (!match) return null;
+      const position = Number(match[2]), total = Number(match[3]);
+      return total >= 1 && total <= 12 && position >= 1 && position <= total ? { label: match[1], position, total, available: !/Upgrade required/i.test(description) } : null;
+    };
+    return {
+      items, current, wait, latestProModel,
+      async models() {
+        const toggle = picker()?.querySelector('[role="menuitem"][aria-label="Select model"]');
+        if (items().length && toggle?.getAttribute('aria-expanded') !== 'false') return items();
+        if (!toggle || !stillCurrent()) return null;
+        toggle.click(); return wait(() => toggle.getAttribute('aria-expanded') !== 'false' && items().length ? items() : null);
+      },
+      async open() {
+        // A newly created helper registers before React necessarily mounts the composer.
+        // Observe that same document becoming ready, instead of freezing a null trigger.
+        const button = await wait(trigger, 15000);
+        if (!button || !stillCurrent()) return false;
+        if (!picker()) {
+          // Native menu triggers handle keyboard/pointer activation; HTMLElement.click()
+          // alone does not exercise their pointer-down opening contract.
+          button.focus();
+          button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+        }
+        return !!(await wait(picker));
+      },
+      close() { if (stillCurrent()) trigger()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true })); },
+      async choose(model) {
+        if (!await this.models()) return false;
+        let option = items().find((node) => normalizeModelLabel(node.textContent) === normalizeModelLabel(model));
+        if (!option || !stillCurrent() || option.getAttribute('aria-disabled') === 'true') return false;
+        const alreadySelected = option.getAttribute('aria-checked') === 'true';
+        // Selecting even the checked row returns from the model submenu to Power.
+        // Neither the Select model toggle nor radio rows must remain mounted there.
+        const activate = node => {
+          node.focus();
+          node.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+        };
+        activate(option);
+        if (!await wait(current)) return false;
+        if (alreadySelected) return stillCurrent();
+        // Reopen to prove the actual checked model, then return to its power row.
+        if (!await this.models()) return false;
+        option = items().find((node) => normalizeModelLabel(node.textContent) === normalizeModelLabel(model) && node.getAttribute('aria-checked') === 'true');
+        if (!option || !stillCurrent()) return false;
+        activate(option);
+        return !!await wait(current);
+      },
+      async step(direction) {
+        const before = current(); if (!before || !stillCurrent()) return false;
+        const expected = before.position + direction;
+        if (expected < 1 || expected > before.total) return false;
+        const key = direction < 0 ? 'ArrowLeft' : 'ArrowRight';
+        const control = power();
+        const target = control.querySelector('[role="slider"]') || control;
+        target.focus(); target.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
+        return !!(await wait(() => { const next = current(); return next?.position === expected && next.total === before.total && next; }));
+      }
+    };
+  }
+  /** Reads actual account choices in an idle app-owned page and restores its selection. */
+  function visibleModelSelection() {
+    // Passive observation only: never open a picker just to poll its selection.
+    const ui = modelPickerAccess(() => true);
+    const checked = ui.items().find(node => node.getAttribute('aria-checked') === 'true');
+    let model = checked?.textContent?.trim();
+    if (model === 'Latest') model = ui.current()?.label.toLowerCase() === 'pro' ? ui.latestProModel() : null;
+    if (!model || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(model)) return null;
+    const effort = Object.entries(CHAT_EFFORT_LABELS).find(([, label]) => label === ui.current()?.label)?.[0];
+    return { model, ...(effort ? { reasoningEffort: effort } : {}) };
+  }
+  async function inspectModelSettings(stillCurrent = () => true, failure = () => {}) {
+    const ui = modelPickerAccess(stillCurrent);
+    if (!await ui.open()) { failure('picker_unavailable'); return null; }
+    // The model submenu replaces the Power row. Capture its ordinal before
+    // opening that submenu, while the original model is still selected.
+    const originalPower = await ui.wait(ui.current);
+    const options = await ui.models();
+    const originalModel = options?.find((node) => node.getAttribute('aria-checked') === 'true')?.textContent?.trim();
+    if (!originalModel || !originalPower) { failure(originalPower ? 'model_unconfirmed' : 'power_unknown'); ui.close(); return null; }
+    const models = options.filter((node) => node.getAttribute('aria-disabled') !== 'true').map((node) => (node.textContent || '').trim()).filter((name) => /^[a-zA-Z0-9 ._-]{1,80}$/.test(name)).slice(0, 20);
+    if (!models.length) { failure('model_unconfirmed'); ui.close(); return null; }
+    let result = [];
+    let restored = false;
+    try {
+      for (const label of models) {
+        if (!await ui.choose(label)) throw new Error('model_unconfirmed');
+        const first = await ui.wait(ui.current); if (!first) throw new Error('power_unknown');
+        for (let n = first.position; n > 1; n--) if (!await ui.step(-1)) throw new Error('power_unconfirmed');
+        const efforts = [];
+        for (let n = 1; n <= first.total; n++) {
+          const power = ui.current(); if (!power || power.position !== n) throw new Error('power_changed');
+          const effort = Object.entries(CHAT_EFFORT_LABELS).find(([, name]) => name.toLowerCase() === power.label.toLowerCase())?.[0];
+          if (power.available && effort && !efforts.includes(effort)) {
+            if (label === 'Latest') {
+              const actual = effort === 'pro' && ui.latestProModel();
+              if (actual) result.push({ id: actual.toLowerCase().replace(/\s+/g, '-'), label: actual, efforts: [effort] });
+            } else efforts.push(effort);
+          }
+          if (n < first.total && !await ui.step(1)) throw new Error('power_unconfirmed');
+        }
+        if (label !== 'Latest') result.push({ id: label.toLowerCase().replace(/\s+/g, '-'), label, efforts });
+      }
+    } catch (error) { failure(['model_unconfirmed', 'power_unknown', 'power_unconfirmed', 'power_changed'].includes(error?.message) ? error.message : 'inspection_failed'); result = null; }
+    finally {
+      if (stillCurrent() && await ui.choose(originalModel)) {
+        for (let n = 0; n < 12; n++) {
+          const power = ui.current();
+          if (!power) break;
+          if (power.position === originalPower.position) { restored = power.label === originalPower.label && power.total === originalPower.total; break; }
+          if (!await ui.step(power.position > originalPower.position ? -1 : 1)) break;
+        }
+      }
+      ui.close();
+    }
+    if (!restored) failure('restore_failed');
+    if (!restored || !stillCurrent() || !result?.length) return null;
+    // A provider may expose the same numeric Pro choice both directly and via Latest.
+    const catalog = new Map();
+    for (const model of result) {
+      const existing = catalog.get(model.id);
+      if (existing) existing.efforts = [...new Set([...existing.efforts, ...model.efforts])];
+      else catalog.set(model.id, model);
+    }
+    return [...catalog.values()];
+  }
+  /** Apply requested choices, proving their actual checked/ordinal state before Send. */
+  async function selectModelSettings(model, effort, stillCurrent = () => true) {
+    if (!model && !effort) return true;
+    if (effort && !CHAT_EFFORT_LABELS[effort]) return false;
+    const ui = modelPickerAccess(stillCurrent);
+    if (!await ui.open()) return false;
+    try {
+      let latest = false;
+      if (model) {
+        const options = await ui.models();
+        const exact = options?.some(node => normalizeModelLabel(node.textContent) === normalizeModelLabel(model));
+        // A discovered numeric Pro identity may live under Latest. It is admitted
+        // only after its final power badge proves the requested generation again.
+        latest = !exact && /^gpt-?\d+(?:\.\d+)?-pro$/i.test(model) && effort === 'pro';
+        if (!await ui.choose(latest ? 'Latest' : model)) return false;
+      }
+      const confirmed = (power) => power.available && (!latest || normalizeModelLabel(ui.latestProModel()) === normalizeModelLabel(model));
+      if (!effort) return stillCurrent();
+      const first = await ui.wait(ui.current); if (!first) return false;
+      if (first.label.toLowerCase() === CHAT_EFFORT_LABELS[effort].toLowerCase()) return confirmed(first);
+      for (let n = first.position; n > 1; n--) if (!await ui.step(-1)) return false;
+      for (let n = 1; n <= first.total; n++) {
+        const power = ui.current();
+        if (power?.label.toLowerCase() === CHAT_EFFORT_LABELS[effort].toLowerCase()) return confirmed(power);
+        if (n < first.total && !await ui.step(1)) return false;
+      }
+      return false;
+    } finally { ui.close(); }
+  }
+
   return {
+    visibleModelSelection,
+    inspectModelSettings,
+    uploadImages,
+    captureComposerDraft,
+    hasComposerAttachments,
+    pluginRefreshView,
+    pluginInstalledButtons,
+    pluginManagementIdle,
+    selectModelSettings,
+    temporaryChatReady: () => [...document.querySelectorAll('button')].some(button =>
+      button.getAttribute('aria-label') === 'Turn off temporary chat' || text(button, 100) === 'Turn off temporary chat'),
+    confirmTemporaryChatIntroduction: () => {
+      const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node =>
+        [...node.querySelectorAll('h1,h2,[role="heading"]')].some(heading => text(heading, 100) === 'Temporary Chat') && /Not in history/.test(text(node, 2000)));
+      const button = dialog && [...dialog.querySelectorAll('button')].find(node => text(node, 100) === 'Continue');
+      if (button) button.click();
+    },
     conversationId,
     conversationFromPath,
     conversationTitle,
@@ -1621,6 +2021,7 @@ var CLF_DOM = (() => {
     sectionSignature,
     generating,
     stopButton,
+    stopGeneration,
     sendButton,
     progressLine,
     progressItems,

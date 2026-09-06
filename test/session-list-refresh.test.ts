@@ -4,10 +4,13 @@ import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendEvent,
+  getSession,
+  setSessionOrigin,
   createSession,
   endSession,
   initSessionStore,
   listSessionPage,
+  listUsageSessions,
   reopenSession,
   resetSessionStoreForTests
 } from '../src/main/session/store.js';
@@ -190,9 +193,12 @@ describe('visible Chat refresh', () => {
     const { chatVisible, initChat } = await import('../src/renderer/chat.js');
     initChat({
       save: async () => undefined,
-      state: () => ({ config: { sessions: { record: true } } }) as any
+      state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any
     });
     chatVisible(true);
+    await vi.waitFor(() => expect(w.document.querySelector('#sessionList [data-id]')).not.toBeNull());
+    expect(detailCalls).toHaveLength(0); // Startup stays in New Chat; reading history is deliberate.
+    (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();
     await vi.waitFor(() => expect(detailCalls).toHaveLength(1));
     expect(detailCalls[0]).toEqual({ id: selected.id, options: { limit: 160 } });
 
@@ -251,7 +257,7 @@ describe('visible Chat refresh', () => {
     Object.defineProperty(w, 'api', { value: api, configurable: true });
 
     const { chatVisible, initChat } = await import('../src/renderer/chat.js');
-    initChat({ save: async () => undefined, state: () => ({ config: { sessions: { record: true } } }) as any });
+    initChat({ save: async () => undefined, state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
     chatVisible(true);
     await vi.waitFor(() => expect(listCalls).toHaveLength(1));
     await vi.waitFor(() =>
@@ -268,4 +274,31 @@ describe('visible Chat refresh', () => {
     await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(65));
     expect(w.document.getElementById('sessionsFoot')?.textContent).toContain('65 retained sessions');
   });
+});
+
+it('serves repeated Usage metadata from the shared index without disk rereads', async () => {
+  const session = await createSession({ title: 'Usage cache', conversationId: null });
+  await endSession(session.id);
+  resetSessionStoreForTests();
+  await listUsageSessions();
+  const reads = vi.spyOn(fs, 'readFile');
+  const directories = vi.spyOn(fs, 'readdir');
+  expect((await listUsageSessions()).some(row => row.id === session.id)).toBe(true);
+  expect((await listUsageSessions()).some(row => row.id === session.id)).toBe(true);
+  expect(reads).not.toHaveBeenCalled(); expect(directories).not.toHaveBeenCalled();
+});
+
+
+it('omits exact helper origins before pagination while retaining ordinary lookalike chats and helper recordings after restart', async () => {
+  const ordinary = await createSession({ title: 'You are a task planner not the user', conversationId: 'ordinary-chat' });
+  const helper = await createSession({ title: 'Any title', conversationId: 'owned-helper' });
+  await setSessionOrigin(helper.id, { kind: 'helper', fromSessionId: null, agentId: null, task: '' }, 'Task helper');
+  for (const restart of [false, true]) {
+    if (restart) { await endSession(helper.id); await endSession(ordinary.id); resetSessionStoreForTests(); }
+    const page = await listSessionPage({ limit: 1 });
+    expect(page.sessions.map(row => row.id)).toEqual([ordinary.id]);
+    expect(page.total).toBe(1); expect(page.nextCursor).toBeNull();
+    expect(await getSession(helper.id)).toMatchObject({ conversationId: 'owned-helper', origin: { kind: 'helper' } });
+    expect((await listUsageSessions()).map(row => row.id)).toContain(helper.id);
+  }
 });

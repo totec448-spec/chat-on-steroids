@@ -50,7 +50,7 @@ beforeEach(async () => {
   goal.resetGoalStateForTests();
   await saveConfig({
     ...defaultConfig(),
-    goal: { ...defaultConfig().goal, enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' }
+    goal: { ...defaultConfig().goal, backend: 'api', enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' }
   });
   await setSecret('openRouterApiKey', 'sk-or-resume-test');
 });

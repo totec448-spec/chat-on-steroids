@@ -444,3 +444,50 @@ describe('installing on request', () => {
     ]);
   });
 });
+
+describe('staged executable authority across later events', () => {
+  it('retires the old staged installer before a replacement download fails', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    github({ version: '99.0.1', fail: 'asset' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(markInstallOnQuit()).toBe(false);
+    await applyStagedUpdate();
+    expect(spawned).toEqual([]);
+  });
+  it('does not apply a staged release withdrawn from the latest feed', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    github({ version: APP_VERSION });
+    await checkForUpdates();
+    expect(markInstallOnQuit()).toBe(false);
+    await applyStagedUpdate();
+    expect(spawned).toEqual([]);
+  });
+  it('checks staged bytes again at the actual installer handoff', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    writeFileSync(path.join(userData, 'updates', NEXT, WINDOWS_ASSET), 'changed after download');
+    await applyStagedUpdate();
+    expect(spawned).toEqual([]);
+  });
+  it('starts immediately and repeats on the unreferenced six-hour timer', async () => {
+    const unref = vi.fn();
+    let repeat: (() => void) | undefined;
+    const interval = vi.spyOn(globalThis, 'setInterval').mockImplementation(((callback: () => void, delay: number) => {
+      expect(delay).toBe(6 * 60 * 60_000);
+      repeat = callback;
+      return { unref };
+    }) as unknown as typeof setInterval);
+    try {
+      const { startUpdateChecks } = await import('../src/main/update.js');
+      const first = github({ version: APP_VERSION });
+      startUpdateChecks(); await checkForUpdates();
+      expect(first.asked).toEqual(['latest']); expect(unref).toHaveBeenCalledOnce();
+      const next = github({ version: APP_VERSION });
+      repeat!(); await checkForUpdates();
+      expect(next.asked).toEqual(['latest']);
+    } finally { interval.mockRestore(); }
+  });
+});

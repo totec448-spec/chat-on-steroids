@@ -81,22 +81,29 @@ function checkMessageFile(messagePath) {
  * Commits that are already published on the public main line.
  *
  * The gate exists to keep a private value from *entering* public history. A commit that is
- * already on `origin/main` has entered it, and refusing every later local push cannot
+ * already on the canonical repository's main has entered it, and refusing every later local push cannot
  * unpublish it — it only strands the working clone, because the merge commits GitHub writes
  * for a merged pull request carry whatever address that account publishes, and no local hook
  * ever saw them. Those are exempt here; everything a local push would actually add stays
  * checked. Removing a value from published history is a deliberate rewrite of a public branch,
  * not something a pre-push hook should be able to demand.
  *
- * A missing `origin/main` — a fresh CI checkout, a clone with another remote name — exempts
- * nothing, so the strict reading is the fallback.
+ * A fork's origin may lag upstream. Select by exact repository URL, never by the name
+ * "upstream". Without a canonical remote, retain the legacy origin/main convention.
+ * If a configured canonical remote has no fetched main, exempt nothing.
  */
 function publishedCommits() {
-  const ref = runGit(['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'], {
+  const remotes = String(runGit(['remote']).stdout).split(/\r?\n/).filter(Boolean);
+  const canonical = remotes.find((remote) => {
+    const url = String(runGit(['remote', 'get-url', remote]).stdout).trim();
+    return /^(?:https?:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)totec448-spec\/chat-on-steroids(?:\.git)?\/?$/i.test(url);
+  });
+  const publishedRef = `refs/remotes/${canonical ?? 'origin'}/main`;
+  const ref = runGit(['rev-parse', '--verify', '--quiet', publishedRef], {
     allowFailure: true,
   });
   if (ref.status !== 0) return new Set();
-  const listed = runGit(['rev-list', 'refs/remotes/origin/main'], { allowFailure: true });
+  const listed = runGit(['rev-list', publishedRef], { allowFailure: true });
   if (listed.status !== 0) return new Set();
   return new Set(String(listed.stdout).split(/\r?\n/).filter(Boolean));
 }

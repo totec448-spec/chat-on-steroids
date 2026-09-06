@@ -318,6 +318,7 @@ async function mountChat(
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
+  Object.assign(globalThis, { Event: w.Event });
   Object.assign(globalThis, {
     window: w,
     document: w.document,
@@ -663,8 +664,8 @@ it('requires a live browser only when a browser-backed feature is actually enabl
   expect(browserStep.hidden).toBe(true);
   expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(true);
   expect(doc.getElementById('bridgeState')!.textContent).toContain('not needed');
-  expect((doc.getElementById('goalEnabled') as HTMLInputElement).disabled).toBe(true);
-  expect(doc.getElementById('goalHint')!.textContent).toMatch(/recording first/i);
+  expect((doc.getElementById('chatAutomation') as HTMLSelectElement).disabled).toBe(true);
+  expect(doc.getElementById('chatAutomation')!.title).toMatch(/recording/i);
 });
 
 /**
@@ -723,6 +724,13 @@ it('reports a staged update in the Activity line and the header bar', async () =
   expect((doc.getElementById('updateInstall') as HTMLButtonElement).hidden).toBe(false);
   expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(false);
 
+  const checking = structuredClone(staged) as any;
+  checking.update.stage = 'checking';
+  mounted.push(checking);
+  expect(line.textContent).toContain('Checking for the latest update');
+  expect(line.textContent).not.toContain('by hand');
+  expect((doc.getElementById('updateGet') as HTMLButtonElement).hidden).toBe(true);
+  expect((doc.getElementById('updateInstall') as HTMLButtonElement).hidden).toBe(true);
   // Still downloading is not yet installable: there is no verified file to hand over.
   const downloading = structuredClone(staged) as any;
   downloading.update = { ...downloading.update, stage: 'downloading' };
@@ -768,15 +776,15 @@ it('asks for an extension reload only when the extension is older than this app'
  * The exact sentence, because it is the same sentence the composer's settings sheet shows
  * and the two are meant to be recognisably one message rather than two paraphrases.
  */
-it('says an OpenRouter key is needed before the goal loop can do anything', async () => {
+it('reports stored API credentials without exposing app-wide Goal switches', async () => {
   const mounted = await mountChat();
-  const hint = mounted.window.document.getElementById('goalHint')!;
-  expect(hint.textContent).toBe('OpenRouter API key essential for goal feature.');
-  expect(hint.classList.contains('is-warn')).toBe(true);
+  expect(mounted.window.document.getElementById('goalEnabled')).toBeNull();
+  expect((mounted.window.document.getElementById('goalKeyRemove') as HTMLButtonElement).disabled).toBe(true);
 
   mounted.push({ ...mounted.state, hasGoalKey: true });
   await settle();
-  expect(mounted.window.document.getElementById('goalHint')!.classList.contains('is-warn')).toBe(false);
+  expect(mounted.window.document.getElementById('goalKeyState')!.textContent).toContain('A key is stored');
+  expect((mounted.window.document.getElementById('goalKeyRemove') as HTMLButtonElement).disabled).toBe(false);
 });
 
 /**
@@ -1000,4 +1008,31 @@ it('keeps the model in use when OpenRouter cannot be reached', async () => {
   await settle();
   expect(doc.getElementById('goalModelsState')!.textContent).toContain('unchanged');
   expect(doc.getElementById('goalModelName')!.textContent).toBe('deepseek/deepseek-v4-flash');
+});
+
+it('edits a fresh Goal before first send and clears it on an independent New Chat', async () => {
+  const sendInput = vi.fn(async () => ({ ok: false, error: 'test delivery stopped' }));
+  const mounted = await mountChat({}, [], { sendInput,
+    getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['none', 'high'] }] } }),
+    draftGoalOpening: async () => ({ ok: true, data: { reply: 'Generated opening', model: 'fixture' } })
+  });
+  const w = mounted.window, doc = w.document;
+  (doc.getElementById('newChat') as HTMLButtonElement).click();
+  await settle();
+  expect(doc.getElementById('sessionControls')!.hidden).toBe(false);
+  (doc.querySelector('[data-mode="goal"]') as HTMLButtonElement).click();
+  const objective = doc.getElementById('sessionObjective') as HTMLTextAreaElement;
+  objective.value = 'Build and verify the requested feature';
+  objective.dispatchEvent(new w.Event('input', { bubbles: true }));
+  (doc.getElementById('saveSessionObjective') as HTMLButtonElement).click();
+  await settle();
+  expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ text: 'Generated opening', sessionId: null, automation: 'goal', objective: 'Build and verify the requested feature' }));
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Start with the existing code';
+  doc.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, automation: 'goal', objective: 'Build and verify the requested feature' }));
+  (doc.getElementById('newChat') as HTMLButtonElement).click();
+  await settle();
+  expect(objective.value).toBe('');
 });

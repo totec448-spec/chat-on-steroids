@@ -59,7 +59,7 @@ const marker = (kind: 'HANDOFF' | 'RESUME', token: string): string =>
 export const sourceContinuationMarker = (token: string): string => marker('HANDOFF', token);
 export const destinationContinuationMarker = (token: string): string => marker('RESUME', token);
 
-export function nativeHandoffPrompt(token = ''): string {
+export function nativeHandoffPrompt(token = '', includeToolCalls = true): string {
   const identity = sourceContinuationMarker(token);
   return (
     (identity ? `${identity}\n\n` : '') +
@@ -67,9 +67,11 @@ export function nativeHandoffPrompt(token = ''): string {
     'Stop whatever you were doing and do only this.\n\n' +
     'Write a handoff brief so a different coding agent can continue this unfinished task in a brand-new ' +
     "conversation, with no memory of anything here. Everything you know about this session — the user's " +
-    'messages, your own replies, and every tool call you made against this machine with its result — is the ' +
+    (includeToolCalls ? 'messages, your own replies, and every tool call you made against this machine with its result — is the ' :
+      'messages and your own replies, including interim updates — is the ') +
     'material. Write it so an agent who reads only your brief can carry on correctly.\n\n' +
     `${HANDOFF_BRIEF_RULES}\n\n` +
+    (includeToolCalls ? '' : 'Tool-detail setting: preserve verified outcomes and distinguish them from claims, but omit raw tool-call arguments and result bodies from the brief. Do not copy tool transcripts. This setting controls the brief, not the history you already saw.\n\n') +
     'Your reply to this message must be the brief itself and nothing else: no preamble, no closing remark, no ' +
     'question back, and no tool calls. The app reads this reply, stores it, and opens the fresh chat with it.'
   );

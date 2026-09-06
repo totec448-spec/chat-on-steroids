@@ -160,6 +160,10 @@ describe('an ordinary call from a worker', () => {
     expect(() => identify({ conversationId: 'chat-stranger' })).toThrow(/AGENTS_BUSY/);
     expect(() => identify({})).toThrow(IdentityLostError);
     expect(() => identify({})).toThrow(/WORKER_IDENTITY_LOST/);
+    const refusal = new IdentityLostError().message;
+    expect(refusal).toContain('No agent operation was performed');
+    expect(refusal).toContain('delivery is unconfirmed');
+    expect(refusal).not.toMatch(/reloads the affected chat|work.*lost/);
   });
 
   it('will not let a stranger send a message as a worker', () => {

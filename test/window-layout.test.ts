@@ -16,8 +16,8 @@ describe('main window accessibility', () => {
 
   it('keeps sensible minimums without making them larger than the display', () => {
     expect(windowLayoutForWorkArea({ x: 0, y: 0, width: 1600, height: 900 })).toMatchObject({
-      width: 1080,
-      height: 700,
+      width: 1600,
+      height: 900,
       minWidth: 640,
       minHeight: 480,
       resizable: true,
@@ -34,12 +34,12 @@ describe('main window accessibility', () => {
     });
   });
 
-  it('centres the preferred size inside a larger work area', () => {
+  it('fills a larger work area from the initial hidden construction bounds', () => {
     expect(windowLayoutForWorkArea({ x: 100, y: 50, width: 1600, height: 900 })).toMatchObject({
-      x: 360,
-      y: 150,
-      width: 1080,
-      height: 700
+      x: 100,
+      y: 50,
+      width: 1600,
+      height: 900
     });
   });
 });

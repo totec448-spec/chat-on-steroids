@@ -106,7 +106,7 @@ export function releaseVersion(tag: unknown): string | null {
 const CLEAR: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle', error: null, checkedAt: null };
 
 let status: UpdateStatus = CLEAR;
-let staged: { version: string; file: string; kind: 'installer' | 'appimage'; target: string } | null = null;
+let staged: { version: string; file: string; kind: 'installer' | 'appimage'; target: string; digest: string } | null = null;
 let pass: Promise<void> | null = null;
 /** Set by `markInstallOnQuit`: the user pressed Install, so bring the app back afterwards. */
 let runAfterInstall = false;
@@ -163,6 +163,8 @@ async function runPass(): Promise<void> {
   // GitHub answered. From here the UI can tell "current" from "not asked yet", whatever the
   // rest of this pass does with the answer.
   set({ checkedAt: Date.now() });
+  // A newly published selection retires the previous executable authority before any file replacement.
+  if (staged?.version !== release.version || !isNewer(release.version, APP_VERSION)) staged = null;
   if (!isNewer(release.version, APP_VERSION)) {
     // Up to date, or ahead of the published release on a development build. Both mean nothing
     // to offer, and `latest` stays null so nothing in the UI claims otherwise.
@@ -189,14 +191,14 @@ async function runPass(): Promise<void> {
   if (!expected) throw new Error(`release ${release.version} publishes no ${artifact.name}`);
   const carried = await adopt(release.version, artifact.name, expected);
   if (carried) {
-    staged = { version: release.version, file: carried, kind: artifact.kind, target: artifact.target };
+    staged = { version: release.version, file: carried, kind: artifact.kind, target: artifact.target, digest: expected };
     set({ latest: release.version, stage: 'ready' });
     logInfo(`update: ${release.version} was already downloaded and is ready to install`);
     return;
   }
   set({ latest: release.version, stage: 'downloading' });
   const file = await download(release.version, artifact.name, expected);
-  staged = { version: release.version, file, kind: artifact.kind, target: artifact.target };
+  staged = { version: release.version, file, kind: artifact.kind, target: artifact.target, digest: expected };
   set({ stage: 'ready' });
   logInfo(`update: ${release.version} is downloaded and ready to install`);
 }
@@ -363,6 +365,7 @@ export async function applyStagedUpdate(): Promise<void> {
   runAfterInstall = false;
   if (!ready) return;
   try {
+    if ((await fileDigest(ready.file)) !== ready.digest) throw new Error('the staged artifact changed after verification');
     if (ready.kind === 'installer') {
       // `--updated` tells the assisted NSIS installer this is an upgrade of the install it
       // already owns, so it keeps the location and the shortcuts instead of asking about them.

@@ -1,3 +1,6 @@
+/** User-facing 100% is the previous 130% size; IPC exposes relative zoom only. */
+export const UI_BASE_ZOOM = 1.3;
+
 export interface DisplayWorkArea {
   x: number;
   y: number;
@@ -17,8 +20,6 @@ export interface MainWindowLayout {
   maximizable: true;
 }
 
-const PREFERRED_WIDTH = 1080;
-const PREFERRED_HEIGHT = 700;
 const MIN_WIDTH = 640;
 const MIN_HEIGHT = 480;
 
@@ -30,12 +31,12 @@ const MIN_HEIGHT = 480;
 export function windowLayoutForWorkArea(workArea: DisplayWorkArea): MainWindowLayout {
   const areaWidth = Math.max(1, Math.floor(workArea.width));
   const areaHeight = Math.max(1, Math.floor(workArea.height));
-  const width = Math.min(PREFERRED_WIDTH, areaWidth);
-  const height = Math.min(PREFERRED_HEIGHT, areaHeight);
+  const width = areaWidth;
+  const height = areaHeight;
 
   return {
-    x: Math.round(workArea.x + (areaWidth - width) / 2),
-    y: Math.round(workArea.y + (areaHeight - height) / 2),
+    x: Math.round(workArea.x),
+    y: Math.round(workArea.y),
     width,
     height,
     minWidth: Math.min(MIN_WIDTH, width),

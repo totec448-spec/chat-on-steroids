@@ -20,6 +20,7 @@ import { SURFACE_LIST, surfaceIsUseful, type SurfaceId } from './mcp/surfaces.js
 import { getSecret } from './secrets.js';
 import { startTunnel, TunnelError, type TunnelHandle } from './tunnel/index.js';
 import { desktopAutomationSupported } from './platform.js';
+import { publishPluginSurface, unpublishPluginSurface } from './plugin-refresh.js';
 
 let endpoint: McpEndpoint | null = null;
 /** The Core tunnel. Also the only tunnel on the cloudflared and manual paths. */
@@ -159,9 +160,17 @@ function toolsFor(id: SurfaceId): string[] {
 }
 
 function updateSurface(id: SurfaceId, next: Partial<SurfaceStatus>): void {
+  const before = status.surfaces.find(entry => entry.id === id)?.state;
   setStatus({
     surfaces: status.surfaces.map((entry) => (entry.id === id ? { ...entry, ...next } : entry))
   });
+  if (next.state !== undefined && next.state !== before) refreshPluginPublication(id);
+}
+
+function refreshPluginPublication(id: SurfaceId): void {
+  const surface = describeSurfaces().find(entry => entry.id === id);
+  if (!endpoint || surface?.state !== 'live' || !surface.available) { unpublishPluginSurface(id); return; }
+  endpoint.publication?.(id, (name, version, instructions, tools) => publishPluginSurface(id, name, version, instructions, tools));
 }
 
 /** Projects a whole-connection tunnel report onto one connector card. */
@@ -443,10 +452,11 @@ async function applySettingsImpl(): Promise<void> {
 
 /** Applies a settings change to a live connection. Safe to call while disconnected. */
 export function applySettings(): Promise<void> {
-  return enqueueLifecycle(applySettingsImpl);
+  return enqueueLifecycle(async () => { await applySettingsImpl(); for (const surface of SURFACE_LIST) refreshPluginPublication(surface.id); });
 }
 
 async function disconnectImpl(endpointForceAfterMs?: number): Promise<void> {
+  for (const surface of SURFACE_LIST) unpublishPluginSurface(surface.id);
   // Invalidate callbacks first; stopping a child can itself cause exit/health events.
   connectionGeneration += 1;
   // Stop local admission first and let accepted MCP calls finish recording before any

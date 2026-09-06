@@ -9,6 +9,18 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.0.6] — 2026-09-06
+
+**I am exhausted.**
+
+- New desktop UI, projects, images, model picker and editable plans.
+- Durable injections, FIFO after-turn tasks, accurate transcripts, clearer worker messages and retry controls.
+- Astra finish queues and Loop; Pro: no auto-compaction, ten-minute recovery window.
+- Shared background Chrome, safer tab reuse and worker revival.
+- Automatic history scrolling, attachment thumbnails, wrapped tables and context tooltip.
+- Fixed New Chat selection, composer spacing and delivery indicators.
+- Hardened updater, macOS packaging and cross-platform checks.
+
 ## [2.0.5] — 2026-09-04
 
 **The update installs.**

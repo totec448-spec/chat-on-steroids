@@ -1409,7 +1409,9 @@ describe('the window in which a replacement chat is expected', () => {
     expect(await repairPrimeFromResumeShadow(to)).toBe(false);
     expect(goalObjectiveFor(from)).toBe('old parked goal must stay isolated');
     expect(goalObjectiveFor(to)).toBe('');
-    expect(workspaceEntries().filter((held) => held.key.startsWith('chat:')).map((held) => held.key)).toEqual([`chat:${from}`]);
+    // Workers now retain their exact conversation workspace while sleeping; the unrelated
+    // descendant must still receive neither the old prime nor its worker workspace.
+    expect(workspaceEntries().filter((held) => held.key.startsWith('chat:')).map((held) => held.key).sort()).toEqual([`chat:${from}`, 'chat:worker-old-owner'].sort());
     expect(swarmStateForCaller({ conversationId: from }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
       conversationId: 'worker-old-owner',
       state: 'sleeping'

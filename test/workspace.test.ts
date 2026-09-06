@@ -43,13 +43,13 @@ let approved = '';
 let outside = '';
 let roots: Root[] = [];
 
-/** A call context carrying nothing but an agent identity, which is all the key needs. */
+/** Each friendly agent in these path tests has an exact, distinct conversation. */
 function asAgent(agent: string | null): CallContext {
   return {
     startedAt: Date.now(),
     transportKey: null,
     agent,
-    caller: { transportKey: null, secret: null, requestId: null, conversationId: null },
+    caller: { transportKey: null, requestId: null, conversationId: agent ? `conv-${agent}` : null },
     outcome: null,
     evidence: emptyEvidence()
   } as CallContext;
@@ -113,8 +113,8 @@ describe('live process ownership across chat replacement', () => {
 });
 
 describe('who a workspace belongs to', () => {
-  it('keys on the agent when the call proved one', () => {
-    expect(run('worker-1', workspaceKey)).toBe('agent:worker-1');
+  it('keys on the exact conversation rather than its reusable friendly id', () => {
+    expect(run('worker-1', workspaceKey)).toBe('chat:conv-worker-1');
   });
 
   it('has no key at all when nothing identifies the caller', () => {
@@ -207,122 +207,42 @@ describe("one chat's folder is not another's", () => {
   });
 });
 
-describe('a worker starting where the prime left off', () => {
-  it('inherits the prime workspace learned under its conversation', () => {
-    // The ordinary prime call carries no agent identity, so what it learns is filed under
-    // the conversation. This is the first-spawn shape.
-    setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-    expect(inheritWorkspace('worker-1', 'conv-prime')).toBe(true);
-    expect(run('worker-1', currentWorkspace)?.virtual).toBe('/workspace/project');
+describe('run-scoped worker inheritance', () => {
+  it('isolates two simultaneous worker-1 bootstraps and their exact bound chats', () => {
+    setWorkspaceFor('chat:prime-a', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+    setWorkspaceFor('chat:prime-b', { virtual: '/workspace/other', real: path.join(approved, 'other') });
+    expect(inheritWorkspace('worker-1', 'prime-a', 'run-a')).toBe(true);
+    expect(inheritWorkspace('worker-1', 'prime-b', 'run-b')).toBe(true);
+    expect(bindAgentWorkspace('worker-1', 'worker-a', 'run-a')).toBe(true);
+    expect(bindAgentWorkspace('worker-1', 'worker-b', 'run-b')).toBe(true);
+    expect(runAsConversation('worker-1', 'worker-a', currentWorkspace)?.virtual).toBe('/workspace/project');
+    expect(runAsConversation('worker-1', 'worker-b', currentWorkspace)?.virtual).toBe('/workspace/other');
+    expect(workspaceEntries().filter(row => row.key.startsWith('agent:'))).toEqual([]);
   });
-
-  it('still inherits on a later spawn, once the prime answers to agent:prime', () => {
-    // The regression this exists for: from the second `agents` call onwards the caller is
-    // resolved to `agent:prime` before create_agents runs, while everything the prime
-    // learned is still under `chat:`. Reading only the agent key found nothing and the new
-    // worker silently started with no folder at all.
-    setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-    expect(run('prime', () => inheritWorkspace('worker-1', 'conv-prime'))).toBe(true);
-    expect(run('prime', () => inheritWorkspace('worker-2', 'conv-prime'))).toBe(true);
-    expect(run('worker-1', currentWorkspace)?.virtual).toBe('/workspace/project');
-    expect(run('worker-2', currentWorkspace)?.virtual).toBe('/workspace/project');
-  });
-
-  it('gives concurrent workers in one spawn the same folder', () => {
-    setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/other', real: path.join(approved, 'other') });
-    for (const id of ['worker-1', 'worker-2', 'worker-3']) inheritWorkspace(id, 'conv-prime');
-    const held = workspaceEntries().filter((entry) => entry.key.startsWith('agent:worker-'));
-    expect(held.map((entry) => entry.virtual)).toEqual(['/workspace/other', '/workspace/other', '/workspace/other']);
-  });
-
-  it('hands over the folder the prime moved to, not the one it started in', () => {
-    setWorkspaceFor('agent:prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-    setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/other', real: path.join(approved, 'other') });
-    expect(primeWorkspace('conv-prime')?.virtual).toBe('/workspace/other');
-  });
-
-  it('lets a worker diverge without dragging the prime along', async () => {
-    setWorkspaceFor('chat:conv-prime', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-    inheritWorkspace('worker-1', 'conv-prime');
-    await run('worker-1', () => resolveIn(roots, '/workspace/other/src/index.ts'));
-    expect(run('worker-1', currentWorkspace)?.virtual).toBe('/workspace/other');
-    expect(primeWorkspace('conv-prime')?.virtual).toBe('/workspace/project');
-  });
-
-  it('inherits nothing when the prime has no folder, rather than guessing one', () => {
-    expect(inheritWorkspace('worker-1', 'conv-prime')).toBe(false);
-    expect(workspaceEntries()).toEqual([]);
-  });
-
-  it('prefers the exact conversation over a reusable friendly agent id', () => {
-    expect(runAsConversation('worker-1', 'worker-chat-a', workspaceKey)).toBe('chat:worker-chat-a');
-    expect(runAsConversation('prime', 'prime-chat-a', workspaceKey)).toBe('chat:prime-chat-a');
-  });
-
-  it('clears a reused worker id when a new run has no prime workspace yet', () => {
-    // Worker ids are friendly slot names, not run incarnations. A previous worker-1 may have
-    // learned a completely different project and the next run is allowed to reuse that id.
-    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/old-run', real: path.join(approved, 'old-run') });
-
-    expect(inheritWorkspace('worker-1', 'conv-new-prime')).toBe(false);
-    expect(workspaceEntries().filter((entry) => entry.key === 'agent:worker-1')).toEqual([]);
-    expect(run('worker-1', currentWorkspace)).toBeNull();
-  });
-});
-
-describe('reusable worker workspace isolation across run turnover', () => {
-  it('parks a friendly worker id under its exact conversation before another run reuses that id', () => {
-    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-
-    expect(parkAgentWorkspace('worker-1', 'worker-chat-a')).toBe(true);
-    expect(workspaceForChat('worker-chat-a')?.virtual).toBe('/workspace/project');
-    expect(run('worker-1', currentWorkspace)).toBeNull();
-
-    // A different run is now free to reuse the friendly slot without seeing A's cwd.
+  it('never gives an unproven friendly identity another run workspace', () => {
     setWorkspaceFor('agent:worker-1', { virtual: '/workspace/other', real: path.join(approved, 'other') });
-    expect(run('worker-1', currentWorkspace)?.virtual).toBe('/workspace/other');
-    expect(workspaceForChat('worker-chat-a')?.virtual).toBe('/workspace/project');
+    const context = asAgent('worker-1'); context.caller.conversationId = null;
+    expect(runInCallContext(context, workspaceKey)).toBeNull();
+    expect(runInCallContext(context, currentWorkspace)).toBeNull();
+    expect(inheritWorkspace('worker-1', 'prime-a')).toBe(false);
+    expect(bindAgentWorkspace('worker-1', 'worker-a')).toBe(false);
   });
-
-  it('restores the exact dormant worker workspace and never leaves the previous run in the friendly key', () => {
-    setWorkspaceFor('chat:worker-chat-a', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/other', real: path.join(approved, 'other') });
-
-    expect(activateAgentWorkspace('worker-1', 'worker-chat-a')).toBe(true);
-    expect(run('worker-1', currentWorkspace)?.virtual).toBe('/workspace/project');
-
-    // A dormant worker with no learned cwd must clear a recycled friendly id rather than
-    // inheriting the other prime's project.
-    expect(activateAgentWorkspace('worker-1', 'worker-chat-with-no-workspace')).toBe(false);
-    expect(run('worker-1', currentWorkspace)).toBeNull();
+  it('does not borrow a different prime cwd and clears only its own failed inheritance', () => {
+    setWorkspaceFor('agent:prime', { virtual: '/workspace/other', real: path.join(approved, 'other') });
+    setWorkspaceFor('agent:run-a:worker-1', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+    setWorkspaceFor('agent:run-b:worker-1', { virtual: '/workspace/other', real: path.join(approved, 'other') });
+    expect(inheritWorkspace('worker-1', 'unknown-prime', 'run-a')).toBe(false);
+    expect(primeWorkspace('unknown-prime')).toBeNull();
+    expect(bindAgentWorkspace('worker-1', 'worker-a', 'run-a')).toBe(false);
+    expect(bindAgentWorkspace('worker-1', 'worker-b', 'run-b')).toBe(true);
+    expect(workspaceForChat('worker-b')?.virtual).toBe('/workspace/other');
   });
-
-  it('migrates inherited bootstrap workspace to the exact worker chat on first attributed use', () => {
-    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-
-    expect(runAsConversation('worker-1', 'worker-chat-a', currentWorkspace)?.virtual).toBe('/workspace/project');
-    expect(workspaceForChat('worker-chat-a')?.virtual).toBe('/workspace/project');
-    expect(run('worker-1', currentWorkspace)).toBeNull();
-  });
-
-  it('can finalize bootstrap inheritance at browser bind before the worker ever calls a tool', () => {
-    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-
-    expect(bindAgentWorkspace('worker-1', 'bound-worker-chat')).toBe(true);
-    expect(workspaceForChat('bound-worker-chat')?.virtual).toBe('/workspace/project');
-    expect(run('worker-1', currentWorkspace)).toBeNull();
-  });
-
-  it('does not fall back from a missing exact chat to a recycled friendly worker id', () => {
-    // Simulate another active run already owning the friendly slot. Exact dormant conversation
-    // A has no workspace, so its call must see no cwd rather than B's project.
-    setWorkspaceFor('agent:worker-1', { virtual: '/workspace/other', real: path.join(approved, 'other') });
-    setWorkspaceFor('chat:someone-else', { virtual: '/workspace/project', real: path.join(approved, 'project') });
-
-    // The lazy migration is intentionally only safe for the newly bound worker that currently
-    // owns the friendly key. A dormant/non-active caller must never be assigned agent=worker-1 by
-    // the kernel while another run owns that slot; the kernel fencing regression covers that.
-    expect(runAsConversation(null, 'dormant-worker-chat', currentWorkspace)).toBeNull();
+  it('never replaces work already learned by a bound conversation with stale inheritance', () => {
+    setWorkspaceFor('chat:worker-a', { virtual: '/workspace/other', real: path.join(approved, 'other') });
+    setWorkspaceFor('agent:run-a:worker-1', { virtual: '/workspace/project', real: path.join(approved, 'project') });
+    expect(parkAgentWorkspace('worker-1', 'worker-a', 'run-a')).toBe(true);
+    expect(workspaceForChat('worker-a')?.virtual).toBe('/workspace/other');
+    expect(activateAgentWorkspace('worker-1', 'missing-chat', 'run-a')).toBe(false);
   });
 });
 

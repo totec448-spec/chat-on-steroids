@@ -736,6 +736,20 @@ describe('the calls a turn says it made', () => {
     ]);
   });
 
+  it('preserves distinct authored segments even when raw, working and exchange UUIDs all repeat', async () => {
+    const id = 'b7d6231f-1174-42f0-8ee0-e828d132020c';
+    const times = [1788644947400, 1788644965847, 1788645029019, 1788645099694];
+    const ids: string[] = [];
+    for (const [index, time] of times.entries()) {
+      const result = await scan([], [{ id: `segment-${index}`, messages: [authored(id, `Distinct segment ${index}`, {
+        workingTurnId: id, turnExchangeId: id, createTime: time
+      })] }]);
+      ids.push(result.turns[0]!.messages[0]!.messageId);
+    }
+    expect(new Set(ids).size).toBe(4);
+    expect(ids).toEqual(times.map(time => `assistant:${id}:${id}:${time}`));
+  });
+
   it('keeps two messages when both the creation stamp and parent tuple collide', async () => {
     const relation = { parent: 'thought-same', workingTurnId: 'working-same', turnExchangeId: 'exchange-same' };
     const { turns } = await scan([], [{
@@ -826,6 +840,21 @@ describe('the calls a turn says it made', () => {
 
     expect(turns[0]!.endMessageId).toBe('final-public');
     expect(turns[0]!.messages.map((message) => message.messageId)).toEqual(['final-public']);
+  });
+
+  it('retains an image-only terminal turn without requiring public text', async () => {
+    const image = authored('image-final', '', { status: 'finished_successfully', endTurn: true, channel: 'final' });
+    image.content = { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer', asset_pointer: 'image-test' }] };
+    const { turns } = await scan([], [{ id: 'turn-image', messages: [image] }]);
+    expect(turns[0]?.endMessageId).toBe('image-final');
+    expect(turns[0]?.messages).toEqual([]);
+  });
+
+  it('does not reuse an old text completion while a newer image answer is still running', async () => {
+    const image = authored('image-running', '', { status: 'in_progress', endTurn: false, channel: 'final' });
+    image.content = { content_type: 'multimodal_text', parts: [] };
+    const { turns } = await scan([], [{ id: 'turn-image-retry', messages: [authored('old-answer', 'Old', { status: 'finished_successfully', endTurn: true }), image] }]);
+    expect(turns[0]?.endMessageId ?? null).toBeNull();
   });
 
   it('reads through a trailing commentary message that never carries the answer', async () => {

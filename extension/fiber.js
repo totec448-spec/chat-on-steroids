@@ -554,7 +554,7 @@
    */
   function turnEndMessageId(messages) {
     if (!Array.isArray(messages)) return null;
-    // The latest public text that *could* be the answer is the current state of the assistant
+    // The latest public message that *could* be the answer is the current state of the assistant
     // turn. A Retry/Regenerate can leave the previous finished attempt in the same model while
     // a newer public message is active; searching for *any* older end_turn=true would
     // incorrectly keep the new attempt terminal forever. So the first such message from the
@@ -572,7 +572,7 @@
       const author = message.author;
       if (!author || author.role !== 'assistant') continue;
       const content = message.content;
-      if (!content || typeof content !== 'object' || content.content_type !== 'text') continue;
+      if (!content || typeof content !== 'object' || !['text', 'multimodal_text', 'image'].includes(content.content_type)) continue;
       if (neverTerminalChannel(message)) continue;
       if (message.end_turn === true && message.status === 'finished_successfully') return str(message.id);
       return null;
@@ -1188,11 +1188,12 @@
         const renderedMessages = renderedMessagesOf(group.sections, messages, turnBudget);
         responseBudget.remaining -= before - turnBudget.remaining;
         const activities = nativeActivitiesOf(group.sections, messages);
+        const endMessageId = turnEndMessageId(messages);
         if (
           calls.length === 0 &&
           requests.length === 0 &&
           renderedMessages.length === 0 &&
-          activities.length === 0
+          activities.length === 0 && !endMessageId
         ) continue;
         const index = out.length;
         const conversation = conversationEvidenceOf(fiber);
@@ -1201,7 +1202,7 @@
           turnId: group.turnId,
           conversationId: conversation.conversationId,
           conversationConflict: conversation.conflict,
-          endMessageId: turnEndMessageId(messages),
+          endMessageId,
           calls,
           requests,
           messages: renderedMessages,

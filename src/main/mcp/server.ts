@@ -30,6 +30,8 @@ import { SURFACE_IDS, surfaceDefinition, type SurfaceId } from './surfaces.js';
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 export interface McpEndpoint {
+  /** Reuses the endpoint's actual exposure projection; no tool handlers are executed. */
+  publication?: (surface: SurfaceId, observe: Parameters<typeof buildServer>[2]) => void;
   port: number;
   /**
    * The Core surface's URL, including its secret path segment.
@@ -209,6 +211,7 @@ export function tunnelProbeHeaders(): Record<string, string> {
  * fresh; nothing about the permission state is captured at startup.
  */
 interface SurfaceExposure {
+  finishTool: boolean;
   caps: ToolContext['caps'] | null;
   sessionTools: boolean;
   agentTools: boolean;
@@ -229,7 +232,7 @@ const surfaceExposure = new Map<SurfaceId, SurfaceExposure>();
 function exposureFor(surface: SurfaceId): SurfaceExposure {
   let state = surfaceExposure.get(surface);
   if (!state) {
-    state = { caps: null, sessionTools: false, agentTools: false, find: null };
+    state = { finishTool: false, caps: null, sessionTools: false, agentTools: false, find: null };
     surfaceExposure.set(surface, state);
   }
   return state;
@@ -295,6 +298,7 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     const config = getConfig();
     const sessionTools = live.sessionTools ?? config.sessions.record;
     const agentTools = live.agentTools ?? config.multiAgent.enabled;
+    exposed.finishTool = exposed.finishTool || config.ui.finishTool === true;
     exposed.sessionTools = exposed.sessionTools || sessionTools;
     exposed.agentTools = exposed.agentTools || agentTools;
     return {
@@ -303,6 +307,7 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
       agentTools,
       exposedCaps: { ...exposed.caps },
       exposedSessionTools: exposed.sessionTools,
+      exposedFinishTool: exposed.finishTool,
       exposedAgentTools: exposed.agentTools,
       exposedFind: exposed.find
     };
@@ -446,6 +451,7 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     port: address.port,
     url: urls.core,
     urls,
+    publication: (surface, observe) => { void buildServer(stableContext(surface), surface, observe).close(); },
     stop: (options = {}) =>
       new Promise<void>((resolve) => {
         // Stop accepting new work, but let requests already accepted by the MCP adapter

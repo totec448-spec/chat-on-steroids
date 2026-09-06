@@ -32,6 +32,7 @@ const mocks = vi.hoisted(() => {
     starts: 0,
     prewarm: vi.fn(async () => undefined),
     endpointStop: vi.fn(async (_options?: { forceAfterMs?: number }) => undefined),
+    publication: vi.fn((surface: string, observe: (name: string, version: string, instructions: string, tools: unknown[]) => void) => observe(`Chat On Steroids ${surface}`, '1', 'instructions', [])),
     endpointStartGate: null as Promise<void> | null,
     endpointStartReached: vi.fn(),
     tunnelStartGate: null as Promise<void> | null,
@@ -59,6 +60,7 @@ vi.mock('../src/main/mcp/server.js', () => ({
     if (mocks.endpointStartGate) await mocks.endpointStartGate;
     return {
       port: 45678,
+      publication: mocks.publication,
       url: 'http://127.0.0.1:45678/mcp/core/core-token',
       urls: {
         core: 'http://127.0.0.1:45678/mcp/core/core-token',
@@ -98,6 +100,7 @@ describe('connection surface state', () => {
     mocks.starts = 0;
     mocks.prewarm.mockClear();
     mocks.endpointStop.mockClear();
+    mocks.publication.mockClear();
     mocks.endpointStartReached.mockClear();
     mocks.endpointStartGate = null;
     mocks.tunnelStartReached.mockClear();
@@ -126,6 +129,22 @@ describe('connection surface state', () => {
     mocks.config.tunnel.tunnelId = '';
     mocks.config.tunnel.binaryPath = '';
     vi.resetModules();
+  });
+
+  it('publishes refresh declarations only for live surfaces and does not rebuild on unchanged health reports', async () => {
+    const connection = await import('../src/main/connection.js');
+    const refresh = await import('../src/main/plugin-refresh.js');
+    expect(refresh.pluginRefreshPublications()).toEqual([]);
+    await connection.connect();
+    expect(refresh.pluginRefreshPublications().map(row => row.surface)).toEqual(['core']);
+    const first = refresh.pluginRefreshPublications()[0]!.schemaId;
+    const calls = mocks.publication.mock.calls.length;
+    mocks.report?.({ state: 'connected', detail: 'Still healthy' });
+    expect(mocks.publication).toHaveBeenCalledTimes(calls);
+    await connection.applySettings();
+    expect(refresh.pluginRefreshPublications()[0]!.schemaId).toBe(first);
+    await connection.disconnect();
+    expect(refresh.pluginRefreshPublications()).toEqual([]);
   });
 
   it('drops the previous tunnel state and URL from connector cards after disconnect', async () => {

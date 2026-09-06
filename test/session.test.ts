@@ -9,6 +9,7 @@
 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { lineDelta, formatDelta } from '../src/main/diffstat.js';
@@ -29,6 +30,7 @@ import {
 import {
   appendEvent,
   autoCompactionReady,
+  observeSessionModel,
   createSession,
   deleteSession,
   endSession,
@@ -177,6 +179,23 @@ describe('session store', () => {
     expect(otherMetaAfterRecentRead.events).toBe(1);
   });
 
+  it('pages backwards over journal and canonical messages without overlapping sequence boundaries', async () => {
+    const session = await createSession({ title: 'backward history' });
+    for (let i = 0; i < 12; i++) await appendEvent(session.id, {
+      time: 1000 + i, source: 'extension', kind: 'user_message', messageId: `back-${i}`,
+      message: { text: `message ${i}`, truncated: false, chars: 10 }
+    } as never);
+    const seen = new Set<number>();
+    let before: number | undefined;
+    for (let i = 0; i < 5; i++) {
+      const page = await readRecentEvents(session.id, 3, { before });
+      if (!page.length) break;
+      expect(page.length).toBeLessThanOrEqual(3);
+      for (const event of page) { expect(seen.has(event.seq)).toBe(false); seen.add(event.seq); }
+      before = Math.min(...page.map(event => event.seq));
+    }
+    expect(seen.size).toBeGreaterThanOrEqual(12);
+  });
   it('counts stable legacy message revisions once when building a recent presentation window', async () => {
     const summary = await createSession({ title: 'legacy recent dedupe' });
     await appendEvent(summary.id, {
@@ -423,6 +442,90 @@ describe('session store', () => {
     expect(await readEvents(summary.id, { limit: 2 })).toHaveLength(2);
   });
 
+  it('keeps the original anchor when provider creation time changes on reload, without merging sibling messages', async () => {
+    const summary = await createSession({ title: 'provider timestamp revision' });
+    const row = (messageId: string, providerMessageId: string) => ({
+      kind: 'assistant_message' as const, source: 'extension' as const, time: 100,
+      messageId, providerMessageId, message: { text: 'Same greeting', chars: 13, truncated: false },
+      final: true, state: 'final' as const
+    });
+    const first = await upsertMessageEvent(summary.id, row('assistant:working:exchange:1000', 'provider-one'));
+    await upsertMessageEvent(summary.id, row('assistant:working:exchange:1100', 'provider-two'));
+    const replay = await upsertMessageEvent(summary.id,
+      { ...row('assistant:working:exchange:2000', 'provider-one'), time: 900 }, { preferTime: true });
+    expect(replay.event.messageId).toBe(first.event.messageId);
+    expect(replay.event.origin).toBe(first.event.origin);
+    expect(replay.event.time).toBe(first.event.time);
+    await flushSessions();
+    const rows = await readEvents(summary.id, { kinds: ['assistant_message'] });
+    expect(rows).toHaveLength(2);
+  });
+
+  it('reads already stored reload aliases once at their original position without deleting source shards', async () => {
+    const summary = await createSession({ title: 'existing reload aliases' });
+    const first = await upsertMessageEvent(summary.id, { kind: 'assistant_message', source: 'extension', time: 100,
+      messageId: 'assistant:working:exchange:1000', providerMessageId: 'actual-provider-uuid',
+      message: { text: 'The old complete answer.', chars: 24, truncated: false }, final: true, state: 'final' });
+    await upsertMessageEvent(summary.id, { kind: 'user_message', source: 'extension', time: 200,
+      messageId: 'new-user', message: { text: 'ghjkghk', chars: 7, truncated: false } });
+    await flushSessions();
+    const duplicate = { ...first.event, seq: first.event.seq + 2, origin: first.event.seq + 2,
+      time: 300, messageId: 'assistant:working:exchange:2000', turnId: undefined };
+    const name = createHash('sha256').update(`assistant_message\u0000${duplicate.messageId}`).digest('hex') + '.json';
+    const file = path.join(sessionsRoot(), summary.id, 'messages', name);
+    await fs.writeFile(file, JSON.stringify(duplicate));
+    resetSessionStoreForTests();
+    const rows = await readEvents(summary.id, { kinds: ['assistant_message', 'user_message'] });
+    expect(rows.map(row => row.kind)).toEqual(['assistant_message', 'user_message']);
+    expect(rows[0]?.kind === 'assistant_message' && rows[0].origin).toBe(first.event.origin);
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).messageId).toBe(duplicate.messageId);
+    await upsertMessageEvent(summary.id, { ...duplicate, message: { text: 'The corrected complete answer.', chars: 30, truncated: false } });
+    resetSessionStoreForTests();
+    expect(await readEvents(summary.id, { kinds: ['assistant_message'] })).toHaveLength(1);
+  });
+
+  it('selects terminal alias content independently of cursor and repairs an otherwise current legacy summary once', async () => {
+    const summary = await createSession({ title: 'legacy alias checkpoint' });
+    const first = await upsertMessageEvent(summary.id, { kind: 'assistant_message', source: 'extension', time: 100,
+      messageId: 'first', providerMessageId: 'same-provider', turnId: 'original-turn', goalEligible: true,
+      message: { text: 'Old final', chars: 9, truncated: false }, final: true, state: 'final' });
+    await flushSessions();
+    const metaFile = path.join(sessionsRoot(), summary.id, 'meta.json');
+    const baseline = JSON.parse(await fs.readFile(metaFile, 'utf8'));
+    const streaming = { ...first.event, messageId: 'streaming-alias', origin: 3, seq: 30, time: 300,
+      message: { text: 'Partial', chars: 7, truncated: false }, final: false, state: 'streaming' as const };
+    const terminal = { ...first.event, messageId: 'final-alias', origin: 4, seq: 20, time: 400,
+      turnId: undefined, goalEligible: undefined,
+      message: { text: 'Latest complete final answer', chars: 28, truncated: false } };
+    const files: string[] = [];
+    for (const event of [streaming, terminal]) {
+      const name = createHash('sha256').update(`assistant_message\u0000${event.messageId}`).digest('hex') + '.json';
+      const file = path.join(sessionsRoot(), summary.id, 'messages', name);
+      await fs.writeFile(file, JSON.stringify(event)); files.push(file);
+    }
+    const extraTokens = eventTokens(streaming) + eventTokens(terminal);
+    const oldMeta = { ...baseline, __historySeq: 30, events: baseline.events + 2,
+      estimatedTokens: baseline.estimatedTokens + extraTokens,
+      contextTokens: baseline.contextTokens + extraTokens - 1 };
+    delete oldMeta.__canonicalProjection;
+    await fs.writeFile(metaFile, JSON.stringify(oldMeta));
+    resetSessionStoreForTests();
+    const recovered = await getSession(summary.id);
+    const expectedTokens = baseline.estimatedTokens - eventTokens(first.event) + eventTokens(terminal);
+    expect(recovered).toMatchObject({ events: baseline.events, estimatedTokens: expectedTokens,
+      contextTokens: Math.max(0, expectedTokens - 1) });
+    const rows = await readEvents(summary.id, { kinds: ['assistant_message'], from: 21 });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ messageId: 'first', time: 100, origin: first.event.origin,
+      seq: 30, turnId: 'original-turn', goalEligible: true, message: terminal.message });
+    const repairedMeta = await fs.readFile(metaFile, 'utf8');
+    resetSessionStoreForTests();
+    expect((await getSession(summary.id))?.estimatedTokens).toBe(expectedTokens);
+    expect(await fs.readFile(metaFile, 'utf8')).toBe(repairedMeta);
+    expect(JSON.parse(await fs.readFile(files[0]!, 'utf8')).seq).toBe(30);
+    expect(JSON.parse(await fs.readFile(files[1]!, 'utf8')).seq).toBe(20);
+  });
+
   it('never downgrades a final canonical message when a stale streaming snapshot arrives later', async () => {
     const summary = await createSession({ title: 'terminal canonical final' });
     const messageId = 'msg-terminal-final';
@@ -457,6 +560,7 @@ describe('session store', () => {
   it('keeps rich HTML when the same canonical prose is reobserved without rendered HTML', async () => {
     const summary = await createSession({ title: 'sparse rich final' });
     const messageId = 'msg-sparse-rich';
+    const providerMessageId = 'bdc7b4c3-5f89-4e1d-a9ca-6c0f6a5ffb4a';
     const message = { text: 'Bold answer', truncated: false, chars: 11 };
     await upsertMessageEvent(summary.id, {
       time: 200,
@@ -465,6 +569,7 @@ describe('session store', () => {
       messageId,
       message,
       renderedHtml: { text: '<p><strong>Bold</strong> answer</p>', truncated: false, chars: 35 },
+      providerMessageId,
       state: 'final',
       final: true
     });
@@ -479,6 +584,7 @@ describe('session store', () => {
     });
 
     expect(repeated.changed).toBe(false);
+    expect(repeated.event.kind === 'assistant_message' && repeated.event.providerMessageId).toBe(providerMessageId);
     expect(repeated.event.kind === 'assistant_message' && repeated.event.renderedHtml?.text).toBe(
       '<p><strong>Bold</strong> answer</p>'
     );
@@ -1294,6 +1400,42 @@ describe('session store', () => {
     expect(await readAsset(summary.id, '../../../config.json')).toBeNull();
   });
 
+  it('keeps the compaction exemption model-scoped even with Infinite Astra enabled', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
+    try {
+      const summary = await createSession({ title: 'Astra policy', conversationId: 'conv-astra' });
+      await appendEvent(summary.id, {
+        time: Date.now(), source: 'extension', kind: 'user_message', messageId: 'astra-u',
+        message: { text: 'x'.repeat(44_000), chars: 44_000, truncated: false }
+      });
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
+      await observeSessionModel(summary.id, 'conv-astra', 'GPT-6 Pro', 200);
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
+      // A delayed old receipt and a foreign document are neither the current selection.
+      await observeSessionModel(summary.id, 'conv-astra', 'gpt-6-sol', 100);
+      await observeSessionModel(summary.id, 'other-chat', 'gpt-6-sol', 300);
+      await flushSessions();
+      resetSessionStoreForTests();
+      expect((await getSession(summary.id))?.selectedModel?.model).toBe('GPT-6 Pro');
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
+      await observeSessionModel(summary.id, 'conv-astra', 'gpt-5.6-sol', 400);
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
+      await saveConfig({ ...base, ui: { ...base.ui, finishTool: true }, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
+      await observeSessionModel(summary.id, 'conv-astra', 'gpt-6-astra', 500);
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
+      await observeSessionModel(summary.id, 'conv-astra', 'gpt-5.6-pro', 510);
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
+      await observeSessionModel(summary.id, 'conv-astra', 'gpt-5.6-sol', 520, 'pro');
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
+      await observeSessionModel(summary.id, 'conv-astra', 'gpt-6', 530, 'pro');
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(false);
+      await observeSessionModel(summary.id, 'conv-astra', 'gpt-5.6-sol', 600);
+      expect(autoCompactionReady(await getSession(summary.id))).toBe(true);
+    } finally { await saveConfig(base); }
+  });
+
   it('keeps automatic compaction ready above the line across interrupted and later turns', async () => {
     const base = defaultConfig();
     await saveConfig({ ...base, compaction: { ...base.compaction, auto: true, autoTokens: 10_000 } });
@@ -1627,6 +1769,13 @@ describe('handoff storage', () => {
     expect(prompt).toMatch(/FAILED \/ UNRESOLVED/i);
     expect(prompt).toMatch(/VERIFICATION/i);
     expect(prompt).toMatch(/completed and verified/i);
+  });
+
+  it('honors the tool-detail setting in the handoff brief without claiming to erase seen history', () => {
+    expect(nativeHandoffPrompt('token', false)).toContain('omit raw tool-call arguments and result bodies');
+    expect(nativeHandoffPrompt('token', false)).toContain('not the history you already saw');
+    expect(nativeHandoffPrompt('token', true)).not.toContain('omit raw tool-call arguments');
+    expect(nativeHandoffPrompt('token', false)).toContain('interim updates');
   });
 });
 
@@ -2097,6 +2246,18 @@ describe('naming the chats this app opened', () => {
    * into the fresh tab before that tab has told the app anything about itself, so the
    * origin is known before the session exists.
    */
+  it('keeps desktop chat titles and durable creation provenance without treating them as resumes', async () => {
+    const opened = await recordChatObservations('desktop-created', [{ kind: 'user_message', time: Date.now(), text: 'Inspect my project', messageId: 'first-user' }]);
+    const before = (await getSession(opened.sessionId!))!.title;
+    await noteChatOrigin('desktop-created', { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
+    expect((await getSession(opened.sessionId!))?.origin?.kind).toBe('desktop');
+    expect((await getSession(opened.sessionId!))?.title).toBe(before);
+    expect(originTitle({ kind: 'desktop', fromSessionId: null, agentId: null, task: '' }, before)).toBe(before);
+    await noteChatOrigin('desktop-before-recording', { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
+    const fresh = await recordChatObservations('desktop-before-recording', [{ kind: 'user_message', time: Date.now(), text: 'Keep my authored title', messageId: 'next-user' }]);
+    expect((await getSession(fresh.sessionId!))?.title).toBe('Keep my authored title');
+  });
+
   it('names the session at creation when the origin arrives first', async () => {
     const source = await createSession({ title: 'Fix the bridge' });
     await noteChatOrigin('conv-fresh', {
@@ -2736,6 +2897,28 @@ describe('folding redrawn commentary', () => {
       ...(origin === undefined ? {} : { origin }),
       message: { text, truncated: false, chars: text.length }
     }) as SessionEvent;
+
+  it('reconciles a stored Stop status from its exact stopped turn without moving or duplicating the row', () => {
+    const pending: SessionEvent = { ...progress(2, 'finish-release:stop-one', 'Stop requested. ChatGPT has not yet confirmed that generation stopped.'), source: 'app', turnId: 'stop-one' };
+    const stopped: SessionEvent = { seq: 4, time: 4, source: 'extension', kind: 'turn_end', turnId: 'stop-one', outcome: 'stopped' };
+    const rows = [pending, stopped];
+    const folded = foldProgress(rows);
+    expect(folded).toHaveLength(2);
+    expect(folded[0]).toMatchObject({ seq: 2, time: 2, progressId: 'finish-release:stop-one', turnId: 'stop-one', message: { text: 'Stopped. ChatGPT confirmed that generation stopped.', truncated: false } });
+    expect(foldProgress(folded)).toEqual(folded);
+    expect(pending.kind === 'progress' && pending.message.text).toContain('not yet confirmed');
+  });
+  it.each(['completed', 'interrupted', 'error', 'unknown'])('does not confirm Stop from a %s outcome', outcome => {
+    const pending: SessionEvent = { ...progress(2, 'finish-release:stop-one', 'Stop requested. Still unconfirmed.'), source: 'app', turnId: 'stop-one' };
+    const end = { seq: 4, time: 4, source: 'extension', kind: 'turn_end', turnId: 'stop-one', outcome } as SessionEvent;
+    expect(foldProgress([pending, end])[0]).toEqual(pending);
+  });
+  it('never lets another turn or app-authored terminal evidence confirm a pending Stop', () => {
+    const pending: SessionEvent = { ...progress(2, 'finish-release:stop-one', 'Stop requested. Still unconfirmed.'), source: 'app', turnId: 'stop-one' };
+    const other: SessionEvent = { seq: 4, time: 4, source: 'extension', kind: 'turn_end', turnId: 'other', outcome: 'stopped' };
+    const synthetic: SessionEvent = { ...other, source: 'app', turnId: 'stop-one' };
+    expect(foldProgress([pending, other, synthetic])[0]).toEqual(pending);
+  });
 
   it('keeps the newest text at the earliest record’s position', () => {
     const folded = foldProgress([

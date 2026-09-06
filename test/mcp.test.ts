@@ -3080,6 +3080,29 @@ describe('exec_command and write_stdin', () => {
     expect(brokenText).toContain('Batch: command 2 exited 3; the other command exited 0.');
   }, 60_000);
 
+  it.skipIf(!IS_WINDOWS)('scopes parser recovery to its failed batch command after an earlier mutation', async () => {
+    const reply = await core('tools/call', {
+      name: 'exec_command',
+      arguments: {
+        cmds: [
+          "Set-Content -LiteralPath batch-parser-proof.txt -Value saved; Write-Output 'ParserError: source text only'",
+          "Write-Output 'unterminated"
+        ],
+        workdir: '/workspace',
+        yield_time_ms: 8_000
+      }
+    });
+    const text = textOf(reply);
+    expect(text).toContain('Batch: command 2 exited 1; the other command exited 0.');
+    expect(text).toContain('Note: Command 2: PowerShell parsed none of the command');
+    expect(text).not.toContain('Note: Command 1:');
+    expect(text).not.toContain('Note: PowerShell parsed none');
+    const proof = await core('tools/call', {
+      name: 'read', arguments: { paths: ['/workspace/batch-parser-proof.txt'] }
+    });
+    expect(textOf(proof)).toContain('saved');
+  });
+
   it('uses Codex response and session semantics for quick and interactive commands', async () => {
     const quick = await core('tools/call', {
       name: 'exec_command',

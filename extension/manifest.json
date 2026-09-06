@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Chat On Steroids companion",
-  "version": "2.0.5",
+  "version": "2.0.6",
   "description": "Records your ChatGPT session into the local Chat On Steroids app and labels its MCP tool calls with what they actually did.",
   "minimum_chrome_version": "116",
-  "permissions": ["storage", "scripting", "alarms"],
+  "permissions": [
+    "storage",
+    "scripting",
+    "alarms"
+  ],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
@@ -20,16 +24,40 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["chatgpt-dom.js", "content.js"],
-      "css": ["overlay.css"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "chatgpt-dom.js",
+        "content.js"
+      ],
+      "css": [
+        "overlay.css"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["fiber.js"],
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "fiber.js"
+      ],
       "world": "MAIN",
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*"
+      ],
+      "js": [
+        "usage.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_start"
     }
   ],
   "icons": {

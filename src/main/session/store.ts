@@ -22,12 +22,14 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
+import { isProModel } from '../../shared/chat-models.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type {
   AssetRef,
   Handoff,
   NewSessionEvent,
+  ReasoningEffort,
   SessionEvent,
   SessionOrigin,
   SessionSummary,
@@ -201,11 +203,15 @@ type NewMessageEvent = MessageEvent extends infer Event
 
 /** Internal checkpoint field persisted beside the public summary projection. */
 const META_HISTORY_SEQ = '__historySeq';
-type PersistedSummary = SessionSummary & { [META_HISTORY_SEQ]?: number };
+// Alias shards remain forensic history, so the watermark alone cannot tell whether
+// their duplicate token/event contributions have already been removed from metadata.
+const META_CANONICAL_PROJECTION = '__canonicalProjection';
+type PersistedSummary = SessionSummary & { [META_HISTORY_SEQ]?: number; [META_CANONICAL_PROJECTION]?: number };
 interface MetaCheckpoint {
   summary: SessionSummary;
   /** Null means metadata written by a version that did not yet persist a history watermark. */
   historySeq: number | null;
+  canonicalProjectionCurrent: boolean;
   /** Derived migration signal; never persisted. */
   outcomeCountersMissing: boolean;
   /** Derived final-message activity boundary was added after the original summaries. */
@@ -257,6 +263,7 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     lastCommittedResumeHandoffId: null,
     lastTurnOutcome: null,
     activeTurnId: null,
+    finishTurn: null,
     agents: [],
     origin: null
   };
@@ -273,7 +280,7 @@ async function writeSummary(summary: SessionSummary, historySeq: number): Promis
   const target = path.join(dir, 'meta.json');
   const backup = path.join(dir, 'meta.backup.json');
   const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  const persisted: PersistedSummary = { ...summary, [META_HISTORY_SEQ]: historySeq };
+  const persisted: PersistedSummary = { ...summary, [META_HISTORY_SEQ]: historySeq, [META_CANONICAL_PROJECTION]: 1 };
   await fs.mkdir(dir, { recursive: true });
   try {
     await fs.writeFile(tmp, JSON.stringify(persisted, null, 2), 'utf8');
@@ -382,6 +389,10 @@ export async function createSession(options: {
   const id = `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
   const summary = emptySummary(id, options.title?.trim() || 'ChatGPT session', options.conversationId ?? null);
   summary.origin = options.origin ?? null;
+  if (options.origin?.fromSessionId) {
+    const source = await getSession(options.origin.fromSessionId);
+    if (source?.projectId) summary.projectId = source.projectId;
+  }
   // Invalidate before exposing the in-flight live entry. A cached miss must never hide a
   // session that this process has started creating, even while its first durable write awaits.
   if (summary.conversationId) missingCurrentConversations.delete(summary.conversationId);
@@ -472,7 +483,7 @@ async function sealTornTail(id: string): Promise<void> {
 }
 
 /** Canonical message snapshot file. Unknown/legacy shapes are ignored, never guessed. */
-async function readCanonicalMessages(id: string): Promise<Map<string, MessageEvent>> {
+async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void): Promise<Map<string, MessageEvent>> {
   const out = new Map<string, MessageEvent>();
   try {
     const raw = await fs.readFile(path.join(sessionDir(id), 'messages.json'), 'utf8');
@@ -515,6 +526,34 @@ async function readCanonicalMessages(id: string): Promise<Map<string, MessageEve
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logWarn(`session ${id}: canonical message shards unreadable`);
   }
+  // Older builds persisted reload timestamp aliases as separate shards. Project
+  // those exact provider UUIDs as one message without deleting forensic history.
+  // First observation owns chronology; the latest terminal revision owns content.
+  const providers = new Map<string, Array<[string, Extract<MessageEvent, { kind: 'assistant_message' }>]>>();
+  for (const [key, event] of [...out].sort(([, a], [, b]) => (a.origin ?? a.seq) - (b.origin ?? b.seq))) {
+    if (event.kind !== 'assistant_message' || !event.providerMessageId) continue;
+    const group = providers.get(event.providerMessageId) ?? [];
+    group.push([key, event]);
+    providers.set(event.providerMessageId, group);
+  }
+  for (const group of providers.values()) {
+    if (group.length < 2) continue;
+    aliasesCollapsed?.();
+    const [firstKey, first] = group[0]!;
+    // Keep the winning content's own seq intact until selection finishes: a later
+    // streaming alias advances the read cursor but must not outrank a terminal revision.
+    let latest = first, seq = first.seq;
+    for (const [key, event] of group) {
+      const latestFinal = latest.final === true || latest.state === 'final';
+      const eventFinal = event.final === true || event.state === 'final';
+      if (latestFinal !== eventFinal ? eventFinal : event.seq > latest.seq) latest = event;
+      seq = Math.max(seq, event.seq);
+      out.delete(key);
+    }
+    out.set(firstKey, { ...latest, messageId: first.messageId, origin: first.origin ?? first.seq,
+      time: first.time, seq, turnId: group.find(([, event]) => event.turnId)?.[1].turnId,
+      ...(group.some(([, event]) => event.goalEligible === true) ? { goalEligible: true } : {}) });
+  }
   return out;
 }
 
@@ -548,7 +587,8 @@ async function rebuildSummaryFromHistory(
   id: string,
   messages: Map<string, MessageEvent>,
   checkpoint: SessionSummary | null,
-  historySeq: number
+  historySeq: number,
+  preserveAttachmentTurn = false
 ): Promise<SessionSummary> {
   const rebuilt = emptySummary(id, 'Recovered session', null);
   let sawProjected = false;
@@ -645,7 +685,8 @@ async function rebuildSummaryFromHistory(
         lastHandoffId: rebuilt.lastHandoffId,
         lastHandoffAt: rebuilt.lastHandoffAt,
         lastTurnOutcome: rebuilt.lastTurnOutcome,
-        activeTurnId: rebuilt.activeTurnId ?? null,
+        activeTurnId: preserveAttachmentTurn ? checkpoint.activeTurnId ?? null : rebuilt.activeTurnId ?? null,
+        finishTurn: rebuilt.finishTurn?.conversationId === checkpoint.conversationId ? rebuilt.finishTurn : null,
         agents: [...new Set([...checkpoint.agents, ...rebuilt.agents])]
       }
     : rebuilt;
@@ -668,7 +709,8 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
   const existing = reconciling.get(id);
   if (existing) return existing;
   const work = (async () => {
-    const messages = await readCanonicalMessages(id);
+    let aliasesCollapsed = false;
+    const messages = await readCanonicalMessages(id, () => { aliasesCollapsed = true; });
     let messageSeq = 0;
     for (const event of messages.values()) messageSeq = Math.max(messageSeq, event.seq);
     const journalSeq = await lastSeqOnDisk(id);
@@ -678,8 +720,10 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     // A pre-taxonomy checkpoint can have a current watermark but stale outcome classification.
     if (
       checkpoint?.historySeq === historySeq &&
+      (!aliasesCollapsed || checkpoint.canonicalProjectionCurrent) &&
       !checkpoint.outcomeCountersMissing &&
-      !checkpoint.activityBoundaryMissing
+      !checkpoint.activityBoundaryMissing &&
+      checkpoint.summary.finishTurn !== undefined
     ) {
       return { summary: checkpoint.summary, messages, historySeq, reconciled: false };
     }
@@ -691,14 +735,15 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
         lastToolCallAt: null,
         lastAssistantFinalAt: null,
         lastTurnEndAt: null,
-        lastFinishReportAt: null
+        lastFinishReportAt: null,
+        finishTurn: null
       };
       await writeSummary(summary, 0);
       return { summary, messages, historySeq: 0, reconciled: true };
     }
     if (!checkpoint && historySeq === 0) return null;
 
-    const summary = await rebuildSummaryFromHistory(id, messages, checkpoint?.summary ?? null, historySeq);
+    const summary = await rebuildSummaryFromHistory(id, messages, checkpoint?.summary ?? null, historySeq, checkpoint?.historySeq === historySeq);
     return { summary, messages, historySeq, reconciled: true };
   })();
   reconciling.set(id, work);
@@ -759,6 +804,15 @@ async function ensureOpen(id: string): Promise<OpenSession> {
   }
 }
 
+/** A hold-call result or app status is not evidence of new work. */
+function noteFinishWork(summary: SessionSummary, event: SessionEvent): void {
+  if (!summary.finishTurn || (event.turnId && event.turnId !== summary.finishTurn.turnId)) return;
+  const meaningful = event.kind === 'user_message' || event.kind === 'assistant_message' ||
+    (event.kind === 'progress' && event.source !== 'app') ||
+    (event.kind === 'tool_call' && !['keep_astra_on_forever', 'session_finish'].includes(event.call.tool));
+  if (meaningful) summary.finishTurn = { ...summary.finishTurn, workSeq: Math.max(summary.finishTurn.workSeq, event.seq) };
+}
+
 function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   summary.events += 1;
   // Never backwards. A tool call is written once the app knows which chat it belongs to,
@@ -793,7 +847,33 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
     summary.lastTurnOutcome = event.outcome;
     summary.lastTurnEndAt = Math.max(summary.lastTurnEndAt ?? 0, event.time);
   }
-  if (event.kind === 'turn_start') summary.activeTurnId = event.turnId ?? `seq-${event.seq}`;
+  if (event.kind === 'turn_start') {
+    summary.activeTurnId = event.turnId ?? `seq-${event.seq}`;
+    if (summary.finishTurn?.turnId !== summary.activeTurnId) summary.finishTurn = {
+      turnId: summary.activeTurnId, conversationId: summary.conversationId, startedAt: event.time,
+      notified: false, released: false, decisionRevision: null, workSeq: 0, decisionSeq: 0, decisionInputRevision: null
+    };
+  }
+  if (event.kind === 'progress' && event.source === 'app' && event.turnId && summary.finishTurn?.turnId === event.turnId) {
+    const finish = { ...summary.finishTurn };
+    summary.finishTurn = finish;
+    // IDs cover already-shipped event rows; new rows additionally carry typed control.
+    if (event.progressId === `finish:${event.turnId}` || event.finishControl?.state === 'notified') finish.notified = true;
+    const prefix = `finish-goal:${event.turnId}:`;
+    const revision = event.finishControl?.state === 'decision' ? event.finishControl.revision
+      : event.progressId?.startsWith(prefix) ? event.progressId.slice(prefix.length) : null;
+    if (revision && /^[a-f0-9]{64}$/.test(revision) && finish.decisionRevision !== revision) {
+      finish.decisionRevision = revision;
+      finish.decisionAt = event.time;
+      finish.decisionSeq = Number.isSafeInteger(event.finishControl?.workSeq) ? event.finishControl!.workSeq! : event.seq;
+      finish.decisionInputRevision = event.finishControl?.inputRevision ?? null;
+    } else if (revision === finish.decisionRevision && event.finishControl?.state === 'decision' && Number.isSafeInteger(event.finishControl.workSeq)) {
+      finish.decisionSeq = Math.max(finish.decisionSeq, event.finishControl.workSeq!);
+    }
+    if (event.finishControl) finish.conversationId = event.finishControl.conversationId;
+    if (event.finishControl?.state === 'released') finish.released = true;
+  }
+  noteFinishWork(summary, event);
   if (event.kind === 'turn_end' && (!event.turnId || summary.activeTurnId === event.turnId)) summary.activeTurnId = null;
   if (event.kind === 'handoff') {
     summary.lastHandoffId = event.handoffId;
@@ -821,10 +901,18 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
  * once a stopped/settled chat asks for its handoff prompt; pre-barrier refusal owns no durable
  * state and may be attempted by a later generation.
  */
+export function automaticCompactionAllowed(summary?: SessionSummary | null): boolean {
+  const config = getConfig();
+  const selected = summary?.selectedModel;
+  // The selected model owns this exemption; Infinite Astra with Sol still compacts.
+  return config.compaction.auto &&
+    !(selected?.conversationId === summary?.conversationId && isProModel(selected?.model, selected?.reasoningEffort));
+}
+
 export function autoCompactionReady(summary: SessionSummary | null | undefined): boolean {
   if (!summary) return false;
   const config = getConfig().compaction;
-  return config.auto && config.autoTokens > 0 && summary.contextTokens >= config.autoTokens;
+  return automaticCompactionAllowed(summary) && config.autoTokens > 0 && summary.contextTokens >= config.autoTokens;
 }
 
 /**
@@ -897,8 +985,21 @@ export function upsertMessageEvent(
   if (!directKey) throw new Error('Canonical message update requires ChatGPT messageId');
   return ensureOpen(sessionId).then((entry) => {
     const write = entry.queue.then(async () => {
-      const key = directKey;
+      // Provider create_time can change after a tab reload while the actual message
+      // UUID stays identical. Preserve the first canonical anchor on that exact
+      // evidence; never collapse distinct authored segments by working-turn tuple
+      // or matching text. Legacy observations without a provider UUID keep their key.
+      const providerMessageId = event.kind === 'assistant_message' ? event.providerMessageId : undefined;
+      const providerMatches = providerMessageId
+        ? [...entry.messages.entries()].filter(([, candidate]) => candidate.kind === 'assistant_message' &&
+            candidate.providerMessageId === providerMessageId)
+        : [];
+      const key = !entry.messages.has(directKey) && providerMatches.length === 1 ? providerMatches[0]![0] : directKey;
       const previous = entry.messages.get(key);
+      // A changed provider timestamp caused this alias; it is not a correction of
+      // the original anchor. Same-key DOM-to-Fiber timestamp promotion still applies.
+      const preferTime = options.preferTime === true && key === directKey;
+      if (previous && key !== directKey) event = { ...event, messageId: previous.messageId };
       // Final is terminal for one canonical ChatGPT message. The page can briefly re-report
       // an older streaming DOM snapshot after settling/remounting; accepting that snapshot
       // would turn a completed answer back into a partial one and could replace its text.
@@ -927,6 +1028,7 @@ export function upsertMessageEvent(
               // The producer already supplied the stable website identity. Keep that exact
               // identity through every revision; a different id is a different logical row.
               messageId: previous.messageId,
+              providerMessageId: event.providerMessageId ?? previous.providerMessageId,
               // `final` is a compatibility mirror of state, not an independent truth.
               state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
               final: event.state === 'final' || event.final === true,
@@ -942,7 +1044,14 @@ export function upsertMessageEvent(
                 ? { renderedHtml: previous.renderedHtml }
                 : {})
             }
-          : event;
+          : previous?.kind === 'user_message' && event.kind === 'user_message'
+            ? { ...event, inputId: event.inputId ?? previous.inputId,
+                authoredText: event.authoredText ?? previous.authoredText,
+                inputDelivery: previous.inputDelivery === 'confirmed' ? 'confirmed' : event.inputDelivery ?? previous.inputDelivery,
+                model: event.model ?? previous.model,
+                reasoningEffort: event.reasoningEffort ?? previous.reasoningEffort,
+                assets: event.assets ?? previous.assets }
+            : event;
       // A canonical assistant message belongs to exactly one generation permanently. Ownership
       // may still be *promoted* from "not known yet" to a durable generation id when the
       // recorder learns it late, but a settled assistant answer may never move to another turn.
@@ -966,15 +1075,20 @@ export function upsertMessageEvent(
         previous &&
         previous.kind === nextEvent.kind &&
         sameMessage &&
+        nextEvent.model === previous.model &&
+        nextEvent.reasoningEffort === previous.reasoningEffort &&
         (previous.kind !== 'assistant_message' ||
           (nextEvent.kind === 'assistant_message' &&
             storedTextEqual(previous.renderedHtml, nextEvent.renderedHtml) &&
             previous.state === nextEvent.state &&
             previous.final === nextEvent.final &&
-            previous.goalEligible === nextEvent.goalEligible)) &&
+            previous.goalEligible === nextEvent.goalEligible &&
+            previous.providerMessageId === nextEvent.providerMessageId)) &&
+        (nextEvent.kind !== 'user_message' || previous.kind !== 'user_message' ||
+          (nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets))) &&
         (previous.turnId ?? undefined) === settledTurnId &&
         (nextEvent.agent === undefined || previous.agent === nextEvent.agent) &&
-        (!options.preferTime || previous.time === nextEvent.time)
+        (!preferTime || previous.time === nextEvent.time)
       ) {
         return { event: previous, changed: false };
       }
@@ -984,7 +1098,7 @@ export function upsertMessageEvent(
         // A page-model authored timestamp is stronger than a DOM first-sight timestamp. The
         // recorder opts into that correction explicitly; ordinary revisions still keep the
         // original first-seen time forever.
-        time: options.preferTime ? nextEvent.time : previous?.time ?? nextEvent.time,
+        time: preferTime ? nextEvent.time : previous?.time ?? nextEvent.time,
         ...(settledTurnId === undefined ? {} : { turnId: settledTurnId }),
         ...(previous?.agent && !nextEvent.agent ? { agent: previous.agent } : {}),
         ...(nextEvent.kind === 'assistant_message' || nextEvent.kind === 'user_message'
@@ -1006,6 +1120,7 @@ export function upsertMessageEvent(
         entry.summary.estimatedTokens = Math.max(0, entry.summary.estimatedTokens + delta);
         entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens + delta);
         entry.summary.updatedAt = Math.max(entry.summary.updatedAt, nextEvent.time);
+        noteFinishWork(entry.summary, full);
         if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final')) {
           entry.summary.lastAssistantFinalAt = Math.max(
             entry.summary.lastAssistantFinalAt ?? 0,
@@ -1133,7 +1248,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
 export async function readRecentEvents(
   sessionId: string,
   limit: number,
-  options: Pick<ReadOptions, 'kinds' | 'agent'> & { maxBytes?: number } = {}
+  options: Pick<ReadOptions, 'kinds' | 'agent'> & { maxBytes?: number; before?: number } = {}
 ): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
   await flushSession(sessionId);
@@ -1151,7 +1266,9 @@ export async function readRecentEvents(
   const legacyMessageKeys = new Set<string>();
   const rawTail: SessionEvent[] = [];
   let damaged = 0;
-  const readBudget = Math.max(64 * 1024, Math.min(MAX_RECENT_READ_BYTES, options.maxBytes ?? MAX_RECENT_READ_BYTES));
+  // Explicit history navigation may seek beyond the recent-tail budget. It streams backwards
+  // in fixed chunks and retains only this page, never materializing the complete journal.
+  const readBudget = options.before === undefined ? Math.max(64 * 1024, Math.min(MAX_RECENT_READ_BYTES, options.maxBytes ?? MAX_RECENT_READ_BYTES)) : Number.POSITIVE_INFINITY;
 
   const accept = (line: Buffer): void => {
     if (rawTail.length >= cap || line.length === 0) return;
@@ -1170,6 +1287,7 @@ export async function readRecentEvents(
       damaged += 1;
       return;
     }
+    if (options.before !== undefined && parsed.seq >= options.before) return;
     if (options.kinds && !options.kinds.includes(parsed.kind)) return;
     if (options.agent && parsed.agent !== options.agent) return;
     if (parsed.kind === 'user_message' || parsed.kind === 'assistant_message') {
@@ -1225,6 +1343,7 @@ export async function readRecentEvents(
 
   const candidates: SessionEvent[] = [...rawTail];
   for (const message of messages.values()) {
+    if (options.before !== undefined && message.seq >= options.before) continue;
     if (options.kinds && !options.kinds.includes(message.kind)) continue;
     if (options.agent && message.agent !== options.agent) continue;
     candidates.push(message);
@@ -1343,8 +1462,23 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
       Number.isSafeInteger(parsed[META_HISTORY_SEQ]) && (parsed[META_HISTORY_SEQ] as number) >= 0
         ? (parsed[META_HISTORY_SEQ] as number)
         : null;
-    const { [META_HISTORY_SEQ]: _historySeq, ...publicFields } = parsed;
+    const { [META_HISTORY_SEQ]: _historySeq, [META_CANONICAL_PROJECTION]: canonicalProjection, ...publicFields } = parsed;
     const publicSummary = publicFields as SessionSummary;
+    const selected = publicSummary.selectedModel;
+    if (selected !== undefined && (!selected || typeof selected !== 'object' ||
+        typeof selected.conversationId !== 'string' || typeof selected.model !== 'string' ||
+        !/^[a-zA-Z0-9 ._-]{1,80}$/.test(selected.model) || !Number.isFinite(selected.observedAt))) {
+      delete publicSummary.selectedModel;
+    }
+    const finish = publicSummary.finishTurn;
+    if (finish !== undefined && finish !== null && (!finish || typeof finish !== 'object' ||
+        typeof finish.turnId !== 'string' || !Number.isFinite(finish.startedAt) ||
+        typeof finish.notified !== 'boolean' || typeof finish.released !== 'boolean' ||
+        !Number.isSafeInteger(finish.workSeq) || finish.workSeq < 0 || !Number.isSafeInteger(finish.decisionSeq) || finish.decisionSeq < 0 ||
+        !(finish.decisionInputRevision === null || (typeof finish.decisionInputRevision === 'string' && /^[a-f0-9]{64}$/.test(finish.decisionInputRevision))) ||
+        !(finish.conversationId === null || typeof finish.conversationId === 'string') ||
+        !(finish.decisionRevision === null || /^[a-f0-9]{64}$/.test(finish.decisionRevision)))) delete publicSummary.finishTurn;
+
     // A meta.json written before agents, app-opened chats or the session lineage existed
     // has no such field. A session recorded before the lineage was a single chat by
     // definition, and everything it holds was in that chat's context, so both defaults are
@@ -1356,6 +1490,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
     const activityBoundaryMissing = !Object.prototype.hasOwnProperty.call(publicSummary, 'lastAssistantFinalAt');
     return {
       historySeq,
+      canonicalProjectionCurrent: canonicalProjection === 1,
       outcomeCountersMissing,
       activityBoundaryMissing,
       summary: {
@@ -1658,6 +1793,7 @@ export async function listSessionPage(options: {
   // Open summaries are authoritative between debounced metadata writes. There are normally one
   // or a handful, so overlay them explicitly instead of rebuilding/sorting every retained row.
   for (const entry of open.values()) {
+    if (entry.summary.origin?.kind === 'helper') continue;
     if (options.cursor && !comesAfterCursor(entry.summary, options.cursor)) continue;
     candidates.push({ ...entry.summary, chatIds: [...entry.summary.chatIds], agents: [...entry.summary.agents] });
   }
@@ -1670,7 +1806,7 @@ export async function listSessionPage(options: {
   for (const id of catalog.orderedIds) {
     if (openIds.has(id)) continue;
     const summary = catalog.summaries.get(id);
-    if (!summary || (options.cursor && !comesAfterCursor(summary, options.cursor))) continue;
+    if (!summary || summary.origin?.kind === 'helper' || (options.cursor && !comesAfterCursor(summary, options.cursor))) continue;
     if (durableEligible > limit) {
       durableHasMore = true;
       break;
@@ -1684,8 +1820,11 @@ export async function listSessionPage(options: {
   const last = sessions.at(-1);
   const hasMore = durableHasMore || candidates.length > sessions.length;
   const nextCursor = hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null;
-  let total = catalog.summaries.size;
-  for (const id of openIds) if (!catalog.summaries.has(id)) total += 1;
+  let total = 0;
+  for (const summary of catalog.summaries.values()) {
+    if (!openIds.has(summary.id) && summary.origin?.kind !== 'helper') total += 1;
+  }
+  for (const entry of open.values()) if (entry.summary.origin?.kind !== 'helper') total += 1;
   return { sessions, total, nextCursor };
 }
 
@@ -1695,6 +1834,11 @@ export async function listSessions(): Promise<SessionSummary[]> {
 }
 
 /** Full bounded compatibility/model-facing view. Never use it for retention or identity. */
+/** Usage shares the live metadata index; it must not reopen every meta.json per visit. */
+export async function listUsageSessions(): Promise<SessionSummary[]> {
+  return readEverySummary();
+}
+
 export async function listAllSessions(): Promise<SessionSummary[]> {
   return readAllSummaries();
 }
@@ -1881,6 +2025,41 @@ export async function renameSession(id: string, title: string): Promise<void> {
   });
 }
 
+/** Persist current provider selection independently of recording/history replay. */
+export async function observeSessionModel(
+  id: string, conversationId: string, model: string, observedAt: number,
+  reasoningEffort?: ReasoningEffort
+): Promise<void> {
+  if (!/^[a-zA-Z0-9 ._-]{1,80}$/.test(model) || !Number.isFinite(observedAt)) return;
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'model-selection', async () => {
+    // Late old-document reports cannot change the replacement's policy. Repeated observations
+    // and delayed delivery receipts cannot overwrite a newer provider selection either.
+    if (entry.summary.conversationId !== conversationId ||
+        observedAt < (entry.summary.selectedModel?.observedAt ?? 0)) return;
+    const selectedModel = { conversationId, model, observedAt, ...(reasoningEffort ? { reasoningEffort } : {}) };
+    if (JSON.stringify(entry.summary.selectedModel) === JSON.stringify(selectedModel)) return;
+    const staged = { ...entry.summary, selectedModel };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/** Bind once before publishing project work; a task never silently changes folders. */
+export async function bindSessionProject(id: string, projectId: string): Promise<void> {
+  if (!/^[a-f0-9-]{36}$/i.test(projectId)) throw new Error('Invalid project id');
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'project', async () => {
+    if (entry.summary.projectId === projectId) return;
+    if (entry.summary.projectId) throw new Error('Session already belongs to another project');
+    const staged = { ...entry.summary, projectId };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
 /**
  * Records that this app opened the chat, and names the session accordingly.
  *
@@ -1890,11 +2069,14 @@ export async function renameSession(id: string, title: string): Promise<void> {
  * name contradicts.
  */
 export async function setSessionOrigin(id: string, origin: SessionOrigin, title: string): Promise<void> {
+  const inheritedProject = origin.fromSessionId ? (await getSession(origin.fromSessionId))?.projectId : undefined;
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'origin write', async () => {
-    entry.summary.origin = origin;
-    entry.summary.title = title.slice(0, 120);
-    await writeMeta(entry);
+    if (inheritedProject && entry.summary.projectId && entry.summary.projectId !== inheritedProject) throw new Error('Session origin belongs to another project');
+    const staged = { ...entry.summary, origin, title: title.slice(0, 120), ...(inheritedProject ? { projectId: inheritedProject } : {}) };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
   });
 }
 
@@ -1957,6 +2139,7 @@ export async function rebindSession(
         : [...entry.summary.chatIds, toConversationId],
       contextTokens: 0,
       activeTurnId: null,
+      finishTurn: null,
       ...(committedResumeHandoffId !== undefined
         ? { lastCommittedResumeHandoffId: committedResumeHandoffId }
         : {}),
