@@ -2,6 +2,16 @@
 > **Set ChatGPT to English!!!!**
 >
 > Set ChatGPT's interface language to **English**, then reload your ChatGPT tabs and retry model discovery in Chat On Steroids. The current model-picker integration relies on English UI labels. Other languages can leave the model list empty even when the extension is connected and all setup checks are green.
+>
+> **Quick fix if the model picker isn't showing:**
+>
+> 1. Open Chat On Steroids or click the model picker's **Refresh** button.
+> 2. Switch to the **Chrome window and ChatGPT tab that the app opens**.
+> 3. If ChatGPT shows a model list instead of the thinking-effort slider, click **GPT-5.6 Sol**, even if it already looks selected.
+> 4. Return to Chat On Steroids and **refresh the model picker again**.
+>
+> This workaround has restored the model picker for a user whose setup checks were all green. If it still does not appear, please report it in [Issues](../../issues).
+
 
 <div align="center">
   <img src="extension/icons/icon128.png" width="88" alt="Chat On Steroids icon" />
