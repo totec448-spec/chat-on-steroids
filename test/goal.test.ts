@@ -26,7 +26,7 @@ vi.mock('electron', () => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
 const { initDurableStore } = await import('../src/main/durable.js');
-const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests } = await import(
+const { appendEvent, createSession, observeSessionModel, initSessionStore, resetSessionStoreForTests } = await import(
   '../src/main/session/store.js'
 );
 const goal = await import('../src/main/goal.js');
@@ -84,13 +84,30 @@ beforeEach(async () => {
   goal.resetGoalStateForTests();
   await saveConfig({
     ...defaultConfig(),
-    goal: { ...defaultConfig().goal, enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' }
+    goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' }
   });
   await setSecret('openRouterApiKey', 'sk-or-test');
 });
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+});
+
+it('keeps a withdrawn synthetic reply revoked when the deletion write fails and Goal is re-armed', async () => {
+  const conversationId = 'deletion-failure-pro';
+  const session = await createSession({ conversationId, title: 'Synthetic revocation' });
+  await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'silence:old', turnId: 'g-silence-old', eventSeq: 1, blocked: false });
+  goal.startGoalDraft({ conversationId, sessionId: session.id, turnId: 'g-silence-old', deferStart: true });
+  const durable = await import('../src/main/durable.js');
+  const write = durable.writeDurableNow;
+  const spy = vi.spyOn(durable, 'writeDurableNow').mockImplementationOnce(write).mockRejectedValueOnce(new Error('deletion write failed'));
+  try {
+    await expect(goal.withdrawSilenceGoalReplyNow(conversationId, 'silence:old')).rejects.toThrow('deletion write failed');
+    await goal.setGoalReplyActiveNow(conversationId, false);
+    await goal.setGoalReplyActiveNow(conversationId, true);
+    expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    expect(goal.goalViewFor(conversationId)).toBeNull();
+  } finally { spy.mockRestore(); }
 });
 
 describe('the instruction the goal model is given', () => {
@@ -186,6 +203,30 @@ describe('the instruction the goal model is given', () => {
 });
 
 describe('what leaves this machine', () => {
+  it.each([false, true])('shares the bounded tool-context policy with fast finish follow-ups (%s)', async (includeToolCalls) => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'api', loopBackend: 'api', includeToolCalls } });
+    const session = await createSession({ title: 'tool context', conversationId: `tool-context-${includeToolCalls}` });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Check the project', chars: 17, truncated: false } });
+    await appendEvent(session.id, { time: 110, source: 'extension', kind: 'assistant_message', messageId: 'interim-one', final: false,
+      message: { text: 'Inspecting the project', chars: 22, truncated: false } });
+    await appendEvent(session.id, { time: 120, source: 'mcp', kind: 'tool_call', call: {
+      callId: 'context-call', tool: 'read', attribution: 'request_id', requestId: 'context-request', conversationId: session.conversationId, attributionMethod: 'request_id', outcome: 'ok', durationMs: 1,
+      args: { text: '{"path":"/project/example"}', chars: 27, truncated: false },
+      result: { text: 'tool-result-evidence', chars: 20, truncated: false },
+      summary: { kind: 'read', tone: 'neutral', title: 'Read example' }
+    } });
+    const projected = await goal.conversationMessages(session.id);
+    expect(projected.some(message => message.content.includes('Inspecting the project'))).toBe(true);
+    expect(projected.some(message => message.content.includes('tool-result-evidence'))).toBe(includeToolCalls);
+    expect(projected.some(message => message.content.includes('/project/example'))).toBe(includeToolCalls);
+    let sent = '';
+    globalThis.fetch = vi.fn(async (_url, init) => { sent = String(init?.body); return decision('continue', 'Continue checking the project.'); });
+    await goal.draftFastFollowup(session.id);
+    expect(sent.includes('Inspecting the project')).toBe(true);
+    expect(sent.includes('tool-result-evidence')).toBe(includeToolCalls);
+    expect(sent.includes('/project/example')).toBe(includeToolCalls);
+  });
+
   /**
    * The privacy boundary. The goal model decides whether the user's request has been met,
    * and the conversation is the only evidence it needs for that — every tool call,
@@ -240,6 +281,25 @@ describe('what leaves this machine', () => {
     ]);
   });
 
+  it('includes interim commentary once at its original position and excludes app notices', async () => {
+    const session = await createSession({ title: 'goal', conversationId: 'c-goal-interim' });
+    await appendEvent(session.id, { time: 1000, source: 'extension', kind: 'user_message',
+      message: { text: 'Fix and test', chars: 12, truncated: false } });
+    await appendEvent(session.id, { time: 1100, source: 'extension', kind: 'progress', progressId: 'commentary',
+      message: { text: 'Testing', chars: 7, truncated: false } });
+    await appendEvent(session.id, { time: 1200, source: 'extension', kind: 'assistant_message', final: true,
+      message: { text: 'Done', chars: 4, truncated: false } });
+    await appendEvent(session.id, { time: 1300, source: 'extension', kind: 'progress', progressId: 'commentary',
+      message: { text: 'Testing completed', chars: 17, truncated: false } });
+    await appendEvent(session.id, { time: 1400, source: 'app', kind: 'progress', progressId: 'notice',
+      message: { text: 'Checking Goal', chars: 13, truncated: false } });
+    expect(await goal.conversationMessages(session.id)).toEqual([
+      { role: 'user', content: 'Fix and test' },
+      { role: 'assistant', content: 'Testing completed' },
+      { role: 'assistant', content: 'Done' }
+    ]);
+  });
+
   it('collapses repeated final snapshots from a legacy append-only recording by ChatGPT message id', async () => {
     const session = await createSession({ title: 'goal', conversationId: 'c-goal-legacy-snapshots' });
     await appendEvent(session.id, {
@@ -280,7 +340,7 @@ describe('what leaves this machine', () => {
     await saveConfig({
       ...defaultConfig(),
       goal: {
-        ...defaultConfig().goal,
+        ...defaultConfig().goal, backend: 'api', loopBackend: 'api',
         enabled: true,
         model: 'deepseek/deepseek-v4-flash',
         prompt: customPrompt
@@ -331,7 +391,7 @@ describe('what leaves this machine', () => {
     expect(trailer.role).toBe('system');
     expect(trailer.content).toContain('That was the conversation.');
     expect(trailer.content).toContain('NO_REPLY');
-    expect(sent.body.stream).toBe(false);
+    expect(sent.body.stream).toBe(true);
     expect(sent.body.reasoning).toEqual({ exclude: true });
     expect(sent.body.response_format).toMatchObject({
       type: 'json_schema',
@@ -340,7 +400,7 @@ describe('what leaves this machine', () => {
     expect(sent.body.response_format.json_schema.schema.properties.action.description).toContain(
       'continue while concrete requested work or questions are not yet clearly completed or answered'
     );
-    expect(sent.body.plugins).toEqual([{ id: 'response-healing' }]);
+    expect(sent.body.plugins).toBeUndefined();
     expect(sent.body.provider).toEqual({ require_parameters: true });
   });
 
@@ -474,7 +534,7 @@ describe('what leaves this machine', () => {
   it('asks for a reasoning effort only when one was chosen', async () => {
     await saveConfig({
       ...defaultConfig(),
-      goal: { ...defaultConfig().goal, enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'high' }
+      goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'high' }
     });
     const session = await createSession({ title: 'goal', conversationId: 'c-goal-3' });
     await appendEvent(session.id, {
@@ -493,6 +553,21 @@ describe('what leaves this machine', () => {
     goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-goal-3', turnId: 'g-1' });
     await settled('c-goal-3');
     expect(body.reasoning).toEqual({ effort: 'high', exclude: true });
+  });
+});
+
+describe('API task planner reasoning', () => {
+  it.each(['default', 'high', 'minimal'] as const)('uses the configured %s setting in the actual request body', async reasoning => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', model: 'z-ai/glm-5.3-flash', reasoning } });
+    const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.model).toBe('z-ai/glm-5.3-flash');
+      expect(body.reasoning).toEqual(reasoning === 'default' ? { exclude: true } : { effort: reasoning, exclude: true });
+      return decision('continue', JSON.stringify({ stages: ['Implement the requested change', 'Verify acceptance'] }));
+    });
+    globalThis.fetch = fetch as typeof globalThis.fetch;
+    expect(await goal.draftTaskPlan('Implement the change and verify it', 'api')).toEqual(['Implement the requested change', 'Verify acceptance']);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1612,7 +1687,7 @@ describe('a chat driven towards a specific goal', () => {
   it('stores a handled tombstone when Goal was off at terminal acceptance', async () => {
     await saveConfig({
       ...defaultConfig(),
-      goal: { ...defaultConfig().goal, enabled: false }
+      goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', enabled: false }
     });
     await goal.acceptGoalReplyNow({
       conversationId: 'c-reply-disabled',
@@ -1960,6 +2035,16 @@ describe('a chat driven towards a specific goal', () => {
  * other message this app puts into somebody's chat.
  */
 describe('opening a chat on a goal', () => {
+  it('preserves Retry-After without retrying ambiguous browser sends', async () => {
+    globalThis.fetch = (async () => new Response('busy', { status: 429, headers: { 'Retry-After': '37' } })) as never;
+    const result = await goal.draftOpeningMessage('Implement the change');
+    expect(result).toMatchObject({ retryable: true, retryAfterMs: 37000 });
+    if (!('error' in result)) throw new Error('expected rate limit');
+    expect(goal.nativeGoalFailure(result.error, 'api', result.retryAfterMs)).toMatchObject({ retryable: true, retryAfterMs: 37000 });
+    expect(goal.nativeGoalFailure(result.error, 'chatgpt')).toMatchObject({ retryable: false });
+    expect(goal.nativeGoalFailure('auth_rejected: bad key', 'api')).toMatchObject({ retryable: false });
+  });
+
   it('writes the first message from the goal alone', async () => {
     let seen: { role: string; content: string }[] = [];
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
@@ -2005,7 +2090,7 @@ describe('opening a chat on a goal', () => {
   it('opens under the mode it was given rather than the standing switch', async () => {
     await saveConfig({
       ...defaultConfig(),
-      goal: { ...defaultConfig().goal, model: 'deepseek/deepseek-v4-flash', enabled: false, mode: 'goal' }
+      goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', model: 'deepseek/deepseek-v4-flash', enabled: false, mode: 'goal' }
     });
     let sent: Record<string, unknown> = {};
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
@@ -2043,7 +2128,7 @@ describe('the loop that never stops', () => {
     await saveConfig({
       ...defaultConfig(),
       goal: {
-        ...defaultConfig().goal,
+        ...defaultConfig().goal, backend: 'api', loopBackend: 'api',
         enabled: true,
         mode: 'loop',
         model: 'deepseek/deepseek-v4-flash'
@@ -2152,7 +2237,7 @@ describe('the loop that never stops', () => {
   it('is not entered by a chat that only carries its own goal while the switch is off', async () => {
     await saveConfig({
       ...defaultConfig(),
-      goal: { ...defaultConfig().goal, enabled: false, mode: 'loop', model: 'deepseek/deepseek-v4-flash' }
+      goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', enabled: false, mode: 'loop', model: 'deepseek/deepseek-v4-flash' }
     });
     const sessionId = await seed('c-loop-off');
     goal.setGoalObjective('c-loop-off', 'get the release out');
@@ -2239,4 +2324,39 @@ describe('the loop that never stops', () => {
     expect(seen[0]!.content).toBe(goal.goalLoopPrompt());
     expect(seen[1]!.content).toContain('scrape the prices into a csv');
   });
+});
+
+it('publishes actual opening response deltas before one validated final result', async () => {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const body = new ReadableStream<Uint8Array>({ start(value) { controller = value; } });
+  let requested: any;
+  globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+    requested = JSON.parse(String(init.body));
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+  }) as never;
+  const updates = vi.fn();
+  const result = goal.draftOpeningMessage('Inspect then implement', 'goal', updates);
+  await vi.waitFor(() => expect(requested?.stream).toBe(true));
+  const encoder = new TextEncoder();
+  const emit = (content: string) => controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
+  emit('{"action":"continue","reply":"Inspect');
+  await vi.waitFor(() => expect(updates).toHaveBeenCalledWith({ phase: 'generating', text: '{"action":"continue","reply":"Inspect' }));
+  let completed = false; void result.then(() => { completed = true; });
+  expect(completed).toBe(false);
+  emit(' then implement"}'); controller.enqueue(encoder.encode('data: [DONE]\n\n')); controller.close();
+  expect(await result).toMatchObject({ reply: goal.humanReply('Inspect then implement') });
+});
+
+it('never owes or generates a browser continuation for Astra even with Goal armed', async () => {
+  const conversationId = 'aaaaaaaa-1111-4222-8333-123456789abc';
+  const session = await createSession({ conversationId, title: 'Astra finish-only' });
+  await observeSessionModel(session.id, conversationId, 'gpt-6-pro', Date.now());
+  await goal.setGoalSwitchNow(conversationId, 'goal', true);
+  await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'astra-final', turnId: 'astra-turn', eventSeq: 1, blocked: false });
+  expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+  const fetch = vi.fn(); globalThis.fetch = fetch;
+  const draft = goal.startGoalDraft({ conversationId, sessionId: session.id, turnId: 'astra-turn' });
+  goal.beginGoalDraft(conversationId, draft.token);
+  await vi.waitFor(() => expect(goal.goalViewFor(conversationId)?.stage).toBe('no-reply'));
+  expect(fetch).not.toHaveBeenCalled();
 });

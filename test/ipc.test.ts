@@ -6,6 +6,8 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 
 type Handler = (event: unknown, payload: unknown) => Promise<unknown>;
 const handlers = new Map<string, Handler>();
@@ -17,7 +19,7 @@ vi.mock('electron', () => ({
   },
   BrowserWindow: class {},
   clipboard: { readText: () => '', writeText: () => undefined },
-  dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
+  dialog: { showOpenDialog: vi.fn(async () => ({ canceled: true, filePaths: [] as string[] })) },
   shell: { openExternal: vi.fn(async () => undefined), openPath: vi.fn(async () => '') },
   nativeTheme: { themeSource: 'system' },
   safeStorage: {
@@ -61,7 +63,7 @@ const {
 } = await import('../src/main/agents.js');
 const { registerIpc } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
-const { app, nativeTheme, safeStorage, shell } = await import('electron');
+const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
@@ -81,6 +83,114 @@ const renameRoot = (payload: unknown): Promise<any> => handlers.get('roots:renam
 const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remove')!(null, payload) as Promise<any>;
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
+
+it('validates dropped image count and decodes bytes through the existing image authority', async () => {
+  const drop = (payload: unknown) => handlers.get('sessions:dropImages')!(null, payload) as Promise<any>;
+  expect(await drop({ paths: [] })).toMatchObject({ ok: false });
+  expect(await drop({ paths: Array(5).fill('image.png') })).toMatchObject({ ok: false });
+  expect(await drop({ paths: [''] })).toMatchObject({ ok: false });
+  expect(await drop({ paths: [path.join(process.cwd(), 'package.json')] })).toMatchObject({ ok: false });
+});
+
+it('does not authorize the composer Generate Goal action from an absent or stale finish wait', async () => {
+  const generate = (payload: unknown) => handlers.get('sessions:generateFinishGoal')!(null, payload) as Promise<any>;
+  const session = await createSession({ title: 'No finish wait', conversationId: 'finish-action-ipc-chat' });
+  expect(await generate({ id: session.id })).toMatchObject({ ok: false });
+  expect(await generate({ id: session.id, expectedTurnId: 'old-turn' })).toMatchObject({ ok: false });
+});
+
+it('round-trips Goal controls and cannot revive old periodic input when Off cancellation fails then On retries', async () => {
+  const outbox = await import('../src/main/session/input.js');
+  const durable = await import('../src/main/durable.js');
+  const store = await import('../src/main/session/store.js');
+  const original = await outbox.listInputs();
+  await writeDurableNow('session-input', []); outbox.resetInputForTests();
+  const config = (minutes: number) => ({ ...settings({ record: true, multiAgent: false }),
+    ui: { ...defaultConfig().ui, finishTool: true },
+    goal: { ...defaultConfig().goal, impulseMinutes: minutes, includeToolCalls: true } });
+  let write: ReturnType<typeof vi.spyOn> | undefined;
+  try {
+    expect(await save(config(1))).toMatchObject({ ok: true });
+    expect(getConfig().goal).toMatchObject({ impulseMinutes: 1, includeToolCalls: true });
+    const session = await createSession({ title: 'Periodic ownership', conversationId: 'periodic-settings-chat' });
+    await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'periodic-turn', time: Date.now() });
+    await store.observeSessionModel(session.id, 'periodic-settings-chat', 'gpt-6-astra', Date.now());
+    const row = await outbox.enqueueInput({ id: '949091a5-e895-4b57-b090-925ef3d14f7a', sessionId: session.id,
+      text: 'Pending automatic instruction', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null },
+      { turnId: 'periodic-turn', periodic: false, userRequested: true });
+    // Seed an old-version row; current code deliberately refuses new periodic input.
+    await writeDurableNow('session-input', [{ ...row, finishOwner: { turnId: 'periodic-turn', periodic: true } }]);
+    outbox.resetInputForTests();
+    write = vi.spyOn(durable, 'writeDurableNow').mockRejectedValueOnce(new Error('Cancellation disk failure'));
+    expect(await save(config(0))).toMatchObject({ ok: false });
+    expect(getConfig().goal.impulseMinutes).toBe(0); // Off was published before retirement.
+    write.mockRejectedValueOnce(new Error('Still cannot retire'));
+    expect(await save(config(1))).toMatchObject({ ok: false });
+    expect(getConfig().goal.impulseMinutes).toBe(0); // Failed retirement cannot publish On.
+    write.mockRestore(); write = undefined;
+    expect(await save(config(1))).toMatchObject({ ok: true });
+    outbox.resetInputForTests();
+    expect((await outbox.listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
+    expect(await outbox.offerToolInput(session.id, 'periodic-settings-chat', 'later-request', Date.now())).toEqual([]);
+  } finally {
+    write?.mockRestore();
+    await writeDurableNow('session-input', original); outbox.resetInputForTests();
+  }
+});
+
+it('native opening cancellation aborts the exact IPC invocation and prevents a late ready result', async () => {
+  const goal = await import('../src/main/goal.js');
+  const requestId = 'ad3ecbf4-c3a1-4d0d-9e9f-619787bcf982';
+  let signal: AbortSignal | undefined;
+  const draft = vi.spyOn(goal, 'draftOpeningMessage').mockImplementation(async (_text, _mode, _progress, current) => {
+    signal = current;
+    return new Promise((_resolve, reject) => current!.addEventListener('abort', () => reject(new Error('provider aborted')), { once: true }));
+  });
+  try {
+    const opening = handlers.get('sessions:goalOpening')!(null, { text: 'Implement safely', mode: 'goal', requestId });
+    const cancelled = await handlers.get('tasks:cancel')!(null, { requestId }) as any;
+    expect(cancelled).toEqual({ ok: true, data: true });
+    expect(signal?.aborted).toBe(true);
+    expect(await opening).toMatchObject({ ok: false, error: 'task_cancelled' });
+    expect(draft).toHaveBeenCalledTimes(1);
+  } finally { draft.mockRestore(); }
+});
+
+it('projects exact retained worker parents without adopting same-name unrelated recordings', async () => {
+  const prime = await createSession({ title: 'Parent', conversationId: 'parent-projection' });
+  spawn({ workers: [{ task: 'test parent identity' }], caller: { conversationId: 'parent-projection' } });
+  expect(bindConversation('worker-1', 'worker-projection')).toBe(true);
+  const origin = { kind: 'worker' as const, fromSessionId: null, agentId: 'worker-1', task: 'test parent identity' };
+  const child = await createSession({ title: 'Child', conversationId: 'worker-projection', origin });
+  const unrelated = await createSession({ title: 'Unrelated', conversationId: 'unrelated-worker', origin });
+  const result = await sessionList();
+  expect(result.ok).toBe(true);
+  expect(result.data.sessions.find((row: any) => row.id === child.id).origin.fromSessionId).toBe(prime.id);
+  expect(result.data.sessions.find((row: any) => row.id === unrelated.id).origin.fromSessionId).toBeNull();
+  restoreSwarm(null); // End this fixture without user-clear retiring it into later tests.
+});
+
+it('adds picker-selected projects, reuses containing approval, and leaves cancellation unchanged', async () => {
+  currentWindow = { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  const folder = path.join(dir, 'picker-project');
+  await fs.mkdir(path.join(folder, 'child'), { recursive: true });
+  await saveConfig({ ...defaultConfig(), roots: [] });
+  await writeDurableNow('projects', []);
+  const add = () => handlers.get('projects:add')!(null, {}) as Promise<any>;
+  expect((await add()).data).toBeNull();
+  expect(getConfig().roots).toHaveLength(0);
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [folder] });
+  const first = await add();
+  expect(first.ok, first.error).toBe(true);
+  expect(first.data.name).toBe('picker-project');
+  expect(getConfig().roots).toHaveLength(1);
+  expect((await add()).data.id).toBe(first.data.id);
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [path.join(folder, 'child')] });
+  expect((await add()).data.name).toBe('child');
+  expect(getConfig().roots).toHaveLength(1);
+  const listed = await handlers.get('projects:list')!(null, {}) as any;
+  expect(listed.data).toHaveLength(2);
+});
 
 /** The whole settings object the renderer sends, with the parts a test cares about set. */
 function settings(over: { record: boolean; multiAgent: boolean }) {
@@ -128,6 +238,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   currentWindow = null;
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: true, filePaths: [] });
   nativeTheme.themeSource = 'system';
   vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockResolvedValue(true);
   vi.mocked(shell.openPath).mockReset().mockResolvedValue('');
@@ -143,6 +254,35 @@ beforeEach(async () => {
     ...defaultConfig(),
     sessions: { ...defaultConfig().sessions, record: true },
     multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false, recoverAgentTabs: true }
+  });
+});
+
+describe('explicit settings replace the published tool contract', () => {
+  it.each(['finish', 'command', 'session'] as const)('withdraws %s from real endpoint publication after its setting is disabled', async kind => {
+    const { startMcpServer } = await import('../src/main/mcp/server.js');
+    const { effectiveCapabilities } = await import('../src/main/config.js');
+    const { publishPluginSurface, pluginRefreshPublications, resetPluginRefreshForTests } = await import('../src/main/plugin-refresh.js');
+    const initial = getConfig();
+    await saveConfig({ ...initial, ui: { ...initial.ui, finishTool: true }, capabilities: { ...initial.capabilities, read: true } });
+    const endpoint = await startMcpServer(() => ({ roots: [], caps: effectiveCapabilities(getConfig()), readOnly: getConfig().readOnly }));
+    const snapshot = () => {
+      endpoint.publication!('core', (name, version, instructions, tools) => publishPluginSurface('core', name, version, instructions, tools));
+      return pluginRefreshPublications().find(row => row.surface === 'core')!;
+    };
+    try {
+      const before = snapshot();
+      const tool = kind === 'finish' ? 'session_finish' : kind === 'command' ? 'exec_command' : kind;
+      expect(before.tools.map(row => row.name)).toContain(tool);
+      const current = getConfig();
+      const patch = { ...current, ...(kind === 'finish' ? { ui: { ...current.ui, finishTool: false } } : kind === 'command' ? { capabilities: { ...current.capabilities, command: false } } : { sessions: { ...current.sessions, record: false } }) };
+      expect((await save(patch)).ok).toBe(true);
+      const after = snapshot();
+      expect(after.tools.map(row => row.name)).not.toContain(tool);
+      expect(after.schemaId).not.toBe(before.schemaId);
+      const saved = getConfig();
+      expect((await save({ ...saved, ui: { ...saved.ui, theme: 'dark' } })).ok).toBe(true);
+      expect(snapshot().schemaId).toBe(after.schemaId);
+    } finally { await endpoint.stop(); resetPluginRefreshForTests(); }
   });
 });
 
@@ -190,7 +330,7 @@ describe('turning multi-agent mode off', () => {
     const reply = await save(settings({ record: false, multiAgent: false }));
     expect(reply.ok, reply.error).toBe(true);
     expect(await readDurable<any>('ipc-swarm')).toMatchObject({
-      version: 5,
+      version: 6,
       runId: null,
       primeConversationId: null,
       agents: [],
@@ -343,6 +483,33 @@ describe('bounded IPC identities and OS launch results', () => {
 });
 
 describe('settings writes from more than one UI', () => {
+  it('saves helper settings and tab retention through the renderer schema and merge boundary', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    const wanted = { ...base, ui: { ...base.ui, tabsToKeepOpen: 6 }, goal: {
+      ...base.goal, helperModel: 'account-helper', helperReasoning: 'medium' as const
+    } };
+    const result = await save(wanted, base);
+    expect(result.ok, result.error).toBe(true);
+    expect(getConfig().ui.tabsToKeepOpen).toBe(6);
+    expect(getConfig().goal).toMatchObject({ helperModel: 'account-helper', helperReasoning: 'medium', model: base.goal.model });
+  });
+  it('persists the planner backend and preserves it across an unrelated stale settings save', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    const selected = await save({ ...base, ui: { ...base.ui, planBackend: 'api' } }, base);
+    expect(selected.ok, selected.error).toBe(true);
+    expect(getConfig().ui.planBackend).toBe('api');
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).ui.planBackend).toBe('api');
+    const stale = await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base);
+    expect(stale.ok, stale.error).toBe(true);
+    expect(getConfig().ui).toMatchObject({ planBackend: 'api', minimizeToTray: !base.ui.minimizeToTray });
+    const current = getConfig();
+    expect((await save({ ...current, ui: { ...current.ui, planBackend: 'chatgpt' } }, current)).ok).toBe(true);
+    expect(getConfig().ui.planBackend).toBe('chatgpt');
+    expect((await save({ ...current, ui: { ...current.ui, planBackend: 'unsupported' } }, current)).ok).toBe(false);
+    expect(getConfig().ui.planBackend).toBe('chatgpt');
+  });
   it('does not let a stale renderer snapshot undo a newer extension setting', async () => {
     currentWindow = {
       setBackgroundColor: vi.fn(),
@@ -610,6 +777,19 @@ describe('the editable goal system prompt', () => {
 });
 
 describe('session IPC contracts', () => {
+  it('projects absent live activity without persisting the runtime deadline', async () => {
+    const { observeSessionModel, getSession } = await import('../src/main/session/store.js');
+    const pro = await createSession({ title: 'Idle Pro', conversationId: 'idle-pro-projection' });
+    const sol = await createSession({ title: 'Idle Sol', conversationId: 'idle-sol-projection' });
+    await observeSessionModel(pro.id, pro.conversationId!, 'gpt-6', Date.now(), 'pro');
+    await observeSessionModel(sol.id, sol.conversationId!, 'gpt-5.6', Date.now(), 'medium');
+    const reply = await sessionList();
+    expect(reply.ok, reply.error).toBe(true);
+    expect(reply.data.sessions.find((row: any) => row.id === pro.id).activityExpiresAt).toBeNull();
+    expect(reply.data.sessions.find((row: any) => row.id === sol.id).activityExpiresAt).toBeNull();
+    expect(await getSession(pro.id)).not.toHaveProperty('activityExpiresAt');
+  });
+
   it('keeps total as the whole session size on an explicit event page', async () => {
     const session = await createSession({ title: 'paged IPC total', conversationId: null });
     for (let index = 0; index < 5; index++) {
@@ -753,5 +933,22 @@ describe('renderer pushes after the window is gone', () => {
     );
     expect(() => logInfo('teardown progress written after the window went away')).not.toThrow();
     expect(touchedWebContents).toBe(false);
+  });
+});
+
+describe('Stop IPC exact session and turn authority', () => {
+  it('requires an explicit current turn and cannot stop a replacement conversation', async () => {
+    const invoke = (payload: unknown) => handlers.get('sessions:stopTurn')!(null, payload) as Promise<any>;
+    const conversationId = 'f1111111-aaaa-4bbb-8ccc-111111111111';
+    const session = await createSession({ title: 'Stop IPC', conversationId });
+    await appendEvent(session.id, { time: Date.now(), source: 'app', kind: 'turn_start', turnId: 'ipc-stop-one' });
+    expect((await invoke({ id: session.id })).ok).toBe(false);
+    expect(await invoke({ id: session.id, expectedTurnId: 'other-turn' })).toMatchObject({ ok: false, error: 'active_turn_changed' });
+    // A stored historical start alone cannot authorize stopping a browser turn.
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: 'active_turn_changed' });
+    await rebindSession(session.id, conversationId, 'f2222222-aaaa-4bbb-8ccc-111111111111');
+    expect((await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).ok).toBe(false);
+    const missing = await createSession({ title: 'No browser ownership', conversationId: null });
+    expect(await invoke({ id: missing.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: 'session_not_recorded' });
   });
 });

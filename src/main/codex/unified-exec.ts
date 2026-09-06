@@ -14,7 +14,7 @@
  *   - `cmd.exe` gets a verbatim command line. Node (like Rust) would otherwise escape inner
  *     quotes as `\"`, which cmd has never understood, and cmd exits 0 after failing to run
  *     it — a command that silently does nothing.
- *   - `interrupt()` on a pipe session sends SIGINT through Node, because a Windows console
+ *   - `interrupt()` terminates Windows pipe process trees; POSIX uses group SIGINT. A Windows console
  *     control event cannot be delivered to a child that owns no console.
  */
 
@@ -483,10 +483,10 @@ class UnifiedExecProcess {
     const pid = this.child?.pid;
     if (pid === undefined) throw UnifiedExecError.processFailed('the process is no longer running');
     try {
-      // Windows cannot deliver a console control event to a child with no console, so
-      // Node's SIGINT is the closest available equivalent for a pipe session. POSIX pipe
-      // sessions are process-group leaders, so Ctrl-C reaches their descendants too.
-      process.kill(process.platform === 'win32' ? pid : -pid, 'SIGINT');
+      // Windows pipe children have no console for Ctrl-C. Terminate the tree before
+      // its leader disappears, otherwise descendants retain the session's pipes/cwd.
+      if (process.platform === 'win32') await terminateProcessTree(pid, true);
+      else process.kill(-pid, 'SIGINT');
     } catch (error) {
       // The managed session can outlive the OS process for the tiny window before Node's
       // ChildProcess `exit` event reaches us. Ctrl+C in that window used to turn a successful

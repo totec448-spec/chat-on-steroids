@@ -1546,6 +1546,9 @@ export function execRecoveryHints(
   const bashQuoteFailure = command.includes('\\"') && /The string (?:is missing the terminator|starting:)/i.test(outputText);
   const parserFailure =
     /\bParserError\b/i.test(outputText) ||
+    // The batch runner parses each item with ScriptBlock.Create; PowerShell wraps its
+    // parser diagnostic in this exception instead of emitting FullyQualifiedErrorId.
+    /Exception calling "Create" with "1" argument\(s\): "At line:\d+ char:\d+/i.test(outputText) ||
     /FullyQualifiedErrorId\s*:\s*(?:TerminatorExpectedAtEndOfString|MissingArgument|MissingExpressionAfterToken|MissingFileSpecification|RedirectionNotSupported|UnexpectedToken|EmptyPipeElement)/i.test(
       outputText
     );

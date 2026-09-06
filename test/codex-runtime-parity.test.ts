@@ -373,8 +373,7 @@ describe('Codex unified exec runtime parity', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'clf-pipe-interrupt-parity-'));
     tempRoots.push(root);
     const ready = path.join(root, 'grandchild.pid');
-    const survived = path.join(root, 'grandchild-survived.txt');
-    const grandchildScript = `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(survived)}, 'survived'), 900); setInterval(() => {}, 1000);`;
+    const grandchildScript = 'setInterval(() => {}, 1000);';
     const parentScript = `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(process.execPath)}, ['-e', ${JSON.stringify(grandchildScript)}], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(ready)}, String(child.pid)); setInterval(() => {}, 1000);`;
 
     const instance = manager();
@@ -394,6 +393,8 @@ describe('Codex unified exec runtime parity', () => {
       tty: false
     });
 
+    // Observe rejection immediately even if a later assertion takes the cleanup path.
+    const initialOutcome = initial.then(value => ({ value }), error => ({ error }));
     await waitForProcess(instance, processId);
     await waitForFile(ready);
     const grandchildPid = Number.parseInt(await readFile(ready, 'utf8'), 10);
@@ -401,15 +402,17 @@ describe('Codex unified exec runtime parity', () => {
       const interrupted = await instance.writeStdin({
         processId,
         input: String.fromCharCode(3),
-        yieldTimeMs: 250,
+        yieldTimeMs: 10_000,
         maxOutputTokens: undefined,
         truncationPolicy
       });
       expect(interrupted.processId).toBeNull();
-      await expect(initial).resolves.toMatchObject({ processId: null });
-      await new Promise((resolve) => setTimeout(resolve, 1_200));
-      await expect(access(survived)).rejects.toBeDefined();
+      expect(await initialOutcome).toMatchObject({ value: { processId: null } });
+      // Assert the descendant itself has exited, independent of scheduler speed.
+      expect(() => process.kill(grandchildPid, 0)).toThrow();
     } finally {
+      await instance.terminateProcess(processId);
+      await initialOutcome;
       if (Number.isInteger(grandchildPid) && grandchildPid > 0) {
         await terminateProcessTree(grandchildPid, true).catch(() => undefined);
       }

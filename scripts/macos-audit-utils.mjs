@@ -94,12 +94,24 @@ export function assertCompatibleMacOSDeploymentTargets(file, otoolOutput, declar
  * arm64 Mach-O executables can carry an ad-hoc LC_CODE_SIGNATURE even when the application has
  * never been signed by a Developer ID. `codesign --display` may therefore succeed for a bundle
  * whose publisher identity is still untrusted. A trust-bearing signature instead exposes an
- * Authority chain and/or a real TeamIdentifier. Whole-bundle signing also creates CodeResources;
- * identity:null must not produce that resource envelope at all.
+ * Authority chain and/or a real TeamIdentifier.
+ *
+ * The resource envelope is now required rather than forbidden, which is the opposite of what this
+ * asserted before. That inversion was issue #66: arm64 Mach-Os are ad-hoc signed by the linker
+ * whether anyone asks or not, so a bundle without CodeResources is one whose executables claim a
+ * resource seal the bundle does not have. macOS reads that contradiction as damage and refuses to
+ * launch, with Gatekeeper assessment disabled and no crash report to show for it. Demanding the
+ * absence of a seal made the broken artifact the compliant one, and two releases shipped it.
+ *
+ * Coherent and untrusted are different axes. Only the second is the policy, and it is still
+ * enforced below.
  */
 export function assertNoTrustBearingMacCodeSignature(file, codesignResult, hasCodeResources = false) {
-  if (hasCodeResources) {
-    throw new Error(`${file} unexpectedly has a bundle CodeResources signature envelope`);
+  if (!hasCodeResources) {
+    throw new Error(
+      `${file} has no bundle CodeResources envelope; macOS reads an ad-hoc linker-signed bundle ` +
+        'without one as damaged. The afterPack ad-hoc seal should have created it.'
+    );
   }
 
   const output = `${codesignResult.stdout ?? ''}\n${codesignResult.stderr ?? ''}`;

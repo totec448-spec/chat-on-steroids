@@ -116,6 +116,11 @@ export function blockedChatIds(): string[] {
   return [...blocked.keys()];
 }
 
+/** The user's existing durable block time, for retiring its browser page after a quiet grace. */
+export function chatBlockedAt(conversationId: string): number | null {
+  return blocked.get(conversationId) ?? null;
+}
+
 /**
  * Blocks or releases one conversation. Idempotent in both directions: the user pressing the
  * button twice must not move a block's timestamp or resurrect a released one.

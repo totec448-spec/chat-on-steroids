@@ -1,8 +1,61 @@
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import os from 'node:os';
+import { describe, expect, it, vi } from 'vitest';
 import { findPreferredBrowser, openInPreferredBrowser, preferredBrowserCandidates } from '../src/main/browser.js';
+import { runPowerShell } from '../src/main/exec.js';
 
 describe('browser-backed ChatGPT commands', () => {
+  it('cold background startup gives Chrome one owned tab in a minimized startup window', async () => {
+    const calls: string[] = [];
+    const launch = vi.fn();
+    const browser = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    await openInPreferredBrowser('https://chatgpt.com/?cos-model-catalog=owned', {
+      platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' }, backgroundStartup: true,
+      usable: candidate => candidate === browser,
+      launch,
+      powershell: async (script, cwd, timeout) => {
+        calls.push(script);
+        expect(cwd).toBe(path.win32.dirname(browser)); expect(timeout).toBe(10_000);
+        return { stdout: '', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 };
+      }
+    });
+    expect(calls).toEqual([`$ErrorActionPreference='Stop'; Start-Process -FilePath '${browser}' -ArgumentList '"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--start-maximized" "https://chatgpt.com/?cos-model-catalog=owned"' -WorkingDirectory '${path.win32.dirname(browser)}' -WindowStyle Minimized`]);
+    expect(launch).not.toHaveBeenCalled();
+  });
+  it.runIf(process.platform === 'win32')('keeps executable, cwd and quoted URL literal through PowerShell without launching a browser', async () => {
+    const root = "C:\\O'Brien $(Write-Error injected)";
+    const browser = `${root}\\Google\\Chrome\\Application\\chrome.exe`;
+    const url = 'https://chatgpt.com/?q=space "quoted"&literal=$(`whoami`)&path=C:\\dir with space\\';
+    let captured: Record<string, string> = {};
+    await openInPreferredBrowser(url, {
+      platform: 'win32', env: { ProgramFiles: root }, backgroundStartup: true,
+      usable: candidate => candidate === browser,
+      launch: async () => { throw new Error('must not launch directly'); },
+      powershell: async script => {
+        // Override the cmdlet: evaluate the exact production script's quoting,
+        // but never create Chrome, another process or a visible window.
+        const result = await runPowerShell(`function Start-Process { param($FilePath,$ArgumentList,$WorkingDirectory,$WindowStyle) @{ file=$FilePath; args=$ArgumentList; cwd=$WorkingDirectory; style=$WindowStyle } | ConvertTo-Json -Compress }\n${script}`, os.tmpdir(), 10_000);
+        expect(result.exitCode).toBe(0); expect(result.stderr).toBe('');
+        captured = JSON.parse(result.stdout);
+        return result;
+      }
+    });
+    expect(captured.file).toBe(browser);
+    expect(captured.cwd).toBe(path.win32.dirname(browser));
+    expect(captured.style).toBe('Minimized');
+    expect(captured.args).toBe(String.raw`"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--start-maximized" "https://chatgpt.com/?q=space \"quoted\"&literal=$(` + '`whoami`' + String.raw`)&path=C:\dir with space\\"`);
+  });
+
+  it.each([{ exitCode: 1, timedOut: false }, { exitCode: null, timedOut: true }])('reports minimized startup failure without direct foreground fallback: %j', async failure => {
+    const launch = vi.fn();
+    const browser = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    await expect(openInPreferredBrowser('https://chatgpt.com/?cos-model-catalog=owned', {
+      platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' }, backgroundStartup: true,
+      usable: candidate => candidate === browser, launch,
+      powershell: async () => ({ ...failure, stdout: '', stderr: 'launch failed', truncated: false, durationMs: 1 })
+    })).rejects.toThrow('Background browser launch failed');
+    expect(launch).not.toHaveBeenCalled();
+  });
   it('prefers the normal per-user Chrome install on Windows', () => {
     const env = {
       LOCALAPPDATA: 'C:\\Users\\example\\AppData\\Local',
@@ -101,6 +154,30 @@ describe('browser-backed ChatGPT commands', () => {
 
     expect(opened).toBe(second);
     expect(attempts).toEqual([first, second]);
+  });
+
+  it.each(['win32', 'darwin'] as const)('uses background switches only for Windows orchestration (%s)', async (platform) => {
+    const browser = platform === 'win32'
+      ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+      : '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    const calls: Array<{ command: string; args: readonly string[]; cwd: string }> = [];
+    const url = 'https://chatgpt.com/?clf=worker-marker&model=example';
+    await openInPreferredBrowser(url, {
+      platform,
+      env: { ProgramFiles: 'C:\\Program Files' },
+      usable: (candidate) => candidate === browser,
+      launch: async (command, args, cwd) => {
+        calls.push({ command, args, cwd });
+        return { pid: 789 };
+      }
+    });
+    expect(calls).toEqual([{
+      command: browser,
+      args: platform === 'win32'
+        ? ['--disable-renderer-backgrounding', '--disable-background-timer-throttling', url]
+        : [url],
+      cwd: (platform === 'win32' ? path.win32 : path.posix).dirname(browser)
+    }]);
   });
 
   it('passes only the orchestration URL to a Linux browser, never the AppImage sandbox fallback', async () => {

@@ -190,6 +190,6 @@ jobs:
             publish/Chat-On-Steroids-Linux-arm64.deb \
             publish/Chat-On-Steroids-Extension.zip \
             publish/SHA256SUMS.txt \
-            --title "Chat On Steroids ${TAG#v}" \
+            --title "$(sed -n 's/^## //p' "docs/release-notes/$TAG.md" | head -n 1)" \
             --notes-file "docs/release-notes/$TAG.md"
           gh release view "$TAG" --json url --jq .url

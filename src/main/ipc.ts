@@ -1,3 +1,19 @@
+import { noteChatOrigin } from './session/recorder.js';
+import { REASONING_EFFORTS } from '../shared/session.js';
+import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
+import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
+import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
+import { prepareInputImage, validateInputImages } from './session/input-images.js';
+import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
+import { UI_BASE_ZOOM } from './window-layout.js';
+import { usageOverview } from './session/usage.js';
+import { inputArgs, listInputs, editQueuedInput, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
+import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
+import { cancelTaskRequest, runTaskRequest } from './task-request.js';
+import { randomUUID } from 'node:crypto';
+import { retryGoalBrowserHelper } from './goal.js';
+import { requestBrowserPreferences } from './browser-preferences.js';
+import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, wakeBrowserUrl } from './session/start-input.js';
 /**
  * IPC surface.
  *
@@ -20,17 +36,21 @@ import {
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange } from './connection.js';
-import { getConfig, updateConfig } from './config.js';
-import { clearAllGoalSwitches, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts } from './goal.js';
+import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
+import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
-import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError } from './sandbox.js';
+import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
+import { addProject, listProjects } from './projects.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
 import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
 import {
   bridgeStatus,
+  sessionActivityExpiresAt,
+  sessionHasInputActivity,
+  sessionControlsFor, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
   onBridgeChange,
@@ -45,6 +65,7 @@ import {
   deleteSession,
   getSession,
   listSessionPage,
+  findSessionByConversation,
   readEvents,
   readRecentEvents,
   readHandoff
@@ -53,6 +74,7 @@ import { activeSessionId, forgetSession, onSessionChange } from './session/recor
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
 import {
   clearAgent,
+  primeForOwnedConversation,
   onSwarmChange,
   pauseSwarmForDisable,
   persistAgentAuthorityNow,
@@ -117,6 +139,13 @@ const settingsPatch = z.object({
     binaryPath: z.string().max(4096)
   }),
   ui: z.object({
+    developerMode: z.boolean().optional(),
+    finishTool: z.boolean().optional(),
+    planBackend: z.enum(['chatgpt', 'api']).optional(),
+    finishAction: z.enum(['notify', 'goal']).optional(),
+    finishLeadMinutes: z.number().int().min(3).max(5).optional(),
+    backgroundChats: z.boolean().optional(),
+    tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
     privacyScreenshots: z.boolean(),
@@ -136,11 +165,19 @@ const settingsPatch = z.object({
   }),
   multiAgent: z.object({
     enabled: z.boolean(),
+    defaultModel: z.string().max(80).optional(),
+    defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
     allowUnattributedCalls: z.boolean(),
     recoverAgentTabs: z.boolean()
   }),
   goal: z.object({
+    impulseMinutes: z.number().int().min(0).max(60).optional(),
+    includeToolCalls: z.boolean().optional(),
+      backend: z.enum(['api', 'chatgpt', 'templates']).optional(),
+      loopBackend: z.enum(['api', 'chatgpt']).optional(),
+      helperModel: z.string().trim().min(1).max(80).optional(),
+      helperReasoning: z.enum(REASONING_EFFORTS).optional(),
     enabled: z.boolean(),
     // Which of the two standing modes the switch runs. One field, so the renderer has no way
     // to describe a state where Goal and Loop are both on.
@@ -200,6 +237,13 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       binaryPath: pick(current.tunnel.binaryPath, base.tunnel.binaryPath, wanted.tunnel.binaryPath)
     },
     ui: {
+      developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
+      finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
+      planBackend: pick(current.ui.planBackend, base.ui.planBackend, wanted.ui.planBackend),
+      finishAction: pick(current.ui.finishAction, base.ui.finishAction, wanted.ui.finishAction),
+      finishLeadMinutes: pick(current.ui.finishLeadMinutes, base.ui.finishLeadMinutes, wanted.ui.finishLeadMinutes),
+      backgroundChats: pick(current.ui.backgroundChats, base.ui.backgroundChats, wanted.ui.backgroundChats),
+      tabsToKeepOpen: pick(current.ui.tabsToKeepOpen, base.ui.tabsToKeepOpen, wanted.ui.tabsToKeepOpen),
       minimizeToTray: pick(current.ui.minimizeToTray, base.ui.minimizeToTray, wanted.ui.minimizeToTray),
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       privacyScreenshots: pick(
@@ -224,6 +268,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       autoTokens: pick(current.compaction.autoTokens, base.compaction.autoTokens, wanted.compaction.autoTokens)
     },
     multiAgent: {
+      defaultModel: pick(current.multiAgent.defaultModel, base.multiAgent.defaultModel, wanted.multiAgent.defaultModel),
+      defaultReasoning: pick(current.multiAgent.defaultReasoning, base.multiAgent.defaultReasoning, wanted.multiAgent.defaultReasoning),
       enabled: pick(current.multiAgent.enabled, base.multiAgent.enabled, wanted.multiAgent.enabled),
       maxWorkers: pick(current.multiAgent.maxWorkers, base.multiAgent.maxWorkers, wanted.multiAgent.maxWorkers),
       allowUnattributedCalls: pick(
@@ -238,6 +284,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       )
     },
     goal: {
+      impulseMinutes: pick(current.goal.impulseMinutes, base.goal.impulseMinutes, wanted.goal.impulseMinutes),
+      includeToolCalls: pick(current.goal.includeToolCalls, base.goal.includeToolCalls, wanted.goal.includeToolCalls),
+      backend: pick(current.goal.backend, base.goal.backend, wanted.goal.backend),
+      loopBackend: pick(current.goal.loopBackend, base.goal.loopBackend, wanted.goal.loopBackend),
+      helperModel: pick(current.goal.helperModel, base.goal.helperModel, wanted.goal.helperModel),
+      helperReasoning: pick(current.goal.helperReasoning, base.goal.helperReasoning, wanted.goal.helperReasoning),
       enabled: pick(current.goal.enabled, base.goal.enabled, wanted.goal.enabled),
       mode: pick(current.goal.mode, base.goal.mode, wanted.goal.mode),
       model: pick(current.goal.model, base.goal.model, wanted.goal.model),
@@ -308,6 +360,7 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  handle('usage:get', () => usageOverview());
   handle('state:get', async () => {
     const state = await buildState();
     // Native package smoke uses this as the end-to-end renderer readiness barrier. Unlike
@@ -320,8 +373,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('settings:save', async (payload) => {
     const request = settingsSave.parse(payload);
     const before = getConfig();
-    const wasMultiAgent = before.multiAgent.enabled;
-    const next = await updateConfig((config) => ({ ...config, ...mergeSettings(config, request.base, request.patch) }));
+    const next = await updateConfig(async config => {
+      const proposed = { ...config, ...mergeSettings(config, request.base, request.patch) };
+      // If an earlier Off retirement failed, On must retry it before admission.
+      if (!config.ui.finishTool && proposed.ui.finishTool) await cancelFinishInputs(false);
+      else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
+      return proposed;
+    }, async (published, previous) => {
+      if (previous.ui.finishTool && !published.ui.finishTool) await cancelFinishInputs(false);
+      else if ((previous.goal.impulseMinutes ?? 0) > 0 && !published.goal.impulseMinutes) await cancelFinishInputs(true);
+    });
     // Renderer palette changes are immediate, so keep OS/Electron-owned chrome in lock-step too.
     // Without this, selecting Dark on macOS left the title bar, menus and file picker in the
     // system theme until restart (and startup still defaulted to system before index.ts applies it).
@@ -337,7 +398,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // asked for a loop, and a loop draft must not be typed after they asked for a gate.
       before.goal.mode !== next.goal.mode ||
       before.goal.model !== next.goal.model ||
+      before.goal.backend !== next.goal.backend ||
+      before.goal.loopBackend !== next.goal.loopBackend ||
+      before.goal.helperModel !== next.goal.helperModel || before.goal.helperReasoning !== next.goal.helperReasoning ||
       before.goal.reasoning !== next.goal.reasoning ||
+      before.goal.includeToolCalls !== next.goal.includeToolCalls ||
       before.goal.prompt !== next.goal.prompt ||
       before.goal.objectivePrompt !== next.goal.objectivePrompt ||
       before.goal.loopPrompt !== next.goal.loopPrompt
@@ -350,12 +415,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // somebody wanted stopped would go on running with nowhere obvious to switch it off.
     // Turning it *on* deliberately does not reach into a chat that has said no.
     if (before.goal.enabled && !next.goal.enabled) clearAllGoalSwitches();
-    // Switching multi-agent mode off has to be able to remove the `agents` tool from the
-    // schemas, and the exposed surface only ever widens by default. So the latch is
-    // released here — the one place that knows the user made the decision
-    // deliberately — and the settings screen tells them to reconnect the connector, which
-    // is what makes ChatGPT read the clean schemas.
-    if (wasMultiAgent && !next.multiAgent.enabled) forgetExposedSurface();
+    // Explicit settings changes replace discovery's monotonic snapshot. Otherwise
+    // disabled permissions/finish/session tools remain published and no schema change
+    // reaches automatic plugin refresh. Cosmetic saves must not invalidate discovery.
+    if (before.multiAgent.enabled !== next.multiAgent.enabled || before.sessions.record !== next.sessions.record ||
+        before.ui.finishTool !== next.ui.finishTool ||
+        JSON.stringify(effectiveCapabilities(before)) !== JSON.stringify(effectiveCapabilities(next))) forgetExposedSurface();
     // Order matters, and it used to be wrong. Pausing the run and withdrawing worker browser
     // commands has to happen while the bridge can still cancel those transports; stopping the
     // bridge first left queued worker/revival commands behind for a later restart to deliver.
@@ -415,6 +480,24 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
     return approveRoot(result.filePaths[0]);
+  });
+
+  handle('projects:list', () => listProjects());
+  handle('projects:add', async () => {
+    const window = getWindow();
+    if (!window) throw new Error('No window');
+    const result = await dialog.showOpenDialog(window, { title: 'Choose a project folder for ChatGPT', properties: ['openDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const folder = result.filePaths[0];
+    try { await resolvePath(getConfig().roots, folder); }
+    catch (error) {
+      if (!(error instanceof SandboxError)) throw error;
+      const state = await approveRoot(folder);
+      push('state:changed', state);
+    }
+    const project = await addProject(folder);
+    push('session:changed');
+    return project;
   });
 
   // A folder dropped onto the Folders card. The renderer never sees a system path itself:
@@ -571,10 +654,25 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       })
       .parse(payload ?? {});
     const config = getConfig();
+    await listInputs(); // Restore exact helper origins before the first sidebar page.
     const page = await listSessionPage({ cursor, limit: limit ?? 60 });
-    const sessions = page.sessions;
+    // Older recordings omitted worker origins' parent IDs. The broker's exact
+    // retained owner can repair that presentation without reviving a worker or
+    // guessing from reusable names such as worker-1.
+    const parents = new Map<string, ReturnType<typeof findSessionByConversation>>();
+    const sessions = await Promise.all(page.sessions.map(async (summary) => {
+      if (summary.origin?.kind !== 'worker' || summary.origin.fromSessionId || !summary.conversationId) return summary;
+      const prime = primeForOwnedConversation(summary.conversationId);
+      if (!prime || prime === summary.conversationId) return summary;
+      if (!parents.has(prime)) parents.set(prime, findSessionByConversation(prime, { requireUnique: true }));
+      const parent = await parents.get(prime);
+      return parent && parent.id !== summary.id ? { ...summary, origin: { ...summary.origin, fromSessionId: parent.id } } : summary;
+    }));
     return {
-      sessions,
+      sessions: sessions.map(summary => {
+        const activityExpiresAt = sessionActivityExpiresAt(summary);
+        return activityExpiresAt === undefined ? summary : { ...summary, activityExpiresAt };
+      }),
       total: page.total,
       nextCursor: page.nextCursor,
       activeId: activeSessionId(),
@@ -592,11 +690,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     };
   });
 
+  handle('sessions:image', async (payload) => {
+    const { id, assetId } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), assetId: z.string().max(100).regex(/^[a-f0-9]+\.bin$/) }).parse(payload);
+    return recordedInputImage(id, assetId);
+  });
   handle('sessions:events', async (payload) => {
-    const { id, from, limit } = z
+    const { id, from, before, limit } = z
       .object({
         id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
         from: z.number().int().min(0).max(10_000_000).optional(),
+        before: z.number().int().min(1).max(10_000_000).optional(),
         limit: z.number().int().min(1).max(1000).optional()
       })
       .parse(payload);
@@ -608,13 +711,92 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // load was pure cloning/IPC work; later refreshes use the sequence cursor below.
     const cap = limit ?? 160;
     if (from === undefined) {
-      const events = await readRecentEvents(id, cap);
+      const events = await readRecentEvents(id, cap, { before });
       const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), 0);
       return { summary, events, total: summary.events, nextFrom };
     }
     const events = await readEvents(id, { from, limit: cap });
     const nextFrom = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), from);
     return { summary, events, total: summary.events, nextFrom };
+  });
+
+  handle('sessions:images', async () => {
+    const chosen = await dialog.showOpenDialog({ title: 'Attach images', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }] });
+    if (chosen.canceled) return [];
+    if (chosen.filePaths.length > 4) throw new Error('Attach up to four images at a time');
+    const images = [];
+    for (const file of chosen.filePaths) images.push(await prepareInputImage(file));
+    return images;
+  });
+  handle('sessions:dropImages', async payload => {
+    const { paths } = z.object({ paths: z.array(z.string().min(1).max(32768)).min(1).max(4) }).parse(payload);
+    const images = [];
+    for (const file of paths) images.push(await prepareInputImage(file));
+    return images;
+  });
+  handle('sessions:stopTurn', async payload => {
+    const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
+    return stopSessionTurn(id, expectedTurnId);
+  });
+  handle('sessions:releaseFinish', async (payload) => {
+    const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
+    await sessionControlsFor(id);
+    await releaseSessionFinish(id, expectedTurnId);
+    return sessionControlsFor(id);
+  });
+  handle('sessions:generateFinishGoal', async payload => {
+    const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
+    return requestSessionFinishGoal(id, expectedTurnId);
+  });
+  handle('chatModels:get', async () => getChatModels());
+  handle('browser:preferences', async (payload) => requestBrowserPreferences(payload));
+  handle('chatModels:request', async () => startChatModelDiscovery());
+  handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
+  handle('sessions:automation', async (payload) => {
+    const { id, automation } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']) }).parse(payload);
+    return setSessionAutomation(id, automation);
+  });
+  handle('sessions:objective', async (payload) => {
+    const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(16000), mode: z.enum(['goal', 'loop']) }).parse(payload);
+    return setSessionObjective(id, text, mode);
+  });
+  handle('sessions:compact', async (payload) => compactSession(sessionIdArg.parse(payload).id));
+  handle('sessions:cancelCompaction', async (payload) => cancelSessionCompaction(sessionIdArg.parse(payload).id));
+  handle('sessions:plan', async (payload) => {
+    const { text, backend, requestId } = z.object({ text: z.string().trim().min(1).max(16000), backend: z.enum(['api', 'chatgpt']), requestId: z.string().uuid().optional() }).parse(payload);
+    const publish = (progress: import('../shared/task-progress.js').TaskProgressUpdate) => {
+      const target = getWindow();
+      if (requestId && target && !target.isDestroyed()) target.webContents.send('task:progress', { requestId, ...progress });
+    };
+    return runTaskRequest(requestId ?? randomUUID(), JSON.stringify(['plan', text, backend]), signal => draftTaskPlan(text, backend, publish, signal), publish);
+  });
+  handle('sessions:send', async (payload) => {
+    const input = inputArgs.parse(payload);
+    await validateInputImages(input.images ?? []);
+    return sendDesktopInput(input);
+  });
+  handle('sessions:outbox', async () => (await listInputs()).filter((row) => row.purpose !== 'decision'));
+  handle('sessions:reorderInputs', async (payload) => {
+    const { sessionId, ids } = z.object({ sessionId: z.string().min(8).max(64), ids: z.array(z.string().uuid()).min(1).max(10000) }).parse(payload);
+    return reorderQueuedInputs(sessionId, ids);
+  });
+  handle('sessions:retryBrowser', async (payload) => retryQueuedInputBrowser(z.object({ id: z.string().uuid() }).parse(payload).id));
+  handle('sessions:pausedHelpers', async () => pausedBrowserHelpers());
+  handle('sessions:retryHelper', async (payload) => {
+    const { id, sourceSessionId } = z.object({ id: z.string().uuid(), sourceSessionId: z.string().min(8).max(64) }).parse(payload);
+    return retryGoalBrowserHelper(sourceSessionId, id);
+  });
+  handle('sessions:editInput', async (payload) => { const { id, text, afterTurn } = z.object({ id: z.string().uuid(), text: z.string().trim().min(1).max(16000), afterTurn: z.boolean().optional() }).parse(payload); return editQueuedInput(id, text, afterTurn); });
+  handle('sessions:cancelInput', async (payload) => cancelDesktopInput(z.object({ id: z.string().uuid() }).parse(payload).id));
+  handle('sessions:inputAutomation', async payload => {
+    const { id, mode } = z.object({ id: z.string().uuid(), mode: z.enum(['off', 'goal', 'loop']) }).parse(payload);
+    return setInputAutomation(id, mode);
+  });
+  handle('window:getZoom', async () => (getWindow()?.webContents.getZoomFactor() ?? UI_BASE_ZOOM) / UI_BASE_ZOOM);
+  handle('window:zoom', async (payload) => {
+    const { factor } = z.object({ factor: z.number().min(0.75).max(1.5) }).parse(payload);
+    getWindow()?.webContents.setZoomFactor(factor * UI_BASE_ZOOM);
+    return factor;
   });
 
   handle('sessions:openChat', async (payload) => {
@@ -746,13 +928,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
    * what stops a tab opening for a slot the user has just cleared.
    */
   handle('swarm:clearAgent', async (payload) => {
-    const id = agentIdArg.parse(payload);
-    const outcome = clearAgent(id);
+    const { id, runId } = z.object({ id: agentIdArg, runId: z.string().min(1).max(200).optional() }).parse(typeof payload === 'string' ? { id: payload } : payload);
+    const outcome = clearAgent(id, runId);
     if (outcome.cleared !== 'none') {
       if (!(await persistAgentAuthorityNow())) {
         throw new Error('The agent clear could not be made durable. Retry the clear action.');
       }
-      if (outcome.cleared === 'worker') cancelWorkerCommands(outcome.reason, id);
+      if (outcome.cleared === 'worker') cancelWorkerCommands(outcome.reason, id, runId);
     }
     // The prime's report stays in the main process: the renderer needs the outcome, not
     // the message queued for the prime agent.
@@ -780,6 +962,48 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!target || target.isDestroyed()) return;
     target.webContents.send(channel, ...args);
   };
+  configureInputDelivery({
+    hasActivity: sessionHasInputActivity,
+    wakeDecision: async (entry, signal) => {
+      signal.throwIfAborted();
+      if (!await startBridge()) throw new Error('The browser bridge could not start');
+      signal.throwIfAborted();
+      const marker = `cos-input=${encodeURIComponent(entry.id)}`;
+      await wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}`
+        : `https://chatgpt.com/?${entry.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`);
+    },
+    bindHelper: async (conversationId, fromSessionId) => {
+      const source = fromSessionId ? await getSession(fromSessionId) : null;
+      if (source?.conversationId === conversationId || source?.chatIds.includes(conversationId)) return;
+      await noteChatOrigin(conversationId, { kind: 'helper', fromSessionId, agentId: null, task: '' });
+    },
+    changed: () => push('session:changed'),
+    recordDelivered: (entry) => getConfig().sessions.record ? recordDeliveredInput(entry) : Promise.resolve(true),
+    prepareText: (entry) => {
+      const control = entry.conversationId ? goalSwitchFor(entry.conversationId) : getConfig().goal;
+      const mode = entry.automation ?? (control.enabled ? control.mode : 'off');
+      const text = mode === 'goal' && goalBackendFor('goal') === 'templates' && !entry.text.includes(GOAL_MARKER_INSTRUCTION)
+        ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
+      return text;
+    },
+    applyAutomation: async (conversationId, automation, phase, objective) => {
+      // This message supersedes the old final; never pick that old final up merely
+      // because the composer enabled Goal for the next turn.
+      const mode = automation === 'off' ? goalSwitchFor(conversationId).mode : automation;
+      // Reserve switch ordering immediately, before awaiting another ledger write.
+      // A user Off arriving during persistence must remain later than this attempt.
+      const switchWrite = setGoalSwitchNow(conversationId, mode, automation !== 'off');
+      const [held] = await Promise.all([switchWrite, setGoalReplyActiveNow(conversationId, false)]);
+      // A fresh chat can finish before its send ACK arrives. Its newest final is
+      // this message's own response, so it may be picked up after binding.
+      // Objective ownership transfers with delivery even if the user switched Off
+      // before the fresh chat acquired its identity. The saved Off row remains the
+      // execution authority; retaining authored text must never imply reactivation.
+      if (objective !== undefined) await setGoalObjectiveNow(conversationId, objective);
+      const live = goalSwitchFor(conversationId);
+      if (phase === 'after-send' && held.enabled && live.enabled && live.mode === held.mode) await setGoalReplyActiveNow(conversationId, true);
+    }
+  });
 
   let statePushGeneration = 0;
   const pushState = (): void => {
@@ -791,6 +1015,25 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   };
   onStatusChange(pushState);
   onBridgeChange(pushState);
+  onGoalChange(pushState);
+  handle('tasks:cancel', async payload => cancelTaskRequest(z.object({ requestId: z.string().uuid() }).parse(payload).requestId));
+  handle('sessions:goalOpening', async payload => {
+    const { text, mode, requestId } = z.object({ text: z.string().trim().min(1).max(16000),
+      mode: z.enum(['goal', 'loop']), requestId: z.string().uuid() }).parse(payload);
+    const backend = goalBackendFor(mode);
+    const publish = (progress: import('../shared/task-progress.js').TaskProgressUpdate) => push('task:progress', { requestId, ...progress });
+    return runTaskRequest(requestId, JSON.stringify(['goal', text, mode]), async signal => {
+      if (goalBackendFor(mode) !== backend) throw new Error('task_settings_changed');
+      const drafted = await draftOpeningMessage(text, mode, publish, signal);
+      if ('error' in drafted) throw nativeGoalFailure(drafted.error, backend, drafted.retryAfterMs);
+      signal.throwIfAborted(); publish({ phase: 'ready', text: drafted.reply.slice(-8000) });
+      return drafted;
+    }, publish);
+  });
+  configureChatModelDiscovery({ changed: pushState, wake: async (nonce) => {
+    if (!await startBridge()) throw new Error('The browser bridge could not start');
+    await wakeBrowserUrl(`https://chatgpt.com/?cos-model-catalog=${nonce}`, true, true);
+  } });
   onUpdateChange(pushState);
   onMacOSDesktopAccessChange(pushState);
   onLog((entry) => push('log:entry', entry));

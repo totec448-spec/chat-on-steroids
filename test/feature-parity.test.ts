@@ -65,7 +65,8 @@ describe('portable browser-backed feature parity', () => {
       'exec_command',
       'write_stdin',
       'session',
-      'agents'
+      'agents',
+      'session_finish'
     ]);
     expect(surfaceIsUseful('core', config.capabilities, 'darwin')).toBe(true);
     // Fresh macOS installs start the Desktop group off; the surface exists once it is switched on.

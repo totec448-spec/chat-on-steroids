@@ -131,6 +131,23 @@ describe('cross-platform packaging targets', () => {
     expect(smoke).toContain('runtime.electron !== expectedElectronVersion');
   });
 
+  it('grants sandbox read access only to the Windows install tree and fails on ACL errors', () => {
+    const config = yamlFile('electron-builder.yml');
+    const installer = readFileSync(path.join(root, 'scripts/windows-installer-acl.nsh'), 'utf8');
+    expect(config.nsis.include).toBe('scripts/windows-installer-acl.nsh');
+    expect(installer).toContain('!macro customInit');
+    expect(installer).toContain('!macro customInstall');
+    expect(installer).toContain('${FileExists} "$INSTDIR\\${APP_EXECUTABLE_FILENAME}"');
+    expect(installer).toContain('ExecWait');
+    expect(installer).toContain('"$SYSDIR\\icacls.exe" "$INSTDIR" /grant "*S-1-15-2-2:(OI)(CI)(RX)"');
+    expect(installer).toContain('${If} ${Errors}');
+    expect(installer).toContain('${If} $0 != 0');
+    expect(installer).toContain('SetErrorLevel 2');
+    expect(installer).toContain('Abort "Windows could not set the folder access needed');
+    expect(installer).not.toMatch(/\/(?:reset|remove|T)\b/i);
+    expect(installer).not.toMatch(/(?:no-sandbox|disable-gpu-sandbox)/i);
+  });
+
   it('assembles every platform artifact in the reusable release workflow', () => {
     const workflow = readFileSync(path.join(root, '.github', 'workflows', 'release.yml'), 'utf8');
     const parsed = yamlFile('.github/workflows/release.yml');
@@ -432,6 +449,7 @@ describe('cross-platform packaging targets', () => {
       'launchedMachOCount < 6',
       "run('plutil', ['-extract', key, 'raw', plist])",
       "run('codesign', ['--display', '--verbose=4', app]",
+      "run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app])",
       'assertNoTrustBearingMacCodeSignature(',
       "path.join(contents, '_CodeSignature', 'CodeResources')"
     ]) expect(macSmoke).toContain(marker);
@@ -516,37 +534,54 @@ Load command 11
   });
 
   it('allows Apple-Silicon ad-hoc signatures but rejects publisher-bearing macOS signatures', () => {
-    expect(() => assertNoTrustBearingMacCodeSignature('unsigned.app', {
-      status: 1,
-      stdout: '',
-      stderr: 'code object is not signed at all'
-    })).not.toThrow();
+    // The sealed ad-hoc bundle, which is what ships: no Authority, no TeamIdentifier, and the
+    // resource envelope its own executables imply.
     expect(() => assertNoTrustBearingMacCodeSignature('adhoc.app', {
       status: 0,
       stdout: '',
       stderr: 'Identifier=com.example\nSignature=adhoc\nTeamIdentifier=not set\n'
-    })).not.toThrow();
+    }, true)).not.toThrow();
 
     expect(() => assertNoTrustBearingMacCodeSignature('developer-id.app', {
       status: 0,
       stdout: '',
       stderr: 'Signature size=9000\nAuthority=Developer ID Application: Example Corp (TEAM123456)\nTeamIdentifier=TEAM123456\n'
-    })).toThrow(/trust-bearing code signature/);
+    }, true)).toThrow(/trust-bearing code signature/);
     expect(() => assertNoTrustBearingMacCodeSignature('unknown-success.app', {
       status: 0,
       stdout: '',
       stderr: 'Identifier=com.example\n'
-    })).toThrow(/trust-bearing code signature/);
+    }, true)).toThrow(/trust-bearing code signature/);
     expect(() => assertNoTrustBearingMacCodeSignature('inspection-failed.app', {
       status: null,
       stdout: '',
       stderr: 'codesign was terminated unexpectedly'
-    })).toThrow(/inspection failed unexpectedly/);
-    expect(() => assertNoTrustBearingMacCodeSignature('enveloped.app', {
+    }, true)).toThrow(/inspection failed unexpectedly/);
+  });
+
+  /**
+   * Issue #66: the shape that shipped twice and would not launch.
+   *
+   * arm64 Mach-Os are ad-hoc signed by the linker whether anyone asks or not, so a bundle with no
+   * CodeResources is one whose executables claim a resource seal the bundle does not have. macOS
+   * reads that contradiction as damage — with Gatekeeper assessment already disabled, and no
+   * crash report to show for it. This assertion used to *demand* that state, which is why two
+   * releases shipped it and nothing caught them.
+   */
+  it('rejects a bundle whose executables are signed but which has no resource seal', () => {
+    expect(() => assertNoTrustBearingMacCodeSignature('linker-signed.app', {
+      status: 0,
+      stdout: '',
+      stderr: 'Identifier=com.example\nSignature=adhoc\nTeamIdentifier=not set\n'
+    }, false)).toThrow(/no bundle CodeResources envelope/);
+
+    // "Never signed at all" earns the same refusal. The seal is what macOS needs, and a packaged
+    // arm64 app cannot reach that state anyway — the linker signs it regardless.
+    expect(() => assertNoTrustBearingMacCodeSignature('unsigned.app', {
       status: 1,
       stdout: '',
       stderr: 'code object is not signed at all'
-    }, true)).toThrow(/CodeResources signature envelope/);
+    }, false)).toThrow(/no bundle CodeResources envelope/);
   });
 
   it('fails release-existence preflight closed on API errors instead of spending packaging runners', async () => {

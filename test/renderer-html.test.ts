@@ -4,6 +4,7 @@ import type { StoredText } from '../src/shared/session.js';
 
 let dom: JSDOM;
 let renderedMessage: (html: StoredText | null | undefined, fallback: string) => HTMLElement;
+let renderedMarkdown: (text: string) => HTMLElement;
 
 /** A whole capture, as the store holds one. */
 const whole = (text: string): StoredText => ({ text, truncated: false, chars: text.length });
@@ -18,7 +19,7 @@ beforeAll(async () => {
     Element: dom.window.Element,
     Node: dom.window.Node
   });
-  ({ renderedMessage } = await import('../src/renderer/chat.js'));
+  ({ renderedMessage, renderedMarkdown } = await import('../src/renderer/chat.js'));
 });
 
 afterAll(() => {
@@ -26,6 +27,27 @@ afterAll(() => {
 });
 
 describe('captured ChatGPT rendered HTML', () => {
+  it('contains authored and captured tables without discarding cell text or trusting page styles', () => {
+    for (const rendered of [
+      renderedMarkdown('| Area | Details |\n| --- | --- |\n| Great Hall | ' + 'Longunbrokenfilename'.repeat(20) + ' |'),
+      renderedMessage(whole('<table style="width:9999px"><tr><td colspan="2" style="white-space:nowrap">All details remain readable</td></tr></table>'), '')
+    ]) {
+      const table = rendered.querySelector('table')!;
+      expect(table.parentElement?.className).toBe('markdown-table');
+      expect(table.parentElement?.tabIndex).toBe(0);
+      expect(table.querySelector('td')?.textContent).toBeTruthy();
+      expect(table.querySelector('[style]')).toBeNull();
+      expect(table.getAttribute('style')).toBeNull();
+    }
+  });
+  it('renders the complete canonical Markdown revision with formatting and sanitized HTML', () => {
+    const rendered = renderedMarkdown('1. Rain begins when **water condenses**.\n\n2. The final paragraph. COS-0606-FINAL-A\n\n```js\nconst rain = true;\n```\n<script>alert(1)</script>');
+    expect(rendered.querySelectorAll('li')).toHaveLength(2);
+    expect(rendered.querySelector('strong')?.textContent).toBe('water condenses');
+    expect(rendered.querySelector('pre code')?.textContent).toContain('const rain = true;');
+    expect(rendered.textContent).toContain('COS-0606-FINAL-A');
+    expect(rendered.querySelector('script')).toBeNull();
+  });
   it('keeps semantic Markdown structure while stripping executable attributes and unsafe links', () => {
     const rendered = renderedMessage(
       whole(

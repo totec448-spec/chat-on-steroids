@@ -1,3 +1,4 @@
+import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -24,6 +25,13 @@ afterAll(async () => {
 });
 
 describe('settings migration', () => {
+  it('defaults Goal and Loop to ChatGPT while preserving explicit backend choices', async () => {
+    expect(defaultConfig().goal).toMatchObject({ backend: 'chatgpt', loopBackend: 'chatgpt' });
+    for (const backend of ['api', 'templates', 'chatgpt'] as const) {
+      await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend, loopBackend: 'api' } });
+      expect((await loadConfig()).goal).toMatchObject({ backend, loopBackend: 'api' });
+    }
+  });
   it('never leaves Goal enabled while session recording is off', async () => {
     const impossible = {
       ...defaultConfig(),
@@ -417,6 +425,16 @@ describe('shipped defaults', () => {
  * consent question rather than a convenience one.
  */
 describe('the goal loop settings', () => {
+  it('keeps helper settings independent from the API and preserves a chosen idle tab budget', async () => {
+    const config = defaultConfig();
+    expect(config.goal).toMatchObject({ helperModel: 'gpt-5.6-sol', helperReasoning: 'high', model: DEFAULT_GOAL_MODEL });
+    await saveConfig({ ...config, ui: { ...config.ui, tabsToKeepOpen: 7 }, goal: {
+      ...config.goal, model: 'provider/api-model', reasoning: 'low', helperModel: 'account-browser-model', helperReasoning: 'medium'
+    } });
+    const loaded = await loadConfig();
+    expect(loaded.goal).toMatchObject({ model: 'provider/api-model', reasoning: 'low', helperModel: 'account-browser-model', helperReasoning: 'medium' });
+    expect(loaded.ui.tabsToKeepOpen).toBe(7);
+  });
   it('is off out of the box', () => {
     const config = defaultConfig();
     expect(config.goal.enabled).toBe(false);
@@ -448,6 +466,12 @@ describe('the goal loop settings', () => {
       }
     });
     expect((await loadConfig()).goal).toEqual({
+      backend: 'chatgpt',
+      loopBackend: 'chatgpt',
+      includeToolCalls: false,
+      impulseMinutes: 0,
+      helperModel: 'gpt-5.6-sol',
+      helperReasoning: 'high',
       enabled: true,
       mode: 'loop',
       model: 'openai/gpt-5.2-mini:nitro',
@@ -573,11 +597,27 @@ describe('the goal loop settings', () => {
     expect(loaded.roots).toEqual(config.roots);
   });
 
+  it('defaults Goal tool context off for old configs and preserves an explicit opt-in', async () => {
+    const config = defaultConfig();
+    expect(config.goal.includeToolCalls).toBe(false);
+    const { includeToolCalls: omitted, ...oldGoal } = config.goal;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, goal: oldGoal }), 'utf8');
+    expect((await loadConfig()).goal.includeToolCalls).toBe(false);
+    await saveConfig({ ...config, goal: { ...config.goal, includeToolCalls: true } });
+    expect((await loadConfig()).goal.includeToolCalls).toBe(true);
+  });
+
   it('adds the section to a config written before the loop existed', async () => {
     const before = defaultConfig() as unknown as Record<string, unknown>;
     const { goal: _dropped, ...withoutGoal } = before;
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(withoutGoal), 'utf8');
     expect((await loadConfig()).goal).toEqual({
+      backend: 'chatgpt',
+      loopBackend: 'chatgpt',
+      includeToolCalls: false,
+      impulseMinutes: 0,
+      helperModel: 'gpt-5.6-sol',
+      helperReasoning: 'high',
       enabled: false,
       mode: 'goal',
       model: DEFAULT_GOAL_MODEL,
@@ -662,4 +702,15 @@ describe('the goal loop settings', () => {
     );
     expect((await loadConfig()).goal.reasoning).toBe('default');
   });
+});
+
+
+it.each(REASONING_EFFORTS)('retains canonical worker/helper effort %s across settings save and reload', async effort => {
+  const config = defaultConfig();
+  config.multiAgent.defaultReasoning = effort;
+  config.goal.helperReasoning = effort;
+  await saveConfig(config);
+  const loaded = await loadConfig();
+  expect(loaded.multiAgent.defaultReasoning).toBe(effort);
+  expect(loaded.goal.helperReasoning).toBe(effort);
 });

@@ -36,8 +36,7 @@ harness truncates long project docs, raise its limit rather than cutting this do
 ## 1. The app in sixty seconds
 
 A **Windows/macOS/Linux Electron app** that hands ChatGPT a deliberately small set of local
-computer capabilities over MCP. It is a bridge and a permission layer — not a chat client,
-not a model host. It also ships a Chrome extension that watches ChatGPT itself, so the app can
+computer capabilities over MCP. It is a desktop chat workspace, bridge and permission layer. ChatGPT still hosts model execution; the extension transports desktop input and observes the provider UI. It also ships a Chrome extension that watches ChatGPT itself, so the app can
 record conversations, prove which conversation issued which tool call, replace generic tool
 rows with what actually happened, compact a long chat into a fresh one, and run worker chats.
 Core is portable; the Desktop/computer-use surface has native Windows and macOS backends behind
@@ -187,9 +186,7 @@ moved to a supported host does not lose them.
 Do not "restore" these from an older document:
 
 - `view_image` is its own Core tool, not a mode of `read`.
-- Core declares **8** tool names but at most **7** are live: `find` and the exec pair are
-  mutually exclusive. Desktop adds at most 2. Live ceiling is 9, and reporting must derive
-  from the surface projection, never a hardcoded count.
+- Live tool counts derive from `mcp/surfaces.ts` and current exposure: `find` and the exec pair are mutually exclusive, `session_finish` is conditional, and Desktop is a separate surface. Never restore a hardcoded count from older releases.
 - `session` has exactly two actions, `search` and `read`. Search discovers recordings; read
   requires an explicit local session id and returns cursor-paged history **without silently
   truncating authored user/assistant rows**. Tool rows are intentionally compact headlines with
@@ -214,7 +211,7 @@ Do not "restore" these from an older document:
   the project, so every intermediate folder remains explicit (`/me/projects/app/...`,
   not `/me/src/...`). There is no model-visible `list_roots` fallback that makes the old example
   safe; fix the instruction text/tests rather than teaching tools to guess a missing project level.
-- Goal currently continues **completed final answers only**. Older README/working-note wording that
+- Ordinary Goal continues **completed final answers only**; Astra is finish-tool-only (see §17). Older README/working-note wording that
   says an `interrupted` turn is automatically continued is stale against `content.js::GOAL_CONTINUABLE`.
 - The older prose comment near `config.ts` auto-compaction defaults still calls the trigger
   edge-based. Live authority is `store.ts::autoCompactionReady()` + `bridge.ts::chatIsWorking()`:
@@ -251,8 +248,7 @@ Do not "restore" these from an older document:
   reply row on A. Treat both comments as stale against the mechanisms documented below.
 - `test/update.test.ts` still contains prose that the next retry schedule is only “the next time the
   app opens”. Production `update.ts::startUpdateChecks()` now runs an immediate pass plus an
-  unreferenced six-hour schedule. The existing update tests cover pass/staging semantics but not that
-  timer lifetime; do not regress production to satisfy the old comment.
+  unreferenced six-hour schedule. Current update tests cover the immediate/unreferenced timer lifetime and staging; do not regress production to satisfy the old comment.
 - Exec custody is keyed by the durable local `sessionId` carried in `RequestCorrelation`, not the
   replaceable ChatGPT conversation id. Compact & Resume therefore needs no process-owner move: B
   resolves to the same principal and may continue A's live `write_stdin(session_id=...)`, while a
@@ -322,6 +318,8 @@ src/main/codex/apply-patch/*  V4A parser / matcher / runtime / shell interceptio
 
 ── sessions ───────────────────────────────────────────────────────────────
 src/main/session/store.ts     durable sessions, messages, assets, handoffs
+src/main/session/input.ts     durable user input, browser claims and tool/finish delivery
+src/main/session/finish.ts    exact-turn Astra finish notices and Loop-based injected continuation
 src/main/session/recorder.ts  merges MCP truth with browser observations
 src/main/session/correlation.ts  requestId → conversationId proof registry
 src/main/session/blocked-chats.ts  user-blocked conversations; the app's only stop for a rogue turn
@@ -428,7 +426,7 @@ durable or externally re-observable fact can reconstruct it.
 | command output budget | `head-tail-buffer.ts` + `truncate.ts` + `exec-output.ts` | per process/result | collection cap and model-visible truncation are different bounds; preserve head+tail and explicitly count omitted middle bytes/tokens |
 | Desktop frame/ref identity | `computer/index.ts` | bounded process caches | physical coordinates are meaningful only against the captured frame/window geometry; semantic refs are meaningful only against their UIA snapshot |
 | extension install path | `extension-path.ts` | stable `userData/extension` for packaged builds | stage/fingerprint/rename/rollback; Chrome never points at an AppImage's temporary mount or a half-copied update |
-| app update | `update.ts` | process lifetime: startup check + unreferenced six-hour schedule, with at most one in-flight pass; verified file under `userData/updates`, but **staged status is process memory only** | check/download never blocks startup; SHA-256 from release manifest is mandatory; install is handed off only during ordinary shutdown. A crash/restart does not rediscover the old staged file — next start checks/downloads again |
+| app update | `update.ts` | startup + unreferenced six-hour checks, one in-flight pass; versioned verified artifacts under `userData/updates` | Restart adopts an existing file only after a fresh published-digest check. Changed release selection retires old staged authority. Quit rechecks bytes before handoff; explicit Install requests relaunch. |
 | tunnel-client run ownership | `tunnel/index.ts::ClientRun` + `current` | one process-generation object at a time; old child may exist only while `retirement` joins its teardown | every callback checks `current === run`; `restart()` is the CAS-like ownership cut, clears current before retirement, and only the retirement owner may schedule the successor |
 | app-window lifetime | `window-lifecycle.ts` | process lifetime | only the single-instance lock owner touches shared userData; activation is gated until bootstrap/security/IPC are ready and permanently disabled once quit begins |
 
@@ -571,7 +569,7 @@ chooses assets, hashes bytes or decides install eligibility.
   shutdown; installer is per-user and needs no elevation.
 - Linux **AppImage** can stage the matching AppImage; shutdown copies to `<running>.new`, chmods and
   renames over the path so the mounted old inode can finish running safely.
-- Linux **DEB** is package-manager-owned; macOS is unsigned/unnotarized by current release policy.
+- Linux **DEB** is package-manager-owned; macOS has ad-hoc signing, not Developer ID notarization.
   Both may show a newer-version notice but do not silently self-replace.
 - An unpackaged run (`npm run dev`, a working tree) is told what is published and stages nothing.
 - A failed check/download leaves the running version fully usable and the next six-hour pass (or
@@ -581,10 +579,14 @@ chooses assets, hashes bytes or decides install eligibility.
 - Update network waits are bounded at the owner: latest-release/checksum HTTP uses a 15-second
   ceiling, while the artifact download may take up to 10 minutes. Expiry is just a failed one-pass
   check/stage; it does not start a same-run retry daemon or force an app restart.
-- The verified artifact file may still exist under `userData/updates`, but **the fact that it is
-  staged is process-memory state**. A crash/restart does not rediscover or trust that old file;
-  the next startup performs a fresh release check and, for an applicable update, downloads/verifies
-  again. Do not build restart semantics around `updates/` merely containing an executable.
+- Staged authority is process memory; the versioned artifact survives restart. The next pass asks
+  for the release and its published checksum, then `adopt()` reuses a matching file without another
+  download. A changed/withdrawn release retires the previous authority. Quit hashes the artifact
+  again before execution; a directory containing an executable alone never grants install authority.
+- Explicit Install uses the ordinary drained shutdown and requests relaunch (`--force-run` on
+  Windows, `app.relaunch` for AppImage); an ordinary quit does not reopen the app. Recheck UI stays
+  in Checking, never briefly claims a manual update. A release must be strictly newer than the
+  installed version; replacing bytes under the same tag cannot trigger an upgrade.
 
 The update module does **not** own extension-version truth. `bridgeStatus()` learns that from the
 authenticated extension header; duplicating it in the updater would create two authorities.
@@ -792,7 +794,9 @@ The local execution wrapper adds several mechanisms around that port. They are n
 - **`cmds` is one shell, not N processes.** `command-batch.ts` composes sequential commands in the
   same shell so cwd/environment changes survive between them. It keeps running after ordinary
   non-zero exits, frames each section with a random marker that command output cannot spoof by
-  accident, and returns the first non-zero exit after all sections ran.
+  accident, and returns the first non-zero exit after all sections ran. Recovery hints consume
+  only completed nonzero sections and name that command: a later parse failure must not imply
+  earlier commands did not run or invite repeating their successful mutations.
 - **Collection and model output are different budgets.** `head-tail-buffer.ts` bounds what a
   process can accumulate while keeping a stable head, rolling tail and exact omitted-byte count.
   `truncate.ts`/`exec-output.ts` separately bound what is serialized to the model in UTF-8 byte /
@@ -1456,7 +1460,11 @@ transcript six to eight times and took every message's text each time — most o
 thread per second on a 300-turn chat, and the freeze behind the 2026-09-03 prime. Never read
 message text or tool rows around the cache; add a field to the memo instead.
 
-An open semantic turn grants its **conversation** a two-minute silence deadline in `activeUntil`.
+An ordinary open semantic turn grants its **conversation** a two-minute silence deadline in `activeUntil`.
+Known Pro models instead use ten minutes from meaningful work/tool-start evidence. A late exact
+picker or MCP identity promotes an unknown grant without resetting its evidence timestamp. A real
+turn-end removes activity immediately; a genuinely newer exact MCP call can revive it. Pro never
+receives an inactivity-generated Goal or automatic compaction. Picker presence alone is not work.
 `grantActivity()` arms/pushes it from accepted current-turn evidence and attributed calls;
 `endActivity()` removes it only on a real terminal. `armSilenceSweep()` owns one timer for the
 earliest deadline across all chats, so a 30-second maintenance tick cannot silently add another
@@ -2086,15 +2094,15 @@ service worker restores `autoDiscardable:true` only for markers it owns. A tab a
 the user/browser is never claimed and therefore never “restored” behind their back. Sleeping and
 terminal workers are not protected.
 
-**Tab closing is the same kind of derived policy.** `bridge.ts::closableAgentConversations()`
-projects `closableConversations` on `/status`: the source chat of every committed Compact &
-Resume (`continuation.ts::supersededSourceConversations()`) plus stopped worker chats beyond the
-`maxWorkers + 2` most recently used (`agents.ts::closableWorkerConversations()`), never a
-protected chat. `background.js::maintain()` closes exact matching tabs with `chrome.tabs.remove`,
-skipping the tab that is active in its window — the one in front of the user is theirs. Closing a
-sleeping worker's tab loses nothing: a revival reopens its chat. This is what keeps a long run
-from accumulating one resident ChatGPT tab per worker it ever spawned.
-
+**Tab closing is derived from model activity.** `bridge.ts::browserTabPolicy()` projects exact
+managed/protected conversations, activity timestamps and the configured `maxWorkers` retention
+count. `background.js::pruneManagedTabs()` retains that many app-owned tabs; above the count,
+only idle candidates older than one minute are retired, oldest model activity/turn completion first.
+Active conversations, pending journals and unsent drafts are protected even above the count.
+Redundant document copies are handled separately from the retention floor. Tab selection is not
+model activity. One managed background browser window is reused for helpers/workers; a temporary
+planner remains available until its replacement is established. Browser process count is not the
+window-ownership invariant.
 This keeps live agent pages resident; it does not prove a turn
 active, revive a worker or authorize a browser repair.
 
@@ -2200,6 +2208,31 @@ the same complete worker history to the child conversation or move nothing.
 `bridge.test.ts`, `extension.test.ts` and `content-script.test.ts`.
 
 ## 17. Renderer, IPC, connection and desktop
+### Astra finish continuation and durable input
+
+`session/finish.ts` owns the exact active conversation/turn finish boundary. `session_finish` is
+for Astra when explicitly requested by the user prompt; worker completion still uses
+`agents action=finish`. Planning helpers receive only task content. Finish reminders are attached
+at delivery, independently of plan text, and hidden from the app's authored prompt display.
+
+Plans deliver one stage directly in a successful finish-tool return, or after a verified completed
+turn for ordinary chats. Ordinary tool injections may stack and share the next tool response;
+normal browser sends retain one exclusive delivery claim. `session/input.ts` owns those distinctions,
+receipts and cancellation. Tool-intent input has no claim-age timeout; actual turn/settings changes
+can cancel generated instructions. Legacy periodic generated rows are retired and cannot revive.
+
+For Astra, both Goal and Loop use the Loop prompt and tool injection: an actual completed answer
+never starts another automatic browser message. `goal.ts::astraFinishOnly()` guards ordinary Goal
+acceptance/generation and bridge routes. Pending user/plan instructions take priority. The shared
+`automaticFinishEnabled()` authority decides both production and queued-input validity: an armed
+chat Goal/Loop suppresses Notify even when global finish action is Notify. A resulting instruction
+arrives on a later tool call, with the normal generating animation while it is being drafted.
+The empty-queue notification/manual action remains scoped to the exact held turn.
+
+`automaticCompactionAllowed()` excludes exact selected Pro models independently of the saved
+auto-compaction setting. The composer context meter shows estimated current-chat tokens, not a
+provider-reported count; Pro has a static ring, while other models show configured utilization.
+
 
 **Goal + Loop.** `goal.ts` is one OpenRouter engine with two standing modes and one optional
 per-chat objective. It sends only authored user messages and final assistant answers to the
@@ -2212,7 +2245,7 @@ before filling newest history backwards it reserves the actual first user reques
 **committed** Compact & Resume bootstrap reconstructed from durable handoff provenance. Uncommitted
 or stale handoffs never become a model-context anchor merely because matching text is visible. The
 fresh baseline is **off**, mode **`goal`**, model **`z-ai/glm-5.3`**, reasoning `default`; existing
-user selections remain verbatim. `shared/types.ts::GoalSettings` is the contract and
+user selections remain verbatim. Goal and Loop default to the ChatGPT backend with GPT-5.6 Sol High; the API model above applies only when API is selected. `shared/types.ts::GoalSettings` is the contract and
 `config.ts::DEFAULT_GOAL` is the fresh/repair default.
 
 The standing switches are **one setting**, not two booleans: `goal.enabled` says whether the
@@ -2597,7 +2630,13 @@ queue and main-process three-way merge solve different races and both are requir
 The desktop session UI has its **own** bounded read protocol; do not reuse the model-facing
 `session` cursor design by assumption. `ipc.ts` session lists page by stable `(updatedAt,id)`
 cursor, first detail load reads a recent tail, and incremental detail reads advance by monotonic
-sequence. `renderer/chat.ts` then caps one paint to 160 rows, about 2 MiB of text and 256 KiB of
+sequence. Deliberate upward scrolling near the top requests `before` pages in 80-row chunks;
+the retained window stays bounded at 160 rows, preserves its visible anchor and offers Back to latest.
+Initial/layout scroll events do not drain history. The boundary comes from visible rows so a large final cannot hide earlier
+history permanently; filtered-empty pages use the raw page boundary. Historical pages resist live
+delta eviction while controls remain live, and async navigation is fenced by selection/load epoch.
+`readRecentEvents` scans older pages in fixed chunks and retains only the requested rows.
+`renderer/chat.ts` then caps one paint to 160 rows, about 2 MiB of text and 256 KiB of
 captured rendered HTML. Those are presentation/read budgets only — the durable session store may
 contain much more, and the model-facing session tool independently uses snapshot/update/detail
 cursors for a different consumer.
@@ -3058,3 +3097,5 @@ private process in `SECURITY.md`, not in public issues, comments, or fixtures.
 > **The rule.** Name the identity crossing the failing boundary, follow one concrete item
 > end to end, and fix the earliest place where reality diverges from that identity or
 > invariant.
+
+Intentional `after-turn` inputs for an existing ordinary chat share the durable staged-task FIFO and composer queue dock. Multiple waits are admitted, but each browser claim spends one distinct verified completed `turn_end`; repeated observations or restart cannot drain the next item. Initial and immediate browser sends retain single-send admission. Edits and reordering apply only before claim.

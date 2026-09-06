@@ -22,6 +22,7 @@ beforeAll(async () => {
     fs.readFile(path.join(process.cwd(), 'extension', 'chatgpt-dom.js'), 'utf8'),
     fs.readFile(path.join(process.cwd(), 'extension', 'background.js'), 'utf8')
   ]);
+  backgroundSource = backgroundSource.replace(/\r\n/g, '\n');
 });
 
 describe('extension release metadata', () => {
@@ -50,14 +51,14 @@ describe('extension release metadata', () => {
    * goes back to standing for one call. That is a regression with no symptom, which is
    * why it is pinned here.
    */
-  it('runs the fiber helper in the page context, and nothing else there', async () => {
+  it('runs only the fiber and bounded usage readers in the page context', async () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(process.cwd(), 'extension', 'manifest.json'), 'utf8')
     ) as { content_scripts: Array<{ js: string[]; world?: string }> };
 
     const main = manifest.content_scripts.filter((entry) => entry.world === 'MAIN');
-    expect(main).toHaveLength(1);
-    expect(main[0]!.js).toEqual(['fiber.js']);
+    expect(main).toHaveLength(2);
+    expect(main.flatMap((entry) => entry.js).sort()).toEqual(['fiber.js', 'usage.js']);
     // The rest stays isolated: the page must not be able to reach the code that talks to
     // the service worker, holds the bridge token, or decides what gets recorded.
     for (const entry of manifest.content_scripts) {
@@ -499,6 +500,7 @@ function loadWorker(options: {
     Array<{ id?: number; windowId?: number; url?: string; pendingUrl?: string; status?: string; autoDiscardable?: boolean; active?: boolean }>
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
+  windowsGet?: (windowId: number) => Promise<{ focused?: boolean }>;
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
@@ -555,7 +557,7 @@ function loadWorker(options: {
       },
       onStartup: event()
     },
-    windows: { update: windowsUpdate },
+    windows: { update: windowsUpdate, get: options.windowsGet ?? (async () => ({ focused: true })) },
     scripting: {
       executeScript: scriptingExecuteScript,
       insertCSS: scriptingInsertCSS
@@ -724,6 +726,35 @@ function journalOf(session: FakeStorageArea): any[] {
   return Array.isArray(value) ? value : [];
 }
 
+describe('accepted helper tab cleanup', () => {
+  for (const outcome of ['accepted', 'rejected', 'navigated'] as const) {
+    it(`closes only the exact accepted helper document (${outcome})`, async () => {
+      const helper = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+      const other = '11111111-2222-4333-8444-555555555555';
+      let url = `https://chatgpt.com/c/${helper}`;
+      const worker = loadWorker({
+        local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+        tabsGet: async () => ({ id: 1, url }),
+        fetch: async (input) => {
+          const route = new URL(input).pathname;
+          if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+          if (route === '/input/answer') {
+            if (outcome === 'navigated') url = `https://chatgpt.com/c/${other}`;
+            return response(200, { ok: outcome !== 'rejected' });
+          }
+          return response(200, {});
+        }
+      });
+      await worker.registerTab(1);
+      const result = await worker.send({ type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444',
+        owner: '1:document-1-0:0', response: '{"action":"stop","reply":""}' });
+      expect(result.ok).toBe(true);
+      if (outcome === 'accepted') expect(worker.tabsRemove).toHaveBeenCalledExactlyOnceWith(1);
+      else expect(worker.tabsRemove).not.toHaveBeenCalled();
+    });
+  }
+});
+
 /**
  * Exact chat recovery, from the browser's side.
  *
@@ -789,7 +820,9 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     await worker.fireAlarm();
     expect(worker.tabsReload).toHaveBeenCalledTimes(1);
     expect(worker.tabsReload).toHaveBeenCalledWith(21);
-    expect(asked).toEqual(['status', `repaired:${CHAT}`]);
+    // Document registration also wakes maintenance immediately; the repair itself is once.
+    expect(asked.filter((item) => item !== 'status')).toEqual([`repaired:${CHAT}`]);
+    expect(asked[0]).toBe('status');
     expect(actions).toEqual(['reloaded']);
 
     // Reported, so the app has nothing outstanding and nothing here repeats it.
@@ -924,7 +957,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
 
     expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
     expect(worker.tabsCreate).toHaveBeenCalledWith({ url: `https://chatgpt.com/c/${CHAT}`, active: false });
-    expect(asked).toEqual(['status', 'repaired:close-repair']);
+    expect(asked.filter((item) => item !== 'status')).toEqual(['repaired:close-repair']);
+    expect(asked[0]).toBe('status');
     expect(worker.alarmClear).not.toHaveBeenCalled();
   });
 
@@ -949,7 +983,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     await worker.registerTab(51);
     await worker.send({ type: 'bind', conversationId: CHAT }, 51);
     await worker.fireAlarm();
-    expect(asked).toEqual(['status', 'status']);
+    // Fresh content readiness wakes a pass without waiting for the maintenance alarm.
+    expect(asked).toEqual(['status', 'status', 'status']);
   });
 
   it('asks nobody while it is not paired', async () => {
@@ -1047,7 +1082,7 @@ describe('active agent tab discard protection', () => {
     expect(session.data.discardProtectedTabs).toEqual({});
   });
 
-  it('closes the tabs of chats the app has finished with, except the one in front of the user', async () => {
+  it('closes finished managed chats including an idle selected tab', async () => {
     const OLD_WORKER = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
     const COMPACTED = 'cccccccc-dddd-4eee-8fff-000000000000';
     const fetch = vi.fn(async (input: string) => {
@@ -1059,28 +1094,30 @@ describe('active agent tab discard protection', () => {
           repairs: [],
           recoveryMonitoring: true,
           nonDiscardableConversations: [CHAT],
+          managedConversations: [CHAT, OLD_WORKER, COMPACTED],
+          tabsToKeepOpen: 1,
           closableConversations: [OLD_WORKER, COMPACTED]
         });
       }
       return response(404, {});
     });
+    const tabs = [
+      { id: 91, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` },
+      { id: 92, windowId: 7, url: `https://chatgpt.com/c/${OLD_WORKER}` },
+      { id: 93, windowId: 7, url: `https://chatgpt.com/c/${COMPACTED}`, active: true },
+      { id: 94, windowId: 8, url: `https://chatgpt.com/c/${COMPACTED}` }
+    ];
     const worker = loadWorker({
       local: new FakeStorageArea(paired),
-      session: new FakeStorageArea(),
+      session: new FakeStorageArea({ tabDocuments: Object.fromEntries(tabs.map(tab => [tab.id, `doc-${tab.id}`])), tabEpochs: Object.fromEntries(tabs.map(tab => [tab.id, 0])) }),
       fetch,
-      tabsQuery: async () => [
-        { id: 91, windowId: 7, url: `https://chatgpt.com/c/${CHAT}` },
-        { id: 92, windowId: 7, url: `https://chatgpt.com/c/${OLD_WORKER}` },
-        // Compacted, but the user is looking at it: left alone until they move on.
-        { id: 93, windowId: 7, url: `https://chatgpt.com/c/${COMPACTED}`, active: true },
-        { id: 94, windowId: 8, url: `https://chatgpt.com/c/${COMPACTED}` }
-      ]
+      tabsQuery: async () => tabs,
+      tabsGet: async id => tabs.find(tab => tab.id === id)!,
+      tabsSendMessage: async id => ({ safe: true, navigationEpoch: 0, conversationId: tabs.find(tab => tab.id === id)!.url.split('/c/')[1] })
     });
-    await worker.registerTab(91);
-    await worker.send({ type: 'bind', conversationId: CHAT }, 91);
 
     await worker.fireAlarm();
-    expect(worker.tabsRemove.mock.calls.map((call) => call[0]).sort()).toEqual([92, 94]);
+    expect(worker.tabsRemove.mock.calls.map((call) => call[0]).sort()).toEqual([92, 93, 94]);
     // The live prime chat is still protected, never closed.
     expect(worker.tabsUpdate).toHaveBeenCalledWith(91, { autoDiscardable: false });
   });
@@ -1116,9 +1153,79 @@ describe('active agent tab discard protection', () => {
   });
 });
 
+describe('app-owned retained tab pool', () => {
+  const id = (n: number) => `aaaaaaaa-bbbb-4ccc-8ddd-${String(n).padStart(12, '0')}`;
+  async function budget(options: { safe?: (tab: number) => boolean; changed?: number; keep?: number; recent?: number; protectDuplicate?: boolean; reverseActivity?: boolean } = {}) {
+    const tabs = [1, 2, 3, 4, 5, 6].map(n => ({ id: n, windowId: n === 5 ? 9 : 7, url: `https://chatgpt.com/c/${id(n === 4 ? 3 : n)}`, active: n === 5, lastAccessed: n === options.recent ? Date.now() : 0 }));
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea({ tabDocuments: Object.fromEntries(tabs.map(tab => [tab.id, `doc-${tab.id}`])), tabEpochs: Object.fromEntries(tabs.map(tab => [tab.id, 0])) }),
+      fetch: async input => response(200, new URL(input).pathname === '/hello' ? { app: 'chat-on-steroids', paired: true } : {
+        ok: true, repairs: [], tabsToKeepOpen: options.keep ?? 2,
+        conversationActivityAt: Object.fromEntries([1, 2, 3, 5].map(n => [id(n), (options.reverseActivity ? 10 - n : n) * 1000])),
+        managedConversations: [1, 2, 3, 5].map(id), nonDiscardableConversations: [id(1), ...(options.protectDuplicate ? [id(3)] : [])], closableConversations: options.keep === 20 ? [] : [2, 3, 5].map(id)
+      }),
+      tabsQuery: async () => tabs,
+      windowsGet: async () => ({ focused: true }),
+      tabsGet: async n => ({ ...tabs.find(tab => tab.id === n)!, ...(n === options.changed ? { url: `https://chatgpt.com/c/${id(99)}` } : {}) }),
+      tabsSendMessage: async n => ({ safe: options.safe?.(n) ?? true, navigationEpoch: 0, conversationId: tabs.find(tab => tab.id === n)!.url.split('/c/')[1] })
+    });
+    await worker.fireAlarm();
+    return worker;
+  }
+  it('retains the worker-sized pool, preserving manual chats and active work', async () => {
+    const worker = await budget();
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 2, 3]);
+    expect(worker.tabsRemove).not.toHaveBeenCalledWith(1); // live app work
+    expect(worker.tabsRemove).not.toHaveBeenCalledWith(6); // unrelated manual chat
+  });
+  it('keeps idle conversations below the pool limit while removing an idle duplicate', async () => {
+    const worker = await budget({ keep: 20 });
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4]);
+  });
+  it('does not use tab selection as model activity', async () => {
+    const worker = await budget({ recent: 5 });
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 2, 3]);
+  });
+  it('never removes copies of a protected active conversation', async () => {
+    const worker = await budget({ protectDuplicate: true });
+    expect(worker.tabsRemove.mock.calls.map(call => call[0]).sort()).toEqual([2, 5]);
+  });
+  it('evicts the oldest work timestamp even when tab IDs and selection say otherwise', async () => {
+    const worker = await budget({ reverseActivity: true, recent: 5 });
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 5, 3]);
+  });
+  it('retains drafts/unreadable pages and refuses a navigated candidate', async () => {
+    const worker = await budget({ safe: n => n !== 3 && n !== 4, changed: 5 });
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([2]);
+  });
+});
+
 describe('worker settings authority', () => {
   const paired = { port: 8765, token: 'paired-token' };
   const CHAT = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+
+  it('authorizes Stop through the real runtime dispatcher and rejects a retired document', async () => {
+    const posted: string[] = [];
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 42, url: `https://chatgpt.com/c/${CHAT}` }),
+      fetch: async input => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        posted.push(route);
+        return response(200, { ok: true, command: { type: 'stop', conversationId: CHAT, turnId: 'live-turn' } });
+      }
+    });
+    await worker.registerTab(42);
+    const command = { id: '1111111111111111', client: 'page-owner', conversationId: CHAT, turnId: 'live-turn' };
+    expect(await worker.send({ type: 'stop_redeem', ...command }, 42)).toMatchObject({ ok: true, command: { type: 'stop' } });
+    expect(await worker.send({ type: 'stop_ack', status: 'sent', ...command }, 42)).toMatchObject({ ok: true });
+    expect(posted).toContain('/commands/redeem');
+    await worker.registerTab(42, 'replacement-document');
+    const before = posted.filter(route => route === '/commands/redeem').length;
+    expect(await worker.send({ type: 'stop_redeem', ...command }, 42, 'document-42-0')).toMatchObject({ ok: false, error: 'stale_document' });
+    expect(posted.filter(route => route === '/commands/redeem')).toHaveLength(before);
+  });
 
   it('forwards auto-compaction writes with the source tab conversation so the app can reject worker authority', async () => {
     const posted: Record<string, unknown>[] = [];
@@ -1600,6 +1707,7 @@ describe('extension revival delivery', () => {
     const opened = String(worker.tabsCreate.mock.calls[0]?.[0]?.url || '');
     expect(opened).toContain(`/c/${CHAT}`);
     expect(opened).toContain(`clf=${revival.id}`);
+    expect(worker.tabsCreate.mock.calls[0]?.[0]?.active).toBe(false);
 
     // The marker tab is visible to the next fresh scan even before redeem settles. The same
     // pending revival can therefore never turn an alarm/activity burst into a tab spiral.
