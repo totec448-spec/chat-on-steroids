@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> **Set ChatGPT to English!!!!**
+>
+> Set ChatGPT's interface language to **English**, then reload your ChatGPT tabs and retry model discovery in Chat On Steroids. The current model-picker integration relies on English UI labels. Other languages can leave the model list empty even when the extension is connected and all setup checks are green.
+
 <div align="center">
   <img src="extension/icons/icon128.png" width="88" alt="Chat On Steroids icon" />
   <h1>Chat On Steroids</h1>
