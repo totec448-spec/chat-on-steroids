@@ -55,20 +55,7 @@ export function createWindowActivationGate(showWindow: () => void): {
 }
 
 /**
- * Closing the last ordinary window is not an application quit on macOS. The app stays in the
- * Dock/menu bar until the user explicitly quits (Cmd+Q / application menu / tray menu), and a
- * later `activate` recreates the window. Windows/Linux retain the existing preference semantics:
- * when close-to-tray is off, closing the last window exits the app.
- */
-export function shouldQuitOnWindowAllClosed(
-  platform: NodeJS.Platform,
-  minimizeToTray: boolean
-): boolean {
-  return platform !== 'darwin' && !minimizeToTray;
-}
-
-/**
- * macOS users return to a hidden app through the Dock, which Electron reports as `activate`.
+ * macOS can report Finder/re-launch activation through `activate` even for a menu-bar accessory.
  * Windows/Linux use the tray/second-instance paths and should not gain a synthetic handler.
  */
 export function registerNativeWindowActivation(

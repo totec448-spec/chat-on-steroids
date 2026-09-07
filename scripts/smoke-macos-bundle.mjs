@@ -50,6 +50,7 @@ const expectedPlist = {
   CFBundleVersion: packageVersion,
   LSApplicationCategoryType: 'public.app-category.developer-tools',
   LSMinimumSystemVersion: '13.0',
+  LSUIElement: 'true',
   NSScreenCaptureUsageDescription:
     'Chat On Steroids captures a display or window only when the enabled Desktop connector asks to observe it.'
 };

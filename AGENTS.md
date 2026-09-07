@@ -491,7 +491,7 @@ single-instance lock
   → if feature is off: pause live execution, preserve history, persist the safe projection
   → restore continuations AFTER swarm, because recovery may need to repair prime ownership
   → install renderer CSP + deny browser permissions
-  → register fixed IPC → enable the native window activation gate → create/show window + tray
+  → register fixed IPC → enable native activation → macOS accessory policy → create tray + show control panel
   → queue legacy attribution repair asynchronously
   → start bridge if recording OR multi-agent
   → start session-retention maintenance independently of recording admission

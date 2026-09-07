@@ -46,7 +46,7 @@ ChatGPT is a good engineer trapped in a text box. Developer mode lets it call MC
 - **Plans, Goal and Loop.** Split a request into editable tasks or generate follow-ups through a separate ChatGPT helper or the API. Astra can receive the next task through `session_finish` in the same turn, without opening another model turn.
 - **You stay the permission boundary.** Only the folders you approve are visible. Each capability is a switch. Read-only mode is a single kill switch. Nothing runs on this machine that you did not turn on.
 
-It runs in the tray, hosts no model of its own, and works with the ChatGPT you already use in the browser.
+It runs in the tray, hosts no model of its own, and works with the ChatGPT you already use in the browser. On macOS it lives in the menu bar without occupying the Dock or App Switcher.
 
 ## Download
 
@@ -86,7 +86,7 @@ Use a normal ChatGPT conversation with the custom app enabled. OpenAI's built-in
 
 ## Quick start
 
-1. Install the build for your CPU and open Chat On Steroids. It lives in the tray or menu bar.
+1. Install the build for your CPU and open Chat On Steroids. The control panel opens on every launch; closing it leaves the app running in the tray or menu bar, where you can reopen it.
 2. Open **Settings → Workspace**, review permissions and approve a project folder. Press **Add**, or drop the folder onto the Folders card.
 3. Create an OpenAI Secure MCP Tunnel and a restricted API key, then press **Connect**. Details below.
 4. In ChatGPT on the web, enable Developer mode and create the **Core** app from the tunnel. On Windows, create the **Desktop** app too if you left screen and input control on; on macOS, if you switched them on.

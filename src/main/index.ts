@@ -66,8 +66,7 @@ import {
   createWindowActivationGate,
   ownsAppRuntime,
   registerNativeWindowActivation,
-  shouldBeginAppBootstrap,
-  shouldQuitOnWindowAllClosed
+  shouldBeginAppBootstrap
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
@@ -122,11 +121,9 @@ function createWindow(): void {
   window.on('show', () => {
     if (!quitting) void startChatModelDiscovery().catch(error => logWarn(`model discovery on window open: ${error.message}`));
   });
-  window.once('ready-to-show', () => {
-    // A renderer can finish loading after Cmd+Q has already entered bounded teardown. Never let
-    // that late native event make the app visible again while `will-quit` is draining.
-    if (!quitting) showWindow();
-  });
+  // The desktop window is a control panel for the tray app, not the app's lifetime owner.
+  // Every process launch presents it once. Closing it hides it to the tray/menu bar, and a later
+  // tray click, native activation, or second-instance launch presents the same control panel again.
 
   // A renderer that fails to load leaves a blank window with no other clue, so
   // record it where the diagnostics panel can show it.
@@ -152,7 +149,7 @@ function createWindow(): void {
   window.webContents.on('will-attach-webview', (event) => event.preventDefault());
 
   window.on('close', (event) => {
-    if (!quitting && getConfig().ui.minimizeToTray) {
+    if (!quitting) {
       event.preventDefault();
       window?.hide();
     }
@@ -178,10 +175,8 @@ function showWindow(): void {
   // below additionally protects the long pre-window startup interval, while this invariant makes
   // a direct caller harmless once `before-quit` has started.
   if (quitting) return;
-  if (!window) {
-    createWindow();
-    return;
-  }
+  if (!window) createWindow();
+  if (!window) return;
   if (window.isMinimized()) window.restore();
   window.show();
   // Launch, tray reopen and native activation share the same work-area presentation.
@@ -271,6 +266,10 @@ void app.whenReady().then(async () => {
   // This guard is intentionally before even app.getPath/init* calls. A secondary instance, or a
   // primary that was told to quit before ready, must never touch the primary's shared userData.
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
+  // Keep macOS presence menu-bar-only even in development builds, where there is no packaged
+  // Info.plist to supply LSUIElement. `accessory` still allows ordinary focusable windows while
+  // removing the app from the Dock and App Switcher.
+  if (process.platform === 'darwin') app.setActivationPolicy('accessory');
   const userData = app.getPath('userData');
   initLogFile(path.join(userData, 'app.log'));
   initConfigPath(userData);
@@ -397,16 +396,19 @@ void app.whenReady().then(async () => {
     }
   );
   windowActivation.enable();
-  windowActivation.request();
-  // macOS `activate` can fire on first launch, so do not wire it at module load where it could
-  // create a BrowserWindow before Electron is ready. Once the initial window path is established,
-  // Dock activation/re-launch can safely recreate or focus it.
+  // macOS `activate` can fire on first launch or re-launch, so do not wire it at module load where
+  // it could create a BrowserWindow before Electron is ready. Once the initial window path is
+  // established, native re-launch activation can safely recreate or focus it.
   registerNativeWindowActivation(app, windowActivation.request);
 
   tray = new Tray(trayIcon(false), ...trayGuidArgsForPlatform());
   tray.on('click', windowActivation.request);
   refreshTray();
   onStatusChange(refreshTray);
+  // Present the control panel on every primary process launch. Closing it still hides to the
+  // tray/menu bar because the close handler above owns window lifetime independently of process lifetime.
+  createWindow();
+  windowActivation.request();
 
   logInfo('app started');
 
@@ -443,17 +445,9 @@ void app.whenReady().then(async () => {
 app.on('before-quit', () => {
   if (!ownsAppRuntime(hasSingleInstanceLock)) return;
   quitting = true;
-  // From this point `will-quit` owns a bounded teardown. A Dock click/relaunch arriving while
+  // From this point `will-quit` owns a bounded teardown. A native relaunch arriving while
   // that sequence drains must not recreate or reveal a window after the tray has disappeared.
   windowActivation.disable();
-});
-
-app.on('window-all-closed', () => {
-  if (!ownsAppRuntime(hasSingleInstanceLock)) return;
-  // macOS convention: closing the last window is not quitting the application. The Dock/menu
-  // bar stay alive and `activate` recreates it. Windows/Linux retain the explicit close-to-tray
-  // preference; Cmd+Q / app.quit bypasses this event and still enters the shutdown sequence.
-  if (shouldQuitOnWindowAllClosed(process.platform, getConfig().ui.minimizeToTray)) app.quit();
 });
 
 app.on('will-quit', (event) => {

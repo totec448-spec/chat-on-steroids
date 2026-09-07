@@ -5,8 +5,7 @@ import {
   createWindowActivationGate,
   ownsAppRuntime,
   registerNativeWindowActivation,
-  shouldBeginAppBootstrap,
-  shouldQuitOnWindowAllClosed
+  shouldBeginAppBootstrap
 } from '../src/main/window-lifecycle.js';
 
 describe('native window activation', () => {
@@ -22,6 +21,11 @@ describe('native window activation', () => {
     const context = vm.createContext({ window: native, quitting: false, createWindow });
     vm.runInContext(present + '\nshowWindow();', context);
     expect(operations.splice(0)).toEqual(['show', 'maximize', 'focus']);
+    context.window = null;
+    context.createWindow = vi.fn(() => { context.window = native; });
+    vm.runInContext('showWindow()', context);
+    expect(context.createWindow).toHaveBeenCalledTimes(1);
+    expect(operations.splice(0)).toEqual(['show', 'maximize', 'focus']);
     state.minimized = true;
     vm.runInContext('showWindow()', context);
     expect(operations.splice(0)).toEqual(['restore', 'show', 'maximize', 'focus']);
@@ -32,17 +36,25 @@ describe('native window activation', () => {
     vm.runInContext('showWindow()', context);
     expect(operations).toEqual([]);
 
-    let ready!: () => void;
-    const startup = source.slice(source.indexOf("  window.once('ready-to-show'"), source.indexOf('  // A renderer that fails', source.indexOf("  window.once('ready-to-show'")));
-    const showWindow = vi.fn();
-    const launch = vm.createContext({ window: { once: (_event: string, listener: () => void) => { ready = listener; } }, quitting: false, showWindow });
-    vm.runInContext(startup, launch);
-    ready(); expect(showWindow).toHaveBeenCalledTimes(1);
-    launch.quitting = true; ready(); expect(showWindow).toHaveBeenCalledTimes(1);
+    // BrowserWindow itself starts hidden so renderer readiness cannot race presentation. Once
+    // startup owns the tray and activation gate, every primary process launch explicitly opens it.
+    expect(source).toContain('show: false');
+    expect(source).not.toContain("window.once('ready-to-show'");
+    expect(source).toContain("tray.on('click', windowActivation.request)");
+    const startupCreate = source.indexOf('  createWindow();', source.indexOf('tray = new Tray('));
+    const startupShow = source.indexOf('  windowActivation.request();', startupCreate);
+    expect(startupCreate).toBeGreaterThan(-1);
+    expect(startupShow).toBeGreaterThan(startupCreate);
+
+    // Closing the control panel is never process quit: it is always intercepted and hidden.
+    const close = source.slice(source.indexOf("  window.on('close'"), source.indexOf("  window.on('closed'"));
+    expect(close).toContain('if (!quitting)');
+    expect(close).toContain('event.preventDefault();');
+    expect(close).toContain('window?.hide();');
   });
   it('starts background catalog discovery on each actual show, including tray reopen, and never during quit', async () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
-    const listener = source.slice(source.indexOf("  window.on('show'"), source.indexOf("  window.once('ready-to-show'"));
+    const listener = source.slice(source.indexOf("  window.on('show'"), source.indexOf('  // The desktop window is a control panel'));
     let show!: () => void;
     const start = vi.fn(async () => ({}));
     const context = vm.createContext({ window: { on: (event: string, callback: () => void) => {
@@ -70,8 +82,8 @@ describe('native window activation', () => {
     const gate = createWindowActivationGate(show);
 
     // Electron can emit second-instance after its `ready` event while our async startup is still
-    // restoring state. The initial startup path will show a window itself, so this early request
-    // must not create one before CSP/permission/IPC setup is complete.
+    // restoring state. Startup itself opens the control panel only after bootstrap, so an early
+    // second-instance request must not create or reveal one before security/IPC is ready.
     gate.request();
     expect(show).not.toHaveBeenCalled();
 
@@ -88,14 +100,14 @@ describe('native window activation', () => {
 
     // Startup is async. A continuation that resumes after `before-quit` can still execute its
     // old enable() call; shutdown must be a one-way boundary so that stale continuation cannot
-    // reactivate Dock/second-instance/tray presentation.
+    // reactivate native/second-instance/tray presentation.
     expect(gate.isDisabled()).toBe(true);
     gate.enable();
     gate.request();
     expect(show).toHaveBeenCalledTimes(1);
   });
 
-  it('reopens the app from the macOS Dock activation event', () => {
+  it('reopens the app from the macOS native activation event', () => {
     const listeners = new Map<string, () => void>();
     const source = { on: vi.fn((event: 'activate', listener: () => void) => listeners.set(event, listener)) };
     const show = vi.fn();
@@ -112,13 +124,4 @@ describe('native window activation', () => {
     expect(source.on).not.toHaveBeenCalled();
   });
 
-  it('keeps a macOS app alive after its last window closes, regardless of close-to-tray preference', () => {
-    expect(shouldQuitOnWindowAllClosed('darwin', true)).toBe(false);
-    expect(shouldQuitOnWindowAllClosed('darwin', false)).toBe(false);
-  });
-
-  it.each(['win32', 'linux'] as const)('keeps close-to-tray semantics on %s', (platform) => {
-    expect(shouldQuitOnWindowAllClosed(platform, true)).toBe(false);
-    expect(shouldQuitOnWindowAllClosed(platform, false)).toBe(true);
-  });
 });

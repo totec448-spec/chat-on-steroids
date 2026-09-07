@@ -306,17 +306,12 @@ describe('cross-platform packaging targets', () => {
     const beforeQuit = main.indexOf("app.on('before-quit', () => {");
     const beforeQuitOwner = main.indexOf('if (!ownsAppRuntime(hasSingleInstanceLock)) return;', beforeQuit);
     const beforeQuitMutation = main.indexOf('quitting = true;', beforeQuit);
-    const windowAllClosed = main.indexOf("app.on('window-all-closed', () => {");
-    const windowAllOwner = main.indexOf('if (!ownsAppRuntime(hasSingleInstanceLock)) return;', windowAllClosed);
-    const windowAllConfig = main.indexOf('getConfig().ui.minimizeToTray', windowAllClosed);
     const willQuit = main.indexOf("app.on('will-quit', (event) => {");
     const willQuitOwner = main.indexOf('if (!ownsAppRuntime(hasSingleInstanceLock)) return;', willQuit);
     const preventDefault = main.indexOf('event.preventDefault();', willQuit);
 
     expect(beforeQuitOwner).toBeGreaterThan(beforeQuit);
     expect(beforeQuitOwner).toBeLessThan(beforeQuitMutation);
-    expect(windowAllOwner).toBeGreaterThan(windowAllClosed);
-    expect(windowAllOwner).toBeLessThan(windowAllConfig);
     expect(willQuitOwner).toBeGreaterThan(willQuit);
     expect(willQuitOwner).toBeLessThan(preventDefault);
   });
@@ -327,13 +322,17 @@ describe('cross-platform packaging targets', () => {
     const loadConfig = main.indexOf('await loadConfig();', ready);
     const theme = main.indexOf('nativeTheme.themeSource = getConfig().ui.theme;', loadConfig);
     const enableActivation = main.indexOf('windowActivation.enable();', theme);
-    const firstWindowRequest = main.indexOf('windowActivation.request();', enableActivation);
+    const trayCreation = main.indexOf('tray = new Tray(', enableActivation);
+    const startupCreate = main.indexOf('  createWindow();', trayCreation);
+    const startupShow = main.indexOf('  windowActivation.request();', startupCreate);
 
     expect(ready).toBeGreaterThan(-1);
     expect(loadConfig).toBeGreaterThan(ready);
     expect(theme).toBeGreaterThan(loadConfig);
     expect(enableActivation).toBeGreaterThan(theme);
-    expect(firstWindowRequest).toBeGreaterThan(enableActivation);
+    expect(trayCreation).toBeGreaterThan(enableActivation);
+    expect(startupCreate).toBeGreaterThan(trayCreation);
+    expect(startupShow).toBeGreaterThan(startupCreate);
 
     const ipc = readFileSync(path.join(root, 'src', 'main', 'ipc.ts'), 'utf8');
     const save = ipc.indexOf("handle('settings:save', async (payload) => {");
@@ -342,6 +341,16 @@ describe('cross-platform packaging targets', () => {
     expect(save).toBeGreaterThan(-1);
     expect(liveTheme).toBeGreaterThan(save);
     expect(background).toBeGreaterThan(liveTheme);
+  });
+
+  it('keeps macOS menu-bar-only while still allowing the control-panel window', () => {
+    const builder = yamlFile('electron-builder.yml');
+    const main = readFileSync(path.join(root, 'src', 'main', 'index.ts'), 'utf8');
+    const macSmoke = readFileSync(path.join(root, 'scripts', 'smoke-macos-bundle.mjs'), 'utf8');
+
+    expect(builder.mac.extendInfo.LSUIElement).toBe(true);
+    expect(main).toContain("if (process.platform === 'darwin') app.setActivationPolicy('accessory');");
+    expect(macSmoke).toContain("LSUIElement: 'true'");
   });
 
   it('uses Noble-compatible Linux packages and a FUSE-independent AppImage runtime', () => {
@@ -432,6 +441,7 @@ describe('cross-platform packaging targets', () => {
       'CFBundleVersion: packageVersion',
       "LSApplicationCategoryType: 'public.app-category.developer-tools'",
       "LSMinimumSystemVersion: '13.0'",
+      "LSUIElement: 'true'",
       'NSScreenCaptureUsageDescription:',
       "path.join(resources, 'desktop', 'macos-desktop-addon.node')",
       "path.join(resources, 'desktop', 'libcos-desktop.dylib')",

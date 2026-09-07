@@ -444,15 +444,15 @@ it('preserves native Desktop permissions when saving unrelated settings on Linux
   });
 });
 
-it('uses native menu-bar/Dock wording on macOS instead of Windows tray copy', async () => {
+it('uses menu-bar-only wording on macOS instead of Windows tray copy', async () => {
   const mounted = await mountChat({
     platform: { family: 'macos', name: 'macOS', desktopAutomation: true }
   });
   const doc = mounted.window.document;
 
-  expect(doc.getElementById('backgroundRunningCopy')!.textContent).toContain('menu bar and Dock');
+  expect(doc.getElementById('backgroundRunningCopy')!.textContent).toContain('menu bar without occupying the Dock');
   expect(doc.getElementById('backgroundRunningCopy')!.textContent).not.toContain('tray');
-  expect(doc.getElementById('minimizeToTrayCopy')!.textContent).toBe('Hide the window to the menu bar when closed');
+  expect(doc.getElementById('minimizeToTrayCopy')!.textContent).toBe('Runs in the menu bar when the window is closed');
 });
 
 it('surfaces the existing root rename API in the folder row', async () => {
