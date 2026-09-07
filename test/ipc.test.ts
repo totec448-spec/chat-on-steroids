@@ -482,7 +482,7 @@ describe('bounded IPC identities and OS launch results', () => {
   });
 });
 
-describe('settings writes from more than one UI', () => {
+describe('ChatGPT browser settings', () => {
   it('persists Edge and keeps it through an unrelated stale renderer save', async () => {
     const base = defaultConfig();
     await saveConfig(base);
@@ -496,6 +496,9 @@ describe('settings writes from more than one UI', () => {
     expect((await save({ ...current, ui: { ...current.ui, chatBrowser: 'unsupported' } }, current)).ok).toBe(false);
     expect(getConfig().ui.chatBrowser).toBe('edge');
   });
+});
+
+describe('settings writes from more than one UI', () => {
   it('saves helper settings and tab retention through the renderer schema and merge boundary', async () => {
     const base = defaultConfig();
     await saveConfig(base);

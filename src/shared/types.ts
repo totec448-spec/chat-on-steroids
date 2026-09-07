@@ -120,8 +120,6 @@ export const CHAT_BROWSERS = ['chrome', 'edge'] as const;
 export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 
 export interface UiPrefs {
-  /** Browser for app-originated launches; connected source tabs retain placement ownership. */
-  chatBrowser?: ChatBrowser;
   backgroundChats?: boolean;
   /** Actual app-owned tabs to retain; active work and drafts stay protected. Omitted uses workers + 2. */
   tabsToKeepOpen?: number;
@@ -134,6 +132,8 @@ export interface UiPrefs {
   autoConnect: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
+  /** Browser for app-originated launches; connected source tabs retain placement ownership. */
+  chatBrowser?: ChatBrowser;
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */
   theme: 'light' | 'dark';
 }
