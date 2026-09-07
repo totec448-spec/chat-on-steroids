@@ -182,7 +182,7 @@ The MCP connector uses ChatGPT's documented Developer mode and Secure MCP Tunnel
 
 - **Tools missing or stale after a permission change:** tool-schema changes schedule a connector refresh after a 20-second debounce. If it fails, refresh the custom app in ChatGPT; this is separate from reloading the companion extension.
 - **Extension says app not found:** recording or multi-agent mode must be on for the bridge to run. Then reopen the popup.
-- **Extension version mismatch:** reload the unpacked extension after every app update.
+- **Extension version mismatch:** the popup shows both app and extension versions/protocols. After updating the app, click **Reload companion**, or open your browser's Extensions page, enable **Developer mode**, and click **Update / Reload**. If the mismatch remains, use **Open extension folder** in the app and load that folder. Reopen the popup to verify the connection; **Looking for the app** is not a successful handshake.
 - **`agents` says `UNIDENTIFIED_CALLER`:** use that conversation in the paired browser so the extension can observe its request id. The app will not guess identity from the active tab.
 - **`COMPACTION_IN_PROGRESS` in a chat:** that chat is being handed off. Let it write the brief; work continues in the replacement.
 - **OS warning about an unverified app:** expected for the unsigned beta. Verify `SHA256SUMS.txt` before overriding.

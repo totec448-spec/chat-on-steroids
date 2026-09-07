@@ -112,7 +112,7 @@ function pipeline(info, ready) {
       read: readStage,
       sent: ['failed', pending ? `${pending} held` : ''],
       proc: ['off'],
-      why: ['bad', 'The app is not reachable. Nothing is leaving this browser.']
+      why: ['bad', 'Delivery is blocked. Check the app connection or version warning above.']
     };
   }
   if (sent && sent.ok === false) {
@@ -223,7 +223,8 @@ function paintHeader(status) {
   // connection that has not finished yet, which is what it looked like back when the next
   // poll would silently undo it.
   const off = status && status.disconnected === true && !paired;
-  const ready = connected && paired && !incompatible;
+  // An unknown compatibility result is not a successful handshake.
+  const ready = connected && paired && status.compatible === true;
 
   $('pill').className = `pill ${ready ? '' : incompatible ? 'bad' : 'off'}`;
   $('state').textContent = incompatible
@@ -248,7 +249,12 @@ function paintAlert(status, info) {
   const pairError = status && status.pairError;
   const error = page && page.lastError;
   const text = incompatible
-    ? 'The app and this extension speak different bridge protocols.'
+    ? `App v${status.appVersion || '?'} (protocol ${status.appProtocol ?? '?'}) · ` +
+      `extension v${status.extensionVersion || '?'} (protocol ${status.extensionProtocol ?? '?'}). ` +
+      'These bridge protocols are incompatible. After updating the app, click Reload companion, ' +
+      'or open your browser’s Extensions page → Developer mode → Update / Reload. ' +
+      'If the mismatch remains, use Open extension folder in the app and load that folder. ' +
+      'Reopen this popup to verify the connection.'
     : pairError && pairError.message
       ? pairError.message
       : pairError && pairError.error === 'secure_storage_unavailable'
