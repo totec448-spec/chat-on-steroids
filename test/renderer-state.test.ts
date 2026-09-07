@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
-import { DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
+import { DEFAULT_GOAL_MODEL, DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
 
 let dom: JSDOM | null = null;
 afterEach(() => {
@@ -313,7 +313,8 @@ interface GoalMount {
 async function mountChat(
   overrides: Record<string, unknown> = {},
   models: any[] = [],
-  apiOverrides: Record<string, (...args: any[]) => any> = {}
+  apiOverrides: Record<string, (...args: any[]) => any> = {},
+  initialGoal: Record<string, unknown> = {}
 ): Promise<GoalMount> {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
@@ -350,7 +351,8 @@ async function mountChat(
       enabled: false,
       model: 'deepseek/deepseek-v4-flash',
       reasoning: 'default' as const,
-      prompt: DEFAULT_GOAL_SYSTEM_PROMPT
+      prompt: DEFAULT_GOAL_SYSTEM_PROMPT,
+      ...initialGoal
     }
   };
   const state: any = {
@@ -419,6 +421,88 @@ async function mountChat(
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+it('attaches pasted screenshot files with previews while preserving ordinary text paste', async () => {
+  const dropFiles = vi.fn(async () => ({ ok: true, data: [{ id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'screenshot.png', size: 4, mimeType: 'image/png', preview: 'data:image/webp;base64,AAAA' }] }));
+  const mounted = await mountChat({}, [], { dropFiles });
+  const w = mounted.window, input = w.document.getElementById('chatInput')!;
+  const file = new w.File(['image'], 'screenshot.png', { type: 'image/png' });
+  const paste = new w.Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(paste, 'clipboardData', { value: { files: [file] } });
+  input.dispatchEvent(paste);
+  await vi.waitFor(() => expect(dropFiles).toHaveBeenCalledWith([file]));
+  expect(paste.defaultPrevented).toBe(true);
+  await vi.waitFor(() => expect(w.document.querySelector('img[src="data:image/webp;base64,AAAA"]')).not.toBeNull());
+  const text = new w.Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(text, 'clipboardData', { value: { files: [] } });
+  input.dispatchEvent(text);
+  expect(text.defaultPrevented).toBe(false);
+  const overflow = new w.Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(overflow, 'clipboardData', { value: { files: Array(20).fill(file) } });
+  input.dispatchEvent(overflow);
+  expect(overflow.defaultPrevented).toBe(true);
+  expect(dropFiles).toHaveBeenCalledTimes(1);
+});
+
+it('preserves the selected OpenRouter model through an unchanged custom-provider round trip', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const original = 'z-ai/glm-5.3-flash';
+  mounted.state.config.goal = { ...mounted.state.config.goal, model: original, provider: { kind: 'openrouter', baseUrl: '' } };
+  mounted.push(mounted.state);
+  const provider = w.document.getElementById('goalProvider') as HTMLSelectElement;
+  provider.value = 'custom'; provider.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  // Repainting custom settings must not replace the hidden OpenRouter picker's model.
+  mounted.push({ ...mounted.state, hasCustomProviderKey: false });
+  provider.value = 'openrouter'; provider.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
+  expect(mounted.calls[1].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: original });
+  expect(w.document.getElementById('goalModelName')!.textContent).toBe(original);
+});
+
+it('uses the OpenRouter default when opened directly on an unrelated custom deployment', async () => {
+  const mounted = await mountChat({}, [], {}, { model: 'llama3.1', provider: { kind: 'custom', baseUrl: 'http://localhost:8000/v1' } });
+  const provider = mounted.window.document.getElementById('goalProvider') as HTMLSelectElement;
+  provider.value = 'openrouter';
+  provider.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: DEFAULT_GOAL_MODEL });
+});
+
+it('saves a custom deployment id and returns to the known OpenRouter model', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const provider = w.document.getElementById('goalProvider') as HTMLSelectElement;
+  provider.value = 'custom';
+  provider.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].goal.provider.kind).toBe('custom');
+  expect(w.document.getElementById('goalCustomPanel')?.hidden).toBe(false);
+  const model = w.document.getElementById('goalCustomModel') as HTMLInputElement;
+  model.value = 'llama3.1';
+  model.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
+  expect(mounted.calls[1].goal.model).toBe('llama3.1');
+  provider.value = 'openrouter';
+  provider.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(3));
+  expect(mounted.calls[2].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: 'deepseek/deepseek-v4-flash' });
+});
+
+it('saves the ChatGPT browser choice from its settings control and restores it on state push', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const browser = w.document.getElementById('chatBrowser') as HTMLSelectElement;
+  expect(browser.value).toBe('chrome'); // older config has no field
+  browser.value = 'edge';
+  browser.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].ui.chatBrowser).toBe('edge');
+  expect(browser.value).toBe('edge');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
+  expect(browser.value).toBe('chrome');
+});
 
 it('preserves native Desktop permissions when saving unrelated settings on Linux', async () => {
   const mounted = await mountChat({

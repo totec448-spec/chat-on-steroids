@@ -1782,6 +1782,50 @@ describe('handoff storage', () => {
 // ---------------------------------------------------------------- recorder
 
 describe('canonical recorder 1.8', () => {
+  it('counts a full tool result after rebind while keeping its recorder preview bounded', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, compaction: { ...config.compaction, auto: true, autoTokens: 10000 } });
+    try {
+      const source = 'conv-fulltext-source';
+      const destination = 'conv-fulltext-destination';
+      const opened = await recordChatObservations(source, [{ kind: 'user_message', time: Date.now(),
+        messageId: 'old-large-context', text: 'x'.repeat(50000) }]);
+      const sessionId = opened.sessionId!;
+      expect(await rebindSession(sessionId, source, destination)).toBe(true);
+      rebindConversation(sessionId, source, destination);
+      const requestId = 'wfr-fulltext-result';
+      await recordChatObservations(destination, [
+        { kind: 'user_message', time: Date.now(), messageId: 'new-handoff', text: 'h'.repeat(13237) },
+        { kind: 'tool_evidence', time: Date.now(), calls: [{ messageId: 'fulltext-call', requestId,
+          tool: 'read', order: 0, answered: false }] }
+      ]);
+      const before = (await getSession(sessionId))!;
+      const args = { paths: ['a.ts', 'b.ts', 'c.ts'] };
+      const result = 'r'.repeat(60306);
+      const call = await recordToolCall({ tool: 'read', args, content: [{ type: 'text', text: result }],
+        outcome: 'ok', durationMs: 1, startedAt: Date.now(), requestId });
+      expect(call?.result).toMatchObject({ truncated: true, chars: result.length });
+      expect(call!.result.text.length).toBeLessThan(8200);
+      expect((await readAsset(sessionId, call!.result.assetId!))?.toString('utf8')).toBe(result);
+      const expected = estimateTokens(JSON.stringify(args)) + estimateTokens(result) + estimateTokens(call!.summary.title);
+      const after = (await getSession(sessionId))!;
+      expect(after.estimatedTokens - before.estimatedTokens).toBe(expected);
+      expect(after.contextTokens).toBe(estimateTokens('h'.repeat(13237)) + expected);
+      expect(autoCompactionReady(after)).toBe(true);
+    } finally { await enableRecording(); }
+  });
+
+  it('replaces a canonical truncated message contribution with its new full length once', async () => {
+    const opened = await createSession({ title: 'full message revisions' });
+    const revision = (chars: number) => ({ time: Date.now(), source: 'extension' as const, kind: 'assistant_message' as const,
+      messageId: 'full-answer', state: 'streaming' as const, final: false,
+      message: { text: 'same bounded head', truncated: true, chars, digest: String(chars) } });
+    await upsertMessageEvent(opened.id, revision(20000));
+    await upsertMessageEvent(opened.id, revision(60000));
+    await upsertMessageEvent(opened.id, revision(60000));
+    expect(await getSession(opened.id)).toMatchObject({ estimatedTokens: 15000, contextTokens: 15000 });
+  });
+
   it('lets the store deduplicate repeated recorder assets instead of shadow-counting the same bytes toward quota', async () => {
     const conversationId = `conv-dedup-shot-${Date.now()}`;
     const sessionId = await sessionForConversation(conversationId);
@@ -2361,6 +2405,24 @@ describe('naming the chats this app opened', () => {
     expect((await getSession(opened.sessionId!))?.title).toBe('My manual title');
   });
 
+  it('does not persist native file credentials in recorded artifact arguments', async () => {
+    const conversationId = 'conv-artifact-privacy';
+    const requestId = 'wfr_artifact_privacy';
+    const opened = await recordChatObservations(conversationId, [{
+      kind: 'tool_evidence', time: Date.now(), fiberConversationId: conversationId,
+      calls: [{ messageId: 'artifact-private', tool: 'download_artifact', order: 0, answered: false, requestId }]
+    }]);
+    await recordToolCall({ tool: 'download_artifact',
+      args: { file: { download_url: 'https://files.oaiusercontent.com/f?sig=PRIVATE_SIGNATURE', file_id: 'file-PRIVATE_ID' }, path: '/project/image.png' },
+      content: [{ type: 'text', text: 'Saved /project/image.png.' }], outcome: 'ok', durationMs: 1,
+      startedAt: Date.now(), requestId, agent: null });
+    const stored = JSON.stringify(await readEvents(opened.sessionId!, { kinds: ['tool_call'] }));
+    expect(stored).toContain('native file credentials not stored');
+    expect(stored).toContain('/project/image.png');
+    expect(stored).not.toContain('PRIVATE_SIGNATURE');
+    expect(stored).not.toContain('PRIVATE_ID');
+  });
+
   it('recovers a late worker call agent from the durable worker session origin after live broker state is gone', async () => {
     const conversationId = 'conv-late-worker-call';
     const requestId = 'wfr_late_worker_exact';
@@ -2846,6 +2908,27 @@ describe('token estimation', () => {
       }
     } as SessionEvent;
     expect(eventTokens(event)).toBe(100 + 200 + Math.ceil('Read a.ts'.length / 4));
+  });
+
+  it('counts full truncated tool text once, independently of its preview and asset reference', () => {
+    const event = { seq: 1, time: 1, source: 'mcp', kind: 'tool_call', call: {
+      callId: 'full-result', tool: 'read', attribution: 'turn',
+      args: { text: 'short preview with a recorder annotation', truncated: true, chars: 20001, assetId: 'args.txt' },
+      result: { text: 'x'.repeat(8000) + ' [52306 characters stored as result.txt]', truncated: true, chars: 60306, assetId: 'result.txt' },
+      outcome: 'ok', durationMs: 1, summary: { title: 'Read 3 paths', tone: 'neutral', kind: 'read' },
+      assets: [{ id: 'result.txt', mimeType: 'text/plain', bytes: 60306 }]
+    } } as SessionEvent;
+    expect(eventTokens(event)).toBe(Math.ceil(20001 / 4) + Math.ceil(60306 / 4) + estimateTokens('Read 3 paths'));
+    if (event.kind !== 'tool_call') throw new Error('fixture');
+    delete event.call.result.assetId;
+    event.call.result.text = 'Another bounded preview; overflow asset unavailable';
+    expect(eventTokens(event)).toBe(Math.ceil(20001 / 4) + Math.ceil(60306 / 4) + estimateTokens('Read 3 paths'));
+  });
+
+  it.each([undefined, -1, NaN, Infinity, 2.5])('keeps legacy or malformed original lengths bounded by actual inline text (%s)', chars => {
+    const event = { seq: 1, time: 1, source: 'extension', kind: 'user_message',
+      message: { text: 'abcdefgh', truncated: true, chars } } as SessionEvent;
+    expect(eventTokens(event)).toBe(2);
   });
 
   it('does not inflate the context advisory with transient progress captions', () => {

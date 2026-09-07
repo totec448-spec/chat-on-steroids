@@ -15,6 +15,25 @@ it architecturally cleaner and preferably smaller than before.
 
 **Rule: no build up; rewrite with the new feature in mind.**
 
+**Browser efficiency rules.** Opening the app, a suspended MV3 wake socket and a maintenance
+alarm are not permission to open a tab. Reuse a suitable existing document. One operation owns
+one elected tab across provider navigation and MV3 suspension; a missing receipt or a user-closed
+tab must not create a new opening attempt. Transfer opening authority at handout, not after page
+hydration. Keep broker worker reuse independent of tab retention: sleeping/finished workers can
+release their renderer after two minutes, subject to the existing draft/generation/document checks.
+Read bounded account-evaluated model metadata and installed tool declarations through the existing
+MAIN-world bridge. Do not infer availability from English labels or fixed release names, sweep every
+effort to discover a catalog, or add polling/fallback openers around an uncertain observation.
+
+Native attachments have one staging owner in `session/input-attachments.ts`: immutable originals,
+bounded thumbnails, serialized quota/pruning/admission and opaque IDs. The outbox owns membership;
+the bridge serves bounded chunks only to that exact pre-send browser claim. Never expose source
+paths or inject a file reference as though its bytes reached ChatGPT. Final Send must recheck the
+same text, attachment nodes and navigation epoch after every asynchronous authorization step.
+Pending plan stages are projected from the first durable input until its receipt materializes the
+queue. Temporary planner tabs retire after capture/cancellation only with exact idle/draft proof.
+
+
 **This tree is usually dirty and shared with the user and other agents — never `reset`,
 `checkout`, `clean`, reformat, or overwrite work you did not do.**
 
@@ -75,8 +94,9 @@ Four runtime planes, only two of which are servers:
 
 **The MCP server and the browser bridge are two different servers with two different
 threat models.** MCP is the model's capability endpoint. The bridge exists only for the
-Chrome extension and deliberately has no route that reads a file, runs a command, or
-changes a permission. Never merge their lifecycles or their auth.
+Chrome extension and has no arbitrary filesystem, command or permission authority. Its attachment
+route serves only immutable user-selected staging bytes belonging to an exact claimed input.
+Never merge their lifecycles or their auth.
 
 The extension never executes a tool. It observes ChatGPT and reports evidence. **The app is
 the only authority on what a local tool actually did.** The renderer has no Node, no
@@ -161,7 +181,7 @@ copy a release number that can drift. Core is cross-platform; main process is Ty
 extension is plain MV3 JavaScript with no build step; Vitest; `node-pty` is the main native
 terminal dependency. Desktop automation is available through native Windows and macOS backends.
 
-Fresh-install defaults from `config.ts` — **all Core tool permissions on**, **read-only off**,
+Fresh-install defaults from `config.ts` — **Core tool permissions on except opt-in ChatGPT file saving**, **read-only off**,
 **recording on**, session advisory/limit **400k/533k** estimated tokens, **auto-compaction on
 at 400k and level-based with live-work gating**, **multi-agent on** with `maxWorkers` 2 (hard max 8).
 Fresh multi-agent also starts with `allowUnattributedCalls=true`; `recoverAgentTabs` starts **off**
@@ -338,7 +358,7 @@ src/shared/types.ts           config/app/IPC types and Capabilities
 
 ── browser ────────────────────────────────────────────────────────────────
 src/main/bridge.ts            extension HTTP bridge + compaction/worker orchestration
-src/main/goal.ts              Goal/Loop OpenRouter driver, durable obligations, one draft per turn
+src/main/goal.ts              Goal/Loop LLM driver (OpenRouter default, custom endpoint optional), durable obligations, one draft per turn
 src/main/agents.ts            the one global star-topology multi-agent broker
 extension/manifest.json       MV3 composition root: service worker, isolated scripts/CSS, MAIN-world Fiber, popup, host/extension permissions
 extension/chatgpt-dom.js      EVERY ChatGPT selector and DOM-shape assumption
@@ -461,7 +481,7 @@ first?**
 | resumed first answer missed by Goal | `content.js::rememberResumeGoalPending()` / `bindResumeGoalTurn()` | `maybeRecoverResumeGoalTurn()` → exact single resume-user-turn + final/Fiber proof → ordinary `noteGoalTurn()`; synthetic `g-resume-<commandId>` is only a stable local turn id when no observed generation id exists |
 | worker lifecycle | `tools-core.ts` `agents` action dispatch | `agents.ts::stageSpawn()` / `stageMessages()` / `stageFinishAgent()` → `persistCriticalSwarmNow()` → staged commit/rollback → bridge worker/revive commands → `background.js::recoverDeferredRevivals()` → exact page liveness back into `agents.ts` |
 | browser command delivery | worker producers `bridge.ts::queueWorkerBootstrap()` / `queueWorkerRevival()`; **resume production** is bridge POST `/compact` after `continuation.ts::attachSummary()` → private `queueResumeCommand()` | durable command owner/lease → `/commands/redeem` / `/commands/ack` → `background.js::redeemCommand()` / `ackCommand()` → content send → receipt/recovery in `restoreCommands()`; exported `queueResume()` is a test/older-caller convenience wrapper, and private generic `queue()` is storage plumbing — neither is the semantic resume entrypoint |
-| which browser opens a fresh chat | `bridge.ts::offerPlacement()` / `pendingBrowserPlacement()` → `background.js::placeSuccessorChat()` | the `/compact` reply that produced the command carries `placement`, and chat A's own browser creates chat B in chat A's window; `openFreshChatInBrowser()` is the fallback after `BROWSER_PLACEMENT_MS` and the only path for a resume no page asked for |
+| which browser opens a fresh chat | `bridge.ts::offerPlacement()` / `pendingBrowserPlacement()` → `background.js::placeSuccessorChat()` | the `/compact` reply that produced the command carries `placement`, and chat A's own browser creates chat B in chat A's window; `pendingBrowserPlacement()` spends opening authority on handout, before hydration; no timer may issue a second OS open. `openFreshChatInBrowser()` handles a resume with no waiting browser collector |
 | extension document/conversation identity | `background.js::authorizeDocument()` / `registerDocument()` / `ownsDocument()` | `noteTabConversation()` + `chatgpt-dom.js::conversationFromPath()` / `conversationId()`; React-only evidence begins at `fiber.js::scan()` |
 | page observation commit | bridge POST `/events` | exact lost-worker-ACK recovery + `noteAgentAlive()` → `recorder.ts::recordChatObservations()` → durable Goal reply obligation → browser-recovery activity → context ceiling → staged/durable worker final → HTTP 200 lets extension journal retire the batch |
 | Overwrite / native ChatGPT presentation | `content.js::renderStreams()` | `websiteRenderForTurn()` + `completeReplacementForTurn()` + `hasUnrepresentedFiberCall()` → `chatgpt-dom.js::replaceActivity()` / `hideProgress()`; exact Fiber/page identities decide whether local activity is complete enough to replace native activity, while ChatGPT always keeps answer/code/actions |
@@ -498,6 +518,11 @@ single-instance lock
   → auto-connect MCP/tunnel if configured
   → start non-blocking updater lifetime: immediate pass + unreferenced six-hour recheck schedule
 ```
+
+`ui.chatBrowser` owns the Chrome/Edge choice for OS-originated ChatGPT launches. `browser.ts`
+reads it at launch time and tries only that family's installations; failures propagate to the
+request owner instead of opening the system default browser. The setting does not select a
+profile or override connected-extension delivery/source-tab placement. Legacy configs use Chrome.
 
 The **window activation gate** is a real lifetime boundary, not UI polish. Electron may deliver
 `second-instance` after its own `ready` event while this app is still restoring durable state and
@@ -607,6 +632,7 @@ earn it today.
 | `find` | `search` **and not** `command` | `tools-core.ts` → `search.ts` |
 | `apply_patch` | any of `create`/`edit`/`move`/`deleteFile` | `codex/apply-patch/*` |
 | `exec_command`, `write_stdin` | `command` | `codex/unified-exec.ts` |
+| `download_artifact` | `saveArtifact` | `tools-core.ts` → `artifact-fetch.ts` + `artifact-target.ts` |
 | `session` | recording enabled | session subsystem |
 | `agents` | multi-agent enabled | `agents.ts` |
 
@@ -2096,8 +2122,9 @@ terminal workers are not protected.
 
 **Tab closing is derived from model activity.** `bridge.ts::browserTabPolicy()` projects exact
 managed/protected conversations, activity timestamps and the configured `maxWorkers` retention
-count. `background.js::pruneManagedTabs()` retains that many app-owned tabs; above the count,
-only idle candidates older than one minute are retired, oldest model activity/turn completion first.
+count. `background.js::pruneManagedTabs()` closes managed tabs after two minutes without model
+activity even below that count. The count caps worker tabs only: when new worker work arrives,
+the oldest safe sleeping worker tab is evicted immediately if needed; its broker identity remains reusable.
 Active conversations, pending journals and unsent drafts are protected even above the count.
 Redundant document copies are handled separately from the retention floor. Tab selection is not
 model activity. One managed background browser window is reused for helpers/workers; a temporary
@@ -2234,8 +2261,9 @@ auto-compaction setting. The composer context meter shows estimated current-chat
 provider-reported count; Pro has a static ring, while other models show configured utilization.
 
 
-**Goal + Loop.** `goal.ts` is one OpenRouter engine with two standing modes and one optional
-per-chat objective. It sends only authored user messages and final assistant answers to the
+**Goal + Loop.** `goal.ts` is one LLM engine with two standing modes and one optional
+per-chat objective: OpenRouter by default, or a custom OpenAI-compatible endpoint
+(`goal.provider`). It sends only authored user messages and final assistant answers to the
 provider; tool rows, native progress and hidden reasoning stay out of that transcript. That provider
 view comes from the **local canonical recording**, not the live page. `goal.ts::
 conversationMessages()` keeps final assistant revisions only, coalesces duplicate legacy final
@@ -2304,12 +2332,13 @@ project. Keep both properties if you rewrite these; a loop that drifts off the b
 whole night it was left running for.
 
 The Goal **model picker** has its own narrow secret/network boundary. Renderer code never receives
-the OpenRouter key and never fetches the catalogue directly: IPC `goal:models` accepts only a bounded
+the provider key and never fetches the catalogue directly: IPC `goal:models` accepts only a bounded
 offset, fixes the page size at 20, and calls `goal.ts::listGoalModels()`. The main-process catalogue
 loader uses a 30-second request ceiling, 8 MiB response bound and 5,000-model parse cap, sorts newest
 releases first, and caches for five minutes **scoped to a SHA-256 fingerprint of the current API
-key** (or the public/no-key bucket). A key change therefore cannot reuse a restricted catalogue from
-the previous credential. `renderer/chat.ts::loadGoalModels()` / `paintGoalModels()` /
+key** (or the public/no-key bucket) **plus the endpoint URL**. A key or endpoint change therefore cannot reuse a restricted catalogue from
+the previous credential. A custom endpoint that answers no usable catalogue yields an empty
+list and the model stays a hand-typed field. `renderer/chat.ts::loadGoalModels()` / `paintGoalModels()` /
 `maybePageGoalModels()` own scroll-paged presentation only; load failure leaves the user's current
 model selection untouched.
 

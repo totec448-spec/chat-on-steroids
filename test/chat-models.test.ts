@@ -5,6 +5,53 @@ const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'me
 beforeEach(() => { resetChatModelsForTests(); vi.useFakeTimers(); });
 afterEach(() => vi.useRealTimers());
 describe('ephemeral observed ChatGPT model catalog', () => {
+  it('explains a missing native picker without claiming sign-in failure or inventing models', () => {
+    requestChatModels();
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: null, error: 'picker_unavailable' });
+    expect(getChatModels()).toMatchObject({ state: 'unavailable', models: [], error: expect.stringContaining('native model picker') });
+  });
+  it('rechecks browser startup when an unfinished discovery is explicitly opened again', async () => {
+    const wake = vi.fn(async () => {}); configureChatModelDiscovery({ wake, changed: () => {} });
+    await startChatModelDiscovery();
+    const pending = pendingChatModelRequest()!;
+    // The browser may have exited since the completed OS handoff. The shared
+    // browser startup owner, not the catalog nonce, decides whether it is absent.
+    await startChatModelDiscovery();
+    expect(pendingChatModelRequest()).toEqual(pending);
+    expect(wake.mock.calls).toEqual([[pending.nonce, true], [pending.nonce, true]]);
+  });
+  it('promotes a pending passive observation once when the user explicitly refreshes', async () => {
+    const wake = vi.fn(async () => {}); configureChatModelDiscovery({ wake, changed: () => {} });
+    await startChatModelDiscovery(false);
+    const passive = pendingChatModelRequest()!;
+    await Promise.all([startChatModelDiscovery(), startChatModelDiscovery()]);
+    expect(pendingChatModelRequest()).toEqual({ ...passive, allowOpen: true });
+    expect(wake.mock.calls).toEqual([[passive.nonce, false], [passive.nonce, true]]);
+  });
+  it('serializes explicit promotion behind an in-flight passive wake without duplicate opening', async () => {
+    let release!: () => void;
+    const wake = vi.fn((_nonce: string, _allowOpen: boolean) => new Promise<void>(resolve => { release = resolve; }));
+    configureChatModelDiscovery({ wake, changed: () => {} });
+    const passive = startChatModelDiscovery(false);
+    const nonce = pendingChatModelRequest()!.nonce;
+    const first = startChatModelDiscovery(), second = startChatModelDiscovery();
+    expect(wake).toHaveBeenCalledTimes(1);
+    release(); await passive;
+    expect(wake.mock.calls).toEqual([[nonce, false], [nonce, true]]);
+    release(); await Promise.all([first, second]);
+    expect(pendingChatModelRequest()).toMatchObject({ nonce, allowOpen: true });
+  });
+  it('observes existing tabs once on window show without opening Chrome or invalidating ready models', async () => {
+    const wake = vi.fn(async () => {}); configureChatModelDiscovery({ wake, changed: () => {} });
+    await startChatModelDiscovery(false);
+    const request = pendingChatModelRequest()!;
+    expect(request.allowOpen).toBe(false);
+    expect(wake).toHaveBeenCalledWith(request.nonce, false);
+    observeChatModels({ nonce: request.nonce, models });
+    await startChatModelDiscovery(false); await startChatModelDiscovery(false);
+    expect(wake).toHaveBeenCalledTimes(1);
+    expect(getChatModels()).toMatchObject({ state: 'ready', models });
+  });
   it('shares explicit browser startup and publishes a bounded expiry without polling', async () => {
     let release!: () => void;
     const wake = vi.fn(() => new Promise<void>(resolve => { release = resolve; }));

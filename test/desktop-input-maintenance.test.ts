@@ -50,6 +50,90 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null 
 }
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
+  it.each(['closed', 'navigated'])('does not reopen an elected input tab after it is %s, including browser restart', async reason => {
+    const input = { id: firstId, conversationId: null };
+    const h = await worker([input]);
+    await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(1);
+    if (reason === 'closed') h.tabs.length = 0;
+    else { h.tabs[0]!.url = 'https://chatgpt.com/'; delete h.tabs[0]!.pendingUrl; }
+    await h.maintain(); await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(1);
+    const restarted = await worker([input], undefined, h.localSaved);
+    await restarted.maintain();
+    expect(restarted.create).not.toHaveBeenCalled();
+  });
+  it('spends input opening authority before creation and permits a new explicit operation', async () => {
+    const inputs = [{ id: firstId, conversationId: null }];
+    const h = await worker(inputs);
+    h.create.mockImplementationOnce(async () => { throw new Error('Chrome rejected creation'); });
+    await expect(h.maintain()).rejects.toThrow('Chrome rejected creation'); await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(1);
+    inputs.splice(0, 1, { id: secondId, conversationId: null });
+    await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(2);
+  });
+  it('does not create behind a failed custody write', async () => {
+    const h = await worker([{ id: firstId, conversationId: null }]);
+    h.local.set.mockImplementation(async value => {
+      if ('inputOpenings' in value) throw new Error('disk full');
+      Object.assign(h.localSaved, value);
+    });
+    await expect(h.maintain()).rejects.toThrow('disk full'); await h.maintain();
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('restores the pre-create checkpoint without reopening after a crash before tab-id persistence', async () => {
+    const input = { id: firstId, conversationId: null };
+    const h = await worker([input], undefined, { inputOpenings: { [firstId]: { tab: null } } });
+    await h.maintain();
+    expect(h.create).not.toHaveBeenCalled();
+    h.tabs.push({ id: 9, url: `https://chatgpt.com/?cos-input=${firstId}` });
+    await h.maintain();
+    expect(h.sendMessage).toHaveBeenCalledWith(9, expect.objectContaining({ type: 'clf-desktop-input', id: firstId }));
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('does not confuse a temporarily withheld offer with retired opening authority', async () => {
+    const input = { id: firstId, conversationId: null };
+    const inputs = [input];
+    const h = await worker(inputs);
+    await h.maintain(); h.tabs.length = 0;
+    inputs.length = 0;
+    await h.maintain();
+    inputs.push(input);
+    await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(1);
+  });
+  it('closes an explicitly retired temporary planner without requiring another work tab', async () => {
+    const h = await worker([{ id: firstId, conversationId: null, owner: '7:planner:1', lifetime: 'temporary-planner', close: true, retire: true } as any]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/?temporary-chat=true&cos-input=${firstId}` });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'planner', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async () => ({ safe: true } as never));
+    await h.maintain();
+    expect(h.remove).toHaveBeenCalledWith(7);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('never opens a helper for passive model observation, including repeated maintenance', async () => {
+    const h = await worker([]);
+    const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: false };
+    await h.inspectModels(request, true); await h.inspectModels(request, true);
+    expect(h.create).not.toHaveBeenCalled();
+    h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${secondId}` });
+    await h.inspectModels(request, true);
+    expect(h.sendMessage).toHaveBeenCalledWith(8, expect.objectContaining({ type: 'clf-model-catalog' }));
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('retains model discovery custody when a user closes its elected tab', async () => {
+    const h = await worker([]);
+    const request = { nonce: firstId, expiresAt: Date.now() + 60000 };
+    await h.inspectModels(request, true);
+    expect(h.create).toHaveBeenCalledTimes(1);
+    h.tabs.length = 0;
+    await h.inspectModels(request, true); await h.inspectModels(request, true);
+    expect(h.create).toHaveBeenCalledTimes(1);
+    // Only a new explicit request can authorize another tab.
+    await h.inspectModels({ ...request, nonce: secondId }, true);
+    expect(h.create).toHaveBeenCalledTimes(2);
+  });
   it('does not close a temporary planner when its answer is accepted', async () => {
     const h = await worker([]);
     const url = `https://chatgpt.com/?temporary-chat=true&cos-input=${firstId}`;
@@ -88,12 +172,12 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     });
     await h.maintain(); expect(h.remove).not.toHaveBeenCalled();
   });
-  it('sizes the owned minimized window from desktop work area without requesting focus or restore', async () => {
+  it('bounds the owned minimized window inside the work area without requesting focus or restore', async () => {
     const h = await worker([{ id: firstId, conversationId: null }]);
     h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, ok: true, inputs: [{ id: firstId, conversationId: null }], background: true, browserWorkArea: { x: -1920, y: 0, width: 1920, height: 1040 } }) });
     await h.maintain();
     expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, state: 'minimized' }));
-    expect(h.windows.update).toHaveBeenCalledWith(80, { left: -1920, top: 0, width: 1920, height: 1040 });
+    expect(h.windows.update).toHaveBeenCalledWith(80, { left: -1510, top: 120, width: 1100, height: 800 });
     expect(h.windows.update.mock.calls.every(call => !('focused' in (call[1] as object)) && !('state' in (call[1] as object)))).toBe(true);
   });
   it('reuses an idle conversation without opening or navigating a helper', async () => {
@@ -128,15 +212,36 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     await h.maintain();
     expect(h.create).toHaveBeenCalledTimes(1);
   });
-  it('reuses a warm catalog across requests without navigation or closing it', async () => {
+  it('retires the completed exact dedicated catalog and preserves its opening tombstone', async () => {
     const h = await worker([]);
     h.tabs.push({ id: 7, url: `https://chatgpt.com/?cos-model-catalog=${firstId}` }, { id: 8, url: `https://chatgpt.com/c/${secondId}` });
-    await h.inspectModels({ nonce: secondId, expiresAt: Date.now() + 60000 }, true);
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'catalog', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_id, message) => message.type === 'clf-tab-close-check'
+      ? { ok: true, safe: true, conversationId: null, navigationEpoch: 1 } as never : { ok: true, ready: true });
+    h.remove.mockImplementation(async id => { h.tabs.splice(h.tabs.findIndex(tab => tab.id === id), 1); });
+    const request = { nonce: secondId, expiresAt: Date.now() + 60000 };
+    await h.inspectModels(request, true);
+    expect(h.remove.mock.calls).toEqual([[7]]);
+    expect(h.saved.modelCatalogOwner).toEqual({ nonce: secondId, tab: 7 });
+    await h.inspectModels(request, true);
+    await h.inspectModels(null, true);
     expect(h.create).not.toHaveBeenCalled();
     expect(h.update).not.toHaveBeenCalled();
-    expect(h.sendMessage).toHaveBeenCalledWith(7, expect.objectContaining({ type: 'clf-model-catalog', nonce: secondId }));
-    await h.inspectModels(null, true);
+    expect(h.remove).toHaveBeenCalledTimes(1);
+  });
+  it('retires a sole completed catalog on later maintenance after its draft clears', async () => {
+    const h = await worker([]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/?cos-model-catalog=${firstId}` });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'catalog', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    let safe = false;
+    h.sendMessage.mockImplementation(async (_id, message) => message.type === 'clf-tab-close-check'
+      ? { ok: true, safe, conversationId: null, navigationEpoch: 1 } as never : { ok: true, ready: true });
+    await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 60000 }, true);
     expect(h.remove).not.toHaveBeenCalled();
+    safe = true;
+    await h.inspectModels(null, true);
+    expect(h.remove.mock.calls).toEqual([[7]]);
+    expect(h.create).not.toHaveBeenCalled();
   });
   it('preserves a draft on a catalog marker and waits for unreachable old helpers instead of accumulating tabs', async () => {
     const h = await worker([]);
@@ -347,14 +452,14 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.sendMessage).toHaveBeenCalledTimes(2);
   });
 
-  it('releases a failed flight so a later pass can retry and matches exact marker identity', async () => {
+  it('releases a failed flight without repeating its opening and matches exact marker identity', async () => {
     const h = await worker([{ id: firstId, conversationId: null }]);
     h.tabs.push({ id: 50, url: `https://chatgpt.com/?other=cos-input=${firstId}` });
     h.create.mockRejectedValueOnce(new Error('Chrome temporarily refused tab creation'));
     await expect(h.maintain()).rejects.toThrow('temporarily refused');
     await h.maintain();
-    expect(h.create).toHaveBeenCalledTimes(2);
-    expect(h.tabs).toHaveLength(2);
+    expect(h.create).toHaveBeenCalledTimes(1);
+    expect(h.tabs).toHaveLength(1);
   });
 });
 

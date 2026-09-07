@@ -201,11 +201,24 @@ describe('model attribution and equivalent cost', () => {
     expect(usageEstimate(rows, { divisor: 4, multiplier: 1, rates: { a: 0, b: 1 } })).toEqual({ tokens: 2e6, cost: 1, unpricedTokens: 0.5e6 });
     expect(rows[0]!.tokens).toBe(1e6);
   });
+  it('prices the recorded Sol picker ID without changing its identity or overriding saved rates', async () => {
+    const { DEFAULT_USAGE_FORMULA, usageEstimate } = await import('../src/shared/usage.js');
+    const rows = [{ model: 'gpt-5-6-thinking', reasoningEffort: 'high', assumed: false, tokens: 427245 }];
+    expect(usageEstimate(rows, DEFAULT_USAGE_FORMULA)).toEqual({ tokens: 427245, cost: 0.2050776, unpricedTokens: 0 });
+    for (const rate of [null, 0, 0.8]) {
+      const estimate = usageEstimate(rows, { ...DEFAULT_USAGE_FORMULA, rates: { ...DEFAULT_USAGE_FORMULA.rates, 'gpt-5-6-thinking': rate } });
+      expect(estimate.unpricedTokens).toBe(rate === null ? 427245 : 0);
+      expect(estimate.cost).toBeCloseTo(rate === null ? 0 : 427245 / 1e6 * rate * 1.2);
+    }
+    expect(usageEstimate(rows, { ...DEFAULT_USAGE_FORMULA, rates: { 'gpt-5.6-sol': 0.8 } }).cost).toBeCloseTo(0.4101552);
+    expect(usageEstimate([{ ...rows[0]!, model: 'gpt-5-6-thinking-unknown' }], DEFAULT_USAGE_FORMULA).unpricedTokens).toBe(427245);
+    expect(rows[0]!.model).toBe('gpt-5-6-thinking');
+  });
   it('prices the verified ChatGPT GPT-6 Pro alias at the Astra cached-input comparison rate', async () => {
     const { DEFAULT_USAGE_FORMULA, usageEstimate } = await import('../src/shared/usage.js');
-    const rows = ['gpt-5.6', 'gpt-5.6-sol', 'gpt-6-astra', 'gpt-5.5', 'gpt-6-pro'].map(model => ({ model, reasoningEffort: 'high', assumed: false, tokens: 1e6 }));
+    const rows = ['gpt-5.6', 'gpt-5.6-sol', 'gpt-6-astra', 'gpt-5.5', 'gpt-6-pro', 'gpt-5.6-terra', 'gpt-5.6-luna'].map(model => ({ model, reasoningEffort: 'high', assumed: false, tokens: 1e6 }));
     const estimate = usageEstimate(rows, DEFAULT_USAGE_FORMULA);
-    expect(estimate).toMatchObject({ tokens: 5e6, unpricedTokens: 0 });
-    expect(estimate.cost).toBeCloseTo(3.96);
+    expect(estimate).toMatchObject({ tokens: 7e6, unpricedTokens: 0 });
+    expect(estimate.cost).toBeCloseTo(4.224);
   });
 });

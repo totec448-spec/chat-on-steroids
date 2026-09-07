@@ -84,12 +84,36 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
-it('validates dropped image count and decodes bytes through the existing image authority', async () => {
-  const drop = (payload: unknown) => handlers.get('sessions:dropImages')!(null, payload) as Promise<any>;
-  expect(await drop({ paths: [] })).toMatchObject({ ok: false });
-  expect(await drop({ paths: Array(5).fill('image.png') })).toMatchObject({ ok: false });
-  expect(await drop({ paths: [''] })).toMatchObject({ ok: false });
-  expect(await drop({ paths: [path.join(process.cwd(), 'package.json')] })).toMatchObject({ ok: false });
+it('validates dropped file count and stages arbitrary native file types', async () => {
+  const drop = (payload: unknown) => handlers.get('sessions:dropFiles')!(null, payload) as Promise<any>;
+  expect(await drop({ files: [] })).toMatchObject({ ok: false });
+  expect(await drop({ files: Array(21).fill('image.png') })).toMatchObject({ ok: false });
+  expect(await drop({ files: [''] })).toMatchObject({ ok: false });
+  expect(await drop({ files: [path.join(process.cwd(), 'package.json')] })).toMatchObject({ ok: true, data: [expect.objectContaining({ name: 'package.json', mimeType: 'application/json' })] });
+});
+
+it('publishes Goal draft progress through the session refresh channel without a new transcript event', async () => {
+  const { startGoalDraft, resetGoalStateForTests } = await import('../src/main/goal.js');
+  const session = await createSession({ title: 'Goal progress', conversationId: 'ipc-goal-progress' });
+  currentWindow = { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  try {
+    startGoalDraft({ conversationId: session.conversationId!, sessionId: session.id, turnId: 'finished-turn', deferStart: true });
+    expect(currentWindow.webContents.send).toHaveBeenCalledWith('session:changed');
+  } finally {
+    resetGoalStateForTests();
+  }
+});
+
+it('stages clipboard image bytes with a preview through the general attachment owner', async () => {
+  const drop = (payload: unknown) => handlers.get('sessions:dropFiles')!(null, payload) as Promise<any>;
+  expect(await drop({ files: [] })).toMatchObject({ ok: false });
+  expect(await drop({ files: [{ name: 'huge.png', bytes: new Uint8Array(12 * 1024 * 1024 + 1) }] })).toMatchObject({ ok: false });
+  const sharp = (await import('sharp')).default;
+  const bytes = await sharp({ create: { width: 12, height: 8, channels: 3, background: '#123456' } }).png().toBuffer();
+  const pasted = await drop({ files: [{ name: 'screenshot.png', bytes: new Uint8Array(bytes) }] });
+  expect(pasted).toMatchObject({ ok: true, data: [{ name: 'screenshot.png', size: bytes.length, mimeType: 'image/png', preview: expect.stringMatching(/^data:image\/webp;base64,/) }] });
+  const { readInputAttachmentChunk } = await import('../src/main/session/input-attachments.js');
+  expect(await readInputAttachmentChunk(pasted.data[0], 0)).toBe(bytes.toString('base64'));
 });
 
 it('does not authorize the composer Generate Goal action from an absent or stale finish wait', async () => {
@@ -482,7 +506,78 @@ describe('bounded IPC identities and OS launch results', () => {
   });
 });
 
+describe('ChatGPT browser settings', () => {
+  it('persists Edge and keeps it through an unrelated stale renderer save', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    const result = await save({ ...base, ui: { ...base.ui, chatBrowser: 'edge' } }, base);
+    expect(result.ok, result.error).toBe(true);
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).ui.chatBrowser).toBe('edge');
+    const stale = await save({ ...base, ui: { ...base.ui, theme: 'light' } }, base);
+    expect(stale.ok, stale.error).toBe(true);
+    expect(getConfig().ui).toMatchObject({ chatBrowser: 'edge', theme: 'light' });
+    const current = getConfig();
+    expect((await save({ ...current, ui: { ...current.ui, chatBrowser: 'unsupported' } }, current)).ok).toBe(false);
+    expect(getConfig().ui.chatBrowser).toBe('edge');
+  });
+});
+
 describe('settings writes from more than one UI', () => {
+  it('changes login registration only on a changed preference and reports failure after other effects', async () => {
+    const lifecycle = await import('../src/main/window-lifecycle.js');
+    const connection = await import('../src/main/connection.js');
+    const applied = vi.spyOn(connection, 'applySettings');
+    const login = vi.spyOn(lifecycle, 'applyLoginStartup').mockImplementation(() => { throw new Error('login registration refused'); });
+    try {
+      const base = defaultConfig();
+      await saveConfig(base);
+      const cosmetic = await save({ ...base, ui: { ...base.ui, theme: 'light' } }, base);
+      expect(cosmetic.ok, cosmetic.error).toBe(true);
+      expect(login).not.toHaveBeenCalled();
+      applied.mockClear();
+      const current = getConfig();
+      const changed = await save({ ...current, ui: { ...current.ui, theme: 'dark', startAtLogin: true } }, current);
+      expect(changed.ok).toBe(false);
+      expect(changed.error).toContain('login registration refused');
+      expect(getConfig().ui.startAtLogin).toBe(true);
+      expect(nativeTheme.themeSource).toBe('dark');
+      expect(applied).toHaveBeenCalledOnce();
+      expect(login).toHaveBeenCalledOnce();
+      expect(applied.mock.invocationCallOrder[0]).toBeLessThan(login.mock.invocationCallOrder[0]!);
+    } finally { login.mockRestore(); applied.mockRestore(); }
+  });
+  it('rotates only the active Goal provider and exposes key presence without the secret', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, goal: { ...base.goal, provider: { kind: 'custom', baseUrl: 'http://localhost:11434/v1' } } });
+    const goal = await import('../src/main/goal.js');
+    const retired = vi.spyOn(goal, 'retireGoalDrafts');
+    try {
+      await handlers.get('secret:set')!({}, { key: 'openRouterApiKey', value: 'synthetic-inactive-key' });
+      expect(retired).not.toHaveBeenCalled();
+      const response = await handlers.get('secret:set')!({}, { key: 'customProviderApiKey', value: 'synthetic-active-key' });
+      expect(retired).toHaveBeenCalledTimes(1);
+      expect(response).toMatchObject({ ok: true, data: { hasCustomProviderKey: true } });
+      expect(JSON.stringify(response)).not.toContain('synthetic-active-key');
+    } finally { retired.mockRestore(); }
+  });
+  it('persists connector instructions through IPC, preserves concurrent edits, and allows explicit clearing', async () => {
+    const base = defaultConfig(); await saveConfig(base);
+    const wanted = { ...base, mcp: { instructions: 'Use the approved project only.' }, ui: { ...base.ui, browserOnly: true } };
+    expect((await save(wanted, base)).ok).toBe(true);
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).mcp).toEqual(wanted.mcp);
+    expect(getConfig().ui.browserOnly).toBe(true);
+    expect((await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base)).ok).toBe(true);
+    expect(getConfig().mcp).toEqual(wanted.mcp);
+    expect(getConfig().ui.browserOnly).toBe(true);
+    const legacy = { ...base } as any; delete legacy.mcp;
+    expect((await save(legacy, legacy)).ok).toBe(true);
+    expect(getConfig().mcp).toEqual(wanted.mcp);
+    const current = getConfig();
+    expect((await save({ ...current, mcp: { instructions: '' } }, current)).ok).toBe(true);
+    expect(getConfig().mcp.instructions).toBe('');
+    expect((await save({ ...current, mcp: { instructions: 'x'.repeat(4001) } }, current)).ok).toBe(false);
+    expect(getConfig().mcp.instructions).toBe('');
+  });
   it('saves helper settings and tab retention through the renderer schema and merge boundary', async () => {
     const base = defaultConfig();
     await saveConfig(base);
@@ -739,6 +834,62 @@ describe('the goal model id', () => {
     const reply = await save(settings({ record: false, multiAgent: false }));
     expect(reply.ok, reply.error).toBe(true);
     expect(getConfig().goal.model).toBe(defaultConfig().goal.model);
+  });
+
+  it('accepts a bare endpoint id while custom and stores the base URL verbatim', async () => {
+    const patch = {
+      ...settings({ record: false, multiAgent: false }),
+      goal: {
+        ...defaultConfig().goal,
+        provider: { kind: 'custom' as const, baseUrl: 'http://localhost:11434/v1/' },
+        model: 'llama3.1'
+      }
+    };
+    const reply = await save(patch);
+    expect(reply.ok, reply.error).toBe(true);
+    expect(getConfig().goal.provider).toEqual({ kind: 'custom', baseUrl: 'http://localhost:11434/v1/' });
+    expect(getConfig().goal.model).toBe('llama3.1');
+  });
+
+  it('still refuses a bare id while on OpenRouter, and an unknown provider kind', async () => {
+    const custom = {
+      ...settings({ record: false, multiAgent: false }),
+      goal: {
+        ...defaultConfig().goal,
+        provider: { kind: 'custom' as const, baseUrl: 'http://localhost:11434/v1' },
+        model: 'llama3.1'
+      }
+    };
+    // Same model, OpenRouter provider: the vendor/model shape still applies.
+    const openrouter = {
+      ...custom,
+      goal: { ...custom.goal, provider: { kind: 'openrouter' as const, baseUrl: '' } }
+    };
+    expect((await save(openrouter)).ok).toBe(false);
+    const unknown = {
+      ...custom,
+      goal: { ...custom.goal, provider: { kind: 'own' as never, baseUrl: '' } }
+    };
+    expect((await save(unknown)).ok).toBe(false);
+  });
+});
+
+describe('the custom provider key slot', () => {
+  const storeSecret = (payload: unknown): Promise<any> =>
+    handlers.get('secret:set')!(null, payload) as Promise<any>;
+
+  it('stores a custom key in its own slot and refuses an unnamed one', async () => {
+    const prior = await handlers.get('state:get')!(null, undefined) as any;
+    const stored = await storeSecret({ value: 'sk-custom-1', key: 'customProviderApiKey' });
+    expect(stored.ok, stored.error).toBe(true);
+    expect(stored.data.hasCustomProviderKey).toBe(true);
+    // The OpenRouter slot is untouched: naming is exact, never a shared bucket.
+    expect(stored.data.hasGoalKey).toBe(prior.data.hasGoalKey);
+    const cleared = await storeSecret({ value: '', key: 'customProviderApiKey' });
+    expect(cleared.ok).toBe(true);
+    expect(cleared.data.hasCustomProviderKey).toBe(false);
+    const refused = await storeSecret({ value: 'x', key: 'nobodyDefinedThis' });
+    expect(refused.ok).toBe(false);
   });
 });
 

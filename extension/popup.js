@@ -12,21 +12,6 @@
  */
 
 const $ = (id) => document.getElementById(id);
-// This explicit action runs in the freshly opened popup, never through the worker
-// it is meant to replace. It therefore remains usable when that worker is stale
-// or its status/connection requests never return.
-$('reloadBtn').addEventListener('click', () => {
-  const button = $('reloadBtn');
-  if (button.disabled) return;
-  button.disabled = true;
-  $('reloadStatus').textContent = 'Reload requested. Reopen this popup to verify the connection.';
-  try {
-    chrome.runtime.reload();
-  } catch (error) {
-    button.disabled = false;
-    $('reloadStatus').textContent = `Reload failed: ${error instanceof Error ? error.message : String(error)}`;
-  }
-});
 const RENDER_STREAM_KEY = 'renderStreamEnabled';
 const SHOW_TIMES_KEY = 'showStreamTimes';
 const POLL_MS = 1500;
@@ -112,7 +97,7 @@ function pipeline(info, ready) {
       read: readStage,
       sent: ['failed', pending ? `${pending} held` : ''],
       proc: ['off'],
-      why: ['bad', 'The app is not reachable. Nothing is leaving this browser.']
+      why: ['bad', 'Delivery is blocked until the app is connected and protocol compatibility is confirmed.']
     };
   }
   if (sent && sent.ok === false) {
@@ -223,7 +208,7 @@ function paintHeader(status) {
   // connection that has not finished yet, which is what it looked like back when the next
   // poll would silently undo it.
   const off = status && status.disconnected === true && !paired;
-  const ready = connected && paired && !incompatible;
+  const ready = connected && paired && status.compatible === true;
 
   $('pill').className = `pill ${ready ? '' : incompatible ? 'bad' : 'off'}`;
   $('state').textContent = incompatible
@@ -248,7 +233,7 @@ function paintAlert(status, info) {
   const pairError = status && status.pairError;
   const error = page && page.lastError;
   const text = incompatible
-    ? 'The app and this extension speak different bridge protocols.'
+    ? `App v${status.appVersion || '?'} (protocol ${status.appProtocol ?? '?'}); companion v${status.extensionVersion || '?'} (protocol ${status.extensionProtocol ?? '?'}). Open your browser's Extensions page, enable Developer mode, then Update / Reload this companion. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished.`
     : pairError && pairError.message
       ? pairError.message
       : pairError && pairError.error === 'secure_storage_unavailable'

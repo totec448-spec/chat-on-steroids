@@ -8,6 +8,7 @@ import { draftFastFollowup, conversationMessages, automaticFinishEnabled } from 
 import { hasEligibleToolInput, onInputChange, listInputs, enqueueInput } from './input.js';
 
 import { logWarn } from '../logger.js';
+import { retryTaskRequest } from '../task-request.js';
 
 let notify: ((title: string, body: string, sessionId: string, turnId: string) => boolean | void) | null = null;
 export function setFinishNotifier(listener: typeof notify): void { notify = listener; }
@@ -108,15 +109,36 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
     }
     const anchor = await recordProgress(sessionId, progressId, 'Checking the newly recorded progress for remaining work.', undefined, turnId, { state: 'decision', conversationId: session.conversationId!, revision, inputRevision, workSeq: session.finishTurn?.workSeq ?? 0 });
     if (!anchor) throw new Error('Goal decision could not be recorded; no provider request was made');
+    // This existing operation owns every attempt. User input and turn release revoke it;
+    // transport waits may finish meanwhile, but only the existing input queue delivers.
+    const controller = new AbortController();
+    const knownInputs = new Set(inputs.map(entry => entry.id));
+    const currentDecision = async () => await stillCurrent() && !(await listInputs()).some(entry =>
+      entry.sessionId === sessionId && !entry.finishOwner && !knownInputs.has(entry.id) &&
+      ['queued', 'browser', 'tool', 'sent'].includes(entry.state));
+    const checkDecision = () => { void currentDecision().then(current => {
+      if (!current) controller.abort(new Error('The turn, settings or user instructions changed; the Goal check was discarded.'));
+    }).catch(error => controller.abort(error)); };
+    const stopInput = onInputChange(checkDecision);
+    const stopSession = onSessionChange(checkDecision);
     try {
       let publishedAt = 0;
-      const reply = await draftFastFollowup(sessionId, AbortSignal.timeout(180000), context, text => {
-        if (Date.now() - publishedAt < 250) return;
-        publishedAt = Date.now();
-        draft.stage = 'answering'; draft.text = text.slice(-8000);
-        void recordProgress(sessionId, progressId, `Generating Goal: ${text.slice(-8000)}`, anchor, turnId);
-      }, mode);
-      if (!(await stillCurrent())) result = 'The turn changed; its old Goal follow-up was discarded.';
+      const reply = await retryTaskRequest(async signal => {
+        if (!(await currentDecision())) controller.abort(new Error('The turn, settings or user instructions changed; the Goal check was discarded.'));
+        signal.throwIfAborted();
+        draft.stage = 'sending'; draft.text = '';
+        return draftFastFollowup(sessionId, AbortSignal.any([signal, AbortSignal.timeout(180000)]), context, text => {
+          if (signal.aborted || Date.now() - publishedAt < 250) return;
+          publishedAt = Date.now();
+          draft.stage = 'answering'; draft.text = text.slice(-8000);
+          void recordProgress(sessionId, progressId, `Generating Goal: ${text.slice(-8000)}`, anchor, turnId);
+        }, mode);
+      }, controller.signal, progress => {
+        draft.stage = 'sending';
+        draft.text = `Goal temporarily unavailable (${progress.error}); retrying in ${Math.ceil(((progress.retryAt ?? Date.now()) - Date.now()) / 1000)} seconds.`;
+        void recordProgress(sessionId, progressId, draft.text, anchor, turnId);
+      });
+      if (!(await currentDecision())) result = 'The turn changed or new user instructions took priority; the old Goal follow-up was discarded.';
       else if (reply) {
         if ((await listInputs()).some(entry => entry.sessionId === sessionId && ['queued', 'browser', 'tool'].includes(entry.state))) {
           result = `${notification} New user instructions took priority; the automatic follow-up was discarded.`;
@@ -130,7 +152,7 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
       }
     } catch (error) {
       result = `${notification} Goal follow-up was not available: ${(error as Error).message}. ${REMAINING}`;
-    }
+    } finally { stopInput(); stopSession(); }
     await recordProgress(sessionId, progressId, result, anchor, turnId);
     return result;
   })();

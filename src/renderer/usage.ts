@@ -1,5 +1,5 @@
 import { $, el, run } from './dom.js';
-import { DEFAULT_USAGE_FORMULA, usageEstimate, type UsageFormula, type UsageOverview } from '../shared/usage.js';
+import { DEFAULT_USAGE_FORMULA, usageEstimate, usageRate, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 let snapshot: UsageOverview | null = null;
 let loadGeneration = 0;
 const FORMULA_KEY = 'usage-formula-v1';
@@ -75,8 +75,8 @@ function paintRates(): void {
   const host = $('usageRates'); host.replaceChildren();
   for (const model of [...new Set(snapshot.models.map(row => row.model))].sort()) {
     const label = el('label', 'setting'); const text = el('span', 'setting-text');
-    text.append(el('b', '', model), el('em', '', Object.hasOwn(DEFAULT_USAGE_FORMULA.rates, model) ? 'USD / 1M cached input · editable official baseline, checked 5 September 2026' : 'USD / 1M cached input · enter a verified comparison rate'));
-    const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = '0.01'; input.placeholder = 'Unknown rate'; input.value = formula.rates[model]?.toString() ?? '';
+    text.append(el('b', '', model), el('em', '', usageRate(model, DEFAULT_USAGE_FORMULA) !== undefined ? 'USD / 1M cached input · editable official baseline, checked 7 September 2026' : 'USD / 1M cached input · enter a verified comparison rate'));
+    const input = document.createElement('input'); input.type = 'number'; input.min = '0'; input.step = '0.01'; input.placeholder = 'Unknown rate'; input.value = usageRate(model, formula)?.toString() ?? '';
     input.setAttribute('aria-label', `${model} cached-input USD per million tokens`);
     input.addEventListener('input', () => {
       if (input.value === '') formula.rates[model] = null;

@@ -162,7 +162,7 @@
           <section class="usage-section"><h2>Cost estimate per day</h2>
             <details id="usageFormulaDetails"><summary>Edit cost formula</summary>
             <p id="usageFormula" class="muted"></p>
-            <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 5 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
+            <p class="muted">Automatic baselines use Standard short-context cached-input prices, checked 7 September 2026: <a href="https://developers.openai.com/api/docs/models/gpt-5.6-sol" target="_blank" rel="noopener noreferrer">GPT-5.6 Sol</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-terra" target="_blank" rel="noopener noreferrer">GPT-5.6 Terra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.6-luna" target="_blank" rel="noopener noreferrer">GPT-5.6 Luna</a>, <a href="https://developers.openai.com/api/docs/models/gpt-6-astra" target="_blank" rel="noopener noreferrer">GPT-6 Astra</a>, <a href="https://developers.openai.com/api/docs/models/gpt-5.5" target="_blank" rel="noopener noreferrer">GPT-5.5</a>. These are editable cost comparisons, not actual bills.</p>
             <label class="setting"><span class="setting-text"><b>Context times unique tool calls, divided by</b><em>Changes estimated tokens and costs.</em></span><input id="usageDivisor" aria-label="Usage token divisor" type="number" min="0.01" step="0.01" value="2" /></label>
             <label class="setting"><span class="setting-text"><b>Cached-input cost multiplier</b><em>Applied after each model's cached-input rate.</em></span><input id="usageMultiplier" aria-label="Cached-input cost multiplier" type="number" min="0" step="0.01" value="1.2" /></label>
             <div id="usageRates"></div></details>
@@ -515,6 +515,7 @@
               </div>
 
               <div class="field">
+                <label class="inline" id="startAtLoginRow" hidden><input type="checkbox" id="startAtLogin" /> Start Chat On Steroids when I sign in</label>
                 <label class="inline"><input type="checkbox" id="autoConnect" /> Connect automatically at startup</label>
                 <label class="inline"><input type="checkbox" id="minimizeToTray" /> <span id="minimizeToTrayCopy">Keep running when closed</span></label>
                 <label class="inline" id="privacyScreenshotsSetting"><input type="checkbox" id="privacyScreenshots" /> Privacy screenshots: default to the active window instead of the whole monitor</label>
@@ -588,10 +589,19 @@
                 <h2 class="settings-section-title">Keep the turn open</h2>
                 <div class="pane">
                   <label class="setting"><span class="setting-text"><b>Plan generation</b><em>Create staged tasks. ChatGPT uses the Goal, Loop and Plan model above; API uses the model and reasoning in API provider settings.</em></span><select id="planBackend"><option value="chatgpt">ChatGPT</option><option value="api">API provider</option></select></label>
-                  <label class="setting"><span class="setting-text"><b>Session finish</b><em>Ask Astra to keep the turn open for your next instruction. Tool changes refresh the connector automatically after 20 seconds.</em></span><input id="finishTool" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Session finish</b><em>Ask Astra to keep the turn open for your next instruction. With Automatic plugin refresh enabled, tool changes refresh the connector after 20 seconds.</em></span><input id="finishTool" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b>When ChatGPT is wrapping up</b><em>Automatic follow-ups use your Loop instructions and selected Loop source.</em></span><select id="finishAction"><option value="notify">Notify me · Write or Generate Goal</option><option value="goal">Generate and inject Goal</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Requested notice</b><em>A request to the model, not a guaranteed countdown.</em></span><select id="finishLeadMinutes"><option value="3">3 minutes</option><option value="5">5 minutes</option></select></div>
                   </div>
+                <h2 class="settings-section-title">Connector instructions</h2>
+                <div class="pane">
+                  <div class="field">
+                    <label for="mcpInstructions">Your own instructions</label>
+                    <textarea id="mcpInstructions" rows="6" maxlength="4000" spellcheck="false" placeholder="e.g. Always run the test suite before saying a change works."></textarea>
+                    <p class="hint">Added to the end of what each connector tells ChatGPT about itself, marked as yours. Kept across app updates. Leave empty for none.</p>
+                  </div>
+                  <p class="muted">ChatGPT reads connector instructions once, when it loads the tools, so a change reaches an existing conversation only after the connector is loaded again.</p>
+                </div>
                 <h2 class="settings-section-title">ChatGPT models</h2>
                 <div class="pane">
                   <div class="setting"><span class="setting-text"><b>Available ChatGPT models</b><em id="chatModelStatus">Read model choices from your account.</em></span><button class="btn" id="refreshChatModels" type="button">Refresh</button></div>
@@ -599,9 +609,12 @@
                   <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
                   </div>
                 <h2 class="settings-section-title">Browser & history</h2>
+                <div class="pane"><label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option></select></label></div>
                 <div class="pane">
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
-                  <p class="muted">Keeps as many app chat tabs as your worker limit. Above that, the longest-idle chats close after one minute without work. Active turns and unsent drafts stay open.</p>
+                  <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Browser only</b><em>Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.</em></span><input id="browserOnly" type="checkbox" /></label>
+                  <p class="muted">Idle app-created tabs close after two minutes. Sleeping worker tabs can close earlier when the worker limit is exceeded. Active turns and unsent drafts stay open.</p>
                   <label class="setting"><span class="setting-text"><b>Overwrite ChatGPT tool rows</b><em>Show recorded local activity in the ChatGPT page.</em></span><input id="browserOverwrite" type="checkbox" disabled /></label>
                   <label class="setting"><span class="setting-text"><b>Show durations in ChatGPT</b><em>Uses the same preference as the extension popup.</em></span><input id="browserDurations" type="checkbox" disabled /></label>
                   <div class="setting"><span class="setting-text"><b>Browser preferences</b><em id="browserPreferencesStatus" role="status">Refresh to read the browser's current preferences.</em></span><button id="browserPreferencesRefresh" class="btn" type="button">Refresh browser preferences</button></div>
@@ -625,7 +638,32 @@
                   </div>
                 <h2 class="settings-section-title">API provider</h2>
                 <div class="pane">
-                  <div class="field">
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Provider</b>
+                      <em>OpenRouter, or your own OpenAI-compatible endpoint (Ollama, vLLM, LM Studio, a gateway) for the API response source.</em>
+                    </span>
+                    <select id="goalProvider">
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="custom">Custom endpoint</option>
+                    </select>
+                  </div>
+
+                  <div class="field" id="goalCustomPanel" hidden>
+                    <label for="goalBaseUrl">Endpoint base URL</label>
+                    <input id="goalBaseUrl" type="text" spellcheck="false" placeholder="http://localhost:11434/v1" autocomplete="off" />
+                    <p class="hint">https, or http on localhost. <code>/chat/completions</code> and <code>/models</code> are called under it.</p>
+                    <label for="goalCustomModel">Model</label>
+                    <input id="goalCustomModel" type="text" spellcheck="false" placeholder="llama3.1" autocomplete="off" />
+                    <p class="hint">Your endpoint's own model id, typed exactly as it serves it.</p>
+                    <label for="goalCustomKey">Endpoint API key (optional)</label>
+                    <input id="goalCustomKey" type="password" spellcheck="false" placeholder="leave empty for a keyless local server" autocomplete="off" />
+                    <p class="hint" id="goalCustomKeyState"></p>
+                    <div class="step-actions">
+                      <button class="btn" id="goalCustomKeyRemove" type="button">Remove stored key</button>
+                    </div>
+                  </div>
+                  <div class="field" id="goalKeyField">
                     <label for="goalKey">OpenRouter API key</label>
                     <input id="goalKey" type="password" spellcheck="false" placeholder="sk-or-v1-…" autocomplete="off" />
                     <p class="hint" id="goalKeyState"></p>
@@ -636,7 +674,12 @@
                       </button>
                     </div>
                   </div>
-                  <div class="setting">
+                  <!--
+                    The catalogue is several hundred models long and changes weekly, so it is
+                    not fetched until somebody actually asks to change the one in use - and
+                    then twenty at a time, newest release first.
+                  -->
+                  <div class="setting" id="goalPickerRow">
                     <span class="setting-text">
                       <b>Model</b>
                       <em id="goalModelName"></em>
@@ -763,7 +806,7 @@
                 <details class="composer-menu" id="attachmentMenu">
                   <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
                   <div class="composer-popover">
-                    <button id="attachImages" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-image" /></svg>Add images</button>
+                    <button id="attachImages" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-image" /></svg>Add photos &amp; files</button>
                     <button id="composerFolder" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Share a folder</button>
                   </div>
                 </details>

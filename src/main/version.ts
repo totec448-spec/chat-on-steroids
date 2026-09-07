@@ -12,7 +12,7 @@
  * extension does nothing" into a diagnosable mismatch.
  */
 
-export const APP_VERSION = '2.0.6';
+export const APP_VERSION = '2.0.7';
 
 /**
  * Standalone extension recovery must stay on the app's own release. Using GitHub's moving
@@ -64,4 +64,6 @@ export function extensionDownloadUrl(version = APP_VERSION): string {
  *      An 11 peer reads the new field as absent and quietly stops repairing anything at all,
  *      which is exactly the silent failure this fence exists to turn into a 426.
  */
-export const BRIDGE_PROTOCOL = 12;
+// 13 — native file attachments require exact claimed-input chunk delivery and final
+// draft ownership. A 12 companion would silently send text without these files.
+export const BRIDGE_PROTOCOL = 13;

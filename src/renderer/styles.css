@@ -2436,7 +2436,13 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .usage-table th, .usage-table td { text-align: right; border-bottom: 1px solid var(--line); padding: 12px 4px; }
 .usage-table th:first-child, .usage-table td:first-child { text-align: left; }
 
-.composer-images { display: flex; gap: 10px; margin-bottom: 12px; }
+.composer-images { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.attachment-card { position: relative; display: flex; align-items: center; gap: 8px; height: 62px; padding: 10px; max-width: 280px; min-width: 150px; border: 1px solid var(--line); border-radius: 18px; background: var(--page); box-sizing: border-box; text-align: left; }
+.attachment-icon { width: 40px; height: 40px; flex: 0 0 40px; display: grid; place-items: center; font-size: 26px; color: #0285ff; }
+.attachment-details { min-width: 0; font-size: 14px; line-height: 20px; }
+.attachment-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-kind { color: var(--muted); }
+.message-attachments:has(.attachment-card) { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px; }
 .composer-image { position: relative; width: 78px; height: 66px; }
 .composer-image img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; border: 1px solid var(--line); }
 .image-remove { position: absolute; top: -4px; right: -4px; border: 0; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--page); cursor: pointer; }
@@ -2646,8 +2652,10 @@ select option { background: var(--card); color: var(--ink); }
 .composer-dock .queued-input.is-editing { flex-wrap: wrap; }
 .composer-dock textarea { width: 100%; min-height: 65px; padding: 8px; font: inherit; resize: vertical; }
 #taskPlanPreview { max-height: 300px; overflow-y: auto; }
+/* Status spans need a real row: inline padding does not contribute to dock height. */
+#taskPlanPreview > .muted { display: block; line-height: 20px; }
 #taskPlanPreview > .muted, #taskPlanPreview > .task-progress-text { margin: 0; padding: 10px 12px; }
-.task-progress-text { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; color: var(--soft); }
+.task-progress-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; color: var(--soft); }
 .plan-stage + .plan-stage { border-top: 1px solid var(--edge); }
 .plan-stage-heading { display: flex; align-items: center; gap: 10px; min-height: 39px; padding: 6px 12px; color: var(--soft); font-size: 13px; }
 .stage-number { flex: 0 0 18px; color: var(--faint); font-size: 11px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -2669,7 +2677,7 @@ select option { background: var(--card); color: var(--ink); }
 #contextMeterButton:hover { background: var(--hover); }
 #contextMeterButton svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; transform: rotate(-90deg); }
 .context-track { opacity: .35; }
-#contextMeterInfo { display: none; position: absolute; z-index: 20; bottom: calc(100% + 8px); right: 0; width: max-content; max-width: min(310px, 75vw); white-space: pre-line; padding: 12px 16px; border: 1px solid var(--edge); border-radius: 12px; background: var(--card); color: var(--ink); font-size: 12px; line-height: 1.6; box-shadow: 0 8px 24px #0003; text-align: center; }
+#contextMeterInfo { display: none; position: absolute; z-index: 20; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: max-content; max-width: min(310px, 75vw); white-space: pre-line; padding: 12px 16px; border: 1px solid var(--edge); border-radius: 12px; background: var(--card); color: var(--ink); font-size: 12px; line-height: 1.6; box-shadow: 0 8px 24px #0003; text-align: center; }
 .context-meter:hover #contextMeterInfo, .context-meter:focus-within #contextMeterInfo, .context-meter.pinned #contextMeterInfo { display: block; }
 .queue-delivery { flex-shrink: 0; font-size: 11px; padding: 3px 7px; }
 .queue-delivery[aria-pressed="true"] { color: var(--text); border-color: var(--soft); }

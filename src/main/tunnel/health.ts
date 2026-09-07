@@ -54,7 +54,9 @@ export function readMetric(text: string, name: string): number | null {
     // Must be the whole name: `commands_poll_cycles` must not match `..._total`.
     const rest = trimmed.slice(name.length);
     if (rest !== '' && rest[0] !== ' ' && rest[0] !== '{') continue;
-    const value = Number(rest.replace(/^\{[^}]*\}/, '').trim().split(/\s+/)[0]);
+    const sample = rest.replace(/^\{[^}]*\}/, '').trim().split(/\s+/)[0];
+    if (!sample) continue;
+    const value = Number(sample);
     if (!Number.isFinite(value)) continue;
     total = (total ?? 0) + value;
   }
@@ -86,7 +88,9 @@ export function parsePollHealth(metrics: string): PollHealth {
 
 export async function readPollHealth(base: string, timeoutMs = 3000): Promise<PollHealth | null> {
   const text = await fetchText(`${base}/metrics`, timeoutMs);
-  return text === null ? null : parsePollHealth(text);
+  // A readable endpoint without the poll timestamp is still unknown, not the
+  // explicit zero that means a healthy client is awaiting its first poll.
+  return text === null || readMetric(text, 'commands_poll_last_successful_timestamp_seconds') === null ? null : parsePollHealth(text);
 }
 
 export function parseClientStatus(raw: unknown): ClientStatus {
