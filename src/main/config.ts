@@ -12,12 +12,15 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   CAPABILITIES,
+  CHAT_BROWSERS,
   DEFAULT_CAPABILITIES,
   GOAL_MODES,
+  GOAL_PROVIDERS,
   GOAL_REASONING_LEVELS,
   WRITE_CAPABILITIES,
   type Capabilities,
   DESKTOP_CAPABILITIES,
+  type ArtifactSettings,
   type CompactionSettings,
   type Config,
   type GoalSettings,
@@ -26,6 +29,7 @@ import {
   type SessionSettings
 } from '../shared/types.js';
 import {
+  DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
   DEFAULT_GOAL_OBJECTIVE_SYSTEM_PROMPT,
   DEFAULT_GOAL_SYSTEM_PROMPT,
@@ -113,6 +117,17 @@ const DEFAULT_COMPACTION: CompactionSettings = {
   autoTokens: DEFAULT_SESSIONS.advisoryTokens
 };
 /**
+ * Default bound for `download_artifact`.
+ *
+ * 20 MiB covers generated images, PDFs and small archives without letting one call
+ * fill the disk or blow the MCP result budget. Enforced before, during and after
+ * the stream (see artifact-fetch/artifact-target), so a lying Content-Length helps nothing.
+ */
+const DEFAULT_ARTIFACTS: ArtifactSettings = {
+  maxFileBytes: 20 * 1024 * 1024
+};
+
+/**
  * The goal loop's defaults.
  *
  * Off, because it types into somebody's chat on its own and because it cannot work at all
@@ -126,7 +141,7 @@ const DEFAULT_COMPACTION: CompactionSettings = {
  * protocol behaviour the Goal loop is validating. Existing user-selected models remain stored
  * verbatim; this value is only the fresh/repair default.
  */
-export const DEFAULT_GOAL_MODEL = 'z-ai/glm-5.3';
+export { DEFAULT_GOAL_MODEL } from '../shared/goal.js';
 const DEFAULT_GOAL: GoalSettings = {
   backend: 'chatgpt',
   loopBackend: 'chatgpt',
@@ -139,6 +154,9 @@ const DEFAULT_GOAL: GoalSettings = {
   // the one that can end by itself: a loop that never stops is a deliberate choice, not a
   // default anybody should discover by turning something on.
   mode: 'goal',
+  // OpenRouter stays the default provider so an upgrade changes nothing for anyone who
+  // never touches the switch; a hand-written config predating the field parses the same way.
+  provider: { kind: 'openrouter', baseUrl: '' },
   model: DEFAULT_GOAL_MODEL,
   reasoning: 'default',
   prompt: DEFAULT_GOAL_SYSTEM_PROMPT,
@@ -238,6 +256,16 @@ const capabilitiesSchema = z
   )
   .transform((caps) => ({ ...DEFAULT_CAPABILITIES, ...caps }) as Capabilities);
 
+/**
+ * The user's own MCP instructions.
+ *
+ * Empty by default, and deliberately so: the connector instructions are how the app explains
+ * its own tools, and inventing text on the user's behalf there would put words the app cannot
+ * honour in front of the model.
+ */
+export const MAX_MCP_INSTRUCTIONS_CHARS = 4000;
+const DEFAULT_MCP = { instructions: '' } as const;
+
 const configSchema = z.object({
   // A config written by hand — or by a build before `/skills` was reserved — must not be
   // able to claim a reserved virtual root. Renamed rather than rejected: a single bad root
@@ -258,15 +286,19 @@ const configSchema = z.object({
     binaryPath: z.string().max(4096)
   }),
   ui: z.object({
+    chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     developerMode: z.boolean().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional().default(false),
+    browserOnly: z.boolean().optional().default(false),
+    autoRefreshPlugins: z.boolean().optional().default(false),
     tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
+    startAtLogin: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
@@ -317,6 +349,18 @@ const configSchema = z.object({
     })
     .optional()
     .default({ ...DEFAULT_MULTI_AGENT }),
+  artifacts: z
+    .object({
+      maxFileBytes: z
+        .number()
+        .int()
+        .min(1)
+        .max(256 * 1024 * 1024)
+        .optional()
+        .default(DEFAULT_ARTIFACTS.maxFileBytes)
+    })
+    .optional()
+    .default({ ...DEFAULT_ARTIFACTS }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with
   // every root and permission in it intact.
@@ -333,6 +377,18 @@ const configSchema = z.object({
       // written by a version that knows one more mode than this one must not send every root
       // and permission in the file through conservative recovery over a single word.
       mode: z.enum(GOAL_MODES).optional().default(DEFAULT_GOAL.mode).catch(DEFAULT_GOAL.mode),
+      provider: z
+        .object({
+          // Repaired rather than rejected like `mode` above: a config written by a version
+          // that knows one more provider than this one must not invalidate every root and
+          // permission in the file over a single word.
+          kind: z.enum(GOAL_PROVIDERS).optional().default('openrouter').catch('openrouter'),
+          // Stored verbatim and validated at draft time: a URL cannot be repaired the way an
+          // enum can, and silently rewriting it would point a key at a host nobody chose.
+          baseUrl: z.string().max(2048).optional().default('')
+        })
+        .optional()
+        .default({ ...DEFAULT_GOAL.provider }),
       model: z
         .string()
         .max(160)
@@ -382,7 +438,22 @@ const configSchema = z.object({
         .catch(DEFAULT_GOAL.loopPrompt)
     })
     .optional()
-    .default({ ...DEFAULT_GOAL, backend: 'chatgpt', loopBackend: 'chatgpt', impulseMinutes: 0, includeToolCalls: false, helperModel: 'gpt-5.6-sol', helperReasoning: 'high' })
+    .default({ ...DEFAULT_GOAL, backend: 'chatgpt', loopBackend: 'chatgpt', impulseMinutes: 0, includeToolCalls: false, helperModel: 'gpt-5.6-sol', helperReasoning: 'high' }),
+  mcp: z
+    .object({
+      // Repaired rather than rejected, like the Goal prompts above: this is free text a person
+      // typed, and one over-long or malformed field must not send the whole config — every
+      // root, every permission — through conservative recovery.
+      instructions: z
+        .string()
+        .optional()
+        .default(DEFAULT_MCP.instructions)
+        .transform((value) => value.slice(0, MAX_MCP_INSTRUCTIONS_CHARS).trim())
+        .catch(DEFAULT_MCP.instructions)
+    })
+    .optional()
+    .default({ ...DEFAULT_MCP })
+    .catch({ ...DEFAULT_MCP })
 });
 
 /**
@@ -404,11 +475,13 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     capabilities: firstLaunchCapabilities(platform, release),
     readOnly: false,
     tunnel: { kind: 'openai', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'dark' },
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: false },
     sessions: { ...DEFAULT_SESSIONS },
     compaction: { ...DEFAULT_COMPACTION },
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },
-    goal: { ...DEFAULT_GOAL }
+    artifacts: { ...DEFAULT_ARTIFACTS },
+    goal: { ...DEFAULT_GOAL },
+    mcp: { ...DEFAULT_MCP }
   };
 }
 

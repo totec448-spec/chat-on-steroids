@@ -33,6 +33,14 @@ export const DIR_LINK: 'junction' | 'dir' = process.platform === 'win32' ? 'junc
 
 export const IS_WINDOWS = process.platform === 'win32';
 
+/** Pause an existing async boundary; entry is observable and release is idempotent. */
+export function faultGate(): { entered: Promise<void>; hold(): Promise<void>; release(): void } {
+  let entered!: () => void, release!: () => void;
+  const reached = new Promise<void>(resolve => { entered = resolve; });
+  const held = new Promise<void>(resolve => { release = resolve; });
+  return { entered: reached, hold: () => { entered(); return held; }, release };
+}
+
 /**
  * A handoff brief long enough to be one.
  *

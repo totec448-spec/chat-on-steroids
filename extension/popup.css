@@ -623,17 +623,6 @@ input:focus-visible + .track {
   cursor: default;
 }
 
-.reload-action {
-  margin: 0 0 6px;
-}
-
-.reload-status {
-  margin: 0 4px 16px;
-  color: var(--faint);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
 button:focus-visible {
   outline: 2px solid var(--muted);
   outline-offset: 2px;

@@ -16,7 +16,7 @@ import { initBrowserPreferences } from './browser-preferences.js';
 
 import type { AppApi, SettingsPatch } from '../preload/index.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
-import type { AppState, Capability, LogEntry, SurfaceStatus } from '../shared/types.js';
+import type { AppState, Capability, ChatBrowser, LogEntry, SurfaceStatus } from '../shared/types.js';
 import {
   browserExtensionRequired,
   isNewer,
@@ -63,8 +63,8 @@ const GROUPS: Group[] = [
     id: 'write',
     title: 'Change files',
     icon: 'i-pencil',
-    blurb: 'Create, edit, move and delete, inside those folders only.',
-    caps: ['create', 'edit', 'move', 'deleteFile']
+    blurb: 'Create, edit, move, delete and save ChatGPT files, inside those folders only.',
+    caps: ['create', 'edit', 'move', 'deleteFile', 'saveArtifact']
   },
   {
     id: 'desktop',
@@ -442,12 +442,16 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       binaryPath: $<HTMLInputElement>('binaryPath').value.trim()
     },
     ui: {
+      chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishAction: $<HTMLSelectElement>('finishAction').value as 'notify' | 'goal',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
+      browserOnly: $<HTMLInputElement>('browserOnly').checked,
+      autoRefreshPlugins: $<HTMLInputElement>('autoRefreshPlugins').checked,
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
+      startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
       developerMode: $<HTMLInputElement>('developerMode').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
@@ -472,6 +476,10 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
   const toolSurfaceChanged =
     previous.sessions.record !== patch.sessions.record ||
     previous.multiAgent.enabled !== patch.multiAgent.enabled ||
+    // The user's own connector instructions are part of what each server advertises about
+    // itself, and ChatGPT reads that once when it loads the tools. Editing them is therefore
+    // the same kind of change as adding a tool: it needs the same reconnect to be seen.
+    (previous.mcp?.instructions ?? '') !== patch.mcp.instructions ||
     (Object.keys(patch.capabilities) as Capability[]).some((cap) => {
       const before = previous.capabilities[cap] && !(previous.readOnly && WRITE_CAPABILITIES.includes(cap));
       const after = patch.capabilities[cap] && !(patch.readOnly && WRITE_CAPABILITIES.includes(cap));
@@ -484,6 +492,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     ui: previous.ui,
     sessions: previous.sessions,
     compaction: previous.compaction,
+    mcp: previous.mcp ?? { instructions: '' },
     multiAgent: previous.multiAgent,
     goal: previous.goal
   };
@@ -922,11 +931,17 @@ function apply(next: AppState): void {
     previousState?.config.tunnel.desktopTunnelId
   );
   applyValue($<HTMLInputElement>('binaryPath'), config.tunnel.binaryPath, previousState?.config.tunnel.binaryPath);
+  applyValue($<HTMLSelectElement>('chatBrowser'), config.ui.chatBrowser ?? 'chrome', previousState?.config.ui.chatBrowser ?? 'chrome');
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishAction'), config.ui.finishAction ?? 'notify', previousState?.config.ui.finishAction);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
+  applyChecked($<HTMLInputElement>('browserOnly'), config.ui.browserOnly === true, previousState?.config.ui.browserOnly);
+  applyChecked($<HTMLInputElement>('autoRefreshPlugins'), config.ui.autoRefreshPlugins === true, previousState?.config.ui.autoRefreshPlugins);
+  $('startAtLoginRow').hidden = next.loginStartupAvailable !== true;
+  $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
+  applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked(
@@ -1628,6 +1643,7 @@ $('removeApiKey').addEventListener('click', async () => {
 
 for (const id of [
   'autoConnect',
+  'startAtLogin',
   'minimizeToTray',
   'developerMode',
   'privacyScreenshots',

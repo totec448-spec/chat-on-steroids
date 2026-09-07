@@ -2,7 +2,7 @@ import type { ChatModelCatalog } from '../shared/chat-models.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { BrowserPreferences } from '../shared/browser-preferences.js';
 import type { SessionControlsView } from '../main/bridge.js';
-import type { InputImage } from '../shared/input.js';
+import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
@@ -39,9 +39,10 @@ export interface SettingsPatch {
   compaction: Config['compaction'];
   multiAgent: Config['multiAgent'];
   goal: Config['goal'];
+  mcp: Config['mcp'];
 }
 
-/** One page of the OpenRouter catalogue, as the model picker asks for it. */
+/** One page of the model catalogue, as the model picker asks for it. */
 export interface GoalModelPage {
   models: Array<{ id: string; name: string; created: number; contextLength: number }>;
   total: number;
@@ -72,8 +73,20 @@ export interface SessionDetail {
 }
 
 const api = {
-  chooseImages: () => call<InputImage[]>('sessions:images'),
-  dropImages: (files: File[]) => call<InputImage[]>('sessions:dropImages', { paths: files.map(file => webUtils.getPathForFile(file)) }),
+  chooseFiles: () => call<InputAttachment[]>('sessions:files'),
+  dropFiles: async (files: File[]): Promise<Reply<InputAttachment[]>> => {
+    if (!files.length || files.length > 20) return { ok: false, error: 'Attach up to 20 files per message' };
+    try {
+      const sources = [];
+      for (const file of files) {
+        const path = webUtils.getPathForFile(file);
+        if (!path && file.size > 12 * 1024 * 1024) return { ok: false, error: 'Pasted images must be 12 MB or smaller' };
+        sources.push(path || { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) });
+      }
+      return await call<InputAttachment[]>('sessions:dropFiles', { files: sources });
+    } catch { return { ok: false, error: 'Could not read the attachment' }; }
+  },
+  attachText: (text: string) => call<InputAttachment>('sessions:attachText', { text }),
   getUsage: () => call<UsageOverview>('usage:get'),
   getState: () => call<AppState>('state:get'),
   saveSettings: (patch: SettingsPatch, base: SettingsPatch) => call<AppState>('settings:save', { patch, base }),
@@ -85,6 +98,8 @@ const api = {
   setApiKey: (value: string) => call<AppState>('secret:set', { value }),
   // The goal loop's own credential. Same channel, named slot; the value only ever goes in.
   setGoalKey: (value: string) => call<AppState>('secret:set', { value, key: 'openRouterApiKey' }),
+  // The same, for a custom provider endpoint. Optional: keyless local servers need nothing stored.
+  setCustomProviderKey: (value: string) => call<AppState>('secret:set', { value, key: 'customProviderApiKey' }),
   listGoalModels: (offset: number) => call<GoalModelPage>('goal:models', { offset }),
   pickBinary: () => call<AppState>('binary:pick'),
   connect: () => call<AppState>('connection:connect'),

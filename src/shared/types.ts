@@ -31,6 +31,7 @@ export const CAPABILITIES = [
   'move',
   'deleteFile',
   'command',
+  'saveArtifact',
   'screen',
   'control',
   'clipboardRead',
@@ -60,6 +61,7 @@ export const WRITE_CAPABILITIES: readonly Capability[] = [
   'move',
   'deleteFile',
   'command',
+  'saveArtifact',
   'control',
   'clipboardWrite'
 ];
@@ -116,8 +118,15 @@ export interface TunnelSettings {
   binaryPath: string;
 }
 
+export const CHAT_BROWSERS = ['chrome', 'edge'] as const;
+export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
+
 export interface UiPrefs {
+  /** Maintenance may reuse existing tabs but cannot open helpers or missing chats. */
+  browserOnly?: boolean;
   backgroundChats?: boolean;
+  /** Opt-in browser automation for changed connector tool schemas. */
+  autoRefreshPlugins?: boolean;
   /** Actual app-owned tabs to retain; active work and drafts stay protected. Omitted uses workers + 2. */
   tabsToKeepOpen?: number;
   finishTool?: boolean;
@@ -127,8 +136,11 @@ export interface UiPrefs {
   developerMode?: boolean;
   minimizeToTray: boolean;
   autoConnect: boolean;
+  startAtLogin?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
+  /** Browser for app-originated launches; connected source tabs retain placement ownership. */
+  chatBrowser?: ChatBrowser;
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */
   theme: 'light' | 'dark';
 }
@@ -187,12 +199,13 @@ export type GoalReasoning = (typeof GOAL_REASONING_LEVELS)[number];
  * The goal loop: a second model, standing in for the user, that keeps a chat going.
  *
  * When ChatGPT finishes a turn, the recorded conversation — every user message and every
- * final ChatGPT answer, and nothing else — is sent to an OpenRouter model with an editable
+ * final ChatGPT answer, and nothing else — is sent to the configured provider's model with an editable
  * continuation-gate instruction. A completion claim produces `NO_REPLY`; only a concrete
  * requested item the final answer explicitly leaves unfinished becomes a user message.
  *
- * Off by default, and useless without an OpenRouter API key: the key is the credential the
- * whole feature runs on, so the UI says so rather than failing quietly at the first turn.
+ * Off by default, and useless without a key for the configured provider: the key is the credential the
+ * whole feature runs on, so the UI says so rather than failing quietly at the first turn. A custom
+ * keyless local endpoint is the one exception — there is nothing to store for it.
  */
 /**
  * Which of the two standing modes the switch runs.
@@ -206,6 +219,27 @@ export const GOAL_MODES = ['goal', 'loop'] as const;
 export type GoalMode = (typeof GOAL_MODES)[number];
 
 export type GoalBackend = 'api' | 'chatgpt' | 'templates';
+/**
+ * Where the Goal/Loop second model runs when the backend is `api`.
+ *
+ * `openrouter` is the shipped default: OpenRouter's catalogue, key and routing. `custom`
+ * points at any OpenAI-compatible `/chat/completions` endpoint the user runs themselves
+ * (Ollama, vLLM, LM Studio, a gateway) and is used with that endpoint's own model id.
+ * The other backends (`chatgpt`, `templates`) never read this block.
+ */
+export const GOAL_PROVIDERS = ['openrouter', 'custom'] as const;
+export type GoalProviderKind = (typeof GOAL_PROVIDERS)[number];
+
+export interface GoalProviderSettings {
+  kind: GoalProviderKind;
+  /**
+   * Base URL of a custom provider, e.g. `http://localhost:11434/v1`. Ignored unless
+   * kind is `custom`. Stored verbatim; validated when a draft is started, not when saved,
+   * so a typo fails loudly at use time rather than silently rewriting the user's text.
+   */
+  baseUrl: string;
+}
+
 export interface GoalSettings {
   /** Optional active-turn Goal impulses; zero disables them. */
   impulseMinutes?: number;
@@ -223,7 +257,8 @@ export interface GoalSettings {
    * with the switch off runs as `goal`, because Loop is a thing the user switches on.
    */
   mode: GoalMode;
-  /** An OpenRouter model id, exactly as its `/models` listing spells it. */
+  provider: GoalProviderSettings;
+  /** A model id: an OpenRouter id while the provider is openrouter, the endpoint's own id while custom. */
   model: string;
   reasoning: GoalReasoning;
   /** Editable continuation-gate instruction sent as the OpenRouter system message. */
@@ -267,7 +302,19 @@ export interface MultiAgentSettings {
   recoverAgentTabs: boolean;
 }
 
+/** The user's own additions to what each MCP connector tells the model about itself. */
+export interface McpSettings {
+  /** Appended to the Core and Desktop server instructions, or empty for none. */
+  instructions: string;
+}
+
+export interface ArtifactSettings {
+  /** Per-file byte ceiling enforced before, during and after the download stream. */
+  maxFileBytes: number;
+}
+
 export interface Config {
+  artifacts: ArtifactSettings;
   roots: Root[];
   capabilities: Capabilities;
   readOnly: boolean;
@@ -277,6 +324,7 @@ export interface Config {
   compaction: CompactionSettings;
   multiAgent: MultiAgentSettings;
   goal: GoalSettings;
+  mcp: McpSettings;
 }
 
 export type ConnectionState =
@@ -504,11 +552,15 @@ export interface AppState {
   config: Config;
   status: ConnectionStatus;
   platform: PlatformInfo;
+  /** Only packaged Windows builds may change the login item. */
+  loginStartupAvailable?: boolean;
   secureStorage: SecureStorageInfo;
   /** True when an OpenAI control-plane API key is stored. The key itself never leaves the main process. */
   hasApiKey: boolean;
-  /** True when an OpenRouter key is stored, which is what the goal loop spends. Same rule: the key stays here. */
+  /** True when an OpenRouter key is stored, which is what the goal loop spends on that provider. Same rule: the key stays here. */
   hasGoalKey: boolean;
+  /** True when a custom-provider key is stored. Only meaningful beside a custom endpoint, which may also run keyless. */
+  hasCustomProviderKey: boolean;
   /** Resolved path of the tunnel binary we would run, or null if we cannot find one. */
   resolvedBinary: string | null;
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */
@@ -529,6 +581,7 @@ export const DEFAULT_CAPABILITIES: Capabilities = {
   move: false,
   deleteFile: false,
   command: false,
+  saveArtifact: false,
   screen: false,
   control: false,
   clipboardRead: false,
@@ -545,6 +598,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   move: 'Move / rename',
   deleteFile: 'Delete files',
   command: 'Run commands',
+  saveArtifact: 'Save ChatGPT files',
   screen: 'See the screen',
   control: 'Control mouse and keyboard',
   clipboardRead: 'Read clipboard',
@@ -569,6 +623,7 @@ export const CAPABILITY_DETAILS: Record<Capability, string> = {
   move: 'Move or rename, both ends inside approved folders.',
   deleteFile: 'Permanent — there is no Recycle Bin.',
   command: 'Run anything as you. NOT limited to approved folders.',
+  saveArtifact: 'Save images and files ChatGPT generates into an approved folder.',
   screen: 'Screenshots, open windows, and the controls on them.',
   control: 'Moves the pointer, clicks, types and presses keys, as you.',
   clipboardRead: 'Read the current clipboard text.',
@@ -593,6 +648,7 @@ export const CAPABILITY_TOOLS: Record<Capability, readonly string[]> = {
   move: ['apply_patch'],
   deleteFile: ['apply_patch'],
   command: ['exec_command', 'write_stdin'],
+  saveArtifact: ['download_artifact'],
   screen: ['observe'],
   control: ['computer'],
   clipboardRead: ['computer'],

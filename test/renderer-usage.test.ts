@@ -57,3 +57,26 @@ it('edits the canonical formula controls and per-model rates without reloading r
   expect(field('usageDivisor').value).toBe('4'); expect(field('usageMultiplier').value).toBe('1');
   expect(cost()).toContain('0.70');
 });
+
+it('shows the Sol picker alias rate and preserves an explicitly cleared rate after reload', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const models = [{ model: 'gpt-5-6-thinking', reasoningEffort: 'high', assumed: false, tokens: 427245 }];
+  const data: UsageOverview = { tokens: 427245, models, days: [{ date: '2026-09-07', tokens: 427245, models }], sessions: 1, limits: [] };
+  const getUsage = vi.fn(async () => ({ ok: true, data }));
+  Object.assign(dom.window, { api: { getUsage, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
+  const usage = await import('../src/renderer/usage.js');
+  usage.initUsage(); await usage.refreshUsage();
+  const rate = () => dom.window.document.querySelector('input[aria-label="gpt-5-6-thinking cached-input USD per million tokens"]') as HTMLInputElement;
+  expect(rate().value).toBe('0.4');
+  expect(dom.window.document.getElementById('usageTotalCost')!.textContent).toContain('0.21');
+  expect(dom.window.document.getElementById('usageDays')!.textContent).not.toContain('Rate unknown');
+  rate().value = ''; rate().dispatchEvent(new dom.window.Event('input'));
+  expect(getUsage).toHaveBeenCalledTimes(1);
+  expect(dom.window.document.getElementById('usageDays')!.textContent).toContain('Rate unknown');
+  vi.resetModules();
+  const restored = await import('../src/renderer/usage.js');
+  restored.initUsage(); await restored.refreshUsage();
+  expect(rate().value).toBe('');
+  expect(dom.window.document.getElementById('usageDays')!.textContent).toContain('Rate unknown');
+});

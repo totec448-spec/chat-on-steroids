@@ -154,6 +154,7 @@ function toolsFor(id: SurfaceId): string[] {
   if (!caps.command && caps.search) tools.push('find');
   if (caps.create || caps.edit || caps.move || caps.deleteFile) tools.push('apply_patch');
   if (caps.command) tools.push('exec_command', 'write_stdin');
+  if (caps.saveArtifact) tools.push('download_artifact');
   if (config.sessions.record) tools.push('session');
   if (config.multiAgent.enabled) tools.push('agents');
   return tools;

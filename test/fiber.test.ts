@@ -311,8 +311,9 @@ async function scan(
   }
 
   const elements = fibers.map((fiber) => {
-    const row = document.createElement('button');
-    row.setAttribute('aria-label', 'Open tool call list');
+    const row = document.createElement('span');
+    row.className = 'group/tool-message';
+    row.setAttribute('aria-label', '工具呼び出し一覧');
     // React hangs the Fiber off a key with a per-build random suffix.
     (row as unknown as Record<string, unknown>)['__reactFiber$qlrmvxwbkkq'] = fiber;
     document.body.append(row);

@@ -1,5 +1,7 @@
 /** Maximum editable Goal instruction size accepted by config and renderer IPC. */
 export const MAX_GOAL_SYSTEM_PROMPT_CHARS = 20_000;
+/** Default API model, also used when switching back from a custom model namespace. */
+export const DEFAULT_GOAL_MODEL = 'z-ai/glm-5.3';
 
 /**
  * All three Goal models are meta-prompters, not reviewers.

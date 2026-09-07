@@ -25,6 +25,24 @@ afterAll(async () => {
 });
 
 describe('settings migration', () => {
+  it('defaults login startup off for fresh and legacy settings independently of auto-connect', async () => {
+    expect(defaultConfig().ui.startAtLogin).toBe(false);
+    const legacy = defaultConfig();
+    delete legacy.ui.startAtLogin;
+    legacy.ui.autoConnect = true;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui).toMatchObject({ startAtLogin: false, autoConnect: true });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, startAtLogin: true, autoConnect: false } });
+    expect((await loadConfig()).ui).toMatchObject({ startAtLogin: true, autoConnect: false });
+  });
+  it('defaults automatic plugin refresh off for fresh and legacy settings while preserving explicit opt-in', async () => {
+    expect(defaultConfig().ui.autoRefreshPlugins).toBe(false);
+    const legacy = defaultConfig(); delete legacy.ui.autoRefreshPlugins;
+    await saveConfig(legacy);
+    expect((await loadConfig()).ui.autoRefreshPlugins).toBe(false);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: true } });
+    expect((await loadConfig()).ui.autoRefreshPlugins).toBe(true);
+  });
   it('defaults Goal and Loop to ChatGPT while preserving explicit backend choices', async () => {
     expect(defaultConfig().goal).toMatchObject({ backend: 'chatgpt', loopBackend: 'chatgpt' });
     for (const backend of ['api', 'templates', 'chatgpt'] as const) {
@@ -84,6 +102,11 @@ describe('settings migration', () => {
     expect(loaded.capabilities.create).toBe(true);
     expect(loaded.capabilities.clipboardRead).toBe(false);
     expect(loaded.capabilities.clipboardWrite).toBe(false);
+    expect(loaded.capabilities.saveArtifact).toBe(false);
+    expect(loaded.artifacts.maxFileBytes).toBe(defaultConfig().artifacts.maxFileBytes);
+    // A config written before custom providers existed keeps OpenRouter with no URL:
+    // an upgrade never moves a running Goal loop onto an endpoint nobody chose.
+    expect(loaded.goal.provider).toEqual({ kind: 'openrouter', baseUrl: '' });
     expect(loaded.ui.autoConnect).toBe(true);
     expect(loaded.ui.privacyScreenshots).toBe(false);
     // The one tunnel id a pre-split config had is Core's, because Core is the connector
@@ -474,6 +497,7 @@ describe('the goal loop settings', () => {
       helperReasoning: 'high',
       enabled: true,
       mode: 'loop',
+      provider: { kind: 'openrouter', baseUrl: '' },
       model: 'openai/gpt-5.2-mini:nitro',
       reasoning: 'high',
       prompt,
@@ -620,6 +644,7 @@ describe('the goal loop settings', () => {
       helperReasoning: 'high',
       enabled: false,
       mode: 'goal',
+      provider: { kind: 'openrouter', baseUrl: '' },
       model: DEFAULT_GOAL_MODEL,
       reasoning: 'default',
       prompt: defaultConfig().goal.prompt,

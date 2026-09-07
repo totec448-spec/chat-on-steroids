@@ -144,6 +144,12 @@ export function runningToolCalls(conversationId: string | null = null): number {
   return countFor(running, conversationId);
 }
 
+/** Presentation requires exact ownership; anonymous safety counts are not this chat's work. */
+export function runningToolProgress(conversationId: string): { count: number; since: number } | null {
+  const owned = [...running].filter(call => call.caller.conversationId === conversationId);
+  return owned.length ? { count: owned.length, since: Math.min(...owned.map(call => call.startedAt)) } : null;
+}
+
 /** Finished tool work whose unattributed durable record is still landing. */
 export function settlingToolCalls(conversationId: string | null = null): number {
   return countFor(settling, conversationId);

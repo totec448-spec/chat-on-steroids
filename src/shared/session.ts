@@ -258,6 +258,7 @@ export type SessionEvent =
       inputDelivery?: 'offered' | 'confirmed';
       /** Original app-authored text, excluding transport-only control instructions. */
       authoredText?: string;
+      attachments?: import('./input.js').InputAttachment[];
       assets?: AssetRef[];
       /** First sequence assigned to this stable website message; revisions keep this anchor. */
       origin?: number;
@@ -813,14 +814,21 @@ export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-/** Token weight of one stored event, using the text we actually kept. */
+/** Recorder clipping changes storage, not the text already sent to the model. */
+function storedTextTokens(value: StoredText): number {
+  const chars = value.truncated && Number.isSafeInteger(value.chars) && value.chars >= 0
+    ? value.chars : value.text.length;
+  return Math.ceil(chars / 4);
+}
+
+/** Token weight of original recorded text; previews, assets and HTML are not extra context. */
 export function eventTokens(event: SessionEvent): number {
   switch (event.kind) {
     case 'user_message':
     case 'assistant_message':
     case 'chat_error':
     case 'note':
-      return estimateTokens(event.message.text);
+      return storedTextTokens(event.message);
     case 'progress':
       // Live progress/reasoning captions are useful audit evidence but are not stable
       // conversation context, and often restate work that later appears in the final
@@ -832,11 +840,11 @@ export function eventTokens(event: SessionEvent): number {
       // result the model actually reads, so it occupies the conversation the same way a
       // tool result does. Leaving it at zero made the meter under-report exactly the runs
       // most likely to need compacting — the multi-agent ones.
-      return estimateTokens(event.message.text);
+      return storedTextTokens(event.message);
     case 'tool_call':
       return (
-        estimateTokens(event.call.args.text) +
-        estimateTokens(event.call.result.text) +
+        storedTextTokens(event.call.args) +
+        storedTextTokens(event.call.result) +
         estimateTokens(event.call.summary.title)
       );
     case 'handoff':

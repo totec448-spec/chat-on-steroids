@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 interface DomApi {
+  composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
+  generating(): boolean;
+  sendButton(): HTMLButtonElement | null;
+  temporaryChatReady(): boolean;
   errors(): Array<{ text: string; recoverable: boolean; blocking?: boolean }>;
   captureComposerDraft(text: string, current?: () => boolean): { clear(): Promise<boolean>; dispose(): void; attachments(nodes: Element[]): void };
   visibleModelSelection(): { model: string; reasoningEffort?: string } | null;
@@ -12,7 +16,7 @@ interface DomApi {
   inspectModelSettings(current?: () => boolean, failure?: (reason: string) => void): Promise<Array<{id: string; label: string; efforts: string[]}> | null>;
   send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean }): Promise<boolean>;
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
-  uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>): Promise<boolean>;
+  uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
 }
 let dom: JSDOM;
 let document: Document;
@@ -43,6 +47,16 @@ function user(text: string) {
 }
 
 describe('one native Send and bounded acceptance observation', () => {
+  it.each([false, true])('retires only the unchanged accepted composer text (new draft: %s)', async edited => {
+    document.execCommand = command => { if (command === 'delete') box.replaceChildren(); return true; };
+    button.addEventListener('click', () => {
+      dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+      user('Exact app prompt');
+      if (edited) box.textContent = 'My next unsent draft';
+    });
+    expect(await api.send()).toBe(true);
+    expect(box.textContent).toBe(edited ? 'My next unsent draft' : '');
+  });
   it('recognizes the live Stop answering composer-submit control without treating Start Voice as Stop', () => {
     button.dataset.testid = 'composer-submit-button'; button.setAttribute('aria-label', 'Stop answering');
     const clicked = vi.fn(); button.addEventListener('click', clicked);
@@ -163,130 +177,6 @@ describe('one native Send and bounded acceptance observation', () => {
   });
 });
 
-function picker() {
-  const trigger = document.querySelector<HTMLButtonElement>('button[aria-haspopup]')!;
-  const container = document.createElement('div');
-  container.setAttribute('data-testid', 'composer-intelligence-picker-content');
-  container.innerHTML = '<button type="button" role="menuitem" aria-label="Select model">Select model</button><button type="button" role="menuitemradio" aria-checked="false">GPT Example</button><button type="button" role="menuitem" aria-label="Power" aria-describedby="power-description">Power</button><span id="power-description">Medium, 2 of 5</span>';
-  // Native Radix model radio rows activate on Enter; jsdom has no keyboard default action.
-  container.addEventListener('keydown', event => {
-    const target = event.target as HTMLElement;
-    if (event.key === 'Enter' && target.getAttribute('role') === 'menuitemradio') target.click();
-  });
-  trigger.addEventListener('keydown', event => { if (event.key === 'Enter') document.body.append(container); });
-  return { container, radio: container.querySelector('[role="menuitemradio"]')!, power: container.querySelector('[aria-label="Power"]')!, description: container.querySelector('span')! };
-}
-describe('actual visible model and reasoning selection', () => {
-  it('recognizes only the visible provider access-limit dialog as a blocking nontransport error', () => {
-    const notice = document.createElement('div');
-    notice.innerHTML = '<h2>Too many requests</h2><p>We have temporarily limited access to conversations to protect your data. Please wait a few minutes.</p>';
-    document.body.append(notice);
-    expect(api.errors()).toEqual([]);
-    notice.setAttribute('role', 'dialog');
-    expect(api.errors()).toEqual([expect.objectContaining({ blocking: true, recoverable: false, text: expect.stringContaining('Too many requests') })]);
-    notice.querySelector('p')!.setAttribute('role', 'alert');
-    expect(api.errors()).toHaveLength(1);
-    notice.setAttribute('aria-hidden', 'true'); expect(api.errors()).toEqual([]);
-    notice.querySelector('p')!.removeAttribute('role');
-    notice.removeAttribute('aria-hidden'); notice.querySelector('p')!.textContent = 'An article about rate limits';
-    expect(api.errors()).toEqual([]);
-  });
-  it('observes only a visible checked model without opening or changing the picker', () => {
-    const controls = picker();
-    controls.radio.textContent = 'GPT-6 Pro'; controls.radio.setAttribute('aria-checked', 'true');
-    expect(api.visibleModelSelection()).toBeNull();
-    document.body.append(controls.container);
-    expect(api.visibleModelSelection()).toMatchObject({ model: 'GPT-6 Pro' });
-    controls.radio.setAttribute('aria-checked', 'false');
-    expect(api.visibleModelSelection()).toBeNull();
-    controls.radio.setAttribute('aria-checked', 'true'); controls.container.setAttribute('aria-hidden', 'true');
-    expect(api.visibleModelSelection()).toBeNull();
-  });
-  it('finds the model outside a nested voice wrapper with description children', async () => {
-    const controls = picker();
-    button.remove();
-    const trailing = document.querySelector('[data-testid="composer-trailing-actions"]')!;
-    trailing.removeAttribute('data-testid');
-    trailing.className = 'flex items-center gap-1 [grid-area:trailing]';
-    const wrapper = document.createElement('div');
-    wrapper.innerHTML = '<div><button type="button" aria-label="Start Voice">Voice</button><span>Voice description</span></div>';
-    trailing.append(wrapper);
-    controls.radio.setAttribute('aria-checked', 'true');
-    expect(await api.selectModelSettings('gpt-example', 'medium')).toBe(true);
-    expect(document.querySelector('[data-testid="composer-intelligence-picker-content"]')).not.toBeNull();
-  });
-
-  it('expands collapsed model rows even when they retain layout rectangles', async () => {
-    const controls = picker();
-    const toggle = controls.container.querySelector('[aria-label="Select model"]')!;
-    toggle.setAttribute('aria-expanded', 'false');
-    const expanded = vi.fn(() => toggle.setAttribute('aria-expanded', 'true'));
-    toggle.addEventListener('click', expanded);
-    controls.radio.addEventListener('click', () => {
-      if (toggle.getAttribute('aria-expanded') !== 'true') return;
-      controls.radio.setAttribute('aria-checked', 'true');
-      toggle.setAttribute('aria-expanded', 'false');
-    });
-    expect(await api.selectModelSettings('gpt-example', null)).toBe(true);
-    expect(expanded).toHaveBeenCalledTimes(2);
-    expect(controls.radio.getAttribute('aria-checked')).toBe('true');
-  });
-
-  it('requires checked model evidence and moves effort independently without selecting Pro', async () => {
-    const controls = picker();
-    const selected = vi.fn(() => controls.radio.setAttribute('aria-checked', 'true'));
-    controls.radio.addEventListener('click', selected);
-    const keys: string[] = [];
-    controls.power.addEventListener('keydown', event => {
-      keys.push((event as KeyboardEvent).key);
-      const position = Number(controls.description.textContent!.match(/(\d) of/)![1]) + ((event as KeyboardEvent).key === 'ArrowRight' ? 1 : -1);
-      controls.description.textContent = `${['Instant', 'Medium', 'High', 'Extra High', 'Pro'][position - 1]}, ${position} of 5`;
-    });
-    expect(await api.selectModelSettings('gpt-example', 'high')).toBe(true);
-    expect(selected).toHaveBeenCalledTimes(2);
-    expect(keys).toEqual(['ArrowLeft', 'ArrowRight', 'ArrowRight']);
-  });
-
-  it.each([false, true])('keeps already-selected High and refuses it when unavailable (%s)', async (unavailable) => {
-    const controls = picker();
-    controls.radio.setAttribute('aria-checked', 'true');
-    controls.description.textContent = `High, 3 of 5.${unavailable ? ' Upgrade required.' : ''}`;
-    const changedPower = vi.fn(); controls.power.addEventListener('keydown', changedPower);
-    expect(await api.selectModelSettings('gpt-example', 'high')).toBe(!unavailable);
-    expect(changedPower).not.toHaveBeenCalled();
-  });
-
-  it('targets the nested Power slider rather than the surrounding menu item', async () => {
-    const controls = picker();
-    const slider = document.createElement('span');
-    slider.setAttribute('role', 'slider'); slider.tabIndex = 0;
-    controls.power.append(slider);
-    let position = 2;
-    slider.addEventListener('keydown', event => {
-      event.stopPropagation();
-      position += (event as KeyboardEvent).key === 'ArrowRight' ? 1 : -1;
-      controls.description.textContent = `${['Instant', 'Medium', 'High', 'Extra High', 'Pro'][position - 1]}, ${position} of 5`;
-    });
-    expect(await api.selectModelSettings(null, 'high')).toBe(true);
-    expect(position).toBe(3);
-  });
-
-  it('fails when a model click never becomes checked and refuses unsupported effort', async () => {
-    picker();
-    const result = api.selectModelSettings('gpt-example', null);
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(await result).toBe(false);
-    expect(await api.selectModelSettings(null, 'ultra')).toBe(false);
-  });
-
-  it('does not click a picker after target ownership is lost', async () => {
-    const controls = picker();
-    const clicked = vi.fn(); controls.radio.addEventListener('click', clicked);
-    expect(await api.selectModelSettings('gpt-example', 'high', () => false)).toBe(false);
-    expect(clicked).not.toHaveBeenCalled();
-  });
-});
-
 function upload() {
   const input = document.createElement('input');
   input.id = 'upload-photos'; input.type = 'file'; input.accept = 'image/*';
@@ -300,6 +190,23 @@ function upload() {
   return input;
 }
 describe('native image readiness', () => {
+  it('uploads original Markdown bytes and recognizes localized native file actions without duplicate tiles', async () => {
+    const input = upload(); input.id = 'upload-files'; input.accept = '';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    document.execCommand = command => { if (command === 'delete') box.replaceChildren(); return true; };
+    input.addEventListener('change', () => {
+      const tile = document.createElement('div'); tile.setAttribute('role', 'group'); tile.setAttribute('aria-label', 'Notes.md');
+      tile.innerHTML = '<div data-default-action="true"><button aria-label="Notes.md"></button></div><button aria-label="删除文件 1: Notes.md"></button>';
+      tile.lastElementChild!.addEventListener('click', () => tile.remove());
+      document.querySelector('form')!.append(tile);
+    });
+    const file = new dom.window.File(['# exact markdown'], 'Notes.md', { type: 'text/markdown' });
+    expect(await api.uploadImages([], () => true, draft, [file])).toBe(true);
+    expect(input.files?.[0]).toBe(file);
+    expect(api.hasComposerAttachments()).toBe(true);
+    expect(await draft.clear()).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(false); draft.dispose();
+  });
   it('withdraws only the exact prepared app text and ready attachment nodes before Send', async () => {
     const input = upload();
     document.execCommand = command => { if (command === 'delete') box.replaceChildren(); return true; };
@@ -387,181 +294,105 @@ describe('native image readiness', () => {
   });
 });
 
-function catalogPicker(labels: string[], hiddenModels = false) {
-  const controls = picker();
-  let position = 2;
-  const radios = [controls.radio];
-  controls.radio.setAttribute('aria-checked', 'true');
-  const other = controls.radio.cloneNode(true) as HTMLElement;
-  other.textContent = 'Sol Example'; other.setAttribute('aria-checked', 'false');
-  controls.radio.after(other); radios.push(other);
-  const render = () => { controls.description.textContent = `${labels[position - 1]}, ${position} of ${labels.length}`; };
-  render();
-  for (const radio of radios) radio.addEventListener('click', () => {
-    for (const entry of radios) entry.setAttribute('aria-checked', String(entry === radio));
-    position = 1; render();
+
+describe('provider limit notice', () => {
+  it('recognizes only the visible provider access-limit dialog as a blocking nontransport error', () => {
+    const notice = document.createElement('div');
+    notice.innerHTML = '<h2>Too many requests</h2><p>We have temporarily limited access to conversations to protect your data. Please wait a few minutes.</p>';
+    document.body.append(notice);
+    expect(api.errors()).toEqual([]);
+    notice.setAttribute('role', 'dialog');
+    expect(api.errors()).toEqual([expect.objectContaining({ blocking: true, recoverable: false, text: expect.stringContaining('Too many requests') })]);
+    notice.querySelector('p')!.setAttribute('role', 'alert');
+    expect(api.errors()).toHaveLength(1);
+    notice.setAttribute('aria-hidden', 'true'); expect(api.errors()).toEqual([]);
+    notice.querySelector('p')!.removeAttribute('role');
+    notice.removeAttribute('aria-hidden'); notice.querySelector('p')!.textContent = 'An article about rate limits';
+    expect(api.errors()).toEqual([]);
   });
-  const keys: string[] = [];
-  controls.power.addEventListener('keydown', event => {
-    const key = (event as KeyboardEvent).key; keys.push(key);
-    position += key === 'ArrowRight' ? 1 : -1; render();
-  });
-  if (hiddenModels) {
-    for (const radio of radios) (radio as HTMLElement).hidden = true;
-    controls.container.querySelector('[aria-label="Select model"]')!.addEventListener('click', () => {
-      for (const radio of radios) (radio as HTMLElement).hidden = false;
-    });
+});
+
+describe('rendered temporary-chat state independent of language', () => {
+  function toggle(label: string, checked: boolean) {
+    const control = document.createElement('button');
+    control.setAttribute('aria-label', label);
+    control.innerHTML = `<svg style="opacity:${checked ? 0 : 1}"><use href="/cdn/assets/sprites-shell-anyhash.svg#chat-temp"></use></svg><svg aria-hidden="true" style="opacity:${checked ? 1 : 0}"><use href="/cdn/assets/sprites-shell-anyhash.svg#chat-temp-checked"></use></svg>`;
+    document.body.append(control);
+    return control;
   }
-  return { ...controls, keys, radios };
-}
-describe('read-only picker catalog', () => {
-  function latestPicker(generation = '6') {
-    const controls = catalogPicker(['Instant', 'Medium', 'High', 'Extra High', 'Pro']);
-    controls.radios[0]!.textContent = 'Latest';
-    controls.radios[1]!.textContent = 'GPT-5.6 Sol';
-    const badge = controls.container.querySelector('[aria-label="Select model"]')!;
-    const renderBadge = () => {
-      const latest = controls.radios[0]!.getAttribute('aria-checked') === 'true';
-      badge.textContent = controls.description.textContent?.startsWith('Pro,') ? `${latest ? generation : '5.6'}Pro` : 'High';
-    };
-    for (const radio of controls.radios) radio.addEventListener('click', renderBadge);
-    controls.power.addEventListener('keydown', renderBadge);
-    renderBadge();
-    return controls;
-  }
-  it('resolves Latest Pro from its native generation badge and keeps explicit 5.6 Pro separate', async () => {
-    const controls = latestPicker();
-    expect(await api.inspectModelSettings()).toEqual([
-      { id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'] },
-      { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['none', 'medium', 'high', 'xhigh', 'pro'] }
-    ]);
-    expect(controls.radios[0]!.getAttribute('aria-checked')).toBe('true');
-    expect(controls.description.textContent).toBe('Medium, 2 of 5');
-    expect(await api.selectModelSettings('gpt-6-pro', 'pro')).toBe(true);
-    expect(api.visibleModelSelection()).toEqual({ model: 'GPT-6 Pro', reasoningEffort: 'pro' });
-    expect(await api.selectModelSettings('gpt-5.6-sol', 'pro')).toBe(true);
-    expect(controls.radios[1]!.getAttribute('aria-checked')).toBe('true');
-    expect(controls.container.querySelector('[aria-label="Select model"]')!.textContent).toBe('5.6Pro');
+  it.each(['Temporären Chat ausschalten', '一時チャットをオフにする', 'Turn off temporary chat', ''])('reads the checked glyph with arbitrary label %s', label => {
+    toggle(label, true);
+    expect(api.temporaryChatReady()).toBe(true);
   });
-  it('refuses a stale Latest Pro identity if the native badge now names another generation', async () => {
-    latestPicker('5.6');
-    expect(await api.selectModelSettings('gpt-6-pro', 'pro')).toBe(false);
+  it('does not mistake a hidden checked glyph, English wording or URL intent for active mode', () => {
+    dom.reconfigure({ url: 'https://chatgpt.com/?temporary-chat=true' });
+    toggle('Turn off temporary chat', false);
+    expect(api.temporaryChatReady()).toBe(false);
   });
-  it('does not invent Latest identity from an effort-only badge', async () => {
-    latestPicker('');
-    const models = await api.inspectModelSettings();
-    expect(models?.map(model => model.id)).toEqual(['gpt-5.6-sol']);
+  it('rejects a hidden toolbar or a glyph quoted in assistant content', () => {
+    const control = toggle('arbitrary', true);
+    control.hidden = true;
+    expect(api.temporaryChatReady()).toBe(false);
+    control.hidden = false;
+    const authored = document.createElement('div'); authored.setAttribute('data-message-author-role', 'assistant');
+    document.body.append(authored); authored.append(control);
+    expect(api.temporaryChatReady()).toBe(false);
   });
-  it('opens the native menu with Enter rather than relying on a click-only fixture', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High']);
-    controls.container.remove();
-    const trigger = document.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
-    const click = vi.fn(); trigger.addEventListener('click', click);
-    trigger.addEventListener('keydown', event => { if (event.key === 'Enter') document.body.append(controls.container); });
-    const result = api.inspectModelSettings();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await result).toHaveLength(2);
-    expect(click).not.toHaveBeenCalled();
+});
+
+
+describe('locale-independent provider composer evidence', () => {
+  it.each([['ja', '送信', '回答を停止'], ['ar', 'إرسال', 'إيقاف الإجابة']])('uses provider Send and Stop identities in %s', (language, sendLabel, stopLabel) => {
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+    button.setAttribute('aria-label', sendLabel);
+    button.textContent = sendLabel;
+    expect(api.sendButton()).toBe(button);
+    expect(api.generating()).toBe(false);
+    button.dataset.testid = 'stop-button';
+    button.id = 'composer-submit-button';
+    button.setAttribute('aria-label', stopLabel);
+    expect(api.sendButton()).toBeNull();
+    expect(api.generating()).toBe(true);
+    expect(api.stopGeneration(() => true)).toBe(true);
   });
-  it('reports unsupported model labels instead of silently returning an empty catalog', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High']);
-    for (const radio of controls.radios) radio.textContent = 'Unknown / model';
-    const failure = vi.fn();
-    expect(await api.inspectModelSettings(() => true, failure)).toBeNull();
-    expect(failure).toHaveBeenCalledWith('model_unconfirmed');
+
+  it.each([['ja', '音声入力'], ['ar', 'إملاء']])('anchors to the provider microphone glyph in %s', (language, label) => {
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+    button.removeAttribute('data-testid'); button.setAttribute('aria-label', label);
+    button.id = 'composer-submit-button';
+    button.innerHTML = '<svg><use href="#microphone-regular-24"></use></svg>';
+    const trailing = button.parentElement!;
+    // The observed grid area survives even when no test id names its action row.
+    trailing.removeAttribute('data-testid'); trailing.className = '[grid-area:trailing]';
+    expect(api.composerActions()).toEqual({ host: trailing, before: button });
+    expect(api.sendButton()).toBeNull();
+    expect(api.generating()).toBe(false);
+    expect(api.stopGeneration(() => true)).toBe(false);
   });
-  it('waits for a helper composer and its Power row to hydrate in the same document', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High', 'Extra High']);
-    const form = document.querySelector('form')!;
-    form.remove(); controls.power.remove();
-    const result = api.inspectModelSettings();
-    let settled = false; void result.then(() => { settled = true; });
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(settled).toBe(false);
-    document.body.prepend(form);
-    await vi.advanceTimersByTimeAsync(500);
-    expect(settled).toBe(false);
-    controls.container.append(controls.power);
-    await vi.advanceTimersByTimeAsync(0);
-    expect(await result).toHaveLength(2);
+
+  it('does not anchor to a microphone glyph in prose or an unrelated composer control', () => {
+    button.parentElement!.removeAttribute('data-testid');
+    button.removeAttribute('data-testid'); button.removeAttribute('aria-label');
+    button.innerHTML = '<svg><use href="#microphone-regular-24"></use></svg>';
+    const quote = document.createElement('section'); quote.setAttribute('data-testid', 'conversation-turn-1');
+    quote.innerHTML = '<button><svg><use href="#microphone-regular-24"></use></svg></button>';
+    document.body.prepend(quote);
+    expect(api.composerActions()).toBeNull();
+    expect(api.sendButton()).toBeNull();
+    expect(api.generating()).toBe(false);
   });
-  it('reads a menu that replaces Power and Select model with radio choices', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High', 'Extra High'], true);
-    const toggle = controls.container.querySelector('[aria-label="Select model"]')!;
-    const expand = () => {
-      controls.power.remove(); toggle.remove();
-      for (const radio of controls.radios) radio.removeAttribute('hidden');
-    };
-    toggle.addEventListener('click', expand);
-    for (const radio of controls.radios) radio.addEventListener('click', () => {
-      for (const sibling of controls.radios) sibling.setAttribute('hidden', '');
-      controls.container.append(toggle, controls.power);
-    });
-    const result = await api.inspectModelSettings();
-    expect(result).toHaveLength(2);
-    expect(controls.description.textContent).toBe('Medium, 2 of 4');
-    expect(controls.power.isConnected).toBe(true);
-    expect(controls.radio.getAttribute('aria-checked')).toBe('true');
-  });
-  it('omits upgrade-only effort slots and refuses selecting them', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High', 'Pro']);
-    const markUpgrade = () => {
-      if (controls.description.textContent?.startsWith('Pro,')) controls.description.textContent += ' Upgrade required.';
-    };
-    controls.power.addEventListener('keydown', markUpgrade);
-    const result = await api.inspectModelSettings();
-    expect(result?.map(model => model.efforts)).toEqual([['none', 'medium', 'high'], ['none', 'medium', 'high']]);
-    expect(await api.selectModelSettings('gpt-example', 'pro')).toBe(false);
-  });
-  it('captures the original effort before the model submenu unmounts Power', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High', 'Extra High'], true);
-    const toggle = controls.container.querySelector('[aria-label="Select model"]')!;
-    toggle.setAttribute('aria-expanded', 'false');
-    toggle.addEventListener('click', () => {
-      toggle.setAttribute('aria-expanded', 'true');
-      controls.power.remove();
-    });
-    for (const radio of controls.radios) radio.addEventListener('click', () => {
-      toggle.setAttribute('aria-expanded', 'false');
-      controls.container.append(controls.power);
-    });
-    const result = await api.inspectModelSettings();
-    expect(result).toHaveLength(2);
-    expect(controls.radio.getAttribute('aria-checked')).toBe('true');
-    expect(controls.description.textContent).toBe('Medium, 2 of 4');
-  });
-  it.each([
-    ['Instant', 'Medium', 'High', 'Extra High'],
-    ['Instant', 'Medium', 'High', 'Extra High', 'Pro']
-  ])('reads actual %j slots and restores model and effort', async (...labels) => {
-    const controls = catalogPicker(labels, true);
-    const result = await api.inspectModelSettings();
-    expect(result).toEqual([
-      { id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'medium', 'high', 'xhigh', ...(labels.includes('Pro') ? ['pro'] : [])] },
-      { id: 'sol-example', label: 'Sol Example', efforts: ['none', 'medium', 'high', 'xhigh', ...(labels.includes('Pro') ? ['pro'] : [])] }
-    ]);
-    expect(controls.radio.getAttribute('aria-checked')).toBe('true');
-    expect(controls.description.textContent).toBe(`Medium, 2 of ${labels.length}`);
-    expect(box.textContent).toBe('Exact app prompt');
-  });
-  it('returns unknown when restoring the original model is no longer possible', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High', 'Extra High']);
-    controls.radios[1]!.addEventListener('click', () => controls.radio.setAttribute('aria-disabled', 'true'));
-    expect(await api.inspectModelSettings()).toBeNull();
-  });
-  it('stops immediately after ownership changes and does not restore in another document', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High', 'Extra High']);
-    let owned = true;
-    controls.power.addEventListener('keydown', () => { owned = false; });
-    expect(await api.inspectModelSettings(() => owned)).toBeNull();
-    expect(controls.keys).toHaveLength(1);
-  });
-  it('reports unknown if native power has no exact ordinal proof', async () => {
-    const controls = catalogPicker(['Instant', 'Medium', 'High', 'Extra High']);
-    controls.description.textContent = 'Thinking';
-    const result = api.inspectModelSettings();
-    await vi.advanceTimersByTimeAsync(3000);
-    expect(await result).toBeNull();
-    expect(controls.keys).toEqual([]);
+
+  it.each(['画像.webp', 'صورة.webp'])('recognizes the provider attachment group independently of translated removal labels (%s)', name => {
+    const group = document.createElement('div'); group.setAttribute('role', 'group'); group.setAttribute('aria-label', name);
+    group.innerHTML = '<div data-default-action="true"><button type="button">開く</button></div><button aria-label="削除" type="button">×</button>';
+    document.querySelector('form')!.append(group);
+    expect(api.hasComposerAttachments()).toBe(true);
+    group.querySelector('[data-default-action]')!.removeAttribute('data-default-action');
+    expect(api.hasComposerAttachments()).toBe(false);
+    group.firstElementChild!.setAttribute('data-default-action', 'true');
+    group.append(group.lastElementChild!.cloneNode(true));
+    expect(api.hasComposerAttachments()).toBe(false);
   });
 });

@@ -18,6 +18,7 @@ import { noteChatOrigin } from './recorder.js';
 import { isAstraModel } from '../../shared/chat-models.js';
 import { automaticFinishEnabled } from '../goal.js';
 import { finishInstruction, finishInputInstruction } from '../../shared/finish.js';
+import { attachmentSchema, validateInputAttachments } from './input-attachments.js';
 
 export const inputArgs = z.object({
   projectId: z.string().uuid().nullable().optional(),
@@ -25,6 +26,7 @@ export const inputArgs = z.object({
   objective: z.string().trim().max(16000).optional(),
   stages: z.array(z.string().trim().min(1).max(16000)).max(11).optional(),
   images: z.array(z.object({ name: z.string().min(1).max(110), dataUrl: z.string().max(512100).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/) })).max(4).optional(),
+  attachments: z.array(attachmentSchema).max(20).optional(),
   id: z.string().uuid(),
   sessionId: z.string().min(8).max(64).nullable(),
   text: z.string().trim().min(1).max(16000),
@@ -110,6 +112,7 @@ export function hasEligibleToolInput(sessionId: string, finishBoundary = false):
     if (current.some(row => row.sessionId === sessionId && row.state === 'browser')) return false;
     for (const row of current) {
       if (row.sessionId !== sessionId || row.dueAt > Date.now()) continue;
+      if (row.attachments?.length) continue;
       if (row.mode === 'finish' && !finishBoundary) continue;
       if (row.state === 'tool') return true;
       if (row.state === 'queued') return row.mode === 'auto' || (finishBoundary && row.mode === 'finish');
@@ -176,7 +179,7 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
       return { ...row, state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Native preparation bounds include the 60s upload and 15s picker hydration.
     // Once Send is authorized, its 30s receipt + 15s fresh-route wait are the entire tail.
-    if (row.state === 'browser' && Date.now() - (row.sendAuthorizedAt ?? row.offeredAt ?? row.createdAt) >= (row.sendAuthorizedAt === undefined ? (row.images?.length ? 120_000 : 60_000) : 45_000))
+    if (row.state === 'browser' && Date.now() - (row.sendAuthorizedAt ?? row.offeredAt ?? row.createdAt) >= (row.sendAuthorizedAt === undefined ? (row.attachments?.length ? 720_000 : row.images?.length ? 120_000 : 60_000) : 45_000))
       return { ...row, state: 'cancelled', error: row.requiresAuthorization && row.sendAuthorizedAt === undefined
         ? 'Not sent: browser preparation timed out. This attempt was cancelled.'
         : 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' };
@@ -245,7 +248,8 @@ function append(current: InputEntry[], entry: InputEntry, stackDirect = false): 
   if ([...active, entry].reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify({ ...row, images: undefined, stages: reserved(row) })), 0) > 1024000) {
     throw new Error('The message queue is full');
   }
-  const imageBytes = (row: InputEntry): number => (row.images ?? []).reduce((sum, image) => sum + image.dataUrl.length, 0);
+  const imageBytes = (row: InputEntry): number => (row.images ?? []).reduce((sum, image) => sum + image.dataUrl.length, 0) +
+    (row.attachments ?? []).reduce((sum, file) => sum + (file.preview?.length ?? 0), 0);
   if ([...active, entry].reduce((sum, row) => sum + imageBytes(row), 0) > 4 * 1024 * 1024) throw new Error('The image queue is full');
   const history = current.filter((row) => terminal(row) && !needsHistory(row) && !pendingStages(row)).slice(-50);
   const bytes = (row: InputEntry): number => Buffer.byteLength(row.text) + Buffer.byteLength(row.deliveryText ?? '') + Buffer.byteLength(row.response ?? '') + Buffer.byteLength(JSON.stringify(row.stages ?? [])) + imageBytes(row);
@@ -285,12 +289,17 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
     }
     const policy = input.sessionId ? await sessionInputPolicy(input.sessionId) : null;
     const requestedMode = input.mode;
-    if (input.mode === 'after-turn' && policy?.queueAtFinish) input.mode = 'finish';
+    if (input.attachments?.length) {
+      await validateInputAttachments(input.attachments);
+      // Native files belong to the next browser message, never a tool-result injection.
+      if (finishOwner) throw new Error('Automatic finish messages cannot attach files');
+      if (input.mode === 'finish' || (input.mode === 'auto' && policy?.canInject)) input.mode = 'after-turn';
+    } else if (input.mode === 'after-turn' && policy?.queueAtFinish) input.mode = 'finish';
     if (input.mode === 'finish' || input.stages?.length) {
       const session = input.sessionId ? await getSession(input.sessionId) : null;
       if ((input.mode === 'finish' && !session?.conversationId) || session?.origin?.kind === 'worker') throw new Error('Queue staged tasks in a normal chat');
     }
-    const transportIntent = input.mode === 'auto' && !finishOwner ? policy?.canInject ? 'tool' as const : 'browser' as const : undefined;
+    const transportIntent = input.attachments?.length ? 'browser' as const : input.mode === 'auto' && !finishOwner ? policy?.canInject ? 'tool' as const : 'browser' as const : undefined;
     const entry: InputEntry = { ...input, ...(transportIntent ? { transportIntent } : {}), ...(requestedMode !== input.mode ? { requestedMode } : {}), ...(finishOwner ? { finishOwner } : {}), state: 'queued', owner: null, createdAt: Date.now(), conversationId: null };
     if (input.projectId) {
       await projectWorkspace(input.projectId);
@@ -605,6 +614,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
     let payloadFull = false;
     const next = ordered(current).sort((a, b) => Number(a.mode === 'finish' || !!a.finishOwner) - Number(b.mode === 'finish' || !!b.finishOwner)).map((entry): InputEntry => {
       if (entry.sessionId !== sessionId || entry.dueAt > Date.now()) return entry;
+      if (entry.attachments?.length) return entry;
       if (entry.state === 'queued' && entry.mode === 'after-turn') waitingForTurn = true;
       // ChatGPT may reuse one request id for the whole server turn. Receipt follows
       // the actual invocation start, never a change in that grouping id.

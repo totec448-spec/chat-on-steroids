@@ -1,7 +1,33 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cancelTaskRequest, runTaskRequest, TaskRequestError } from '../src/main/task-request.js';
+import { cancelTaskRequest, retryTaskRequest, runTaskRequest, TaskRequestError } from '../src/main/task-request.js';
 afterEach(() => vi.useRealTimers());
+
+it('keeps a caller-owned operation retrying every fifteen seconds until it succeeds', async () => {
+  vi.useFakeTimers();
+  const work = vi.fn().mockRejectedValueOnce(new TaskRequestError('rate_limited', true))
+    .mockRejectedValueOnce(new TaskRequestError('http_503', true))
+    .mockRejectedValueOnce(new TaskRequestError('rate_limited', true))
+    .mockRejectedValueOnce(new TaskRequestError('rate_limited', true)).mockResolvedValue('ready');
+  const result = retryTaskRequest(work, new AbortController().signal, vi.fn());
+  await vi.advanceTimersByTimeAsync(59999);
+  expect(work).toHaveBeenCalledTimes(4);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await result).toBe('ready');
+  expect(work).toHaveBeenCalledTimes(5);
+});
+
+it('honors Retry-After beyond the native timer range without immediate retries', async () => {
+  vi.useFakeTimers();
+  const delay = 30 * 24 * 60 * 60 * 1000;
+  const work = vi.fn().mockRejectedValueOnce(new TaskRequestError('rate_limited', true, delay)).mockResolvedValue('ready');
+  const result = retryTaskRequest(work, new AbortController().signal, vi.fn());
+  await vi.advanceTimersByTimeAsync(delay - 1);
+  expect(work).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await result).toBe('ready');
+  expect(work).toHaveBeenCalledTimes(2);
+});
 
 it('honors Retry-After, coalesces the same invocation and never retries a successful result', async () => {
   vi.useFakeTimers(); const id = randomUUID(), progress = vi.fn();

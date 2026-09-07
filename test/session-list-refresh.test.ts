@@ -134,7 +134,7 @@ const note = (seq: number, text: string): SessionEvent => ({
 });
 
 describe('visible Chat refresh', () => {
-  it('uses the detail cursor after the initial bounded tail instead of resending that tail', async () => {
+  it.each([false, true])('uses the detail cursor without starving slow refreshes under continuous events (%s)', async streaming => {
     const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
     dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
     const w = dom.window;
@@ -156,17 +156,20 @@ describe('visible Chat refresh', () => {
     let changed: () => void = () => undefined;
     const detailCalls: Array<{ id: string; options: any }> = [];
     let detailRound = 0;
+    let listDelay = 0;
     const ok = (data: any) => Promise.resolve({ ok: true as const, data });
     const api: any = new Proxy(
       {
-        listSessions: () =>
-          ok({
+        listSessions: async () => {
+          if (listDelay) await new Promise(resolve => setTimeout(resolve, listDelay));
+          return ok({
             sessions: [selected],
             activeId: selected.id,
             pressure: [],
             total: 1,
             nextCursor: null
-          }),
+          });
+        },
         getSession: (id: string, options?: any) => {
           detailCalls.push({ id, options });
           detailRound += 1;
@@ -202,9 +205,12 @@ describe('visible Chat refresh', () => {
     await vi.waitFor(() => expect(detailCalls).toHaveLength(1));
     expect(detailCalls[0]).toEqual({ id: selected.id, options: { limit: 160 } });
 
-    changed();
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    await vi.waitFor(() => expect(detailCalls).toHaveLength(2));
+    listDelay = streaming ? 600 : 0;
+    const stream = streaming ? setInterval(changed, 100) : undefined;
+    try {
+      changed();
+      await vi.waitFor(() => expect(detailCalls).toHaveLength(2), { timeout: 1600 });
+    } finally { clearInterval(stream); }
     expect(detailCalls[1]).toEqual({ id: selected.id, options: { from: 101, limit: 160 } });
     expect(w.document.getElementById('timeline')?.textContent).toContain('initial');
     expect(w.document.getElementById('timeline')?.textContent).toContain('delta');

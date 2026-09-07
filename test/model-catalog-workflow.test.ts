@@ -17,7 +17,7 @@ it.each([false, true])('holds cold discovery until composer hydration without a 
   const dom = new JSDOM('<html><body></body></html>');
   const ask = vi.fn(async () => ({ ok: true }));
   const clear = vi.fn(() => true);
-  const context = vm.createContext({ URL, Date, setTimeout, clearTimeout, document: dom.window.document,
+  const context = vm.createContext({ URL, Date, setTimeout, clearTimeout, pageViewChecks: new Set(), document: dom.window.document,
     MutationObserver: dom.window.MutationObserver, alive: true, epoch: 1, conversationId: null,
     generating: false, desktopInputBusy: false, modelCatalogBusy: false,
     location: { pathname: '/', href: `https://chatgpt.com/?cos-model-catalog=${nonce}` }, ask,
@@ -34,6 +34,7 @@ it.each([false, true])('holds cold discovery until composer hydration without a 
   dom.window.document.body.append(composer);
   expect(await pending).toBe(!navigated);
   expect(ask).toHaveBeenCalledTimes(navigated ? 0 : 1);
+  expect(context.pageViewChecks.size).toBe(0);
   expect(clear).not.toHaveBeenCalled();
   dom.window.close();
 });

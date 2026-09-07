@@ -1036,6 +1036,9 @@ const CREDENTIAL_FIELDS = new Set(['secret']);
 function redactArgs(tool: string, args: unknown): unknown {
   if (!args || typeof args !== 'object') return args;
   const copy: Record<string, unknown> = { ...(args as Record<string, unknown>) };
+  // Native file values carry download credentials, not reproducible tool input.
+  // Keep the destination and result for recovery without persisting the URL or file token.
+  if (tool === 'download_artifact' && Object.hasOwn(copy, 'file')) copy['file'] = '<native file credentials not stored>';
   if (copy['env'] && typeof copy['env'] === 'object') {
     copy['env'] = Object.fromEntries(Object.keys(copy['env'] as object).map((key) => [key, '***']));
   }
@@ -1243,8 +1246,19 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     // durable first-hand evidence: the bridge stamped it when this app opened and bound the
     // worker chat. Recover only that worker id, never a guessed prime/current agent.
     let eventAgent = input.agent ?? null;
+    let callModel: Pick<ToolCallRecord, 'model' | 'reasoningEffort'> = {};
     if (target.conversationId) {
       const summary = await getSession(sessionId);
+      const selection = summary?.selectedModel;
+      const live = conversations.get(target.conversationId);
+      // Selection evidence must precede this exact turn, not merely arrive before the
+      // tool result is recorded. A user changing next-turn settings cannot reprice the
+      // model still executing the old turn. Unknown/historical calls stay unattributed.
+      if (selection?.conversationId === target.conversationId && live?.turnId === target.turnId &&
+          live.turnStartedAt !== null && live.turnStartedAt !== undefined &&
+          selection.observedAt <= live.turnStartedAt && selection.observedAt <= input.startedAt) {
+        callModel = { model: selection.model, ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) };
+      }
       const origin = summary?.origin;
       if (origin?.kind === 'worker' && origin.agentId && /^worker-\d+$/.test(origin.agentId)) {
         // Request/session ownership is older and stronger than whatever live broker role this
@@ -1277,6 +1291,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     });
 
     const call: ToolCallRecord = {
+      ...callModel,
       callId: randomUUID(),
       tool: input.tool,
       attribution: target.attribution,

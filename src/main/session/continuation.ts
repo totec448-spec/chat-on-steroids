@@ -145,12 +145,45 @@ export interface ContinuationDestinationCheckpoint extends ContinuationSendCheck
 export const sendUnattempted = (checkpoint: ContinuationSendCheckpoint): boolean =>
   checkpoint.state === 'not-attempted' || checkpoint.state === 'attempted-unresolved';
 
+/**
+ * The ChatGPT Project a successor chat must be created in, reduced to its routing identity.
+ *
+ * Matches background.js::projectFromUrl, the browser-side routing rule --
+ * the extension is plain JS and cannot import this. Both accept only `g-p-` followed by 32 hex
+ * digits, because that is the form ChatGPT addresses a Project page by. A Project chat's own
+ * path carries the display name appended to that id, and a renamed Project changes it, so the
+ * name is never part of what is stored or built.
+ *
+ * Anything else is null, and null everywhere means "open at the site root" -- exactly what this
+ * app did before Projects were carried at all. An unrecognised shape therefore degrades to the
+ * previous behaviour rather than to a guessed address.
+ */
+export function normalizeProjectId(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const candidate = value.trim().toLowerCase();
+  return /^g-p-[0-9a-f]{32}$/.test(candidate) ? candidate : null;
+}
+
 interface Continuation {
   token: string;
   sessionId: string;
   /** Chat A: where the session is attached until the commit lands. */
   from: string;
   openedAt: number;
+  /**
+   * Last sign that this handoff is still being worked, which is what the manual deadline runs on.
+   *
+   * The ten-minute clock is a limit on *waiting*, and it used to be measured from `openedAt` — so
+   * a brief that ChatGPT was still writing was indistinguishable from one nobody had touched. On a
+   * 730k-token chat under Pro reasoning the brief took longer than that, and issue #21 is what
+   * happened next: the running generation was declared dead and auto-compaction then treated the
+   * compaction itself as an eligible turn, stopped it, and started another one.
+   *
+   * Renewed only by real forward progress. A token that has genuinely gone quiet for a full TTL
+   * still expires, so this lengthens nothing for a stalled handoff.
+   */
+  touchedAt: number;
+  sourceProgress: number;
   /** Auto-compaction ticket: survives page/retry clocks until commit or explicit Off/cancel. */
   automatic: boolean;
   /** When the brief request first went on its way; the automatic clock starts here. */
@@ -175,6 +208,14 @@ interface Continuation {
   claimedBy: string | null;
   /** Chat B while the durable commit is in flight; persisted for restart recovery. */
   to: string | null;
+  /**
+   * The Project chat A belongs to, so chat B is created in it too. Null for a chat at the root.
+   *
+   * Held here rather than only in the browser because the app opens the replacement itself
+   * whenever the extension does not -- an OS fallback, or a recovery after this process
+   * restarted -- and by then the tab that knew the Project may be gone.
+   */
+  project: string | null;
   sourceSend: ContinuationSendCheckpoint;
   destinationSend: ContinuationDestinationCheckpoint;
   error: string | null;
@@ -194,10 +235,15 @@ interface ContinuationRecord {
   from: string;
   to: string | null;
   openedAt: number;
+  /** Absent in snapshots written before the manual deadline counted from activity. */
+  touchedAt?: number;
+  sourceProgress?: number;
   /** Absent in records written before durable auto-compaction tickets existed. */
   automatic?: boolean;
   /** Absent in records written before automatic handovers had a deadline. */
   askedAt?: number | null;
+  /** Absent in records written before Project affinity was carried; null means the site root. */
+  project?: string | null;
   state: ContinuationState;
   summary: string;
   handoffId: string | null;
@@ -223,8 +269,11 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     from: entry.from,
     to: entry.to,
     openedAt: entry.openedAt,
+    touchedAt: entry.touchedAt,
+    sourceProgress: entry.sourceProgress,
     automatic: entry.automatic,
     askedAt: entry.askedAt,
+    project: entry.project,
     state: entry.state,
     summary: entry.summary.slice(0, 512 * 1024),
     handoffId: entry.handoffId,
@@ -270,6 +319,12 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   // waiting out a window that is already over.
   if (record.state === 'committed' || record.state === 'aborted') endResumeClaim(entry.token);
   entry.to = record.to;
+  entry.project = normalizeProjectId(record.project);
+  // Never let a durable read move the deadline backwards: a snapshot written before this field
+  // existed reports nothing, and reading that as "last touched when it opened" would expire a
+  // handoff that has been progressing since.
+  entry.touchedAt = Math.max(entry.touchedAt, record.touchedAt ?? record.openedAt);
+  entry.sourceProgress = record.sourceProgress ?? 0;
   entry.automatic = record.automatic === true;
   entry.state = record.state;
   entry.summary = record.summary;
@@ -295,6 +350,10 @@ async function transitionNow(
 ): Promise<ContinuationRecord> {
   const current = durableRecord(entry);
   const next = derive(current);
+  // Any semantic transition is forward progress, so it renews the waiting deadline. Without this
+  // the stamp would only ever be set at open and the manual clock would be back to counting from
+  // there — the same bug in a new field.
+  if (JSON.stringify(next) !== JSON.stringify(current)) next.touchedAt = Date.now();
   try {
     // Persist the proposed semantic state before publishing it into the live transaction.
     // If the durable boundary rejects, callers still see the previous state and can retry or
@@ -333,6 +392,7 @@ export function setContinuationRecoveryHooks(hooks: ContinuationRecoveryHooks): 
 }
 
 export interface ContinuationView {
+  touchedAt: number;
   token: string;
   sessionId: string;
   from: string;
@@ -344,11 +404,14 @@ export interface ContinuationView {
   automatic: boolean;
   /** When the brief request first went on its way, or null while it has not. */
   askedAt: number | null;
+  /** The Project the replacement chat belongs in, or null for the site root. */
+  project: string | null;
   sourceSend: ContinuationSendCheckpoint;
   destinationSend: ContinuationDestinationCheckpoint;
 }
 
 const view = (entry: Continuation): ContinuationView => ({
+  touchedAt: entry.touchedAt,
   token: entry.token,
   sessionId: entry.sessionId,
   from: entry.from,
@@ -359,6 +422,7 @@ const view = (entry: Continuation): ContinuationView => ({
   openedAt: entry.openedAt,
   automatic: entry.automatic,
   askedAt: entry.askedAt,
+  project: entry.project,
   sourceSend: { ...entry.sourceSend },
   destinationSend: { ...entry.destinationSend }
 });
@@ -377,7 +441,7 @@ const handoffAsked = (entry: Continuation): boolean =>
 const expired = (entry: Continuation, now = Date.now()): boolean =>
   entry.automatic
     ? entry.askedAt !== null && now - entry.askedAt >= AUTOMATIC_HANDOVER_TTL_MS
-    : now - entry.openedAt >= CONTINUATION_TTL_MS;
+    : now - entry.touchedAt >= CONTINUATION_TTL_MS;
 
 const isOpen = (entry: Continuation): boolean =>
   entry.state !== 'committed' && entry.state !== 'aborted' && !expired(entry);
@@ -393,7 +457,7 @@ function sweep(): void {
     if (entry.state === 'committed' || entry.state === 'aborted') {
       // Kept briefly so a repeated ack can be answered with "already done" rather than with
       // a fresh transaction, then forgotten.
-      if (Date.now() - entry.openedAt > CONTINUATION_TTL_MS * 2) byToken.delete(entry.token);
+      if (Date.now() - entry.touchedAt > CONTINUATION_TTL_MS * 2) byToken.delete(entry.token);
       continue;
     }
     if (expired(entry)) {
@@ -466,10 +530,10 @@ export function supersededSourceConversations(): string[] {
   return [...out].sort();
 }
 
-/** Auto-compaction tickets still owed a real A -> B commit. */
-export function pendingAutomaticContinuations(): ContinuationView[] {
+/** Compaction tickets still owed a real A -> B commit. */
+export function pendingContinuations(): ContinuationView[] {
   sweep();
-  return [...byToken.values()].filter((entry) => entry.automatic && isOpen(entry)).map(view);
+  return [...byToken.values()].filter(isOpen).map(view);
 }
 
 /**
@@ -622,12 +686,15 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
  * one already running. That is deliberate — the previous design let each press become its
  * own handoff and its own fresh tab.
  */
-function makeContinuation(sessionId: string, fromConversationId: string, automatic: boolean): Continuation {
+function makeContinuation(sessionId: string, fromConversationId: string, automatic: boolean, project: string | null): Continuation {
   return {
     token: randomBytes(16).toString('base64url'),
     sessionId,
     from: fromConversationId,
+    project,
     openedAt: Date.now(),
+    touchedAt: Date.now(),
+    sourceProgress: 0,
     automatic,
     askedAt: null,
     state: 'awaiting-summary',
@@ -647,7 +714,8 @@ function makeContinuation(sessionId: string, fromConversationId: string, automat
 export async function openContinuationNow(
   sessionId: string,
   fromConversationId: string,
-  automatic = false
+  automatic = false,
+  project: string | null = null
 ): Promise<ContinuationView> {
   sweep();
   const existing = [...byToken.values()].find((entry) => entry.sessionId === sessionId && isOpen(entry));
@@ -658,7 +726,7 @@ export async function openContinuationNow(
   const work = (async (): Promise<ContinuationView> => {
     const again = [...byToken.values()].find((entry) => entry.sessionId === sessionId && isOpen(entry));
     if (again) return view(again);
-    const entry = makeContinuation(sessionId, fromConversationId, automatic);
+    const entry = makeContinuation(sessionId, fromConversationId, automatic, normalizeProjectId(project));
     try {
       await writeDurableNow(CONTINUATIONS_STATE, snapshotWith(entry.token, durableRecord(entry)));
     } catch (err) {
@@ -705,7 +773,7 @@ async function withCheckpointLock<T>(token: string, work: () => Promise<T>): Pro
  * hold the message, and the only honest ends are its own marker or an explicit cancel.
  */
 export async function beginContinuationSourceSendNow(
-  token: string
+  token: string, project?: string | null
 ): Promise<{ allowed: boolean; checkpoint: ContinuationSendCheckpoint } | null> {
   return withCheckpointLock(token, async () => {
     const entry = byToken.get(token);
@@ -718,6 +786,7 @@ export async function beginContinuationSourceSendNow(
     }
     await transitionNow(entry, (current) => ({
       ...current,
+      ...(project !== undefined ? { project: normalizeProjectId(project) } : {}),
       sourceSend: { state: 'attempted-unresolved', messageId: null }
     }));
     return { allowed: true, checkpoint: { ...entry.sourceSend } };
@@ -744,15 +813,25 @@ export async function dispatchContinuationSourceSendNow(token: string): Promise<
 }
 
 /** Binds the marked source prompt to ChatGPT's stable user-message identity. */
-export async function bindContinuationSourceMessageNow(token: string, messageId: string): Promise<boolean> {
+export async function bindContinuationSourceMessageNow(token: string, messageId: string, progress?: number): Promise<boolean> {
   if (!messageId || messageId.length > 200) return false;
   return withCheckpointLock(token, async () => {
     const entry = byToken.get(token);
     if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary') return false;
-    if (entry.sourceSend.state === 'sent') return entry.sourceSend.messageId === messageId;
+    if (entry.sourceSend.state === 'sent') {
+      if (entry.sourceSend.messageId !== messageId) return false;
+      // Only growth of this exact marked response renews the manual waiting deadline.
+      // Persist at most twice a minute; unchanged snapshots and a spinner alone buy no time.
+      if (!entry.automatic && Number.isSafeInteger(progress) && progress! > entry.sourceProgress &&
+          progress! <= 4_000_000 && Date.now() - entry.touchedAt >= 30_000) {
+        await transitionNow(entry, current => ({ ...current, sourceProgress: progress! }));
+      }
+      return true;
+    }
     if (entry.sourceSend.state !== 'dispatched-unresolved') return false;
     await transitionNow(entry, (current) => ({
       ...current,
+      sourceProgress: Number.isSafeInteger(progress) && progress! >= 0 && progress! <= 4_000_000 ? progress! : 0,
       sourceSend: { state: 'sent', messageId }
     }));
     return true;
@@ -1367,8 +1446,8 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       raw.from.length === 0 || raw.from.length > 256 ||
       !validStates.has(raw.state) ||
       !Number.isFinite(raw.openedAt) ||
-      ((raw.state === 'committed' || raw.state === 'aborted') && now - raw.openedAt >= CONTINUATION_TTL_MS * 2) ||
-      (raw.automatic !== true && now - raw.openedAt >= CONTINUATION_TTL_MS * 2)
+      ((raw.state === 'committed' || raw.state === 'aborted') && now - (Number.isFinite(raw.touchedAt) && raw.touchedAt! <= now ? raw.touchedAt! : raw.openedAt) >= CONTINUATION_TTL_MS * 2) ||
+      (raw.automatic !== true && now - (Number.isFinite(raw.touchedAt) && raw.touchedAt! <= now ? raw.touchedAt! : raw.openedAt) >= CONTINUATION_TTL_MS * 2)
     ) {
       continue;
     }
@@ -1378,6 +1457,10 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       from: raw.from,
       to: typeof raw.to === 'string' && raw.to ? raw.to : null,
       openedAt: raw.openedAt,
+      project: normalizeProjectId(raw.project),
+      // Older snapshots have no touch stamp; the open time is the honest floor for them.
+      sourceProgress: Number.isSafeInteger(raw.sourceProgress) && raw.sourceProgress! >= 0 && raw.sourceProgress! <= 4_000_000 ? raw.sourceProgress! : 0,
+      touchedAt: Number.isFinite(raw.touchedAt) && raw.touchedAt! >= raw.openedAt && raw.touchedAt! <= now ? Number(raw.touchedAt) : raw.openedAt,
       automatic: raw.automatic === true,
       askedAt: null,
       state: raw.state,

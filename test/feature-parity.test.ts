@@ -64,6 +64,7 @@ describe('portable browser-backed feature parity', () => {
       'apply_patch',
       'exec_command',
       'write_stdin',
+      'download_artifact',
       'session',
       'agents',
       'session_finish'

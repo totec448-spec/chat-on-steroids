@@ -1,30 +1,10 @@
 /** Explicit desktop sends bring up the existing connection/browser authorities. */
 import { connect, getStatus, onStatusChange } from '../connection.js';
-import { bridgeStatus, browserWakeConnected, startBridge } from '../bridge.js';
-import { openInPreferredBrowser } from '../browser.js';
+import { startBridge } from '../bridge.js';
+import { wakeBrowserUrl, resetBrowserStartupForTests } from '../browser-startup.js';
 import { getConfig } from '../config.js';
 import { enqueueInput, cancelInput, listInputs, noteInputStartupError, type InputArgs, type InputEntry } from './input.js';
 
-let waking: { lastSeenAt: number | null; work: Promise<void>; failed: boolean } | null = null;
-/** One browser startup per absence episode, shared by authored sends and read-only discovery. */
-export async function wakeBrowserUrl(url: string, retry = false, backgroundStartup = false): Promise<void> {
-  const browser = await bridgeStatus();
-  // Closing Chrome (including its last helper window) disconnects the live wake
-  // transport immediately while its last HTTP sighting stays "present" for a minute.
-  // Only an authenticated live transport can receive this newly published work.
-  if (browserWakeConnected()) { waking = null; return; }
-  if (retry && waking?.failed) waking = null;
-  // Until the extension registers, another explicit send belongs to the same startup.
-  // Its outbox entry will be discovered by normal maintenance once Chrome is ready.
-  if (waking?.lastSeenAt === browser.lastSeenAt) return waking.work;
-  const work = (async () => {
-    const opened = await (backgroundStartup ? openInPreferredBrowser(url, { backgroundStartup: true }) : openInPreferredBrowser(url));
-    if (!opened) throw new Error('Chrome or Chromium was not found');
-  })();
-  const attempt = { lastSeenAt: browser.lastSeenAt, work, failed: false };
-  waking = attempt;
-  try { await work; } catch (error) { attempt.failed = true; throw error; }
-}
 function wakeBrowser(entry: InputEntry, retry = false): Promise<void> {
   const marker = `cos-input=${encodeURIComponent(entry.id)}`;
   return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry, getConfig().ui.backgroundChats === true);
@@ -88,4 +68,4 @@ export async function retryQueuedInputBrowser(id: string): Promise<InputEntry | 
   const entry = (await listInputs()).find(row => row.id === id);
   return eligible(entry) ? deliver(entry, true) : null;
 }
-export function resetInputStartupForTests(): void { waking = null; starting.clear(); }
+export function resetInputStartupForTests(): void { resetBrowserStartupForTests(); starting.clear(); }

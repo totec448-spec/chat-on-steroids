@@ -37,10 +37,18 @@ function harness(initial: Tab[], cached?: number) {
         if (!windows.has(id)) throw new Error('Window closed'); return windows.get(id);
       } }
     }
-  }) as { createChatTab(url: string, background: boolean): Promise<Tab>; reconcileBackgroundWindow(policy: object): Promise<boolean> };
+  }) as { createChatTab(url: string, background: boolean, active?: boolean): Promise<Tab>; reconcileBackgroundWindow(policy: object): Promise<boolean> };
   return { ...api, tabs, stored, create, move, get, windowCreate, windowUpdate };
 }
 const policy = { background: true, managedConversations: ['main', 'worker'] };
+
+it('selects a recovery tab inside the owned window without focusing or restoring the window', async () => {
+  const app = harness([{ id: 1, windowId: 9, url: 'https://chatgpt.com/c/main' }], 9);
+  await app.createChatTab('https://chatgpt.com/c/recovered', true, true);
+  expect(app.create).toHaveBeenCalledWith({ url: 'https://chatgpt.com/c/recovered', windowId: 9, active: true });
+  expect(app.windowCreate).not.toHaveBeenCalled();
+  expect(app.windowUpdate).not.toHaveBeenCalled();
+});
 
 it('adopts an existing app main window after cache loss and puts planner and worker tabs beside it', async () => {
   const app = harness([{ id: 1, windowId: 9, url: 'https://chatgpt.com/c/main' }]);

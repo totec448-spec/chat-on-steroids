@@ -347,11 +347,11 @@ it('shows original user text while retaining transport instructions outside the 
   expect(w.document.body.textContent).toContain('hello');
 });
 
-it('appends dropped images to the originating composer draft and caps attachments', async () => {
+it('appends dropped files to the originating composer draft and caps attachments', async () => {
   const { w } = await boot([], false);
   const api = (w as any).api;
-  const image = { name: 'dropped.webp', dataUrl: 'data:image/webp;base64,YQ==' };
-  api.dropImages = vi.fn(async () => ({ ok: true, data: [image] }));
+  const image = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'dropped.md', size: 12, mimeType: 'text/markdown' };
+  api.dropFiles = vi.fn(async () => ({ ok: true, data: [image] }));
   const composer = w.document.getElementById('composer')!;
   const drop = (count: number) => {
     const event = new w.Event('drop', { bubbles: true, cancelable: true });
@@ -361,11 +361,12 @@ it('appends dropped images to the originating composer draft and caps attachment
   };
   expect(drop(1).defaultPrevented).toBe(true);
   await settle();
-  expect(w.document.querySelectorAll('#composerImages img')).toHaveLength(1);
-  drop(4);
+  expect(w.document.querySelectorAll('#composerImages .attachment-card')).toHaveLength(1);
+  expect(w.document.getElementById('composerImages')!.textContent).toContain('dropped.md');
+  drop(20);
   await settle();
-  expect(api.dropImages).toHaveBeenCalledTimes(1);
-  expect(w.document.querySelectorAll('#composerImages img')).toHaveLength(1);
+  expect(api.dropFiles).toHaveBeenCalledTimes(1);
+  expect(w.document.querySelectorAll('#composerImages .attachment-card')).toHaveLength(1);
 });
 
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
@@ -886,6 +887,10 @@ it('keeps editable stages until the composer sends the first stage exactly once'
   await settle();
   expect(live.sent).toHaveLength(1);
   expect(live.sent[0]).toMatchObject({ text: 'Build the edited foundation', stages: ['Verify it'] });
+  expect(w.document.getElementById('taskPlanPreview')!.hidden).toBe(true);
+  expect(w.document.getElementById('finishQueue')!.hidden).toBe(false);
+  expect(w.document.getElementById('finishQueue')!.textContent).toContain('Verify it');
+  expect(w.document.querySelector('[aria-label="Plan stage · waiting for the first message to be sent"]')).not.toBeNull();
 });
 
 it('disables empty task actions and confirms saving without the old helper sentence', async () => {

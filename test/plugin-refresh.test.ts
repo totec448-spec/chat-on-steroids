@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
 import { initDurableStore, resetDurableForTests, readDurable, writeDurableNow } from '../src/main/durable.js';
-import { claimPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, resetPluginRefreshForTests, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
+import { claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh, pendingPluginRefreshes, pluginRefreshPublications, publishPluginSurface, resetPluginRefreshForTests, unpublishPluginSurface } from '../src/main/plugin-refresh.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 import { buildServer } from '../src/main/mcp/tools.js';
 import { defaultConfig } from '../src/main/config.js';
@@ -88,6 +88,19 @@ it('does not settle a changed contract as already current', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0]!, description: 'Old' }], alreadyCurrent: true })).toBe(false);
   expect(await claim(request)).toBe(true);
+});
+it('durably suppresses automatic retries when the provider requires manual recreation', async () => {
+  publish(); const request = (await pendingPluginRefreshes())[0]!;
+  const installed = [{ ...tools[0]!, description: 'Older installed declaration' }];
+  expect(await requireManualPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: installed, error: 'Recreate the custom app manually.' })).toBe(true);
+  expect(await pendingPluginRefreshes()).toEqual([]);
+  const stored = (await readDurable('plugin-refresh') as any[])[0];
+  expect(stored).toMatchObject({ appId, attempted: false, manual: true, error: 'Recreate the custom app manually.' });
+  expect(stored.completedSchemaId).not.toBe(stored.schemaId);
+  resetPluginRefreshForTests(); publish();
+  expect(await pendingPluginRefreshes()).toEqual([]);
+  publish('2', [{ ...tools[0]!, description: 'Another local schema' }]);
+  expect((await pendingPluginRefreshes())[0]).toMatchObject({ appId });
 });
 it('keeps an exact app mapping and refuses another installed same-name plugin', async () => {
   publish(); const a = (await pendingPluginRefreshes())[0]!;

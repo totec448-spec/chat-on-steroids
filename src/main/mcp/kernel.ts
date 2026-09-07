@@ -671,13 +671,13 @@ async function dispatchTracked(
         : retiredLeaseAmbiguous
         ? Promise.resolve(
             fail(
-              'CALLER_IDENTITY_REQUIRED: a recently retired worker tab may still be open, and the connector could not prove this call belongs to a different chat. No local tool was run. Reload the extension evidence path or wait for the retired lease to expire.'
+              'CALLER_IDENTITY_REQUIRED: a recently retired worker tab may still be open, and the connector could not prove this call belongs to a different chat. No local tool was run. For a browser chat, restore the companion connection and retry. Scheduled or headless runs may have no browser identity: the user can enable "Allow unattributed calls" in the app settings to permit self-contained calls recorded as Unattributed. Exact retired-worker restrictions still apply.'
             )
           )
         : dormantLeaseAmbiguous
         ? Promise.resolve(
             fail(
-              'CALLER_IDENTITY_REQUIRED: a dormant worker chat still belongs to its prime history, and the connector could not prove this call belongs to a different conversation. No local tool was run. Restore the browser-extension identity path and retry.'
+              'CALLER_IDENTITY_REQUIRED: a dormant worker chat still belongs to its prime history, and the connector could not prove this call belongs to a different conversation. No local tool was run. For a browser chat, restore the companion connection and retry. Scheduled or headless runs may have no browser identity: the user can enable "Allow unattributed calls" in the app settings to permit self-contained calls recorded as Unattributed. This does not identify the caller or grant access to another chat’s workspace or processes.'
             )
           )
         : !allowUnattributed && swarmRunning() && identitySensitive && !context.caller.conversationId
@@ -980,6 +980,12 @@ export interface SurfaceRegistrar {
       inputSchema: Schema;
       outputSchema?: z.ZodType;
       annotations?: ToolAnnotations;
+      /**
+       * Opaque host metadata advertised verbatim in tools/list.
+       * Used once by download_artifact for {"openai/fileParams": ["file"]},
+       * which tells ChatGPT to inject the native file value. Never interpreted here.
+       */
+      _meta?: Record<string, unknown>;
     },
     handler: (args: z.output<Schema>) => Promise<ToolResult>
   ): void;

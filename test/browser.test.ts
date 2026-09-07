@@ -1,10 +1,65 @@
 import path from 'node:path';
 import os from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
-import { findPreferredBrowser, openInPreferredBrowser, preferredBrowserCandidates } from '../src/main/browser.js';
+import { findPreferredBrowser, isPreferredBrowserRunning, openInPreferredBrowser, preferredBrowserCandidates } from '../src/main/browser.js';
 import { runPowerShell } from '../src/main/exec.js';
 
 describe('browser-backed ChatGPT commands', () => {
+  it('launches selected Edge when Chrome is also installed', async () => {
+    const edge = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+    const chrome = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    const launch = vi.fn(async () => ({ pid: 123 }));
+    const url = 'https://chatgpt.com/?cos-model-catalog=selected';
+    const opened = await openInPreferredBrowser(url, {
+      browser: 'edge', platform: 'win32',
+      env: { ProgramFiles: 'C:\\Program Files', 'ProgramFiles(x86)': 'C:\\Program Files (x86)' },
+      usable: candidate => candidate === edge || candidate === chrome, launch
+    });
+    expect(opened).toBe(edge);
+    expect(launch).toHaveBeenCalledExactlyOnceWith(edge,
+      ['--disable-renderer-backgrounding', '--disable-background-timer-throttling', url], path.win32.dirname(edge));
+  });
+
+  it('does not open Chrome when selected Edge is absent', async () => {
+    const launch = vi.fn(async () => ({ pid: 123 }));
+    await expect(openInPreferredBrowser('https://chatgpt.com/', {
+      browser: 'edge', platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' },
+      usable: candidate => candidate.endsWith('chrome.exe'), launch
+    })).rejects.toThrow(/Microsoft Edge.*not found/);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it('reports selected Edge launch failure without switching browser families', async () => {
+    const launch = vi.fn(async () => { throw new Error('cannot start'); });
+    await expect(openInPreferredBrowser('https://chatgpt.com/', {
+      browser: 'edge', platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' },
+      usable: () => true, launch
+    })).rejects.toThrow(/Microsoft Edge.*cannot start/);
+    expect(launch.mock.calls).toHaveLength(1);
+  });
+
+  it('probes the selected browser process rather than inferring it from another installed browser', async () => {
+    const probe = vi.fn(async (_script: string) => ({ stdout: 'running', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 }));
+    expect(await isPreferredBrowserRunning('win32', probe, 'edge')).toBe(true);
+    expect(probe.mock.calls[0]?.[0]).toContain("ProcessName -eq 'msedge'");
+    expect(probe.mock.calls[0]?.[0]).not.toContain("ProcessName -eq 'chrome'");
+  });
+  it('grants process absence only from a successful bounded Windows probe', async () => {
+    const result = { stdout: 'absent\r\n', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 };
+    const probe = vi.fn(async () => result);
+    expect(await isPreferredBrowserRunning('win32', probe)).toBe(false);
+    result.stdout = 'running\r\n';
+    expect(await isPreferredBrowserRunning('win32', probe)).toBe(true);
+    result.stdout = '';
+    expect(await isPreferredBrowserRunning('win32', probe)).toBeNull();
+    result.stdout = 'absent'; result.timedOut = true;
+    expect(await isPreferredBrowserRunning('win32', probe)).toBeNull();
+    result.timedOut = false; result.exitCode = 1;
+    expect(await isPreferredBrowserRunning('win32', probe)).toBeNull();
+    probe.mockClear();
+    expect(await isPreferredBrowserRunning('darwin', probe)).toBeNull();
+    expect(probe).not.toHaveBeenCalled();
+  });
   it('cold background startup gives Chrome one owned tab in a minimized startup window', async () => {
     const calls: string[] = [];
     const launch = vi.fn();
@@ -19,7 +74,7 @@ describe('browser-backed ChatGPT commands', () => {
         return { stdout: '', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 };
       }
     });
-    expect(calls).toEqual([`$ErrorActionPreference='Stop'; Start-Process -FilePath '${browser}' -ArgumentList '"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--start-maximized" "https://chatgpt.com/?cos-model-catalog=owned"' -WorkingDirectory '${path.win32.dirname(browser)}' -WindowStyle Minimized`]);
+    expect(calls).toEqual([`$ErrorActionPreference='Stop'; Start-Process -FilePath '${browser}' -ArgumentList '"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--window-size=1100,800" "https://chatgpt.com/?cos-model-catalog=owned"' -WorkingDirectory '${path.win32.dirname(browser)}' -WindowStyle Minimized`]);
     expect(launch).not.toHaveBeenCalled();
   });
   it.runIf(process.platform === 'win32')('keeps executable, cwd and quoted URL literal through PowerShell without launching a browser', async () => {
@@ -43,7 +98,7 @@ describe('browser-backed ChatGPT commands', () => {
     expect(captured.file).toBe(browser);
     expect(captured.cwd).toBe(path.win32.dirname(browser));
     expect(captured.style).toBe('Minimized');
-    expect(captured.args).toBe(String.raw`"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--start-maximized" "https://chatgpt.com/?q=space \"quoted\"&literal=$(` + '`whoami`' + String.raw`)&path=C:\dir with space\\"`);
+    expect(captured.args).toBe(String.raw`"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--window-size=1100,800" "https://chatgpt.com/?q=space \"quoted\"&literal=$(` + '`whoami`' + String.raw`)&path=C:\dir with space\\"`);
   });
 
   it.each([{ exitCode: 1, timedOut: false }, { exitCode: null, timedOut: true }])('reports minimized startup failure without direct foreground fallback: %j', async failure => {

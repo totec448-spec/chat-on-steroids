@@ -21,7 +21,7 @@ vi.mock('../src/main/connection.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/main/connection.js')>();
   return { ...actual, connect: async () => {}, getStatus: () => ({ ...actual.getStatus(), state: 'connected' }) };
 });
-vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: async () => 'chrome.exe' }));
+vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: async () => 'chrome.exe', isPreferredBrowserRunning: async () => null }));
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath } = await import('../src/main/secrets.js');
 const { initDurableStore, flushDurable, resetDurableForTests, writeDurableNow } = await import('../src/main/durable.js');
@@ -53,8 +53,23 @@ beforeAll(async () => {
 });
 beforeEach(async () => {
   await writeDurableNow('session-input', []);
+  await writeDurableNow('plugin-refresh', []);
   goal.resetGoalStateForTests(); input.resetInputForTests(); pushed.mockClear();
   await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+});
+it('serves staged attachment bytes only to the exact unsent browser input owner', async () => {
+  const { stageInputAttachment } = await import('../src/main/session/input-attachments.js');
+  const file = await stageInputAttachment({ text: 'Attachment payload' }, new Set());
+  const other = await stageInputAttachment({ text: 'Different input' }, new Set([file.id]));
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', attachments: [file] });
+  const request = { id: row.id, owner: 'document-one', conversationId: null, attachmentId: file.id, offset: 0 };
+  expect((await post('/input/attachment', request)).status).toBe(409);
+  await post('/input/claim', { id: row.id, owner: request.owner, conversationId: null, requiresAuthorization: true });
+  expect((await post('/input/attachment', { ...request, owner: 'document-two' })).status).toBe(409);
+  expect((await post('/input/attachment', { ...request, attachmentId: other.id })).status).toBe(409);
+  expect(Buffer.from((await post('/input/attachment', request)).body.chunk, 'base64').toString()).toBe('Attachment payload');
+  expect((await post('/input/claim', { ...request, authorize: true })).body.ok).toBe(true);
+  expect((await post('/input/attachment', request)).status).toBe(409);
 });
 it('revokes a claimed send via IPC, fences pre-send authorization and records a late exact receipt', async () => {
   const row = message(null, 'goal');
@@ -134,6 +149,7 @@ describe('IPC input delivery and Goal control integration', () => {
     await input.cancelInput(later.id);
   });
   it('requires an exact plugin claim and matching schema before a refresh completion', async () => {
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: true } });
     const { publishPluginSurface, resetPluginRefreshForTests } = await import('../src/main/plugin-refresh.js');
     resetPluginRefreshForTests();
     const tools = [{ name: 'read', description: 'Read a file', inputSchema: { type: 'object', properties: {} } }];
@@ -146,6 +162,43 @@ describe('IPC input delivery and Goal control integration', () => {
     expect((await post('/plugin-refresh', { ...identity, action: 'claim', connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0], description: 'Old declaration' }] })).body.ok).toBe(true);
     expect((await post('/plugin-refresh', { ...identity, action: 'complete', tools: [] })).body.ok).toBe(false);
     expect((await post('/plugin-refresh', { ...identity, action: 'complete', tools, versionId: 'asdk_app_v_synthetic' })).body.ok).toBe(true);
+    resetPluginRefreshForTests();
+  });
+  it('defaults automatic plugin refresh off and revokes an already offered claim without removing the backend', async () => {
+    const plugin = await import('../src/main/plugin-refresh.js');
+    plugin.resetPluginRefreshForTests();
+    await writeDurableNow('plugin-refresh', []);
+    const tools = [{ name: 'read', description: 'Current declaration', inputSchema: { type: 'object', properties: {} } }];
+    plugin.publishPluginSurface('core', 'Chat On Steroids Core', 'test', '', tools);
+    const saved = (await plugin.pendingPluginRefreshes())[0]!;
+    expect(saved).toBeDefined();
+    expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
+    expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toEqual([]);
+    const configure = (enabled: boolean) => saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: enabled } });
+    await configure(true);
+    expect((await post('/plugin-refresh', { action: 'pending' })).body.requests[0].id).toBe(saved.id);
+    expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toHaveLength(1);
+    const claim = { action: 'claim', id: saved.id, appId: 'asdk_app_off_on_test', connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0], description: 'Older declaration' }] };
+    await configure(false);
+    expect((await post('/plugin-refresh', claim)).body).toMatchObject({ ok: false, error: 'automatic_refresh_disabled' });
+    await configure(true);
+    expect((await post('/plugin-refresh', claim)).body.ok).toBe(true);
+    await configure(false);
+    // A click already accepted while enabled may still report its real result.
+    expect((await post('/plugin-refresh', { ...claim, action: 'complete', tools })).body.ok).toBe(true);
+    plugin.resetPluginRefreshForTests();
+  });
+  it('accepts a manual plugin-refresh terminal state and removes it from browser pickup', async () => {
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: true } });
+    const { publishPluginSurface, resetPluginRefreshForTests } = await import('../src/main/plugin-refresh.js');
+    resetPluginRefreshForTests();
+    const tools = [{ name: 'read', description: 'Read current', inputSchema: { type: 'object', properties: {} } }];
+    const installed = [{ ...tools[0], description: 'Read old' }];
+    publishPluginSurface('core', 'Chat On Steroids Core', 'test', 'Synthetic instructions', tools);
+    const request = (await post('/plugin-refresh', { action: 'pending' })).body.requests[0];
+    const manual = await post('/plugin-refresh', { ...request, appId: 'asdk_app_synthetic', action: 'manual', connectorName: 'Chat On Steroids Core', tools: installed, error: 'Recreate or republish this custom app.' });
+    expect(manual.body.ok).toBe(true);
+    expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
     resetPluginRefreshForTests();
   });
   it.each(['browser', 'tool'] as const)('records %s receipt text and pixels through the real IPC hook', async (transport) => {
@@ -403,4 +456,24 @@ it.each(['auto', 'finish'] as const)('adds one short reminder to every later Ast
   expect(restored.deliveryText?.split(finishInstruction(3))).toHaveLength(2);
   await input.cancelInput(request.id);
   await saveConfig(config);
+});
+
+it('retires a late-confirmed cancelled desktop send after two minutes even as the only managed chat', async () => {
+  const conversationId = randomUUID();
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto' });
+  expect((await post('/input/claim', { id: row.id, owner: 'cancelled-send-document', conversationId: null })).status).toBe(200);
+  await input.cancelInput(row.id);
+  expect((await post('/input/ack', { id: row.id, owner: 'cancelled-send-document', conversationId })).status).toBe(200);
+  expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'cancelled', conversationId, deliveredAt: expect.any(Number) });
+  const now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 119_000);
+  try {
+    const before = (await post('/status', { openConversations: [conversationId] })).body;
+    expect(before.managedConversations).toContain(conversationId);
+    expect(before.retiredConversations).not.toContain(conversationId);
+    clock.mockReturnValue(now + 120_001);
+    const after = (await post('/status', { openConversations: [conversationId] })).body;
+    expect(after.retiredConversations).toContain(conversationId);
+    expect(after.closableConversations).toContain(conversationId);
+  } finally { clock.mockRestore(); }
 });

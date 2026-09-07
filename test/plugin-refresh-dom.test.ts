@@ -2,67 +2,76 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it } from 'vitest';
 const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
+const fiber = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
 let dom: JSDOM;
 afterEach(() => dom?.window.close());
-const tool = { name: 'read', description: 'Read an exact file.', inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'A path with {braces} and "quotes"' } }, required: ['path'] } };
+const tool = { name: 'read', description: 'Read an exact file.', inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } };
 function page() {
-  dom = new JSDOM('<button id="plugins-tab">Plugins</button><section role="tabpanel" aria-labelledby="plugins-tab"><h2>Chat On Steroids Core</h2><div class="actions"><article><h3>read</h3>\nPUBLIC WRITE\n<p>Read an exact file.</p>\nINPUT SCHEMA\n<button>Copy input schema</button><pre></pre>\nMETADATA\nVisibility public</article></div><footer>Information\n<button>Refresh</button>\nApp Id asdk_app_synthetic\nVersion Id asdk_app_v_synthetic</footer></section>', { runScripts: 'outside-only', url: 'https://chatgpt.com/plugins' });
-  dom.window.document.querySelector('pre')!.textContent = JSON.stringify(tool.inputSchema);
-  Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value() { return [{}]; } });
-  dom.window.eval(source);
-  return (dom.window as any).CLF_DOM;
+  dom = new JSDOM('<section role="tabpanel" aria-labelledby="settings-trigger-Plugins"><h2>Chat On Steroids Core</h2><button id="schema">Schema kopieren</button><footer><button id="refresh">Aktualisieren</button></footer></section>', { runScripts: 'outside-only', url: 'https://chatgpt.com/#settings/Plugins/plugin_asdk_app_synthetic' });
+  const win = dom.window;
+  Object.defineProperty(win.HTMLElement.prototype, 'getClientRects', { value() { return this.hidden ? [] : [{}]; } });
+  win.postMessage = (data: unknown) => queueMicrotask(() => win.dispatchEvent(new win.MessageEvent('message', { data, source: win as unknown as Window, origin: win.location.origin })));
+  const props = { connector: { id: 'asdk_app_synthetic', name: 'Chat On Steroids Core', app_metadata: { version_id: 'asdk_app_v_synthetic' }, owners: ['never-copy'] },
+    actions: [{ name: tool.name, description: tool.description, description_model: null, params: tool.inputSchema }], isLoadingActions: false };
+  (win.document.getElementById('schema') as any).__reactFiber$fixture = { memoizedProps: props };
+  (win.document.getElementById('refresh') as any).__reactFiber$fixture = { memoizedProps: { details: [{ title: 'App-Kennung', value: props.connector.id }], reportEntity: { id: props.connector.id, entityType: 'connector' }, headerTrailingContent: {} } };
+  win.eval(fiber); win.eval(source);
+  return { api: (win as any).CLF_DOM, props };
 }
-it('reads exact visible plugin identity and full schema without treating a refresh button as success', () => {
-  const api = page();
-  const view = api.pluginRefreshView('Chat On Steroids Core', [tool]);
+it('reads localized installed declarations and the unique native refresh action from provider state', async () => {
+  const { api } = page(); const view = await api.pluginRefreshView('Chat On Steroids Core', [tool]);
   expect(view).toMatchObject({ appId: 'asdk_app_synthetic', versionId: 'asdk_app_v_synthetic', tools: [tool] });
-  expect(view.refresh.textContent).toBe('Refresh');
-  expect(view).not.toHaveProperty('success');
+  expect(view.refresh.textContent).toBe('Aktualisieren'); expect(view).not.toHaveProperty('success');
 });
-it('refuses duplicate app identity and does not substitute expected text for a changed description', () => {
-  const api = page();
-  dom.window.document.querySelector('p')!.textContent = 'Read an exact file. And write it.';
-  expect(api.pluginRefreshView('Chat On Steroids Core', [tool]).tools[0].description).toBe('Read an exact file. And write it.');
-  dom.window.document.querySelector('footer')!.append(' App Id asdk_app_other');
-  expect(api.pluginRefreshView('Chat On Steroids Core', [tool])).toBeNull();
+it('does not substitute expected declarations for changed provider descriptions', async () => {
+  const { api, props } = page(); props.actions[0]!.description = 'Changed declaration.';
+  expect((await api.pluginRefreshView('Chat On Steroids Core', [tool])).tools[0].description).toBe('Changed declaration.');
+  props.actions.push(props.actions[0]!);
+  expect(await api.pluginRefreshView('Chat On Steroids Core')).toBeNull();
 });
-it('reads removed tool declarations without inventing their identity, but refuses the wrong Plugins heading', () => {
-  const api = page();
-  expect(api.pluginRefreshView('Chat On Steroids Desktop', [tool])).toBeNull();
-  dom.window.document.querySelector('h3')!.textContent = 'another_tool';
-  expect(api.pluginRefreshView('Chat On Steroids Core', [tool]).tools).toEqual([{ ...tool, name: 'another_tool' }]);
-  // A mapped connector may still expose a tool that the new schema removed. Identity
-  // and Refresh remain observable; initial enrollment still rejects the unknown set.
-  expect(api.pluginRefreshView('Chat On Steroids Core', [tool], 'asdk_app_synthetic').refresh.textContent).toBe('Refresh');
+it('uses an enrolled App ID through renames, but refuses mismatched IDs and loading schemas', async () => {
+  const { api, props } = page(); props.connector.name = 'Renamed';
+  expect(await api.pluginRefreshView('Chat On Steroids Core')).toBeNull();
+  expect(await api.pluginRefreshView('Chat On Steroids Core', [], 'asdk_app_synthetic')).not.toBeNull();
+  expect(await api.pluginRefreshView('Chat On Steroids Core', [], 'asdk_app_other')).toBeNull();
+  props.isLoadingActions = true;
+  expect(await api.pluginRefreshView('Renamed')).toBeNull();
 });
-it('distinguishes the loading plugin index from a settled missing installation', () => {
-  const api = page();
-  const panel = dom.window.document.querySelector('section')!;
-  panel.innerHTML = '<a href="/plugins">Browse plugins</a>';
+it('rejects oversized or cyclic schemas before projecting them to the isolated world', async () => {
+  const { api, props } = page();
+  const schema = { type: 'object', description: 'x'.repeat(300000) };
+  props.actions[0]!.params = schema as any;
+  expect(await api.pluginRefreshView('Chat On Steroids Core')).toBeNull();
+  props.actions[0]!.params = { type: 'object', properties: {} } as any;
+  (props.actions[0]!.params as any).properties.self = props.actions[0]!.params;
+  expect(await api.pluginRefreshView('Chat On Steroids Core')).toBeNull();
+});
+it('refuses ambiguous native actions and never copies unrelated connector properties', async () => {
+  const { api } = page(); const messages: unknown[] = [];
+  dom.window.addEventListener('message', event => { if (event.data?.source === 'clf-plugin-reply') messages.push(event.data); });
+  await api.pluginRefreshView('Chat On Steroids Core'); expect(JSON.stringify(messages)).not.toContain('never-copy');
+  const button = dom.window.document.getElementById('refresh')!;
+  const copy = button.cloneNode(true) as any; copy.__reactFiber$fixture = (button as any).__reactFiber$fixture; button.after(copy);
+  expect(await api.pluginRefreshView('Chat On Steroids Core')).toBeNull();
+});
+it('discovers exact installed rows across languages and preserves ambiguity', () => {
+  const { api } = page(); const panel = dom.window.document.querySelector('section')!;
+  panel.innerHTML = '<a href="/plugins">Plugins durchsuchen</a>';
   expect(api.pluginInstalledButtons('Chat On Steroids Core')).toBeNull();
-  panel.insertAdjacentHTML('beforeend', '<button><span data-testid="plugin-icon-wrapper"></span><div>Chat On Steroids Desktop</div><span>Allow all</span></button>');
-  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([]);
-  panel.insertAdjacentHTML('beforeend', '<button><span data-testid="plugin-icon-wrapper"></span><div>Chat On Steroids Core</div><span>Allow all</span></button>');
-  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([panel.querySelectorAll('button')[1]]);
-});
-it('uses a mapped App ID before a renamed display name and refuses another App ID', () => {
-  const api = page();
-  dom.window.document.querySelector('h2')!.textContent = 'My renamed connector';
-  expect(api.pluginRefreshView('Chat On Steroids Core', [tool], 'asdk_app_synthetic')?.appId).toBe('asdk_app_synthetic');
-  expect(api.pluginRefreshView('Chat On Steroids Core', [tool], 'asdk_app_other')).toBeNull();
-});
-it('reads the live adjacent settings labels and ignores provider schema recommendation badges', () => {
-  const api = page();
-  const panel = dom.window.document.querySelector('section')!;
-  const article = dom.window.document.querySelector('article')!;
-  Object.defineProperty(panel, 'innerText', { value: 'Chat On Steroids Core\nApp Id\nasdk_app_synthetic\nVersion Id\nasdk_app_v_synthetic' });
-  dom.window.document.querySelector('footer')!.textContent = 'App Idasdk_app_syntheticVersion Idasdk_app_v_synthetic';
-  Object.defineProperty(article, 'innerText', { value: `read\nREAD\nOUTPUT SCHEMA RECOMMENDED\nRead an exact file.\nINPUT SCHEMA\n${JSON.stringify(tool.inputSchema)}` });
-  expect(api.pluginRefreshView('Chat On Steroids Core', [tool])).toMatchObject({ appId: 'asdk_app_synthetic', tools: [tool] });
-});
-it('exposes duplicate installed names as ambiguous instead of picking a row', () => {
-  const api = page();
-  const panel = dom.window.document.querySelector('section')!;
-  panel.innerHTML = '<button><span data-testid="plugin-icon-wrapper"></span><div>Chat On Steroids Core</div></button>'.repeat(2);
+  panel.insertAdjacentHTML('beforeend', '<button><span data-testid="plugin-icon-wrapper"></span><div>Chat On Steroids Core</div><span>Alle zulassen</span></button>');
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toHaveLength(1);
+  expect(api.pluginInstalledButtons('Chat On Steroids Desktop')).toEqual([]);
+  panel.insertAdjacentHTML('beforeend', panel.querySelector('button')!.outerHTML);
   expect(api.pluginInstalledButtons('Chat On Steroids Core')).toHaveLength(2);
+});
+
+it('observes an exact installed card without a refresh action through the real Fiber bridge', async () => {
+  const { api } = page();
+  const refresh = dom.window.document.getElementById('refresh') as any;
+  const card = { ...refresh.__reactFiber$fixture.memoizedProps, headerTrailingContent: null };
+  (dom.window.document.getElementById('schema') as any).__reactFiber$fixture.return = { memoizedProps: card };
+  refresh.remove();
+  expect(await api.pluginRefreshView('Chat On Steroids Core', [tool])).toMatchObject({ appId: 'asdk_app_synthetic', tools: [tool], refresh: null });
+  delete (dom.window.document.getElementById('schema') as any).__reactFiber$fixture.return;
+  expect(await api.pluginRefreshView('Chat On Steroids Core', [tool])).toBeNull();
 });

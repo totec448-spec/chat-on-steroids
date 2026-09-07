@@ -2,12 +2,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { readDurable, writeDurableNow } from './durable.js';
 import { wakeBrowserWork } from './browser-wake.js';
-import { logInfo } from './logger.js';
+import { logInfo, logWarn } from './logger.js';
 import { surfaceDefinition } from './mcp/surfaces.js';
 import type { PluginPublication, PluginRefreshRequest, PluginSurface, PluginToolSchema } from '../shared/plugin-refresh.js';
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
-const rowSchema = z.object({ surface: z.enum(['core', 'desktop']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), error: z.string().max(200).optional(), versionId: z.string().max(200).optional() });
+const rowSchema = z.object({ surface: z.enum(['core', 'desktop']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional() });
 type Row = z.infer<typeof rowSchema>;
 const publications = new Map<PluginSurface, PluginPublication>();
 const settling = new Map<PluginSurface, { schemaId: string; readyAt: number; timer?: ReturnType<typeof setTimeout> }>();
@@ -89,17 +89,17 @@ export function pendingPluginRefreshes(): Promise<PluginRefreshRequest[]> {
     for (const publication of publications.values()) {
       const found = current.find(row => row.surface === publication.surface);
       if (found?.schemaId === publication.schemaId) continue;
-      const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: found?.completedSchemaId ?? null, attempted: false };
+      const next: Row = { surface: publication.surface, schemaId: publication.schemaId, id: randomUUID(), appId: found?.appId ?? null, completedSchemaId: found?.completedSchemaId ?? null, attempted: false, manual: false };
       if (found) current[current.indexOf(found)] = next; else current.push(next);
       changed = true;
     }
     if (changed) {
       await writeDurableNow('plugin-refresh', current);
-      logInfo(`plugin refresh pending observed ${current.filter(row => row.completedSchemaId !== row.schemaId).map(row => `surface=${row.surface} schema=${row.schemaId.slice(0, 12)} dueInMs=${Math.max(0, (settling.get(row.surface)?.readyAt ?? 0) - Date.now())}`).join(' ')}`);
+      logInfo(`plugin refresh pending observed ${current.filter(row => !row.manual && row.completedSchemaId !== row.schemaId).map(row => `surface=${row.surface} schema=${row.schemaId.slice(0, 12)} dueInMs=${Math.max(0, (settling.get(row.surface)?.readyAt ?? 0) - Date.now())}`).join(' ')}`);
     }
     return current.flatMap(row => {
       const publication = publications.get(row.surface);
-      return publication && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now() && publication.schemaId === row.schemaId && !row.attempted && row.completedSchemaId !== row.schemaId
+      return publication && (settling.get(row.surface)?.readyAt ?? 0) <= Date.now() && publication.schemaId === row.schemaId && !row.attempted && !row.manual && row.completedSchemaId !== row.schemaId
         ? [{ ...structuredClone(publication), id: row.id, appId: row.appId }] : [];
     });
   });
@@ -113,7 +113,7 @@ function exact(current: Row[], identity: Identity): Row | undefined {
 export function claimPluginRefresh(input: Identity & { connectorName: string; tools: unknown; alreadyCurrent?: boolean }): Promise<boolean> {
   return serial(async () => {
     const current = await rows(); const row = exact(current, input);
-    if (!row || row.attempted || row.completedSchemaId === row.schemaId || !recognizable(input.tools)) return false;
+    if (!row || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools)) return false;
     const publication = publications.get(row.surface)!;
     // Unique-name discovery is initial enrollment only. Stale definitions can still
     // identify the surface; the complete post-refresh declarations must match below.
@@ -129,10 +129,33 @@ export function claimPluginRefresh(input: Identity & { connectorName: string; to
     await writeDurableNow('plugin-refresh', current); return true;
   });
 }
+/**
+ * Records a changed provider snapshot that this ChatGPT workspace cannot refresh in place.
+ *
+ * This is intentionally neither a completed refresh nor an attempted click. The same schema stays
+ * visible as requiring manual recreation/republishing, but automatic browser maintenance stops
+ * reopening its settings page. A later local schema change creates a fresh row and may be tried
+ * again normally.
+ */
+export function requireManualPluginRefresh(input: Identity & { connectorName: string; tools: unknown; error: string }): Promise<boolean> {
+  return serial(async () => {
+    const current = await rows(); const row = exact(current, input);
+    if (!row || row.attempted || row.manual || row.completedSchemaId === row.schemaId || !recognizable(input.tools)) return false;
+    const publication = publications.get(row.surface)!;
+    if (row.appId ? row.appId !== input.appId : input.connectorName !== publication.connectorName || !enrollable(input.tools, publication)) return false;
+    if (current.some(other => other !== row && other.appId === input.appId) || matches(input.tools, publication.tools)) return false;
+    row.appId = input.appId;
+    row.manual = true;
+    row.error = input.error.slice(0, 200);
+    await writeDurableNow('plugin-refresh', current);
+    logWarn(`plugin refresh requires manual action surface=${row.surface}: ${row.error}`);
+    return true;
+  });
+}
 export function completePluginRefresh(input: Identity & { tools: unknown; versionId?: string }): Promise<boolean> {
   return serial(async () => {
     const current = await rows(); const row = exact(current, input);
-    if (!row || !row.attempted || row.appId !== input.appId || !matches(input.tools, publications.get(row.surface)!.tools)) return false;
+    if (!row || row.manual || !row.attempted || row.appId !== input.appId || !matches(input.tools, publications.get(row.surface)!.tools)) return false;
     row.completedSchemaId = row.schemaId; delete row.error;
     if (input.versionId) row.versionId = input.versionId.slice(0, 200);
     await writeDurableNow('plugin-refresh', current); return true;

@@ -34,15 +34,13 @@ export function applyComposerSessionModel(scope: string | null, observation: Obs
   paintComposerContext(); paintStatus();
 }
 
-/** Composer scope is Sol through Astra, with only observed non-Instant power levels. */
+/** Provider order and available efforts define the slider, including newly released models. */
 function composerModels() {
   if (catalog.state !== 'ready') return [];
-  const rank = (label: string) => /^gpt[ -]?5\.6(?:[ -](?:sol|pro))?$/i.test(label) ? 0
-    : /^(?:gpt[ -]?6(?:\.0)?(?:[ -](?:pro|astra))?|astra)$/i.test(label) ? 1 : -1;
-  return catalog.models.filter(model => rank(model.label) >= 0)
+  return catalog.models
+    .filter(model => !/^gpt[ -]?5\.5(?:$|[ -])/i.test(model.label))
     .map(model => ({ ...model, efforts: composerEfforts.filter(effort => model.efforts.includes(effort)) }))
-    .filter(model => model.efforts.length > 0)
-    .sort((a, b) => rank(a.label) - rank(b.label));
+    .filter(model => model.efforts.length > 0);
 }
 
 function options(select: HTMLSelectElement, choices: Array<{ id: string; label: string }>, value: string): void {
@@ -94,7 +92,7 @@ function paintComposerChoices(): void {
   const selected = $<HTMLSelectElement>('composerModel');
   const effort = $<HTMLSelectElement>('composerReasoning');
   const choices = composerModels();
-  const signature = JSON.stringify([choices, selected.value, effort.value]);
+  const signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   if (models.dataset.signature === signature) return;
   models.dataset.signature = signature;
   models.replaceChildren();
@@ -106,8 +104,8 @@ function paintComposerChoices(): void {
   const title = document.getElementById('composerPowerTitle');
   const subtitle = document.getElementById('composerPowerModel');
   if (!steps.length) {
-    if (title) title.textContent = 'No supported choices';
-    if (subtitle) subtitle.textContent = 'Reload models';
+    if (title) title.textContent = catalog.state === 'pending' ? 'Loading models…' : 'Models unavailable';
+    if (subtitle) subtitle.textContent = catalog.state === 'pending' ? 'Reading your ChatGPT account' : 'Reload models';
     return;
   }
   const current = steps.findIndex(step => step.model === selected.value && step.effort === effort.value);
@@ -136,7 +134,7 @@ function paintComposerChoices(): void {
     const step = show();
     paintPair('composerModel', 'composerReasoning', step.model, step.effort);
     paintComposerLabel();
-    models.dataset.signature = JSON.stringify([choices, selected.value, effort.value]);
+    models.dataset.signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
   };
   slider.oninput = choose;
   slider.onclick = () => { if (current < 0) choose(); };
@@ -181,7 +179,8 @@ function paintStatus(): void {
   for (const id of ['refreshChatModels', 'refreshComposerModels']) {
     const button = document.getElementById(id) as HTMLButtonElement | null;
     if (button) {
-      button.disabled = catalog.state === 'pending';
+      // Refresh can promote passive discovery; main coalesces repeated explicit clicks.
+      button.disabled = false;
       if (id === 'refreshComposerModels') {
         button.hidden = false;
         button.title = catalog.state === 'pending' ? 'Reading ChatGPT models' : 'Reload ChatGPT models';
@@ -213,7 +212,7 @@ export function applyChatModels(config: Config, previous?: Config): void {
 export function initChatModels(onPaint?: () => void): void {
   onComposerPaint = onPaint;
   document.getElementById('modelMenu')?.addEventListener('toggle', () => {
-    if (($('modelMenu') as HTMLDetailsElement).open && catalog.state !== 'ready' && catalog.state !== 'pending') $('refreshComposerModels').click();
+    if (($('modelMenu') as HTMLDetailsElement).open && catalog.state !== 'ready') $('refreshComposerModels').click();
   });
   for (const [modelId, effortId] of pairs) {
     document.getElementById(modelId)?.addEventListener('change', () => {
