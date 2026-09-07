@@ -9,6 +9,29 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.0.7] — 2026-09-07
+
+**plus = gpt 5.6; pro = astra**
+
+- Account-specific model and reasoning discovery now handles localized and nested ChatGPT pickers through native metadata. Model availability follows the signed-in account.
+- Fewer browser tabs: one operation retains one opening attempt across navigation, closure and restart. Sleeping workers release browser memory while keeping their reusable conversations.
+- Durable Goal/Loop and finish delivery preserves the exact task and turn, ordered queues and delivery receipts across recovery. Editing an objective re-evaluates an already completed answer.
+- Temporary Goal API failures retry with visible progress and provider retry timing. Finish-generated follow-ups arrive through the next tool response; new input or cancellation retires obsolete work.
+- Custom OpenAI-compatible Goal providers have separate credentials. Endpoint, model and reasoning stay together across settings changes; authenticated requests refuse redirects.
+- Compact & Resume preserves Project placement, continuation identity and live terminal ownership. Real handoff progress extends manual deadlines; cancelled helpers retire without reopening.
+- Explicit Chrome/Edge selection, more reliable startup and exact browser handoffs. Optional Windows login startup respects background launch; macOS startup and reopen handling are hardened.
+- Connector refresh checks the installed identity and tool declarations, including native cards with no Refresh button. The companion popup requires confirmed compatibility and explains manual mismatch recovery.
+- Drop files or paste images into the composer. Filename cards and previews stay above messages; native uploads retain exact ownership, bounded image handling and send confirmation. Later user drafts survive acknowledged bootstrap cleanup.
+- Opt-in artifact downloads save generated files inside approved folders with bounded transfers, validated destinations and no overwriting of existing files.
+- Plan stages stay visible during startup. Completed and cancelled planner tabs retire after generation and draft checks; streamed planning and retry progress stays in one timeline row.
+- Per-worker model and reasoning selection, reusable sleeping workers and custom Core/Desktop instructions, including concurrent settings-save fixes. Scheduled callers receive clearer guidance when attribution permission is disabled.
+- Worker token meters update from recorded tool activity. Usage recognizes the Sol model alias, uses updated configurable rates and preserves proven model identity. Context popups sit directly above the ring.
+- Clearer waiting status distinguishes active tools, workers and unknown waits. Tunnel outage detection and missing metrics no longer conflate unrelated states.
+- Finish notification actions include the macOS alert-style packaging declaration. Cross-platform regression coverage includes canonical download paths and symlink replacement protection.
+- Removed the debugging Reload companion button; normal browser extension management remains available.
+
+**Reload the browser extension after updating the app.** Protocol 13 prevents older companions from silently omitting file attachments.
+
 ## [2.0.6] — 2026-09-06
 
 **I am exhausted.**

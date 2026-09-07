@@ -420,6 +420,7 @@ describe('cross-platform packaging targets', () => {
     expect(builder.mac.category).toBe('public.app-category.developer-tools');
     expect(builder.mac.minimumSystemVersion).toBe('13.0');
     expect(builder.mac.artifactName).toBe('Chat-On-Steroids-macOS-${arch}.${ext}');
+    expect(builder.mac.extendInfo.NSUserNotificationAlertStyle).toBe('alert');
     const nativePrep = readFileSync(path.join(root, 'scripts', 'prepare-packaging-native.mjs'), 'utf8');
     expect(nativePrep).toContain("await chmod(path.join(payloadRoot, 'node-pty', 'prebuilds', prebuildDir, 'spawn-helper'), 0o755)");
     for (const marker of [

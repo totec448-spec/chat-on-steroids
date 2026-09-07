@@ -27,12 +27,10 @@
         <h1>Chat On Steroids</h1>
       </header>
 
-      <p class="pill" id="pill"><span class="dot"></span><span id="state">Looking for the app</span></p>
-      <div class="actions reload-action">
-        <button id="reloadBtn" type="button" aria-describedby="reloadStatus">Reload companion</button>
-      </div>
-      <p id="reloadStatus" class="reload-status" role="status">Restarts this extension. Then reopen this popup to check its connection.</p>
+      <p class="pill off" id="pill"><span class="dot"></span><span id="state">Looking for the app</span></p>
 
+
+      <p class="alert" id="alert" hidden></p>
       <p class="caption">Session capture</p>
       <section class="card">
         <div class="row" id="r-tab">
@@ -77,7 +75,6 @@
       </details>
     </section>
 
-    <p class="alert" id="alert" hidden></p>
 
     <p class="caption">Augment ChatGPT</p>
     <section class="card">

@@ -11,7 +11,7 @@
  */
 
 import { LAUNCHES_WINDOWS_POWERSHELL_5 } from '../codex/tool-specs.js';
-import { getConfig } from '../config.js';
+import { getConfig, MAX_MCP_INSTRUCTIONS_CHARS } from '../config.js';
 import { isGitRepository } from '../toolchain.js';
 import type { ToolContext } from './kernel.js';
 import { surfaceDefinition, type SurfaceId } from './surfaces.js';
@@ -22,6 +22,23 @@ export function serverInstructions(
   platform: NodeJS.Platform = process.platform
 ): string {
   return surface === 'desktop' ? desktopInstructions(ctx, platform) : coreInstructions(ctx, platform);
+}
+
+/**
+ * The user's own additions, appended to whichever connector is being described.
+ *
+ * Last, and fenced under a heading that says whose words these are. Both matter. Last, because
+ * everything above is what the app can actually promise about its own tools, and a preference
+ * must not quietly redefine one of them. Attributed, because the model should be able to tell a
+ * standing instruction from this user apart from the connector's description of itself -- they
+ * carry different authority, and running them together hides that.
+ *
+ * Empty is the normal case and adds nothing at all, not even the heading.
+ */
+function userInstructions(): string[] {
+  const text = getConfig().mcp.instructions.trim();
+  if (!text) return [];
+  return ['', "The user's own standing instructions for this connector:", text.slice(0, MAX_MCP_INSTRUCTIONS_CHARS)];
 }
 
 function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
@@ -99,7 +116,12 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     // The one exception to the virtual-path rule above, and the model has to be told: cmd
     // is a program, not a path, so it reaches the shell exactly as written.
     'exec_command’s workdir is virtual, but its cmd is not translated — set workdir and write paths inside the command relative to it.',
-    'Output is capped. When a result says it was truncated, narrow the request instead of repeating it.'
+    'Output is capped. When a result says it was truncated, narrow the request instead of repeating it.',
+    ...(ctx.caps.saveArtifact
+      ? [
+          'When the user supplies or ChatGPT generates a file that is not on this computer, save it with download_artifact using its native file value and a destination path inside an approved folder. The tool refuses to overwrite and returns the saved path. Never recreate such files with apply_patch or exec_command, and never place signed URLs, file objects or base64 content in shell commands or logs.'
+        ]
+      : [])
   ];
 
   if (desktop && (ctx.caps.screen || ctx.caps.control || ctx.caps.clipboardRead || ctx.caps.clipboardWrite)) {
@@ -155,6 +177,8 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     );
   }
 
+  lines.push(...userInstructions());
+
   return lines.join('\n');
 }
 
@@ -202,6 +226,8 @@ function desktopInstructions(ctx: ToolContext, platform: NodeJS.Platform): strin
     `Files, patches and commands live in a separate connector, "${surfaceDefinition('core').connectorName}".`,
     'This one cannot read or change files. If a task needs that and it is not available here, say so.'
   );
+
+  lines.push(...userInstructions());
 
   return lines.join('\n');
 }

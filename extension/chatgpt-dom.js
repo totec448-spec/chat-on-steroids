@@ -29,23 +29,9 @@ var CLF_DOM = (() => {
   // Keep both explicit structural anchors; hashed CSS-module names remain off limits.
   const TOOL_LEGACY = 'span[class*="tool-message"]';
   const TOOL = `${TOOL_LEGACY}, div.pointer-events-none.contents`;
-  /**
-   * The control ChatGPT puts inside a *connector* tool row and nowhere else.
-   *
-   * Collapsed, a connector row carries no name, no tool id and no connector attribute —
-   * inspected live it is a `group/tool-message` span wrapping a button whose only
-   * distinguishing mark is this label, above turn-level attributes that say nothing about
-   * what ran. The identity ChatGPT holds (`api_tool`, the connector's name, the request
-   * path) appears only once the row or its side panel is opened, and opening rows behind
-   * the user's back to read it is not something this extension will do.
-   *
-   * So this is the one structural thing that separates a connector row from a built-in
-   * one — "Searched the web" and friends are a different component. It matters because
-   * the app uses these rows as its only evidence of *where a tool call came from*: a row
-   * that is not a connector row must never vouch for a connector call, or a turn that
-   * merely searched the web ends up adopting a call made from another device.
-   */
-  const CONNECTOR = '[aria-label="Open tool call list" i]';
+  // MAIN-world scan stamps only a row whose own message group proves api_tool.
+  // A translated label or a generic built-in tool button never establishes identity.
+  const CONNECTOR = '[data-clf-fiber]';
   const STOP =
     'button[data-testid="stop-button"], button[data-testid="composer-stop-button"], ' +
     'button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop answering"]';
@@ -580,10 +566,17 @@ var CLF_DOM = (() => {
     const changed = event => { if (event.isTrusted) touched = true; };
     for (const name of events) host?.addEventListener(name, changed, true);
     const same = () => !touched && stillCurrent() && composer() === box && box?.isConnected && box.textContent === insertedText;
+    const ownsAttachments = () => {
+      if (!same() || !host) return false;
+      const current = [...host.querySelectorAll('button[aria-label]')].filter(node => composerFileName(node));
+      return current.length === files.length && current.every(node => files.includes(node)) &&
+        !host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]');
+    };
     return {
       attachments(nodes) { if (same()) files = [...nodes]; },
+      current: ownsAttachments,
       async clear() {
-        if (!same() || !host) return false;
+        if (!ownsAttachments() || !host) return false;
         const current = [...host.querySelectorAll('button[aria-label]')].filter(node => composerFileName(node));
         if (current.length !== files.length || current.some(node => !files.includes(node)) ||
             host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]')) return false;
@@ -1379,7 +1372,14 @@ var CLF_DOM = (() => {
    */
   function composerActions() {
     return safe(() => {
-      const anchor = document.querySelector(SEND) || document.querySelector(STOP) || document.querySelector(SPEECH);
+      // The current provider microphone has no stable button test id; its sprite and
+      // composer trailing parent identify it without interpreting a translated label.
+      const anchor = document.querySelector(SEND) || document.querySelector(STOP) || document.querySelector(SPEECH) ||
+        [...(composerBox()?.querySelectorAll(`${TRAILING} button`) || [])]
+        .find(button => !button.closest(OWN_SURFACES) && [...button.querySelectorAll('svg use')].some(use => {
+          const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
+          return href.slice(href.lastIndexOf('#')) === '#microphone-regular-24';
+        }));
       const explicit = anchor ? anchor.closest(TRAILING) : document.querySelector(TRAILING);
       if (!anchor) return explicit ? { host: explicit, before: null } : null;
 
@@ -1592,7 +1592,7 @@ var CLF_DOM = (() => {
     }, false);
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true } = {}) {
     try {
       const box = composer();
       if (!box || !box.isConnected || !stillCurrent() || generating() || stopButton()) return false;
@@ -1610,6 +1610,7 @@ var CLF_DOM = (() => {
       const priorUsers = messages().filter((message) => message.role === 'user');
       const priorUserNodes = new Set(priorUsers.map((message) => message.node));
       const priorUserIds = new Set(priorUsers.map((message) => message.id).filter(Boolean));
+      let submittedMessageObserved = false;
 
       // click()/dispatchEvent() only prove that JavaScript ran, not that ChatGPT accepted a
       // prompt. Observe for a page-owned consequence instead of sleeping and re-sampling on a
@@ -1624,7 +1625,10 @@ var CLF_DOM = (() => {
         for (let at = visible.length - 1; at >= 0; at--) {
           const message = visible[at];
           if (message.role !== 'user') continue;
-          if (!priorUserNodes.has(message.node) && !priorUserIds.has(message.id) && compact(message.text) === expected) return true;
+          if (!priorUserNodes.has(message.node) && !priorUserIds.has(message.id) && (matchesUser ? matchesUser(message, submitted) : compact(message.text) === expected)) {
+            submittedMessageObserved = true;
+            return true;
+          }
         }
         if (currentConversation !== beforeConversation) return false;
         const current = composer();
@@ -1638,11 +1642,18 @@ var CLF_DOM = (() => {
         let done = false;
         let observer = null;
         let timer = null;
+        let unsubscribeEvidence = null;
         const finish = (value) => {
           if (done) return;
           done = true;
           if (observer) observer.disconnect();
+          if (unsubscribeEvidence) unsubscribeEvidence();
           if (timer !== null) clearTimeout(timer);
+          // A fresh matching user row proves this text was accepted. Some provider
+          // transitions retain that same draft; leaving it lets the next Loop append
+          // to and resend the entire bootstrap. Preserve replaced editors/new drafts.
+          if (clearAcceptedDraft && value && submittedMessageObserved && stillCurrent() && composer() === box)
+            clearPromptExact(submitted);
           resolve(value);
         };
         const check = () => {
@@ -1657,6 +1668,7 @@ var CLF_DOM = (() => {
           characterData: true,
           attributes: true
         });
+        if (observeEvidence) unsubscribeEvidence = observeEvidence(check);
         // Observe this one click through late React acceptance; never click again. The
         // upper bound remains below the app's command lease/deadline.
         const timeout = Number.isFinite(acceptanceTimeoutMs) ? Math.max(1, Math.min(30000, acceptanceTimeoutMs)) : 30000;
@@ -1686,68 +1698,44 @@ var CLF_DOM = (() => {
   }
 
   /** Native ChatGPT photo input, observed as #upload-photos. Sending waits for every tile. */
-  const composerFileName = (button) => /^Remove file(?: \d+)?: (.+)$/.exec(button.getAttribute('aria-label') || '')?.[1];
+  function composerFileName(button) {
+    const group = button.closest('[role="group"][aria-label]');
+    if (group?.querySelector('[data-default-action="true"] button')) {
+      const actions = [...group.querySelectorAll('button')].filter(node => !node.closest('[data-default-action="true"]'));
+      return actions.length === 1 && actions[0] === button ? group.getAttribute('aria-label') : undefined;
+    }
+    return /^Remove file(?: \d+)?: (.+)$/.exec(button.getAttribute('aria-label') || '')?.[1];
+  }
   function hasComposerAttachments() {
     const host = composerBox() || composerActions()?.host;
     return !!host && (!!host.querySelector('[data-inline-file-uploading], [role="progressbar"]') ||
       [...host.querySelectorAll('button[aria-label]')].some(button => composerFileName(button)));
   }
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
-  function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
-    return safe(() => {
-      const shown = node => node && !node.closest('[hidden],[aria-hidden="true"]') && node.getClientRects().length > 0;
-      const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => shown(panel) &&
-        text(document.getElementById(panel.getAttribute('aria-labelledby'))).trim() === 'Plugins');
-      if (panels.length !== 1) return null;
-      const panel = panels[0];
-      const headings = [...panel.querySelectorAll('h1,h2,h3,[role="heading"]')].filter(node => shown(node) && text(node) === connectorName);
-      if (!expectedAppId && headings.length !== 1) return null;
-      // Settings uses adjacent label/value divs. textContent concatenates App Id with
-      // its value (and the following label), destroying the identity delimiter.
-      const body = (panel.innerText || text(panel, 400000)).slice(0, 400000);
-      const ids = [...body.matchAll(/App Id\s+(asdk_app_[a-zA-Z0-9_-]+)/g)];
-      const versions = [...body.matchAll(/Version Id\s+(asdk_app_v_[a-zA-Z0-9_-]+)/g)];
-      if (ids.length !== 1 || (expectedAppId && ids[0][1] !== expectedAppId)) return null;
-      const refresh = [...panel.querySelectorAll('button')].filter(node => shown(node) && text(node) === 'Refresh');
-      const identity = { appId: ids[0][1], versionId: versions.length === 1 ? versions[0][1] : null, connectorName,
-        refresh: refresh.length === 1 ? refresh[0] : null };
-      const copies = [...panel.querySelectorAll('button')].filter(node => shown(node) && (text(node) === 'Copy input schema' || node.getAttribute('aria-label') === 'Copy input schema'));
-      const normalize = value => String(value).replace(/\s+/g, ' ').trim();
-      const tools = [];
-      for (const copy of copies.slice(0, 17)) {
-        let block = copy.parentElement;
-        while (block?.parentElement && block.parentElement !== panel &&
-          [...block.parentElement.querySelectorAll('button')].filter(node => text(node) === 'Copy input schema' || node.getAttribute('aria-label') === 'Copy input schema').length === 1) block = block.parentElement;
-        const raw = block?.innerText || block?.textContent || '';
-        const marker = raw.toUpperCase().indexOf('INPUT SCHEMA');
-        if (marker < 0) return { ...identity, tools: null };
-        const prefix = raw.slice(0, marker).trim();
-        const names = [...new Set([...(block?.querySelectorAll('*') || [])].filter(node => node.children.length === 0)
-          .map(node => text(node)).filter(name => /^[a-z][a-z0-9_]{0,79}$/.test(name) && prefix.startsWith(name)))];
-        if (names.length !== 1) return { ...identity, tools: null };
-        const name = names[0], expected = expectedTools.find(tool => tool.name === name);
-        const description = prefix.slice(name.length).trim().replace(/^(?:(?:PUBLIC|READ ONLY|READ|WRITE|OPEN WORLD|CLOSED WORLD|DESTRUCTIVE|IDEMPOTENT|OUTPUT SCHEMA RECOMMENDED)\s*)+/, '').trim();
-        const schemaText = raw.slice(marker + 'INPUT SCHEMA'.length).replace(/^\s*Copy input schema\s*/, '');
-        const start = schemaText.indexOf('{');
-        let end = -1, depth = 0, quoted = false, escaped = false;
-        for (let i = start; i >= 0 && i < Math.min(schemaText.length, 200000); i++) {
-          const char = schemaText[i];
-          if (quoted) { if (escaped) escaped = false; else if (char === '\\') escaped = true; else if (char === '"') quoted = false; }
-          else if (char === '"') quoted = true;
-          else if (char === '{') depth++;
-          else if (char === '}' && --depth === 0) { end = i + 1; break; }
-        }
-        if (start < 0 || end < 0) return { ...identity, tools: null };
-        tools.push({ name, description: expected && normalize(description) === normalize(expected.description) ? expected.description : description, inputSchema: JSON.parse(schemaText.slice(start, end)) });
-      }
-      return { ...identity,
-        tools: copies.length > 0 && copies.length <= 16 && new Set(tools.map(tool => tool.name)).size === tools.length ? tools : null };
-    }, null);
+  async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
+    const snapshot = await new Promise(resolve => {
+      const nonce = crypto.randomUUID();
+      const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
+      const receive = event => {
+        const data = event.data;
+        if (event.source === window && event.origin === location.origin && data?.source === 'clf-plugin-reply' && data.nonce === nonce && data.v === 1) finish(data.plugin);
+      };
+      const timer = setTimeout(() => finish(null), 1500);
+      window.addEventListener('message', receive); window.postMessage({ source: 'clf-plugin-ask', nonce }, location.origin);
+    });
+    const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
+    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : snapshot.connectorName !== connectorName) ||
+        !Array.isArray(snapshot.tools) || snapshot.tools.length < 1 || snapshot.tools.length > 16 || JSON.stringify(snapshot.tools).length > 300000 ||
+        snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
+        new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
+    const buttons = [...document.querySelectorAll('button[data-clf-plugin-refresh]')].filter(button => button.getAttribute('data-clf-plugin-refresh') === snapshot.appId && button.getClientRects().length > 0);
+    return typeof snapshot.refreshAvailable === 'boolean' && buttons.length === (snapshot.refreshAvailable ? 1 : 0) ? { appId: snapshot.appId, connectorName: snapshot.connectorName, versionId: typeof snapshot.versionId === 'string' ? snapshot.versionId.slice(0, 200) : null,
+      tools: snapshot.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })), refresh: buttons[0] || null } : null;
   }
   function pluginInstalledButtons(connectorName) {
     return safe(() => {
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
-        text(document.getElementById(panel.getAttribute('aria-labelledby'))).trim() === 'Plugins');
+        panel.getAttribute('aria-labelledby')?.endsWith('-trigger-Plugins'));
       if (panels.length !== 1) return null;
       // Installed settings rows are buttons, not the links in the /plugins catalog.
       // Match the name's own leaf so adjacent permission text cannot alter identity.
@@ -1760,15 +1748,17 @@ var CLF_DOM = (() => {
   function pluginManagementIdle() {
     return safe(() => ![...document.querySelectorAll('textarea,input:not([type="hidden"]),[contenteditable="true"]')].some(node => node.getClientRects().length > 0 && String(node.value || node.textContent || '').trim()), false);
   }
-  async function uploadImages(images, stillCurrent = () => true, draft = null) {
+  async function uploadImages(images, stillCurrent = () => true, draft = null, files = []) {
+    if (files.length) images = [...(images || []), ...files];
     if (!images?.length) return true;
-    if (!Array.isArray(images) || images.length > 4 || !stillCurrent() || hasComposerAttachments()) return false;
-    const input = document.querySelector('input#upload-photos[type="file"][accept="image/*"]');
+    if (!Array.isArray(images) || images.length > 20 || !stillCurrent() || hasComposerAttachments()) return false;
+    const input = document.querySelector(files.length ? 'input#upload-files[type="file"]' : 'input#upload-photos[type="file"][accept="image/*"]');
     if (!input) return false;
     const priorTiles = new Set((composerBox() || composerActions()?.host)?.querySelectorAll('button[aria-label]') || []);
     const transfer = new DataTransfer();
     try {
       for (const image of images) {
+        if (image instanceof File) { transfer.items.add(image); continue; }
         if (typeof image.name !== 'string' || !/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/.test(image.dataUrl) || image.dataUrl.length > 512100) return false;
         const raw = atob(image.dataUrl.split(',')[1]);
         const bytes = Uint8Array.from(raw, (char) => char.charCodeAt(0));
@@ -1804,193 +1794,168 @@ var CLF_DOM = (() => {
       };
       observer = new MutationObserver(check);
       observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true });
-      timer = setTimeout(() => finish(false), 60000);
+      timer = setTimeout(() => finish(false), files.length ? 600000 : 60000);
       check();
     });
   }
 
-  const CHAT_EFFORT_LABELS = { none: 'Instant', medium: 'Medium', high: 'High', xhigh: 'Extra High', pro: 'Pro' };
-  const normalizeModelLabel = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
-  /** One visible picker adapter for discovery and application; DOM ordinals are authoritative. */
-  function modelPickerAccess(stillCurrent) {
-    const shown = (node) => node && !node.closest('[aria-hidden="true"]') && node.getClientRects().length > 0;
-    const picker = () => document.querySelector('[data-testid="composer-intelligence-picker-content"]');
-    const items = () => [...(picker()?.querySelectorAll('[role="menuitemradio"]') || [])].filter(shown);
-    const trigger = () => [...(composerActions()?.host?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
-      .filter(shown).find((node) => /(?:Instant|Medium|High|Pro|Thinking effort)/i.test(node.textContent || ''));
-    const wait = (read, timeoutMs = 3000) => new Promise((resolve) => {
-      let observer, timer;
-      const finish = (value) => { observer?.disconnect(); clearTimeout(timer); resolve(value); };
-      const check = () => { if (!stillCurrent()) return finish(null); const value = read(); if (value) finish(value); };
-      observer = new MutationObserver(check);
-      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
-      timer = setTimeout(() => finish(null), timeoutMs); check();
+  const normalizeModelLabel = value => String(value || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
+  /** One bounded read through the existing MAIN-world helper; no provider API or setters. */
+  function readPickerState() {
+    return new Promise(resolve => {
+      const nonce = crypto.randomUUID();
+      const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
+      const receive = event => {
+        const data = event.data;
+        if (event.source !== window || event.origin !== location.origin || data?.source !== 'clf-picker-reply' || data.nonce !== nonce || data.v !== 1) return;
+        const state = data.picker;
+        const valid = state && typeof state.version === 'string' && Number.isInteger(state.currentBucket) &&
+          Array.isArray(state.versions) && state.versions.length > 0 && state.versions.length <= 20 &&
+          state.versions.every(v => typeof v.id === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(v.id) && typeof v.label === 'string' && v.label.length > 0 && v.label.length <= 80) &&
+          Array.isArray(state.choices) && state.choices.length > 0 && state.choices.length <= 12 &&
+          state.choices.every(c => Number.isInteger(c.bucket) && typeof c.id === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(c.id) && typeof c.label === 'string' && c.label.length > 0 && c.label.length <= 80 &&
+            ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(c.effort) && typeof c.available === 'boolean') &&
+          new Set(state.versions.map(v => v.id)).size === state.versions.length && new Set(state.choices.map(c => c.bucket)).size === state.choices.length &&
+          state.versions.some(v => v.id === state.version) && state.choices.some(c => c.bucket === state.currentBucket);
+        finish(valid ? state : null);
+      };
+      const timer = setTimeout(() => finish(null), 1500);
+      window.addEventListener('message', receive);
+      window.postMessage({ source: 'clf-picker-ask', nonce }, location.origin);
     });
-    const power = () => picker()?.querySelector('[role="menuitem"][aria-label="Power"]');
-    // Latest is a routing choice, not a model identity. At Pro the native badge
-    // explicitly names the generation (observed: 6 Pro versus explicit 5.6 Pro).
-    const latestProModel = () => {
-      const label = picker()?.querySelector('[role="menuitem"][aria-label="Select model"]')?.textContent?.trim();
-      const match = label?.match(/^(?:GPT[- ]?)?(\d+(?:\.\d+)?)\s*Pro$/i);
-      return match ? `GPT-${match[1]} Pro` : null;
+  }
+  /** UI only transports a requested selection. Provider state proves identity and availability. */
+  function modelPickerAccess(stillCurrent) {
+    const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
+    const picker = () => document.querySelector('[data-testid="composer-intelligence-picker-content"]');
+    const trigger = () => {
+      const candidates = [...(composerActions()?.host?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
+        .filter(node => shown(node) && !node.closest(OWN_SURFACES) && node.id !== 'composer-plus-btn' && node.getAttribute('data-testid') !== 'composer-plus-btn');
+      return candidates.length === 1 ? candidates[0] : null;
     };
-    const current = () => {
-      if (power()?.getAttribute('aria-disabled') === 'true') return null;
-      const description = (power()?.getAttribute('aria-describedby') || '').split(/\s+/).map((id) => document.getElementById(id)?.textContent || '').join(' ');
-      const match = description.match(/(Instant|Medium|Extra High|High|Pro),\s*(\d+) of (\d+)/i);
-      if (!match) return null;
-      const position = Number(match[2]), total = Number(match[3]);
-      return total >= 1 && total <= 12 && position >= 1 && position <= total ? { label: match[1], position, total, available: !/Upgrade required/i.test(description) } : null;
-    };
+    const wait = (read, timeout = 3000) => new Promise(resolve => {
+      let reading = false, dirty = false, done = false;
+      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
+      const check = async () => {
+        if (done) return;
+        if (!stillCurrent()) return finish(null);
+        if (reading) { dirty = true; return; }
+        reading = true;
+        try { let value = read(); if (value?.then) value = await value; if (stillCurrent() && value) finish(value); }
+        catch { finish(null); }
+        finally { reading = false; if (dirty && !done) { dirty = false; void check(); } }
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      const timer = setTimeout(() => finish(null), timeout); void check();
+    });
+    const state = predicate => wait(async () => { const value = await readPickerState(); return value && (!predicate || predicate(value)) ? value : null; });
+    const key = (node, value) => { if (!node || !stillCurrent()) return false; node.focus(); node.dispatchEvent(new KeyboardEvent('keydown', { key: value, code: value, bubbles: true, cancelable: true })); return true; };
     return {
-      items, current, wait, latestProModel,
-      async models() {
-        const toggle = picker()?.querySelector('[role="menuitem"][aria-label="Select model"]');
-        if (items().length && toggle?.getAttribute('aria-expanded') !== 'false') return items();
-        if (!toggle || !stillCurrent()) return null;
-        toggle.click(); return wait(() => toggle.getAttribute('aria-expanded') !== 'false' && items().length ? items() : null);
-      },
+      state,
       async open() {
-        // A newly created helper registers before React necessarily mounts the composer.
-        // Observe that same document becoming ready, instead of freezing a null trigger.
-        const button = await wait(trigger, 15000);
-        if (!button || !stillCurrent()) return false;
-        if (!picker()) {
-          // Native menu triggers handle keyboard/pointer activation; HTMLElement.click()
-          // alone does not exercise their pointer-down opening contract.
-          button.focus();
-          button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+        if (!picker()) { const button = await wait(trigger, 15000); if (!key(button, 'Enter') || !await wait(picker)) return null; }
+        return state();
+      },
+      close() { key(trigger(), 'Escape'); },
+      async version(version) {
+        const before = await state(); if (!before) return null;
+        const versionRows = () => [...(picker()?.querySelectorAll('[role="menuitemradio"]') || [])].filter(shown);
+        if (before.version === version && !versionRows().length) return before;
+        const label = before.versions.find(v => v.id === version)?.label;
+        if (!label) return null;
+        // The picker may already show the version list (including a checked row).
+        // Select that row to return to its effort view; never assume the slider is open.
+        if (!versionRows().length) {
+          const toggle = [...picker().querySelectorAll('[role="menuitem"][aria-expanded]')].filter(shown);
+          if (toggle.length !== 1) return null;
+          toggle[0].click();
         }
-        return !!(await wait(picker));
+        const option = await wait(() => {
+          const rows = versionRows().filter(node => node.textContent.trim() === label && node.getAttribute('aria-disabled') !== 'true');
+          return rows.length === 1 ? rows[0] : null;
+        });
+        if (!key(option, 'Enter')) return null;
+        return state(next => next.version === version && !versionRows().length);
       },
-      close() { if (stillCurrent()) trigger()?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true })); },
-      async choose(model) {
-        if (!await this.models()) return false;
-        let option = items().find((node) => normalizeModelLabel(node.textContent) === normalizeModelLabel(model));
-        if (!option || !stillCurrent() || option.getAttribute('aria-disabled') === 'true') return false;
-        const alreadySelected = option.getAttribute('aria-checked') === 'true';
-        // Selecting even the checked row returns from the model submenu to Power.
-        // Neither the Select model toggle nor radio rows must remain mounted there.
-        const activate = node => {
-          node.focus();
-          node.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
-        };
-        activate(option);
-        if (!await wait(current)) return false;
-        if (alreadySelected) return stillCurrent();
-        // Reopen to prove the actual checked model, then return to its power row.
-        if (!await this.models()) return false;
-        option = items().find((node) => normalizeModelLabel(node.textContent) === normalizeModelLabel(model) && node.getAttribute('aria-checked') === 'true');
-        if (!option || !stillCurrent()) return false;
-        activate(option);
-        return !!await wait(current);
-      },
-      async step(direction) {
-        const before = current(); if (!before || !stillCurrent()) return false;
-        const expected = before.position + direction;
-        if (expected < 1 || expected > before.total) return false;
-        const key = direction < 0 ? 'ArrowLeft' : 'ArrowRight';
-        const control = power();
-        const target = control.querySelector('[role="slider"]') || control;
-        target.focus(); target.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
-        return !!(await wait(() => { const next = current(); return next?.position === expected && next.total === before.total && next; }));
+      async bucket(bucket) {
+        let current = await state();
+        for (let count = 0; current && count < 12; count++) {
+          if (current.currentBucket === bucket) return current;
+          const from = current.choices.findIndex(c => c.bucket === current.currentBucket), to = current.choices.findIndex(c => c.bucket === bucket);
+          if (from < 0 || to < 0) return null;
+          const expected = current.choices[from + (to > from ? 1 : -1)].bucket;
+          const controls = [...picker().querySelectorAll('[role="menuitem"][aria-keyshortcuts]')].filter(node => shown(node) && node.getAttribute('aria-keyshortcuts').includes('ArrowRight'));
+          if (controls.length !== 1 || !key(controls[0], to > from ? 'ArrowRight' : 'ArrowLeft')) return null;
+          const version = current.version;
+          current = await state(next => next.version === version && next.currentBucket === expected);
+        }
+        return null;
       }
     };
   }
-  /** Reads actual account choices in an idle app-owned page and restores its selection. */
+  // The mounted provider picker carries the MAIN-world snapshot's exact identity.
+  // Removing that native node also removes the evidence; never cache across navigation.
   function visibleModelSelection() {
-    // Passive observation only: never open a picker just to poll its selection.
-    const ui = modelPickerAccess(() => true);
-    const checked = ui.items().find(node => node.getAttribute('aria-checked') === 'true');
-    let model = checked?.textContent?.trim();
-    if (model === 'Latest') model = ui.current()?.label.toLowerCase() === 'pro' ? ui.latestProModel() : null;
-    if (!model || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(model)) return null;
-    const effort = Object.entries(CHAT_EFFORT_LABELS).find(([, label]) => label === ui.current()?.label)?.[0];
-    return { model, ...(effort ? { reasoningEffort: effort } : {}) };
+    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]');
+    const model = node?.getAttribute('data-clf-selected-model'), reasoningEffort = node?.getAttribute('data-clf-selected-effort');
+    return model && /^[a-zA-Z0-9._-]{1,80}$/.test(model) && ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(reasoningEffort)
+      ? { model, reasoningEffort } : null;
   }
   async function inspectModelSettings(stillCurrent = () => true, failure = () => {}) {
-    const ui = modelPickerAccess(stillCurrent);
-    if (!await ui.open()) { failure('picker_unavailable'); return null; }
-    // The model submenu replaces the Power row. Capture its ordinal before
-    // opening that submenu, while the original model is still selected.
-    const originalPower = await ui.wait(ui.current);
-    const options = await ui.models();
-    const originalModel = options?.find((node) => node.getAttribute('aria-checked') === 'true')?.textContent?.trim();
-    if (!originalModel || !originalPower) { failure(originalPower ? 'model_unconfirmed' : 'power_unknown'); ui.close(); return null; }
-    const models = options.filter((node) => node.getAttribute('aria-disabled') !== 'true').map((node) => (node.textContent || '').trim()).filter((name) => /^[a-zA-Z0-9 ._-]{1,80}$/.test(name)).slice(0, 20);
-    if (!models.length) { failure('model_unconfirmed'); ui.close(); return null; }
-    let result = [];
+    const ui = modelPickerAccess(stillCurrent), original = await ui.open();
+    if (!original) { ui.close(); failure('picker_unavailable'); return null; }
+    const result = new Map();
     let restored = false;
     try {
-      for (const label of models) {
-        if (!await ui.choose(label)) throw new Error('model_unconfirmed');
-        const first = await ui.wait(ui.current); if (!first) throw new Error('power_unknown');
-        for (let n = first.position; n > 1; n--) if (!await ui.step(-1)) throw new Error('power_unconfirmed');
-        const efforts = [];
-        for (let n = 1; n <= first.total; n++) {
-          const power = ui.current(); if (!power || power.position !== n) throw new Error('power_changed');
-          const effort = Object.entries(CHAT_EFFORT_LABELS).find(([, name]) => name.toLowerCase() === power.label.toLowerCase())?.[0];
-          if (power.available && effort && !efforts.includes(effort)) {
-            if (label === 'Latest') {
-              const actual = effort === 'pro' && ui.latestProModel();
-              if (actual) result.push({ id: actual.toLowerCase().replace(/\s+/g, '-'), label: actual, efforts: [effort] });
-            } else efforts.push(effort);
-          }
-          if (n < first.total && !await ui.step(1)) throw new Error('power_unconfirmed');
+      // One observation per version, not one mutation per effort. Computed choices
+      // include account/workspace denials which the raw global preset list does not prove.
+      for (const version of original.versions) {
+        const state = await ui.version(version.id);
+        if (!state) throw new Error('model_unconfirmed');
+        for (const choice of state.choices.filter(c => c.available)) {
+          const entry = result.get(choice.id) || { id: choice.id, label: choice.label, efforts: [] };
+          if (!entry.efforts.includes(choice.effort)) entry.efforts.push(choice.effort);
+          result.set(choice.id, entry);
         }
-        if (label !== 'Latest') result.push({ id: label.toLowerCase().replace(/\s+/g, '-'), label, efforts });
       }
-    } catch (error) { failure(['model_unconfirmed', 'power_unknown', 'power_unconfirmed', 'power_changed'].includes(error?.message) ? error.message : 'inspection_failed'); result = null; }
+    } catch { failure('model_unconfirmed'); result.clear(); }
     finally {
-      if (stillCurrent() && await ui.choose(originalModel)) {
-        for (let n = 0; n < 12; n++) {
-          const power = ui.current();
-          if (!power) break;
-          if (power.position === originalPower.position) { restored = power.label === originalPower.label && power.total === originalPower.total; break; }
-          if (!await ui.step(power.position > originalPower.position ? -1 : 1)) break;
-        }
+      if (stillCurrent() && await ui.version(original.version)) {
+        const state = await ui.bucket(original.currentBucket);
+        const previous = original.choices.find(c => c.bucket === original.currentBucket);
+        const selected = state?.choices.find(c => c.bucket === state.currentBucket);
+        restored = selected?.id === previous.id && selected?.effort === previous.effort;
       }
       ui.close();
     }
     if (!restored) failure('restore_failed');
-    if (!restored || !stillCurrent() || !result?.length) return null;
-    // A provider may expose the same numeric Pro choice both directly and via Latest.
-    const catalog = new Map();
-    for (const model of result) {
-      const existing = catalog.get(model.id);
-      if (existing) existing.efforts = [...new Set([...existing.efforts, ...model.efforts])];
-      else catalog.set(model.id, model);
-    }
-    return [...catalog.values()];
+    return restored && stillCurrent() && result.size ? [...result.values()] : null;
   }
-  /** Apply requested choices, proving their actual checked/ordinal state before Send. */
   async function selectModelSettings(model, effort, stillCurrent = () => true) {
     if (!model && !effort) return true;
-    if (effort && !CHAT_EFFORT_LABELS[effort]) return false;
-    const ui = modelPickerAccess(stillCurrent);
-    if (!await ui.open()) return false;
+    const ui = modelPickerAccess(stillCurrent), original = await ui.open();
+    if (!original) { ui.close(); return false; }
+    let selected = false;
     try {
-      let latest = false;
-      if (model) {
-        const options = await ui.models();
-        const exact = options?.some(node => normalizeModelLabel(node.textContent) === normalizeModelLabel(model));
-        // A discovered numeric Pro identity may live under Latest. It is admitted
-        // only after its final power badge proves the requested generation again.
-        latest = !exact && /^gpt-?\d+(?:\.\d+)?-pro$/i.test(model) && effort === 'pro';
-        if (!await ui.choose(latest ? 'Latest' : model)) return false;
-      }
-      const confirmed = (power) => power.available && (!latest || normalizeModelLabel(ui.latestProModel()) === normalizeModelLabel(model));
-      if (!effort) return stillCurrent();
-      const first = await ui.wait(ui.current); if (!first) return false;
-      if (first.label.toLowerCase() === CHAT_EFFORT_LABELS[effort].toLowerCase()) return confirmed(first);
-      for (let n = first.position; n > 1; n--) if (!await ui.step(-1)) return false;
-      for (let n = 1; n <= first.total; n++) {
-        const power = ui.current();
-        if (power?.label.toLowerCase() === CHAT_EFFORT_LABELS[effort].toLowerCase()) return confirmed(power);
-        if (n < first.total && !await ui.step(1)) return false;
+      // Exact provider slug is preferred. Existing saved display slugs may resolve
+      // only to an actually observed, available pair; never to an account default.
+      const matches = c => c.available && (!effort || c.effort === effort) && (!model || c.id === model || normalizeModelLabel(c.label) === normalizeModelLabel(model));
+      for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
+        const state = await ui.version(version.id); if (!state) return false;
+        const choices = state.choices.filter(matches);
+        if (!choices.length) continue;
+        const choice = choices.find(c => c.bucket === state.currentBucket) || choices[0];
+        const after = await ui.bucket(choice.bucket);
+        const confirmed = after?.choices.find(c => c.bucket === after.currentBucket);
+        selected = stillCurrent() && confirmed?.available === true && confirmed.id === choice.id && confirmed.effort === choice.effort;
+        return selected;
       }
       return false;
-    } finally { ui.close(); }
+    } finally {
+      if (!selected && stillCurrent() && await ui.version(original.version)) await ui.bucket(original.currentBucket);
+      ui.close();
+    }
   }
 
   return {
@@ -2003,8 +1968,20 @@ var CLF_DOM = (() => {
     pluginInstalledButtons,
     pluginManagementIdle,
     selectModelSettings,
-    temporaryChatReady: () => [...document.querySelectorAll('button')].some(button =>
-      button.getAttribute('aria-label') === 'Turn off temporary chat' || text(button, 100) === 'Turn off temporary chat'),
+    temporaryChatReady: () => safe(() => [...document.querySelectorAll('button')].some(button => {
+      if (button.closest(`${OWN_SURFACES}, [data-message-author-role], [data-testid^="conversation-turn-"]`) || !button.getClientRects().length) return false;
+      // The provider renders both icons at once. Only the visible checked glyph proves
+      // the mode; translated labels and the requested URL are not activation receipts.
+      return [...button.querySelectorAll('svg use')].some(use => {
+        const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
+        if (href.slice(href.lastIndexOf('#')) !== '#chat-temp-checked') return false;
+        for (let node = use.parentElement; node; node = node.parentElement) {
+          const style = getComputedStyle(node);
+          if (node.hidden || style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.opacity === '0') return false;
+        }
+        return true;
+      });
+    }), false),
     confirmTemporaryChatIntroduction: () => {
       const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node =>
         [...node.querySelectorAll('h1,h2,[role="heading"]')].some(heading => text(heading, 100) === 'Temporary Chat') && /Not in history/.test(text(node, 2000)));

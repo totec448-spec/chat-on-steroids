@@ -78,3 +78,22 @@ export function registerNativeWindowActivation(
 ): void {
   if (platform === 'darwin') source.on('activate', showWindow);
 }
+
+/** Login launch is distinct from tunnel auto-connect and ordinary app activation. */
+export function isBackgroundLaunch(argv: readonly string[]): boolean {
+  return argv.includes('--background');
+}
+
+export function supportsLoginStartup(platform: NodeJS.Platform, packaged: boolean): boolean {
+  return platform === 'win32' && packaged;
+}
+
+export function applyLoginStartup(
+  app: { isPackaged: boolean; setLoginItemSettings(settings: { openAtLogin: boolean; path: string; args: string[] }): void },
+  enabled: boolean,
+  platform: NodeJS.Platform = process.platform,
+  executable = process.execPath
+): void {
+  if (!supportsLoginStartup(platform, app.isPackaged)) return;
+  app.setLoginItemSettings({ openAtLogin: enabled, path: executable, args: ['--background'] });
+}

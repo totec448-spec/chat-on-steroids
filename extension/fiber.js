@@ -1,12 +1,15 @@
 /**
  * The only code this extension runs in ChatGPT's own JavaScript context.
  *
- * It exists for one reason: a collapsed connector row shows the word "Called tool" and
+ * A collapsed connector row shows the word "Called tool" and
  * nothing else, but the React Fiber behind it already knows exactly which tool ran, under
  * which connector, and how many further calls that single row is standing in for. That
  * last part is why this file has to exist at all — the page renders one row for a run of
  * calls, not always to the same tool, so the visible rows are not a list of the calls, and
  * no amount of DOM reading from the isolated world can recover the ones it folded away.
+ * The same bounded bridge also reads account-evaluated model choices and the installed
+ * connector's public tool declarations. Neither path exports account/session objects or
+ * invokes React callbacks; the isolated world owns UI actions and operation claims.
  *
  * Everything here is written on the assumption that it is the least trusted code in the
  * extension:
@@ -45,8 +48,8 @@
   const ACTIVE_HELPER = '__clfFiberHelper';
   const ASK = 'clf-fiber-ask';
   const REPLY = 'clf-fiber-reply';
-  /** The control ChatGPT puts in a connector tool row and nowhere else. */
-  const CONNECTOR = '[aria-label="Open tool call list" i]';
+  /** Only a successfully described connector row carries this scan reference. */
+  const CONNECTOR = '[data-clf-fiber]';
   /**
    * A runaway guard on the climb, not a claim about how the page is shaped.
    *
@@ -1253,6 +1256,8 @@
    * DOM at the same instant — React can re-render between the two.
    */
   function scan(nonce) {
+    // The existing scan also refreshes mounted-picker evidence; no new poll timer.
+    try { pickerSnapshot(); } catch { /* An unknown picker cannot affect recording. */ }
     // The request nonce already uniquely names this scan across the two worlds. Reuse it as
     // the ephemeral frame token rather than minting a second random value: every DOM stamp
     // can then prove both which descriptor index it names and which exact scan produced it.
@@ -1262,15 +1267,12 @@
     const rows = [];
     let turns = [];
     let scanOk = true;
-    try {
-      turns = turnsOf(scanToken);
-    } catch {
-      turns = [];
-      scanOk = false;
-    }
     let found;
     try {
-      found = document.querySelectorAll(CONNECTOR);
+      // Inspect existing native tool containers, never translated control labels.
+      // The row-local Fiber group is the authority; built-in tools fail describe().
+      found = [...document.querySelectorAll(TOOL)].filter(row => !row.closest(OWN_SURFACES));
+      for (const old of document.querySelectorAll(CONNECTOR)) old.removeAttribute('data-clf-fiber');
     } catch {
       return post({ source: REPLY, nonce, scanToken, v: VERSION, scanOk: false, rows: [], turns }, location.origin);
     }
@@ -1285,7 +1287,7 @@
         descriptor = null;
       }
       try {
-        row.setAttribute('data-clf-fiber', `${scanToken}:${index}`);
+        if (descriptor) row.setAttribute('data-clf-fiber', `${scanToken}:${index}`);
       } catch {
         // If the page will not take the marker, the descriptor is unusable: drop it
         // rather than let the other side match it to a row by position.
@@ -1293,16 +1295,145 @@
       }
       if (descriptor) rows.push(descriptor);
     }
+    // Row stamps must exist before native activity projection excludes connectors.
+    try {
+      turns = turnsOf(scanToken);
+    } catch {
+      turns = [];
+      scanOk = false;
+    }
     post({ source: REPLY, nonce, scanToken, v: VERSION, scanOk, rows, turns }, location.origin);
+  }
+
+  /** Picker data is account-evaluated state, never a scraped English announcement.
+   * Copy only selection metadata; no conversation, account object or callbacks cross worlds. */
+  function pickerSnapshot() {
+    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]');
+    let state = null;
+    try { state = readPickerSnapshot(node); } catch { /* Unknown state invalidates prior proof. */ }
+    const selected = state?.choices.find(choice => choice.bucket === state.currentBucket && choice.available);
+    for (const [attribute, value] of [['data-clf-selected-model', selected?.id], ['data-clf-selected-effort', selected?.effort]]) {
+      if (!value) node?.removeAttribute(attribute);
+      else if (node.getAttribute(attribute) !== value) node.setAttribute(attribute, value);
+    }
+    return state;
+  }
+  function readPickerSnapshot(node) {
+    let fiber = node && fiberOf(node);
+    for (let up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
+      const props = fiber.memoizedProps;
+      const state = props?.composerIntelligencePickerState, data = props?.modelsData;
+      if (!state || !Array.isArray(data?.versions)) continue;
+      if (data.versions.length > 20 || !Array.isArray(state.bucketSelections) || state.bucketSelections.length > 12) return null;
+      const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : null;
+      const label = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 80 ? value.trim() : null;
+      const effortOf = choice => choice.category?.modelLane === 'pro' ? 'pro'
+        : ['auto', 'instant'].includes(choice.category?.modelLane) ? 'none'
+        : ({ standard: 'medium', extended: 'high', max: 'xhigh', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'ultra' })[choice.thinkingEffort] || null;
+      const choices = state.bucketSelections.map(choice => {
+        const name = label(choice.category?.shortLabel);
+        return { bucket: choice.bucket, id: id(choice.modelSlug),
+          label: name && (/^\d/.test(name) ? `GPT-${name}` : name), effort: effortOf(choice),
+          available: choice.availability?.status === 'available' && !props.modelSwitcherDenialsBySlug?.[choice.modelSlug] };
+      });
+      const versions = data.versions.filter(version => version.enabled === true).map(version => ({ id: id(version.id), label: label(version.displayTextForIntelligence) }));
+      if (!versions.length || versions.some(v => !v.id || !v.label) || choices.some(c => !Number.isInteger(c.bucket) || !c.id || !c.label || !c.effort) ||
+          new Set(versions.map(v => v.id)).size !== versions.length || new Set(choices.map(c => c.bucket)).size !== choices.length) return null;
+      const version = id(state.selectedVersionEntry?.id), currentBucket = state.currentBucket;
+      if (!versions.some(v => v.id === version) || !choices.some(c => c.bucket === currentBucket)) return null;
+      const selected = state.currentSelection;
+      const chosen = choices.find(c => c.bucket === currentBucket);
+      if (selected?.modelSlug !== chosen.id || effortOf(selected) !== chosen.effort) return null;
+      return { version, currentBucket, versions, choices };
+    }
+    return null;
+  }
+
+  function copySchema(value, budget, depth = 0) {
+    if (depth > 32 || --budget.nodes < 0) throw new Error('schema_bound');
+    const spend = bytes => { budget.bytes -= bytes; if (budget.bytes < 0) throw new Error('schema_bound'); };
+    if (value === null) { spend(4); return null; }
+    if (typeof value === 'string') { spend(value.length * 3 + 2); return value; }
+    if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) { spend(32); return value; }
+    if (!value || typeof value !== 'object') throw new Error('schema_shape');
+    if (Array.isArray(value)) {
+      if (value.length > budget.nodes) throw new Error('schema_bound');
+      spend(value.length + 2); return value.map(item => copySchema(item, budget, depth + 1));
+    }
+    const keys = Object.keys(value);
+    if (keys.length > budget.nodes) throw new Error('schema_bound');
+    const result = Object.create(null);
+    for (const key of keys) {
+      spend(key.length * 3 + 4);
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !('value' in descriptor)) throw new Error('schema_accessor');
+      result[key] = copySchema(descriptor.value, budget, depth + 1);
+    }
+    return result;
+  }
+
+  function pluginSnapshot() {
+    const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
+    if (!route) return null;
+    const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel =>
+      panel.getAttribute('aria-labelledby')?.endsWith('-trigger-Plugins') && !panel.hidden);
+    if (panels.length !== 1) return null;
+    const buttons = [...panels[0].querySelectorAll('button')].slice(0, 100);
+    let result = null, control = null, observedActions = null, observedCard = null;
+    for (const button of buttons) {
+      let fiber = fiberOf(button);
+      for (let up = 0; fiber && up < 24; up++, fiber = fiber.return) {
+        const props = fiber.memoizedProps;
+        if (!props) continue;
+        if (props.reportEntity?.entityType === 'connector' && props.reportEntity.id === route[1] &&
+            Array.isArray(props.details) && props.details.some(detail => detail.value === route[1]) &&
+            button.getClientRects().length > 0) {
+          if (observedCard && observedCard !== props) return null;
+          observedCard = props;
+          if (props.headerTrailingContent) {
+            if (control && control !== button) return null;
+            control = button;
+          }
+        }
+        if (props.connector?.id !== route[1] || !Array.isArray(props.actions) || props.isLoadingActions === true) continue;
+        if (props.actions === observedActions) continue;
+        if (observedActions) return null;
+        observedActions = props.actions;
+        if (!props.actions.length || props.actions.length > 16 || typeof props.connector.name !== 'string') return null;
+        const budget = { bytes: 280000, nodes: 20000 };
+        const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
+        if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||
+            new Set(tools.map(tool => tool.name)).size !== tools.length) return null;
+        result = { appId: route[1], connectorName: props.connector.name.slice(0, 100),
+          versionId: str(props.connector.app_metadata?.version_id), tools };
+      }
+    }
+    if (!result || !observedCard) return null;
+    // Stamp only the native button wired to this connector's header action. Never
+    // invoke page callbacks; the isolated world still owns the durable claim and click.
+    if (control && control.getAttribute('data-clf-plugin-refresh') !== route[1]) control.setAttribute('data-clf-plugin-refresh', route[1]);
+    return { ...result, refreshAvailable: !!control };
   }
 
   const listener = (event) => {
     // Only this window, only our own request shape. Anything else is not ours to answer.
     if (event.source !== window) return;
     const data = event.data;
-    if (!data || typeof data !== 'object' || data.source !== ASK) return;
+    if (!data || typeof data !== 'object' || ![ASK, 'clf-picker-ask', 'clf-plugin-ask'].includes(data.source)) return;
     const nonce = typeof data.nonce === 'string' ? data.nonce.slice(0, 64) : '';
     if (!nonce) return;
+    if (data.source === 'clf-plugin-ask') {
+      let plugin = null;
+      try { plugin = pluginSnapshot(); } catch { /* Unrecognized installed settings. */ }
+      post({ source: 'clf-plugin-reply', nonce, v: 1, plugin }, location.origin);
+      return;
+    }
+    if (data.source === 'clf-picker-ask') {
+      let picker = null;
+      try { picker = pickerSnapshot(); } catch { /* Unknown provider shape fails closed. */ }
+      post({ source: 'clf-picker-reply', nonce, v: 1, picker }, location.origin);
+      return;
+    }
     try {
       scan(nonce);
     } catch {

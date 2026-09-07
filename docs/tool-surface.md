@@ -12,19 +12,19 @@ separate secret tokenized local paths.
 
 | Connector | Purpose | Possible tools |
 | --- | --- | --- |
-| **Chat On Steroids Core** | Approved files, patches, terminal, recorded-session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` |
+| **Chat On Steroids Core** | Approved files, patches, terminal, ChatGPT file saving, recorded-session lookup, workers | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `download_artifact`, `session`, `agents` |
 | **Chat On Steroids Desktop** | **Windows/macOS:** screen, windows, mouse/keyboard and clipboard | `observe`, `computer` |
 
 The Desktop connector is optional on Windows/macOS. Core is the main connector everywhere.
 
-On a fresh current config, all Core tool permissions, session recording and multi-agent mode are
-enabled, while read-only mode is off. Windows also enables Desktop permissions; macOS starts them off and the user switches them on. Linux masks
+On a fresh current config, Core permissions except saving ChatGPT files are enabled, along with
+session recording and multi-agent mode; read-only mode is off. Saving ChatGPT files is opt-in. Windows also enables Desktop permissions; macOS starts them off and the user switches them on. Linux masks
 Desktop permissions off at runtime while preserving stored choices for a config later reopened on
 Windows or macOS. Existing configs keep explicit choices during upgrades; missing legacy permissions are
 not silently widened.
 
-With the fresh all-on capability snapshot, Core advertises seven schemas:
-`read`, `view_image`, `apply_patch`, `exec_command`, `write_stdin`, `session`, and `agents`.
+With fresh defaults, Core advertises `read`, `view_image`, `apply_patch`, `exec_command`,
+`write_stdin`, `session`, and `agents`. Enabling file saving adds `download_artifact`.
 `find` is the search fallback for a snapshot where search is enabled and command execution is
 unavailable. Tool exposure is monotonic within a running connector instance, so a permission
 changed mid-conversation can leave a previously exposed name listed; its handler still enforces
@@ -79,6 +79,17 @@ poll returns as soon as the process produces output rather than holding the full
 anything that arrives afterwards stays buffered for the next poll. A non-empty write keeps
 Codex's collection-window behaviour so one interactive response is gathered whole.
 
+### `download_artifact`
+
+Saves a native file reference into an approved folder. The schema requests ChatGPT
+injection through `_meta` `openai/fileParams`; availability requires live provider
+verification. The capability starts off and the default per-file limit is 20 MiB.
+Only HTTPS `files.oaiusercontent.com` sources and redirects are accepted. Destination
+parents must already exist; an existing destination is refused. Directory and partial
+file identity are rechecked before publication, with portable Node path I/O rather
+than a directory-handle-pinned race guarantee. Signed file credentials are omitted
+from recorded tool arguments.
+
 ### `session`
 
 Available while session recording is enabled. It has exactly two actions:
@@ -111,9 +122,11 @@ Available while multi-agent mode is enabled. It has exactly four actions:
   on a limited model can spawn workers on a cheaper one. Omitted means the account default;
   a slug ChatGPT does not recognise opens with the default too. The model is fixed for the
   life of that conversation, including across sleep/wake reuse. Each worker also takes an
-  optional `reasoning_effort`: none, minimal, low, medium, high, xhigh, max or ultra, forwarded
-  on the open URL independently of `model` — a level never selects or changes the model, and
-  omitting both inherits the normal worker defaults.
+  optional `reasoning_effort`: pro, none, minimal, low, medium, high, xhigh, max or ultra,
+  forwarded on the open URL independently of `model` — a level never selects or changes the
+  model, and omitting either inherits the default set in app settings, or the account default
+  when no setting is chosen. The vocabulary is the one in `shared/session.ts`; `pro` is the
+  ChatGPT browser Power tier and is listed here because a worker is a real browser chat.
 - `message` sends one message or an all-or-nothing batch. Messaging a sleeping worker is what
   wakes it, in the chat it already has.
 - `status` reports the run and workers, including who is asleep and how many worker slots are free.

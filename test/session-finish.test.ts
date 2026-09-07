@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
+import { TaskRequestError } from '../src/main/task-request.js';
 const hooks = vi.hoisted(() => ({ caller: { sessionId: '', conversationId: '' }, startedAt: 2000, followup: vi.fn(), enqueue: vi.fn(), hasInput: true, delivered: [] as Array<{ id: string; sessionId: string; text: string; state: string }>, inputListeners: new Set<() => void>() }));
 vi.mock('../src/main/session/input.js', () => ({
   hasEligibleToolInput: async () => hooks.hasInput,
@@ -15,6 +16,7 @@ vi.mock('../src/main/mcp/call-context.js', async (importOriginal) => ({
 }));
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSessionStore, createSession, getSession, rebindSession, appendEvent, readRecentEvents, flushSessions, resetSessionStoreForTests, observeSessionModel } = await import('../src/main/session/store.js');
+const { resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { announceSessionFinish: announceTransport, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld } = await import('../src/main/session/finish.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 async function announceSessionFinish(sessionId: string, summary: string): Promise<string> {
@@ -42,9 +44,54 @@ beforeEach(async () => {
   hooks.caller = { sessionId, conversationId }; hooks.startedAt = 2000;
   await appendEvent(sessionId, { source: 'extension', kind: 'turn_start', turnId: 'turn-one', time: 1000 });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers(); vi.restoreAllMocks();
+  // Switching clocks discards fake timers, but the recorder still owns its pending
+  // notification handle. Clear that owner too or later End turn notifications never fire.
+  resetRecorderForTests();
+});
 afterAll(async () => { setFinishNotifier(null); resetSessionStoreForTests(); await removeTempDir(directory); });
 describe('session finish turn identity', () => {
+  it('keeps one Goal operation through transient retries and queues its eventual result once', async () => {
+    let fail!: (error: Error) => void;
+    hooks.followup.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    await announceTransport(sessionId, 'Ready');
+    await vi.waitFor(() => expect(fail).toBeTypeOf('function'));
+    vi.useFakeTimers();
+    fail(new TaskRequestError('rate_limited: busy', true));
+    await vi.advanceTimersByTimeAsync(0);
+    await announceTransport(sessionId, 'Still waiting');
+    await vi.advanceTimersByTimeAsync(14999);
+    expect(hooks.followup).toHaveBeenCalledTimes(1);
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    vi.useRealTimers();
+    await settleSessionFinishForTests();
+    expect(hooks.followup).toHaveBeenCalledTimes(2);
+    expect(hooks.enqueue).toHaveBeenCalledTimes(1);
+    expect(hooks.enqueue).toHaveBeenCalledWith(expect.objectContaining({ sessionId, mode: 'auto', text: 'Check the remaining requirement' }),
+      { turnId: 'turn-one', periodic: false });
+    await announceSessionFinish(sessionId, 'Again');
+    expect(hooks.followup).toHaveBeenCalledTimes(2);
+  });
+  it.each(['new input', 'turn release'])('cancels a pending Goal retry on %s', async reason => {
+    let fail!: (error: Error) => void;
+    hooks.followup.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    await announceTransport(sessionId, 'Ready');
+    await vi.waitFor(() => expect(fail).toBeTypeOf('function'));
+    vi.useFakeTimers();
+    fail(new TaskRequestError('http_503: busy', true));
+    await vi.advanceTimersByTimeAsync(0);
+    if (reason === 'new input') {
+      hooks.delivered.push({ id: 'new-user-work', sessionId, text: 'Changed instructions', state: 'sent' });
+      for (const listener of hooks.inputListeners) listener();
+    } else await releaseSessionFinish(sessionId, 'turn-one');
+    vi.useRealTimers();
+    await settleSessionFinishForTests();
+    expect(hooks.followup).toHaveBeenCalledTimes(1);
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    expect(hooks.inputListeners.size).toBe(0);
+  });
   it('uses the armed Astra switch as Loop at finish and suppresses Notify', async () => {
     await observeSessionModel(sessionId, hooks.caller.conversationId, 'gpt-6-pro', Date.now());
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'notify' } });
@@ -242,9 +289,13 @@ describe('session finish turn identity', () => {
   });
   it('releases durably, wakes a waiting call and does not release the next turn', async () => {
     hooks.hasInput = false;
-    const result = announceSessionFinish(sessionId, 'Waiting');
+    const released = vi.fn();
+    const result = announceSessionFinish(sessionId, 'Waiting').then(value => { released(); return value; });
     await vi.waitFor(() => expect(hooks.inputListeners.size).toBe(1));
     await releaseSessionFinish(sessionId, 'turn-one');
+    // A real recorder notification must wake this call; the 25-second transport
+    // deadline used to mask a leaked fake notification timer from an earlier test.
+    await vi.waitFor(() => expect(released).toHaveBeenCalledOnce(), { timeout: 2000 });
     expect(await result).toContain('RELEASED:');
     await flushSessions(); resetSessionStoreForTests(); initSessionStore(directory);
     expect(await sessionFinishHeld(sessionId, 'turn-one', hooks.caller.conversationId)).toBe(false);

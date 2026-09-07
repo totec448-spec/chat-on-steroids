@@ -4,7 +4,7 @@ const ports = vi.hoisted(() => ({ backgroundChats: false, connect: vi.fn(), stat
   browser: { connected: false, present: false, lastSeenAt: null as number | null }, open: vi.fn(), bridge: vi.fn(), enqueue: vi.fn(), cancel: vi.fn(), note: vi.fn(), rows: [] as InputEntry[], listeners: new Set<() => void>() }));
 vi.mock('../src/main/connection.js', () => ({ connect: ports.connect, getStatus: () => ports.status, onStatusChange: (fn: () => void) => { ports.listeners.add(fn); return () => ports.listeners.delete(fn); } }));
 vi.mock('../src/main/bridge.js', () => ({ bridgeStatus: async () => ports.browser, browserWakeConnected: () => ports.browser.connected, startBridge: ports.bridge }));
-vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: ports.open }));
+vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: ports.open, isPreferredBrowserRunning: async () => null }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { backgroundChats: ports.backgroundChats } }) }));
 vi.mock('../src/main/session/input.js', () => ({ enqueueInput: ports.enqueue, cancelInput: ports.cancel, noteInputStartupError: ports.note, listInputs: async () => ports.rows }));
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser, resetInputStartupForTests } from '../src/main/session/start-input.js';
@@ -82,11 +82,10 @@ it('cancels a first send while waiting for connection without publishing or open
   expect(ports.enqueue).not.toHaveBeenCalled();
   expect(ports.open).not.toHaveBeenCalled();
 });
-it('starts a direct send immediately with fresh presence but a disconnected wake transport', async () => {
+it('leaves delivery with the existing browser while its wake transport reconnects', async () => {
   ports.browser = { connected: false, present: true, lastSeenAt: Date.now() };
   await sendDesktopInput(request);
-  expect(ports.open).toHaveBeenCalledTimes(1);
-  expect(ports.open.mock.calls[0]?.[0]).toContain(`cos-input=${request.id}`);
+  expect(ports.open).not.toHaveBeenCalled();
   expect(ports.rows[0]).toMatchObject({ state: 'queued', error: undefined });
 });
 it('preserves background placement for a cold authored send and its explicit retry', async () => {

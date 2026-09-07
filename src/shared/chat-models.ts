@@ -9,7 +9,7 @@ export type ChatModelOption = { id: string; label: string; efforts: ReasoningEff
 /** Pro silence policy follows the selected provider identity, including the older generation. */
 export function isProModel(model: string | null | undefined, effort?: ReasoningEffort): boolean {
   const normalized = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');
-  return isAstraModel(model, effort) || /^gpt-?5\.6-pro$/.test(normalized) ||
+  return isAstraModel(model, effort) || /^gpt-?\d+(?:[.-]\d+)?-pro$/.test(normalized) ||
     (/^gpt-?5\.6(?:-sol)?$/.test(normalized) && effort === 'pro');
 }
 /** Keep the selected generation intact; Pro is already a complete model label. */

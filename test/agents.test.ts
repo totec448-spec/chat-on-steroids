@@ -2317,6 +2317,22 @@ describe('through the MCP endpoint', () => {
     expect(pendingWorkerSpawns()).toEqual([]);
   });
 
+  it('publishes each accepted MCP spawn to its own run when another prime is active', async () => {
+    const opened = vi.fn();
+    const dispose = onSpawnRequest(opened);
+    try {
+      await asChat('prime-existing', 'spawn', { workers: [{ task: 'existing work' }] });
+      await asChat('prime-new', 'spawn', { workers: [{ task: 'new work' }] });
+      expect(opened).toHaveBeenCalledTimes(2);
+      expect(opened.mock.calls.map(([workers]) => workers)).toEqual([
+        [expect.objectContaining({ id: 'worker-1', runId: currentRunId('prime-existing'), primeConversationId: 'prime-existing', task: 'existing work' })],
+        [expect.objectContaining({ id: 'worker-1', runId: currentRunId('prime-new'), primeConversationId: 'prime-new', task: 'new work' })]
+      ]);
+    } finally {
+      dispose();
+    }
+  });
+
   it('rolls back a spawn whose durable acceptance barrier fails instead of resurrecting it from the debounce', async () => {
     const stateName = 'spawn-atomicity-failure';
     onSwarmPersist(() => writeDurableSoon(stateName, snapshotSwarm()));
@@ -2441,6 +2457,29 @@ describe('through the MCP endpoint', () => {
     const exact = textOfReply(await ordinaryWithRequestId(requestId, 'read', { paths: ['/anything'] }));
     await setEnabled(true);
     expect(exact).toContain('WORKER_RETIRED');
+  });
+
+  it('explains scheduled-run permission with dormant history and never adopts that history', async () => {
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'parked history');
+    expect(releaseQuiescentRun()).toBe(true);
+
+    const blocked = await callTool('read', { paths: ['/anything'] });
+    expect(blocked).toContain('CALLER_IDENTITY_REQUIRED');
+    expect(blocked).toContain('Scheduled or headless runs');
+    expect(blocked).toContain('"Allow unattributed calls"');
+    expect(swarmRunning()).toBe(false);
+
+    await setEnabled(true, 3, true);
+    const allowed = await callTool('read', { paths: ['/anything'] });
+    expect(allowed).not.toContain('CALLER_IDENTITY_REQUIRED');
+    // The ordinary sandbox now decides the call; no approved root was granted by this setting.
+    expect(allowed).toMatch(REFUSED_ON_ROOTS);
+    expect(swarmRunning()).toBe(false);
+
+    await setEnabled(true);
+    expect(await callTool('read', { paths: ['/anything'] })).toContain('CALLER_IDENTITY_REQUIRED');
   });
 
   it('permits an unattributed workspace-dependent call to fail honestly instead of guessing a chat', async () => {

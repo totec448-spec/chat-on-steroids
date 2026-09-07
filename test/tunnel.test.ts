@@ -60,13 +60,12 @@ describe('cross-platform tunnel executable discovery', () => {
 
 /** Verbatim lines seen in the field, with the tunnel up and the WLAN off. */
 const REAL_OUTAGE_LINES = [
-  'poll failed; backing off',
-  'poll timed out; backing off',
-  'Post "https://api.openai.com/v1/tunnels/poll": dial tcp: lookup api.openai.com: no such host',
-  'read tcp 192.168.0.24:51544->104.18.32.115:443: wsarecv: An established connection was aborted by the software in your host machine',
-  'dial tcp 104.18.32.115:443: i/o timeout',
-  'connection refused',
-  'network is unreachable'
+  'poll failed; backing off: Post "https://api.openai.com/v1/tunnels/poll": dial tcp: lookup api.openai.com: no such host',
+  'poll failed; backing off: read tcp: wsarecv: An established connection was aborted by the software in your host machine',
+  'poll failed; backing off: dial tcp: i/o timeout',
+  'poll failed; backing off: connection refused',
+  'poll failed; backing off: network is unreachable',
+  'poll timed out; backing off: context deadline exceeded'
 ];
 
 describe('network error classification', () => {
@@ -82,6 +81,9 @@ describe('network error classification', () => {
     expect(isUnreachableError('WARN config reload skipped')).toBe(false);
     expect(isUnreachableError('ERROR unauthorized: invalid api key')).toBe(false);
     expect(isUnreachableError('tunnel not found')).toBe(false);
+    expect(isUnreachableError('context deadline exceeded')).toBe(false);
+    expect(isUnreachableError('mcp probe failed: context deadline exceeded')).toBe(false);
+    expect(isUnreachableError('dial tcp: i/o timeout')).toBe(false);
     expect(isUnreachableError('context deadline exceeded while probing the local MCP server')).toBe(false);
   });
 
@@ -96,6 +98,9 @@ describe('network error classification', () => {
       'the connection was refused'
     );
     expect(describeNetworkError('dial tcp: i/o timeout')).toBe('the connection timed out');
+    expect(describeNetworkError('poll timed out; backing off: context deadline exceeded')).toBe(
+      'the connection timed out'
+    );
     expect(describeNetworkError('network is unreachable')).toBe('the network is unreachable');
     expect(describeNetworkError('something odd happened')).toBe('a network error');
   });

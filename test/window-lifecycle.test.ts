@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import {
+  applyLoginStartup,
+  isBackgroundLaunch,
+  supportsLoginStartup,
   createWindowActivationGate,
   ownsAppRuntime,
   registerNativeWindowActivation,
@@ -40,18 +43,22 @@ describe('native window activation', () => {
     ready(); expect(showWindow).toHaveBeenCalledTimes(1);
     launch.quitting = true; ready(); expect(showWindow).toHaveBeenCalledTimes(1);
   });
-  it('starts background catalog discovery on each actual show, including tray reopen, and never during quit', async () => {
+  it('requests only passive catalog observation on show with browser presence, never during quit or absence', async () => {
     const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
     const listener = source.slice(source.indexOf("  window.on('show'"), source.indexOf("  window.once('ready-to-show'"));
     let show!: () => void;
     const start = vi.fn(async () => ({}));
+    let present = false;
     const context = vm.createContext({ window: { on: (event: string, callback: () => void) => {
       expect(event).toBe('show'); show = callback;
-    } }, quitting: false, startChatModelDiscovery: start, logWarn: vi.fn() });
+    } }, quitting: false, bridgeStatus: async () => ({ present }), startChatModelDiscovery: start, logWarn: vi.fn() });
     vm.runInContext(listener, context);
+    show(); await Promise.resolve(); expect(start).not.toHaveBeenCalled();
+    present = true;
     show(); await Promise.resolve();
     show(); await Promise.resolve();
     expect(start).toHaveBeenCalledTimes(2);
+    expect(start).toHaveBeenCalledWith(false);
     context.quitting = true;
     show();
     expect(start).toHaveBeenCalledTimes(2);
@@ -120,5 +127,36 @@ describe('native window activation', () => {
   it.each(['win32', 'linux'] as const)('keeps close-to-tray semantics on %s', (platform) => {
     expect(shouldQuitOnWindowAllClosed(platform, true)).toBe(false);
     expect(shouldQuitOnWindowAllClosed(platform, false)).toBe(true);
+  });
+});
+
+describe('Windows login startup', () => {
+  it('writes only packaged Windows login settings and supports turning the same entry off', () => {
+    const app = { isPackaged: true, setLoginItemSettings: vi.fn() };
+    applyLoginStartup(app, true, 'win32', 'C:/Program Files/Chat On Steroids/app.exe');
+    applyLoginStartup(app, false, 'win32', 'C:/Program Files/Chat On Steroids/app.exe');
+    expect(app.setLoginItemSettings.mock.calls).toEqual([
+      [{ openAtLogin: true, path: 'C:/Program Files/Chat On Steroids/app.exe', args: ['--background'] }],
+      [{ openAtLogin: false, path: 'C:/Program Files/Chat On Steroids/app.exe', args: ['--background'] }]
+    ]);
+    for (const platform of ['darwin', 'linux'] as const) applyLoginStartup(app, true, platform);
+    app.isPackaged = false;
+    applyLoginStartup(app, true, 'win32');
+    expect(app.setLoginItemSettings).toHaveBeenCalledTimes(2);
+    expect(supportsLoginStartup('win32', false)).toBe(false);
+  });
+  it('ignores background second-instance launches while ordinary launches still focus', () => {
+    const source = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
+    const start = source.indexOf("app.on('second-instance'");
+    const handler = source.slice(start, source.indexOf('\n});', start) + 4);
+    let received!: (event: unknown, argv: string[]) => void;
+    const request = vi.fn();
+    vm.runInNewContext(handler, { app: { on: (_: string, listener: typeof received) => { received = listener; } }, windowActivation: { request }, isBackgroundLaunch });
+    received({}, ['app.exe', '--background']);
+    expect(request).not.toHaveBeenCalled();
+    received({}, ['app.exe']);
+    expect(request).toHaveBeenCalledOnce();
+    expect(isBackgroundLaunch(['app.exe', '--background=false'])).toBe(false);
+    expect(source).toContain('if (!isBackgroundLaunch(process.argv)) windowActivation.request();');
   });
 });

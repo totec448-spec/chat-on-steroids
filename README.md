@@ -1,16 +1,7 @@
 > [!IMPORTANT]
-> **Set ChatGPT to English!!!!**
->
-> Set ChatGPT's interface language to **English**, then reload your ChatGPT tabs and retry model discovery in Chat On Steroids. The current model-picker integration relies on English UI labels. Other languages can leave the model list empty even when the extension is connected and all setup checks are green.
->
-> **Quick fix if the model picker isn't showing:**
->
-> 1. Open Chat On Steroids or click the model picker's **Refresh** button.
-> 2. Switch to the **Chrome window and ChatGPT tab that the app opens**.
-> 3. If ChatGPT shows a model list instead of the thinking-effort slider, click **GPT-5.6 Sol**, even if it already looks selected.
-> 4. Return to Chat On Steroids and **refresh the model picker again**.
->
-> This workaround has restored the model picker for a user whose setup checks were all green. If it still does not appear, please report it in [Issues](../../issues).
+> **2.0.7 needs its matching companion extension.** Reload the unpacked extension after updating.
+> Model discovery now reads your account's native picker state across languages and nested version menus.
+> See [Browser behavior](#browser-behavior-in-the-current-source) for tab reuse, Browser only and native file attachments.
 
 
 <div align="center">
@@ -72,15 +63,17 @@ shasum -a 256 Chat-On-Steroids-macOS-arm64.dmg    # macOS
 sha256sum Chat-On-Steroids-Linux-x64.AppImage     # Linux
 ```
 
-> **This is a beta with real permissions.** A fresh install starts with the full Core capability set on, read-only mode off, multi-agent mode on with two workers, and, on Windows, the Desktop permissions on. On macOS the Desktop permissions start off; enable them in **Settings → Workspace**, then grant Screen Recording and Accessibility in System Settings. Linux has Core tools but no Desktop computer-control backend. Review folder access before connecting: `exec_command` runs programs as your logged-in user.
+> **This is a beta with real permissions.** A fresh install starts with Core capabilities on except opt-in ChatGPT file saving, read-only mode off, multi-agent mode on with two workers, and, on Windows, the Desktop permissions on. On macOS the Desktop permissions start off; enable them in **Settings → Workspace**, then grant Screen Recording and Accessibility in System Settings. Linux has Core tools but no Desktop computer-control backend. Review folder access before connecting: `exec_command` runs programs as your logged-in user.
 
 ## Requirements
 
 - **Windows 10/11**, **macOS 13 Ventura or newer**, or a current desktop **Linux**, on x64 or ARM64 matching the build you downloaded.
-- **Chrome 116 or newer** for the companion extension. Without it you still get the MCP tools, but not session attribution, Compact & Resume, worker chats or the Goal loop.
+- **Chrome 116 or newer**, or a current Microsoft Edge with the companion extension. Without it you still get the MCP tools, but not session attribution, Compact & Resume, worker chats or the Goal loop.
+
+Using Edge? Choose **Settings → Browser & history → ChatGPT browser → Microsoft Edge**. Install the companion and sign in to ChatGPT in that browser's active profile (`edge://extensions` for Edge). This choice controls app-originated launches, including startup model discovery; already connected tabs and source-tab continuations keep their browser. Older configurations retain Chrome. If the selected browser is missing or cannot start, the app reports an error instead of opening a different browser. The setting chooses a browser family, not a particular profile.
 - **Linux:** a Secret Service keyring such as GNOME Keyring or KWallet. The app refuses Electron's unencrypted `basic_text` fallback for stored keys.
 - A ChatGPT workspace with **Developer mode** and custom MCP apps. OpenAI currently documents full MCP support, including write actions, as a beta for Business, Enterprise and Edu, with Pro limited to read and fetch. Business needs an admin to enable it. Check OpenAI's [Developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt) page if your workspace looks different.
-- An **OpenRouter API key** only if you select the API source for plans, Goal or Loop. The default ChatGPT helper source uses your connected browser session.
+- An **OpenRouter API key** (or your own OpenAI-compatible endpoint) only if you select the API source for plans, Goal or Loop. The default ChatGPT helper source uses your connected browser session.
 
 Use a normal ChatGPT conversation with the custom app enabled. OpenAI's built-in Agent mode does not use custom apps.
 
@@ -115,7 +108,7 @@ Permission changes take effect locally immediately. Schema changes schedule a se
 
 | Connector | Tools | What they do |
 | --- | --- | --- |
-| **Core** (all platforms) | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `session`, `agents` | Bounded reads and search inside approved folders, preflighted multi-file patches, shell commands and interactive terminals, lookups into the recorded session, and worker chat control |
+| **Core** (all platforms) | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `download_artifact`, `session`, `agents` | Bounded reads and search inside approved folders, preflighted multi-file patches, shell commands and interactive terminals, saving ChatGPT-generated files, lookups into the recorded session, and worker chat control |
 | **Desktop** (Windows, and macOS when switched on) | `observe`, `computer` | Screenshots, window and control inspection, mouse, keyboard and clipboard |
 
 The live tool list follows your settings: `find` is the no-shell search fallback and steps aside when commands are enabled. Enabling Session finish adds the Astra-only `session_finish` tool. Revoking a permission takes effect immediately, even while ChatGPT still shows the old schema. The full contract lives in [`docs/tool-surface.md`](docs/tool-surface.md).
@@ -148,11 +141,15 @@ For ordinary models, **Goal** checks a completed answer and either drafts a foll
 
 Finish reminders are added by the delivery layer, separate from the visible plan. Desktop notifications depend on OS support and notification settings; the app also offers **Generate Goal** while waiting at a finish point. Native notification actions and cold background browser focus are not yet verified across every supported desktop environment.
 
+At a finish point, temporary Goal API failures retry after 15 seconds by default, honoring a provider's retry delay. The same operation delivers its completed instruction through the next tool result; new user instructions or ending the turn cancel it. Permanent errors such as invalid credentials require correction.
+
+For the API backend, choose OpenRouter or a custom OpenAI-compatible endpoint under **Settings → Agents & automation**. Custom URLs use HTTPS, or HTTP on loopback for local servers. Enter the server's model ID and optional API key; keys use secure OS storage and stay out of browser state. Switching back to OpenRouter selects its default model.
+
 ### Multi-agent mode
 
 One prime chat can open up to eight worker chats (two by default) and exchange brokered messages with them through the `agents` tool. Provider rate limits still apply. Workers cannot talk to each other.
 
-Workers are reusable conversations. When one reports its result it goes to sleep, frees its slot and keeps its full chat. Messaging it again wakes the same conversation. At about 400k recorded tokens a worker becomes non-revivable after its next stop; workers never compact themselves. With background chats enabled, app-managed tabs share one browser window. Idle tabs remain open up to the configured worker capacity; above it, the oldest inactive work is eligible for closure after one minute. Active chats and unsent drafts remain protected.
+Workers are reusable conversations. When one reports its result it goes to sleep, frees its slot and keeps its full chat. Messaging it again wakes the same conversation. At about 400k recorded tokens a worker becomes non-revivable after its next stop; workers never compact themselves. With background chats enabled, app-managed tabs share one browser window. Sleeping and finished worker tabs become eligible for closure after one minute, even below the worker limit. This releases browser memory while preserving the reusable conversation. Active chats and unsent drafts remain protected.
 
 Each prime owns its worker history. If the last worker sleeps, the run is parked and another chat can start its own workers; the original prime still sees its full history in `agents action=status`, can spawn fresh workers, and can wake old ones when the execution slot is free. Turning multi-agent off pauses execution and keeps that history. **Clear swarm** is what discards it.
 
@@ -178,8 +175,20 @@ Report vulnerabilities privately per [`SECURITY.md`](SECURITY.md).
 
 The MCP connector uses ChatGPT's documented Developer mode and Secure MCP Tunnel path. The extension is different: it observes ChatGPT's web UI, records rendered conversation state locally, and multi-agent mode opens and types into extra ChatGPT tabs. None of that is a documented public automation API. Depending on your account, OpenAI's [terms and policies](https://openai.com/policies/) on automated access, rate limits and permitted use may apply. Read the agreement that governs your account before using the extension or multi-agent mode, and do not use these features to scrape ChatGPT, evade limits or bypass safety controls.
 
+## Browser behavior in the current source
+
+The published 2.0.6 build's English-language and nested-picker workaround remains relevant until you install a build containing these fixes. The current source reads account-evaluated model IDs, available efforts and version choices instead of English picker labels. New model families appear after **Reload ChatGPT models**, provided ChatGPT exposes them to your account in the supported picker structure. Discovery restores the previous selection and sends no message.
+
+The current composer accepts dropped files (including Markdown) and dropped text, or **Add photos & files**. Files keep their original bytes and appear as compact filename cards above the message. Up to 20 files and 512 MB total can be prepared per message; ChatGPT's account, format and upload limits still determine acceptance. Files wait for the next native message when a turn is running. The app sends only after every attachment is confirmed and the draft is still unchanged. A failed upload leaves a visible error and is never automatically resent. Install the matching protocol-13 companion with this source build.
+
+Opening the app reuses an idle ChatGPT tab for its initial observation when the browser is already present; showing the window again does not refresh a ready catalog or open Chrome. Explicit model reloads also reuse suitable tabs. A pending operation keeps its selected tab through settings navigation and extension-worker suspension. A slow page or missing receipt never authorizes a second OS open.
+
+In **Chat settings → Browser & history**, enable **Browser only** to prevent automatic plugin-refresh and recovery operations from creating tabs. Existing eligible tabs can still be used; explicit new chats, workers and model reloads retain their normal behavior. Closing a helper does not restart the same operation every maintenance cycle. Connector refresh verifies the installed App ID and complete tool declarations, and clicks Refresh only after the app has durably claimed a changed schema.
+
 ## Troubleshooting
 
+- **A new ChatGPT tab every half minute:** this is a bug, not normal operation. The current source fixes repeated helper ownership loss and duplicate opening after slow browser handoffs. Browser only also disables automatic helper creation.
+- **A folder cannot be listed:** use the actual virtual path shown for your approved folder. `/folder` is an example, not an automatically configured root. Confirm the Core plugin is installed and the folder is approved in the app.
 - **Tools missing or stale after a permission change:** tool-schema changes schedule a connector refresh after a 20-second debounce. If it fails, refresh the custom app in ChatGPT; this is separate from reloading the companion extension.
 - **Extension says app not found:** recording or multi-agent mode must be on for the bridge to run. Then reopen the popup.
 - **Extension version mismatch:** reload the unpacked extension after every app update.
