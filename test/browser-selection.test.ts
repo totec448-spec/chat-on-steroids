@@ -46,3 +46,18 @@ it('finds Edge installations on each platform without mixing in Chrome', () => {
   expect(linux).toContain('/usr/bin/microsoft-edge-stable');
   expect(linux.every(candidate => !/chrome|chromium/.test(candidate))).toBe(true);
 });
+
+it('finds Brave installations on each platform without mixing in Chrome or Edge', () => {
+  expect(preferredBrowserCandidates('win32', { LOCALAPPDATA: 'C:\\Local', ProgramFiles: 'C:\\Apps', 'ProgramFiles(x86)': 'C:\\Apps86' }, undefined, 'brave'))
+    .toEqual(['C:\\Local\\BraveSoftware\\Brave-Browser\\Application\\brave.exe', 'C:\\Apps\\BraveSoftware\\Brave-Browser\\Application\\brave.exe', 'C:\\Apps86\\BraveSoftware\\Brave-Browser\\Application\\brave.exe']);
+  const mac = preferredBrowserCandidates('darwin', {}, '/Users/example', 'brave');
+  expect(mac).toContain('/Applications/Brave Browser.app/Contents/MacOS/Brave Browser');
+  expect(mac).toContain('/Users/example/Applications/Brave Browser.app/Contents/MacOS/Brave Browser');
+  expect(mac.every(candidate => candidate.includes('Brave'))).toBe(true);
+  const linux = preferredBrowserCandidates('linux', { PATH: '/custom/bin:/usr/bin' }, '/home/example', 'brave');
+  expect(linux).toContain('/custom/bin/brave-browser');
+  expect(linux).toContain('/usr/bin/brave-browser');
+  expect(linux).toContain('/opt/brave.com/brave/brave-browser');
+  expect(linux).toContain('/snap/bin/brave');
+  expect(linux.every(candidate => !/chrome|chromium|edge/.test(candidate))).toBe(true);
+});
