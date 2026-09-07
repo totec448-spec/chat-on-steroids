@@ -49,7 +49,7 @@ var CLF_DOM = (() => {
   const STOP =
     'button[data-testid="stop-button"], button[data-testid="composer-stop-button"], ' +
     'button[aria-label="Stop streaming"], button[aria-label="Stop generating"], button[aria-label="Stop answering"]';
-  const SEND = 'button[data-testid="send-button"], form button[aria-label^="Send" i]';
+  const SEND = 'button[data-testid="send-button"], form button[aria-label^="Send" i], form button[aria-label^="Wyślij" i]';
   /** The composer's own trailing controls, where the send and dictation buttons live. */
   const TRAILING =
     '[data-testid="composer-trailing-actions"], [data-testid="composer-footer-actions"], ' +
@@ -57,7 +57,8 @@ var CLF_DOM = (() => {
   const SPEECH =
     'button[data-testid="composer-speech-button"], button[data-testid="composer-dictate-button"], ' +
     'button[aria-label^="Dictate" i], button[aria-label^="Voice" i], ' +
-    'button[aria-label="Start dictation" i], button[aria-label="Start Voice" i]';
+    'button[aria-label="Start dictation" i], button[aria-label="Start Voice" i], ' +
+    'button[aria-label^="Rozpocznij dyktowanie" i], button[aria-label^="Uruchom tryb głosowy" i]';
   const safe = (fn, fallback) => {
     try {
       const value = fn();
@@ -1810,14 +1811,41 @@ var CLF_DOM = (() => {
   }
 
   const CHAT_EFFORT_LABELS = { none: 'Instant', medium: 'Medium', high: 'High', xhigh: 'Extra High', pro: 'Pro' };
+  // Localized surface strings for the model picker, observed on en-US and pl-PL builds.
+  // Structural finds below never depend on these; they only decode what a row announces.
+  const CHAT_EFFORT_LABELS_BY_LOCALE = {
+    pl: { none: 'Błyskawicznie', minimal: 'Minimalnie', low: 'Niski', medium: 'Średni', high: 'Wysoki', xhigh: 'Bardzo wysoki', pro: 'Pro' }
+  };
+  const CHAT_UI_LABELS_BY_LOCALE = {
+    en: { selectModel: 'Select model', power: 'Power', latest: 'Latest', upgradeRequired: 'Upgrade required', of: 'of' },
+    pl: { selectModel: 'Wybierz model', power: 'Moc', latest: 'Najnowsze', upgradeRequired: 'Wymagana aktualizacja', of: 'z' }
+  };
+  const chatLocale = () => ((document.documentElement.lang || 'en').split('-')[0] || 'en').toLowerCase();
+  const chatUiLabel = (key) => CHAT_UI_LABELS_BY_LOCALE[chatLocale()]?.[key] ?? CHAT_UI_LABELS_BY_LOCALE.en[key];
+  const CHAT_EFFORT_LABELS_ALL = (value, locale = chatLocale()) => {
+    if (locale === 'en') return CHAT_EFFORT_LABELS[value] ?? null;
+    const localized = CHAT_EFFORT_LABELS_BY_LOCALE[locale]?.[value];
+    return localized ?? CHAT_EFFORT_LABELS[value] ?? null;
+  };
   const normalizeModelLabel = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9.]/g, '');
   /** One visible picker adapter for discovery and application; DOM ordinals are authoritative. */
   function modelPickerAccess(stillCurrent) {
     const shown = (node) => node && !node.closest('[aria-hidden="true"]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector('[data-testid="composer-intelligence-picker-content"]');
     const items = () => [...(picker()?.querySelectorAll('[role="menuitemradio"]') || [])].filter(shown);
-    const trigger = () => [...(composerActions()?.host?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
-      .filter(shown).find((node) => /(?:Instant|Medium|High|Pro|Thinking effort)/i.test(node.textContent || ''));
+    // The picker trigger is the only non-plus menu button of the composer's trailing
+    // controls; its caption is localized (EN "High"/"Thinking effort", PL "Bardzo
+    // wysoki"), so the structural anchor decides and known captions only corroborate.
+    const trigger = () => {
+      const host = composerActions()?.host || composer()?.closest('form');
+      const candidates = [...(host?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
+        .filter(shown)
+        .filter(node => node.getAttribute('data-testid') !== 'composer-plus-btn');
+      const corroborated = candidates.find(node => /(?:Instant|Medium|High|Pro|Bardzo\s?wysoki|Wysoki|Średni|Błyskawicznie|Minimalnie|Niski|Najnowsze|Thinking effort)/i.test(node.textContent || ''));
+      // The trailing row holds exactly the plus button and the picker trigger once the
+      // composer is mounted, so the lone structural candidate is the trigger.
+      return corroborated ?? candidates[0] ?? null;
+    };
     const wait = (read, timeoutMs = 3000) => new Promise((resolve) => {
       let observer, timer;
       const finish = (value) => { observer?.disconnect(); clearTimeout(timer); resolve(value); };
@@ -1826,26 +1854,43 @@ var CLF_DOM = (() => {
       observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
       timer = setTimeout(() => finish(null), timeoutMs); check();
     });
-    const power = () => picker()?.querySelector('[role="menuitem"][aria-label="Power"]');
+    // The Power row is the picker's only menuitem that owns a slider; its localized
+    // aria-label ("Power"/"Moc") is a corroboration, never the anchor.
+    const power = () => {
+      const rows = [...(picker()?.querySelectorAll('[role="menuitem"]') || [])];
+      return rows.find(node => node.querySelector('[role="slider"]')) ||
+        rows.find(node => (node.getAttribute('aria-label') || '') === chatUiLabel('power')) || null;
+    };
     // Latest is a routing choice, not a model identity. At Pro the native badge
     // explicitly names the generation (observed: 6 Pro versus explicit 5.6 Pro).
     const latestProModel = () => {
-      const label = picker()?.querySelector('[role="menuitem"][aria-label="Select model"]')?.textContent?.trim();
+      const toggle = modelsToggle();
+      const label = toggle?.textContent?.trim();
       const match = label?.match(/^(?:GPT[- ]?)?(\d+(?:\.\d+)?)\s*Pro$/i);
       return match ? `GPT-${match[1]} Pro` : null;
     };
     const current = () => {
       if (power()?.getAttribute('aria-disabled') === 'true') return null;
-      const description = (power()?.getAttribute('aria-describedby') || '').split(/\s+/).map((id) => document.getElementById(id)?.textContent || '').join(' ');
-      const match = description.match(/(Instant|Medium|Extra High|High|Pro),\s*(\d+) of (\d+)/i);
+      const described = (power()?.getAttribute('aria-describedby') || '').split(/\s+/).map((id) => document.getElementById(id)?.textContent || '').join(' ');
+      const of = chatUiLabel('of');
+      const match = described.match(new RegExp(`(Instant|Medium|Extra High|High|Pro|Błyskawicznie|Minimalnie|Niski|Średni|Wysoki|Bardzo\\s?wysoki),\\s*(\\d+)\\s+${of}\\s+(\\d+)`, 'i'));
       if (!match) return null;
       const position = Number(match[2]), total = Number(match[3]);
-      return total >= 1 && total <= 12 && position >= 1 && position <= total ? { label: match[1], position, total, available: !/Upgrade required/i.test(description) } : null;
+      return total >= 1 && total <= 12 && position >= 1 && position <= total ? { label: match[1], position, total, available: !new RegExp(chatUiLabel('upgradeRequired'), 'i').test(described) } : null;
+    };
+    // The Select-model toggle is the picker's only non-Power menuitem; localized
+    // aria-labels ("Select model"/"Wybierz model") corroborate the structural find.
+    const modelsToggle = () => {
+      const rows = [...(picker()?.querySelectorAll('[role="menuitem"]') || [])].filter(shown);
+      return rows.find(node => {
+        const label = node.getAttribute('aria-label') || '';
+        return label === chatUiLabel('selectModel') || (label && label !== chatUiLabel('power') && !node.querySelector('[role="slider"]'));
+      }) || null;
     };
     return {
       items, current, wait, latestProModel,
       async models() {
-        const toggle = picker()?.querySelector('[role="menuitem"][aria-label="Select model"]');
+        const toggle = modelsToggle();
         if (items().length && toggle?.getAttribute('aria-expanded') !== 'false') return items();
         if (!toggle || !stillCurrent()) return null;
         toggle.click(); return wait(() => toggle.getAttribute('aria-expanded') !== 'false' && items().length ? items() : null);
@@ -1903,9 +1948,11 @@ var CLF_DOM = (() => {
     const ui = modelPickerAccess(() => true);
     const checked = ui.items().find(node => node.getAttribute('aria-checked') === 'true');
     let model = checked?.textContent?.trim();
-    if (model === 'Latest') model = ui.current()?.label.toLowerCase() === 'pro' ? ui.latestProModel() : null;
+    const latestLabel = chatUiLabel('latest');
+    if (model === latestLabel) model = ui.current()?.label.toLowerCase() === 'pro' ? ui.latestProModel() : null;
     if (!model || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(model)) return null;
-    const effort = Object.entries(CHAT_EFFORT_LABELS).find(([, label]) => label === ui.current()?.label)?.[0];
+    const observed = ui.current()?.label;
+    const effort = Object.keys(CHAT_EFFORT_LABELS).find(key => CHAT_EFFORT_LABELS_ALL(key) === observed);
     return { model, ...(effort ? { reasoningEffort: effort } : {}) };
   }
   async function inspectModelSettings(stillCurrent = () => true, failure = () => {}) {
@@ -1929,16 +1976,16 @@ var CLF_DOM = (() => {
         const efforts = [];
         for (let n = 1; n <= first.total; n++) {
           const power = ui.current(); if (!power || power.position !== n) throw new Error('power_changed');
-          const effort = Object.entries(CHAT_EFFORT_LABELS).find(([, name]) => name.toLowerCase() === power.label.toLowerCase())?.[0];
+          const effort = Object.keys(CHAT_EFFORT_LABELS).find(key => (CHAT_EFFORT_LABELS_ALL(key) || '').toLowerCase() === power.label.toLowerCase());
           if (power.available && effort && !efforts.includes(effort)) {
-            if (label === 'Latest') {
+            if (label === chatUiLabel('latest')) {
               const actual = effort === 'pro' && ui.latestProModel();
               if (actual) result.push({ id: actual.toLowerCase().replace(/\s+/g, '-'), label: actual, efforts: [effort] });
             } else efforts.push(effort);
           }
           if (n < first.total && !await ui.step(1)) throw new Error('power_unconfirmed');
         }
-        if (label !== 'Latest') result.push({ id: label.toLowerCase().replace(/\s+/g, '-'), label, efforts });
+        if (label !== chatUiLabel('latest')) result.push({ id: label.toLowerCase().replace(/\s+/g, '-'), label, efforts });
       }
     } catch (error) { failure(['model_unconfirmed', 'power_unknown', 'power_unconfirmed', 'power_changed'].includes(error?.message) ? error.message : 'inspection_failed'); result = null; }
     finally {
@@ -1977,16 +2024,16 @@ var CLF_DOM = (() => {
         // A discovered numeric Pro identity may live under Latest. It is admitted
         // only after its final power badge proves the requested generation again.
         latest = !exact && /^gpt-?\d+(?:\.\d+)?-pro$/i.test(model) && effort === 'pro';
-        if (!await ui.choose(latest ? 'Latest' : model)) return false;
+        if (!await ui.choose(latest ? chatUiLabel('latest') : model)) return false;
       }
       const confirmed = (power) => power.available && (!latest || normalizeModelLabel(ui.latestProModel()) === normalizeModelLabel(model));
       if (!effort) return stillCurrent();
       const first = await ui.wait(ui.current); if (!first) return false;
-      if (first.label.toLowerCase() === CHAT_EFFORT_LABELS[effort].toLowerCase()) return confirmed(first);
+      if (first.label.toLowerCase() === (CHAT_EFFORT_LABELS_ALL(effort) || '').toLowerCase()) return confirmed(first);
       for (let n = first.position; n > 1; n--) if (!await ui.step(-1)) return false;
       for (let n = 1; n <= first.total; n++) {
         const power = ui.current();
-        if (power?.label.toLowerCase() === CHAT_EFFORT_LABELS[effort].toLowerCase()) return confirmed(power);
+        if (power?.label.toLowerCase() === (CHAT_EFFORT_LABELS_ALL(effort) || '').toLowerCase()) return confirmed(power);
         if (n < first.total && !await ui.step(1)) return false;
       }
       return false;
@@ -2003,12 +2050,18 @@ var CLF_DOM = (() => {
     pluginInstalledButtons,
     pluginManagementIdle,
     selectModelSettings,
-    temporaryChatReady: () => [...document.querySelectorAll('button')].some(button =>
-      button.getAttribute('aria-label') === 'Turn off temporary chat' || text(button, 100) === 'Turn off temporary chat'),
+    temporaryChatReady: () => {
+      const labels = ['Turn off temporary chat', 'Wyłącz rozmowę tymczasową', 'Wyłącz czat tymczasowy'];
+      return [...document.querySelectorAll('button')].some(button => {
+        const label = button.getAttribute('aria-label');
+        return labels.includes(label) || labels.includes(text(button, 100));
+      });
+    },
     confirmTemporaryChatIntroduction: () => {
+      const headings = ['Temporary Chat', 'Rozmowa tymczasowa', 'Czat tymczasowy'];
       const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node =>
-        [...node.querySelectorAll('h1,h2,[role="heading"]')].some(heading => text(heading, 100) === 'Temporary Chat') && /Not in history/.test(text(node, 2000)));
-      const button = dialog && [...dialog.querySelectorAll('button')].find(node => text(node, 100) === 'Continue');
+        [...node.querySelectorAll('h1,h2,[role="heading"]')].some(heading => headings.includes(text(heading, 100))) && (/Not in history/.test(text(node, 2000)) || /Nie zapisuje w historii|nie są zapisywane w historii/i.test(text(node, 2000))));
+      const button = dialog && [...dialog.querySelectorAll('button')].find(node => ['Continue', 'Kontynuuj'].includes(text(node, 100)));
       if (button) button.click();
     },
     conversationId,
