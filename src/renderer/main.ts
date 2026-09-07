@@ -16,7 +16,7 @@ import { initBrowserPreferences } from './browser-preferences.js';
 
 import type { AppApi, SettingsPatch } from '../preload/index.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
-import type { AppState, Capability, LogEntry, SurfaceStatus } from '../shared/types.js';
+import type { AppState, Capability, ChatBrowser, LogEntry, SurfaceStatus } from '../shared/types.js';
 import {
   browserExtensionRequired,
   isNewer,
@@ -442,6 +442,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       binaryPath: $<HTMLInputElement>('binaryPath').value.trim()
     },
     ui: {
+      chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishAction: $<HTMLSelectElement>('finishAction').value as 'notify' | 'goal',
@@ -927,6 +928,7 @@ function apply(next: AppState): void {
   applyValue($<HTMLSelectElement>('finishAction'), config.ui.finishAction ?? 'notify', previousState?.config.ui.finishAction);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
+  applyValue($<HTMLSelectElement>('chatBrowser'), config.ui.chatBrowser ?? 'chrome', previousState?.config.ui.chatBrowser ?? 'chrome');
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked(

@@ -1,11 +1,25 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 const browser = vi.hoisted(() => ({ connected: false, present: false, lastSeenAt: null as number | null }));
-const open = vi.hoisted(() => vi.fn(async (_url: string): Promise<string | null> => 'chrome'));
+const config = vi.hoisted(() => ({ ui: { chatBrowser: 'chrome' } }));
+vi.mock('../src/main/config.js', () => ({ getConfig: () => config }));
+const open = vi.hoisted(() => vi.fn(async (_url: string): Promise<string> => 'chrome'));
 vi.mock('../src/main/bridge.js', () => ({ bridgeStatus: async () => ({ ...browser }), browserWakeConnected: () => browser.connected, startBridge: async () => true }));
 vi.mock('../src/main/browser.js', () => ({ openInPreferredBrowser: open }));
 vi.mock('../src/main/connection.js', () => ({ connect: vi.fn(), getStatus: vi.fn(), onStatusChange: vi.fn() }));
 import { resetInputStartupForTests, wakeBrowserUrl } from '../src/main/session/start-input.js';
-beforeEach(() => { resetInputStartupForTests(); browser.connected = false; browser.present = false; browser.lastSeenAt = null; open.mockReset().mockResolvedValue('chrome'); });
+beforeEach(() => { resetInputStartupForTests(); config.ui.chatBrowser = 'chrome'; browser.connected = false; browser.present = false; browser.lastSeenAt = null; open.mockReset().mockResolvedValue('chrome'); });
+
+it('allows the newly selected browser to start without reusing the previous browser attempt', async () => {
+  await wakeBrowserUrl('https://chatgpt.com/?cos-model-catalog=old');
+  config.ui.chatBrowser = 'edge';
+  await wakeBrowserUrl('https://chatgpt.com/?cos-model-catalog=new');
+  await wakeBrowserUrl('https://chatgpt.com/?cos-model-catalog=repeat');
+  expect(open).toHaveBeenCalledTimes(2);
+  browser.connected = true;
+  config.ui.chatBrowser = 'chrome';
+  await wakeBrowserUrl('https://chatgpt.com/?cos-model-catalog=connected');
+  expect(open).toHaveBeenCalledTimes(2);
+});
 
 it('shares one successful absence episode across input and discovery retries', async () => {
   await Promise.all([wakeBrowserUrl('https://chatgpt.com/?cos-input=one'), wakeBrowserUrl('https://chatgpt.com/?cos-model-catalog=two', true)]);
@@ -18,7 +32,7 @@ it('shares one successful absence episode across input and discovery retries', a
   expect(open).toHaveBeenCalledTimes(2);
 });
 it('retries a rejected launch only after explicit retry and keeps successful retry shared', async () => {
-  open.mockResolvedValueOnce(null);
+  open.mockRejectedValueOnce(new Error('Microsoft Edge was not found'));
   await expect(wakeBrowserUrl('https://chatgpt.com/')).rejects.toThrow(/not found/);
   await expect(wakeBrowserUrl('https://chatgpt.com/')).rejects.toThrow(/not found/);
   expect(open).toHaveBeenCalledTimes(1);

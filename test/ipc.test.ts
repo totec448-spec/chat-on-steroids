@@ -483,6 +483,19 @@ describe('bounded IPC identities and OS launch results', () => {
 });
 
 describe('settings writes from more than one UI', () => {
+  it('persists Edge and keeps it through an unrelated stale renderer save', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    const result = await save({ ...base, ui: { ...base.ui, chatBrowser: 'edge' } }, base);
+    expect(result.ok, result.error).toBe(true);
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).ui.chatBrowser).toBe('edge');
+    const stale = await save({ ...base, ui: { ...base.ui, theme: 'light' } }, base);
+    expect(stale.ok, stale.error).toBe(true);
+    expect(getConfig().ui).toMatchObject({ chatBrowser: 'edge', theme: 'light' });
+    const current = getConfig();
+    expect((await save({ ...current, ui: { ...current.ui, chatBrowser: 'unsupported' } }, current)).ok).toBe(false);
+    expect(getConfig().ui.chatBrowser).toBe('edge');
+  });
   it('saves helper settings and tab retention through the renderer schema and merge boundary', async () => {
     const base = defaultConfig();
     await saveConfig(base);

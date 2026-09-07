@@ -499,6 +499,11 @@ single-instance lock
   → start non-blocking updater lifetime: immediate pass + unreferenced six-hour recheck schedule
 ```
 
+`ui.chatBrowser` owns the Chrome/Edge choice for OS-originated ChatGPT launches. `browser.ts`
+reads it at launch time and tries only that family's installations; failures propagate to the
+request owner instead of opening the system default browser. The setting does not select a
+profile or override connected-extension delivery/source-tab placement. Legacy configs use Chrome.
+
 The **window activation gate** is a real lifetime boundary, not UI polish. Electron may deliver
 `second-instance` after its own `ready` event while this app is still restoring durable state and
 before CSP/permission/IPC setup is complete. `window-lifecycle.ts` therefore drops/folds early

@@ -5,7 +5,7 @@ import { openInPreferredBrowser } from '../browser.js';
 import { getConfig } from '../config.js';
 import { enqueueInput, cancelInput, listInputs, noteInputStartupError, type InputArgs, type InputEntry } from './input.js';
 
-let waking: { lastSeenAt: number | null; work: Promise<void>; failed: boolean } | null = null;
+let waking: { lastSeenAt: number | null; selected: string; work: Promise<void>; failed: boolean } | null = null;
 /** One browser startup per absence episode, shared by authored sends and read-only discovery. */
 export async function wakeBrowserUrl(url: string, retry = false, backgroundStartup = false): Promise<void> {
   const browser = await bridgeStatus();
@@ -14,14 +14,14 @@ export async function wakeBrowserUrl(url: string, retry = false, backgroundStart
   // Only an authenticated live transport can receive this newly published work.
   if (browserWakeConnected()) { waking = null; return; }
   if (retry && waking?.failed) waking = null;
+  const selected = getConfig().ui.chatBrowser ?? 'chrome';
   // Until the extension registers, another explicit send belongs to the same startup.
-  // Its outbox entry will be discovered by normal maintenance once Chrome is ready.
-  if (waking?.lastSeenAt === browser.lastSeenAt) return waking.work;
+  // Changing the saved browser ends that attempt's authority over subsequent launches.
+  if (waking?.lastSeenAt === browser.lastSeenAt && waking.selected === selected) return waking.work;
   const work = (async () => {
-    const opened = await (backgroundStartup ? openInPreferredBrowser(url, { backgroundStartup: true }) : openInPreferredBrowser(url));
-    if (!opened) throw new Error('Chrome or Chromium was not found');
+    await (backgroundStartup ? openInPreferredBrowser(url, { backgroundStartup: true }) : openInPreferredBrowser(url));
   })();
-  const attempt = { lastSeenAt: browser.lastSeenAt, work, failed: false };
+  const attempt = { lastSeenAt: browser.lastSeenAt, selected, work, failed: false };
   waking = attempt;
   try { await work; } catch (error) { attempt.failed = true; throw error; }
 }

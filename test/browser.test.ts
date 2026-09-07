@@ -5,6 +5,39 @@ import { findPreferredBrowser, openInPreferredBrowser, preferredBrowserCandidate
 import { runPowerShell } from '../src/main/exec.js';
 
 describe('browser-backed ChatGPT commands', () => {
+  it('launches selected Edge when Chrome is also installed', async () => {
+    const edge = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+    const chrome = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    const launch = vi.fn(async () => ({ pid: 123 }));
+    const url = 'https://chatgpt.com/?cos-model-catalog=selected';
+    const opened = await openInPreferredBrowser(url, {
+      browser: 'edge', platform: 'win32',
+      env: { ProgramFiles: 'C:\\Program Files', 'ProgramFiles(x86)': 'C:\\Program Files (x86)' },
+      usable: candidate => candidate === edge || candidate === chrome, launch
+    });
+    expect(opened).toBe(edge);
+    expect(launch).toHaveBeenCalledExactlyOnceWith(edge,
+      ['--disable-renderer-backgrounding', '--disable-background-timer-throttling', url], path.win32.dirname(edge));
+  });
+
+  it('does not open Chrome when selected Edge is absent', async () => {
+    const launch = vi.fn(async () => ({ pid: 123 }));
+    await expect(openInPreferredBrowser('https://chatgpt.com/', {
+      browser: 'edge', platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' },
+      usable: candidate => candidate.endsWith('chrome.exe'), launch
+    })).rejects.toThrow(/Microsoft Edge.*not found/);
+    expect(launch).not.toHaveBeenCalled();
+  });
+
+  it('reports selected Edge launch failure without switching browser families', async () => {
+    const launch = vi.fn(async () => { throw new Error('cannot start'); });
+    await expect(openInPreferredBrowser('https://chatgpt.com/', {
+      browser: 'edge', platform: 'win32', env: { ProgramFiles: 'C:\\Program Files' },
+      usable: () => true, launch
+    })).rejects.toThrow(/Microsoft Edge.*cannot start/);
+    expect(launch.mock.calls).toHaveLength(1);
+  });
+
   it('cold background startup gives Chrome one owned tab in a minimized startup window', async () => {
     const calls: string[] = [];
     const launch = vi.fn();

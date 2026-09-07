@@ -28,6 +28,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } fr
 import { z } from 'zod';
 import {
   CAPABILITIES,
+  CHAT_BROWSERS,
   GOAL_MODES,
   GOAL_REASONING_LEVELS,
   RELEASES_PAGE,
@@ -139,6 +140,7 @@ const settingsPatch = z.object({
     binaryPath: z.string().max(4096)
   }),
   ui: z.object({
+    chatBrowser: z.enum(CHAT_BROWSERS).optional(),
     developerMode: z.boolean().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
@@ -237,6 +239,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       binaryPath: pick(current.tunnel.binaryPath, base.tunnel.binaryPath, wanted.tunnel.binaryPath)
     },
     ui: {
+      chatBrowser: pick(current.ui.chatBrowser, base.ui.chatBrowser, wanted.ui.chatBrowser),
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
       planBackend: pick(current.ui.planBackend, base.ui.planBackend, wanted.ui.planBackend),
@@ -806,8 +809,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
       throw new Error('This session has no valid ChatGPT conversation');
     }
-    const browser = await openInPreferredBrowser(chatUrl(conversationId));
-    if (!browser) throw new Error('Chrome or Chromium was not found');
+    await openInPreferredBrowser(chatUrl(conversationId));
     return true;
   });
 

@@ -12,6 +12,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import {
   CAPABILITIES,
+  CHAT_BROWSERS,
   DEFAULT_CAPABILITIES,
   GOAL_MODES,
   GOAL_REASONING_LEVELS,
@@ -258,6 +259,7 @@ const configSchema = z.object({
     binaryPath: z.string().max(4096)
   }),
   ui: z.object({
+    chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     developerMode: z.boolean().optional(),
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),

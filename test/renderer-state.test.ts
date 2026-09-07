@@ -420,6 +420,20 @@ async function mountChat(
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+it('saves the ChatGPT browser choice from its settings control and restores it on state push', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const browser = w.document.getElementById('chatBrowser') as HTMLSelectElement;
+  expect(browser.value).toBe('chrome'); // older config has no field
+  browser.value = 'edge';
+  browser.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  expect(mounted.calls[0].ui.chatBrowser).toBe('edge');
+  expect(browser.value).toBe('edge');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
+  expect(browser.value).toBe('chrome');
+});
+
 it('preserves native Desktop permissions when saving unrelated settings on Linux', async () => {
   const mounted = await mountChat({
     platform: { family: 'linux', name: 'Linux', desktopAutomation: false }

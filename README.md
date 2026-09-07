@@ -77,7 +77,9 @@ sha256sum Chat-On-Steroids-Linux-x64.AppImage     # Linux
 ## Requirements
 
 - **Windows 10/11**, **macOS 13 Ventura or newer**, or a current desktop **Linux**, on x64 or ARM64 matching the build you downloaded.
-- **Chrome 116 or newer** for the companion extension. Without it you still get the MCP tools, but not session attribution, Compact & Resume, worker chats or the Goal loop.
+- **Chrome 116 or newer**, or a current Microsoft Edge with the companion extension. Without it you still get the MCP tools, but not session attribution, Compact & Resume, worker chats or the Goal loop.
+
+Using Edge? Choose **Settings → Browser & history → ChatGPT browser → Microsoft Edge**. Install the companion and sign in to ChatGPT in that browser's active profile (`edge://extensions` for Edge). This choice controls app-originated launches, including startup model discovery; already connected tabs and source-tab continuations keep their browser. Older configurations retain Chrome. If the selected browser is missing or cannot start, the app reports an error instead of opening a different browser. The setting chooses a browser family, not a particular profile.
 - **Linux:** a Secret Service keyring such as GNOME Keyring or KWallet. The app refuses Electron's unencrypted `basic_text` fallback for stored keys.
 - A ChatGPT workspace with **Developer mode** and custom MCP apps. OpenAI currently documents full MCP support, including write actions, as a beta for Business, Enterprise and Edu, with Pro limited to read and fetch. Business needs an admin to enable it. Check OpenAI's [Developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt) page if your workspace looks different.
 - An **OpenRouter API key** only if you select the API source for plans, Goal or Loop. The default ChatGPT helper source uses your connected browser session.
