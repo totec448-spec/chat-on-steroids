@@ -501,9 +501,9 @@ describe('settings writes from more than one UI', () => {
     expect(selected.ok, selected.error).toBe(true);
     expect(getConfig().ui.planBackend).toBe('api');
     expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).ui.planBackend).toBe('api');
-    const stale = await save({ ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } }, base);
+    const stale = await save({ ...base, ui: { ...base.ui, autoConnect: !base.ui.autoConnect } }, base);
     expect(stale.ok, stale.error).toBe(true);
-    expect(getConfig().ui).toMatchObject({ planBackend: 'api', minimizeToTray: !base.ui.minimizeToTray });
+    expect(getConfig().ui).toMatchObject({ planBackend: 'api', autoConnect: !base.ui.autoConnect });
     const current = getConfig();
     expect((await save({ ...current, ui: { ...current.ui, planBackend: 'chatgpt' } }, current)).ok).toBe(true);
     expect(getConfig().ui.planBackend).toBe('chatgpt');
@@ -545,11 +545,11 @@ describe('settings writes from more than one UI', () => {
       multiAgent: { ...base.multiAgent, allowUnattributedCalls: true }
     });
 
-    const wanted = { ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } };
+    const wanted = { ...base, ui: { ...base.ui, autoConnect: !base.ui.autoConnect } };
     const reply = await save(wanted, base);
 
     expect(reply.ok, reply.error).toBe(true);
-    expect(getConfig().ui.minimizeToTray).toBe(!base.ui.minimizeToTray);
+    expect(getConfig().ui.autoConnect).toBe(!base.ui.autoConnect);
     expect(getConfig().multiAgent.allowUnattributedCalls).toBe(true);
   });
 
@@ -561,11 +561,11 @@ describe('settings writes from more than one UI', () => {
       multiAgent: { ...base.multiAgent, recoverAgentTabs: false }
     });
 
-    const wanted = { ...base, ui: { ...base.ui, minimizeToTray: !base.ui.minimizeToTray } };
+    const wanted = { ...base, ui: { ...base.ui, autoConnect: !base.ui.autoConnect } };
     const reply = await save(wanted, base);
 
     expect(reply.ok, reply.error).toBe(true);
-    expect(getConfig().ui.minimizeToTray).toBe(!base.ui.minimizeToTray);
+    expect(getConfig().ui.autoConnect).toBe(!base.ui.autoConnect);
     expect(getConfig().multiAgent.recoverAgentTabs).toBe(false);
   });
 });

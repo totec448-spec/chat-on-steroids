@@ -125,7 +125,6 @@ export interface UiPrefs {
   finishAction?: 'notify' | 'goal';
   finishLeadMinutes?: number;
   developerMode?: boolean;
-  minimizeToTray: boolean;
   autoConnect: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;

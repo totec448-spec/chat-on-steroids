@@ -75,7 +75,9 @@ describe('settings migration', () => {
         tunnelId: 'tunnel_0123456789abcdef0123456789abcdef',
         binaryPath: ''
       },
-      ui: { minimizeToTray: true, autoConnect: true }
+      // The retired close-to-tray preference may be false in an older config. It must be
+      // discarded at the config boundary now that tray residence is an application invariant.
+      ui: { minimizeToTray: false, autoConnect: true }
     };
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(oldConfig), 'utf8');
 
@@ -85,6 +87,7 @@ describe('settings migration', () => {
     expect(loaded.capabilities.clipboardRead).toBe(false);
     expect(loaded.capabilities.clipboardWrite).toBe(false);
     expect(loaded.ui.autoConnect).toBe(true);
+    expect(loaded.ui).not.toHaveProperty('minimizeToTray');
     expect(loaded.ui.privacyScreenshots).toBe(false);
     // The one tunnel id a pre-split config had is Core's, because Core is the connector
     // the app cannot work without. Desktop is a second, optional tunnel that starts empty
@@ -355,7 +358,7 @@ describe('shipped defaults', () => {
       capabilities: { browse: true, search: true, read: true, metadata: true },
       readOnly: true,
       tunnel: { kind: 'openai', tunnelId: '', binaryPath: '' },
-      ui: { minimizeToTray: true, autoConnect: false }
+      ui: { autoConnect: false }
     };
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
     const loaded = await loadConfig();

@@ -39,7 +39,7 @@ it('does not overwrite a focused dirty settings field on an unsolicited state pu
       screen: false, control: false, clipboardRead: false, clipboardWrite: false
     },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' },
+    ui: { autoConnect: false, privacyScreenshots: false, theme: 'light' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
@@ -194,7 +194,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
       screen: true, control: true, clipboardRead: true, clipboardWrite: true
     },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
+    ui: { autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
@@ -342,7 +342,7 @@ async function mountChat(
       screen: true, control: true, clipboardRead: true, clipboardWrite: true
     },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as const },
+    ui: { autoConnect: false, privacyScreenshots: false, theme: 'light' as const },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
@@ -452,7 +452,7 @@ it('uses menu-bar-only wording on macOS instead of Windows tray copy', async () 
 
   expect(doc.getElementById('backgroundRunningCopy')!.textContent).toContain('menu bar without occupying the Dock');
   expect(doc.getElementById('backgroundRunningCopy')!.textContent).not.toContain('tray');
-  expect(doc.getElementById('minimizeToTrayCopy')!.textContent).toBe('Runs in the menu bar when the window is closed');
+  expect(doc.getElementById('minimizeToTray')).toBeNull();
 });
 
 it('surfaces the existing root rename API in the folder row', async () => {

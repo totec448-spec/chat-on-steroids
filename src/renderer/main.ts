@@ -448,7 +448,6 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
-      minimizeToTray: $<HTMLInputElement>('minimizeToTray').checked,
       developerMode: $<HTMLInputElement>('developerMode').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
       theme: over.theme ?? previous.ui.theme
@@ -929,9 +928,6 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyChecked($<HTMLInputElement>('autoConnect'), config.ui.autoConnect, previousState?.config.ui.autoConnect);
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
-  // Tray residence is now an app invariant rather than an optional close behavior. Keep the
-  // legacy persisted field pinned true so older configs converge on the current contract.
-  $<HTMLInputElement>('minimizeToTray').checked = true;
   applyChecked(
     $<HTMLInputElement>('privacyScreenshots'),
     config.ui.privacyScreenshots,
@@ -941,11 +937,9 @@ function apply(next: AppState): void {
   if (next.platform?.family === 'macos') {
     $('backgroundRunningCopy').textContent =
       'Leave it running while you use the connector. It stays available from the menu bar without occupying the Dock when you close the window.';
-    $('minimizeToTrayCopy').textContent = 'Runs in the menu bar when the window is closed';
   } else {
     $('backgroundRunningCopy').textContent =
       'Leave it running while you use the connector. It stays in the tray when you close the window.';
-    $('minimizeToTrayCopy').textContent = 'Runs in the tray when the window is closed';
   }
 
   const openai = config.tunnel.kind === 'openai';
@@ -1626,7 +1620,6 @@ $('removeApiKey').addEventListener('click', async () => {
 
 for (const id of [
   'autoConnect',
-  'minimizeToTray',
   'developerMode',
   'privacyScreenshots',
   'tunnelKind',

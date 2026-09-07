@@ -161,7 +161,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
       screen: false, control: false, clipboardRead: false, clipboardWrite: false
     },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false },
+    ui: { autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
     multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
