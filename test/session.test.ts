@@ -1735,7 +1735,9 @@ describe('handoff storage', () => {
       resetSessionStoreForTests();
       await deleteSession(seed.id);
     }
-  });
+  // Match the adjacent full-catalog tests: Windows metadata I/O under the parallel
+  // suite can exceed the ordinary 30-second budget. Keep all 5,001 entries exercised.
+  }, 90_000);
 
   it('splits a long brief on blank lines and keeps every character', () => {
     const blocks = Array.from({ length: 40 }, (_, i) => `SECTION ${i}\n${'detail '.repeat(20)}`);

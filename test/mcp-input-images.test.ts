@@ -30,6 +30,10 @@ it('carries validated user image bytes through an exact-session MCP result and a
     const images = [{ name: 'reference.webp', dataUrl: `data:image/webp;base64,${bytes.toString('base64')}` }];
     await validateInputImages(images);
     const input = await enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'Use this image', images, mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+    const additional = [];
+    for (const text of ['Use the connected plugin', 'Include the requested movements']) {
+      additional.push(await enqueueInput({ id: randomUUID(), sessionId: session.id, text, mode: 'auto', dueAt: 0, model: null, reasoningEffort: null }));
+    }
     const call = async (name = 'read', args: Record<string, unknown> = { paths: ['/workspace/example.txt'] }) => {
       const response = await fetch(endpoint.urls.core, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-request-id': `${requestId}/att1` }, body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method: 'tools/call', params: { name, arguments: args } }) });
       const raw = await response.text();
@@ -41,9 +45,16 @@ it('carries validated user image bytes through an exact-session MCP result and a
     expect(first.result.isError).not.toBe(true);
     expect(first.result.content).toContainEqual({ type: 'image', mimeType: 'image/webp', data: bytes.toString('base64') });
     expect(first.result.content.some((row: { text?: string }) => row.text?.includes(input.id))).toBe(true);
+    const injected = first.result.content.filter((row: { text?: string }) => row.text?.includes('--- New instructions from the user ---'));
+    expect(injected).toHaveLength(3);
+    for (const [index, entry] of [input, ...additional].entries()) expect(injected[index].text).toContain(`[User message ${entry.id}]\n${entry.text}`);
     const second = await call();
     expect(second.result.content.some((row: { type: string }) => row.type === 'image')).toBe(false);
     expect((await listInputs()).find(row => row.id === input.id)?.state).toBe('sent');
+    for (const entry of additional) {
+      expect(second.result.content.some((row: { text?: string }) => row.text?.includes(entry.id))).toBe(false);
+      expect((await listInputs()).find(row => row.id === entry.id)?.state).toBe('sent');
+    }
     expect(second.result.content.some((row: { text?: string }) => row.text?.includes(stageOne.id))).toBe(false);
     expect(second.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.id))).toBe(false);
     expect((await listInputs()).find(row => row.id === stageOne.id)?.state).toBe('queued');

@@ -1,9 +1,10 @@
 import { accessSync, constants, existsSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { launchCommand, runPowerShell } from './exec.js';
+import { launchCommand, runCommand, runPowerShell } from './exec.js';
 import { getConfig } from './config.js';
 import type { ChatBrowser } from '../shared/types.js';
+import { browserWindowBounds } from './browser-window-layout.js';
 
 type Exists = (candidate: string) => boolean;
 type Launch = typeof launchCommand;
@@ -12,15 +13,27 @@ type Launch = typeof launchCommand;
 export async function isPreferredBrowserRunning(
   platform: NodeJS.Platform = process.platform,
   powershell: typeof runPowerShell = runPowerShell,
-  browser: ChatBrowser = getConfig().ui.chatBrowser ?? 'chrome'
+  browser: ChatBrowser = getConfig().ui.chatBrowser ?? 'chrome',
+  command: typeof runCommand = runCommand
 ): Promise<boolean | null> {
-  if (platform !== 'win32') return null;
   try {
+    if (platform !== 'win32') {
+      if (platform !== 'darwin' && platform !== 'linux') return null;
+      // comm contains executable names, never arguments or browsing/profile data.
+      const result = await command('ps', ['-A', '-o', 'comm='], os.tmpdir(), 5000);
+      if (result.timedOut || result.truncated || result.exitCode !== 0 || !result.stdout.trim()) return null;
+      const family = browser === 'edge'
+        ? /^(?:msedge|microsoft-edge(?:-(?:stable|beta|dev))?|Microsoft Edge(?: Beta| Dev| Canary)?(?: Helper.*)?)$/i
+        : browser === 'brave'
+          ? /^(?:brave|brave-browser(?:-(?:stable|beta|dev|nightly))?|Brave Browser(?: Beta| Dev| Nightly)?(?: Helper.*)?)$/i
+        : /^(?:chrome|google-chrome(?:-(?:stable|beta|unstable))?|chromium(?:-browser)?|Google Chrome(?: Beta| Dev| Canary)?(?: Helper.*)?|Chromium(?: Helper.*)?)$/i;
+      return result.stdout.split('\n').some(name => family.test(path.posix.basename(name.trim())));
+    }
     // Probe only the selected family; another browser cannot prove its presence or absence.
     // Enumerate names only, never user command lines or profile data. Both names are constants.
     const processName = browser === 'edge' ? 'msedge' : browser === 'brave' ? 'brave' : 'chrome';
     const result = await powershell(`$ErrorActionPreference='Stop'; if (@(Get-Process | Where-Object ProcessName -eq '${processName}').Count) { 'running' } else { 'absent' }`, os.tmpdir(), 5000);
-    if (result.timedOut || result.exitCode !== 0) return null;
+    if (result.timedOut || result.truncated || result.exitCode !== 0) return null;
     return result.stdout.trim() === 'absent' ? false : result.stdout.trim() === 'running' ? true : null;
   } catch { return null; }
 }
@@ -204,12 +217,13 @@ export async function openInPreferredBrowser(
   const launch = options.launch ?? launchCommand;
   const selected = options.browser ?? getConfig().ui.chatBrowser ?? 'chrome';
   const label = selected === 'edge' ? 'Microsoft Edge' : selected === 'brave' ? 'Brave Browser' : 'Google Chrome / Chromium';
+  const bounds = browserWindowBounds();
   // These switches only affect a newly started Chrome process; handing a URL to an
   // existing instance cannot change its policy. Memory Saver exclusions alone do not
   // prevent background timer/renderer throttling of long-running orchestration tabs.
   const args = [
     ...(platform === 'win32' ? ['--disable-renderer-backgrounding', '--disable-background-timer-throttling'] : []),
-    ...(options.backgroundStartup ? ['--window-size=1100,800'] : []),
+    ...(options.backgroundStartup ? [`--window-size=${bounds.width},${bounds.height}`] : []),
     url
   ];
   let lastError: unknown = null;

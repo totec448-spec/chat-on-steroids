@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => {
     roots: [{ name: 'workspace', path: 'C:\\workspace' }],
     readOnly: true,
     capabilities: caps,
-    tunnel: { kind: 'cloudflared', tunnelId: '', desktopTunnelId: '', binaryPath: '' },
+    tunnel: { kind: 'cloudflared', tunnelId: '', desktopTunnelId: '', pluginsTunnelId: '', binaryPath: '' },
     ui: { privacyScreenshots: false },
     sessions: { record: false },
     multiAgent: { enabled: false }
@@ -50,7 +50,7 @@ vi.mock('../src/main/config.js', () => ({
   effectiveCapabilities: () => mocks.caps
 }));
 
-vi.mock('../src/main/logger.js', () => ({ logError: vi.fn(), logInfo: vi.fn() }));
+vi.mock('../src/main/logger.js', () => ({ logError: vi.fn(), logInfo: vi.fn(), logWarn: vi.fn() }));
 
 vi.mock('../src/main/mcp/server.js', () => ({
   lastRequestAt: () => null,
@@ -64,7 +64,8 @@ vi.mock('../src/main/mcp/server.js', () => ({
       url: 'http://127.0.0.1:45678/mcp/core/core-token',
       urls: {
         core: 'http://127.0.0.1:45678/mcp/core/core-token',
-        desktop: 'http://127.0.0.1:45678/mcp/desktop/desktop-token'
+        desktop: 'http://127.0.0.1:45678/mcp/desktop/desktop-token',
+        plugins: 'http://127.0.0.1:45678/mcp/plugins/plugins-token'
       },
       stop: mocks.endpointStop
     };
@@ -127,10 +128,27 @@ describe('connection surface state', () => {
     mocks.config.readOnly = true;
     mocks.config.tunnel.kind = 'cloudflared';
     mocks.config.tunnel.tunnelId = '';
+    mocks.config.tunnel.pluginsTunnelId = '';
     mocks.config.tunnel.binaryPath = '';
     vi.resetModules();
   });
 
+  it('ignores retired Plugins tunnel reports after changing only its tunnel', async () => {
+    mocks.config.tunnel.kind = 'openai';
+    mocks.config.tunnel.tunnelId = 'core-test';
+    mocks.config.tunnel.pluginsTunnelId = 'plugins-before';
+    const connection = await import('../src/main/connection.js');
+    await connection.connect();
+    expect(mocks.starts).toBe(2);
+    const oldReport = mocks.report!;
+    mocks.config.tunnel.pluginsTunnelId = 'plugins-after';
+    await connection.applySettings();
+    expect(mocks.starts).toBe(3);
+    expect(mocks.endpointStop).not.toHaveBeenCalled();
+    oldReport({ state: 'error', detail: 'Retired failure', publicUrl: 'https://old.invalid' });
+    expect(connection.getStatus().surfaces.find((s) => s.id === 'plugins')).toMatchObject({ state: 'live', detail: 'Connected.' });
+    await connection.disconnect();
+  });
   it('publishes refresh declarations only for live surfaces and does not rebuild on unchanged health reports', async () => {
     const connection = await import('../src/main/connection.js');
     const refresh = await import('../src/main/plugin-refresh.js');

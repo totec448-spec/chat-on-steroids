@@ -19,6 +19,7 @@ import type { PluginToolSchema } from '../../shared/plugin-refresh.js';
 import { createRegistrar, type ToolContext } from './kernel.js';
 import { registerCoreTools } from './tools-core.js';
 import { registerDesktopTools } from './tools-desktop.js';
+import { registerPluginTools } from './tools-plugins.js';
 import { surfaceDefinition, type SurfaceId } from './surfaces.js';
 import { serverInstructions } from './instructions.js';
 import { APP_VERSION } from './../version.js';
@@ -33,6 +34,11 @@ export function buildServer(ctx: ToolContext, surface: SurfaceId, observe?: (con
   );
 
   const tools: PluginToolSchema[] = [];
+  if (surface === 'plugins') {
+    const declarations = registerPluginTools(server);
+    observe?.(definition.connectorName, APP_VERSION, serverInstructions(ctx, surface), declarations);
+    return server;
+  }
   const registrar = createRegistrar(server, ctx, surface, observe ? (name, config) => {
     // Match the SDK's Standard Schema conversion target and object-root normalization.
     const schema = z.toJSONSchema(config.inputSchema, { target: 'draft-2020-12', io: 'input' });

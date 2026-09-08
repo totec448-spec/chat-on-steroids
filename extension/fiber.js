@@ -223,7 +223,10 @@
       const props = at.memoizedProps;
       if (!props || typeof props !== 'object') continue;
       const turn = props.turn && typeof props.turn === 'object' ? props.turn : null;
-      const values = [props.clientThreadId, props.conversationId, turn && turn.clientThreadId, turn && turn.conversationId];
+      // Mounted helper turns now carry the owner in conversation.id. Read it here,
+      // alongside older shapes, so terminal consumers keep their exact-chat fence.
+      const conversation = props.conversation && typeof props.conversation === 'object' ? props.conversation : null;
+      const values = [props.clientThreadId, props.conversationId, conversation && conversation.id, turn && turn.clientThreadId, turn && turn.conversationId];
       for (let index = 0; index < values.length; index++) {
         const value = str(values[index]);
         if (!value) continue;
@@ -1329,11 +1332,14 @@
       const label = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 80 ? value.trim() : null;
       const effortOf = choice => choice.category?.modelLane === 'pro' ? 'pro'
         : ['auto', 'instant'].includes(choice.category?.modelLane) ? 'none'
-        : ({ standard: 'medium', extended: 'high', max: 'xhigh', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'ultra' })[choice.thinkingEffort] || null;
+        : ({ min: 'low', standard: 'medium', extended: 'high', max: 'xhigh', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'ultra' })[choice.thinkingEffort] || null;
       const choices = state.bucketSelections.map(choice => {
         const name = label(choice.category?.shortLabel);
+        const familyId = id(choice.category?.modelVersion) || id(choice.modelSlug);
+        const family = data.versions.find(version => version.id === familyId);
         return { bucket: choice.bucket, id: id(choice.modelSlug),
           label: name && (/^\d/.test(name) ? `GPT-${name}` : name), effort: effortOf(choice),
+          familyId, familyLabel: label(family?.displayTextForIntelligence) || label(choice.modelConfig?.title) || (name && (/^\d/.test(name) ? `GPT-${name}` : name)),
           available: choice.availability?.status === 'available' && !props.modelSwitcherDenialsBySlug?.[choice.modelSlug] };
       });
       const versions = data.versions.filter(version => version.enabled === true).map(version => ({ id: id(version.id), label: label(version.displayTextForIntelligence) }));
@@ -1399,7 +1405,8 @@
         if (props.actions === observedActions) continue;
         if (observedActions) return null;
         observedActions = props.actions;
-        if (!props.actions.length || props.actions.length > 16 || typeof props.connector.name !== 'string') return null;
+        const externalPlugins = props.connector.name === 'Chat On Steroids Plugins';
+        if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 64 : 16) || typeof props.connector.name !== 'string') return null;
         const budget = { bytes: 280000, nodes: 20000 };
         const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
         if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||

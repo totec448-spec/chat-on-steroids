@@ -42,3 +42,15 @@ jobs:
 
       - name: Verify
         run: npm run verify:ci
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+
+      - name: Install plugin Python runtime
+        run: python -m pip install uv==0.12.5
+
+      - name: Exercise published plugins on this OS
+        env:
+          COS_PLUGIN_LIVE_TEST: '1'
+        run: npx vitest run test/plugins-live-proxy.test.ts test/plugins-python-live.test.ts test/plugins-catalog-live.test.ts

@@ -71,6 +71,7 @@ const { makeTempDir, removeTempDir } = await import('./helpers.js');
 let dir: string;
 let currentWindow: {
   setBackgroundColor: ReturnType<typeof vi.fn>;
+  setTitleBarOverlay: ReturnType<typeof vi.fn>;
   isDestroyed: () => boolean;
   webContents: { send: ReturnType<typeof vi.fn> };
 } | null = null;
@@ -95,7 +96,7 @@ it('validates dropped file count and stages arbitrary native file types', async 
 it('publishes Goal draft progress through the session refresh channel without a new transcript event', async () => {
   const { startGoalDraft, resetGoalStateForTests } = await import('../src/main/goal.js');
   const session = await createSession({ title: 'Goal progress', conversationId: 'ipc-goal-progress' });
-  currentWindow = { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
   try {
     startGoalDraft({ conversationId: session.conversationId!, sessionId: session.id, turnId: 'finished-turn', deferStart: true });
     expect(currentWindow.webContents.send).toHaveBeenCalledWith('session:changed');
@@ -195,7 +196,7 @@ it('projects exact retained worker parents without adopting same-name unrelated 
 });
 
 it('adds picker-selected projects, reuses containing approval, and leaves cancellation unchanged', async () => {
-  currentWindow = { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
   const folder = path.join(dir, 'picker-project');
   await fs.mkdir(path.join(folder, 'child'), { recursive: true });
   await saveConfig({ ...defaultConfig(), roots: [] });
@@ -523,6 +524,35 @@ describe('ChatGPT browser settings', () => {
 });
 
 describe('settings writes from more than one UI', () => {
+  it('validates and persists the Plugins tunnel id through Settings, including explicit clearing', async () => {
+    const base = defaultConfig(); await saveConfig(base);
+    const tunnelId = `tunnel_${'a'.repeat(32)}`;
+    expect((await save({ ...base, tunnel: { ...base.tunnel, pluginsTunnelId: tunnelId } }, base)).ok).toBe(true);
+    expect(getConfig().tunnel.pluginsTunnelId).toBe(tunnelId);
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).tunnel.pluginsTunnelId).toBe(tunnelId);
+    for (const invalid of ['not-a-tunnel', `tunnel_${'g'.repeat(32)}`, `tunnel_${'a'.repeat(31)}`, 'x'.repeat(129)]) {
+      const current = getConfig();
+      expect((await save({ ...current, tunnel: { ...current.tunnel, pluginsTunnelId: invalid } }, current)).ok).toBe(false);
+      expect(getConfig().tunnel.pluginsTunnelId).toBe(tunnelId);
+    }
+    const current = getConfig();
+    expect((await save({ ...current, tunnel: { ...current.tunnel, pluginsTunnelId: '' } }, current)).ok).toBe(true);
+    expect(getConfig().tunnel.pluginsTunnelId).toBe('');
+  });
+
+  it('preserves a newer Plugins tunnel across stale and legacy renderer saves', async () => {
+    const base = defaultConfig(); await saveConfig(base);
+    const tunnelId = `tunnel_${'b'.repeat(32)}`;
+    expect((await save({ ...base, tunnel: { ...base.tunnel, pluginsTunnelId: tunnelId } }, base)).ok).toBe(true);
+    expect((await save({ ...base, ui: { ...base.ui, theme: 'light' } }, base)).ok).toBe(true);
+    expect(getConfig().tunnel.pluginsTunnelId).toBe(tunnelId);
+    const legacy = { ...base, tunnel: { ...base.tunnel } };
+    delete legacy.tunnel.pluginsTunnelId;
+    expect((await save({ ...legacy, ui: { ...legacy.ui, minimizeToTray: !legacy.ui.minimizeToTray } }, legacy)).ok).toBe(true);
+    expect(getConfig().tunnel.pluginsTunnelId).toBe(tunnelId);
+    expect(getConfig().ui.minimizeToTray).toBe(!legacy.ui.minimizeToTray);
+  });
+
   it('changes login registration only on a changed preference and reports failure after other effects', async () => {
     const lifecycle = await import('../src/main/window-lifecycle.js');
     const connection = await import('../src/main/connection.js');
@@ -607,7 +637,7 @@ describe('settings writes from more than one UI', () => {
   });
   it('does not let a stale renderer snapshot undo a newer extension setting', async () => {
     currentWindow = {
-      setBackgroundColor: vi.fn(),
+      setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(),
       isDestroyed: () => false,
       webContents: { send: vi.fn() }
     };
@@ -629,6 +659,9 @@ describe('settings writes from more than one UI', () => {
     expect(getConfig().ui.theme).toBe('dark');
     expect(nativeTheme.themeSource).toBe('dark');
     expect(currentWindow.setBackgroundColor).toHaveBeenCalledWith('#0e0e11');
+    if (process.platform === 'win32') expect(currentWindow.setTitleBarOverlay).toHaveBeenCalledWith({
+      height: 36, color: '#1a2129', symbolColor: '#b8c0c5'
+    });
     expect(getConfig().goal.enabled).toBe(false);
   });
 
@@ -735,45 +768,40 @@ describe('root namespace invariants', () => {
   });
 });
 
-/**
- * `link:open` is an allowlist, which means a button whose URL was never added to it does
- * not open a slightly wrong page — it throws, in a handler nobody is watching, and the
- * button does nothing at all. That is how "Open OpenRouter keys" shipped dead beside the
- * key field it exists to go and fetch.
- *
- * So the test is not "is this one URL present". It is: every link the window can offer is
- * a link the main process will open. The markup is the source of truth for the first half
- * and `ALLOWED_LINKS` for the second, and they have to agree.
- */
+/** Exercise the real IPC policy for both Settings buttons and authored chat links. */
 describe('every link the window offers', () => {
   it('is one link:open will actually open', async () => {
     const { promises: fs } = await import('node:fs');
     const path = await import('node:path');
-    const [html, ipcSource] = await Promise.all([
-      fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8'),
-      fs.readFile(path.join(process.cwd(), 'src', 'main', 'ipc.ts'), 'utf8')
-    ]);
+    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
 
     const offered = [...html.matchAll(/data-link="([^"]+)"/g)].map((match) => match[1]!);
     expect(offered.length, 'the markup offers no links at all — has data-link been renamed?').toBeGreaterThan(0);
 
-    const block = /const ALLOWED_LINKS = new Set\(\[([\s\S]*?)\]\);/.exec(ipcSource);
-    expect(block, 'ALLOWED_LINKS is gone or renamed').not.toBeNull();
-    // Comment lines go first: prose above an entry is free to contain an apostrophe, and
-    // one stray apostrophe would otherwise re-pair every quote below it. Anchored to the
-    // start of a line, because every URL in the list contains a `//` of its own.
-    const entries = block![1]!.replace(/^[ \t]*\/\/[^\n]*$/gm, '');
-    const allowed = new Set([...entries.matchAll(/'([^']+)'/g)].map((match) => match[1]!));
-
-    expect(offered.filter((url) => !allowed.has(url))).toEqual([]);
+    for (const url of offered) expect(await handlers.get('link:open')!(null, { url })).toEqual({ ok: true, data: true });
   });
 
   it('opens the OpenRouter key page the goal loop sends people to', async () => {
     const open = handlers.get('link:open')!;
     expect(await open(null, { url: 'https://openrouter.ai/settings/keys' })).toEqual({ ok: true, data: true });
-    const refused = (await open(null, { url: 'https://example.com/' })) as { ok: boolean; error: string };
+    expect(await open(null, { url: 'https://example.com/reference#section' })).toEqual({ ok: true, data: true });
+  });
+
+  it.each(['https://example.com/path?q=hello', 'http://localhost:3000/', 'mailto:person@example.com?subject=Hello'])(
+    'opens an authored external link: %s', async url => {
+      expect(await handlers.get('link:open')!(null, { url })).toEqual({ ok: true, data: true });
+      expect(shell.openExternal).toHaveBeenLastCalledWith(url);
+    }
+  );
+  it.each(['javascript:alert(1)', 'data:text/html,hi', 'file:///C:/secret', 'ms-settings:privacy',
+    'x-apple.systempreferences:unapproved', 'https://user:password@example.com/', '//example.com/',
+    'https:example.com', 'https://example.com/\nfoo', 'mailto:a@example.com?body=%0Ainjected', 'https://example.com/\\path'])(
+    'refuses unsafe authored link: %s', async url => {
+    const before = vi.mocked(shell.openExternal).mock.calls.length;
+    const refused = (await handlers.get('link:open')!(null, { url })) as { ok: boolean; error: string };
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/not allowed/i);
+    expect(vi.mocked(shell.openExternal).mock.calls.length).toBe(before);
   });
 
   it('serializes non-Error throws into a real IPC error string', async () => {

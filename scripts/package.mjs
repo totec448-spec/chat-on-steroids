@@ -24,6 +24,7 @@ function run(command, commandArgs, env = process.env) {
 }
 
 const node = process.execPath;
+run(node, ['scripts/generate-third-party-notices.mjs']);
 run(node, ['scripts/make-icon.mjs']);
 run(node, [path.join('node_modules', 'electron-vite', 'bin', 'electron-vite.js'), 'build']);
 

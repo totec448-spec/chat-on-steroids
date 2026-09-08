@@ -461,7 +461,7 @@ interface WorkerHarness {
   /** Fires the periodic maintenance alarm this worker schedules for itself. */
   fireAlarm(name?: string): Promise<void>;
   /** Registers the browser document that owns subsequent tab-scoped messages. */
-  registerTab(tabId: number, documentId?: string): Promise<any>;
+  registerTab(tabId: number, documentId?: string, senderUrl?: string): Promise<any>;
   /** Fires Chrome's tab-created lifecycle event, the way opening a link in a new tab does. */
   createTab(tab: { id: number; url?: string; pendingUrl?: string; autoDiscardable?: boolean }): Promise<void>;
   tabsCreate: ReturnType<typeof vi.fn>;
@@ -1189,13 +1189,13 @@ describe('app-owned retained tab pool', () => {
     await worker.fireAlarm();
     return worker;
   }
-  it('evicts oldest sleepers immediately for worker capacity, preserving manual chats and active work', async () => {
+  it('retains sleeping chats regardless of broker capacity and removes only an exact idle duplicate', async () => {
     const worker = await budget();
-    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 2, 3]);
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4]);
     expect(worker.tabsRemove).not.toHaveBeenCalledWith(1); // live app work
     expect(worker.tabsRemove).not.toHaveBeenCalledWith(6); // unrelated manual chat
   });
-  it('retires sleeping workers below the pool limit while preserving drafts and live work', async () => {
+  it('retires explicitly terminal workers while preserving drafts and live work', async () => {
     const worker = await budget({ keep: 20, retired: true, safe: n => n !== 5 });
     expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 2]);
     expect(worker.tabsRemove).not.toHaveBeenCalledWith(5);
@@ -1205,28 +1205,28 @@ describe('app-owned retained tab pool', () => {
     const worker = await budget({ keep: 20 });
     expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4]);
   });
-  it('does not charge a prime or helper tab against worker capacity', async () => {
+  it('keeps waiting prime and helper tabs as well as reusable worker tabs', async () => {
     const worker = await budget({ ordinary: 1 });
-    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 2]);
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4]);
   });
-  it('closes every expired idle managed chat even below the worker budget', async () => {
+  it('honors explicit terminal close authority independently of the former worker budget', async () => {
     const worker = await budget({ keep: 20, idle: true });
     expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 2, 3, 5]);
   });
   it('does not use tab selection as model activity', async () => {
     const worker = await budget({ recent: 5 });
-    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 2, 3]);
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4]);
   });
   it('never removes copies of a protected active conversation', async () => {
-    const worker = await budget({ protectDuplicate: true });
+    const worker = await budget({ protectDuplicate: true, retired: true });
     expect(worker.tabsRemove.mock.calls.map(call => call[0]).sort()).toEqual([2, 5]);
   });
-  it('evicts the oldest work timestamp even when tab IDs and selection say otherwise', async () => {
-    const worker = await budget({ reverseActivity: true, recent: 5 });
-    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 5, 3]);
+  it('orders terminal retirement by work time without evicting other waiting chats', async () => {
+    const worker = await budget({ reverseActivity: true, recent: 5, retired: true });
+    expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([4, 5, 2]);
   });
   it('retains drafts/unreadable pages and refuses a navigated candidate', async () => {
-    const worker = await budget({ safe: n => n !== 3 && n !== 4, changed: 5 });
+    const worker = await budget({ safe: n => n !== 3 && n !== 4, changed: 5, retired: true });
     expect(worker.tabsRemove.mock.calls.map(call => call[0])).toEqual([2]);
   });
 });

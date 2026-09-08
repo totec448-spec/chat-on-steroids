@@ -135,15 +135,17 @@ function pipeline(info, ready) {
     };
   }
 
-  const sentStage = ['done', sent && sent.total ? String(sent.total) : ''];
   if (!page.session) {
     return {
       read: readStage,
-      sent: sentStage,
+      sent: ['running'],
       proc: ['running'],
-      why: ['', 'Delivered. The app has not opened a session for this chat yet.']
+      // The worker's delivery counters cover every tab. Only the page's session
+      // receipt proves that this particular chat reached the app.
+      why: ['', 'App reachable. Waiting for this chat’s session receipt.']
     };
   }
+  const sentStage = ['done', sent && sent.total ? String(sent.total) : ''];
 
   const calls = Array.isArray(page.trace) ? page.trace : [];
   const placed = calls.filter((call) => call.app === 'request_id').length;
@@ -216,9 +218,10 @@ function paintHeader(status) {
     : off
       ? 'Disconnected'
       : !connected
-        ? 'App not running'
+        ? 'App not reachable'
         : ready
-          ? `Connected · Port ${status.port}`
+          // Health + pairing prove reachability, not the recorder/command flow.
+          ? `App reachable · Port ${status.port}`
           : `Port ${status.port} · connecting`;
 
   $('retryBtn').hidden = ready || incompatible;
@@ -393,6 +396,11 @@ $('copyBtn').addEventListener('click', (event) => {
 });
 
 $('more').addEventListener('toggle', () => paintDetails(latest.status, latest.tab));
+
+$('reloadBtn').addEventListener('click', () => {
+  // The old worker may be stuck: this explicit action belongs to the popup itself.
+  chrome.runtime.reload();
+});
 
 $('retryBtn').addEventListener('click', async () => {
   $('retryBtn').disabled = true;

@@ -1,4 +1,6 @@
 import { initUsage, refreshUsage } from './usage.js';
+import { initSidebarResize } from './sidebar-resize.js';
+import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
@@ -158,7 +160,7 @@ async function zoom(next: number): Promise<void> {
 }
 $('zoomOut').addEventListener('click', () => void zoom(zoomFactor - .1));
 $('zoomIn').addEventListener('click', () => void zoom(zoomFactor + .1));
-$('zoomReset').addEventListener('click', () => void zoom(1));
+$('zoomActualSize').addEventListener('click', () => void zoom(1));
 document.addEventListener('keydown', (event) => {
   if (!(event.ctrlKey || event.metaKey) || !['+', '=', '-', '0'].includes(event.key)) return;
   event.preventDefault(); void zoom(event.key === '0' ? 1 : zoomFactor + (event.key === '-' ? -.1 : .1));
@@ -439,6 +441,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark' } = {}): Prom
       kind: $<HTMLSelectElement>('tunnelKind').value as 'openai' | 'cloudflared' | 'manual',
       tunnelId: $<HTMLInputElement>('tunnelId').value.trim(),
       desktopTunnelId: $<HTMLInputElement>('desktopTunnelId').value.trim(),
+      pluginsTunnelId: previous.tunnel.pluginsTunnelId ?? '',
       binaryPath: $<HTMLInputElement>('binaryPath').value.trim()
     },
     ui: {
@@ -750,9 +753,8 @@ let announced = false;
  *
  * Two facts feed it and this owns neither: what the update service found (state.update, which
  * reports a `latest` only when it is genuinely newer, so nothing here compares versions), and
- * the version of the extension the bridge is talking to. An extension that is not present has
- * no version worth reporting - a stale number from a browser that has since closed would nag
- * about nothing.
+ * the last extension version observed by the bridge. A protocol mismatch can prevent presence,
+ * so an observed older version remains actionable until a current companion reports in.
  *
  * Null is the one silence that is not an answer: GitHub has not replied yet in this run, so
  * "up to date" would be a claim nobody has checked. That is what `checkedAt` is for.
@@ -761,16 +763,19 @@ let announced = false;
  * bar is for what the user can act on - a version to fetch by hand, an extension to reload -
  * while the Activity line reports every state, including the good one.
  */
-function updateSummary({ bridge, update }: AppState): { text: string; tone: UpdateTone; notice: boolean } | null {
+function updateSummary({ bridge, update, config, status }: AppState): { text: string; tone: UpdateTone; notice: boolean; extensionAction: string | null } | null {
   // Only an extension older than this app is the user's to fix. The other direction is an app
   // that has not caught up yet - normal while an update downloads - and telling that user to
   // load the bundled folder again would talk them into downgrading a working extension. The
   // app sentence already owns being behind.
   const stale =
-    bridge.present && bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion)
+    bridge.extensionVersion && isNewer(update.current, bridge.extensionVersion)
       ? bridge.extensionVersion
       : null;
-  if (!stale && !update.latest && update.stage === 'idle' && !update.checkedAt) return null;
+  // A mismatched companion can fail the protocol gate before it becomes present.
+  // Retain its last observed version until a matching companion actually reports in.
+  const missing = !stale && bridge.running && !bridge.present && isRunning(status.state) && browserExtensionRequired(config);
+  if (!stale && !missing && !update.latest && update.stage === 'idle' && !update.checkedAt) return null;
 
   const lines: string[] = [];
   let tone: UpdateTone = 'work';
@@ -795,19 +800,20 @@ function updateSummary({ bridge, update }: AppState): { text: string; tone: Upda
     tone = 'bad';
   } else if (update.stage === 'checking') {
     lines.push('Checking for a newer version…');
-  } else if (!stale) {
+  } else if (!stale && !missing) {
     const extension = bridge.present && bridge.extensionVersion ? ` · extension ${bridge.extensionVersion}` : '';
     lines.push(`Up to date! Chat On Steroids ${update.current}${extension}`);
     tone = 'ok';
   }
   if (stale) {
     lines.push(
-      `The browser extension is ${stale} and this app is ${update.current}. ` +
-        'Load the extension folder again in Chrome.'
+      `Update your browser extension: ${stale} → ${update.current}. ` +
+        'Reload the extension from this app’s folder, then refresh ChatGPT.'
     );
     tone = 'bad';
   }
-  return { text: lines.join(' '), tone, notice: Boolean(update.latest || stale) };
+  if (missing) { lines.push('Browser extension not connected. Open ChatGPT and check the companion in Setup to load models and send messages.'); tone = 'bad'; }
+  return { text: lines.join(' '), tone, notice: Boolean(update.latest || stale || missing), extensionAction: stale ? 'Update extension' : missing ? 'Check extension' : null };
 }
 
 /** The header bar, the Activity line and the one notification, from that single sentence. */
@@ -818,10 +824,13 @@ function paintUpdate(next: AppState): void {
   if (!summary) {
     notice.hidden = true;
     line.hidden = true;
+    $('updateExtension').hidden = true;
     return;
   }
   const { update } = next;
   $('updateText').textContent = summary.text;
+  $('updateExtension').hidden = !summary.extensionAction;
+  $('updateExtension').textContent = summary.extensionAction ?? 'Update extension';
   $<HTMLButtonElement>('updateGet').hidden = !update.latest || update.stage === 'checking' || update.stage === 'downloading' || update.stage === 'ready';
   // `ready` is the only state with a verified artifact on disk, and therefore the only one in
   // which pressing Install can do anything. Both buttons ask the same question of the same fact.
@@ -842,6 +851,7 @@ function paintUpdate(next: AppState): void {
 }
 
 function apply(next: AppState): void {
+  applyPluginsState(next);
   const previousState = state;
   state = next;
   applying = true;
@@ -1124,7 +1134,7 @@ function copyRow(label: string, value: string, what: string): HTMLElement {
 function connectorCards(next: AppState): HTMLElement[] {
   const { status, config } = next;
   return status.surfaces
-    .filter((surface) => surface.id !== 'desktop' || (next.platform?.desktopAutomation ?? true))
+    .filter((surface) => surface.id !== 'plugins' && (surface.id !== 'desktop' || (next.platform?.desktopAutomation ?? true)))
     .map((surface) => {
     const card = el('div', `connector is-${surface.state}`);
 
@@ -1158,7 +1168,7 @@ function connectorCards(next: AppState): HTMLElement[] {
         el(
           'p',
           'hint',
-          surface.id === 'desktop' && !config.tunnel.desktopTunnelId
+          (surface.id === 'desktop' && !config.tunnel.desktopTunnelId) || (surface.id === 'plugins' && !config.tunnel.pluginsTunnelId)
             ? 'Pick this connector’s own tunnel — paste its ID in step 2 first.'
             : 'Choose Tunnel, then pick this connector’s tunnel.'
         )
@@ -1660,6 +1670,13 @@ document.addEventListener('click', (event) => {
 });
 
 $('bridgeDownload').addEventListener('click', () => void run(api.downloadExtension()));
+$('updateExtension').addEventListener('click', () => {
+  showAllSteps = true;
+  if (state) apply(state);
+  showTab('setup');
+  step('browser').hidden = false;
+  step('browser').scrollIntoView({ block: 'center', behavior: 'smooth' });
+});
 
 api.onStateChanged(apply);
 api.onLogEntry(addLogLine);
@@ -1671,7 +1688,9 @@ async function refresh(): Promise<void> {
 }
 
 buildGroups();
+initSidebarResize();
 initUsage();
+initPlugins(apply);
 initBrowserPreferences();
 initChat({ save: () => save(), state: () => state });
 

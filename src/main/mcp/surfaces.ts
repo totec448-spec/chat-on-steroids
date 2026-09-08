@@ -24,7 +24,7 @@
 import type { Capabilities } from '../../shared/types.js';
 import { desktopAutomationSupported } from '../platform.js';
 
-export const SURFACE_IDS = ['core', 'desktop'] as const;
+export const SURFACE_IDS = ['core', 'desktop', 'plugins'] as const;
 export type SurfaceId = (typeof SURFACE_IDS)[number];
 
 /**
@@ -136,9 +136,19 @@ const DESKTOP: SurfaceDefinition = {
   tools: ['observe', 'computer']
 };
 
-export const SURFACES: Record<SurfaceId, SurfaceDefinition> = { core: CORE, desktop: DESKTOP };
+const PLUGINS: SurfaceDefinition = {
+  id: 'plugins', serverName: 'chat-on-steroids-plugins',
+  connectorName: `${CONNECTOR_BRAND} Plugins`,
+  description: 'Tools from external MCP integrations installed and enabled in Chat On Steroids Settings, including Blender and other connected applications and services.',
+  cardSummary: 'One shared connector for your enabled external MCP plugins.',
+  required: false,
+  // Dynamic declarations are owned and bounded by the plugin manager.
+  tools: []
+};
 
-export const SURFACE_LIST: readonly SurfaceDefinition[] = [CORE, DESKTOP];
+export const SURFACES: Record<SurfaceId, SurfaceDefinition> = { core: CORE, desktop: DESKTOP, plugins: PLUGINS };
+
+export const SURFACE_LIST: readonly SurfaceDefinition[] = [CORE, DESKTOP, PLUGINS];
 
 export function surfaceDefinition(id: SurfaceId): SurfaceDefinition {
   return SURFACES[id];

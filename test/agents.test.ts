@@ -2493,6 +2493,39 @@ describe('through the MCP endpoint', () => {
     expect(text).toContain('(none approved)');
   });
 
+  it.each([true, false])('unattributed shutdown reaches only the permitted command runtime (allowed=%s)', async allowed => {
+    await setEnabled(true, 3, allowed);
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    finishAgent(worker.caller, 'Sleeping');
+    expect(releaseQuiescentRun()).toBe(true);
+    await endpoint.stop();
+    let commandEnabled = true;
+    endpoint = await startMcpServer(() => ({ roots: [{ name: 'probe', path: dir }],
+      caps: { ...DEFAULT_CAPABILITIES, command: commandEnabled }, readOnly: false, sessionTools: false, agentTools: true }));
+    const { unifiedExecManager } = await import('../src/main/codex/manager.js');
+    const allocation = vi.spyOn(unifiedExecManager, 'allocateProcessId').mockReturnValue(77777);
+    // Never invoke the OS shutdown: intercept the process boundary and inspect its arguments.
+    const execution = vi.spyOn(unifiedExecManager, 'execCommand').mockResolvedValue({ chunkId: 'shutdown-test', wallTimeMs: 0,
+      rawOutput: Buffer.from('shutdown intercepted'), truncationPolicy: { kind: 'tokens', tokens: 1000 },
+      maxOutputTokens: 1000, processId: null, exitCode: 0, originalTokenCount: null, outputOmittedBytes: null });
+    try {
+      const args = { cmd: 'shutdown.exe /s /t 0', workdir: '/probe' };
+      const reply = await callTool('exec_command', args);
+      if (allowed) {
+        expect(reply).toContain('shutdown intercepted');
+        expect(execution).toHaveBeenCalledWith(expect.objectContaining({ cwd: dir, hookCommand: args.cmd }));
+        execution.mockClear();
+        commandEnabled = false;
+        await callTool('exec_command', args);
+        expect(execution).not.toHaveBeenCalled();
+      } else {
+        expect(reply).toContain('CALLER_IDENTITY_REQUIRED');
+        expect(execution).not.toHaveBeenCalled();
+      }
+    } finally { execution.mockRestore(); allocation.mockRestore(); await setEnabled(true); }
+  });
+
   it('waits for late exact identity while dormant worker histories exist, then revives that worker', async () => {
     startSwarm(1);
     const worker = startWorker('worker-1');

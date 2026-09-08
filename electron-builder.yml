@@ -26,6 +26,12 @@ files:
 extraResources:
   - from: LICENSE
     to: LICENSE
+  - from: THIRD-PARTY-NOTICES.txt
+    to: THIRD-PARTY-NOTICES.txt
+  - from: node_modules/electron/dist/LICENSE
+    to: LICENSE.electron.txt
+  - from: node_modules/electron/dist/LICENSES.chromium.html
+    to: LICENSES.chromium.html
   - from: extension
     to: extension
     filter:

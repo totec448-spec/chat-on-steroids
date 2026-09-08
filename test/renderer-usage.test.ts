@@ -80,3 +80,24 @@ it('shows the Sol picker alias rate and preserves an explicitly cleared rate aft
   expect(rate().value).toBe('');
   expect(dom.window.document.getElementById('usageDays')!.textContent).toContain('Rate unknown');
 });
+
+it('combines equivalent recorded names in the table while keeping raw rate edits and partial unknown cost', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const models = ['5.6', 'gpt-5-6-thinking', 'gpt-5.6-sol'].map(model => ({ model, reasoningEffort: 'high', assumed: false, tokens: 1e6 }));
+  const data: UsageOverview = { tokens: 3e6, models, days: [{ date: '2026-09-08', tokens: 3e6, models }], sessions: 1, limits: [] };
+  const getUsage = vi.fn(async () => ({ ok: true, data }));
+  Object.assign(dom.window, { api: { getUsage, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
+  const usage = await import('../src/renderer/usage.js'); usage.initUsage(); await usage.refreshUsage();
+  const table = () => dom.window.document.querySelector('#usageDays table')!;
+  expect(table().querySelectorAll('tr')).toHaveLength(2);
+  expect(table().textContent).toContain('gpt-5.6-sol · high');
+  expect(table().textContent).toContain('1.44');
+  expect(table().querySelector('[data-usage-hint]')!.getAttribute('data-usage-hint')).toBe('Recorded IDs: 5.6, gpt-5-6-thinking, gpt-5.6-sol');
+  expect(dom.window.document.querySelectorAll('#usageRates input')).toHaveLength(3);
+  const rate = dom.window.document.querySelector('input[aria-label="5.6 cached-input USD per million tokens"]') as HTMLInputElement;
+  rate.value = ''; rate.dispatchEvent(new dom.window.Event('input'));
+  expect(table().textContent).toContain('0.96 + unpriced');
+  expect(getUsage).toHaveBeenCalledTimes(1);
+  expect(models[0]!.model).toBe('5.6');
+});

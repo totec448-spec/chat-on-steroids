@@ -12,6 +12,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  sources:
+    name: Package native library sources
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Verify and archive corresponding native sources
+        run: node scripts/package-native-sources.mjs
+      - name: Upload source artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package-native-sources
+          path: release/Chat-On-Steroids-Native-Sources.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
   package:
     name: Package ${{ matrix.name }}
     strategy:
@@ -300,7 +319,7 @@ jobs:
 
   assemble:
     name: Assemble release candidate
-    needs: package
+    needs: [package, sources]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -339,6 +358,7 @@ jobs:
             release/Chat-On-Steroids-Linux-arm64.AppImage
             release/Chat-On-Steroids-Linux-arm64.deb
             release/Chat-On-Steroids-Extension.zip
+            release/Chat-On-Steroids-Native-Sources.tar.gz
           )
           for file in "${files[@]}"; do test -f "$file" || { echo "Missing $file" >&2; exit 1; }; done
           (cd release && sha256sum \
@@ -352,7 +372,8 @@ jobs:
             Chat-On-Steroids-Linux-x64.deb \
             Chat-On-Steroids-Linux-arm64.AppImage \
             Chat-On-Steroids-Linux-arm64.deb \
-            Chat-On-Steroids-Extension.zip > SHA256SUMS.txt)
+            Chat-On-Steroids-Extension.zip \
+            Chat-On-Steroids-Native-Sources.tar.gz > SHA256SUMS.txt)
           cat release/SHA256SUMS.txt
 
       - name: Upload release candidate
@@ -373,6 +394,7 @@ jobs:
             release/Chat-On-Steroids-Linux-arm64.AppImage
             release/Chat-On-Steroids-Linux-arm64.deb
             release/Chat-On-Steroids-Extension.zip
+            release/Chat-On-Steroids-Native-Sources.tar.gz
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30

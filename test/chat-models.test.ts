@@ -1,10 +1,28 @@
 import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery } from '../src/main/chat-models.js';
+import { getChatModels, requestChatModels, pendingChatModelRequest, observeChatModels, resetChatModelsForTests, configureChatModelDiscovery, startChatModelDiscovery, restoreChatModels } from '../src/main/chat-models.js';
+const saved = vi.hoisted(() => ({ value: null as unknown }));
+vi.mock('../src/main/durable.js', () => ({ readDurable: async () => saved.value, writeDurableSoon: (_name: string, value: unknown) => { saved.value = structuredClone(value); } }));
 const models = [{ id: 'gpt-example', label: 'GPT Example', efforts: ['none', 'medium', 'high', 'xhigh'] }];
-beforeEach(() => { resetChatModelsForTests(); vi.useFakeTimers(); });
+beforeEach(() => { resetChatModelsForTests(); saved.value = null; vi.useFakeTimers(); });
 afterEach(() => vi.useRealTimers());
-describe('ephemeral observed ChatGPT model catalog', () => {
+describe('durable observed ChatGPT model catalog', () => {
+  it('restores successful choices after restart without restoring browser opening authority', async () => {
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
+    resetChatModelsForTests(); await restoreChatModels();
+    expect(getChatModels()).toMatchObject({ state: 'ready', models });
+    expect(pendingChatModelRequest()).toBeNull();
+    const wake = vi.fn(async () => {}); configureChatModelDiscovery({ wake, changed: () => {} });
+    await startChatModelDiscovery(false);
+    expect(wake).not.toHaveBeenCalled();
+  });
+  it('keeps usable choices through refresh and a failed refresh', () => {
+    requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
+    requestChatModels();
+    expect(getChatModels()).toMatchObject({ state: 'pending', models });
+    observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: null });
+    expect(getChatModels()).toMatchObject({ state: 'ready', models, error: expect.any(String) });
+  });
   it('explains a missing native picker without claiming sign-in failure or inventing models', () => {
     requestChatModels();
     observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models: null, error: 'picker_unavailable' });
@@ -88,7 +106,7 @@ describe('ephemeral observed ChatGPT model catalog', () => {
     requestChatModels(); observeChatModels({ nonce: pendingChatModelRequest()!.nonce, models });
     vi.advanceTimersByTime(300000);
     expect(getChatModels()).toMatchObject({ state: 'ready', models });
-    expect(requestChatModels()).toMatchObject({ state: 'pending', models: [], observedAt: null });
+    expect(requestChatModels()).toMatchObject({ state: 'pending', models });
   });
   it('bounds observations, excludes arbitrary metadata and refuses duplicate or invented efforts', () => {
     requestChatModels(); const nonce = pendingChatModelRequest()!.nonce;

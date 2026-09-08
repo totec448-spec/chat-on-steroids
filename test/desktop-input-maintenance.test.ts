@@ -6,8 +6,90 @@ import { BRIDGE_PROTOCOL } from '../src/main/version.js';
 const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
 const firstId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const secondId = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
-type Tab = { id: number; url?: string; pendingUrl?: string; windowId?: number };
-async function worker(inputs: Array<{ id: string; conversationId: string | null }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}) {
+
+it('missing models retain the elected Work document without a New Chat or helper fallback', async () => {
+  const h = await worker([]);
+  const original = { id: 8, url: `https://chatgpt.com/c/${secondId}` }; h.tabs.push(original);
+  await h.authorizeDocument({ tab: { id: 8 }, documentId: 'work-page', frameId: 0, url: original.url }, { navigationEpoch: 1 });
+  h.sendMessage.mockImplementation(async (tabId, message): Promise<any> => {
+    const tab = h.tabs.find(row => row.id === tabId)!;
+    if (message.type === 'clf-model-catalog-state') return { ready: true };
+    if (message.type === 'clf-model-catalog') {
+      if (tabId === 8) return { ok: false, prepare: true, preSend: true, url: tab.url };
+      return { ok: true };
+    }
+    if (message.type === 'clf-prepare-model-catalog') return { ready: false, fallback: true, preSend: true, url: tab.url };
+    if (message.type === 'clf-input-reuse-state') return { safe: tabId !== 8, navigationEpoch: 1 };
+    if (message.type === 'clf-prepare-desktop-input') { tab.url = `https://chatgpt.com/?cos-input=${firstId}`; return { ready: true }; }
+    return { ok: true };
+  });
+  const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true };
+  await h.inspectModels(request, true);
+  await h.inspectModels(request, true);
+  expect(h.saved.modelCatalogOwner).toMatchObject({ nonce: firstId, tab: 8 });
+  expect(h.create).not.toHaveBeenCalled();
+  expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-prepare-model-catalog')).toHaveLength(0);
+  expect(original.url).toBe(`https://chatgpt.com/c/${secondId}`);
+});
+
+it.each(['passive', 'missing-receipt', 'closed', 'cancelled'])('catalog %s cannot authorize a fallback tab', async reason => {
+  const h = await worker([]);
+  h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${secondId}` });
+  await h.authorizeDocument({ tab: { id: 8 }, documentId: 'work-page', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+  h.sendMessage.mockImplementation(async (_tabId, message): Promise<any> => {
+    if (message.type === 'clf-model-catalog-state') return { ready: true };
+    if (message.type === 'clf-model-catalog') return { prepare: true, preSend: true, url: h.tabs[0]?.url };
+    if (message.type === 'clf-prepare-model-catalog') {
+      if (reason === 'closed') h.tabs.splice(0);
+      if (reason === 'missing-receipt') return undefined;
+      return { ready: false, fallback: reason !== 'cancelled', preSend: true, url: `https://chatgpt.com/c/${secondId}` };
+    }
+    return { ok: true };
+  });
+  const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: reason !== 'passive' };
+  await h.inspectModels(request, true); await h.inspectModels(request, true);
+  expect(h.create).not.toHaveBeenCalled();
+  expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-prepare-model-catalog')).toHaveLength(0);
+});
+it('waits for an existing hydrating or busy ChatGPT tab rather than opening another catalog helper', async () => {
+  const h = await worker([]);
+  h.tabs.push({ id: 8, url: 'https://chatgpt.com/' });
+  h.sendMessage.mockResolvedValue({ ok: true, ready: false });
+  await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true }, true);
+  expect(h.create).not.toHaveBeenCalled();
+});
+it('elects the usable chat when an older Settings tab reports its composer hidden', async () => {
+  const h = await worker([]);
+  h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${firstId}#settings/Plugins` }, { id: 8, url: `https://chatgpt.com/c/${secondId}` });
+  h.sendMessage.mockImplementation(async (id, message) => message.type === 'clf-model-catalog-state' ? { ok: true, ready: id === 8 } : { ok: true });
+  await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: true }, true);
+  expect(h.saved.modelCatalogOwner).toMatchObject({ nonce: firstId, tab: 8 });
+  expect(h.sendMessage).toHaveBeenCalledWith(8, expect.objectContaining({ type: 'clf-model-catalog' }));
+  expect(h.sendMessage.mock.calls.filter(([id, message]) => id === 7 && message.type === 'clf-model-catalog')).toHaveLength(0);
+  expect(h.create).not.toHaveBeenCalled();
+});
+it.each(['empty', 'draft', 'navigated', 'rejected', 'transport'])('terminal worker failure retires only the exact empty document (%s)', async mode => {
+  const h = await worker([]);
+  const source = { tab: 8, documentId: 'failed-worker', navigationEpoch: 1 };
+  h.tabs.push({ id: 8, url: `https://chatgpt.com/?clf=${firstId}` });
+  await h.authorizeDocument({ tab: { id: 8 }, documentId: source.documentId, frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+  h.fetch.mockImplementation(async input => ({ ok: mode !== 'transport', status: mode === 'transport' ? 503 : 200,
+    json: async () => new URL(input).pathname === '/hello'
+      ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
+      : { ok: true, outcome: mode === 'rejected' ? 'committed' : 'terminal-failure', committed: false } }));
+  h.sendMessage.mockImplementation(async (_tabId, message): Promise<any> => {
+    if (message.type === 'clf-tab-close-check') {
+      if (mode === 'navigated') h.tabs[0]!.url = `https://chatgpt.com/c/${secondId}`;
+      return { safe: mode !== 'draft', conversationId: null, navigationEpoch: 1 };
+    }
+    return { ok: true };
+  });
+  await (h as any).ackCommand(firstId, 'failed', 'model unavailable', null, null, 'worker-client', source);
+  expect(h.remove).toHaveBeenCalledTimes(mode === 'empty' ? 1 : 0);
+  if (mode === 'empty') expect(h.sendMessage).toHaveBeenCalledWith(8, { type: 'clf-tab-close-check', conversationId: null, failedCommand: { id: firstId, client: 'worker-client' } }, { documentId: source.documentId });
+});
+type Tab = { id: number; url?: string; pendingUrl?: string; windowId?: number; active?: boolean };
+async function worker(inputs: Array<{ id: string; conversationId: string | null; supersededConversationId?: string }>, modelCatalogRequest?: { nonce: string; expiresAt: number }, priorLocal: Record<string, unknown> = {}) {
   const tabs: Tab[] = [];
   const event = { addListener: () => {} };
   const localSaved: Record<string, unknown> = { port: 8765, token: 'test-pairing', ...priorLocal };
@@ -42,14 +124,42 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null 
     },
     fetch, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, TextEncoder, console
   });
-  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, applyRequestedBrowserPreferences };`, context);
-  const api = context.testMaintenance as { applyRequestedBrowserPreferences(request: object): Promise<void>; authorizeDocument(sender: unknown, message: unknown): Promise<any>; catalog(message: unknown, sender: unknown, source: unknown): Promise<any>; load(): Promise<void>; maintain(): Promise<void>; createChatTab(url: string, background: boolean): Promise<Tab> };
+  vm.runInContext(`${source}\nglobalThis.testMaintenance = { load, maintain, releaseTab, serializeTab, noteTabConversation, createChatTab, authorizeDocument, ackDesktopInput, drainCommandAcks, inspectRequestedModels, desktopInput: HANDLERS.desktop_input, catalog: HANDLERS.model_catalog, events: HANDLERS.events, applyRequestedBrowserPreferences };`, context);
+  const api = context.testMaintenance as { releaseTab(...args: any[]): Promise<any>; serializeTab(tab: number, operation: () => Promise<any>): Promise<any>; noteTabConversation(source: any, conversationId: string): Promise<any>; applyRequestedBrowserPreferences(request: object): Promise<void>; authorizeDocument(sender: unknown, message: unknown): Promise<any>; catalog(message: unknown, sender: unknown, source: unknown): Promise<any>; load(): Promise<void>; maintain(): Promise<void>; createChatTab(url: string, background: boolean): Promise<Tab> };
   await api.load();
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
   return { ...api, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, local, localSaved, saved };
 }
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
+  it('moves a queued checkpoint to its existing compacted successor once, including legacy elections', async () => {
+    const input = { id: firstId, conversationId: secondId, supersededConversationId: firstId };
+    const h = await worker([input], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${firstId}` }, { id: 8, url: `https://chatgpt.com/c/${secondId}` });
+    await h.maintain();
+    expect(h.sendMessage).toHaveBeenCalledWith(8, expect.objectContaining({ type: 'clf-desktop-input', id: firstId, conversationId: secondId }));
+    expect(h.create).not.toHaveBeenCalled();
+    h.tabs.splice(1, 1, { id: 9, url: `https://chatgpt.com/c/${secondId}` });
+    h.sendMessage.mockClear();
+    await h.maintain();
+    expect(h.sendMessage.mock.calls.some(([id, message]) => id === 9 && message.type === 'clf-desktop-input')).toBe(false);
+    expect(h.create).not.toHaveBeenCalled();
+    const restarted = await worker([input], undefined, h.localSaved);
+    restarted.tabs.push({ id: 9, url: `https://chatgpt.com/c/${secondId}` });
+    await restarted.maintain();
+    expect(restarted.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-desktop-input')).toBe(false);
+    expect(restarted.create).not.toHaveBeenCalled();
+  });
+
+  it('does not open a missing successor for an already elected checkpoint', async () => {
+    const h = await worker([{ id: firstId, conversationId: secondId, supersededConversationId: firstId }], undefined,
+      { inputOpenings: { [firstId]: { tab: 7, conversationId: firstId, stage: 'ready' } } });
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${firstId}` });
+    await h.maintain();
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-desktop-input')).toBe(false);
+  });
+
   it.each(['closed', 'navigated'])('does not reopen an elected input tab after it is %s, including browser restart', async reason => {
     const input = { id: firstId, conversationId: null };
     const h = await worker([input]);
@@ -172,13 +282,12 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     });
     await h.maintain(); expect(h.remove).not.toHaveBeenCalled();
   });
-  it('bounds the owned minimized window inside the work area without requesting focus or restore', async () => {
+  it('creates a small owned restore size, then minimizes without changing geometry again', async () => {
     const h = await worker([{ id: firstId, conversationId: null }]);
-    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, ok: true, inputs: [{ id: firstId, conversationId: null }], background: true, browserWorkArea: { x: -1920, y: 0, width: 1920, height: 1040 } }) });
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, ok: true, inputs: [{ id: firstId, conversationId: null }], background: true, browserWindowBounds: { left: -1510, top: 220, width: 800, height: 600 } }) });
     await h.maintain();
-    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, state: 'minimized' }));
-    expect(h.windows.update).toHaveBeenCalledWith(80, { left: -1510, top: 120, width: 1100, height: 800 });
-    expect(h.windows.update.mock.calls.every(call => !('focused' in (call[1] as object)) && !('state' in (call[1] as object)))).toBe(true);
+    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, left: -1510, top: 220, width: 800, height: 600 }));
+    expect(h.windows.update).toHaveBeenCalledExactlyOnceWith(80, { state: 'minimized', focused: false });
   });
   it('reuses an idle conversation without opening or navigating a helper', async () => {
     const h = await worker([]);
@@ -192,8 +301,9 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
   it('keeps catalog discovery minimized and unfocused even when foreground chats are preferred', async () => {
     const h = await worker([]);
     await h.inspectModels({ nonce: firstId, expiresAt: Date.now() + 30000 }, false);
-    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, state: 'minimized' }));
-    expect(h.windows.update).not.toHaveBeenCalled();
+    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, width: 800, height: 600 }));
+    expect(h.windows.update).toHaveBeenCalledWith(80, { state: 'minimized', focused: false });
+    expect(h.windows.update).toHaveBeenCalledTimes(1);
   });
   it('places an offered worker in its unfocused background window with discard protection', async () => {
     const h = await worker([]);
@@ -205,14 +315,15 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
       return { ok: true, placement, inputs: [], background: true };
     } }));
     await h.maintain();
-    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, state: 'minimized' }));
-    expect(h.windows.update).not.toHaveBeenCalled();
+    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ focused: false, width: 800, height: 600 }));
+    expect(h.windows.update).toHaveBeenCalledWith(80, { state: 'minimized', focused: false });
+    expect(h.windows.update).toHaveBeenCalledTimes(1);
     expect(h.update).toHaveBeenCalledWith(1, { autoDiscardable: false });
     expect(String(h.create.mock.calls[0]?.[0]?.url)).toContain('model=gpt-5.6-sol&reasoning_effort=medium');
     await h.maintain();
     expect(h.create).toHaveBeenCalledTimes(1);
   });
-  it('retires the completed exact dedicated catalog and preserves its opening tombstone', async () => {
+  it('retains the completed exact dedicated catalog for first-message reuse', async () => {
     const h = await worker([]);
     h.tabs.push({ id: 7, url: `https://chatgpt.com/?cos-model-catalog=${firstId}` }, { id: 8, url: `https://chatgpt.com/c/${secondId}` });
     await h.authorizeDocument({ tab: { id: 7 }, documentId: 'catalog', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
@@ -221,15 +332,15 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     h.remove.mockImplementation(async id => { h.tabs.splice(h.tabs.findIndex(tab => tab.id === id), 1); });
     const request = { nonce: secondId, expiresAt: Date.now() + 60000 };
     await h.inspectModels(request, true);
-    expect(h.remove.mock.calls).toEqual([[7]]);
+    expect(h.remove).not.toHaveBeenCalled();
     expect(h.saved.modelCatalogOwner).toEqual({ nonce: secondId, tab: 7 });
     await h.inspectModels(request, true);
     await h.inspectModels(null, true);
     expect(h.create).not.toHaveBeenCalled();
     expect(h.update).not.toHaveBeenCalled();
-    expect(h.remove).toHaveBeenCalledTimes(1);
+    expect(h.remove).not.toHaveBeenCalled();
   });
-  it('retires a sole completed catalog on later maintenance after its draft clears', async () => {
+  it('retains a sole completed catalog after its draft clears', async () => {
     const h = await worker([]);
     h.tabs.push({ id: 7, url: `https://chatgpt.com/?cos-model-catalog=${firstId}` });
     await h.authorizeDocument({ tab: { id: 7 }, documentId: 'catalog', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
@@ -240,7 +351,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.remove).not.toHaveBeenCalled();
     safe = true;
     await h.inspectModels(null, true);
-    expect(h.remove.mock.calls).toEqual([[7]]);
+    expect(h.remove).not.toHaveBeenCalled();
     expect(h.create).not.toHaveBeenCalled();
   });
   it('preserves a draft on a catalog marker and waits for unreachable old helpers instead of accumulating tabs', async () => {
@@ -251,6 +362,78 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.create).not.toHaveBeenCalled();
     h.sendMessage.mockResolvedValue({ ok: true, ready: false });
     await h.inspectModels(null, true);
+    expect(h.remove).not.toHaveBeenCalled();
+  });
+  it('hands the retained catalog to the first new input and never reopens it after the user closes it', async () => {
+    const h = await worker([{ id: firstId, conversationId: null }]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/?cos-model-catalog=${secondId}` });
+    h.saved.modelCatalogOwner = { nonce: secondId, tab: 7 };
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'warm', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-input-reuse-state') return { ok: true, safe: true, navigationEpoch: 1 } as never;
+      if (message.type === 'clf-prepare-desktop-input') h.tabs[0]!.url = `https://chatgpt.com/?cos-input=${firstId}#cos-input=${firstId}`;
+      return { ok: true, ready: true };
+    });
+    await h.maintain();
+    expect(h.sendMessage).toHaveBeenCalledWith(7, { type: 'clf-prepare-desktop-input', id: firstId }, { documentId: 'warm' });
+    expect(h.update).not.toHaveBeenCalled();
+    expect(h.create).not.toHaveBeenCalled(); expect(h.remove).not.toHaveBeenCalled();
+    await h.maintain();
+    expect(h.sendMessage).toHaveBeenCalledWith(7, { type: 'clf-desktop-input', id: firstId, conversationId: null });
+    h.tabs.splice(0);
+    await h.maintain();
+    await h.inspectModels({ nonce: secondId, expiresAt: Date.now() + 60000 }, true);
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it.each(['https://chatgpt.com/', `https://chatgpt.com/c/${secondId}`])('reuses a safe unmarked idle page %s for a new input', async url => {
+    const h = await worker([{ id: firstId, conversationId: null }]);
+    h.tabs.push({ id: 7, url, active: true });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'idle', frameId: 0, url }, { navigationEpoch: 1 });
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, ok: true, inputs: [{ id: firstId, conversationId: null }], reusableConversations: [secondId] }) });
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-input-reuse-state') return { ok: true, safe: true, navigationEpoch: 1 } as never;
+      if (message.type === 'clf-prepare-desktop-input') h.tabs[0]!.url = `https://chatgpt.com/?cos-input=${firstId}`;
+      return { ok: true, ready: true };
+    });
+    await h.maintain(); await h.maintain();
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.sendMessage).toHaveBeenCalledWith(7, { type: 'clf-desktop-input', id: firstId, conversationId: null });
+    expect((h.localSaved.inputOpenings as any)[firstId].tab).toBe(7);
+  });
+  it.each(['explicit-failure', 'ambiguous', 'closed'])('allows a single pre-send fallback only for %s', async reason => {
+    const h = await worker([{ id: firstId, conversationId: null }]);
+    h.tabs.push({ id: 7, url: 'https://chatgpt.com/' });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'idle', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-input-reuse-state') return { ok: true, safe: true, navigationEpoch: 1 } as never;
+      if (message.type === 'clf-prepare-desktop-input') {
+        if (reason === 'ambiguous') throw new Error('lost response');
+        if (reason === 'closed') h.tabs.length = 0;
+        return { ready: false, fallback: true, preSend: true } as never;
+      }
+      return { ok: false };
+    });
+    await h.maintain(); await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(reason === 'explicit-failure' ? 1 : 0);
+    h.tabs.length = 0;
+    await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(reason === 'explicit-failure' ? 1 : 0);
+  });
+  it('delivers follow-up messages into an already open waiting conversation without closing or creating tabs', async () => {
+    const h = await worker([{ id: firstId, conversationId: secondId }]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    await h.maintain(); await h.maintain();
+    expect(h.sendMessage).toHaveBeenCalledWith(7, { type: 'clf-desktop-input', id: firstId, conversationId: secondId });
+    expect(h.create).not.toHaveBeenCalled(); expect(h.remove).not.toHaveBeenCalled(); expect(h.update).not.toHaveBeenCalled();
+  });
+  it('does not overwrite a draft to reuse a catalog document', async () => {
+    const h = await worker([{ id: firstId, conversationId: null }]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/?cos-model-catalog=${secondId}` });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'draft', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_id, message) => message.type === 'clf-tab-close-check'
+      ? { ok: true, safe: false, conversationId: null, navigationEpoch: 1 } as never : { ok: true, ready: true });
+    await h.maintain();
+    expect(h.update.mock.calls.some(([id, patch]) => id === 7 && 'url' in patch)).toBe(false);
     expect(h.remove).not.toHaveBeenCalled();
   });
   it('adopts the oldest ready catalog and retires only its exact empty duplicate after restart', async () => {
@@ -400,6 +583,18 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect((await h.catalog(message, sender, source)).ok).toBe(false);
     expect(h.remove).not.toHaveBeenCalled();
   });
+  it('reserves initial catalog opening before Chrome acts and never retries an ambiguous failure', async () => {
+    const h = await worker([]);
+    const request = { nonce: firstId, expiresAt: Date.now() + 120000, allowOpen: true };
+    h.windows.create.mockImplementation(async () => {
+      expect(h.saved.modelCatalogOwner).toEqual({ nonce: firstId, opening: true });
+      throw new Error('Chrome may already have created the window');
+    });
+    await h.inspectModels(request, true);
+    await h.inspectModels(request, true);
+    expect(h.windows.create).toHaveBeenCalledTimes(1);
+    expect(h.saved.modelCatalogOwner).toEqual({ nonce: firstId, opening: true });
+  });
   it('opens one owned blank catalog tab without blocking maintenance on DOM inspection', async () => {
     const request = { nonce: firstId, expiresAt: Date.now() + 120000 };
     const h = await worker([], request);
@@ -420,9 +615,9 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     h.tabs.push({ id: 90, windowId: 3, url: 'https://chatgpt.com/c/user-chat' });
     await Promise.all([h.createChatTab('https://chatgpt.com/?first', true), h.createChatTab('https://chatgpt.com/?second', true)]);
     expect(h.windows.create).toHaveBeenCalledTimes(1);
-    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ state: 'minimized', focused: false }));
+    expect(h.windows.create).toHaveBeenCalledWith(expect.objectContaining({ width: 800, height: 600, focused: false }));
     expect(h.create.mock.calls.every(([args]) => args.windowId === 80)).toBe(true);
-    expect(h.windows.update).not.toHaveBeenCalled();
+    expect(h.windows.update).toHaveBeenCalledExactlyOnceWith(80, { state: 'minimized', focused: false });
     h.create.mockRejectedValueOnce(new Error('tab failed'));
     await expect(h.createChatTab('https://chatgpt.com/?third', true)).rejects.toThrow('tab failed');
     expect(h.windows.create).toHaveBeenCalledTimes(1);
@@ -452,7 +647,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.sendMessage).toHaveBeenCalledTimes(2);
   });
 
-  it('releases a failed flight without repeating its opening and matches exact marker identity', async () => {
+  it('releases a failed flight without granting another opening after ambiguous Chrome failure', async () => {
     const h = await worker([{ id: firstId, conversationId: null }]);
     h.tabs.push({ id: 50, url: `https://chatgpt.com/?other=cos-input=${firstId}` });
     h.create.mockRejectedValueOnce(new Error('Chrome temporarily refused tab creation'));
@@ -491,4 +686,47 @@ describe('Stop uses an existing exact registered browser document', () => {
     expect(JSON.parse(String(ack?.[1]?.body))).toMatchObject({ turnId: 'exact-turn', conversationId: firstId, client: 'stop-document' });
     expect(restarted.sendMessage).not.toHaveBeenCalled();
   });
+});
+
+it('releases departed-chat ownership so input claims and model discovery cannot deadlock each other', async () => {
+  const inputs: Array<{ id: string; conversationId: string | null }> = [];
+  const h = await worker(inputs, { nonce: firstId, expiresAt: Date.now() + 60000 });
+  const tab = { id: 7, url: `https://chatgpt.com/c/${secondId}` }; h.tabs.push(tab);
+  const sender = { tab: { id: 7 }, documentId: 'reused-document', frameId: 0 };
+  const source = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+  await h.noteTabConversation(source, secondId);
+  // Chrome reports A's departure as New Chat prepares B in the elected tab.
+  tab.url = `https://chatgpt.com/?cos-input=${firstId}#cos-input=${firstId}`;
+  inputs.push({ id: firstId, conversationId: null });
+  let claimed = false, catalogObserved = false;
+  h.sendMessage.mockImplementation(async (id, message) => {
+    if (message.type === 'clf-model-catalog-state') return { ok: true, ready: true };
+    if (message.type === 'clf-model-catalog') {
+      await h.serializeTab(id, async () => {
+        const current = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+        const result = await h.catalog({ nonce: firstId, models: [{ id: 'observed-model', label: 'Observed model', efforts: ['high'] }] }, sender, current);
+        catalogObserved = result.ok;
+      });
+    }
+    if (message.type === 'clf-desktop-input') {
+      // Real desktop_input IPC uses the same serializeTab queue as releaseTab.
+      await h.serializeTab(id, async () => {
+        const current = await h.authorizeDocument(sender, { navigationEpoch: 1 });
+        const result = await h.desktopInput({ id: firstId, conversationId: null, requiresAuthorization: true }, sender, current);
+        claimed = result.ok;
+      });
+    }
+    return { ok: true };
+  });
+  let released = false;
+  const departure = h.serializeTab(7, () => h.releaseTab(7, secondId, sender.documentId, 1))
+    .then(() => { released = true; });
+  // A bounded observation exposes the circular wait in the old implementation.
+  await vi.waitFor(() => { expect(released).toBe(true); expect(claimed).toBe(true); expect(catalogObserved).toBe(true); });
+  await departure; await h.maintain();
+  expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/closed')).toBe(true);
+  expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/input/claim')).toBe(true);
+  expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/models')).toBe(true);
+  expect(h.localSaved.inputOpenings).toMatchObject({ [firstId]: { tab: 7, stage: 'ready' } });
+  expect(h.create).not.toHaveBeenCalled();
 });

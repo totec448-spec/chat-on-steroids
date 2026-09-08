@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   appendEvent,
+  flushSessions,
   getSession,
   setSessionOrigin,
   createSession,
@@ -14,6 +15,7 @@ import {
   reopenSession,
   resetSessionStoreForTests
 } from '../src/main/session/store.js';
+import { upsertMessageEvent } from '../src/main/session/store.js';
 import type { SessionEvent, SessionSummary } from '../src/shared/session.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -35,6 +37,59 @@ afterEach(async () => {
 });
 
 describe('session summary pages', () => {
+  it('finishes legacy canonical migration once even when no duplicate aliases need repair', async () => {
+    const session = await createSession({ title: 'legacy clean checkpoint' });
+    await upsertMessageEvent(session.id, { time: 1, source: 'extension', kind: 'assistant_message',
+      messageId: 'one', providerMessageId: 'provider-one', final: true,
+      message: { text: 'Preserved answer', chars: 16, truncated: false } });
+    await endSession(session.id);
+    const folder = path.join(dir, 'sessions', session.id);
+    const metaFile = path.join(folder, 'meta.json');
+    const legacy = JSON.parse(await fs.readFile(metaFile, 'utf8'));
+    delete legacy.__canonicalProjection;
+    await fs.writeFile(metaFile, JSON.stringify(legacy));
+    resetSessionStoreForTests();
+
+    const first = await listSessionPage({ limit: 1 });
+    expect(first.sessions[0]).toMatchObject({ id: session.id, events: legacy.events, estimatedTokens: legacy.estimatedTokens });
+    expect(JSON.parse(await fs.readFile(metaFile, 'utf8')).__canonicalProjection).toBe(1);
+    // A later cold launch must use the completed migration without rereading the transcript.
+    await fs.utimes(metaFile, new Date(), new Date(Date.now() + 1000));
+    resetSessionStoreForTests();
+    const readFile = vi.spyOn(fs, 'readFile');
+    expect((await listSessionPage({ limit: 1 })).sessions[0]).toMatchObject({ id: session.id, events: legacy.events });
+    expect(readFile.mock.calls.some(([target]) => /[\\/]messages(?:[\\/]|\.json$)|events\.jsonl$/.test(String(target)))).toBe(false);
+  });
+
+  it('does not read clean retained transcripts to paint the cold first page', async () => {
+    const session = await createSession({ title: 'retained history', conversationId: 'retained-chat' });
+    await appendEvent(session.id, { time: Date.now(), source: 'app', kind: 'note', message: { text: 'recorded history', chars: 16, truncated: false } });
+    await endSession(session.id);
+    // Make the durable write ordering explicit even on filesystems with coarse clocks.
+    const folder = path.join(dir, 'sessions', session.id);
+    await fs.utimes(path.join(folder, 'meta.json'), new Date(), new Date(Date.now() + 1000));
+    resetSessionStoreForTests();
+    const readFile = vi.spyOn(fs, 'readFile'); const readdir = vi.spyOn(fs, 'readdir');
+    const first = await listSessionPage({ limit: 1 });
+    expect(first.sessions[0]).toMatchObject({ id: session.id, events: 1 });
+    expect(readFile.mock.calls.some(([target]) => /[\\/]messages(?:[\\/]|\.json$)|events\.jsonl$/.test(String(target)))).toBe(false);
+    expect(readdir.mock.calls.some(([target]) => String(target).endsWith(`${path.sep}messages`))).toBe(false);
+  });
+
+  it('reconciles a crashed canonical revision when metadata and history clocks are equal', async () => {
+    const session = await createSession({ title: 'same timestamp crash' });
+    await upsertMessageEvent(session.id, { time: 1, source: 'extension', kind: 'user_message', messageId: 'one', message: { text: 'short', chars: 5, truncated: false } });
+    await flushSessions();
+    await upsertMessageEvent(session.id, { time: 2, source: 'extension', kind: 'user_message', messageId: 'one', message: { text: 'long '.repeat(1000), chars: 5000, truncated: false } });
+    const folder = path.join(dir, 'sessions', session.id); const sameTime = new Date();
+    await fs.utimes(path.join(folder, 'messages'), sameTime, sameTime);
+    await fs.utimes(path.join(folder, 'meta.json'), sameTime, sameTime);
+    resetSessionStoreForTests();
+    const first = await listSessionPage({ limit: 1 });
+    expect(first.sessions[0]!.estimatedTokens).toBeGreaterThan(500);
+    expect(first.sessions[0]!.userMessages).toBe(1);
+  });
+
   it('reads retained metadata once, then serves hot list refreshes from the summary index', async () => {
     for (let index = 0; index < 8; index++) {
       const session = await createSession({ title: `cached-${index}`, conversationId: null });
@@ -267,7 +322,7 @@ describe('visible Chat refresh', () => {
     chatVisible(true);
     await vi.waitFor(() => expect(listCalls).toHaveLength(1));
     await vi.waitFor(() =>
-      expect(w.document.getElementById('sessionsFoot')?.textContent).toContain('60 of 65 retained sessions shown')
+      expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(60)
     );
 
     const pane = w.document.getElementById('sessionList')!.closest('.scroll') as HTMLElement;
@@ -278,7 +333,6 @@ describe('visible Chat refresh', () => {
     await vi.waitFor(() => expect(listCalls).toHaveLength(2));
     expect(listCalls[1]).toEqual({ cursor, limit: 60 });
     await vi.waitFor(() => expect(w.document.querySelectorAll('#sessionList .sess')).toHaveLength(65));
-    expect(w.document.getElementById('sessionsFoot')?.textContent).toContain('65 retained sessions');
   });
 });
 

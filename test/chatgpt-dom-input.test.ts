@@ -190,6 +190,43 @@ function upload() {
   return input;
 }
 describe('native image readiness', () => {
+  it.each(['rename', 'replacement', 'extra file', 'cancel'])('retains exact image upload nodes across %s while processing', async change => {
+    const input = upload();
+    const tile = document.createElement('button');
+    tile.setAttribute('aria-label', 'Remove file 1: app.webp');
+    let current = true;
+    input.addEventListener('change', () => {
+      document.querySelector('form')!.append(tile);
+      button.setAttribute('aria-disabled', 'true');
+    });
+    const uploaded = api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }], () => current);
+    await vi.advanceTimersByTimeAsync(0);
+    if (change === 'rename') tile.setAttribute('aria-label', 'Remove file 1: app(1).webp');
+    if (change === 'replacement') tile.replaceWith(tile.cloneNode(true));
+    if (change === 'extra file') tile.after(tile.cloneNode(true));
+    if (change === 'cancel') current = false;
+    button.setAttribute('aria-disabled', 'false');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(await uploaded).toBe(change === 'rename');
+  });
+  it('waits for ARIA-only Send readiness after an attachment tile appears', async () => {
+    const input = upload();
+    input.addEventListener('change', () => {
+      const tile = document.createElement('button');
+      tile.setAttribute('aria-label', 'Remove file 1: app.webp');
+      document.querySelector('form')!.append(tile);
+      button.setAttribute('aria-disabled', 'true');
+    });
+    const uploaded = api.uploadImages([{ name: 'app.webp', dataUrl: 'data:image/webp;base64,YQ==' }]);
+    let ready = false; void uploaded.then(value => { ready = value; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(button.disabled).toBe(false);
+    expect(ready).toBe(false);
+    button.setAttribute('aria-disabled', 'false');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await uploaded).toBe(true);
+  });
   it('uploads original Markdown bytes and recognizes localized native file actions without duplicate tiles', async () => {
     const input = upload(); input.id = 'upload-files'; input.accept = '';
     const draft = api.captureComposerDraft('Exact app prompt');
@@ -296,6 +333,22 @@ describe('native image readiness', () => {
 
 
 describe('provider limit notice', () => {
+  it('records and acknowledges the exact Korean access notice once without accepting other dialogs', () => {
+    const notice = document.createElement('div'); notice.setAttribute('role', 'dialog');
+    notice.innerHTML = '<h2>요청이 너무 많습니다</h2><p>요청을 너무 빠르게 보내고 있습니다. 데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다. 몇 분 후 다시 시도해 주세요.</p><button>알겠습니다</button>';
+    document.body.append(notice);
+    const click = vi.fn(); notice.querySelector('button')!.addEventListener('click', click);
+    expect(api.errors()).toEqual([expect.objectContaining({ blocking: true, recoverable: false })]);
+    expect(click).toHaveBeenCalledTimes(1);
+    api.errors(); expect(click).toHaveBeenCalledTimes(1);
+    const unrelated = notice.cloneNode(true) as HTMLElement;
+    unrelated.querySelector('h2')!.textContent = 'Permission required';
+    const accept = vi.fn(); unrelated.querySelector('button')!.addEventListener('click', accept);
+    document.body.append(unrelated); api.errors(); expect(accept).not.toHaveBeenCalled();
+    const hidden = notice.cloneNode(true) as HTMLElement; hidden.setAttribute('aria-hidden', 'true');
+    hidden.querySelector('button')!.addEventListener('click', accept); document.body.append(hidden);
+    api.errors(); expect(accept).not.toHaveBeenCalled();
+  });
   it('recognizes only the visible provider access-limit dialog as a blocking nontransport error', () => {
     const notice = document.createElement('div');
     notice.innerHTML = '<h2>Too many requests</h2><p>We have temporarily limited access to conversations to protect your data. Please wait a few minutes.</p>';

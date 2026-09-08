@@ -243,13 +243,14 @@ function load() {
 }
 
 async function loadOnce() {
-  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings']);
+  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs']);
   port = typeof stored.port === 'number' ? stored.port : null;
   token = typeof stored.token === 'string' ? stored.token : null;
   // Deliberately in `local` rather than `session`: a choice to disconnect that a browser
   // restart undoes is not a choice, it is a delay.
   disconnected = stored.disconnected === true;
   deferredRevivals = Array.isArray(stored.deferredRevivals) ? stored.deferredRevivals.slice(-100) : [];
+  stored.inputOpenings = { ...(stored.desktopInputTabs || {}), ...(stored.inputOpenings || {}) };
   inputOpenings = stored.inputOpenings && typeof stored.inputOpenings === 'object' && !Array.isArray(stored.inputOpenings)
     ? Object.fromEntries(Object.entries(stored.inputOpenings).filter(([id, row]) => /^[a-f0-9-]{36}$/i.test(id) && row && (row.tab === null || Number.isInteger(row.tab))).slice(-1000)) : {};
   const live = await chrome.storage.session.get([
@@ -1182,6 +1183,9 @@ async function drainCommandAcks(targetId = null) {
       if (entry.id === targetId) targetResult = result;
 
       if (result.ok || result.status === 404 || result.status === 409) {
+        if (!inputReceipt && result.ok && result.data?.outcome === 'terminal-failure' && payload.status === 'failed' && !payload.conversationId && entry.source) {
+          await retireFailedCommandTab(entry);
+        }
         commandAckOutbox = commandAckOutbox.filter((candidate) => candidate !== entry);
         changed = true;
         if (!inputReceipt && result.ok && result.data?.committed !== false && payload.status === 'sent' && !payload.agent) {
@@ -1220,6 +1224,7 @@ async function ackCommand(id, status, error, conversationId, agent, client, sour
   const queued = {
     ...payload,
     provisional: payload.conversationId ? null : tabKey(source),
+    ...(status === 'failed' && !payload.conversationId && ownsDocument(source) ? { source: { tab: source.tab, documentId: source.documentId, navigationEpoch: source.navigationEpoch } } : {}),
     queuedAt: Date.now()
   };
   // One command has one terminal page result. Replace an earlier replay copy rather than
@@ -1232,6 +1237,23 @@ async function ackCommand(id, status, error, conversationId, agent, client, sour
   await persistLive();
   scheduleRetry();
   return drainCommandAcks(id);
+}
+
+/** Terminal failure owns this exact pre-send document, even though no conversation
+ * was created. Reuse the ACK journal's durable custody and ordinary close proof. */
+async function retireFailedCommandTab(entry) {
+  const source = entry.source;
+  if (!ownsDocument(source)) return;
+  try {
+    const tab = await chrome.tabs.get(source.tab);
+    if (!tab || tab.pendingUrl || conversationFromUrl(tab.url) || !ownsDocument(source)) return;
+    const url = tab.url;
+    const proof = await chrome.tabs.sendMessage(source.tab, { type: 'clf-tab-close-check', conversationId: null,
+      failedCommand: { id: entry.id, client: entry.client } }, { documentId: source.documentId });
+    const latest = await chrome.tabs.get(source.tab);
+    if (proof?.safe === true && proof.conversationId === null && proof.navigationEpoch === source.navigationEpoch &&
+        latest && !latest.pendingUrl && latest.url === url && ownsDocument(source)) await chrome.tabs.remove(source.tab);
+  } catch { /* A busy, edited, replaced or unreadable page stays open. */ }
 }
 
 /** A proven browser send hands only its receipt to the existing durable ACK journal.
@@ -1621,7 +1643,7 @@ async function noteTabConversation(source, value) {
  * that is worth placing behind the app's per-chat cooldown.
  */
 let backgroundWindowFlight = null;
-let backgroundWorkArea = null;
+let backgroundWindowBounds = { width: 800, height: 600 };
 /** One serialized owner for window adoption, consolidation and new tab placement. */
 function inBackgroundWindow(work) {
   const flight = (backgroundWindowFlight || Promise.resolve()).catch(() => undefined).then(work);
@@ -1646,8 +1668,8 @@ async function reconcileBackgroundWindow(policy) {
       const url = new URL(tab.pendingUrl || tab.url || '');
       if (url.origin !== 'https://chatgpt.com') return false;
       const inputId = url.searchParams.get('cos-input') || new URLSearchParams(url.hash.slice(1)).get('cos-input');
-      // Catalog markers retain cleanup ownership across browser restart until the
-      // exact empty document can safely retire.
+      // Catalog markers retain ownership across browser restart so the warm empty
+      // document can be handed to the first authored input without another window.
       const catalogHelper = url.pathname === '/' && /^[a-f0-9-]{36}$/i.test(url.searchParams.get('cos-model-catalog') || '');
       return (inputId && inputIds.has(inputId)) || catalogHelper;
     } catch { return false; }
@@ -1687,32 +1709,33 @@ async function createChatTab(url, background = false, active = !background) {
   return inBackgroundWindow(async () => {
     const existing = await storedBackgroundWindow();
     if (existing) {
-      if (backgroundWorkArea && ['left', 'top', 'width', 'height'].some(key => existing[key] !== backgroundWorkArea[key]))
-        await chrome.windows.update(existing.id, backgroundWorkArea);
       return chrome.tabs.create({ url, windowId: existing.id, active });
     }
-    const window = await chrome.windows.create({ url, type: 'normal', state: 'minimized', focused: false });
+    // Chrome forbids geometry together with minimized state. Establish a small,
+    // unfocused restore size first, then minimize only this newly owned window.
+    const window = await chrome.windows.create({ url, type: 'normal', ...backgroundWindowBounds, focused: false });
     if (!Number.isInteger(window?.id) || !window.tabs?.[0]) throw new Error('background_window_not_ready');
     await chrome.storage.session.set({ chatBackgroundWindow: window.id });
-    // Chrome forbids minimized state plus geometry in create(). Apply geometry
-    // separately without changing focus, visibility or the user's other windows.
-    if (backgroundWorkArea) await chrome.windows.update(window.id, backgroundWorkArea);
+    await chrome.windows.update(window.id, { state: 'minimized', focused: false });
     return window.tabs[0];
   });
 }
 
-async function deliverDesktopInputs(inputs, background, activeIds) {
+async function deliverDesktopInputs(inputs, background, reusableConversations = [], activeIds) {
   if (!Array.isArray(inputs)) return;
-  // An offer can disappear while its chat has running tools. Only the complete app-owned
-  // outbox identity projection proves retirement; missing legacy metadata retires nothing.
-  const currentIds = Array.isArray(activeIds) ? new Set(activeIds) : null;
-  const retired = currentIds ? Object.keys(inputOpenings).filter(id => !currentIds.has(id)) : [];
-  if (retired.length) {
-    for (const id of retired) delete inputOpenings[id];
+  // Only the app's complete outbox projection retires spent opening authority.
+  if (Array.isArray(activeIds)) {
+    const active = new Set(activeIds);
+    for (const id of Object.keys(inputOpenings)) if (!active.has(id)) delete inputOpenings[id];
     await persistLive();
   }
   if (!inputs.length) return;
   let tabs = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
+  const elections = inputOpenings;
+  const elect = async (id, record) => {
+    elections[id] = record;
+    await persistLive();
+  };
   const matchesInput = (input, tab) => {
     if (!input || !/^[a-f0-9-]{36}$/i.test(input.id)) return false;
     const target = cleanConversationId(input.conversationId);
@@ -1728,10 +1751,20 @@ async function deliverDesktopInputs(inputs, background, activeIds) {
     const marker = `cos-input=${encodeURIComponent(input.id)}`;
     const candidates = tabs.filter(tab => matchesInput(input, tab));
     let tab = candidates.sort((a, b) => a.id - b.id)[0];
+    let elected = elections[input.id];
+    // A queued checkpoint follows the app's durable session rebind. Transfer only
+    // to an already-existing successor tab, never reopen a closed elected target.
+    if (target && cleanConversationId(input.supersededConversationId) &&
+        input.supersededConversationId !== target && elected && elected.conversationId !== target && tab) {
+      await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
+      elected = elections[input.id];
+    }
+    if (elected?.tab != null) tab = candidates.find(candidate => candidate.id === elected.tab);
     if (input.close === true && input.lifetime === 'temporary-planner') {
       if (!tab) continue;
-      // Keep the latest completed preview warm until its work has a tab. The app can
-      // retire cancelled/obsolete planners immediately; document proof still gates closure.
+      // Preserve the warm planner until newer app work has an actual browser tab.
+      // Terminal input metadata is the lifecycle authority, including after restart;
+      // unrelated personal/catalog tabs are not a replacement for this handoff.
       const replacements = Array.isArray(input.replacements) ? input.replacements : [];
       const replacement = tabs.find(candidate => candidate.id !== tab.id && replacements.some(next => matchesInput(next, candidate)));
       if (!replacement && input.retire !== true) continue;
@@ -1746,20 +1779,57 @@ async function deliverDesktopInputs(inputs, background, activeIds) {
       } catch { /* only the exact still-owned temporary document may close */ }
       continue;
     }
-    const opening = inputOpenings[input.id];
-    if (opening && opening.tab !== null) tab = candidates.find(candidate => candidate.id === opening.tab);
-    if (!tab && opening) continue;
-    if (!opening) {
-      if (Object.keys(inputOpenings).length >= 1000) continue;
-      // Spend authority before Chrome can create anything. A crash or failed write cannot
-      // leave a created tab followed by an apparently unattempted operation.
-      inputOpenings[input.id] = { tab: tab?.id ?? null };
-      await persistLive();
-    }
+    // An existing target spends the same opening authority as a newly created tab.
+    // A later user-close or duplicate document cannot transfer that election.
+    if (tab && !elected) await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
     if (!tab) {
-      tab = await createChatTab(target ? `https://chatgpt.com/c/${encodeURIComponent(target)}` : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`, background);
-      inputOpenings[input.id] = { tab: tab.id };
-      await persistLive();
+      // Handout is opening authority, not a missing delivery receipt. A closed or
+      // unresponsive elected document never grants another opening attempt.
+      if (elections[input.id]) continue;
+      if (Object.keys(elections).length >= 1000) continue;
+      const url = target ? `https://chatgpt.com/c/${encodeURIComponent(target)}` : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
+      if (!target && input.lifetime !== 'temporary-planner') {
+        const reusable = new Set(reusableConversations);
+        const choices = tabs.filter(candidate => !candidate.pendingUrl && modelCatalogTarget?.tab !== candidate.id &&
+          (!conversationForTab(candidate) || reusable.has(conversationForTab(candidate))))
+          .sort((a, b) => Number(!!conversationForTab(a)) - Number(!!conversationForTab(b)) || a.id - b.id);
+        for (const candidate of choices) {
+          const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
+          if (!ownsDocument(source)) continue;
+          let proof;
+          try { proof = await chrome.tabs.sendMessage(candidate.id, { type: 'clf-input-reuse-state' }, { documentId: source.documentId }); }
+          catch { continue; }
+          const current = await chrome.tabs.get(candidate.id).catch(() => null);
+          if (proof?.safe !== true || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source) ||
+              !current || current.pendingUrl || current.url !== candidate.url) continue;
+          await elect(input.id, { tab: candidate.id, stage: 'preparing' });
+          const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
+          if (owner?.tab === candidate.id) await chrome.storage.session.set({ modelCatalogOwner: { ...owner, handedToInput: input.id } });
+          let prepared;
+          try { prepared = await chrome.tabs.sendMessage(candidate.id, { type: 'clf-prepare-desktop-input', id: input.id }, { documentId: source.documentId }); }
+          catch { break; } // Ambiguous preparation is not a fallback authorization.
+          const latest = await chrome.tabs.get(candidate.id).catch(() => null);
+          if (!latest || latest.pendingUrl || tabDocuments[String(candidate.id)] !== source.documentId) break;
+          if (prepared?.ready === true && matchesInput(input, latest)) {
+            await elect(input.id, { tab: candidate.id, stage: 'ready' });
+            tab = latest;
+            try { await chrome.tabs.sendMessage(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: null }); }
+            catch { /* Claim/send ambiguity keeps this exact tab elected. */ }
+          } else if (prepared?.fallback === true && prepared.preSend === true) {
+            // Explicit native transition failure, before claim/insertion/send, owns
+            // exactly one replacement. Persist that expenditure before Chrome awaits.
+            await elect(input.id, { tab: null, stage: 'opening', fallbackUsed: true });
+            tab = await createChatTab(url, background);
+            await elect(input.id, { tab: tab.id, stage: 'ready', fallbackUsed: true });
+            tabs.push(tab);
+          }
+          break;
+        }
+        if (elections[input.id]) continue;
+      }
+      await elect(input.id, { tab: null, stage: 'opening', conversationId: target });
+      tab = await createChatTab(url, background);
+      await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
       tabs.push(tab);
       continue;
     }
@@ -1870,11 +1940,12 @@ function inspectRequestedModels(request) {
   const wanted = request && /^[a-f0-9-]{36}$/i.test(request.nonce) && Number.isFinite(request.expiresAt) && Date.now() < request.expiresAt ? request : null;
   modelCatalogFlight = (async () => {
     const observed = await chrome.tabs.query({ url: CHATGPT_TAB_URLS });
-    const owner = wanted && (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
+    const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
+    if (wanted && owner?.nonce === wanted.nonce && owner.opening) return;
     // One request retains its elected tab through MV3 suspension. A missing or
     // navigated-away tab is an unfinished request, never another create instruction.
     if (owner?.nonce === wanted?.nonce && Number.isInteger(owner?.tab) &&
-        !observed.some(tab => tab.id === owner.tab)) return;
+        (owner.handedToInput || !observed.some(tab => tab.id === owner.tab))) return;
     const tabs = wanted ? observed : observed.filter(tab => catalogTabNonce(tab));
     if (!wanted && !tabs.length) return;
     // Reuse a loaded idle document without navigation. A dedicated helper marker
@@ -1887,17 +1958,18 @@ function inspectRequestedModels(request) {
     if (!wanted && !tab) return;
     if (!tab) {
       // An existing helper may be temporarily busy. Retain it and wait.
-      if (wanted.allowOpen === false || owner?.nonce === wanted.nonce || tabs.some(candidate => catalogTabNonce(candidate))) return;
+      if (wanted.allowOpen === false || owner?.nonce === wanted.nonce || tabs.length) return;
+      await chrome.storage.session.set({ modelCatalogOwner: { nonce: wanted.nonce, opening: true } });
       tab = await createChatTab(`https://chatgpt.com/?cos-model-catalog=${wanted.nonce}`, true);
       await chrome.storage.session.set({ modelCatalogOwner: { nonce: wanted.nonce, tab: tab.id } });
       await chrome.tabs.update(tab.id, { autoDiscardable: false });
       return;
     }
-    // Discovery completion releases every dedicated blank renderer, including the
-    // elected tab. Borrowed user documents never carry cleanup authority.
+    // Keep the elected warm document for another discovery or the first authored
+    // input. Only redundant empty helpers retire; borrowed user documents never do.
     const retireCatalogTabs = async () => {
       for (const candidate of tabs) {
-        if (!catalogTabNonce(candidate) || candidate.pendingUrl) continue;
+        if (candidate.id === tab.id || !catalogTabNonce(candidate) || candidate.pendingUrl) continue;
         const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
         if (!ownsDocument(source)) continue;
         try {
@@ -1914,16 +1986,22 @@ function inspectRequestedModels(request) {
       }
     };
     if (!wanted) { await retireCatalogTabs(); return; }
-    await chrome.storage.session.set({ modelCatalogOwner: { nonce: wanted.nonce, tab: tab.id } });
+    const held = { ...(owner?.nonce === wanted.nonce ? owner : {}), nonce: wanted.nonce, tab: tab.id };
+    await chrome.storage.session.set({ modelCatalogOwner: held });
+    const send = async (message, documentId) => {
+      let timer;
+      try {
+        return await Promise.race([
+          documentId ? chrome.tabs.sendMessage(tab.id, message, { documentId }) : chrome.tabs.sendMessage(tab.id, message),
+          new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, Math.min(35000, wanted.expiresAt - Date.now()))); })
+        ]);
+      } finally { clearTimeout(timer); }
+    };
     modelCatalogTarget = { tab: tab.id, nonce: wanted.nonce, url: tab.url || tab.pendingUrl };
-    let timer;
-    try {
-      const inspected = await Promise.race([
-        chrome.tabs.sendMessage(tab.id, { type: 'clf-model-catalog', nonce: wanted.nonce, expiresAt: wanted.expiresAt }),
-        new Promise(resolve => { timer = setTimeout(resolve, Math.min(35000, wanted.expiresAt - Date.now())); })
-      ]);
-      if (inspected?.ok === true) await retireCatalogTabs();
-    } finally { clearTimeout(timer); }
+    const inspected = await send({ type: 'clf-model-catalog', nonce: wanted.nonce, expiresAt: wanted.expiresAt });
+    // Work->Chat is an in-document transition owned by the content script.
+    // Failure never grants navigation to New Chat or a replacement helper tab.
+    if (inspected === true || inspected?.ok === true) await retireCatalogTabs();
   })().catch(() => undefined).finally(() => { modelCatalogTarget = null; modelCatalogFlight = null; });
   return modelCatalogFlight;
 }
@@ -1996,9 +2074,6 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
   const ordered = [...tabs].sort((a, b) => Number(b.active === true) - Number(a.active === true) || (b.lastAccessed || 0) - (a.lastAccessed || 0) || a.id - b.id);
   const keeper = new Map();
   for (const tab of ordered) if (owned(tab) && !keeper.has(conversationForTab(tab))) keeper.set(conversationForTab(tab), tab.id);
-  const keep = Number.isInteger(policy.tabsToKeepOpen) ? Math.max(1, policy.tabsToKeepOpen) : 1;
-  const workers = new Set((Array.isArray(policy.workerConversations) ? policy.workerConversations : []).map(cleanConversationId).filter(Boolean));
-  const sleeping = new Set((Array.isArray(policy.sleepingWorkerConversations) ? policy.sleepingWorkerConversations : []).map(cleanConversationId).filter(Boolean));
   const activity = policy.conversationActivityAt || {};
   // Evict by model work/turn completion, never by which browser tab was selected.
   const candidates = ordered.filter(owned).sort((a, b) =>
@@ -2010,10 +2085,9 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
     if (!Number.isInteger(tab.id)) continue;
     const duplicate = keeper.get(conversationId) !== tab.id && remaining.some(other => other.id !== tab.id && conversationForTab(other) === conversationId);
     if (protectedChats.has(conversationId)) continue;
-    // The two-minute idle deadline applies below capacity too. Only stopped workers
-    // may be evicted early to make room; primes/helpers never consume worker slots.
-    const workerSurplus = sleeping.has(conversationId) && remaining.filter(other => workers.has(conversationForTab(other))).length > keep;
-    if (!duplicate && !retired.has(conversationId) && !closable.has(conversationId) && !workerSurplus) continue;
+    // Idleness and broker slot pressure are not retirement. Reusable chats stay
+    // ready for follow-ups; only explicit terminal policy or an exact duplicate closes.
+    if (!duplicate && !retired.has(conversationId) && !closable.has(conversationId)) continue;
     const source = { tab: tab.id, documentId: tabDocuments[String(tab.id)], navigationEpoch: tabEpochs[String(tab.id)] };
     if (!ownsDocument(source) || journalCountForConversation(conversationId) > 0) continue;
     const cancelledClaims = (Array.isArray(policy.cancelledDecisionClaims) ? policy.cancelledDecisionClaims : [])
@@ -2060,16 +2134,17 @@ async function maintainOnce() {
   connectWakeSocket();
   await applyRequestedBrowserPreferences(reply.data.browserPreferenceRequest);
   offerStopTurns(reply.data.stopTurns);
-  const area = reply.data.browserWorkArea;
-  backgroundWorkArea = area && ['x', 'y', 'width', 'height'].every(key => Number.isInteger(area[key])) && area.width > 0 && area.height > 0
-    ? { left: area.x + Math.floor((area.width - Math.min(1100, area.width)) / 2),
-        top: area.y + Math.floor((area.height - Math.min(800, area.height)) / 2),
-        width: Math.min(1100, area.width), height: Math.min(800, area.height) } : null;
+  const bounds = reply.data.browserWindowBounds;
+  if (bounds && Number.isInteger(bounds.width) && bounds.width > 0 && bounds.width <= 800 &&
+      Number.isInteger(bounds.height) && bounds.height > 0 && bounds.height <= 600) {
+    backgroundWindowBounds = { width: bounds.width, height: bounds.height,
+      ...(Number.isInteger(bounds.left) && Number.isInteger(bounds.top) ? { left: bounds.left, top: bounds.top } : {}) };
+  }
   const backgroundReady = await reconcileBackgroundWindow(reply.data);
   if (reply.data.placement) await placeSuccessorChat(reply.data.placement, null);
   inspectRequestedModels(reply.data.modelCatalogRequest);
   inspectRequestedPluginRefresh(reply.data.pluginRefreshRequests, reply.data.background === true, reply.data.browserOnly === true);
-  await deliverDesktopInputs(reply.data.inputs, reply.data.background === true, reply.data.inputOpeningIds);
+  await deliverDesktopInputs(reply.data.inputs, reply.data.background === true, reply.data.reusableConversations, reply.data.inputOpeningIds);
   if (!backgroundReady) await reconcileBackgroundWindow(reply.data);
   const monitoring = reply.data.recoveryMonitoring === true;
   if (monitoring !== recoveryMonitoring) {
@@ -2285,8 +2360,11 @@ async function releaseTab(tab, expected = null, expectedDocument = null, expecte
   if (!stillOwned() || conversationStillOpen(conversationId)) return { ok: true, closed: false };
   await enqueueClose(conversationId);
   const delivered = await drainCloses();
-  // Collect `/closed`'s exact no-tab repair before an old async alarm clear can erase its fallback.
-  if (delivered.pending === 0) await maintain();
+  // Closing runs inside this tab's ownership queue. Maintenance can offer input to
+  // the same document and await its claim through that queue: awaiting it here
+  // deadlocks New Chat reuse. Request the existing flight's next pass, then release
+  // tab ownership so the elected document can claim its queued input.
+  if (delivered.pending === 0) void maintain(true).catch(() => undefined);
   return { ok: true, closed: delivered.pending === 0, pendingClose: delivered.pending };
 }
 

@@ -221,4 +221,23 @@ describe('model attribution and equivalent cost', () => {
     expect(estimate).toMatchObject({ tokens: 7e6, unpricedTokens: 0 });
     expect(estimate.cost).toBeCloseTo(4.224);
   });
+  it('groups known aliases without merging effort, provenance or distinct models and preserves per-ID rates', async () => {
+    const { DEFAULT_USAGE_FORMULA, usageEstimate, usageModelGroups } = await import('../src/shared/usage.js');
+    const rows = [
+      ...['5.6', 'gpt-5.6', 'gpt-5-6-thinking', 'gpt-5.6-sol'].map(model => ({ model, reasoningEffort: 'high', assumed: false, tokens: 1e6 })),
+      { model: 'gpt-5-6-pro', reasoningEffort: 'pro', assumed: false, tokens: 1e6 },
+      { model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 1e6 },
+      { model: 'gpt-5.6-sol', reasoningEffort: null, assumed: false, tokens: 1e6 },
+      ...['gpt-6-pro', 'gpt-5.6-terra', 'gpt-5.6-luna', '5.6-unknown'].map(model => ({ model, reasoningEffort: 'pro', assumed: false, tokens: 1e6 }))
+    ];
+    const groups = usageModelGroups(rows);
+    expect(groups).toHaveLength(8);
+    expect(groups[0]).toMatchObject({ model: 'gpt-5.6-sol', reasoningEffort: 'high', assumed: false });
+    expect(groups[0]!.sources).toHaveLength(4);
+    expect(usageEstimate(groups[1]!.sources, DEFAULT_USAGE_FORMULA).cost).toBeCloseTo(0.48);
+    const formula = { ...DEFAULT_USAGE_FORMULA, rates: { ...DEFAULT_USAGE_FORMULA.rates, '5.6': null, 'gpt-5-6-thinking': 0, 'gpt-5.6': 0.8 } };
+    expect(usageEstimate(groups[0]!.sources, formula)).toEqual({ tokens: 4e6, cost: 1.44, unpricedTokens: 1e6 });
+    expect(usageEstimate(rows.slice(-1), DEFAULT_USAGE_FORMULA).unpricedTokens).toBe(1e6);
+    expect(rows[0]!.model).toBe('5.6');
+  });
 });

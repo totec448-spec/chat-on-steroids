@@ -86,6 +86,7 @@ jobs:
             'Chat-On-Steroids-Linux-arm64.AppImage',
             'Chat-On-Steroids-Linux-arm64.deb',
             'Chat-On-Steroids-Extension.zip',
+            'Chat-On-Steroids-Native-Sources.tar.gz',
             'SHA256SUMS.txt'
           ]) {
             if (!notes.includes(`\`${artifact}\``)) throw new Error(`${notesPath} is missing ${artifact}`);
@@ -189,6 +190,7 @@ jobs:
             publish/Chat-On-Steroids-Linux-arm64.AppImage \
             publish/Chat-On-Steroids-Linux-arm64.deb \
             publish/Chat-On-Steroids-Extension.zip \
+            publish/Chat-On-Steroids-Native-Sources.tar.gz \
             publish/SHA256SUMS.txt \
             --title "$(sed -n 's/^## //p' "docs/release-notes/$TAG.md" | head -n 1)" \
             --notes-file "docs/release-notes/$TAG.md"

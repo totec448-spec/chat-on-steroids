@@ -12,10 +12,12 @@ import {
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
+import { listUsageSessions } from '../src/main/session/store.js';
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
 
 const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; turnId: string; time: number } }));
 vi.mock('../src/main/session/store.js', () => ({
+  listUsageSessions: vi.fn(async () => []),
   conversationWasSuperseded: vi.fn(async () => false),
   readRecentEvents: vi.fn(async () => binding.end ? [binding.end] : []),
   getSession: vi.fn(async (id: string) => ({ id, conversationId: id === 'session-two' ? 'conversation-b' : binding.conversationId, activeTurnId: binding.activeTurnId,
@@ -274,6 +276,19 @@ describe('durable user input ownership', () => {
     expect(await acknowledgeBrowserInput(row.id, 'replacement-page', binding.conversationId, 'late-native')).toBe(true);
     expect((await listInputs())[0]).toMatchObject({ state: 'cancelled', messageId: 'late-native' });
   });
+  it('does not replay a retained transcript just to restore an origin already present in the catalog', async () => {
+    const row = await enqueueInput(input({ sessionId: null }));
+    await claimBrowserInput(row.id, 'page', null);
+    await acknowledgeBrowserInput(row.id, 'page', binding.conversationId, 'native-user');
+    vi.mocked(noteChatOrigin).mockClear();
+    vi.mocked(listUsageSessions).mockResolvedValueOnce([{ id: sessionId, conversationId: binding.conversationId, origin: { kind: 'desktop' } }] as never);
+    resetInputForTests(); await listInputs();
+    expect(noteChatOrigin).not.toHaveBeenCalled();
+    // Two current records are not one proven stamped origin; preserve ordinary repair.
+    vi.mocked(listUsageSessions).mockResolvedValueOnce([{ id: sessionId, conversationId: binding.conversationId, origin: { kind: 'desktop' } }, { id: 'session-two', conversationId: binding.conversationId, origin: null }] as never);
+    resetInputForTests(); await listInputs();
+    expect(noteChatOrigin).toHaveBeenCalledWith(binding.conversationId, expect.objectContaining({ kind: 'desktop' }));
+  });
   it('expires pre-send preparation without images within one minute and revokes a late document', async () => {
     const row = await enqueueInput(input({ sessionId: null }));
     await claimBrowserInput(row.id, 'page', null, true);
@@ -509,7 +524,7 @@ describe('durable user input ownership', () => {
     binding.conversationId = 'conversation-b';
     expect(await offerToolInput(sessionId, 'conversation-a', 'old', 0)).toEqual([]);
     expect(await claimBrowserInput(row.id, 'page-a', 'conversation-a')).toBeNull();
-    expect(await pendingBrowserInputs()).toEqual([{ id: row.id, conversationId: 'conversation-b' }]);
+    expect(await pendingBrowserInputs()).toEqual([{ id: row.id, conversationId: 'conversation-b', supersededConversationId: 'conversation-a' }]);
     expect(await claimBrowserInput(row.id, 'page-b', 'conversation-b')).toMatchObject({ state: 'browser' });
   });
   it('legacy queue: elects one browser owner and excludes tools for that session', async () => {
@@ -571,16 +586,36 @@ describe('durable user input ownership', () => {
     expect((await offerToolInput(sessionId, binding.conversationId, 'after-restart', 4000))[0]?.text).toContain(row.id);
     expect((await listInputs())[0]?.state).toBe('tool');
   });
-  it('legacy queue: honors schedule order and never injects after-turn input into tools', async () => {
+  it('honors due times without letting an after-turn wait block immediate tool input', async () => {
     const later = await seedLegacyInput(input({ dueAt: 2000 }));
     const after = await seedLegacyInput(input({ mode: 'after-turn', dueAt: 500 }));
     const auto = await seedLegacyInput(input({ dueAt: 600 }));
     expect((await pendingBrowserInputs()).map(row => row.id)).toEqual([auto.id]);
-    expect(await offerToolInput(sessionId, binding.conversationId, 'request', 0)).toEqual([]);
+    expect(await hasEligibleToolInput(sessionId)).toBe(true);
+    expect((await offerToolInput(sessionId, binding.conversationId, 'request', 0)).map(row => row.text)).toEqual([expect.stringContaining(auto.id)]);
     expect(await pendingBrowserInputs()).not.toContainEqual({ id: after.id, conversationId: binding.conversationId });
     expect(await claimBrowserInput(later.id, 'page', binding.conversationId)).toBeNull();
-    expect(await cancelInput(after.id)).toBe(true);
-    expect((await offerToolInput(sessionId, binding.conversationId, 'request', 0))[0]?.text).toContain(auto.id);
+    expect((await listInputs()).find(row => row.id === after.id)?.state).toBe('queued');
+    expect((await listInputs()).find(row => row.id === later.id)?.state).toBe('queued');
+  });
+  it('injects explicit tool messages behind an after-turn task and retains that task across restart', async () => {
+    binding.model = 'gpt-5-6-pro'; binding.activeTurnId = 'active-pro-turn';
+    const after = await enqueueInput(input({ mode: 'after-turn', text: 'After the answer' }));
+    const first = await enqueueInput(input({ mode: 'auto', text: 'Immediate first' }));
+    const second = await enqueueInput(input({ mode: 'auto', text: 'Immediate second' }));
+    expect(first.transportIntent).toBe('tool'); expect(second.transportIntent).toBe('tool');
+    resetInputForTests();
+    expect(await hasEligibleToolInput(sessionId)).toBe(true);
+    expect(await offerToolInput(sessionId, 'wrong-conversation', 'request', now)).toEqual([]);
+    expect(await offerToolInput(sessionId, binding.conversationId, 'request', now)).toEqual([
+      { text: expect.stringContaining(first.id), images: [] }, { text: expect.stringContaining(second.id), images: [] }
+    ]);
+    now += 1;
+    await acknowledgeToolInput(sessionId, binding.conversationId, 'request', now);
+    expect(await hasEligibleToolInput(sessionId)).toBe(false);
+    expect((await listInputs()).map(row => ({ id: row.id, state: row.state }))).toEqual([
+      { id: after.id, state: 'queued' }, { id: first.id, state: 'sent' }, { id: second.id, state: 'sent' }
+    ]);
   });
   it('keeps claimed browser input inert across restart and bounds failure text', async () => {
     const row = await enqueueInput(input());
@@ -891,6 +926,42 @@ it('keeps future finish tasks after the normal send expiry', async () => {
   expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('queued');
 });
 
+it('rejects an oversized full plan before admission instead of silently starving tool delivery', async () => {
+  const args = input({ text: '界'.repeat(16000), objective: 'Complete task', stages: Array.from({ length: 11 }, () => '界'.repeat(16000)) });
+  await expect(enqueueInput(args)).rejects.toThrow('12,000');
+  expect(await listInputs()).toEqual([]);
+});
+it('reports oversized legacy prepared tool input as failed without blocking later instructions', async () => {
+  await seedLegacyInput(input({ text: '界'.repeat(16000), objective: 'Complete task', stages: Array.from({ length: 11 }, () => '界'.repeat(16000)) }));
+  const next = await seedLegacyInput(input({ text: 'A deliverable instruction' }));
+  const offered = await offerToolInput(sessionId, binding.conversationId, 'request', now);
+  expect(offered).toHaveLength(1);
+  expect(offered[0]?.text).toContain(next.text);
+  expect((await listInputs())[0]).toMatchObject({ state: 'failed', error: expect.stringContaining('delivery limit') });
+});
+it('accepts a full 16k original request and a workflow within the UI 12k limit', async () => {
+  const row = await enqueueInput(input({ sessionId: null, objective: '界'.repeat(16000), text: '界'.repeat(5000), stages: ['界'.repeat(6900)] }));
+  const claimed = await claimBrowserInput(row.id, 'page', null, true);
+  expect(claimed?.deliveryText).toContain(row.objective);
+  expect(Buffer.byteLength(claimed!.deliveryText!)).toBeLessThan(128000);
+});
+it('rejects an oversized restored plan before browser handout and leaves a visible failure', async () => {
+  const row = await seedLegacyInput(input({ sessionId: null, text: '界'.repeat(16000), stages: Array.from({ length: 11 }, () => '界'.repeat(16000)) }));
+  await expect(claimBrowserInput(row.id, 'page', null, true)).rejects.toThrow('delivery limit');
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed', owner: null, error: expect.stringContaining('delivery limit') });
+  expect(await pendingBrowserInputs()).toEqual([]);
+});
+it('delivers the original objective and complete workflow in the first plan message', async () => {
+  configureInputDelivery({ applyAutomation: automate, changed, prepareText: entry => entry.text + '\nHarness reminder' });
+  const first = await enqueueInput(input({ sessionId: null, objective: 'Build the whole requested application with two subagents.', text: 'Implement all requirements; delegate immediately.', stages: ['Exercise the app with computer use and fix failures.', 'Independent code review and final acceptance.'] }));
+  const claimed = await claimBrowserInput(first.id, 'page', null, true);
+  expect(claimed?.deliveryText).toContain(first.objective);
+  for (const stage of [first.text, ...first.stages!]) expect(claimed?.deliveryText).toContain(stage);
+  expect(claimed?.deliveryText).toContain('Harness reminder');
+  expect((await listInputs()).find(row => row.id === first.id)?.text).toBe(first.text);
+  resetInputForTests();
+  expect((await listInputs()).find(row => row.id === first.id)?.deliveryText).toBe(claimed?.deliveryText);
+});
 it('materializes remaining plan stages once after exact delivery, across restart', async () => {
   const first = input({ sessionId: null, model: 'gpt-5.6-sol', reasoningEffort: 'high', stages: ['Implement remaining work', 'Verify acceptance'] });
   await enqueueInput(first);
@@ -901,7 +972,7 @@ it('materializes remaining plan stages once after exact delivery, across restart
   const initial = (await listInputs()).filter(row => row.mode === 'finish');
   expect(initial.map(row => row.text)).toEqual(first.stages);
   expect(initial.every(row => row.sessionId === 'session-one')).toBe(true);
-  expect(initial.every(row => row.model === 'gpt-5.6-sol' && row.reasoningEffort === 'high')).toBe(true);
+  expect(initial.every(row => row.model === null && row.reasoningEffort === null)).toBe(true);
   resetInputForTests();
   expect((await listInputs()).filter(row => row.mode === 'finish').map(row => row.id)).toEqual(initial.map(row => row.id));
   expect(await pendingBrowserInputs()).toEqual([]);
@@ -1082,6 +1153,22 @@ it('keeps Astra finish-only tasks off browser transport across restart and permi
   expect(await pendingBrowserInputs()).toEqual([]);
   expect(await offerToolInput(sessionId, binding.conversationId, 'finish-only-test', now, true)).toHaveLength(1);
 });
+it('elects an opted-in after-turn task past finish-only stages and spends the completed turn once', async () => {
+  const blocked = await enqueueInput(input({ mode: 'finish', text: 'Finish-only implementation' }));
+  const after = await enqueueInput(input({ mode: 'finish', text: 'Inspect the current result', afterTurn: true }));
+  const later = await enqueueInput(input({ mode: 'finish', text: 'Inspect again', afterTurn: true }));
+  binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'astra-ended', time: now + 1 };
+  resetInputForTests();
+  expect(await pendingBrowserInputs()).toEqual([{ id: after.id, conversationId: binding.conversationId }]);
+  expect(await claimBrowserInput(blocked.id, 'page', binding.conversationId, true)).toBeNull();
+  expect(await claimBrowserInput(later.id, 'page', binding.conversationId, true)).toBeNull();
+  expect(await claimBrowserInput(after.id, 'page', binding.conversationId, true)).not.toBeNull();
+  expect(await authorizeBrowserInput(after.id, 'page', binding.conversationId)).toBe(true);
+  await acknowledgeBrowserInput(after.id, 'page', 'message-after', binding.conversationId);
+  resetInputForTests();
+  expect(await pendingBrowserInputs()).toEqual([]);
+  expect((await listInputs()).find(row => row.id === blocked.id)?.state).toBe('queued');
+});
 it('rechecks Astra finish-only policy at final browser authorization after a model change', async () => {
   binding.model = 'gpt-5.6-pro';
   const row = await enqueueInput(input({ mode: 'finish' }));
@@ -1089,4 +1176,22 @@ it('rechecks Astra finish-only policy at final browser authorization after a mod
   expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).not.toBeNull();
   binding.model = 'gpt-6-astra';
   expect(await authorizeBrowserInput(row.id, 'page', binding.conversationId)).toBe(false);
+});
+
+it('delivers a legacy finish checkpoint after an ordinary turn without restoring its old Pro selection', async () => {
+  const args = input({ mode: 'finish', model: '6', reasoningEffort: 'pro', text: 'Final checkpoint' });
+  const row = await enqueueInput(args);
+  resetInputForTests();
+  binding.model = 'gpt-5.6-sol';
+  binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'ordinary-completed', time: now + 1 };
+  expect(await pendingBrowserInputs()).toEqual([{ id: row.id, conversationId: binding.conversationId }]);
+  const claimed = await claimBrowserInput(row.id, 'page', binding.conversationId, true);
+  expect(claimed).toMatchObject({ model: null, reasoningEffort: null, text: 'Final checkpoint' });
+  expect(claimed?.deliveryText).not.toContain('session_finish');
+  expect(await authorizeBrowserInput(row.id, 'page', binding.conversationId)).toBe(true);
+  // Authored identity remains valid even though browser delivery inherits selection.
+  expect(await enqueueInput(args)).toMatchObject({ id: row.id, model: '6', reasoningEffort: 'pro' });
+  await acknowledgeBrowserInput(row.id, 'page', binding.conversationId, 'native-checkpoint');
+  resetInputForTests();
+  expect(await pendingBrowserInputs()).toEqual([]);
 });

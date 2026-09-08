@@ -18,7 +18,7 @@ import type { SwarmSnapshot } from '../src/main/agents.js';
 import type { Config } from '../src/shared/types.js';
 
 const recoveryBrowserWake = vi.hoisted(() => vi.fn(async (_url: string, _retry?: boolean, _background?: boolean,
-  _authority?: { current(): boolean; requireProcessAbsence: boolean }) => {}));
+  _authority?: { current(): boolean }) => {}));
 vi.mock('../src/main/browser-startup.js', () => ({ wakeBrowserUrl: recoveryBrowserWake }));
 
 async function recordFinalForTest(conversationId: string, turnId: string): Promise<void> {
@@ -45,6 +45,7 @@ const { initSecretsPath, resetSecretsCacheForTests, setSecret } = await import('
 const {
   bridgePort,
   bridgeStatus,
+  onBridgeChange,
   compactSession,
   setSessionObjective,
   unattributedRepairEta,
@@ -206,7 +207,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -214,8 +215,8 @@ function request(
   // Every extension request carries its protocol generation. Pairing must fail closed
   // across incompatible app/extension builds instead of provisioning a token that can
   // only produce confusing downstream failures.
-  headers['x-extension-version'] = APP_VERSION;
-  headers['x-extension-protocol'] = String(BRIDGE_PROTOCOL);
+  headers['x-extension-version'] = options.extensionVersion ?? APP_VERSION;
+  headers['x-extension-protocol'] = String(options.protocol ?? BRIDGE_PROTOCOL);
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -358,6 +359,24 @@ beforeEach(async () => {
 // ------------------------------------------------------------------ origin
 
 describe('who is allowed to talk to it', () => {
+  it('pushes newly detected incompatible extension versions without granting browser presence', async () => {
+    const changed = vi.fn();
+    const unsubscribe = onBridgeChange(changed);
+    try {
+      const options = { auth: null, extensionVersion: '0.0.1', protocol: BRIDGE_PROTOCOL - 1 };
+      const hello = await request('GET', '/hello', options);
+      expect(hello.body.compatible).toBe(false);
+      expect(changed).toHaveBeenCalledTimes(1);
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', present: false, lastSeenAt: null });
+      const rejected = await request('POST', '/pair', options);
+      expect(rejected.status).toBe(426);
+      expect(changed).toHaveBeenCalledTimes(1);
+      await request('GET', '/hello', { ...options, extensionVersion: '0.0.2' });
+      expect(changed).toHaveBeenCalledTimes(2);
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.2', present: false, paired: false });
+    } finally { unsubscribe(); }
+  });
+
   it('binds a loopback port only', () => {
     expect(bridgePort()).toBeGreaterThan(0);
     expect(base.startsWith('http://127.0.0.1:')).toBe(true);
@@ -532,7 +551,7 @@ describe('provisioning', () => {
 });
 
 describe('active agent tab discard projection', () => {
-  it('projects idle worker eligibility with a pool sized from the worker limit', async () => {
+  it('retains waiting and sleeping reusable chats beyond the idle deadline while blocked chats still retire', async () => {
     const previous = getConfig();
     await saveConfig({ ...previous, multiAgent: { ...previous.multiAgent, maxWorkers: 3 }, ui: { ...previous.ui, tabsToKeepOpen: 1 } });
     try {
@@ -544,9 +563,7 @@ describe('active agent tab discard projection', () => {
       finishAgent({ conversationId: chats[1]! }, 'second sleeping');
       const status = (await request('POST', '/status', { body: { openConversations: chats } })).body;
       expect(status.idleCloseAfterMs).toBe(120000);
-      expect(status.tabsToKeepOpen).toBe(3);
-      expect(status.workerConversations).toEqual(expect.arrayContaining(chats));
-      expect(status.sleepingWorkerConversations).toEqual(chats.slice(0, 2));
+      expect(status.sleepingWorkerConversations).toBeUndefined();
       expect(status.managedConversations).toEqual(expect.arrayContaining(chats));
       expect(status.closableConversations).toEqual([]);
       expect(status.nonDiscardableConversations).not.toContain(chats[2]); // broker state alone is not live page work
@@ -555,9 +572,8 @@ describe('active agent tab discard projection', () => {
       try {
         noteAgentAlive(chats[0], 'page'); // periodic page presence must not renew idle work
         const quiet = (await request('POST', '/status', { body: { openConversations: chats } })).body;
-        expect(quiet.closableConversations).toEqual(expect.arrayContaining(chats.slice(0, 2)));
-        expect(quiet.retiredConversations).toEqual(expect.arrayContaining(chats.slice(0, 2)));
-        expect(quiet.retiredConversations).toContain(chats[2]); // idle deadline also applies without a broker sleep
+        expect(quiet.closableConversations).toEqual([]);
+        expect(quiet.retiredConversations).toEqual([]);
         setChatBlocked(chats[2]!, true);
         const newlyBlocked = (await request('POST', '/status', { body: { openConversations: chats } })).body;
         expect(newlyBlocked.blockedConversations).toContain(chats[2]);
@@ -602,6 +618,27 @@ describe('active agent tab discard projection', () => {
       expect(status.closableConversations).not.toContain(main);
       expect(status.managedConversations).not.toContain(personal);
       expect(status.cancelledDecisionClaims).toEqual(eligible ? [{ id: row.id, owner: row.owner, conversationId: helper }] : []);
+    } finally { await writeDurableNow('session-input', []); resetInputForTests(); }
+  });
+
+  it.each(['queued', 'browser'])('a %s checkpoint protects its actual owner across compaction', async state => {
+    await pair();
+    const { resetInputForTests } = await import('../src/main/session/input.js');
+    const from = `cafe0291-0000-4000-8000-00000000029${state === 'queued' ? '1' : '3'}`;
+    const to = `cafe0292-0000-4000-8000-00000000029${state === 'queued' ? '2' : '4'}`;
+    const source = await createSession({ conversationId: from, title: 'Plan source' });
+    const continuation = await openContinuationNow(source.id, from);
+    await attachSummary(continuation.token, SAMPLE_BRIEF);
+    await claimContinuationNow(continuation.token, 'plan-resume');
+    expect(await commitContinuation(continuation.token, to)).toBe(true);
+    await writeDurableNow('session-input', [{ id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', sessionId: source.id,
+      text: 'Checkpoint three', state, mode: 'finish', dueAt: Date.now(), createdAt: Date.now(),
+      model: null, reasoningEffort: null, owner: state === 'browser' ? 'old-document' : null, conversationId: from }]);
+    resetInputForTests();
+    try {
+      const status = (await request('POST', '/status', { body: { openConversations: [from, to] } })).body;
+      expect(status.retiredConversations.includes(from)).toBe(state === 'queued');
+      expect(status.retiredConversations).not.toContain(to);
     } finally { await writeDurableNow('session-input', []); resetInputForTests(); }
   });
 
@@ -3792,26 +3829,68 @@ describe('delivering a bootstrap', () => {
     expect(pendingCommands()).toEqual([]);
   });
 
-  it('opens one worker chat at a time, so a report can never name the wrong tab', async () => {
+  it('leases each worker marker independently and binds out-of-order receipts to their exact command', async () => {
     await pair();
     spawn({
       workers: [{ task: 'first audit' }, { task: 'second audit' }],
       caller: { conversationId: PRIME_CHAT }
     });
 
-    await waitForOpened(1);
+    await waitForOpened(2);
     const first = await redeem();
     expect(first.agent).toBe('worker-1');
+    const second = await redeem();
+    expect(second.agent).toBe('worker-2');
+    const secondConversation = '22222222-3333-4444-5555-666666666666';
+    await request('POST', '/commands/ack', {
+      body: { id: second.id, status: 'sent', conversationId: secondConversation, agent: 'worker-2' }
+    });
     const firstConversation = '11111111-2222-3333-4444-555555555555';
     await request('POST', '/commands/ack', {
       body: { id: first.id, status: 'sent', conversationId: firstConversation, agent: 'worker-1' }
     });
 
-    // worker-2's chat opens only once worker-1's is bound.
     await waitForOpened(2);
-    const second = await redeem();
-    expect(second.agent).toBe('worker-2');
     expect(second.text.startsWith('second audit')).toBe(true);
+    expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.conversationId).toBe(firstConversation);
+    expect(swarmState().agents.find(agent => agent.id === 'worker-2')?.conversationId).toBe(secondConversation);
+  });
+
+  it('starts a worker while an unrelated resume awaits its exact receipt', async () => {
+    await pair();
+    const source = await createSession({ conversationId: 'cafe0391-0000-4000-8000-000000000391', title: 'Stalled automatic resume' });
+    const continuation = await openContinuationNow(source.id, source.conversationId!, true);
+    await attachSummary(continuation.token, SAMPLE_BRIEF);
+    const resume = queueResume(source.id, continuation.token)!;
+    await waitForOpened(1);
+    spawn({ workers: [{ task: 'Independent work' }], caller: { conversationId: PRIME_CHAT } });
+    await waitForOpened(2);
+    const worker = await redeem(new URL(opened[1]!).searchParams.get('clf')!);
+    expect(worker.agent).toBe('worker-1');
+    expect(pendingCommands().some(command => command.id === resume.id)).toBe(true);
+    await request('GET', '/status');
+    expect(opened.filter(url => new URL(url).searchParams.get('clf') === resume.id)).toHaveLength(1);
+  });
+
+  it('preserves both concurrent command claims and final receipts in the durable ledger', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'Concurrent first' }, { task: 'Concurrent second' }], caller: { conversationId: PRIME_CHAT } });
+    await waitForOpened(2);
+    const ids = opened.map(url => new URL(url).searchParams.get('clf')!);
+    await Promise.all(ids.map((id, index) => redeem(id, `concurrent-page-${index}`)));
+    const claimed = await readDurable<any>('bridge-commands');
+    for (const [index, id] of ids.entries())
+      expect(claimed.commands.find((row: any) => row.id === id)?.owner).toBe(`concurrent-page-${index}`);
+    const ack = (id: string, index: number) => request('POST', '/commands/ack', {
+      body: { id, client: `concurrent-page-${index}`, status: 'sent', agent: `worker-${index + 1}`,
+        conversationId: `cafe0491-0000-4000-8000-00000000049${index}` }
+    });
+    const receipts = await Promise.all(ids.map(ack));
+    expect(receipts.map(receipt => receipt.status)).toEqual([200, 200]);
+    await flushDurable();
+    const finalized = await readDurable<any>('bridge-commands');
+    expect(finalized.commands).toEqual([]);
+    expect(finalized.receipts.map((row: any) => row.id).sort()).toEqual([...ids].sort());
   });
 
   it('brings an unfinished worker bootstrap back across an app restart, without a credential', async () => {
@@ -3989,14 +4068,16 @@ describe('delivering a bootstrap', () => {
         )?.info.state
       ).toBe('failed');
 
-      // Join the same critical flight as drop() before releasing it. Its earlier
-      // continuation queues bridge retirement before this observer drains disk.
+      // Join the broker flight before releasing it. Bridge retirement also waits for
+      // independent command lease writes, so broker completion alone is not its barrier.
       const brokerPersisted = persistCriticalSwarmNow();
       gate.release();
       expect(await brokerPersisted).toBe(true);
-      await flushDurable();
-      const after = await readDurable<any>('bridge-commands');
-      expect(after?.commands?.some((entry: any) => entry?.id === workerCommand.id)).toBe(false);
+      await vi.waitFor(async () => {
+        await flushDurable();
+        const after = await readDurable<any>('bridge-commands');
+        expect(after?.commands?.some((entry: any) => entry?.id === workerCommand.id)).toBe(false);
+      });
       const durableBroker = await readDurable<any>('swarm');
       expect(durableBroker?.dormantRuns?.[0]?.agents.find((entry: any) => entry?.info?.id === 'worker-1')?.info?.state).toBe(
         'failed'
@@ -4361,11 +4442,11 @@ describe('a worker chat that never opens', () => {
       expect(placement.background === true).toBe(backgroundChats);
     });
     expect(opened).toEqual([]);
+    let second: any;
+    await vi.waitFor(async () => { second ||= (await request('GET', '/status')).body.placement; expect(second?.id).toBeTruthy(); });
     expect((await request('GET', '/status')).body.placement).toBeNull();
     expect((await redeem(placement.id)).agent).toBe('worker-1');
     await request('POST', '/commands/ack', { body: { id: placement.id, status: 'sent', agent: 'worker-1', conversationId: 'abababab-1111-4222-8333-444444444444' } });
-    let second: any;
-    await vi.waitFor(async () => { second ||= (await request('GET', '/status')).body.placement; expect(second?.id).toBeTruthy(); });
     expect(second.id).not.toBe(placement.id);
     expect(second.active).toBe(false);
     expect((await redeem(second.id)).agent).toBe('worker-2');
@@ -4449,16 +4530,8 @@ describe('a worker chat that never opens', () => {
     }
   });
 
-  /**
-   * A bootstrap that ends by being *retired* has to move the line too.
-   *
-   * Only `drop()`'s callers advanced the queue. A worker whose page lost its ACK is bound
-   * through `/events` instead, and when its command later expires it is retired rather than
-   * dropped — with nothing behind it ever delivered. Observed live: `worker-3` sat `invited`
-   * for nine minutes with `claimedAt: null`, holding the last free slot, while worker-1 and
-   * worker-2 ran normally.
-   */
-  it('opens the next worker chat when a bootstrap is retired rather than dropped', async () => {
+  /** Lost-ACK retirement settles only that marker; siblings already own their attempts. */
+  it('does not reopen a sibling when a lost-ACK bootstrap retires', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -4479,32 +4552,31 @@ describe('a worker chat that never opens', () => {
       expect(reply.status).toBe(200);
       expect(swarmState().agents.find((agent) => agent.id === 'worker-1')?.state).toBe('active');
 
-      // Nothing else happens in this app. The only thing left is worker-1's command running out.
-      const openedBefore = opened.length;
-      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
-      await vi.waitFor(() => expect(opened.length).toBeGreaterThan(openedBefore));
-
-      const next = await redeem(new URL(opened[openedBefore]!).searchParams.get('clf')!);
+      await waitForOpened(2);
+      const next = await redeem(new URL(opened[1]!).searchParams.get('clf')!);
       expect(next.agent).toBe('worker-2');
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      expect(opened).toHaveLength(2);
+      expect(pendingCommands().some(command => command.id === first.id)).toBe(false);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('fails an unredeemed opening without duplicating it and advances to the next worker', async () => {
+  it('fails an unredeemed opening without duplicating it or holding its sibling', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       spawn({ workers: [{ task: 'first' }, { task: 'second' }], caller: { conversationId: PRIME_CHAT } });
-      await vi.waitFor(() => expect(opened).toHaveLength(1));
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
       const first = new URL(opened[0]!).searchParams.get('clf')!;
+      const second = new URL(opened[1]!).searchParams.get('clf')!;
+      expect((await redeem(second)).agent).toBe('worker-2');
       await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       await vi.waitFor(() => expect(opened).toHaveLength(2));
-      const second = new URL(opened[1]!).searchParams.get('clf')!;
       expect(second).not.toBe(first);
       expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).toBe('failed');
       expect((await request('POST', '/commands/redeem', { body: { id: first, client: 'late-page' } })).status).toBe(404);
-      expect((await redeem(second)).agent).toBe('worker-2');
       await vi.advanceTimersByTimeAsync(WORKER_REDEEM_MS + 1_000);
       expect(opened).toHaveLength(2);
     } finally { vi.useRealTimers(); }
@@ -4533,11 +4605,9 @@ describe('a worker chat that never opens', () => {
         await vi.advanceTimersByTimeAsync(ms);
         elapsed += ms;
       };
-      for (let count = 1; count <= 3; count++) {
-        await vi.waitFor(() => expect(opened).toHaveLength(count));
-        await request('GET', '/status');
-        await advance(WORKER_REDEEM_MS + 1_000);
-      }
+      await vi.waitFor(() => expect(opened).toHaveLength(3));
+      await request('GET', '/status');
+      await advance(WORKER_REDEEM_MS + 1_000);
       expect(new Set(opened.map(url => new URL(url).searchParams.get('clf'))).size).toBe(3);
 
       await advance(WORKER_BOOTSTRAP_LIMIT_MS + 1_000 - elapsed);
@@ -5251,20 +5321,31 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('reloads for ordinary errors the page shows, once per user turn', async () => {
+  it.each([false, undefined])('does not spend recovery on an informational alert (recoverable: %s)', async recoverable => {
+    await pair();
+    // Older loaded extension documents queued this toast before New Chat had an id.
+    await events(PRIME, [{ kind: 'chat_error', time: Date.now() - 90_000,
+      text: 'Actions refreshed.', recoverable }]);
+    expect(await maintenance()).toBeNull();
+    await events(PRIME, [openTurn('real-failure'), { kind: 'chat_error', time: Date.now(),
+      text: 'Message delivery timed out. Please try again.', recoverable: true }]);
+    expect((await maintenance())?.reason).toBe('assistant-error');
+  });
+
+  it('reloads for recognized transport errors, once per user turn', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       spawn({ workers: [{ task: 'hold the run open' }], caller: { conversationId: PRIME } });
       await events(PRIME, [openTurn('turn-prime')]);
 
-      // A top-level banner the page could not name and did not call recoverable.
+      // A top-level failure needs no turn id, but must carry explicit recovery authority.
       await events(PRIME, [{
         kind: 'chat_error',
         time: Date.now(),
         text: 'Message delivery timed out. Please try again.',
         turnId: null,
-        recoverable: false
+        recoverable: true
       }]);
       const first = await maintenance();
       expect(chatOf(first)).toBe(PRIME);
@@ -5303,13 +5384,13 @@ describe('unattributed activity recovery', () => {
       await pair();
       await events(PRIME, [openTurn('completed-ordinary'), endTurn('completed-ordinary', 'completed')]);
       await vi.advanceTimersByTimeAsync(69_000);
-      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: null,
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: null, recoverable: true,
         text: 'ChatGPT finished its answer but its composer is still stuck on Stop. Recovering this page before delivering the queued message.' }]);
       const repair = await maintenance();
       expect(chatOf(repair)).toBe(PRIME);
       expect(repair?.reason).toBe('assistant-error');
       expect(await maintenance(repair!.token)).toBeNull();
-      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: null,
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: null, recoverable: true,
         text: 'ChatGPT finished its answer but its composer is still stuck on Stop. Recovering this page before delivering the queued message.' }]);
       expect(await maintenance()).toBeNull();
     } finally { vi.useRealTimers(); }
@@ -8206,7 +8287,7 @@ describe('the goal loop over the bridge', () => {
       const [url, retry, , authority] = recoveryBrowserWake.mock.calls[0]!;
       expect(url).toBe(`https://chatgpt.com/c/${chat}`);
       expect(retry).toBe(true);
-      expect(authority?.requireProcessAbsence).toBe(true);
+      expect(authority?.current).toEqual(expect.any(Function));
       expect(authority?.current()).toBe(true);
       const config = getConfig();
       await saveConfig({ ...config, ui: { ...config.ui, browserOnly: true } });

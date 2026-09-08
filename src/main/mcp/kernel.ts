@@ -1,4 +1,5 @@
 import { offerToolInput, acknowledgeToolInput } from '../session/input.js';
+import { pluginManager } from '../plugins/manager.js';
 /**
  * The machinery every model-facing tool sits on, independent of which surface it lives on.
  *
@@ -421,7 +422,7 @@ function withInbox(
  * `agents` tool the terminal call is an *action* rather than a tool name, and the
  * re-offer rule has to follow the action.
  */
-async function dispatch(
+export async function dispatch(
   name: string,
   args: unknown,
   transportKey: string | null,
@@ -752,10 +753,12 @@ async function dispatchTracked(
     delivered = { ...delivered, content: [...delivered.content, ...attachments] };
   }
   const recorderStartedAt = Date.now();
+  const recordedResult = surface === 'plugins' ? pluginManager.redactResult(delivered) : delivered;
   const recording = recordToolCall({
     tool: name,
-    args,
-    content: delivered.content,
+    args: surface === 'plugins' ? pluginManager.redact(args) : args,
+    content: recordedResult.content as ToolResult['content'],
+    ...(surface === 'plugins' ? { protocolResult: recordedResult } : {}),
     // guard() already marks unexpected defects; an unclassified isError is an expected rejection.
     outcome: context.outcome ?? (result.isError ? 'tool_rejected' : 'ok'),
     durationMs,

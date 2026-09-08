@@ -19,8 +19,9 @@ it architecturally cleaner and preferably smaller than before.
 alarm are not permission to open a tab. Reuse a suitable existing document. One operation owns
 one elected tab across provider navigation and MV3 suspension; a missing receipt or a user-closed
 tab must not create a new opening attempt. Transfer opening authority at handout, not after page
-hydration. Keep broker worker reuse independent of tab retention: sleeping/finished workers can
-release their renderer after two minutes, subject to the existing draft/generation/document checks.
+hydration. Keep waiting chats and reusable sleeping workers open for follow-ups. Only terminal,
+blocked or superseded conversations and proven duplicates grant tab-close authority,
+subject to the existing draft/generation/document checks.
 Read bounded account-evaluated model metadata and installed tool declarations through the existing
 MAIN-world bridge. Do not infer availability from English labels or fixed release names, sweep every
 effort to discover a catalog, or add polling/fallback openers around an uncertain observation.
@@ -32,7 +33,6 @@ paths or inject a file reference as though its bytes reached ChatGPT. Final Send
 same text, attachment nodes and navigation epoch after every asynchronous authorization step.
 Pending plan stages are projected from the first durable input until its receipt materializes the
 queue. Temporary planner tabs retire after capture/cancellation only with exact idle/draft proof.
-
 
 **This tree is usually dirty and shared with the user and other agents — never `reset`,
 `checkout`, `clean`, reformat, or overwrite work you did not do.**
@@ -620,8 +620,8 @@ authenticated extension header; duplicating it in the updater would create two a
 
 ChatGPT discovers **one server's entire tool list as a unit**: a no-query
 `list_resources` returns every schema that server advertises. Splitting into separate
-servers is therefore the only mechanism that actually bounds the worst case. Two surfaces
-earn it today.
+servers is therefore the only mechanism that actually bounds the worst case. Core and Desktop
+retain their existing contracts. The optional Plugins surface publishes external MCP tools.
 
 **Core** (`chat-on-steroids-core`, required):
 
@@ -641,7 +641,21 @@ earn it today.
 of its 13 actions at runtime. The surface is offered at all only when one of those four
 permissions exists on a supported host — an empty or impossible connector is worse than no connector.
 
-**Exposure is monotonic per endpoint lifetime.** ChatGPT caches schemas, and yanking one
+**Plugins** (`chat-on-steroids-plugins`, optional): `plugins/manager.ts` owns installed external
+stdio/Streamable HTTP servers and enabled tools. `mcp/tools-plugins.ts` preserves upstream JSON
+schemas/results through the SDK and existing attribution/recording dispatcher. Installation and
+credentials stay in the main process; external processes do not inherit the CoS folder sandbox.
+Discovery is bounded to 64 tools / 250 KB. Stale calls check live plugin policy. See `docs/plugins.md`.
+Only installed and enabled plugins own a running connection; no catalog recipe is preinstalled.
+Enabled connections restore in the background on app startup and remain alive until disabled,
+uninstalled, failed, restarted or app shutdown. Tool inactivity does not retire their process state.
+OAuth remotes use `plugins/oauth.ts` with the MCP SDK for discovery, DCR, PKCE and refresh.
+Credentials are encrypted per installation and exact endpoint. Startup/reconnect may refresh saved
+credentials but never open a browser or register a new client; explicit **Sign in** owns the bounded
+loopback callback. Cancellation, replacement and shutdown revoke that flow. Unauthenticated cached
+tools remain unpublished. Blender also requires the open editor and its running MCP addon.
+
+**Core/Desktop exposure is monotonic per endpoint lifetime.** ChatGPT caches schemas, and yanking one
 from under a cached snapshot surfaces as a transport-level UNKNOWN failure. So
 `server.ts` remembers what this endpoint has ever exposed. A permission revoked after
 exposure leaves the schema registered and its handler returns `TOOL_DISABLED`. The
@@ -1248,6 +1262,18 @@ supported Project shape `/g/<project>/c/<id>` as the **same conversation id**. E
 asks "which chat is this?" must use those shared route rules; teaching only the recorder about a
 Project URL while the service worker/recovery path still sees no conversation splits ownership.
 
+Fiber conversation ownership includes the mounted `props.conversation.id` shape, alongside
+the older direct conversation/client-thread fields. All observed IDs must agree. Helper
+completion still requires its exact acknowledged user, current scan, terminal assistant ID
+and bounded canonical raw text; missing identity is never replaced with rendered JSON.
+
+Queued desktop inputs follow the durable local session across Compact & Resume. The outbox
+publishes a superseded source ID only for still-queued input whose current session has moved.
+The service worker may transfer that election to an existing successor tab once, persisting its
+target conversation; it may not open a missing successor or replace a user-closed elected target.
+Tab retirement protects that current queued-input owner. Already handed-out browser claims
+continue protecting their exact original document until the send outcome is known.
+
 **A turn opens from authored-user evidence, not from the Stop button.** A newly observed stable
 ChatGPT **user** message opens one local generation and emits `turn_start`. On reload the content
 script may adopt the durable `activeTurnId` the app already knows, but must not emit a second
@@ -1385,6 +1411,12 @@ chain at level one; a new `setTimeout`/`setInterval` loop in the recorder is a r
 **Tests.** `content-script.test.ts`, `fiber.test.ts`, `extension.test.ts`.
 
 ## 14. The browser bridge — `bridge.ts`
+
+Worker/resume markers have independent durable claims and receipts. A leased resume cannot
+block an unrelated worker invitation. Only never-handed commands enter the opener; expiry never
+turns a spent lease back into opening authority. Shared command-ledger snapshots commit serially,
+including claim renewal and final receipts. A bound worker's leased transport remains until its
+receipt or deadline settles it; sibling maintenance cannot retire it during ACK persistence.
 
 A second loopback HTTP service on the first free port of **8765–8769**. The extension finds
 it with `/hello`, silently provisions a bearer token with `/pair`, then uses authenticated
@@ -2120,16 +2152,19 @@ service worker restores `autoDiscardable:true` only for markers it owns. A tab a
 the user/browser is never claimed and therefore never “restored” behind their back. Sleeping and
 terminal workers are not protected.
 
-**Tab closing is derived from model activity.** `bridge.ts::browserTabPolicy()` projects exact
-managed/protected conversations, activity timestamps and the configured `maxWorkers` retention
-count. `background.js::pruneManagedTabs()` closes managed tabs after two minutes without model
-activity even below that count. The count caps worker tabs only: when new worker work arrives,
-the oldest safe sleeping worker tab is evicted immediately if needed; its broker identity remains reusable.
-Active conversations, pending journals and unsent drafts are protected even above the count.
-Redundant document copies are handled separately from the retention floor. Tab selection is not
-model activity. One managed background browser window is reused for helpers/workers; a temporary
-planner remains available until its replacement is established. Browser process count is not the
-window-ownership invariant.
+**Tab closing requires terminal authority.** `bridge.ts::browserTabPolicy()` retains waiting
+ordinary chats and reusable sleeping workers, regardless of worker-slot capacity or idle time.
+Two minutes of inactivity permits retirement only for terminal non-revivable workers, blocked
+chats and cancelled dedicated work. A late-confirmed cancelled desktop new-chat send may retire,
+but a later delivered follow-up supersedes that cancellation. Superseded sources and redundant
+document copies remain separately eligible. Fresh document, journal, draft and generation checks
+still gate every close. New owned windows use at most 45% of the work area, capped at 800×600,
+then minimize without a geometry update. Existing background windows are reused without changing
+their state or geometry; a temporary planner stays until its replacement is established.
+Model discovery retains its elected empty helper and transfers that exact tab to the first
+authored input after fresh empty-document proof. The old discovery owner records that handout,
+so a user-closed or navigated helper cannot regain opening authority. Browser process count is
+not the window-ownership invariant.
 This keeps live agent pages resident; it does not prove a turn
 active, revive a worker or authorize a browser repair.
 
@@ -2660,7 +2695,10 @@ The desktop session UI has its **own** bounded read protocol; do not reuse the m
 `session` cursor design by assumption. `ipc.ts` session lists page by stable `(updatedAt,id)`
 cursor, first detail load reads a recent tail, and incremental detail reads advance by monotonic
 sequence. Deliberate upward scrolling near the top requests `before` pages in 80-row chunks;
-the retained window stays bounded at 160 rows, preserves its visible anchor and offers Back to latest.
+downward navigation near the bottom requests `from` pages to recover evicted newer rows.
+The retained window stays bounded at 160 rows, preserves its visible anchor in both directions
+without bottom-following during pagination, and offers Back to latest. Reaching the forward tail
+restores live delta reads.
 Initial/layout scroll events do not drain history. The boundary comes from visible rows so a large final cannot hide earlier
 history permanently; filtered-empty pages use the raw page boundary. Historical pages resist live
 delta eviction while controls remain live, and async navigation is fenced by selection/load epoch.
@@ -3127,4 +3165,26 @@ private process in `SECURITY.md`, not in public issues, comments, or fixtures.
 > end to end, and fix the earliest place where reality diverges from that identity or
 > invariant.
 
-Intentional `after-turn` inputs for an existing ordinary chat share the durable staged-task FIFO and composer queue dock. Multiple waits are admitted, but each browser claim spends one distinct verified completed `turn_end`; repeated observations or restart cannot drain the next item. Initial and immediate browser sends retain single-send admission. Edits and reordering apply only before claim.
+Intentional `after-turn` inputs for an existing ordinary chat share the durable staged-task FIFO and composer queue dock. Multiple waits are admitted, but each browser claim spends one distinct verified completed `turn_end`; repeated observations or restart cannot drain the next item. An after-turn wait does not block later Inject now messages from an eligible tool response. Initial and immediate browser sends retain single-send admission. Edits and reordering apply only before claim; the durable edit receipt ends the renderer's editing state without waiting for another queue read.
+Immediate inputs are batched into one eligible MCP response in queue order within the existing payload bounds; after-turn and finish stages retain their separate one-boundary-at-a-time policy. Model catalog election requires a visible composer, so an editor hidden behind Settings cannot claim the refresh. Captured provider citation ranges use Unicode code points; the renderer maps them to UTF-16 and emits exact uploaded-file chip names as plain text, omitting unresolved file citations.
+
+Finish checkpoints inherit the current chat model. `shared/input.ts::browserInputModel`
+projects null picker settings for finish entries, including legacy rows whose authored fields
+still contain the initial model. Browser handout, finish appendix and delivery-history model
+evidence use that same projection. Newly materialized plan stages store no model override;
+explicit direct/after-turn sends retain their requested model. An inherited checkpoint receipt
+must never republish the stale enqueue-time picker as an observed model switch.
+
+Plugins presents unconfigured connection setup as a red-outlined card; saved plugin tunnel
+identity or a live endpoint projects the compact setup row, including offline restarts with
+saved configuration. A persistent reminder asks users to refresh
+the ChatGPT Plugins connector after installation or enabled-tool changes. Local status checks
+do not refresh ChatGPT's tool catalog. The notice generator rejects missing production license
+material and mismatched catalog notice hashes, and includes native LGPL/GPL/MPL supplements.
+CI runs `verify:notices` against each host's installed production dependencies and checks
+their versions against the lockfile. Packaging regenerates the host-specific inventory.
+Reviewed plugin license labels require an exact package kind, name and version; custom updates
+cannot inherit a previous catalog review. Native binary source/replacement obligations remain
+separate from notice validation; see `docs/plugin-notice-audit.md`.
+Complete notice text is not proof of corresponding-source compliance for binary distribution;
+verify exact native dependency source/build provenance and actual release artifacts separately.

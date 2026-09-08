@@ -43,6 +43,8 @@ describe('browser-backed ChatGPT commands', () => {
     expect(await isPreferredBrowserRunning('win32', probe, 'edge')).toBe(true);
     expect(probe.mock.calls[0]?.[0]).toContain("ProcessName -eq 'msedge'");
     expect(probe.mock.calls[0]?.[0]).not.toContain("ProcessName -eq 'chrome'");
+    expect(await isPreferredBrowserRunning('win32', probe, 'brave')).toBe(true);
+    expect(probe.mock.calls[1]?.[0]).toContain("ProcessName -eq 'brave'");
   });
   it('grants process absence only from a successful bounded Windows probe', async () => {
     const result = { stdout: 'absent\r\n', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 };
@@ -57,8 +59,25 @@ describe('browser-backed ChatGPT commands', () => {
     result.timedOut = false; result.exitCode = 1;
     expect(await isPreferredBrowserRunning('win32', probe)).toBeNull();
     probe.mockClear();
-    expect(await isPreferredBrowserRunning('darwin', probe)).toBeNull();
+    expect(await isPreferredBrowserRunning('aix', probe)).toBeNull();
     expect(probe).not.toHaveBeenCalled();
+  });
+  it.each(['darwin', 'linux'] as const)('observes selected process names on %s and fails closed on incomplete probes', async platform => {
+    const result = { stdout: '/sbin/init\nps\n/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 };
+    const probe = vi.fn(async () => result);
+    expect(await isPreferredBrowserRunning(platform, undefined, 'chrome', probe)).toBe(true);
+    expect(await isPreferredBrowserRunning(platform, undefined, 'edge', probe)).toBe(false);
+    result.stdout = 'init\nmsedge\nps\n';
+    expect(await isPreferredBrowserRunning(platform, undefined, 'edge', probe)).toBe(true);
+    expect(await isPreferredBrowserRunning(platform, undefined, 'chrome', probe)).toBe(false);
+    result.stdout = 'init\n/Applications/Brave Browser.app/Contents/MacOS/Brave Browser\nbrave-browser-nightly\nps\n';
+    expect(await isPreferredBrowserRunning(platform, undefined, 'brave', probe)).toBe(true);
+    expect(await isPreferredBrowserRunning(platform, undefined, 'chrome', probe)).toBe(false);
+    expect(await isPreferredBrowserRunning(platform, undefined, 'edge', probe)).toBe(false);
+    result.truncated = true;
+    expect(await isPreferredBrowserRunning(platform, undefined, 'chrome', probe)).toBeNull();
+    result.truncated = false; result.stdout = '';
+    expect(await isPreferredBrowserRunning(platform, undefined, 'chrome', probe)).toBeNull();
   });
   it('cold background startup gives Chrome one owned tab in a minimized startup window', async () => {
     const calls: string[] = [];
@@ -74,7 +93,7 @@ describe('browser-backed ChatGPT commands', () => {
         return { stdout: '', stderr: '', exitCode: 0, timedOut: false, truncated: false, durationMs: 1 };
       }
     });
-    expect(calls).toEqual([`$ErrorActionPreference='Stop'; Start-Process -FilePath '${browser}' -ArgumentList '"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--window-size=1100,800" "https://chatgpt.com/?cos-model-catalog=owned"' -WorkingDirectory '${path.win32.dirname(browser)}' -WindowStyle Minimized`]);
+    expect(calls).toEqual([`$ErrorActionPreference='Stop'; Start-Process -FilePath '${browser}' -ArgumentList '"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--window-size=800,600" "https://chatgpt.com/?cos-model-catalog=owned"' -WorkingDirectory '${path.win32.dirname(browser)}' -WindowStyle Minimized`]);
     expect(launch).not.toHaveBeenCalled();
   });
   it.runIf(process.platform === 'win32')('keeps executable, cwd and quoted URL literal through PowerShell without launching a browser', async () => {
@@ -98,7 +117,7 @@ describe('browser-backed ChatGPT commands', () => {
     expect(captured.file).toBe(browser);
     expect(captured.cwd).toBe(path.win32.dirname(browser));
     expect(captured.style).toBe('Minimized');
-    expect(captured.args).toBe(String.raw`"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--window-size=1100,800" "https://chatgpt.com/?q=space \"quoted\"&literal=$(` + '`whoami`' + String.raw`)&path=C:\dir with space\\"`);
+    expect(captured.args).toBe(String.raw`"--disable-renderer-backgrounding" "--disable-background-timer-throttling" "--window-size=800,600" "https://chatgpt.com/?q=space \"quoted\"&literal=$(` + '`whoami`' + String.raw`)&path=C:\dir with space\\"`);
   });
 
   it.each([{ exitCode: 1, timedOut: false }, { exitCode: null, timedOut: true }])('reports minimized startup failure without direct foreground fallback: %j', async failure => {

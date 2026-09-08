@@ -593,6 +593,9 @@ describe('API task planner reasoning', () => {
       const body = JSON.parse(String(init?.body));
       expect(body.model).toBe('z-ai/glm-5.3-flash');
       expect(body.reasoning).toEqual(reasoning === 'default' ? { exclude: true } : { effort: reasoning, exclude: true });
+      expect(body.messages[0].content).toContain('ENTIRE workflow in its first message');
+      expect(body.messages[0].content).toContain('early delegation in Stage 1');
+      expect(body.messages[0].content).toContain('verification and improvement checkpoints');
       return decision('continue', JSON.stringify({ stages: ['Implement the requested change', 'Verify acceptance'] }));
     });
     globalThis.fetch = fetch as typeof globalThis.fetch;

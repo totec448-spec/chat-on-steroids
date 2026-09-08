@@ -475,5 +475,13 @@ it('retires a late-confirmed cancelled desktop send after two minutes even as th
     const after = (await post('/status', { openConversations: [conversationId] })).body;
     expect(after.retiredConversations).toContain(conversationId);
     expect(after.closableConversations).toContain(conversationId);
+    const session = await createSession({ conversationId, title: 'Resumed conversation' });
+    const previous = (await input.listInputs()).find(item => item.id === row.id)!;
+    await writeDurableNow('session-input', [previous, { ...previous, id: randomUUID(), sessionId: session.id,
+      state: 'sent', createdAt: now + 121_000, deliveredAt: now + 121_000, historyRecorded: true }]);
+    input.resetInputForTests(); clock.mockReturnValue(now + 242_001);
+    const resumed = (await post('/status', { openConversations: [conversationId] })).body;
+    expect(resumed.retiredConversations).not.toContain(conversationId);
+    expect(resumed.closableConversations).not.toContain(conversationId);
   } finally { clock.mockRestore(); }
 });
