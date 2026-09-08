@@ -1,17 +1,19 @@
 import { REASONING_EFFORTS } from '../shared/session.js';
-/** Read-only account picker observation. Process-local requests never revive after restart. */
+/** Successful account choices survive restart; request/opening authority never does. */
 import { randomUUID } from 'node:crypto';
 import { wakeBrowserWork } from './browser-wake.js';
 import { z } from 'zod';
 import { logInfo } from './logger.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
+import { readDurable, writeDurableSoon } from './durable.js';
 const observation = z.object({
   nonce: z.string().uuid(),
   error: z.enum(['picker_unavailable', 'model_unconfirmed', 'power_unknown', 'power_unconfirmed', 'power_changed', 'restore_failed', 'inspection_failed']).optional(),
   models: z.array(z.object({
     id: z.string().min(1).max(80).regex(/^[a-zA-Z0-9._-]+$/),
     label: z.string().trim().min(1).max(80),
-    efforts: z.array(z.enum(REASONING_EFFORTS)).max(REASONING_EFFORTS.length)
+    efforts: z.array(z.enum(REASONING_EFFORTS)).max(REASONING_EFFORTS.length),
+    aliases: z.array(z.string().min(1).max(80).regex(/^[a-zA-Z0-9._-]+$/)).max(20).optional()
   }).strict()).min(1).max(20).nullable()
 }).strict();
 let catalog: ChatModelCatalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
@@ -20,6 +22,16 @@ let deadline: ReturnType<typeof setTimeout> | null = null;
 let launch: { nonce: string; allowOpen: boolean; work: Promise<void> } | null = null;
 let changed = (): void => {};
 let wake: ((nonce: string, allowOpen: boolean) => Promise<void>) | null = null;
+export async function restoreChatModels(): Promise<void> {
+  const saved = z.object({ observedAt: z.number().finite().positive(), models: observation.shape.models.unwrap() }).strict().safeParse(await readDurable('chat-models'));
+  if (!saved.success || request || catalog.state !== 'unknown') return;
+  const models = saved.data.models;
+  if (new Set(models.map(model => model.id)).size !== models.length || models.some(model => new Set(model.efforts).size !== model.efforts.length)) return;
+  catalog = { state: 'ready', requestedAt: null, observedAt: saved.data.observedAt, models };
+}
+function failed(error: string): void {
+  catalog = { ...catalog, state: catalog.models.length ? 'ready' : 'unavailable', error };
+}
 export function configureChatModelDiscovery(options: { changed: () => void; wake: (nonce: string, allowOpen: boolean) => Promise<void> }): void { changed = options.changed; wake = options.wake; }
 function scheduleDeadline(at: number): void {
   if (deadline) clearTimeout(deadline);
@@ -27,7 +39,7 @@ function scheduleDeadline(at: number): void {
   deadline.unref?.();
 }
 function expire(): void {
-  if (request && Date.now() >= request.expiresAt) { logInfo(`model discovery expired id=${request.nonce}`); request = null; catalog = { ...catalog, state: 'unavailable', models: [], error: 'Model discovery timed out. Check ChatGPT is signed in, then retry.' }; }
+  if (request && Date.now() >= request.expiresAt) { logInfo(`model discovery expired id=${request.nonce}`); request = null; failed('Model discovery timed out. Check ChatGPT is signed in, then retry.'); }
 }
 export function getChatModels(): ChatModelCatalog {
   expire(); return structuredClone(catalog);
@@ -37,7 +49,7 @@ export function requestChatModels(allowOpen = true): ChatModelCatalog {
   if (!request) {
     const now = Date.now(); request = { nonce: randomUUID(), expiresAt: now + 120000, allowOpen };
     logInfo(`model discovery requested id=${request.nonce}`);
-    catalog = { state: 'pending', requestedAt: now, observedAt: null, models: [] };
+    catalog = { ...catalog, state: 'pending', requestedAt: now, error: undefined };
     scheduleDeadline(request.expiresAt);
     wakeBrowserWork();
   } else if (allowOpen && !request.allowOpen) {
@@ -68,7 +80,7 @@ export async function startChatModelDiscovery(allowOpen = true): Promise<ChatMod
         if (request?.nonce !== nonce) return;
         request = null;
         if (deadline) clearTimeout(deadline); deadline = null;
-        catalog = { ...catalog, state: 'unavailable', models: [], error: `${(error as Error).message}. Retry model discovery.`.slice(0, 240) };
+        failed(`${(error as Error).message}. Retry model discovery.`.slice(0, 240));
         changed(); wakeBrowserWork();
       }
     })();
@@ -95,7 +107,10 @@ export function observeChatModels(raw: unknown): boolean {
   const error = parsed.data.error === 'picker_unavailable'
     ? 'ChatGPT\'s native model picker could not be read. If your account shows only Think and no model picker, model discovery is not supported for that interface yet.'
     : 'ChatGPT model choices could not be read. Open ChatGPT in the selected browser and check its model picker, then retry.';
-  catalog = { ...catalog, state: models ? 'ready' : 'unavailable', models: models ?? [], observedAt: Date.now(), ...(models ? {} : { error }) };
+  if (models) {
+    catalog = { ...catalog, state: 'ready', models, observedAt: Date.now(), error: undefined };
+    writeDurableSoon('chat-models', { observedAt: catalog.observedAt, models });
+  } else failed(error);
   request = null;
   if (deadline) clearTimeout(deadline); deadline = null;
   changed(); wakeBrowserWork(); return true;

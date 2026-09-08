@@ -1,5 +1,5 @@
 import { $, el, run } from './dom.js';
-import { DEFAULT_USAGE_FORMULA, usageEstimate, usageRate, type UsageFormula, type UsageOverview } from '../shared/usage.js';
+import { DEFAULT_USAGE_FORMULA, usageEstimate, usageModelGroups, usageRate, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 let snapshot: UsageOverview | null = null;
 let loadGeneration = 0;
 const FORMULA_KEY = 'usage-formula-v1';
@@ -112,9 +112,11 @@ function paintCost(): void {
   const modelTable = el('table', 'usage-table'); const modelHead = el('tr');
   for (const title of ['Recorded model / effort', 'Estimated tokens', 'Estimated equivalent']) modelHead.append(el('th', '', title));
   modelTable.append(modelHead);
-  for (const entry of snapshot.models) {
-    const estimate = usageEstimate([entry], formula); const row = el('tr');
-    row.append(el('td', '', `${entry.model} · ${entry.reasoningEffort ?? 'effort unknown'}${entry.assumed ? ' (assumed)' : ''}`), el('td', '', Math.round(estimate.tokens).toLocaleString()), el('td', '', estimate.unpricedTokens ? 'Rate unknown' : money.format(estimate.cost))); modelTable.append(row);
+  for (const entry of usageModelGroups(snapshot.models)) {
+    const estimate = usageEstimate(entry.sources, formula); const row = el('tr');
+    const name = el('td', '', `${entry.model} · ${entry.reasoningEffort ?? 'effort unknown'}${entry.assumed ? ' (assumed)' : ''}`);
+    usageHint(name, `Recorded IDs: ${[...new Set(entry.sources.map(source => source.model))].join(', ')}`);
+    row.append(name, el('td', '', Math.round(estimate.tokens).toLocaleString()), el('td', '', estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? 'Rate unknown' : costText(estimate))); modelTable.append(row);
   }
   const table = el('table', 'usage-table'); const head = el('tr');
   head.append(el('th', '', 'Day'), el('th', '', 'Estimated tokens'), el('th', '', `Cached × ${formula.multiplier}`)); table.append(head);

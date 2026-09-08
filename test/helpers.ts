@@ -41,6 +41,7 @@ export function faultGate(): { entered: Promise<void>; hold(): Promise<void>; re
   return { entered: reached, hold: () => { entered(); return held; }, release };
 }
 
+
 /**
  * A handoff brief long enough to be one.
  *

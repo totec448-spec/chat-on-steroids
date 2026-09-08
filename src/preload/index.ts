@@ -6,6 +6,7 @@ import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
+import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
 /**
  * The entire renderer-facing API.
  *
@@ -73,6 +74,23 @@ export interface SessionDetail {
 }
 
 const api = {
+  openLegalNotices: () => call<void>('plugins:legalNotices'),
+  pluginsSnapshot: () => call<PluginSnapshot>('plugins:snapshot'),
+  pluginsInstall: (request: PluginInstallRequest) => call<PluginSnapshot>('plugins:install', request),
+  pluginsConfigure: (id: string, patch: PluginConfigPatch) => call<PluginSnapshot>('plugins:configure', { id, patch }),
+  pluginsRestart: (id: string) => call<PluginSnapshot>('plugins:restart', { id }),
+  pluginsAuthenticate: (id: string) => call<PluginSnapshot>('plugins:authenticate', { id }),
+  pluginsCancelAuthentication: (id: string) => call<PluginSnapshot>('plugins:cancelAuthentication', { id }),
+  pluginsUpdate: (id: string) => call<PluginSnapshot>('plugins:update', { id }),
+  pluginsUninstall: (id: string) => call<PluginSnapshot>('plugins:uninstall', { id }),
+  pluginsSetEnabled: (id: string, enabled: boolean) => call<PluginSnapshot>('plugins:enabled', { id, enabled }),
+  pluginsSetToolEnabled: (id: string, name: string, enabled: boolean) => call<PluginSnapshot>('plugins:tool', { id, name, enabled }),
+  pluginsImportBundle: () => call<string | null>('plugins:importBundle'),
+  onPluginsChanged: (listener: (snapshot: PluginSnapshot) => void): (() => void) => {
+    const wrapped = (_event: unknown, snapshot: PluginSnapshot): void => listener(snapshot);
+    ipcRenderer.on('plugins:changed', wrapped);
+    return () => ipcRenderer.removeListener('plugins:changed', wrapped);
+  },
   chooseFiles: () => call<InputAttachment[]>('sessions:files'),
   dropFiles: async (files: File[]): Promise<Reply<InputAttachment[]>> => {
     if (!files.length || files.length > 20) return { ok: false, error: 'Attach up to 20 files per message' };
@@ -131,6 +149,11 @@ const api = {
   getChatModels: () => call<ChatModelCatalog>('chatModels:get'),
   browserPreferences: (patch: Partial<BrowserPreferences> = {}) => call<BrowserPreferences>('browser:preferences', patch),
   requestChatModels: () => call<ChatModelCatalog>('chatModels:request'),
+  onChatModelsChanged: (listener: (catalog: ChatModelCatalog) => void): (() => void) => {
+    const wrapped = (_event: unknown, catalog: ChatModelCatalog): void => listener(catalog);
+    ipcRenderer.on('chatModels:changed', wrapped);
+    return () => ipcRenderer.removeListener('chatModels:changed', wrapped);
+  },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
   setSessionAutomation: (id: string, automation: SessionControlsView['automation']) => call<SessionControlsView>('sessions:automation', { id, automation }),
   setSessionObjective: (id: string, text: string, mode: 'goal' | 'loop') => call<SessionControlsView>('sessions:objective', { id, text, mode }),

@@ -849,11 +849,45 @@ it('asks for an extension reload only when the extension is older than this app'
   const notice = doc.getElementById('updateNotice')!;
   expect(notice.hidden).toBe(false);
   expect(doc.getElementById('updateText')!.textContent).toContain('2.0.1');
+  const action = doc.getElementById('updateExtension') as HTMLButtonElement;
+  expect(action.hidden).toBe(false);
+  action.click();
+  expect(doc.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
+  const rejected = structuredClone(mounted.state) as any;
+  rejected.bridge.present = false;
+  mounted.push(rejected);
+  expect(notice.hidden, 'an old companion rejected by the protocol gate still needs an update').toBe(false);
 
   const ahead = structuredClone(mounted.state) as any;
   ahead.bridge.extensionVersion = '2.0.3';
   mounted.push(ahead);
   expect(notice.hidden, 'a newer extension is not a downgrade prompt').toBe(true);
+  expect(action.hidden).toBe(true);
+});
+
+it('shows a missing-extension reminder while connected and clears it after the companion reports in', async () => {
+  const mounted = await mountChat();
+  const connected = structuredClone(mounted.state) as any;
+  connected.status.state = 'connected'; connected.bridge.running = true; connected.bridge.present = false;
+  mounted.push(connected);
+  const doc = mounted.window.document;
+  expect(doc.getElementById('updateText')!.textContent).toContain('Browser extension not connected');
+  expect(doc.getElementById('updateExtension')!.hidden).toBe(false);
+  connected.bridge.present = true; connected.bridge.extensionVersion = connected.update.current;
+  mounted.push(connected);
+  expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
+});
+
+it('keeps plugin connection controls out of general Setup and preserves its tunnel during unrelated saves', async () => {
+  const mounted = await mountChat(); const doc = mounted.window.document;
+  const next = structuredClone(mounted.state); next.config.tunnel.pluginsTunnelId = 'tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  mounted.push(next);
+  expect(doc.querySelector('[data-panel="setup"] #pluginsTunnelId')).toBeNull();
+  const input = doc.getElementById('tunnelId') as HTMLInputElement;
+  input.value = 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  input.dispatchEvent(new mounted.window.Event('change')); await settle();
+  expect(mounted.calls.at(-1).tunnel.pluginsTunnelId).toBe(next.config.tunnel.pluginsTunnelId);
+  expect(doc.querySelector('[data-panel="setup"] [data-link="https://chatgpt.com/#settings/Plugins"]')).not.toBeNull();
 });
 
 /**

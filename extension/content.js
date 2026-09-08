@@ -586,6 +586,10 @@
    * moving it merely because React transiently moved the native host across a user boundary.
    */
   const streamRootsByKey = new Map();
+  // Recorder takeover starts a new presentation owner. Sibling roots cannot be adopted
+  // through native section descendants, and an older recorder could leave unkeyed roots
+  // outside its registry. Retire that projection once; the durable feed rebuilds it.
+  for (const root of document.querySelectorAll('.clf-stream')) root.remove();
   /** Latest delivery seq for each canonical ChatGPT assistant message. */
   const streamMessageSeq = new Map();
   /**
@@ -716,10 +720,19 @@
   // observed return to New Chat) revokes this send; text proof is not its lifetime.
   function submittedSendLifetime(target, startedEpoch = epoch) {
     let elected = target || null;
+    // A New Chat composer may live in A's existing document. The first concrete
+    // route retires A and advances its observation epoch; that is the submitted
+    // opening acquiring B, not a second navigation away from the send.
+    const priorConversation = !target ? conversationId : null;
+    let heldEpoch = startedEpoch;
     let revoked = false;
     return () => {
       const route = CLF_DOM.conversationId();
-      if (!alive || epoch !== startedEpoch || (elected && route !== elected)) revoked = true;
+      if (!revoked && priorConversation && route && route !== priorConversation &&
+          (!elected || elected === route) && conversationId === route && epoch === startedEpoch + 1) {
+        heldEpoch = epoch;
+      }
+      if (!alive || epoch !== heldEpoch || (elected && route !== elected)) revoked = true;
       if (!elected && route) elected = route;
       return !revoked;
     };
@@ -2388,7 +2401,7 @@
       // identity. DOM rows alone are presentation and never mint durable page_tool ids.
       if (!stallReported && Date.now() - lastChangeAt > STALL_MS) {
         stallReported = true;
-        emit({ kind: 'chat_error', text: 'No visible progress for ten minutes. The turn is still marked as generating.', turnId });
+        emit({ kind: 'chat_error', text: 'No visible progress for ten minutes. The turn is still marked as generating.', turnId, recoverable: true });
       }
     }
 
@@ -5420,15 +5433,6 @@
         streamRootsByKey.delete(streamKey);
         existing = null;
       }
-      // Migration/extension-reload compatibility: adopt a stream created by an older content
-      // script that still lives inside the native section, then the successful replacement
-      // below will move it into the stable sibling slot once it is detached/recreated.
-      if (!existing) {
-        existing = nodes
-          .map((node) => node && node.querySelector ? node.querySelector('.clf-stream') : null)
-          .find(Boolean) || null;
-      }
-
       if (!enabled) {
         if (existing) existing.remove();
         if (streamKey) streamRootsByKey.delete(streamKey);
@@ -5460,7 +5464,10 @@
         continue;
       }
 
-      if (rendered.length === 0 || !completeReplacementForTurn(turn, rendered)) {
+      // Request-only orphan calls can prove the activity, but not a stable response root.
+      // Never mount a sibling that this registry cannot find again on the next paint.
+      // Native relabelling stays available until a durable group/message key arrives.
+      if (!streamKey || rendered.length === 0 || !completeReplacementForTurn(turn, rendered)) {
         const lastComplete = existing ? Number(existing.dataset.clfCompleteAt) : 0;
         // A one-second observer and a two-second activity pull race each other by design.
         // Once this exact section has already been proven complete, do not tear ownership
@@ -9419,7 +9426,10 @@
     if (attempt) attempt.phase = 'claimed';
     reportClaim(true);
 
-    const fail = (why) => ask({ type: 'ack', id: boot.id, status: 'failed', error: why, client: RUN_ID });
+    const fail = (why) => {
+      if (attempt) attempt.phase = 'failed';
+      return ask({ type: 'ack', id: boot.id, status: 'failed', error: why, client: RUN_ID });
+    };
     // What this command is for, as the app states it. A revival names the conversation and
     // will not be typed anywhere else; the two chat-opening commands name none, and their
     // precondition is the opposite one — that this page still has no conversation at all.
@@ -9899,7 +9909,7 @@
       if (!composer && onTarget() && CLF_DOM.generating() && await confirmedProviderTerminal() && onTarget() && CLF_DOM.generating()) {
         // Only after readiness expires, re-prove the exact terminal: a Retry or
         // new user turn must never become authority to reload the page.
-        emit({ kind: 'chat_error', turnId, text: 'ChatGPT finished its answer but its composer is still stuck on Stop. Recovering this page before delivering the queued message.' });
+        emit({ kind: 'chat_error', turnId, recoverable: true, text: 'ChatGPT finished its answer but its composer is still stuck on Stop. Recovering this page before delivering the queued message.' });
         await flush();
         return false; // No claim, insertion or Send: queued input survives recovery.
       }
@@ -10092,8 +10102,54 @@
     } catch { await fail('Connector refresh could not be verified'); return false; }
     finally { pluginRefreshBusy = false; }
   }
+  function inputReuseSafe() {
+    const rows = CLF_DOM.messages();
+    const home = !CLF_DOM.conversationId() && location.pathname === '/';
+    const marker = new URL(location.href).searchParams;
+    return alive && !generating && !CLF_DOM.generating() && pendingTools === 0 && !desktopInputBusy &&
+      !modelCatalogBusy && !pluginRefreshBusy && !desktopDecision && !commandAttempt && !commandJournalGate &&
+      queue.length === 0 && !flushWork && !CLF_DOM.hasComposerAttachments() &&
+      !(CLF_DOM.composer()?.textContent || '').trim() &&
+      (home ? !rows.length && !marker.has('cos-input') && !marker.has('temporary-chat') :
+        !!CLF_DOM.conversationId() && rows.at(-1)?.role === 'assistant');
+  }
+  async function prepareDesktopInputPage(message) {
+    if (!/^[a-f0-9-]{36}$/i.test(message.id) || !inputReuseSafe()) return { ready: false };
+    const startEpoch = epoch, startConversation = CLF_DOM.conversationId();
+    let interrupted = false;
+    const interrupt = event => { if (event.isTrusted) interrupted = true; };
+    document.addEventListener('pointerdown', interrupt, true);
+    document.addEventListener('keydown', interrupt, true);
+    const current = () => alive && !interrupted && epoch >= startEpoch && epoch <= startEpoch + (startConversation ? 1 : 0) &&
+      (!CLF_DOM.conversationId() || CLF_DOM.conversationId() === startConversation) &&
+      !generating && !CLF_DOM.generating() && pendingTools === 0 &&
+      !(CLF_DOM.composer()?.textContent || '').trim() && !CLF_DOM.hasComposerAttachments();
+    const failure = () => ({ ready: false, fallback: current(), preSend: true, url: location.href });
+    desktopInputBusy = true;
+    try {
+      if (startConversation) {
+        const control = await CLF_DOM.newChatControl(current);
+        if (!control || !current()) return failure();
+        control.click();
+        const home = await waitPageView(() => !CLF_DOM.conversationId() && location.pathname === '/' && !CLF_DOM.turns().length, current, 5000);
+        if (!home || !current()) return failure();
+      }
+      if (!(await CLF_DOM.prepareChatModelSurface(current)) || !current()) return failure();
+      if (CLF_DOM.conversationId() || CLF_DOM.turns().length || !CLF_DOM.composer()) return failure();
+      const url = new URL(location.href);
+      url.searchParams.delete('cos-model-catalog');
+      url.searchParams.set('cos-input', message.id);
+      url.hash = `cos-input=${message.id}`;
+      history.replaceState(history.state, '', url.href);
+      return { ready: true, navigationEpoch: epoch, url: location.href };
+    } finally {
+      desktopInputBusy = false;
+      document.removeEventListener('pointerdown', interrupt, true);
+      document.removeEventListener('keydown', interrupt, true);
+    }
+  }
   function catalogPageReady() {
-    return alive && !generating && !CLF_DOM.generating() && !desktopInputBusy && !!CLF_DOM.composer() &&
+    return alive && !generating && !CLF_DOM.generating() && !desktopInputBusy && CLF_DOM.composerVisible() &&
       !CLF_DOM.hasComposerAttachments() && (catalogHelper() || !CLF_DOM.composer().textContent?.trim());
   }
   function catalogHelper() {
@@ -10117,6 +10173,15 @@
     if (!current() || !catalogPageReady()) return false;
     const restoredText = CLF_DOM.composer().textContent;
     if (catalogHelper() && restoredText?.trim() && !CLF_DOM.clearPromptExact(restoredText)) return false;
+    // Work swaps the composer as well as its picker. Complete that owned transition
+    // before binding the exact Chat composer used by the remaining inspection.
+    const switchCurrent = () => current() && !generating && !CLF_DOM.generating() && !desktopInputBusy &&
+      !CLF_DOM.hasComposerAttachments() && !CLF_DOM.composer()?.textContent?.trim();
+    if (!await CLF_DOM.prepareChatModelSurface(switchCurrent) || !switchCurrent()) {
+      if (switchCurrent()) await ask({ type: 'model_catalog', nonce: message.nonce, models: null, error: 'picker_unavailable' });
+      return false;
+    }
+    if (!CLF_DOM.composer()) await waitPageView(catalogPageReady, switchCurrent, 5000);
     const composer = CLF_DOM.composer(), draftText = composer?.textContent;
     const attachments = CLF_DOM.hasComposerAttachments();
     const onTarget = () => current() && catalogPageReady() &&
@@ -10146,7 +10211,7 @@
         return true;
       }
       if (message.type === 'clf-model-catalog') {
-        void inspectAppModelCatalog(message).then(ok => sendResponse({ ok })).catch(() => sendResponse({ ok: false }));
+        void inspectAppModelCatalog(message).then(result => sendResponse(typeof result === 'object' ? result : { ok: result })).catch(() => sendResponse({ ok: false }));
         return true;
       }
       if (message.type === 'clf-plugin-refresh') {
@@ -10159,6 +10224,14 @@
       if (message.type === 'clf-model-catalog-state') {
         sendResponse({ ready: !modelCatalogBusy && (catalogPageReady() || (catalogHelper() && !CLF_DOM.composer())) });
         return false;
+      }
+      if (message.type === 'clf-input-reuse-state') {
+        sendResponse({ safe: inputReuseSafe(), navigationEpoch: epoch });
+        return false;
+      }
+      if (message.type === 'clf-prepare-desktop-input') {
+        void prepareDesktopInputPage(message).then(sendResponse).catch(() => sendResponse({ ready: false }));
+        return true;
       }
       if (message.type === 'clf-desktop-input') {
         void acceptDesktopInput(message).then((ok) => sendResponse({ ok })).catch(() => sendResponse({ ok: false }));
@@ -10191,6 +10264,9 @@
         return false;
       }
       if (message.type === 'clf-tab-close-check') {
+        const failedBootstrap = message.failedCommand?.id === startupCommandId && message.failedCommand?.client === RUN_ID &&
+          markerId() === startupCommandId && !OPENED_CONVERSATION && !conversationId && commandsHandled.has(startupCommandId) &&
+          (!commandAttempt || (commandAttempt.id === startupCommandId && commandAttempt.phase === 'failed'));
         // Maintenance carries the app's terminal tombstone for this exact claimed
         // document. Revocation is independent of whether the renderer is safe to close.
         const cancelled = (Array.isArray(message.cancelledDecisions) ? message.cancelledDecisions : [])
@@ -10210,7 +10286,8 @@
           sendResponse({ conversationId: CLF_DOM.conversationId(), navigationEpoch: epoch,
             safe: alive && epoch === observedEpoch && message.conversationId === conversationId && CLF_DOM.conversationId() === conversationId &&
               (message.allowGenerating === true || (!generating && (!CLF_DOM.generating() ||
-                (terminal && expectedTerminal === fiberTerminalMessageId && fiberTurnFor(currentAssistantTurn())?.endMessageId === expectedTerminal)))) && !desktopInputBusy && !modelCatalogBusy && !desktopDecision && !commandAttempt && !commandJournalGate &&
+                (terminal && expectedTerminal === fiberTerminalMessageId && fiberTurnFor(currentAssistantTurn())?.endMessageId === expectedTerminal)))) && !desktopInputBusy && !modelCatalogBusy && !pluginRefreshBusy && !desktopDecision &&
+              ((!commandAttempt && !commandJournalGate) || failedBootstrap) && (!message.failedCommand || failedBootstrap) &&
               queue.length === 0 && !flushWork && !!CLF_DOM.composer() &&
               !(CLF_DOM.composer().textContent || '').trim() && !CLF_DOM.hasComposerAttachments() });
         })().catch(() => sendResponse({ safe: false }));

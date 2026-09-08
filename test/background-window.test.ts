@@ -75,7 +75,8 @@ it('serializes concurrent first tabs into one minimized unfocused window', async
   const app = harness([]);
   const tabs = await Promise.all([app.createChatTab('https://chatgpt.com/?a', true), app.createChatTab('https://chatgpt.com/?b', true)]);
   expect(app.windowCreate).toHaveBeenCalledTimes(1);
-  expect(app.windowCreate).toHaveBeenCalledWith(expect.objectContaining({ state: 'minimized', focused: false }));
+  expect(app.windowCreate).toHaveBeenCalledWith(expect.objectContaining({ width: 800, height: 600, focused: false }));
+  expect(app.windowUpdate).toHaveBeenCalledWith(tabs[0]?.windowId, { state: 'minimized', focused: false });
   expect(tabs[0]?.windowId).toBe(tabs[1]?.windowId);
 });
 

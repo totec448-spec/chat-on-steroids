@@ -601,6 +601,10 @@ input:focus-visible + .track {
   gap: 8px;
 }
 
+.reload-action {
+  margin-top: 12px;
+}
+
 .actions button {
   flex: 1 1 0;
   min-height: 36px;

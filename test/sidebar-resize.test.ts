@@ -1,0 +1,47 @@
+import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
+import { afterEach, expect, it, vi } from 'vitest';
+import { initSidebarResize } from '../src/renderer/sidebar-resize.js';
+
+let dom: JSDOM;
+afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); });
+it('bounds dragging, releases capture, preserves width through collapse and smaller windows, and resets', () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const doc = dom.window.document;
+  const app = doc.querySelector<HTMLElement>('.app')!;
+  const sidebar = doc.getElementById('sidebar')!;
+  const handle = doc.getElementById('sidebarResize')!;
+  sidebar.getBoundingClientRect = () => ({ width: parseFloat(app.style.getPropertyValue('--sidebar-width')) || 248 }) as DOMRect;
+  let captured = false;
+  handle.setPointerCapture = () => { captured = true; };
+  handle.hasPointerCapture = () => captured;
+  handle.releasePointerCapture = () => { captured = false; };
+  initSidebarResize();
+  const pointer = (type: string, x: number) => {
+    const event = new dom.window.MouseEvent(type, { clientX: x, button: 0 });
+    Object.defineProperty(event, 'pointerId', { value: 7 });
+    handle.dispatchEvent(event);
+  };
+  pointer('pointerdown', 248); pointer('pointermove', 1000); pointer('pointerup', 1000);
+  expect(captured).toBe(false);
+  expect(app.classList.contains('is-resizing-sidebar')).toBe(false);
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('480px');
+  doc.getElementById('sidebarToggle')!.click();
+  expect(sidebar.inert).toBe(true);
+  doc.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'b', ctrlKey: true }));
+  expect(sidebar.inert).toBe(false);
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('480px');
+  Object.defineProperty(dom.window, 'innerWidth', { value: 600, configurable: true });
+  dom.window.dispatchEvent(new dom.window.Event('resize'));
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('300px');
+  Object.defineProperty(dom.window, 'innerWidth', { value: 1200 });
+  dom.window.dispatchEvent(new dom.window.Event('resize'));
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('480px');
+  handle.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Home' }));
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('180px');
+  handle.dispatchEvent(new dom.window.MouseEvent('dblclick'));
+  expect(app.style.getPropertyValue('--sidebar-width')).toBe('');
+  expect(doc.getElementById('zoomIn')!.closest('#viewMenu')).not.toBeNull();
+  expect(sidebar.querySelector('#zoomIn')).toBeNull();
+});

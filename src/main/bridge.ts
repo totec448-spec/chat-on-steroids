@@ -7,9 +7,8 @@ import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, 
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
-let browserWorkArea: (() => { x: number; y: number; width: number; height: number }) | null = null;
-/** Desktop display geometry stays owned by Electron; the companion needs no display permission. */
-export function setBrowserWorkArea(provider: typeof browserWorkArea): void { browserWorkArea = provider; }
+import { browserWindowBounds, currentBrowserWorkArea } from './browser-window-layout.js';
+export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
@@ -525,7 +524,7 @@ let commandReceipts: CommandReceipt[] = [];
  * crash side: restart can retry/reconcile it; only after broker durability may it disappear.
  */
 const commandRetirementsAwaitingBroker = new Map<string, Command>();
-const commandLeaseWrites = new Map<string, Promise<boolean>>();
+const commandWrites = new Map<string, Promise<boolean>>();
 /** Serializes the broker-claim + browser-lease half of one revival redeem. */
 const commandRedeems = new Map<string, Promise<void>>();
 let requestWindow = { start: Date.now(), count: 0 };
@@ -673,6 +672,9 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
   if (typeof version === 'string' && version !== extensionVersion) {
     extensionVersion = version.slice(0, 32);
     logInfo(`bridge: browser extension ${extensionVersion} connected`);
+    // Even an incompatible peer reports its version before the protocol fence.
+    // Publish that evidence without falsely granting compatible browser presence.
+    changed();
   }
   if (!versionWarned && protocol !== null && protocol !== BRIDGE_PROTOCOL) {
     versionWarned = true;
@@ -890,7 +892,7 @@ function parseObservations(input: unknown): ChatObservation[] {
       observation.goalEligible = true;
     }
     if (typeof item['detail'] === 'string') observation.detail = item['detail'].slice(0, 500);
-    if (item['recoverable'] === true) observation.recoverable = true;
+    if (typeof item['recoverable'] === 'boolean') observation.recoverable = item['recoverable'];
     if (Array.isArray(item['calls'])) observation.calls = parseCallEvidence(item['calls']);
     out.push(observation);
   }
@@ -1073,7 +1075,7 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string)
   const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId });
   try {
     // Reuse the command lease barrier: status must not hand out an unsaved request.
-    const pendingLease = commandLeaseWrites.get(command.id);
+    const pendingLease = commandWrites.get(command.id);
     if (pendingLease && !await pendingLease) throw new Error('stop_request_not_durable');
     if (!commands.includes(command) || (command.claimedAt === null && !await persistCommandLease(command, null, Date.now())))
       throw new Error('stop_request_not_durable');
@@ -1100,7 +1102,7 @@ function stopRequestedFor(conversationId: string, turnId = liveConversations().f
 async function pendingStopCommands(): Promise<Array<{ id: string; conversationId: string; turnId: string }>> {
   const pending = [];
   for (const command of [...commands]) {
-    if (command.spec.type !== 'stop' || commandLeaseWrites.has(command.id)) continue;
+    if (command.spec.type !== 'stop' || commandWrites.has(command.id)) continue;
     if (Date.now() - command.createdAt >= 30_000 || !await stopCommandCurrent(command.spec)) {
       retire(command, 'the requested turn is no longer stoppable'); continue;
     }
@@ -1173,7 +1175,6 @@ export async function compactSession(sessionId: string): Promise<SessionControls
   const { opened } = await fileCompactionTicket(sessionId, await controlledConversation(sessionId));
   const lifecycle = bridgeLifecycleEpoch;
   await wakeBrowserUrl(chatUrl(opened.from), true, getConfig().ui.backgroundChats === true, {
-    requireProcessAbsence: true,
     current: () => bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested &&
       !isChatBlocked(opened.from) && !stopRequestedFor(opened.from) &&
       continuationForSession(sessionId)?.token === opened.token &&
@@ -1439,7 +1440,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
                 .map(next => ({ id: next.id, conversationId: next.conversationId })) }))],
         background: getConfig().ui.backgroundChats === true,
         browserOnly: getConfig().ui.browserOnly === true,
-        browserWorkArea: browserWorkArea?.(),
+        browserWorkArea: currentBrowserWorkArea(),
+        browserWindowBounds: browserWindowBounds(),
         commands: commands.length,
         revival,
         placement: pendingBrowserPlacement(null),
@@ -4072,7 +4074,26 @@ function commandSnapshot(options: {
 }
 
 function persistCommands(): void {
+  if (commandWrites.size) {
+    // Never capture a stale full-ledger snapshot while a lease/receipt is staged.
+    void Promise.allSettled([...commandWrites.values()]).then(() => persistCommands());
+    return;
+  }
   writeDurableSoon(COMMANDS_STATE, commandSnapshot());
+}
+
+/** Browser operations are independent; their shared durable ledger commits serially. */
+async function writeCommandTransition(command: Command, transition: () => Promise<boolean>): Promise<boolean> {
+  if (commandWrites.size) {
+    await Promise.allSettled([...commandWrites.values()]);
+    return writeCommandTransition(command, transition);
+  }
+  const work = Promise.resolve().then(transition);
+  commandWrites.set(command.id, work);
+  try { return await work; }
+  finally {
+    if (commandWrites.get(command.id) === work) commandWrites.delete(command.id);
+  }
 }
 
 async function persistCommandLease(
@@ -4081,18 +4102,9 @@ async function persistCommandLease(
   claimedAt: number,
   allowOwnerTakeover = false
 ): Promise<boolean> {
-  const earlier = commandLeaseWrites.get(command.id);
-  if (earlier) {
-    await earlier;
+  return writeCommandTransition(command, async () => {
     if (!commands.includes(command)) return false;
     if (owner !== null && command.owner !== null && command.owner !== owner && !allowOwnerTakeover) return false;
-    // The app-open lease may be finishing just as the marked page redeems it. The page's
-    // owner-bearing renewal is a second durable transition, not a conflict with that write.
-    return persistCommandLease(command, owner, claimedAt, allowOwnerTakeover);
-  }
-  if (!commands.includes(command)) return false;
-  if (owner !== null && command.owner !== null && command.owner !== owner && !allowOwnerTakeover) return false;
-  const work = (async (): Promise<boolean> => {
     const record: DurableCommandRecord = {
       ...durableCommand(command),
       phase: 'leased',
@@ -4113,13 +4125,7 @@ async function persistCommandLease(
     command.claimedAt = claimedAt;
     command.owner = owner;
     return true;
-  })();
-  commandLeaseWrites.set(command.id, work);
-  try {
-    return await work;
-  } finally {
-    if (commandLeaseWrites.get(command.id) === work) commandLeaseWrites.delete(command.id);
-  }
+  });
 }
 
 type RevivalRedeemResult = 'ok' | 'stale' | 'taken' | 'broker-not-durable' | 'lease-not-durable';
@@ -4221,21 +4227,24 @@ function receiptReply(receipt: CommandReceipt): Record<string, unknown> {
 }
 
 async function finalizeCommand(command: Command, receipt: CommandReceipt): Promise<boolean> {
-  if (!commands.includes(command)) return receiptFor(receipt.id) !== null;
-  try {
-    // The receipt and command retirement are one durable state transition. Publishing either
-    // side in memory first recreates the lost-response ambiguity this tombstone exists to end.
-    await writeDurableNow(COMMANDS_STATE, commandSnapshot({ removeCommandId: command.id, addReceipt: receipt }));
-  } catch (err) {
-    logWarn(`bridge: could not persist the final receipt for ${specKey(command.spec)} — ${err instanceof Error ? err.message : String(err)}`);
-    return false;
-  }
-  if (command.timer) clearTimeout(command.timer);
-  command.timer = null;
-  commands = commands.filter((entry) => entry !== command);
-  commandReceipts = [...commandReceipts.filter((entry) => entry.id !== receipt.id), receipt].slice(-MAX_COMMAND_RECEIPTS);
-  changed();
-  return true;
+  return writeCommandTransition(command, async () => {
+    if (!commands.includes(command)) return receiptFor(receipt.id) !== null;
+    try {
+      // The receipt and command retirement are one durable state transition. Publishing either
+      // side in memory first recreates the lost-response ambiguity this tombstone exists to end.
+      await writeDurableNow(COMMANDS_STATE, commandSnapshot({ removeCommandId: command.id, addReceipt: receipt }));
+    } catch (err) {
+      persistCommands();
+      logWarn(`bridge: could not persist the final receipt for ${specKey(command.spec)} — ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+    if (command.timer) clearTimeout(command.timer);
+    command.timer = null;
+    commands = commands.filter((entry) => entry !== command);
+    commandReceipts = [...commandReceipts.filter((entry) => entry.id !== receipt.id), receipt].slice(-MAX_COMMAND_RECEIPTS);
+    changed();
+    return true;
+  });
 }
 
 function queue(spec: CommandSpec): Command {
@@ -5405,7 +5414,6 @@ function queueBrowserRecovery(
     const ticket = continuationForSession(sessionId);
     const lifecycle = bridgeLifecycleEpoch;
     void wakeBrowserUrl(chatUrl(conversationId), true, getConfig().ui.backgroundChats === true, {
-      requireProcessAbsence: true,
       current: () => bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested &&
         getConfig().ui.browserOnly !== true &&
         repairsInFlight.get(conversationId) === repair && repair.state === 'queued' &&
@@ -5519,15 +5527,11 @@ async function noteRecoveryObservations(
     else endActivity(conversationId);
   }
 
-  // An error rendered on the page is the page saying, in its own words, that nothing more is
-  // coming: the answer it was producing is gone, or the site has stopped. That is true of any
-  // chat — an ordinary conversation with no worker attached breaks the same way, and leaving it
-  // parked on "message delivery timed out" until a human notices was the whole of this bug —
-  // Explicit provider access limits are the exception: reloading cannot remove them.
-  // Otherwise, whether the DOM classifier called it recoverable,
-  // and whether the page could name the turn it belongs to, decides nothing here: the page is
-  // reloaded because it shows an error, once per user turn (see turnRepairSpent), and neither
-  // an agent binding nor a recent attributed call may gate that.
+  // Recording an alert does not authorize recovery. Older extension documents also publish
+  // informational toasts (for example after refreshing connector actions) as chat_error,
+  // explicitly marked non-recoverable. Only the DOM transport classifier or an app-owned
+  // watchdog may grant recovery authority. The error may precede a page turn, so turn identity,
+  // agent binding and recent tool calls are still not prerequisites for a recognized failure.
   const now = Date.now();
   for (const item of observations) {
     if (item.kind !== 'chat_error') continue;
@@ -5535,6 +5539,7 @@ async function noteRecoveryObservations(
       endActivity(conversationId);
       continue;
     }
+    if (item.recoverable !== true) continue;
     // Auto-compaction owns this chat's recovery clock until its ticket commits or is cancelled.
     // A native error inside a handoff is not permission for the ordinary two-minute response
     // watchdog to cut across the compaction's own pickup schedule. The failure is still the page
@@ -5580,9 +5585,9 @@ function nonDiscardableAgentConversations(): string[] {
 }
 
 /**
- * Chats whose tabs the browser should close: the source chat of every finished Compact &
- * Resume and other app-owned conversations. The extension applies the configured budget to
- * actual tabs, with fresh per-document draft/generation checks; active work may exceed it.
+ * Terminal chats whose tabs may retire. Waiting ordinary chats and reusable workers retain
+ * their renderer for follow-ups; broker worker limits govern work slots, not tab lifetime.
+ * The extension still proves the exact document has no draft or generation before closing.
  */
 async function browserTabPolicy(openConversations: Set<string>) {
   // Existing cached metadata is the ownership index; never scan transcripts per browser poll.
@@ -5605,7 +5610,14 @@ async function browserTabPolicy(openConversations: Set<string>) {
   for (const row of cancelledDecisionClaims) managed.add(row.conversationId!);
   for (const row of inputs) if (!row.sessionId && row.purpose !== 'decision' && row.deliveredAt !== undefined && row.conversationId && openConversations.has(row.conversationId)) managed.add(row.conversationId);
   for (const id of managed) if (runningToolCalls(id) > 0 || goalActiveFor(id)) protectedChats.add(id);
-  for (const row of inputs) if (row.conversationId && ['queued', 'browser', 'decision'].includes(row.state)) protectedChats.add(row.conversationId);
+  for (const row of inputs) {
+    if (!['queued', 'browser', 'decision'].includes(row.state)) continue;
+    // Queued text follows the durable session; a handed-out claim still protects
+    // its exact document until its send outcome is known.
+    const target = row.state === 'queued' && row.sessionId && row.purpose !== 'decision'
+      ? (await getSession(row.sessionId))?.conversationId : row.conversationId;
+    if (target) protectedChats.add(target);
+  }
   const lastActivity = new Map<string, number>();
   const note = (id: string | null | undefined, at: number | null | undefined) => {
     if (id && typeof at === 'number' && Number.isFinite(at) && at > 0) lastActivity.set(id, Math.max(lastActivity.get(id) ?? 0, at));
@@ -5637,20 +5649,33 @@ async function browserTabPolicy(openConversations: Set<string>) {
     const at = chatBlockedAt(id);
     if (at !== null) lastActivity.set(id, at);
   }
-  const idle = [...managed].filter(id => !protectedChats.has(id) &&
+  const terminal = new Set([...blocked, ...cancelledDecisionClaims.map(row => row.conversationId!)]);
+  const latestDesktopReceipt = new Map<string, (typeof inputs)[number]>();
+  for (const row of inputs) {
+    if (row.purpose === 'decision' || !row.conversationId || row.deliveredAt === undefined) continue;
+    const previous = latestDesktopReceipt.get(row.conversationId);
+    if (!previous || row.deliveredAt >= previous.deliveredAt!) latestDesktopReceipt.set(row.conversationId, row);
+  }
+  // A cancelled new-chat send whose late receipt proves it happened may retire. A
+  // later authored follow-up supersedes that cancellation and retains the waiting chat.
+  for (const [id, row] of latestDesktopReceipt)
+    if (!row.sessionId && row.state === 'cancelled' && managed.has(id)) terminal.add(id);
+  for (const id of managed) {
+    const agent = agentInfoForOwnedConversation(id);
+    if (agent?.role === 'worker' && !agent.revivable && (agent.state === 'finished' || agent.state === 'failed')) terminal.add(id);
+  }
+  const idle = [...terminal].filter(id => !protectedChats.has(id) &&
     lastActivity.has(id) && Date.now() - lastActivity.get(id)! >= 120_000);
   return {
     idleCloseAfterMs: 120_000,
     cancelledDecisionClaims: cancelledDecisionClaims.map(row => ({ id: row.id, owner: row.owner, conversationId: row.conversationId })),
-    // Worker reuse is broker state, not a reason to retain an idle browser renderer.
-    // A later explicit message reopens that same conversation through existing delivery.
+    // Only terminal/blocked helpers and superseded sources grant close authority.
     retiredConversations: [...new Set([...idle, ...supersededSourceConversations()])]
       .filter(id => openConversations.has(id) && !protectedChats.has(id)).sort(),
-    tabsToKeepOpen: getConfig().multiAgent.maxWorkers,
-    workerConversations: [...managed].filter(isWorkerConversation).sort(),
-    sleepingWorkerConversations: closableWorkerConversations(0).filter(id => managed.has(id) && !protectedChats.has(id)),
     conversationActivityAt: Object.fromEntries(lastActivity),
     managedConversations: [...managed].sort(),
+    reusableConversations: [...openConversations].filter(id => !protectedChats.has(id) && runningToolCalls(id) === 0 && !goalActiveFor(id) && !isChatBlocked(id) &&
+      !agentInfoForOwnedConversation(id) && !isGoalDecisionChat(id) && !supersededSourceConversations().includes(id)).sort(),
     nonDiscardableConversations: [...protectedChats].sort(),
     blockedConversations: blocked.sort(),
     closableConversations: [...new Set([...idle, ...supersededSourceConversations().filter(id => openConversations.has(id) && !protectedChats.has(id))])].sort()
@@ -6696,8 +6721,11 @@ async function deliverOne(): Promise<void> {
   // Beside the chat it succeeds, when this app can name that chat and its browser is still
   // polling. Only that browser can put the new tab in the window the old one is in, and only
   // a tab it creates itself is guaranteed to be in a browser this extension is loaded in.
-  if (offerPlacement(command)) return;
-  await openFreshChatInBrowser(command);
+  try {
+    if (!offerPlacement(command)) await openFreshChatInBrowser(command);
+  } finally {
+    scheduleDeliver();
+  }
 }
 
 /**
@@ -7109,9 +7137,10 @@ function tidyCommands(): void {
       retire(command, 'its worker is no longer waiting to be woken');
       continue;
     }
-    if (workerAgent && command.spec.type === 'worker' && !pendingWorkers.has(`${command.spec.runId}:${workerAgent}`)) {
-      // The slot was bound (or the run ended) since this was queued, so there is nothing
-      // left for a chat to be opened for.
+    if (workerAgent && command.spec.type === 'worker' && command.claimedAt === null && !pendingWorkers.has(`${command.spec.runId}:${workerAgent}`)) {
+      // An unopened invitation has no work left once bound. A leased marker still
+      // owes its exact receipt: a sibling ACK can tidy while this ACK persists the
+      // broker binding. Only finalize/expiry may retire that in-flight transport.
       retire(command, 'its worker is bound and running');
       continue;
     }
@@ -7136,19 +7165,15 @@ const isLeased = (command: Command): boolean => {
 };
 
 /**
- * The one command that may go to the browser right now, or null.
- *
- * One at a time, whatever kind it is. The browser half can only be opening one tab anyway,
- * and a worker chat is identified by the extension reporting which tab it opened for which
- * slot — so two bootstraps in flight is precisely the state where that report can be made
- * about the wrong tab.
+ * The next unhanded command. Each marker has its own durable document claim and
+ * exact receipt; waiting for one page cannot hold another command's opening authority.
+ * In particular, a stalled automatic resume must not expire unrelated worker invitations.
  */
 function nextDeliverable(): Command | null {
-  if (commandLeaseWrites.size > 0) return null;
-  // Revivals never enter the app's browser opener: only the extension can know whether the exact
-  // conversation is already open. They also must not block unrelated fresh worker/resume tabs.
-  if (commands.some((command) => (command.spec.type === 'worker' || command.spec.type === 'resume') && isLeased(command))) return null;
-  return commands.find((command) => command.spec.type === 'worker' || command.spec.type === 'resume') ?? null;
+  if (commandWrites.size > 0) return null;
+  // A spent lease stays spent even after its deadline; only expiry settles it.
+  return commands.find((command) => command.claimedAt === null &&
+    (command.spec.type === 'worker' || command.spec.type === 'resume')) ?? null;
 }
 
 /**
@@ -7590,7 +7615,7 @@ export function resetBridgeForTests(): void {
   commands = [];
   commandReceipts = [];
   commandRetirementsAwaitingBroker.clear();
-  commandLeaseWrites.clear();
+  commandWrites.clear();
   commandRedeems.clear();
   bridgeRecovering = false;
   bridgeShutdownRequested = false;

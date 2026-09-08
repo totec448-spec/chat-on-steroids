@@ -114,6 +114,8 @@ export interface TunnelSettings {
    * and the API (`docs/tool-surface.md` §6.5). One id per connector is what actually works.
    */
   desktopTunnelId: string;
+  /** Optional shared connector for installed external MCP plugins. */
+  pluginsTunnelId?: string;
   /** Optional explicit path to tunnel-client / cloudflared. */
   binaryPath: string;
 }
@@ -389,7 +391,7 @@ export interface ConnectionStatus {
 }
 
 /** The identifiers of the connectors this app publishes. Mirrors `mcp/surfaces.ts`. */
-export type SurfaceId = 'core' | 'desktop';
+export type SurfaceId = 'core' | 'desktop' | 'plugins';
 
 export interface SurfaceStatus {
   id: SurfaceId;

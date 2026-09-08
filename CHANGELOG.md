@@ -11,6 +11,22 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+## [2.0.8] — 2026-09-08
+
+**Darkex by dark tibo**
+
+- Independent MCP Plugins connector, reviewed catalog and custom server/MCPB installation, OAuth, persistent enablement and update rollback.
+- Full third-party notices and exact catalog license provenance, with notice validation in CI and packaging.
+- Sidebar resizing/collapse, View menu and Windows title bar; native composer context menus and clearer companion-update actions.
+- Safe transcript links, tables, plugin-result image previews, faster session-list loading and bidirectional timeline paging.
+- Stable account model/reasoning selection and clearer usage estimates; complete initial plan delivery with ordered checkpoints.
+- Durable browser handoffs and queued-input ownership across Compact & Resume; retained waiting/sleeping chats and bounded retirement of completed helpers.
+
+See [the full release notes](docs/release-notes/v2.0.8.md). Binary publication still requires
+the native source and artifact-notice checks described in [the audit](docs/plugin-notice-audit.md).
+
+## Earlier unreleased fixes
+
 ### Fixed
 - **A chat no longer ends on "Message delivery timed out" because one readiness probe was
   missed.** The tunnel watcher asks the client's `/readyz` once every 15 seconds, with a

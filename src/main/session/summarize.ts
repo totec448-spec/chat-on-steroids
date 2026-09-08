@@ -195,7 +195,7 @@ export function summarizeToolCall(input: SummaryInput): ActivitySummary {
     tone: input.outcome === 'tool_internal_error' ? 'bad' : 'warn',
     // The verb carries the outcome, not just the colour. Tone and metric are easy to
     // miss and are gone entirely once a line is quoted or read back as text.
-    title: undoTitle(summary.title, refused)
+    title: input.outcome === 'tool_execution_error' ? `Tool ${input.tool} failed` : undoTitle(summary.title, refused)
   };
   const head = (input.resultHead ?? '').trim();
   if (refused) {

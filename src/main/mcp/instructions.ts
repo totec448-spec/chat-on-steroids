@@ -21,6 +21,7 @@ export function serverInstructions(
   surface: SurfaceId = 'core',
   platform: NodeJS.Platform = process.platform
 ): string {
+  if (surface === 'plugins') return 'External MCP tools enabled by the user in Chat On Steroids. Each tool retains its upstream schema and annotations. External servers run with their own operating-system or service permissions; CoS approved folders do not sandbox them. Use only for the user\'s requested task. A failed or disconnected call may already have taken effect: never automatically retry a mutation after an ambiguous failure. Disabled tools require the user to re-enable them in Settings. Core and Desktop are separate connectors.';
   return surface === 'desktop' ? desktopInstructions(ctx, platform) : coreInstructions(ctx, platform);
 }
 
@@ -108,6 +109,9 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     'Never send read’s line-number prefixes to apply_patch; they are display metadata, not file content.',
     'apply_patch is the only way to change files: it adds, updates, moves and deletes, and it is atomic across files.',
     'exec_command runs git, npm, builds, tests and anything else; a long-running one gives you a session_id to continue with write_stdin.',
+    ...(config.multiAgent.allowUnattributedCalls && ctx.caps.command && !ctx.readOnly
+      ? ['Allow unattributed calls is enabled: self-contained commands, including a user-requested computer shutdown, may run without a ChatGPT conversation identity. Supply an explicit approved workdir; do not borrow another chat’s workspace or terminal session.']
+      : []),
     // The recorded sessions show this done by hand — several checks glued together with
     // Write-Output banners inside one cmd — whenever the model happened to think of it, and
     // split across separate calls whenever it did not. `cmds` is that habit made explicit, and

@@ -4,6 +4,20 @@ import { JSDOM } from 'jsdom';
 import { expect, it, vi } from 'vitest';
 
 const source = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+it.each([false, true])('tab retirement preserves a document whose plugin refresh is active (%s)', async pluginRefreshBusy => {
+  const start = source.indexOf("      if (message.type === 'clf-tab-close-check')");
+  const section = source.slice(start, source.indexOf("      if (message.type === 'clf-close-temporary-planner')", start));
+  let resolve!: (value: any) => void;
+  const response = new Promise<any>(done => { resolve = done; });
+  const context = vm.createContext({ message: { type: 'clf-tab-close-check', conversationId: null }, sendResponse: resolve,
+    startupCommandId: null, RUN_ID: 'document', OPENED_CONVERSATION: null, conversationId: null, commandsHandled: new Set(),
+    alive: true, epoch: 1, desktopDecision: null, fiberTerminalMessageId: null, generating: false,
+    desktopInputBusy: false, modelCatalogBusy: false, pluginRefreshBusy, commandAttempt: null, commandJournalGate: false,
+    queue: [], flushWork: null, CLF_DOM: { conversationId: () => null, generating: () => false, composer: () => ({ textContent: '' }), hasComposerAttachments: () => false }
+  });
+  vm.runInContext(`(function () { ${section} })()`, context);
+  expect(await response).toMatchObject({ safe: !pluginRefreshBusy });
+});
 it('defers desktop delivery while catalog inspection owns the provider picker', async () => {
   const context = vm.createContext({ desktopInputBusy: false, modelCatalogBusy: true });
   const accept = source.slice(source.indexOf('  async function acceptDesktopInput('), source.indexOf('  let modelCatalogBusy ='));
@@ -21,7 +35,7 @@ it.each([false, true])('holds cold discovery until composer hydration without a 
     MutationObserver: dom.window.MutationObserver, alive: true, epoch: 1, conversationId: null,
     generating: false, desktopInputBusy: false, modelCatalogBusy: false,
     location: { pathname: '/', href: `https://chatgpt.com/?cos-model-catalog=${nonce}` }, ask,
-    CLF_DOM: { composer: () => dom.window.document.querySelector('textarea'), generating: () => false,
+    CLF_DOM: { prepareChatModelSurface: async () => true, composerVisible: () => !!dom.window.document.querySelector('textarea'), composer: () => dom.window.document.querySelector('textarea'), generating: () => false,
       turns: () => [], hasComposerAttachments: () => false, clearPromptExact: clear, inspectModelSettings: async () => [{ id: 'observed', label: 'Observed', efforts: ['high'] }] }
   });
   const wait = source.slice(source.indexOf('  function waitPageView('), source.indexOf('  async function refreshManagedPlugin('));
@@ -45,10 +59,18 @@ function fixture(text = '', changed = false, conversationId: string | null = nul
   const inspect = vi.fn(async (current: () => boolean) => { if (changed) composer.textContent = 'new user text'; return current() ? [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high'] }] : null; });
   const context = vm.createContext({ URL, Date, alive: true, epoch: 1, conversationId, generating: false, desktopInputBusy: false, modelCatalogBusy: false,
     location: { pathname: '/', href: `https://chatgpt.com/?cos-model-catalog=${nonce}` }, ask,
-    CLF_DOM: { composer: () => composer, generating: () => false, turns: () => [], hasComposerAttachments: () => false, clearPromptExact: clear, inspectModelSettings: inspect } });
+    CLF_DOM: { prepareChatModelSurface: async () => true, composerVisible: () => true, composer: () => composer, generating: () => false, turns: () => [], hasComposerAttachments: () => false, clearPromptExact: clear, inspectModelSettings: inspect } });
   vm.runInContext(`${section}\nglobalThis.run = inspectAppModelCatalog;`, context);
-  return { composer, ask, clear, inspect, run: () => (context.run as Function)({ nonce, expiresAt: Date.now() + 10000 }) };
+  return { composer, ask, clear, inspect, run: (allowPrepare = false) => (context.run as Function)({ nonce, expiresAt: Date.now() + 10000, allowPrepare }) };
 }
+it('reports missing picker on the elected document without granting New Chat preparation', async () => {
+  const f = fixture('', false, 'existing-chat');
+  f.inspect.mockImplementation(async (_current: () => boolean, failure?: (reason: string) => void) => { failure?.('picker_unavailable'); return null as never; });
+  expect(await f.run(true)).toBe(true);
+  expect(f.ask).toHaveBeenCalledWith(expect.objectContaining({ models: null, error: 'picker_unavailable' }));
+  expect(await f.run(false)).toBe(true);
+  expect(f.ask).toHaveBeenCalledWith(expect.objectContaining({ models: null, error: 'picker_unavailable' }));
+});
 it('clears restored home text and publishes the observed catalog', async () => {
   const f = fixture('hey\nOld finish instruction');
   expect(await f.run()).toBe(true);
@@ -61,6 +83,21 @@ it('inspects an idle existing conversation without clearing or sending its compo
   expect(await f.run()).toBe(true);
   expect(f.clear).not.toHaveBeenCalled();
   expect(f.ask).toHaveBeenCalledWith(expect.objectContaining({ type: 'model_catalog' }));
+});
+it('binds discovery to the Chat composer after Work replaces its composer', async () => {
+  let composer = { textContent: '' };
+  const old = composer, ask = vi.fn(async () => ({ ok: true }));
+  const prepare = vi.fn(async (current: () => boolean) => {
+    expect(current()).toBe(true); composer = { textContent: '' }; return current();
+  });
+  const context = vm.createContext({ URL, Date, alive: true, epoch: 1, conversationId: null, generating: false, desktopInputBusy: false, modelCatalogBusy: false,
+    location: { pathname: '/', href: 'https://chatgpt.com/' }, ask,
+    CLF_DOM: { prepareChatModelSurface: prepare, composerVisible: () => true, composer: () => composer, generating: () => false, turns: () => [], hasComposerAttachments: () => false,
+      inspectModelSettings: async (current: () => boolean) => { expect(composer).not.toBe(old); expect(current()).toBe(true); return [{ id: 'observed', label: 'Observed', efforts: ['high'] }]; } }
+  });
+  vm.runInContext(`${section}\nglobalThis.run = inspectAppModelCatalog;`, context);
+  expect(await (context.run as Function)({ nonce, expiresAt: Date.now() + 10000 })).toBe(true);
+  expect(prepare).toHaveBeenCalledTimes(1); expect(ask).toHaveBeenCalledTimes(1);
 });
 it('does not clear existing conversations or publish over text edited during discovery', async () => {
   const existing = fixture('keep', false, 'existing-chat');

@@ -1,8 +1,8 @@
 /** Capture the visible logical row for one synchronous reconciliation. No retained
  * state: selection changes and user scrolling naturally get a fresh anchor. */
-export function preserveTimelineViewport(pane: HTMLElement, timeline: HTMLElement): () => void {
+export function preserveTimelineViewport(pane: HTMLElement, timeline: HTMLElement, followBottom = true): () => void {
   const previous = pane.scrollTop;
-  const following = previous + pane.clientHeight >= pane.scrollHeight - 40;
+  const following = followBottom && previous + pane.clientHeight >= pane.scrollHeight - 40;
   const edge = pane.getBoundingClientRect().top;
   const rows = () => [...timeline.querySelectorAll<HTMLElement>('[data-timeline-key]')]
     .filter(row => !row.matches('.tool-group[open]'));

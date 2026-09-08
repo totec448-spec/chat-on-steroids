@@ -563,14 +563,22 @@ describe('the calls a turn says it made', () => {
     ]);
   });
 
-  it('distinguishes contradictory conversation metadata from missing conversation metadata', async () => {
+  it('reads the mounted conversation object identity used by helper answers', async () => {
+    const { turns } = await scan([], [{
+      id: 'helper-final', messages: [authored('helper-message', 'Complete.')],
+      rendered: ['Complete.'], conversationProps: { conversation: { id: THREAD } }
+    }]);
+    expect(turns[0]).toMatchObject({ conversationId: THREAD, conversationConflict: false });
+  });
+
+  it.each([{ clientThreadId: THREAD }, { conversation: { id: THREAD } }])('distinguishes contradictory conversation metadata from missing conversation metadata: %j', async (identity) => {
     const other = '11111111-2222-3333-4444-555555555555';
     const messages = [authored('assistant-conflicted-chat', 'Stale mounted answer.')];
     const { turns } = await scan([], [{
       id: 'turn-conflicted-chat',
       messages,
       rendered: ['Stale mounted answer.'],
-      conversationProps: { clientThreadId: THREAD, conversationId: other }
+      conversationProps: { ...identity, conversationId: other }
     }]);
 
     expect(turns).toHaveLength(1);

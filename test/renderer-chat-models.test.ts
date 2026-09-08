@@ -6,6 +6,31 @@ import { readFile } from 'node:fs/promises';
 let dom: JSDOM;
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
 
+it('a send requests missing models once and waits for the pushed catalog before selecting', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const requestChatModels = vi.fn(async () => ({ ok: true, data: { state: 'pending', requestedAt: 1, observedAt: null, models: [] } }));
+  const models = [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high'] }];
+  Object.assign(dom.window, { api: { requestChatModels, getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 2, models } }) } });
+  const { initChatModels, ensureComposerModel, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels();
+  const first = ensureComposerModel(), second = ensureComposerModel();
+  let resolved = false; void first.then(() => { resolved = true; });
+  await Promise.resolve(); await Promise.resolve();
+  expect(requestChatModels).toHaveBeenCalledTimes(1); expect(resolved).toBe(false);
+  applyChatModels({ multiAgent: {}, goal: {} } as Config);
+  expect(await first).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+  expect(await second).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+});
+
+it('a failed discovery keeps sending unconfirmed and settles its wait', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  Object.assign(dom.window, { api: { requestChatModels: async () => ({ ok: true, data: { state: 'unavailable', requestedAt: 1, observedAt: 2, models: [] } }) } });
+  const { initChatModels, ensureComposerModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); expect(await ensureComposerModel()).toBeNull();
+});
+
 it('opening an empty or pending picker requests models immediately without a separate refresh', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
@@ -137,7 +162,7 @@ it('uses observed account choices, preserves unverified defaults, and clears inc
   const select = (id: string) => dom.window.document.getElementById(id) as HTMLSelectElement;
   expect(select('workerModel').value).toBe('unseen');
   expect(select('workerModel').selectedOptions[0]!.disabled).toBe(true);
-  expect(select('helperModel').value).toBe('gpt-5.6-sol');
+  expect(select('helperModel').value).toBe('first');
   expect([...select('composerModel').options].map(row => row.value)).toEqual(['first', 'second']);
   select('composerModel').value = 'first'; select('composerModel').dispatchEvent(new dom.window.Event('change'));
   expect([...select('composerReasoning').options].map(row => row.value)).toEqual(['high']);
@@ -234,7 +259,7 @@ it('keeps the trigger consistent with send admission during reload and a removed
   let catalog = { state: 'ready', requestedAt: 1, observedAt: 2, models: [{ id: 'sol', label: 'GPT-5.6 Sol', efforts: ['high', 'xhigh'] }] };
   Object.assign(dom.window, { api: {
     getChatModels: async () => ({ ok: true, data: catalog }),
-    requestChatModels: async () => ({ ok: true, data: { state: 'pending', requestedAt: 3, observedAt: null, models: [] } })
+    requestChatModels: async () => ({ ok: true, data: { ...catalog, state: 'pending', requestedAt: 3 } })
   } });
   const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
   const config = { multiAgent: {}, goal: {} } as Config;
@@ -243,8 +268,8 @@ it('keeps the trigger consistent with send admission during reload and a removed
   expect(label.textContent).toBe('GPT-5.6 Sol · High');
   expect(confirmedComposerModel()).toEqual({ model: 'sol', reasoningEffort: 'high' });
   dom.window.document.getElementById('refreshComposerModels')!.click();
-  expect(confirmedComposerModel()).toBeNull();
-  expect(label.textContent).toBe('Loading models…');
+  expect(confirmedComposerModel()).toEqual({ model: 'sol', reasoningEffort: 'high' });
+  expect(label.textContent).toBe('GPT-5.6 Sol · High');
   await Promise.resolve(); await Promise.resolve();
   applyChatModels(config); await Promise.resolve();
   expect(label.textContent).toBe('GPT-5.6 Sol · High');
@@ -258,4 +283,49 @@ it('keeps the trigger consistent with send admission during reload and a removed
   expect(confirmedComposerModel()).toEqual({ model: 'sol', reasoningEffort: 'medium' });
   expect(label.textContent).toBe('GPT-5.6 Sol · Medium');
   expect(label.title).toBe(label.textContent);
+});
+it('paints catalog pushes immediately and refuses late startup reads without refetching on unrelated state', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  let receive!: (catalog: any) => void, resolve!: (result: any) => void;
+  const getChatModels = vi.fn(() => new Promise<any>(done => { resolve = done; }));
+  Object.assign(dom.window, { api: { getChatModels, onChatModelsChanged: (listener: typeof receive) => { receive = listener; } } });
+  const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
+  const config = { multiAgent: {}, goal: {} } as Config;
+  initChatModels(); applyChatModels(config);
+  receive({ state: 'ready', requestedAt: 1, observedAt: 2, models: [{ id: '5.6', label: 'GPT-5.6 Sol', efforts: ['high', 'pro'] }] });
+  expect(confirmedComposerModel()).toEqual({ model: '5.6', reasoningEffort: 'high' });
+  resolve({ ok: true, data: { state: 'pending', requestedAt: 1, observedAt: null, models: [] } }); await Promise.resolve();
+  expect(confirmedComposerModel()).toEqual({ model: '5.6', reasoningEffort: 'high' });
+  applyChatModels(config); applyChatModels(config);
+  expect(getChatModels).toHaveBeenCalledTimes(1);
+});
+it('maps saved execution slugs to the observed family while preserving Pro reasoning', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 2,
+    models: [{ id: '5.6', label: 'GPT-5.6 Sol', efforts: ['high', 'pro'], aliases: ['gpt-5-6-thinking', 'gpt-5-6-pro'] }] } }) } });
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: { defaultModel: 'gpt-5-6-pro', defaultReasoning: 'pro' }, goal: {} } as Config); await Promise.resolve();
+  const model = dom.window.document.getElementById('workerModel') as HTMLSelectElement;
+  expect(model.value).toBe('5.6'); expect(model.options).toHaveLength(1);
+  expect((dom.window.document.getElementById('workerReasoning') as HTMLSelectElement).value).toBe('pro');
+});
+it.each(['5.6', 'gpt-5.6-sol', 'GPT-5.6 Sol', 'gpt-5-6-thinking'])('keeps saved Sol High selected across reordered catalogs: %s', async saved => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  let receive!: (catalog: any) => void;
+  const models = [
+    { id: '6', label: 'GPT-6 Pro', efforts: ['pro'], aliases: ['gpt-6-pro'] },
+    { id: '5.6', label: 'GPT-5.6 Sol', efforts: ['none', 'medium', 'high', 'xhigh', 'pro'], aliases: ['gpt-5-6-thinking', 'gpt-5-6-pro'] }
+  ];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', models } }), onChatModelsChanged: (listener: typeof receive) => { receive = listener; } } });
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: { defaultModel: saved, defaultReasoning: 'high' }, goal: {} } as Config); await Promise.resolve();
+  const check = () => {
+    const model = dom.window.document.getElementById('workerModel') as HTMLSelectElement;
+    expect(model.value).toBe('5.6'); expect(model.selectedOptions[0]!.disabled).toBe(false);
+    expect((dom.window.document.getElementById('workerReasoning') as HTMLSelectElement).value).toBe('high');
+  };
+  check(); receive({ state: 'ready', models: [...models].reverse() }); check();
 });

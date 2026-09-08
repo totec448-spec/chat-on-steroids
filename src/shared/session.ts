@@ -128,7 +128,7 @@ export interface FileChange {
 }
 
 /** Only `tool_internal_error` is a connector defect. */
-export type ToolOutcome = 'ok' | 'process_exit_nonzero' | 'tool_rejected' | 'tool_internal_error';
+export type ToolOutcome = 'ok' | 'process_exit_nonzero' | 'tool_rejected' | 'tool_execution_error' | 'tool_internal_error';
 
 /**
  * How confident the recorder is that this call belongs to the session it landed in.
@@ -217,6 +217,7 @@ export function normalizedToolOutcome(
     call.outcome === 'ok' ||
     call.outcome === 'process_exit_nonzero' ||
     call.outcome === 'tool_rejected' ||
+    call.outcome === 'tool_execution_error' ||
     call.outcome === 'tool_internal_error'
   ) {
     return call.outcome;

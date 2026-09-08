@@ -6,6 +6,39 @@ const domSource = readFileSync(new URL('../extension/chatgpt-dom.js', import.met
 const fiberSource = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
 let page: JSDOM;
 afterEach(() => { page?.window.close(); });
+it('reveals the native New Chat control through the compact sidebar before reuse', async () => {
+  page = new JSDOM('<button data-testid="open-sidebar-button" aria-expanded="false" aria-controls="stage-popover-sidebar">Menu</button>', { url: 'https://chatgpt.com/c/existing', runScripts: 'outside-only' });
+  Object.defineProperty(page.window.HTMLElement.prototype, 'getClientRects', { value: () => [{}] });
+  page.window.eval(domSource);
+  const button = page.window.document.querySelector('button')!;
+  const click = vi.fn(() => {
+    button.setAttribute('aria-expanded', 'true');
+    const sidebar = page.window.document.createElement('aside'); sidebar.id = 'stage-popover-sidebar';
+    sidebar.innerHTML = '<a data-testid="create-new-chat-button" data-sidebar-item="true" href="/">New Chat</a>';
+    page.window.document.body.append(sidebar);
+  });
+  button.addEventListener('click', click);
+  const api = (page.window as any).CLF_DOM;
+  expect(await api.newChatControl(() => false)).toBeNull(); expect(click).not.toHaveBeenCalled();
+  const control = await api.newChatControl();
+  expect(control?.getAttribute('data-testid')).toBe('create-new-chat-button');
+  expect(click).toHaveBeenCalledTimes(1);
+});
+it('switches the observed Work surface to Chat once without relying on translated labels', async () => {
+  page = new JSDOM('<button role="radio" data-tpp-toggle-value="chatgpt" aria-checked="false">Unterhaltung</button><button role="radio" data-tpp-toggle-value="work" aria-checked="true">Arbeit</button>', { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
+  Object.defineProperty(page.window.HTMLElement.prototype, 'getClientRects', { value: () => [{}] });
+  page.window.eval(domSource);
+  const chat = page.window.document.querySelector('[data-tpp-toggle-value="chatgpt"]')!;
+  const click = vi.fn(() => {
+    chat.setAttribute('aria-checked', 'true');
+    page.window.document.querySelector('[data-tpp-toggle-value="work"]')!.setAttribute('aria-checked', 'false');
+  });
+  chat.addEventListener('click', click);
+  const api = (page.window as any).CLF_DOM;
+  expect(await api.prepareChatModelSurface(() => false)).toBe(false); expect(click).not.toHaveBeenCalled();
+  expect(await api.prepareChatModelSurface()).toBe(true); expect(click).toHaveBeenCalledTimes(1);
+  expect(await api.prepareChatModelSurface()).toBe(true); expect(click).toHaveBeenCalledTimes(1);
+});
 function fixture() {
   page = new JSDOM('<form><div id="prompt-textarea" contenteditable="true"></div><div data-testid="composer-trailing-actions"><button type="button" aria-haspopup="menu">Denkaufwand</button><button data-testid="send-button">Senden</button></div></form>', { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
   const win = page.window, doc = win.document;
@@ -48,17 +81,32 @@ function fixture() {
     if (event.key === 'Escape') doc.querySelector('[data-testid="composer-intelligence-picker-content"]')?.remove();
   });
   win.eval(fiberSource); win.eval(domSource);
-  return { api: (win as any).CLF_DOM, state, props, actions, freeze: () => { frozen = true; } };
+  return { api: (win as any).CLF_DOM, state, props, selections, actions, freeze: () => { frozen = true; } };
 }
 it('reads localized nested models and future efforts from account state, excludes locked choices, and restores selection', async () => {
   const f = fixture();
   expect(await f.api.inspectModelSettings()).toEqual([
-    { id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'] },
-    { id: 'future-model', label: 'Neues Modell', efforts: ['low', 'ultra'] }
+    { id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] },
+    { id: 'future-model', label: 'Neues Modell', efforts: ['low', 'ultra'], aliases: ['future-model'] }
   ]);
   expect(f.state.selectedVersionEntry.id).toBe('latest'); expect(f.state.currentBucket).toBe(2);
   // Only restore the original High once; discovery never sweeps every power level.
   expect(f.actions.mock.calls.filter(([action]) => action === 'effort')).toHaveLength(1);
+});
+it('rejects a mounted composer hidden by Settings while recognizing the visible High picker', async () => {
+  const f = fixture(), doc = page.window.document;
+  doc.querySelector('button')!.textContent = 'High';
+  expect(f.api.composerVisible()).toBe(true);
+  const editor = doc.querySelector('#prompt-textarea')!;
+  editor.setAttribute('aria-hidden', 'true');
+  expect(f.api.composerVisible()).toBe(false);
+  editor.removeAttribute('aria-hidden');
+  doc.querySelector('form')!.setAttribute('inert', '');
+  expect(f.api.composerVisible()).toBe(false);
+  doc.querySelector('form')!.removeAttribute('inert');
+  expect(f.api.composerVisible()).toBe(true);
+  expect(await f.api.inspectModelSettings()).toHaveLength(2);
+  expect(f.state.currentBucket).toBe(2);
 });
 it('confirms the exact model and effort and refuses visible upgrade-only entries', async () => {
   const f = fixture();
@@ -66,6 +114,19 @@ it('confirms the exact model and effort and refuses visible upgrade-only entries
   expect(f.state.currentSelection).toMatchObject({ modelSlug: 'future-model', thinkingEffort: 'ultra' });
   expect(await f.api.selectModelSettings('gpt-6-pro', 'pro')).toBe(false);
   expect(f.state.currentSelection).toMatchObject({ modelSlug: 'future-model', thinkingEffort: 'ultra' });
+});
+it('groups provider family lanes and selects Pro through the same family instead of a separate execution slug', async () => {
+  const f = fixture();
+  const version = f.props.modelsData.versions[0]!;
+  version.id = '5.6'; version.displayTextForIntelligence = 'GPT-5.6 Sol';
+  for (const selection of f.selections[0]!) (selection.category as any).modelVersion = '5.6';
+  const pro = f.selections[0]![2]!;
+  pro.modelSlug = 'gpt-5-6-pro'; pro.availability.status = 'available'; pro.category.shortLabel = '5.6 Pro';
+  expect(await f.api.inspectModelSettings()).toContainEqual({ id: '5.6', label: 'GPT-5.6 Sol', efforts: ['medium', 'high', 'pro'], aliases: ['gpt-5-6-thinking', 'gpt-5-6-pro'] });
+  expect(await f.api.selectModelSettings('5.6', 'pro')).toBe(true);
+  expect(f.state.currentSelection.modelSlug).toBe('gpt-5-6-pro');
+  // Existing stored family display slugs retain their requested Pro effort too.
+  expect(await f.api.selectModelSettings('gpt-5.6-sol', 'pro')).toBe(true);
 });
 it('reads an already-open version submenu and restores its original exact power', async () => {
   const f = fixture();
@@ -93,7 +154,11 @@ it('invalidates mounted selection proof when provider state becomes unrecognized
 });
 it('keeps an explicit model denial unavailable even when the preset is visible', async () => {
   const f = fixture(); (f.props.modelSwitcherDenialsBySlug as any)['future-model'] = { reason: 'workspace_policy' };
-  expect(await f.api.inspectModelSettings()).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'] }]);
+  expect(await f.api.inspectModelSettings()).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] }]);
+});
+it('recognizes the provider min effort as Low without invalidating the account catalog', async () => {
+  const f = fixture(); f.selections[0]![0]!.thinkingEffort = 'min';
+  expect(await f.api.inspectModelSettings()).toContainEqual({ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['low', 'high'], aliases: ['gpt-5-6-thinking'] });
 });
 it('does not mutate the picker after navigation ownership is lost', async () => {
   const f = fixture(); expect(await f.api.selectModelSettings('future-model', 'ultra', () => false)).toBe(false);

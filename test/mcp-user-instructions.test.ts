@@ -71,6 +71,16 @@ afterEach(() => {
 });
 
 describe('the user’s own connector instructions', () => {
+  it('describes unattributed shutdown only when unattributed command execution is allowed', async () => {
+    const config = getConfig();
+    await saveConfig({ ...config, multiAgent: { ...config.multiAgent, allowUnattributedCalls: true } });
+    expect(serverInstructions(ctx, 'core', 'win32')).toContain('user-requested computer shutdown');
+    expect(serverInstructions({ ...ctx, readOnly: true }, 'core', 'win32')).not.toContain('user-requested computer shutdown');
+    expect(serverInstructions({ ...ctx, caps: { ...ctx.caps, command: false } }, 'core', 'win32')).not.toContain('user-requested computer shutdown');
+    await saveConfig({ ...config, multiAgent: { ...config.multiAgent, allowUnattributedCalls: false } });
+    expect(serverInstructions(ctx, 'core', 'win32')).not.toContain('user-requested computer shutdown');
+  });
+
   it('adds nothing at all when empty, not even the heading', () => {
     expect(defaultConfig().mcp.instructions).toBe('');
     for (const surface of ['core', 'desktop'] as const) {

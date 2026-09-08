@@ -72,7 +72,18 @@
     </svg>
 
     <div class="app" data-screen="chat">
-      <aside class="sidebar">
+      <div class="app-topbar">
+        <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar (Ctrl+B)"><svg class="ico" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3" /><path d="M9 4v16" /></svg></button>
+        <details class="view-menu" id="viewMenu"><summary>View</summary><div class="view-menu-items">
+          <button class="btn" id="sidebarMenuToggle" type="button">Toggle Sidebar <kbd>Ctrl+B</kbd></button>
+          <hr />
+          <button class="btn" id="zoomIn" type="button">Zoom In <kbd>Ctrl++</kbd></button>
+          <button class="btn" id="zoomOut" type="button">Zoom Out <kbd>Ctrl+−</kbd></button>
+          <button class="btn" id="zoomActualSize" type="button">Actual Size <span id="zoomReset">100%</span><kbd>Ctrl+0</kbd></button>
+        </div></details>
+      </div>
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden>← Back to chat</button>
         <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
         <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>New chat</button>
@@ -81,6 +92,7 @@
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-home" /></svg>Workspace
         </button>
         <button data-tab="usage" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Usage</button>
+        <button data-tab="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Plugins</button>
 <button data-tab="setup" type="button">
           <svg class="ico" viewBox="0 0 24 24"><use href="#i-steps" /></svg>Setup
           <span class="badge" id="setupBadge" hidden></span>
@@ -102,16 +114,15 @@
               </span>
             </h2>
             <div class="scroll">
-              <div id="sessionList"></div>
+              <div id="sessionList"><p class="empty" role="status">Loading conversations…</p></div>
               <p class="empty" id="sessionsEmpty" hidden>
                 Nothing recorded yet. Turn on recording in Settings, pair the Chrome extension,
                 and this fills up as you work in ChatGPT.
               </p>
             </div>
-            <p class="foot" id="sessionsFoot"></p>
           </section>
 
-        <div class="sidebar-bottom"><button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button><span class="zoom-controls"><button class="btn" id="zoomOut" type="button" aria-label="Zoom out">−</button><button class="btn" id="zoomReset" type="button" title="Reset zoom">100%</button><button class="btn" id="zoomIn" type="button" aria-label="Zoom in">+</button></span></div>
+        <div class="sidebar-bottom"><button class="btn" id="workspaceSettings" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-gear" /></svg>Settings</button></div>
       </aside>
       <!-- ------------------------------------------------------------ header -->
       <header>
@@ -152,9 +163,25 @@
         <span id="updateText"></span>
         <button class="btn btn-quiet" id="updateGet" type="button" hidden>Get it</button>
         <button class="btn btn-quiet" id="updateInstall" type="button" hidden>Install now</button>
+        <button class="btn btn-quiet" id="updateExtension" type="button" hidden>Update extension</button>
       </div>
 
       <main>
+        <section class="panel plugins-panel" data-panel="plugins">
+          <div class="plugins-content">
+          <header class="plugin-page-head"><div><h1>Plugins</h1><p>Bring your favorite tools into the conversation.</p></div><div class="plugin-search-actions"><label class="plugin-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="pluginsSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" /></label><button class="btn plugin-add" id="pluginsAdd" type="button" aria-label="Add a plugin" title="Add a plugin"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg></button></div></header>
+          <section class="plugin-connection" aria-labelledby="pluginsSetupTitle">
+            <div><h2 id="pluginsSetupTitle">Set up plugins before your first use</h2><p id="pluginsSetupHint">Add the Chat On Steroids Plugins connector in ChatGPT once so it can use your installed plugins.</p><span id="pluginsConnectionStatus" role="status">Setup required · connect your plugins</span></div>
+            <button class="btn btn-solid" id="pluginsSetupLink" type="button">Set up plugins</button>
+          </section>
+          <div class="plugin-refresh-guide"><p>After installing, updating or changing enabled plugins, refresh <strong>Chat On Steroids Plugins</strong> in ChatGPT to make its tools available.</p><button class="btn" id="pluginsOpenChatGPT" type="button">Open ChatGPT plugins</button></div>
+          <div class="plugin-section-head"><h2>Installed <span id="pluginsCount" class="plugin-count">Loading…</span></h2><button class="btn" id="pluginsRefresh" type="button">Check local status</button></div>
+          <div id="pluginsInstalled" aria-live="polite"></div>
+          <div class="plugin-section-head"><h2>Explore plugins</h2><span class="muted">Made for your workflow</span></div>
+          <div id="pluginsExplore" class="plugin-directory"></div>
+          <details class="plugin-legal"><summary>Legal Notices / Third-party Licenses</summary><p>Catalog illustrations are original Chat On Steroids artwork, Copyright © 2026 Chat On Steroids contributors, licensed under the app’s MIT license. They illustrate independent integrations and are not official product logos or endorsements. Product names belong to their respective owners.</p><p>Installed plugins retain their own licenses. Open a plugin’s details to see its source, version and license. Review the upstream project before installation. Bundled dependency notices and reviewed catalog license texts are included in THIRD-PARTY-NOTICES.txt with the application; external plugins are downloaded separately.</p><button class="btn" id="pluginsLegalOpen" type="button">Open full third-party license texts</button></details>
+          </div>
+        </section>
         <section class="panel usage-panel" data-panel="usage">
           <div class="settings-heading"><span class="eyebrow">YOUR ACTIVITY</span><h1>Usage</h1><p>Model availability and the work recorded in this workspace.</p></div>
           <p class="muted usage-status" id="usageStatus" role="status">Calculating recorded tool usage…</p><div class="usage-summary" id="usageSummary"></div>
@@ -412,12 +439,17 @@
                   <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
                 </div>
                 <div class="step-body">
-                  <h3>Add it in ChatGPT</h3>
+                  <div class="step-heading">
+                    <h3>Add it in ChatGPT</h3>
+                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/#settings/Plugins">
+                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open ChatGPT Plugins
+                    </button>
+                  </div>
                   <p>
                     Turn on <strong>Developer mode</strong> in ChatGPT — currently under
                     <em>Settings → Apps → Advanced settings</em>, with workspace-managed plans
                     also exposing custom apps from their Apps area. Then create one app per card
-                    below — the required one, plus the optional desktop one if you want it. Each
+                    below — Core, plus Desktop if you use it. Configure Plugins from the Plugins page. Each
                     card is a separate app in ChatGPT:
                   </p>
                   <ul class="ticks">
@@ -439,9 +471,6 @@
                     <p>This lets ChatGPT use the plugin without asking for each action. Otherwise, approval prompts can pause Goal, Loop and agent tasks. Your folder and tool permissions in this app still apply.</p>
                   </div>
                   <div class="step-actions">
-                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/#settings/Apps">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open Apps
-                    </button>
                     <span class="chosen" id="wizChatgpt"></span>
                   </div>
                 </div>
@@ -609,8 +638,8 @@
                   <div class="setting"><span class="setting-text"><b>Default sub-agent reasoning</b><em>Selected independently from the model.</em></span><select id="workerReasoning"><option value="" disabled>No observed choices</option></select></div>
                   </div>
                 <h2 class="settings-section-title">Browser & history</h2>
-                <div class="pane"><label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option></select></label></div>
                 <div class="pane">
+                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the companion and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Background chats</b><em>Keep app-created ChatGPT tabs in the background.</em></span><input id="backgroundChats" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Automatic plugin refresh</b><em>Let the companion refresh changed connector tools in ChatGPT. Off by default; manual refresh remains available in ChatGPT.</em></span><input id="autoRefreshPlugins" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Browser only</b><em>Do not open tabs for automatic plugin refresh or chat recovery. Explicit new chats, workers and Reload models still work.</em></span><input id="browserOnly" type="checkbox" /></label>

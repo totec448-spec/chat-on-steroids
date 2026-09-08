@@ -7,18 +7,25 @@ import { $, el, run } from './dom.js';
 let catalog: ChatModelCatalog = { state: 'unknown', requestedAt: null, observedAt: null, models: [] };
 let generation = 0;
 let onComposerPaint: (() => void) | undefined;
+const catalogWaiters = new Set<() => void>();
+let discovery: Promise<void> | null = null;
+let catalogSubscribed = false;
 type ObservedSelection = { model: string; reasoningEffort?: ReasoningEffort; observedAt: number };
 let composerContext: { scope: string | null; observation: ObservedSelection | null; edited: boolean } | null = null;
 const pairs = [['composerModel', 'composerReasoning'], ['workerModel', 'workerReasoning'], ['helperModel', 'helperReasoning']] as const;
 const effortNames: Record<string, string> = { none: 'Instant', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', pro: 'Pro' } satisfies Record<ReasoningEffort, string>;
 const composerEfforts = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro'] as const;
+function observedModel(value: string) {
+  const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9.]/g, '');
+  const matches = catalog.models.filter(choice => choice.id === value || choice.aliases?.includes(value) || normalize(choice.label) === normalize(value));
+  return matches.length === 1 ? matches[0] : undefined;
+}
 
 function paintComposerContext(): void {
   if (!composerContext || composerContext.edited) return;
   const observed = composerContext.observation;
   if (composerContext.scope === null) return;
-  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9.]/g, '');
-  const match = observed && catalog.models.find(choice => normalize(choice.id) === normalize(observed.model) || normalize(choice.label) === normalize(observed.model));
+  const match = observed && observedModel(observed.model);
   // An unknown session model must not inherit the previous chat's valid Send choice.
   paintPair('composerModel', 'composerReasoning', match?.id ?? observed?.model ?? 'not-observed', observed?.reasoningEffort ?? 'not-observed');
 }
@@ -36,7 +43,7 @@ export function applyComposerSessionModel(scope: string | null, observation: Obs
 
 /** Provider order and available efforts define the slider, including newly released models. */
 function composerModels() {
-  if (catalog.state !== 'ready') return [];
+  if (!catalog.models.length) return [];
   return catalog.models
     .filter(model => !/^gpt[ -]?5\.5(?:$|[ -])/i.test(model.label))
     .map(model => ({ ...model, efforts: composerEfforts.filter(effort => model.efforts.includes(effort)) }))
@@ -68,9 +75,10 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
   const model = document.getElementById(modelId) as HTMLSelectElement | null;
   const effort = document.getElementById(effortId) as HTMLSelectElement | null;
   if (!model || !effort) return;
-  const models = modelId === 'composerModel' ? composerModels() : catalog.state === 'ready' ? catalog.models : [];
+  const models = modelId === 'composerModel' ? composerModels() : catalog.models;
   let nextModel = modelValue ?? model.value;
   let nextEffort = effortValue ?? effort.value;
+  nextModel = observedModel(nextModel)?.id ?? nextModel;
   if (models.length && !nextModel) {
     // A preference selects only a model/effort actually observed in this catalog.
     const preferred = models.find(item => /^gpt[ -]?6$/i.test(item.label) && item.efforts.includes('high'));
@@ -145,7 +153,7 @@ function paintComposerChoices(): void {
 
 /** Admission guard for desktop sends: a stale selection is not permission to use defaults. */
 export function confirmedComposerModel(): { model: string; reasoningEffort: ReasoningEffort } | null {
-  if (catalog.state !== 'ready') return null;
+  if (!catalog.models.length) return null;
   const model = $<HTMLSelectElement>('composerModel').value;
   const reasoningEffort = $<HTMLSelectElement>('composerReasoning').value;
   const confirmed = composerModels().find(choice => choice.id === model)?.efforts.find(effort => effort === reasoningEffort);
@@ -189,6 +197,37 @@ function paintStatus(): void {
     }
   }
   paintComposerLabel();
+  for (const waiter of catalogWaiters) waiter();
+}
+
+/** Refresh and Send share one request; state pushes complete waiting sends without polling. */
+function discoverModels(): Promise<void> {
+  if (discovery) return discovery;
+  const requested = ++generation;
+  catalog = { ...catalog, state: 'pending', requestedAt: Date.now(), error: undefined };
+  paintStatus();
+  const work = (async () => {
+    const result = await run(window.api.requestChatModels()).catch(() => null);
+    if (requested !== generation) return;
+    catalog = result ?? { ...catalog, state: 'unavailable', error: 'Model discovery could not start.' };
+    for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
+    paintComposerContext(); paintStatus();
+  })();
+  discovery = work.finally(() => { discovery = null; });
+  return discovery;
+}
+
+export async function ensureComposerModel(): Promise<ReturnType<typeof confirmedComposerModel>> {
+  if (catalog.models.length) return confirmedComposerModel();
+  const ready = new Promise<void>(resolve => {
+    const finish = () => { clearTimeout(timer); catalogWaiters.delete(check); resolve(); };
+    const check = () => { if (catalog.state === 'ready' || catalog.state === 'unavailable') finish(); };
+    const timer = setTimeout(finish, 125000);
+    catalogWaiters.add(check);
+  });
+  await discoverModels();
+  await ready;
+  return confirmedComposerModel();
 }
 
 export function applyChatModels(config: Config, previous?: Config): void {
@@ -199,6 +238,7 @@ export function applyChatModels(config: Config, previous?: Config): void {
   };
   paintPair('workerModel', 'workerReasoning', chosen('workerModel', config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel), chosen('workerReasoning', config.multiAgent.defaultReasoning ?? '', previous?.multiAgent.defaultReasoning));
   paintPair('helperModel', 'helperReasoning', chosen('helperModel', config.goal.helperModel ?? 'gpt-5.6-sol', previous?.goal.helperModel ?? 'gpt-5.6-sol'), chosen('helperReasoning', config.goal.helperReasoning ?? 'high', previous?.goal.helperReasoning ?? 'high'));
+  if (catalogSubscribed && catalog.state !== 'unknown') return;
   const requested = ++generation;
   void window.api.getChatModels().then(result => {
     if (requested !== generation || !result?.ok || !result.data) return;
@@ -211,8 +251,17 @@ export function applyChatModels(config: Config, previous?: Config): void {
 
 export function initChatModels(onPaint?: () => void): void {
   onComposerPaint = onPaint;
+  if (window.api.onChatModelsChanged) {
+    catalogSubscribed = true;
+    window.api.onChatModelsChanged(value => {
+      // A current push supersedes every older startup/read/refresh response.
+      ++generation; catalog = value;
+      for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
+      paintComposerContext(); paintStatus();
+    });
+  }
   document.getElementById('modelMenu')?.addEventListener('toggle', () => {
-    if (($('modelMenu') as HTMLDetailsElement).open && catalog.state !== 'ready') $('refreshComposerModels').click();
+    if (($('modelMenu') as HTMLDetailsElement).open && !catalog.models.length) $('refreshComposerModels').click();
   });
   for (const [modelId, effortId] of pairs) {
     document.getElementById(modelId)?.addEventListener('change', () => {
@@ -227,17 +276,7 @@ export function initChatModels(onPaint?: () => void): void {
       paintStatus();
     });
   }
-  for (const id of ['refreshChatModels', 'refreshComposerModels']) document.getElementById(id)?.addEventListener('click', async () => {
-    const requested = ++generation;
-    catalog = { state: 'pending', requestedAt: Date.now(), observedAt: null, models: [] };
-    paintStatus();
-    const result = await run(window.api.requestChatModels());
-    if (requested !== generation || !result) return;
-    catalog = result;
-    for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
-    paintComposerContext();
-    paintStatus();
-  });
+  for (const id of ['refreshChatModels', 'refreshComposerModels']) document.getElementById(id)?.addEventListener('click', () => { void discoverModels(); });
   for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
   paintStatus();
 }

@@ -1,0 +1,125 @@
+[
+  {
+    "id": "memory",
+    "package": "@modelcontextprotocol/server-memory",
+    "version": "2026.8.31",
+    "license": "MIT AND Apache-2.0 (upstream transitional terms; documentation CC-BY-4.0)",
+    "archive": "https://registry.npmjs.org/@modelcontextprotocol/server-memory/-/server-memory-2026.8.31.tgz",
+    "integrity": "sha512-ljj/3S4aGjxdNSQWw6gucKKGnTLdBPWxzapyY/MT2tOVyZwvxChvevXSLPwx59nKJAlVpUVW+cOlnVRXRwiqMQ==",
+    "notices": [
+      {
+        "file": "memory-LICENSE",
+        "source": "https://raw.githubusercontent.com/modelcontextprotocol/servers/a40bc270fb5ece62673f8a1196f57116d885c5eb/LICENSE",
+        "sha256": "0382b0057770ca05e9c350a50aa3b1c1fea84da0bc81d723bf00b9aa841be58a",
+        "reason": "npm archive omits its referenced LICENSE"
+      }
+    ],
+    "checkedOn": "2026-09-08",
+    "bundledWithApp": false,
+    "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory"
+  },
+  {
+    "id": "playwright",
+    "package": "@playwright/mcp",
+    "version": "0.0.80",
+    "license": "Apache-2.0",
+    "archive": "https://registry.npmjs.org/@playwright/mcp/-/mcp-0.0.80.tgz",
+    "integrity": "sha512-FOPXHm2SvFhAQylm10jMZ35B/SR2TaMLVkavAlwoG4N2qCb5RqbvhQYcu3zmXNyxR2DW0Ooxe+9XPVt5UjKRCQ==",
+    "notices": [
+      {
+        "file": "playwright-LICENSE",
+        "upstreamArchivePath": "package/LICENSE",
+        "sha256": "9a7110fc2d2f964038e5dc49128f908f29f47a574c961cba16085914e879cbda"
+      }
+    ],
+    "checkedOn": "2026-09-08",
+    "bundledWithApp": false,
+    "repository": "https://github.com/microsoft/playwright-mcp"
+  },
+  {
+    "id": "blender",
+    "package": "blender-mcp",
+    "version": "1.9.1",
+    "license": "MIT",
+    "archive": "https://files.pythonhosted.org/packages/98/93/3e8656c0436c7df6397775064cc05261910c05be009c598d38dda0eda816/blender_mcp-1.9.1-py3-none-any.whl",
+    "integrity": "sha256-ede3aed34926f77142b8f00ee4f8544f68067d2dc747da8295d1c456171355b2",
+    "notices": [
+      {
+        "file": "blender-LICENSE",
+        "upstreamArchivePath": "blender_mcp-1.9.1.dist-info/licenses/LICENSE",
+        "sha256": "049501fd54d27852507853a5b88094ca1c6ff97404418a5032f3310eecc9cde6"
+      }
+    ],
+    "checkedOn": "2026-09-08",
+    "bundledWithApp": false,
+    "repository": "https://github.com/ahujasid/blender-mcp"
+  },
+  {
+    "id": "fetch",
+    "package": "mcp-server-fetch",
+    "version": "2025.4.7",
+    "license": "MIT",
+    "archive": "https://files.pythonhosted.org/packages/a7/ae/93cb99a40be35e7557f74af73b4b2fcb54c342a35f9dc5ff3db401b3d054/mcp_server_fetch-2025.4.7-py3-none-any.whl",
+    "integrity": "sha256-349b79754d9d5caeb7c3f427ef07af2a994d4c998dab33c060eb9fbeb9da8d6b",
+    "notices": [
+      {
+        "file": "fetch-LICENSE",
+        "upstreamArchivePath": "mcp_server_fetch-2025.4.7.dist-info/licenses/LICENSE",
+        "sha256": "8cc7c6e33b24ed4ee8fcccc33eccf102549d04fa4cb9737cecc9770dad1080ff"
+      }
+    ],
+    "checkedOn": "2026-09-08",
+    "bundledWithApp": false,
+    "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch"
+  },
+  {
+    "id": "heygen",
+    "name": "HeyGen Video",
+    "endpoint": "https://mcp.heygen.com/mcp/v1/",
+    "repository": "https://developers.heygen.com/mcp/overview",
+    "terms": "https://www.heygen.com/terms",
+    "license": "Hosted service terms",
+    "notices": [
+      {
+        "file": "heygen-SERVICE-NOTICE",
+        "sha256": "bf30ee8d88c444513e430315cd3d2d6d9ef98eb0073a30305a4ad2bf8b9a2fe2"
+      }
+    ],
+    "checkedOn": "2026-09-08",
+    "bundledWithApp": false
+  },
+  {
+    "id": "recraft",
+    "name": "Recraft Design",
+    "endpoint": "https://mcp.recraft.ai/mcp",
+    "repository": "https://www.recraft.ai/docs/mcp-reference/remote-server",
+    "terms": "https://www.recraft.ai/legal/terms",
+    "license": "Hosted service terms",
+    "notices": [
+      {
+        "file": "recraft-SERVICE-NOTICE",
+        "sha256": "9ecba00599d77b5c2ca2ff039218ec643f2cb6ad0208a93295e4b6fd791e4dcf"
+      }
+    ],
+    "checkedOn": "2026-09-08",
+    "bundledWithApp": false
+  },
+  {
+    "id": "unity",
+    "package": "mcpforunityserver",
+    "version": "10.2.0",
+    "repository": "https://github.com/CoplayDev/unity-mcp",
+    "license": "MIT",
+    "archive": "https://files.pythonhosted.org/packages/1f/e0/9c3a6bcf46cf43b5021a5c9a7e33cd14b232918b1e7a0403e82bae41d557/mcpforunityserver-10.2.0-py3-none-any.whl",
+    "integrity": "sha256-596e2a7322d829b6cf73510bad5ad87ba7e0ba2eee7e1b19645e8caf4ebf1460",
+    "notices": [
+      {
+        "file": "unity-LICENSE",
+        "upstreamArchivePath": "mcpforunityserver-10.2.0.dist-info/licenses/LICENSE",
+        "sha256": "6efe650c965012ac418238dcd6b9116e4130a5220717ef0dfb539dd159c4245c"
+      }
+    ],
+    "checkedOn": "2026-09-08",
+    "bundledWithApp": false
+  }
+]

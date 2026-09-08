@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { createSession, getSession, initSessionStore, readEvents, resetSessionStoreForTests, upsertMessageEvent, writeAsset } from '../src/main/session/store.js';
+import { appendEvent, createSession, getSession, initSessionStore, observeSessionModel, readEvents, resetSessionStoreForTests, upsertMessageEvent, writeAsset } from '../src/main/session/store.js';
 import { recordDeliveredInput, recordedInputImage } from '../src/main/session/input-history.js';
 import type { InputEntry } from '../src/main/session/input.js';
 import { chronological } from '../src/shared/chronology.js';
@@ -11,6 +11,44 @@ import { chronological } from '../src/shared/chronology.js';
 let directory: string;
 beforeEach(async () => { directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-input-history-')); initSessionStore(directory); });
 afterEach(async () => { resetSessionStoreForTests(); await fs.rm(directory, { recursive: true, force: true }); });
+
+it('does not republish an inherited finish task model as a new picker observation', async () => {
+  const session = await createSession({ conversationId: 'continued-chat', title: 'Finish inheritance' });
+  await observeSessionModel(session.id, 'continued-chat', '5.6', 100, 'xhigh');
+  const entry: InputEntry = { id: 'checkpoint', sessionId: session.id, state: 'sent', text: 'Check result', mode: 'finish',
+    dueAt: 0, createdAt: 0, owner: 'page', messageId: 'native-checkpoint', deliveredAt: 200,
+    model: '6', reasoningEffort: 'pro', conversationId: 'continued-chat' };
+  await recordDeliveredInput(entry);
+  expect((await getSession(session.id))?.selectedModel).toMatchObject({ model: '5.6', reasoningEffort: 'xhigh', observedAt: 100 });
+  const row = (await readEvents(session.id)).find(event => event.kind === 'user_message');
+  expect(row?.model).toBeUndefined();
+  expect(row?.reasoningEffort).toBeUndefined();
+});
+
+it('serves real recorded tool PNG pixels and refuses unreferenced or invalid images', async () => {
+  const session = await createSession({ title: 'Tool image' });
+  const other = await createSession({ title: 'Other' });
+  const bytes = await sharp({ create: { width: 3, height: 2, channels: 3, background: '#00ff00' } }).png().toBuffer();
+  const asset = await writeAsset(session.id, bytes, 'image/png');
+  const broken = await writeAsset(session.id, Buffer.from('not image bytes'), 'image/png');
+  const text = { text: '{}', chars: 2, truncated: false };
+  await appendEvent(session.id, { time: Date.now(), source: 'mcp', kind: 'tool_call', call: {
+    callId: 'tool-image', tool: 'get_viewport_screenshot', requestId: null, conversationId: null,
+    attribution: 'unattributed', attributionMethod: 'unattributed', args: text, result: text,
+    outcome: 'ok', durationMs: 1, summary: { kind: 'other', title: 'Screenshot', tone: 'neutral' }, assets: [asset, broken]
+  } });
+  expect(await recordedInputImage(session.id, asset.id)).toBe(`data:image/png;base64,${bytes.toString('base64')}`);
+  expect(await recordedInputImage(session.id, broken.id)).toBeNull();
+  const assetPath = path.join(directory, 'sessions', session.id, 'assets', asset.id);
+  await fs.truncate(assetPath, 17 * 1024 * 1024);
+  const readFile = vi.spyOn(fs, 'readFile');
+  try {
+    expect(await recordedInputImage(session.id, asset.id)).toBeNull();
+    expect(readFile.mock.calls.some(args => String(args[0]) === assetPath)).toBe(false);
+  } finally { readFile.mockRestore(); }
+  await writeAsset(other.id, bytes, 'image/png');
+  expect(await recordedInputImage(other.id, asset.id)).toBeNull();
+});
 
 it.each([true, false])('merges a native echo before=%s with the receipt and preserves real image pixels', async (echoFirst) => {
   const session = await createSession({ conversationId: 'conversation-one', title: 'Input history' });

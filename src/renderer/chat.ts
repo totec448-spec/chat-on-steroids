@@ -1,7 +1,9 @@
-import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel } from './chat-models.js';
-import { marked } from 'marked';
+import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, ensureComposerModel } from './chat-models.js';
+import { marked, Marked } from 'marked';
+import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel } from './agent-panel.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
+import { toolResultText } from './tool-result.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { isAstraModel } from '../shared/chat-models.js';
@@ -146,7 +148,7 @@ function paintComposerImages(): void {
   const images = imageDrafts.get(key) ?? [];
   const box = $('composerImages'); box.hidden = !images.length; box.replaceChildren();
   images.forEach((image, index) => {
-    const tile = 'dataUrl' in image ? el('div', 'composer-image') : attachmentCard(image);
+    const tile = 'dataUrl' in image ? el('div', 'composer-image') : attachmentCard(image, true);
     if ('dataUrl' in image) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; tile.append(preview); }
     const remove = el('button', 'image-remove', '×'); remove.setAttribute('type', 'button'); remove.setAttribute('aria-label', `Remove ${image.name}`);
     remove.addEventListener('click', () => { imageDrafts.set(key, images.filter((_entry, at) => at !== index)); paintComposerImages(); });
@@ -154,9 +156,12 @@ function paintComposerImages(): void {
   });
   paintDeliveryControls();
 }
-function attachmentCard(file: InputAttachment): HTMLElement {
-  if (file.preview) { const tile = el('div', 'composer-image'); tile.title = file.name;
-    const image = document.createElement('img'); image.src = file.preview; image.alt = file.name; tile.append(image); return tile; }
+function attachmentCard(file: InputAttachment, inComposer = false): HTMLElement {
+  if (file.preview) {
+    const image = document.createElement('img'); image.src = file.preview; image.alt = file.name; image.title = file.name;
+    if (!inComposer) return image;
+    const tile = el('div', 'composer-image'); tile.append(image); return tile;
+  }
   const tile = el('div', 'attachment-card'); tile.title = file.name;
   const glyph = el('span', 'attachment-icon');
   glyph.setAttribute('aria-hidden', 'true');
@@ -657,13 +662,6 @@ function paintSessions(): void {
   badgeKey = badgeSignature();
   $('sessionsEmpty').hidden = sessions.length > 0 || projects.length > 0;
 
-  const recording = deps.state()?.config.sessions.record === true;
-  const retained = `${sessionTotal} retained session${sessionTotal === 1 ? '' : 's'}`;
-  const shown = sessions.length < sessionTotal ? `${sessions.length} of ${retained} shown` : retained;
-  const more = sessionPageCursor && sessions.length < sessionTotal ? ' · scroll for older history' : '';
-  $('sessionsFoot').textContent = recording
-    ? `${shown}${more}${activeId ? ' · one live now' : ''}`
-    : `Recording is off · ${shown}${more}`;
   scheduleToolActivityExpiry();
 }
 
@@ -795,9 +793,10 @@ function paintDeliveryControls(): void {
   send.dataset.action = stop ? 'stop' : 'send';
   send.setAttribute('aria-label', stop ? (controlledStopPending ? 'Stop requested' : 'Stop turn') : 'Send message');
   if (stop && !working && pending) send.setAttribute('aria-label', 'Cancel delivery');
-  if (preparedPlan && !stop) send.setAttribute('aria-label', 'Send first stage');
+  if (preparedPlan && !stop) send.setAttribute('aria-label', 'Start full plan');
+  else if (planMode && !stop) send.setAttribute('aria-label', 'Generate plan');
   send.classList.toggle('is-plan-ready', !!preparedPlan && !stop);
-  send.title = stop && !working && pending ? 'Cancel delivery' : preparedPlan && !stop ? 'Send first stage' : '';
+  send.title = stop && !working && pending ? 'Cancel delivery' : preparedPlan && !stop ? 'Start full plan' : planMode && !stop ? 'Click to generate plan' : '';
   send.classList.toggle('is-stop', stop);
   for (const button of $('sendOptions').querySelectorAll<HTMLElement>('[data-delivery]')) {
     button.setAttribute('aria-checked', String(button.dataset.delivery === $<HTMLSelectElement>('sendMode').value));
@@ -838,7 +837,7 @@ function cancelTaskPlan(): void {
 }
 async function createTaskPlan(backend: 'api' | 'chatgpt'): Promise<void> {
   const input = $<HTMLTextAreaElement>('chatInput'), text = input.value.trim();
-  planMode = true; paintTaskActions();
+  planMode = true; paintTaskActions(); paintDeliveryControls();
   if (!text) { input.placeholder = 'Describe the task to turn into a plan…'; input.focus(); return; }
   const generation = ++planGeneration, selection = selectionGeneration;
   const preview = $('taskPlanPreview'); preview.hidden = false;
@@ -875,7 +874,11 @@ async function createTaskPlan(backend: 'api' | 'chatgpt'): Promise<void> {
 function paintPreparedPlan(): void {
   const plan = preparedPlan;
   if (!plan) return;
-  const preview = $('taskPlanPreview'); preview.hidden = false;
+  const preview = $('taskPlanPreview'); preview.hidden = plan.sending;
+  // Sending hands presentation to the outbox/queued-stage rows. Keeping the editable
+  // draft visible until the async receipt arrives paints the same plan twice. Retain
+  // its data so a rejected send can restore the editable preview in the existing finally.
+  if (plan.sending) { preview.replaceChildren(); return; }
   preview.replaceChildren(...plan.stages.map((stage, index) => {
     const row = el('div', 'plan-stage');
     const heading = el('div', 'plan-stage-heading');
@@ -897,7 +900,7 @@ function paintPreparedPlan(): void {
       if (plan.stages.length) { paintPreparedPlan(); paintDeliveryControls(); } else cancelTaskPlan();
     });
     edit.disabled = remove.disabled = field.disabled = plan.sending;
-    heading.title = index === 0 ? 'Send starts this stage. Remaining stages arrive one at a time at Session finish or after a completed answer.' : 'Delivered at Session finish or after a completed answer, following the preceding stage.';
+    heading.title = index === 0 ? 'Send includes your complete request and the full plan. Later stages are queued as verification checkpoints.' : 'Included in the first message, then queued as a checkpoint at Session finish or after a completed answer when enabled.';
     heading.append(label, text, edit, remove); row.append(heading, field, error); return row;
   }));
 }
@@ -1002,7 +1005,7 @@ async function navigateHistory(before: number | null, prepend = false): Promise<
   if (selectedId !== selected || selectionGeneration !== selection || detailLoadGeneration !== generation) return;
   if (!prepend) $('chatBody').scrollTop = before === null ? $('chatBody').scrollHeight : 0;
 }
-async function loadDetail(navigate = false, prepend = false): Promise<void> {
+async function loadDetail(navigate = false, prepend = false, newerFrom?: number): Promise<void> {
   const wanted = selectedId;
   if (wanted !== null && historyBefore !== null && detailFor === wanted && !navigate) { void refreshSessionControls(); paintDetail(); return; }
   const generation = ++detailLoadGeneration;
@@ -1019,9 +1022,9 @@ async function loadDetail(navigate = false, prepend = false): Promise<void> {
   }
   if (detailFor !== wanted) historyBefore = null;
   // Live deltas must not evict a historical page while the user is reading it.
-  const incremental = historyBefore === null && detailFor === wanted && detailCursor !== null;
+  const incremental = newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
   const detail = await run(
-    api.getSession(wanted, incremental ? { from: detailCursor!, limit: MAX_TIMELINE_ROWS } : { ...(historyBefore !== null ? { before: historyBefore } : {}), limit: prepend ? MAX_TIMELINE_ROWS / 2 : MAX_TIMELINE_ROWS })
+    api.getSession(wanted, newerFrom !== undefined ? { from: newerFrom, limit: MAX_TIMELINE_ROWS / 2 } : incremental ? { from: detailCursor!, limit: MAX_TIMELINE_ROWS } : { ...(historyBefore !== null ? { before: historyBefore } : {}), limit: prepend ? MAX_TIMELINE_ROWS / 2 : MAX_TIMELINE_ROWS })
   );
   if (!detail || generation !== detailLoadGeneration || selectedId !== wanted) return;
   // User/assistant prose is canonical in messages.json, while structured page activity stays
@@ -1033,7 +1036,12 @@ async function loadDetail(navigate = false, prepend = false): Promise<void> {
   if (incremental) mergeDetailDelta(detail.events);
   else {
     const folded = chronological(foldProgress(detail.events));
-    if (prepend) {
+    if (newerFrom !== undefined) {
+      events = chronological(foldProgress([...events, ...folded])).slice(-MAX_TIMELINE_ROWS);
+      // Reaching the live tail restores ordinary delta reads. Paging itself preserves
+      // the reader's row even when they were at the bottom of the previous window.
+      if (detail.events.length < MAX_TIMELINE_ROWS / 2) historyBefore = null;
+    } else if (prepend) {
       const boundary = historyBefore!;
       const retained = events.filter(event => event.seq >= boundary).slice(0, MAX_TIMELINE_ROWS - folded.length);
       events = chronological(foldProgress([...folded, ...retained]));
@@ -1049,7 +1057,7 @@ async function loadDetail(navigate = false, prepend = false): Promise<void> {
       ? detail.nextFrom
       : detail.events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), incremental ? detailCursor! : 0);
   totalEvents = detail.total;
-  paintDetail();
+  paintDetail(!prepend && newerFrom === undefined);
   void loadHandoff();
   // A burst can contain more than one renderer-sized page between coalesced notifications.
   // Drain it page by page rather than silently jumping the cursor or lifting the payload cap.
@@ -1101,12 +1109,71 @@ const DROP_RENDERED_TAGS = new Set([
 function safeRenderedHref(value: string): string | null {
   const trimmed = value.trim();
   if (trimmed.startsWith('#')) return trimmed;
-  try {
-    const url = new URL(trimmed);
-    return url.protocol === 'https:' || url.protocol === 'http:' || url.protocol === 'mailto:' ? trimmed : null;
-  } catch {
-    return null;
+  return safeExternalLink(trimmed) ? trimmed : null;
+}
+
+const PROVIDER_CITATION = /^\uE200(?:cite|filecite)\uE202[^\uE200\uE201]*\uE201/;
+const PROVIDER_URL = /^\uE200url\uE202([^\uE200-\uE202]*)\uE202([^\uE200-\uE202]*)\uE201/;
+/** Native citation labels and URLs may arrive before the DOM paints the rest of a canonical
+ * revision. Use only exact source ranges with matching preceding prose, never substitute
+ * the whole captured HTML or guess a destination from an opaque provider reference id. */
+function citationLabels(source: string, capture?: StoredText): Map<string, string> {
+  const links = new Map<string, string>();
+  if (!capture?.text || capture.truncated || capture.text.length > MAX_RENDERED_HTML_CHARS) return links;
+  const template = document.createElement('template');
+  template.innerHTML = capture.text;
+  // Provider reference ranges count Unicode code points; JS slice counts UTF-16
+  // units. Emoji before a citation otherwise move every subsequent range.
+  const offsets = new Uint32Array(source.length + 1);
+  let points = 0, units = 0;
+  for (const char of source) { offsets[points++] = units; units += char.length; }
+  offsets[points] = units;
+  const normalized = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const prose = (fragment: DocumentFragment) => {
+    // Native HTML and Markdown emit different whitespace around hard breaks and
+    // list paragraphs. Compare the same rendered word boundaries in both trees.
+    for (const br of fragment.querySelectorAll('br')) br.replaceWith('\n');
+    for (const block of fragment.querySelectorAll('p,div,li,ul,ol,blockquote,pre,h1,h2,h3,h4,h5,h6,table,tr,td,th')) {
+      block.prepend('\n'); block.append('\n');
+    }
+    return normalized(fragment.textContent ?? '');
+  };
+  for (const reference of template.content.querySelectorAll('[data-content-reference-start][data-content-reference-end]')) {
+    const from = Number(reference.getAttribute('data-content-reference-start'));
+    const to = Number(reference.getAttribute('data-content-reference-end'));
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to <= from || to > points) continue;
+    const start = offsets[from]!, end = offsets[to]!;
+    const marker = source.slice(start, end);
+    if (marker.match(PROVIDER_CITATION)?.[0] !== marker) continue;
+    const before = document.createRange(); before.setStart(template.content, 0); before.setEndBefore(reference);
+    const preceding = before.cloneContents();
+    for (const prior of preceding.querySelectorAll('[data-content-reference-start]')) prior.remove();
+    const canonical = document.createElement('template');
+    canonical.innerHTML = marked.parse(source.slice(0, start).replace(/\uE200(?:cite|filecite)\uE202[^\uE200\uE201]*\uE201/g, ''), { async: false, gfm: true });
+    if (prose(preceding) !== prose(canonical.content)) continue;
+    if (marker.startsWith('\uE200filecite\uE202')) {
+      const names = [...reference.querySelectorAll('[data-file-citation-primary-file-id] button')]
+        .map(node => normalized(node.textContent ?? '')).filter(name => name.length > 0 && name.length <= 500);
+      if (names.length) {
+        const label = document.createElement('span');
+        label.textContent = ` (${[...new Set(names)].join(', ')})`;
+        links.set(marker, label.outerHTML);
+      }
+      continue;
+    }
+    const anchors: string[] = [], seen = new Set<string>();
+    for (const candidate of reference.querySelectorAll('a[href]')) {
+      const href = safeRenderedHref(candidate.getAttribute('href') ?? '');
+      if (!href || !/^https?:/.test(href) || seen.has(href)) continue;
+      seen.add(href);
+      const anchor = document.createElement('a'); anchor.href = href;
+      anchor.textContent = new URL(href).hostname;
+      anchor.title = candidate.textContent?.trim().slice(0, 500) || 'Source';
+      anchors.push(anchor.outerHTML);
+    }
+    if (anchors.length) links.set(marker, ` (${anchors.join(', ')})`);
   }
+  return links;
 }
 
 /**
@@ -1125,12 +1192,30 @@ function safeRenderedHref(value: string): string | null {
  * heading and list item is a newline, so it keeps `msg`'s pre-wrap — flowing it would run a
  * whole brief together into one paragraph.
  */
-export function renderedMarkdown(source: string): HTMLElement {
+export function renderedMarkdown(source: string, capture?: StoredText): HTMLElement {
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
   // never evidence that it contains the current message revision.
   const text = source.slice(0, MAX_RENDERED_HTML_CHARS);
-  const html = marked.parse(text, { async: false, gfm: true });
+  const citations = text.includes('\uE200') ? citationLabels(text, capture) : new Map<string, string>();
+  // An inline tokenizer leaves literal citation examples inside code spans/fences intact.
+  const parser = new Marked({ gfm: true, extensions: [{
+    name: 'providerReference', level: 'inline',
+    start: value => value.indexOf('\uE200'),
+    tokenizer(value) { const match = value.match(PROVIDER_URL) ?? value.match(PROVIDER_CITATION); return match ? { type: 'providerReference', raw: match[0] } : undefined; },
+    renderer(token) {
+      const url = token.raw.match(PROVIDER_URL);
+      if (url) {
+        // Unlike opaque citation IDs, a native url token already carries its exact
+        // authored label and destination. Captured React anchors may have no href.
+        const link = document.createElement('a'); link.textContent = url[1] || url[2] || 'Link';
+        if (safeExternalLink(url[2] ?? '')) link.setAttribute('href', url[2]!);
+        return link.outerHTML;
+      }
+      return citations.get(token.raw) ?? (token.raw.startsWith('\uE200filecite\uE202') ? '' : '<span title="The recording does not include this source URL">[source link unavailable]</span>');
+    }
+  }] });
+  const html = parser.parse(text, { async: false });
   return renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
 }
 
@@ -1186,6 +1271,20 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   };
   visit(template.content);
   box.append(template.content);
+  const openLink = (event: MouseEvent): void => {
+    if (event.type === 'auxclick' && event.button !== 1) return;
+    const anchor = (event.target as Element | null)?.closest?.('a[href]');
+    if (!anchor || !box.contains(anchor)) return;
+    const href = safeRenderedHref(anchor.getAttribute('href') ?? '');
+    event.preventDefault();
+    if (!href) return;
+    if (href.startsWith('#')) { document.getElementById(href.slice(1))?.scrollIntoView(); return; }
+    // Electron deliberately denies arbitrary renderer navigation/window.open. A user
+    // activation crosses the existing, independently validated main-process link API.
+    void run(api.openLink(href));
+  };
+  box.addEventListener('click', openLink);
+  box.addEventListener('auxclick', openLink);
   // Tables wrap to the transcript column. Extremely wide structural tables retain
   // their own horizontal scroll instead of widening/clipping the whole conversation.
   for (const table of box.querySelectorAll('table')) {
@@ -1233,7 +1332,7 @@ function forgetTimelineRows(): void {
   rowCache.clear();
 }
 
-function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>): HTMLElement {
+function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?: { id: string; current: () => boolean }): HTMLElement {
   const { call } = event;
   const box = document.createElement('details');
   box.className = `tool tone-${call.summary.tone}`;
@@ -1272,7 +1371,31 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>): HTMLElem
   raw.append(el('h4', '', 'Arguments'));
   raw.append(textBlock('pre', call.args.text, call.args.truncated, call.args.chars));
   raw.append(el('h4', '', 'Result'));
-  raw.append(textBlock('pre', call.result.text, call.result.truncated, call.result.chars));
+  const images = call.assets?.filter(asset => ['image/png', 'image/jpeg', 'image/webp'].includes(asset.mimeType)) ?? [];
+  const readable = toolResultText(call.result.text, call.result.truncated, images.length > 0);
+  if (readable) raw.append(textBlock('pre', readable, call.result.truncated && images.length === 0, call.result.chars));
+  if (images.length && (context?.id || selectedId)) {
+    const id = context?.id ?? selectedId!, generation = selectionGeneration;
+    const attachments = el('div', 'tool-images');
+    let loaded = false;
+    const load = async () => {
+      if (!box.open || loaded) return;
+      loaded = true;
+      for (const asset of images) {
+        const data = await run(api.getSessionImage(id, asset.id));
+        if (context ? !context.current() : id !== selectedId || generation !== selectionGeneration) return;
+        if (!data) { attachments.append(el('p', 'meta', 'Image unavailable')); continue; }
+        const image = document.createElement('img');
+        image.src = data; image.alt = `${call.tool} result`; image.loading = 'lazy';
+        image.style.cssText = 'display:block;max-width:100%;max-height:600px;object-fit:contain;margin:8px 0';
+        attachments.append(image);
+      }
+    };
+    box.addEventListener('toggle', () => void load());
+    raw.append(attachments);
+    void load();
+  }
+  if (call.result.assetId) raw.append(el('p', 'raw-facts', `Full recorded response: ${call.result.assetId}`));
 
   for (const asset of call.assets ?? []) {
     raw.append(el('p', 'raw-facts', `asset ${asset.id} · ${asset.mimeType} · ${compactNumber(asset.bytes)} bytes`));
@@ -1301,8 +1424,12 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'user_message': {
       const box = el('div', 'said is-user');
       box.append(el('b', '', 'You'));
-      if (event.attachments?.length) { const files = el('div', 'message-attachments'); files.append(...event.attachments.map(attachmentCard)); box.append(files); }
-      box.append(textBlock('msg', event.authoredText ?? event.message.text, event.authoredText === undefined && event.message.truncated, event.authoredText?.length ?? event.message.chars));
+      const attachments = el('div', 'message-attachments');
+      if (event.attachments?.length) attachments.append(...event.attachments.map(file => attachmentCard(file)));
+      const assets = event.assets?.filter(asset => asset.mimeType === 'image/webp').slice(0, 4) ?? [];
+      if (event.attachments?.length || assets.length) box.append(attachments);
+      const userText = event.authoredText ?? event.message.text;
+      if (userText) box.append(textBlock('msg user-message-text', userText, event.authoredText === undefined && event.message.truncated, event.authoredText?.length ?? event.message.chars));
       if (event.inputDelivery) {
         box.classList.add('has-input-receipt');
         const receipt = el('span', 'input-receipt');
@@ -1311,10 +1438,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         receipt.append(icon(event.inputDelivery === 'offered' ? 'i-clock' : 'i-check'));
         box.append(receipt);
       }
-      const assets = event.assets?.filter(asset => asset.mimeType === 'image/webp').slice(0, 4) ?? [];
       if (assets.length && (context?.id || selectedId)) {
         const id = context?.id ?? selectedId!, generation = selectionGeneration;
-        const attachments = el('div', 'message-attachments');
         void (async () => {
           for (const asset of assets) {
             const data = await run(api.getSessionImage(id, asset.id));
@@ -1325,14 +1450,13 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
             attachments.append(image);
           }
         })();
-        box.append(attachments);
       }
       return box;
     }
     case 'assistant_message': {
       const box = el('div', 'said');
       box.append(el('b', '', event.final ? 'ChatGPT' : 'ChatGPT (partial)'));
-      box.append(renderedMarkdown(event.message.text));
+      box.append(renderedMarkdown(event.message.text, event.renderedHtml));
       return box;
     }
     case 'progress':
@@ -1360,7 +1484,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return notice;
     }
     case 'tool_call':
-      return toolBody(event);
+      return toolBody(event, context);
     case 'note':
       return el('p', 'meta', event.message.text);
     /**
@@ -1393,7 +1517,10 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       if (!context) {
         const matches = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && entry.origin.agentId === worker);
         if (matches.length === 1) {
-          const open = el('button', 'btn', 'Open sub-agent chat'); open.setAttribute('type', 'button');
+          const open = el('button', 'btn agent-chat-open'); open.setAttribute('type', 'button');
+          open.setAttribute('aria-label', `Open ${worker} chat`);
+          const arrow = icon('i-out'); arrow.setAttribute('aria-hidden', 'true');
+          open.append(el('span', '', 'Open worker chat'), arrow);
           open.onclick = () => void agentPanel?.open(matches[0]!.id); box.append(open);
         }
       }
@@ -1859,7 +1986,7 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
   return grouped;
 }
 
-function paintDetail(): void {
+function paintDetail(followBottom = true): void {
   paintStateLine();
   const summary = sessions.find((s) => s.id === selectedId) ?? null;
   applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, summary?.selectedModel ?? null);
@@ -1876,7 +2003,7 @@ function paintDetail(): void {
   // Preserve the visible logical row when late transcript revisions change the
   // height above it; retaining absolute scrollTop would move the reader's content.
   const pane = $('chatBody');
-  const restoreViewport = preserveTimelineViewport(pane, $('timeline'));
+  const restoreViewport = preserveTimelineViewport(pane, $('timeline'), followBottom);
   const timelineRows: HTMLElement[] = [];
   if (selectedId && historyBefore !== null) {
     const navigation = el('div', 'timeline-window-note');
@@ -2703,15 +2830,15 @@ async function refreshInputQueue(): Promise<void> {
   reconcileChildren(taskList, queuedTasks.map(entry => {
     const existing = oldCards.get(entry.id);
     if (dragging && existing) return existing;
-    if (entry.state === 'queued' && existing?.querySelector('textarea') && existing.contains(document.activeElement)) return existing;
+    if (entry.state === 'queued' && existing?.classList.contains('is-editing')) return existing;
     const card = el('div', 'queued-input'); card.dataset.inputId = entry.id;
     if (projectedIds.has(entry.id)) card.setAttribute('aria-label', 'Plan stage · waiting for the first message to be sent');
     const label = el('span', 'queue-label', entry.text); label.title = `${entry.state === 'queued' ? (entry.mode === 'after-turn' ? 'After the next completed answer' : 'At Session finish or after a completed answer') : 'Awaiting receipt'} · ${entry.text}`;
     card.append(icon('i-clock'), label);
     if (entry.state === 'queued') {
       const queueSessionSummary = sessions.find(row => row.id === selectedId);
-      const selection = queueSessionSummary?.selectedModel;
-      if (entry.mode === 'finish' && selection?.conversationId === queueSessionSummary?.conversationId && isAstraModel(selection?.model, selection?.reasoningEffort)) {
+      const modelSelection = queueSessionSummary?.selectedModel;
+      if (entry.mode === 'finish' && modelSelection?.conversationId === queueSessionSummary?.conversationId && isAstraModel(modelSelection?.model, modelSelection?.reasoningEffort)) {
         const delivery = el('button', 'btn queue-delivery', entry.afterTurn === true ? 'Also after turn' : 'Finish only') as HTMLButtonElement;
         delivery.type = 'button';
         delivery.setAttribute('aria-label', 'Also send this task as a new message after Astra finishes its turn');
@@ -2754,8 +2881,25 @@ async function refreshInputQueue(): Promise<void> {
       const edit = dockAction('Edit queued task', 'i-pencil', () => {});
       edit.onclick = () => {
         const field = document.createElement('textarea'); field.value = entry.text; field.maxLength = 16000; field.setAttribute('aria-label', 'Queued task');
-        const save = el('button', 'btn', 'Save'); save.setAttribute('type', 'button');
-        save.onclick = async () => { if (await run(api.editQueuedInput(entry.id, field.value))) void refreshInputQueue(); };
+        const contents = [...card.childNodes];
+        const save = el('button', 'btn', 'Save') as HTMLButtonElement; save.type = 'button';
+        save.onclick = async () => {
+          if (save.disabled) return;
+          const value = field.value;
+          save.disabled = true; save.textContent = 'Saving…'; field.readOnly = true;
+          try {
+            const saved = await run(api.editQueuedInput(entry.id, value));
+            if (!card.isConnected || selection !== selectionGeneration) return;
+            if (saved) {
+              // The durable edit receipt ends editing, regardless of focus or a slower
+              // queue refresh. Refreshes preserve drafts; they do not own Save completion.
+              entry.text = value.trim(); label.textContent = entry.text;
+              card.classList.remove('is-editing'); card.replaceChildren(...contents);
+              void refreshInputQueue();
+            } else if (saved === false) toast('This task is no longer queued and could not be edited.');
+          } catch (error) { toast(error instanceof Error ? error.message : 'Could not save this task.'); }
+          finally { save.disabled = false; save.textContent = 'Save'; field.readOnly = false; }
+        };
         card.classList.add('is-editing'); card.replaceChildren(field, save); field.focus();
       };
       const cancel = dockAction('Remove queued task', 'i-trash', () => {}); cancel.onclick = async () => { await run(api.cancelInput(entry.id)); void refreshInputQueue(); };
@@ -2781,13 +2925,11 @@ async function refreshInputQueue(): Promise<void> {
     visibleInputIds.add(entry.id);
     if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
     const status = entry.error || (entry.state === 'failed' ? 'Delivery not confirmed' : entry.state === 'decision' ? 'Preparing follow-up' : entry.state === 'browser' ? 'Delivery confirmation pending' : entry.state === 'tool' ? 'Sent to the active turn · awaiting receipt' : entry.dueAt > Date.now() ? `Scheduled ${new Date(entry.dueAt).toLocaleString()}` : 'Queued');
-    if (entry.attachments?.length) { const files = el('div', 'message-attachments'); files.append(...entry.attachments.map(attachmentCard)); row.append(files); }
-    row.append(el('div', 'pending-message-text', entry.text));
-    if (entry.images?.length) {
-      const images = el('div', 'pending-images');
-      for (const image of entry.images) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; images.append(preview); }
-      row.append(images);
-    }
+    const files = el('div', 'message-attachments');
+    if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
+    for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
+    if (files.childElementCount) row.append(files);
+    if (entry.text) row.append(el('div', 'pending-message-text', entry.text));
     const receipt = el('span', 'pending-message-status');
     receipt.title = status; receipt.setAttribute('aria-label', status);
     if (entry.error || entry.state === 'failed') {
@@ -2855,6 +2997,7 @@ async function stopCurrentTurn(): Promise<void> {
   try { await run(api.stopSessionTurn(id, turnId)); }
   finally { if (selectedId === id && selectionGeneration === generation) { controlledStopPending = false; void refreshSessionControls(); } }
 }
+let composerDiscoveryGeneration = 0;
 async function sendComposer(delivery?: 'finish', plan?: string[]): Promise<boolean | void> {
   const input = $<HTMLTextAreaElement>('chatInput');
   const key = draftKey();
@@ -2890,8 +3033,15 @@ async function sendComposer(delivery?: 'finish', plan?: string[]): Promise<boole
     }
     return;
   }
-  const modelSettings = confirmedComposerModel();
-  if (!modelSettings) { toast('Reload model choices and select an available model and thinking effort before sending.'); return false; }
+  const discoveryGeneration = ++composerDiscoveryGeneration;
+  const discoverySelection = selectionGeneration, discoverySession = selectedId, discoveryDraft = input.value;
+  const modelSettings = confirmedComposerModel() ?? await ensureComposerModel();
+  // Discovery can outlive navigation or draft edits. Only the latest unchanged
+  // authored send may continue; a second click must never send the same text twice.
+  if (discoveryGeneration !== composerDiscoveryGeneration || discoverySelection !== selectionGeneration || discoverySession !== selectedId ||
+      input.value !== discoveryDraft || (imageDrafts.get(key) ?? []).some((image, index) => image !== images[index]) ||
+      (imageDrafts.get(key)?.length ?? 0) !== images.length) return false;
+  if (!modelSettings) { toast('Model discovery could not confirm your selection. Choose an available model and thinking effort, then send again.'); return false; }
   const sessionId = selectedId;
   const generation = selectionGeneration;
   const chosenMode = delivery ?? $<HTMLSelectElement>('sendMode').value;
@@ -2900,14 +3050,15 @@ async function sendComposer(delivery?: 'finish', plan?: string[]): Promise<boole
   const id = crypto.randomUUID();
   const authoredDraft = input.value;
   const attachmentPayload = { images: images.filter((file): file is InputImage => 'dataUrl' in file), attachments: images.filter((file): file is InputAttachment => 'id' in file) };
-  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
+  const objective = plan ? authoredDraft.trim() : mode === 'finish' ? undefined : $<HTMLTextAreaElement>('sessionObjective').value.trim() || undefined;
+  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
     dueAt, ...modelSettings, state: 'queued', owner: null, createdAt: dueAt, conversationId: null });
   input.value = ''; input.style.height = 'auto'; inputDrafts.delete(key);
   if (sessionId === null) pendingNewInput = { id, generation };
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective: mode === 'finish' ? undefined : $<HTMLTextAreaElement>('sessionObjective').value.trim() || undefined, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       if (selectedId === sessionId && selectionGeneration === generation && !input.value) input.value = authoredDraft;
@@ -3221,12 +3372,23 @@ export function initChat(next: Deps): void {
     selectSession(row.dataset.id);
   });
   $('sessionList').closest<HTMLElement>('.scroll')?.addEventListener('scroll', maybePageSessions);
-  // Only deliberate upward navigation fetches history, never a layout restoration.
+  // One bounded window pages in either direction, only on deliberate navigation.
+  // Layout restoration must never drain history or jump straight to the live tail.
   const historyPane = $('chatBody');
   let historyIntent: string | null = null;
-  const loadAtTop = () => {
-    if (!historyIntent || historyIntent !== selectedId || historyLoading || historyPane.scrollTop > 80 || !selectedId || detailFor !== selectedId) return;
+  let historyDirection = 0;
+  const loadAtEdge = () => {
+    if (!historyIntent || historyIntent !== selectedId || historyLoading || !selectedId || detailFor !== selectedId) return;
+    const older = historyDirection < 0 && historyPane.scrollTop <= 80;
+    const newer = historyDirection > 0 && historyBefore !== null && historyPane.scrollHeight - historyPane.clientHeight - historyPane.scrollTop <= 80;
+    if (!older && !newer) return;
     historyIntent = null;
+    if (newer) {
+      const from = events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), 0);
+      historyLoading = true;
+      void loadDetail(true, false, from).finally(() => { historyLoading = false; });
+      return;
+    }
     const windowed = boundedTimeline(visibleEvents());
     const boundaryRows = windowed.omitted > 0 && windowed.shown.length ? windowed.shown : events;
     const before = boundaryRows.length ? Math.min(...boundaryRows.map(event => event.seq)) : 1;
@@ -3234,10 +3396,23 @@ export function initChat(next: Deps): void {
     historyLoading = true;
     void navigateHistory(before, true).finally(() => { historyLoading = false; });
   };
-  historyPane.addEventListener('wheel', event => { historyIntent = event.deltaY < 0 ? selectedId : null; loadAtTop(); }, { passive: true });
-  historyPane.addEventListener('pointerdown', () => { historyIntent = selectedId; });
-  historyPane.addEventListener('keydown', event => { historyIntent = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ? selectedId : null; loadAtTop(); });
-  historyPane.addEventListener('scroll', loadAtTop, { passive: true });
+  historyPane.addEventListener('wheel', event => { historyIntent = selectedId; historyDirection = Math.sign(event.deltaY); loadAtEdge(); }, { passive: true });
+  let pointerScrollTop: number | null = null;
+  historyPane.addEventListener('pointerdown', () => { pointerScrollTop = historyPane.scrollTop; });
+  window.addEventListener('pointerup', () => { pointerScrollTop = null; });
+  historyPane.addEventListener('keydown', event => {
+    historyIntent = selectedId;
+    historyDirection = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ? -1 : ['ArrowDown', 'PageDown', 'End'].includes(event.key) ? 1 : 0;
+    loadAtEdge();
+  });
+  historyPane.addEventListener('scroll', () => {
+    if (pointerScrollTop !== null) {
+      historyDirection = Math.sign(historyPane.scrollTop - pointerScrollTop);
+      pointerScrollTop = historyPane.scrollTop;
+      historyIntent = selectedId;
+    }
+    loadAtEdge();
+  }, { passive: true });
 
   $('chatView').addEventListener('click', (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-view]');

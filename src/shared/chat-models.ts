@@ -3,14 +3,13 @@ import type { ReasoningEffort } from './session.js';
 export function isAstraModel(model: string | null | undefined, effort?: ReasoningEffort): boolean {
   const normalized = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');
   return /^(?:astra|gpt-?6(?:\.0)?-pro|gpt-?6-astra)$/.test(normalized) ||
-    (/^gpt-?6(?:\.0)?$/.test(normalized) && effort === 'pro');
+    (/^(?:gpt-?)?6(?:\.0)?$/.test(normalized) && effort === 'pro');
 }
-export type ChatModelOption = { id: string; label: string; efforts: ReasoningEffort[] };
+export type ChatModelOption = { id: string; label: string; efforts: ReasoningEffort[]; aliases?: string[] };
 /** Pro silence policy follows the selected provider identity, including the older generation. */
 export function isProModel(model: string | null | undefined, effort?: ReasoningEffort): boolean {
   const normalized = (model ?? '').trim().toLowerCase().replace(/\s+/g, '-');
-  return isAstraModel(model, effort) || /^gpt-?\d+(?:[.-]\d+)?-pro$/.test(normalized) ||
-    (/^gpt-?5\.6(?:-sol)?$/.test(normalized) && effort === 'pro');
+  return effort === 'pro' || isAstraModel(model, effort) || /^gpt-?\d+(?:[.-]\d+)?-pro$/.test(normalized);
 }
 /** Keep the selected generation intact; Pro is already a complete model label. */
 export function chatModelDisplayLabel(label: string, effort: ReasoningEffort, effortLabel: string): string {

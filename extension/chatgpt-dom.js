@@ -624,6 +624,12 @@ var CLF_DOM = (() => {
     return safe(() => document.querySelector(SEND), null);
   }
 
+  // File tiles can appear while ChatGPT is still processing them and disables Send
+  // through ARIA only. Upload readiness and the final click must use the same gate.
+  function sendButtonEnabled(button) {
+    return !!button && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
+  }
+
   /**
    * The live progress line of a turn.
    *
@@ -1234,6 +1240,7 @@ var CLF_DOM = (() => {
    * announcement is not a banner. Neither is this extension's own surface, which was
    * recording "Chat On Steroids Desktop is now connected" as a ChatGPT failure.
    */
+  const acknowledgedAccessNotices = new WeakSet();
   function errors() {
     return safe(() => {
       const out = [];
@@ -1241,15 +1248,24 @@ var CLF_DOM = (() => {
       // Live provider access throttling is a dialog, not a broken transport. Match
       // its semantic heading and notice together; quoted assistant prose is not it.
       for (const node of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
-        if (node.closest(OWN_SURFACES) || node.closest('[aria-hidden="true"]') || !node.getClientRects().length) continue;
+        if (node.closest(OWN_SURFACES) || node.closest('[hidden],[inert],[aria-hidden="true"]') || !node.getClientRects().length) continue;
         const heading = node.querySelector('h1,h2,h3,[role="heading"]');
-        if (!/^too many requests$/i.test((heading?.textContent || '').trim())) continue;
+        const headingText = (heading?.textContent || '').trim();
         const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
-        if (value.length >= 500 || !/temporarily limited.*access/i.test(value) || !/few minutes/i.test(value)) continue;
-        const headingText = heading.textContent.trim();
+        const english = /^too many requests$/i.test(headingText) && /temporarily limited.*access/i.test(value) && /few minutes/i.test(value);
+        const korean = headingText === '요청이 너무 많습니다' && value.includes('데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다.') && value.includes('몇 분 후 다시 시도해 주세요.');
+        if (value.length >= 500 || (!english && !korean)) continue;
         const notice = value.startsWith(headingText) ? `${headingText} ${value.slice(headingText.length).trim()}` : value;
         out.push({ text: notice, node, turnId: null, recoverable: false, blocking: true });
         texts.add(value);
+        // Acknowledge this identified informational notice once. The returned
+        // blocking diagnostic survives the click; it grants no retry authority.
+        const buttons = [...node.querySelectorAll('button')].filter(button =>
+          displayed(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true' &&
+          (korean ? button.textContent.trim() === '알겠습니다' : /^got it$/i.test(button.textContent.trim())));
+        if (!acknowledgedAccessNotices.has(node) && buttons.length === 1) {
+          acknowledgedAccessNotices.add(node); buttons[0].click();
+        }
       }
       for (const node of document.querySelectorAll('[role="alert"]')) {
         if (node.closest('[aria-hidden="true"]')) continue;
@@ -1258,17 +1274,11 @@ var CLF_DOM = (() => {
         if (!displayed(node)) continue;
         const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
         if (value.length <= 2 || value.length >= 500) continue;
-        // A live region names no turn. It is announced above the thread, outside every
-        // section, so `turnId` stays null here and the caller's own live generation is what
-        // places it. The wording it does carry goes through the same classifier the in-turn
-        // branch below trusts, because that is the only difference between the two: a send
-        // that dies before an assistant turn exists has nowhere to paint "Message delivery
-        // timed out" except up here. Withholding recovery authority from that one case left
-        // the app recording the failure, marking the turn failed, and then leaving the chat
-        // parked on it - which is what a reload exists to undo. An announcement that is not
-        // a recognised transport failure ("Reasoning details opened", a user-row error) is
-        // still recorded as session evidence and still authorizes nothing.
-        out.push({ text: value, node, turnId: null, recoverable: transportFailure(value) });
+        // Provider live regions also announce successful settings/actions changes. Only the
+        // existing transport classifier makes an announcement a chat error. A failed send
+        // can precede an assistant section, so recognized failures still need no turn id.
+        if (!transportFailure(value)) continue;
+        out.push({ text: value, node, turnId: null, recoverable: true });
         texts.add(value);
       }
       // The current full-width failure card has no alert role. Its exact Retry control is
@@ -1327,6 +1337,12 @@ var CLF_DOM = (() => {
       if (!box) return null;
       return box.closest('form') || box.parentElement || null;
     }, null);
+  }
+
+  /** A mounted editor behind Settings is not an available model-discovery surface. */
+  function composerVisible() {
+    const box = composer();
+    return !!box && !box.closest('[hidden],[aria-hidden="true"],[inert]') && box.getClientRects().length > 0;
   }
 
   /**
@@ -1676,7 +1692,7 @@ var CLF_DOM = (() => {
 
         try {
           const button = document.querySelector(SEND);
-          if (button && (button.disabled || button.getAttribute('aria-disabled') === 'true')) return finish(false);
+          if (button && !sendButtonEnabled(button)) return finish(false);
           if (!stillCurrent()) return finish(false);
           if (button) {
             button.click();
@@ -1713,6 +1729,7 @@ var CLF_DOM = (() => {
   }
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
   async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
+    const externalPlugins = connectorName === 'Chat On Steroids Plugins';
     const snapshot = await new Promise(resolve => {
       const nonce = crypto.randomUUID();
       const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
@@ -1725,7 +1742,7 @@ var CLF_DOM = (() => {
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
     if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : snapshot.connectorName !== connectorName) ||
-        !Array.isArray(snapshot.tools) || snapshot.tools.length < 1 || snapshot.tools.length > 16 || JSON.stringify(snapshot.tools).length > 300000 ||
+        !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 64 : 16) || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
     const buttons = [...document.querySelectorAll('button[data-clf-plugin-refresh]')].filter(button => button.getAttribute('data-clf-plugin-refresh') === snapshot.appId && button.getClientRects().length > 0);
@@ -1769,6 +1786,7 @@ var CLF_DOM = (() => {
     } catch { return false; }
     return new Promise((resolve) => {
       let observer, timer;
+      let ownedTiles = null;
       const finish = (ok) => { observer?.disconnect(); clearTimeout(timer); resolve(ok); };
       const check = () => {
         if (!stillCurrent()) return finish(false);
@@ -1780,14 +1798,20 @@ var CLF_DOM = (() => {
         // Every attached file must belong to this input. A newly added user attachment
         // cannot be silently included just because the requested subset finished uploading.
         if (tiles.length > images.length) return finish(false);
-        const ownedTiles = [...tiles];
-        const attached = images.every((image) => {
-          const index = tiles.findIndex((button) => composerFileName(button) === image.name);
-          if (index < 0) return false;
-          tiles.splice(index, 1);
-          return true;
-        });
-        if (attached && !host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]') && sendButton() && !sendButton().disabled) {
+        if (!ownedTiles) {
+          const unmatched = [...tiles];
+          if (images.every((image) => {
+            const index = unmatched.findIndex((button) => composerFileName(button) === image.name);
+            if (index < 0) return false;
+            unmatched.splice(index, 1);
+            return true;
+          })) ownedTiles = tiles;
+        }
+        if (!ownedTiles) return;
+        // The provider can rename report.md to report(1).md during processing.
+        // Bind once by exact original names, then retain those exact remove controls.
+        if (tiles.length !== ownedTiles.length || tiles.some(node => !ownedTiles.includes(node))) return finish(false);
+        if (!host.querySelector('[aria-busy="true"], [role="progressbar"], [data-inline-file-uploading]') && sendButtonEnabled(sendButton())) {
           draft?.attachments(ownedTiles);
           finish(true);
         }
@@ -1814,6 +1838,7 @@ var CLF_DOM = (() => {
           state.versions.every(v => typeof v.id === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(v.id) && typeof v.label === 'string' && v.label.length > 0 && v.label.length <= 80) &&
           Array.isArray(state.choices) && state.choices.length > 0 && state.choices.length <= 12 &&
           state.choices.every(c => Number.isInteger(c.bucket) && typeof c.id === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(c.id) && typeof c.label === 'string' && c.label.length > 0 && c.label.length <= 80 &&
+            typeof c.familyId === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(c.familyId) && typeof c.familyLabel === 'string' && c.familyLabel.length > 0 && c.familyLabel.length <= 80 &&
             ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(c.effort) && typeof c.available === 'boolean') &&
           new Set(state.versions.map(v => v.id)).size === state.versions.length && new Set(state.choices.map(c => c.bucket)).size === state.choices.length &&
           state.versions.some(v => v.id === state.version) && state.choices.some(c => c.bucket === state.currentBucket);
@@ -1902,6 +1927,36 @@ var CLF_DOM = (() => {
     return model && /^[a-zA-Z0-9._-]{1,80}$/.test(model) && ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(reasoningEffort)
       ? { model, reasoningEffort } : null;
   }
+  /** Account model discovery belongs to Chat; Work mounts a different picker.
+   * The caller owns one idle document and verifies draft/epoch before and after this transition. */
+  async function prepareChatModelSurface(stillCurrent = () => true) {
+    const radios = () => [...document.querySelectorAll('[role="radio"][data-tpp-toggle-value]')]
+      .filter(node => !node.closest(OWN_SURFACES) && node.getClientRects().length > 0);
+    const state = () => {
+      const nodes = radios(), chat = nodes.filter(node => node.getAttribute('data-tpp-toggle-value') === 'chatgpt'),
+        work = nodes.filter(node => node.getAttribute('data-tpp-toggle-value') === 'work');
+      return chat.length === 1 && work.length === 1 ? { chat: chat[0], work: work[0] } : null;
+    };
+    if (!stillCurrent()) return false;
+    const before = state();
+    // Existing ordinary conversations do not expose the new-chat surface toggle.
+    if (!before) return radios().length === 0;
+    if (before.chat.getAttribute('aria-checked') === 'true') return true;
+    if (before.work.getAttribute('aria-checked') !== 'true' || before.chat.disabled || before.chat.getAttribute('aria-disabled') === 'true') return false;
+    return new Promise(resolve => {
+      let done = false;
+      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
+      const check = () => {
+        if (!stillCurrent()) return finish(false);
+        const next = state();
+        if (next?.chat.getAttribute('aria-checked') === 'true' && next.work.getAttribute('aria-checked') === 'false') finish(true);
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+      const timer = setTimeout(() => finish(false), 5000);
+      before.chat.click(); check();
+    });
+  }
   async function inspectModelSettings(stillCurrent = () => true, failure = () => {}) {
     const ui = modelPickerAccess(stillCurrent), original = await ui.open();
     if (!original) { ui.close(); failure('picker_unavailable'); return null; }
@@ -1914,9 +1969,12 @@ var CLF_DOM = (() => {
         const state = await ui.version(version.id);
         if (!state) throw new Error('model_unconfirmed');
         for (const choice of state.choices.filter(c => c.available)) {
-          const entry = result.get(choice.id) || { id: choice.id, label: choice.label, efforts: [] };
+          // A provider family owns its execution lanes. Instant/Thinking/Pro slugs
+          // are selectable pairs within that family, not separate model rows.
+          const entry = result.get(choice.familyId) || { id: choice.familyId, label: choice.familyLabel, efforts: [], aliases: [] };
           if (!entry.efforts.includes(choice.effort)) entry.efforts.push(choice.effort);
-          result.set(choice.id, entry);
+          if (!entry.aliases.includes(choice.id)) entry.aliases.push(choice.id);
+          result.set(choice.familyId, entry);
         }
       }
     } catch { failure('model_unconfirmed'); result.clear(); }
@@ -1940,7 +1998,7 @@ var CLF_DOM = (() => {
     try {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
       // only to an actually observed, available pair; never to an account default.
-      const matches = c => c.available && (!effort || c.effort === effort) && (!model || c.id === model || normalizeModelLabel(c.label) === normalizeModelLabel(model));
+      const matches = c => c.available && (!effort || c.effort === effort) && (!model || c.familyId === model || c.id === model || normalizeModelLabel(c.familyLabel) === normalizeModelLabel(model) || normalizeModelLabel(c.label) === normalizeModelLabel(model));
       for (const version of [original.versions.find(v => v.id === original.version), ...original.versions.filter(v => v.id !== original.version)]) {
         const state = await ui.version(version.id); if (!state) return false;
         const choices = state.choices.filter(matches);
@@ -1958,7 +2016,34 @@ var CLF_DOM = (() => {
     }
   }
 
+  async function newChatControl(stillCurrent = () => true) {
+    const shown = node => node && !node.closest(OWN_SURFACES) && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
+    const link = (root = document) => [...root.querySelectorAll('a[data-testid="create-new-chat-button"][data-sidebar-item="true"][href="/"]')].find(shown) || null;
+    if (!stillCurrent()) return null;
+    if (link()) return link();
+    // Compact ChatGPT unmounts navigation when its sidebar is closed. Reveal the
+    // actual native control before concluding that this document cannot be reused.
+    const toggles = [...document.querySelectorAll('button[data-testid="open-sidebar-button"][aria-expanded="false"][aria-controls]')].filter(shown);
+    if (toggles.length !== 1 || toggles[0].disabled) return null;
+    const toggle = toggles[0], sidebarId = toggle.getAttribute('aria-controls');
+    return new Promise(resolve => {
+      let done = false;
+      const finish = value => { if (done) return; done = true; observer.disconnect(); clearTimeout(timer); resolve(value); };
+      const check = () => {
+        if (!stillCurrent()) return finish(null);
+        const sidebar = document.getElementById(sidebarId), control = sidebar && link(sidebar);
+        if (toggle.getAttribute('aria-expanded') === 'true' && control) finish(control);
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+      const timer = setTimeout(() => finish(null), 3000);
+      toggle.click(); check();
+    });
+  }
   return {
+    composerVisible,
+    prepareChatModelSurface,
+    newChatControl,
     visibleModelSelection,
     inspectModelSettings,
     uploadImages,

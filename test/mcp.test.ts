@@ -855,7 +855,9 @@ describe('surface boundaries', () => {
       // The description is the only thing the model has before discovery, so it has to
       // carry real vocabulary rather than a label.
       expect(surface.description.length, surface.id).toBeGreaterThan(120);
-      expect(surface.tools.length, surface.id).toBeGreaterThan(0);
+      // External plugins declare their bounded schemas dynamically after installation.
+      if (surface.id === 'plugins') expect(surface.tools).toEqual([]);
+      else expect(surface.tools.length, surface.id).toBeGreaterThan(0);
     }
     expect(surfaceDefinition('core').required).toBe(true);
     expect(surfaceDefinition('desktop').required).toBe(false);

@@ -1,6 +1,7 @@
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
+import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
@@ -8,7 +9,7 @@ import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
 import { validateInputImages } from './session/input-images.js';
 import { stageInputAttachment, type AttachmentSource } from './session/input-attachments.js';
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
-import { UI_BASE_ZOOM } from './window-layout.js';
+import { UI_BASE_ZOOM, titleBarOverlayForTheme } from './window-layout.js';
 import { usageOverview } from './session/usage.js';
 import { inputArgs, listInputs, editQueuedInput, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
@@ -18,6 +19,7 @@ import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
 import { wakeBrowserUrl } from './browser-startup.js';
+import { registerPluginIpc } from './plugins-ipc.js';
 /**
  * IPC surface.
  *
@@ -36,7 +38,6 @@ import {
   GOAL_MODES,
   GOAL_PROVIDERS,
   GOAL_REASONING_LEVELS,
-  RELEASES_PAGE,
   type AppState,
   type Config
 } from '../shared/types.js';
@@ -98,26 +99,10 @@ import {
   refreshMacOSDesktopAccess
 } from './computer/index.js';
 
-/** The only URLs the renderer may ask the OS to open. */
+/** Fixed native Settings destinations; authored chat links use the shared web/mail policy. */
 const ALLOWED_LINKS = new Set([
-  // ChatGPT renamed this page from Connectors to Apps and the button followed it; the
-  // allowlist did not, so "Open Apps" had been refused here ever since.
-  'https://chatgpt.com/#settings/Apps',
-  'https://platform.openai.com/settings/organization/tunnels',
-  'https://platform.openai.com/settings/organization/api-keys',
-  'https://github.com/openai/tunnel-client/releases',
-  'https://developers.openai.com/api/docs/guides/secure-mcp-tunnels',
-  'https://developers.openai.com/api/docs/guides/developer-mode',
-  // Fixed System Settings destinations used by the macOS Desktop permission warning.
-  // The renderer still cannot ask the OS to open an arbitrary custom scheme.
   'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
-  'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
-  // Where the key for the goal loop comes from. The button beside the key field is useless
-  // without this: `link:open` refuses anything not named here, so it threw where nobody
-  // was looking and the button did nothing at all.
-  'https://openrouter.ai/settings/keys',
-  // Where an installation that cannot update itself gets the new version by hand.
-  RELEASES_PAGE
+  'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
 ]);
 
 const capabilityPatch = z.object(
@@ -131,6 +116,7 @@ const settingsPatch = z.object({
   capabilities: capabilityPatch,
   readOnly: z.boolean(),
   tunnel: z.object({
+    pluginsTunnelId: z.string().max(128).refine(v => v === '' || TUNNEL_ID_PATTERN.test(v), 'Expected tunnel_ followed by 32 hex characters').optional(),
     kind: z.enum(['openai', 'cloudflared', 'manual']),
     tunnelId: z
       .string()
@@ -250,6 +236,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     capabilities,
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
     tunnel: {
+        pluginsTunnelId: wanted.tunnel.pluginsTunnelId === undefined ? current.tunnel.pluginsTunnelId ?? ''
+          : pick(current.tunnel.pluginsTunnelId ?? '', base.tunnel.pluginsTunnelId ?? '', wanted.tunnel.pluginsTunnelId),
       kind: pick(current.tunnel.kind, base.tunnel.kind, wanted.tunnel.kind),
       tunnelId: pick(current.tunnel.tunnelId, base.tunnel.tunnelId, wanted.tunnel.tunnelId),
       desktopTunnelId: pick(
@@ -393,6 +381,7 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  registerPluginIpc(handle, getWindow);
   handle('usage:get', () => usageOverview());
   handle('state:get', async () => {
     const state = await buildState();
@@ -420,6 +409,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Without this, selecting Dark on macOS left the title bar, menus and file picker in the
     // system theme until restart (and startup still defaulted to system before index.ts applies it).
     nativeTheme.themeSource = next.ui.theme;
+    if (process.platform === 'win32') getWindow()?.setTitleBarOverlay(titleBarOverlayForTheme(next.ui.theme));
     // BrowserWindow's native backing color is fixed at construction unless updated explicitly.
     // Keep it in lock-step too: the default macOS application menu exposes Reload, and after a
     // live theme switch an old opposite background otherwise flashes behind the renderer while it
@@ -680,8 +670,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('link:open', async (payload) => {
-    const { url } = z.object({ url: z.string().max(500) }).parse(payload);
-    if (!ALLOWED_LINKS.has(url)) throw new Error('That link is not allowed');
+    const { url } = z.object({ url: z.string().max(8192) }).parse(payload);
+    if (!ALLOWED_LINKS.has(url) && !safeExternalLink(url)) throw new Error('That link is not allowed');
     await shell.openExternal(url);
     return true;
   });
@@ -739,7 +729,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   handle('sessions:image', async (payload) => {
-    const { id, assetId } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), assetId: z.string().max(100).regex(/^[a-f0-9]+\.bin$/) }).parse(payload);
+    const { id, assetId } = z.object({ id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), assetId: z.string().max(100).regex(/^[a-f0-9]{8,64}\.(?:bin|png|jpg)$/) }).parse(payload);
     return recordedInputImage(id, assetId);
   });
   handle('sessions:events', async (payload) => {
@@ -1087,7 +1077,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       return drafted;
     }, publish);
   });
-  configureChatModelDiscovery({ changed: pushState, wake: async (nonce, allowOpen) => {
+  configureChatModelDiscovery({ changed: () => push('chatModels:changed', getChatModels()), wake: async (nonce, allowOpen) => {
     if (!await startBridge()) throw new Error('The browser bridge could not start');
     if (allowOpen) await wakeBrowserUrl(`https://chatgpt.com/?cos-model-catalog=${nonce}`, true, true);
   } });

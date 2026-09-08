@@ -725,7 +725,11 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
       !checkpoint.activityBoundaryMissing &&
       checkpoint.summary.finishTurn !== undefined
     ) {
-      return { summary: checkpoint.summary, messages, historySeq, reconciled: false };
+      // A successful no-op migration is still a completed migration. Without this stamp,
+      // every launch rereads all old transcripts that happened to contain no aliases.
+      const migrated = !checkpoint.canonicalProjectionCurrent;
+      if (migrated) await writeSummary(checkpoint.summary, historySeq);
+      return { summary: checkpoint.summary, messages, historySeq, reconciled: migrated };
     }
     if (checkpoint && historySeq === 0) {
       // Nothing to replay: stamp the empty legacy projection in place.
@@ -1566,6 +1570,33 @@ async function readMeta(id: string): Promise<SessionSummary | null> {
   return (await readMetaCheckpoint(id))?.summary ?? null;
 }
 
+/**
+ * A cold sidebar needs metadata, not every retained message body. A validated modern
+ * checkpoint can prove that its projection follows all history writes: the journal and
+ * legacy map are files, while canonical shards are replaced by rename, which changes
+ * their directory's timestamp. Read the checkpoint timestamp BEFORE its contents so a
+ * concurrent atomic metadata replacement can only make this test conservative.
+ *
+ * Equal clocks, old schemas, unreadable metadata and any newer history keep the existing
+ * full recovery path. No guessed summary is allowed to suppress crash reconciliation.
+ */
+async function readCatalogSummary(id: string): Promise<SessionSummary | null> {
+  const dir = sessionDir(id);
+  try {
+    const metadata = await fs.stat(path.join(dir, 'meta.json'));
+    const checkpoint = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.json'), 'utf8'));
+    if (checkpoint && checkpoint.historySeq !== null && checkpoint.canonicalProjectionCurrent &&
+        !checkpoint.outcomeCountersMissing && !checkpoint.activityBoundaryMissing && checkpoint.summary.finishTurn !== undefined) {
+      const mutations = await Promise.all(['events.jsonl', 'messages.json', 'messages'].map(async name => {
+        try { return (await fs.stat(path.join(dir, name))).mtimeMs; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; }
+      }));
+      if (metadata.mtimeMs > 0 && mutations.every(at => at < metadata.mtimeMs)) return checkpoint.summary;
+    }
+  } catch { /* Existing full reconstruction owns missing/corrupt/uncertain checkpoints. */ }
+  return (await readDurableSnapshot(id))?.summary ?? null;
+}
+
 function addAttachment(map: Map<string, Set<string>>, conversationId: string, sessionId: string): void {
   if (!conversationId) return;
   const ids = map.get(conversationId) ?? new Set<string>();
@@ -1662,6 +1693,7 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
   if (attachmentCatalog) return attachmentCatalog;
   if (attachmentCatalogLoading) return attachmentCatalogLoading;
   const loading = (async () => {
+    const startedAt = Date.now();
     for (;;) {
       assertReady();
       const epoch = attachmentEpoch;
@@ -1681,8 +1713,7 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
         const summaries = await Promise.all(
           candidates.slice(offset, offset + ATTACHMENT_CATALOG_READ_CONCURRENCY).map(async (name) => {
             const live = open.get(name);
-            const snapshot = live ? null : await readDurableSnapshot(name).catch(() => null);
-            return live?.summary ?? snapshot?.summary ?? null;
+            return live?.summary ?? await readCatalogSummary(name).catch(() => null);
           })
         );
         for (const summary of summaries) if (summary) indexSummary(catalog, summary);
@@ -1692,6 +1723,7 @@ async function ensureAttachmentCatalog(): Promise<AttachmentCatalog> {
         .map((summary) => summary.id);
       if (attachmentEpoch !== epoch) continue;
       attachmentCatalog = catalog;
+      logInfo(`session catalog ready: ${catalog.summaries.size} sessions in ${Date.now() - startedAt} ms`);
       return catalog;
     }
   })();
@@ -1719,16 +1751,13 @@ async function readAllSummaries(): Promise<SessionSummary[]> {
     return [];
   }
   const summaries: SessionSummary[] = [];
-  let scanned = 0;
-  for (const name of names) {
-    if (!/^[0-9a-z-]{8,64}$/i.test(name)) continue;
-    if (++scanned > MAX_SCANNED_SESSIONS) {
-      logWarn(`session store: more than ${MAX_SCANNED_SESSIONS} session folders; older ones were not scanned`);
-      break;
-    }
-    const live = open.get(name);
-    const summary = live ? live.summary : await readMeta(name);
-    if (summary) summaries.push({ ...summary });
+  const candidates = names.filter(name => /^[0-9a-z-]{8,64}$/i.test(name));
+  if (candidates.length > MAX_SCANNED_SESSIONS)
+    logWarn(`session store: more than ${MAX_SCANNED_SESSIONS} session folders; older ones were not scanned`);
+  for (let offset = 0; offset < Math.min(candidates.length, MAX_SCANNED_SESSIONS); offset += ATTACHMENT_CATALOG_READ_CONCURRENCY) {
+    const rows = await Promise.all(candidates.slice(offset, Math.min(offset + ATTACHMENT_CATALOG_READ_CONCURRENCY, MAX_SCANNED_SESSIONS))
+      .map(async name => open.get(name)?.summary ?? await readMeta(name)));
+    for (const summary of rows) if (summary) summaries.push({ ...summary });
   }
   summaries.sort((a, b) => b.updatedAt - a.updatedAt);
   return summaries;
@@ -2310,11 +2339,28 @@ function invalidateAssetUsage(sessionId: string): void {
   globalAssetUsage = null;
 }
 
-export async function readAsset(sessionId: string, assetId: string): Promise<Buffer | null> {
+export async function readAsset(sessionId: string, assetId: string, maxBytes?: number): Promise<Buffer | null> {
   assertSessionId(sessionId);
   if (!/^[0-9a-f]{8,64}\.(png|jpg|txt|bin)$/.test(assetId)) return null;
   try {
-    return await fs.readFile(path.join(sessionDir(sessionId), 'assets', assetId));
+    const file = path.join(sessionDir(sessionId), 'assets', assetId);
+    if (maxBytes === undefined) return await fs.readFile(file);
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 0) return null;
+    const handle = await fs.open(file, 'r');
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > maxBytes) return null;
+      // One bounded allocation and the same file handle throughout: an extra byte
+      // detects growth after stat instead of letting readFile grow the allocation.
+      const buffer = Buffer.alloc(stat.size + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+        if (!bytesRead) return buffer.subarray(0, length);
+        length += bytesRead;
+      }
+      return null;
+    } finally { await handle.close(); }
   } catch {
     return null;
   }

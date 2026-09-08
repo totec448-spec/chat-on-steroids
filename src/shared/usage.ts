@@ -33,10 +33,30 @@ export const DEFAULT_USAGE_FORMULA: UsageFormula = {
   divisor: 2, multiplier: 1.2,
   rates: { 'gpt-5.6': 0.4, 'gpt-5.6-sol': 0.4, 'gpt-5.6-terra': 0.2, 'gpt-5.6-luna': 0.02, 'gpt-6-astra': 1, 'gpt-6-pro': 1, 'gpt-5.5': 0.5 }
 };
-/** Exact provider picker identity, verified against its GPT-5.6 Sol category; never fuzzy-match unknown IDs. */
+// Exact historical/provider identities only. This is a reporting projection, not
+// account availability or browser selection authority. Effort remains independent.
+const usageAliases: Readonly<Record<string, string>> = {
+  '5.6': 'gpt-5.6-sol', 'gpt-5.6': 'gpt-5.6-sol', 'gpt-5-6': 'gpt-5.6-sol',
+  'gpt-5-6-thinking': 'gpt-5.6-sol', 'gpt-5-6-pro': 'gpt-5.6-sol',
+  '6': 'gpt-6-astra', 'gpt-6-pro': 'gpt-6-astra'
+};
+export function usageModel(model: string): string { return Object.hasOwn(usageAliases, model) ? usageAliases[model]! : model; }
+/** Group the display while retaining each raw source for its exact manual rate. */
+export function usageModelGroups(rows: readonly UsageModelTokens[]): Array<{ model: string; reasoningEffort: string | null; assumed: boolean; sources: UsageModelTokens[] }> {
+  const groups = new Map<string, { model: string; reasoningEffort: string | null; assumed: boolean; sources: UsageModelTokens[] }>();
+  for (const row of rows) {
+    const identity = { model: usageModel(row.model), reasoningEffort: row.reasoningEffort, assumed: row.assumed };
+    const key = usageModelKey(identity);
+    const group = groups.get(key) ?? { ...identity, sources: [] };
+    group.sources.push(row); groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+/** Explicit per-recorded-ID rates, including zero/null, override equivalent-model defaults. */
 export function usageRate(model: string, formula: UsageFormula): number | null | undefined {
   if (Object.hasOwn(formula.rates, model)) return formula.rates[model];
-  return model === 'gpt-5-6-thinking' ? formula.rates['gpt-5.6-sol'] : undefined;
+  const canonical = usageModel(model);
+  return Object.hasOwn(formula.rates, canonical) ? formula.rates[canonical] : undefined;
 }
 export function usageModelKey(row: Pick<UsageModelTokens, 'model' | 'reasoningEffort' | 'assumed'>): string {
   return JSON.stringify([row.model, row.reasoningEffort, row.assumed]);

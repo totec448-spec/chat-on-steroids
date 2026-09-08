@@ -1,6 +1,6 @@
 {
   "name": "chat-on-steroids",
-  "version": "2.0.7",
+  "version": "2.0.8",
   "description": "Local coding bridge for ChatGPT over MCP, with native desktop control and approved-folder capability limits.",
   "license": "MIT",
   "author": "Chat On Steroids",
@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "npm run verify:ci",
-    "verify:ci": "npm run rg && npm run verify:privacy && npm run typecheck && vitest run --exclude test/mcp-shutdown.test.ts && vitest run test/mcp-shutdown.test.ts",
+    "verify:ci": "npm run rg && npm run verify:privacy && npm run verify:notices && npm run typecheck && node -e \"require('electron')\" && vitest run --exclude test/mcp-shutdown.test.ts && vitest run test/mcp-shutdown.test.ts",
+    "verify:notices": "node scripts/generate-third-party-notices.mjs --check && node scripts/package-native-sources.mjs --check",
     "verify:privacy": "node scripts/verify-public-history.mjs",
     "verify:tunnel-current": "node scripts/verify-current-tunnel.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
@@ -46,8 +47,11 @@
     "test:kill": "node scripts/kill-stray-vitest.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
+    "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
+    "fflate": "^0.8.3",
     "marked": "18.0.11",
     "node-pty": "1.2.0-beta.15",
     "sharp": "0.35.3",
@@ -67,5 +71,10 @@
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "@anthropic-ai/mcpb": {
+      "tmp": "0.2.7"
+    }
   }
 }

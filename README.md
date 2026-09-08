@@ -1,5 +1,5 @@
 > [!IMPORTANT]
-> **2.0.7 needs its matching companion extension.** Reload the unpacked extension after updating.
+> **2.0.8 — Darkex by dark tibo — needs its matching companion extension.** Reload the unpacked extension after updating.
 > Model discovery now reads your account's native picker state across languages and nested version menus.
 > See [Browser behavior](#browser-behavior-in-the-current-source) for tab reuse, Browser only and native file attachments.
 
@@ -35,6 +35,7 @@ ChatGPT is a good engineer trapped in a text box. Developer mode lets it call MC
 - **Sub agents inside ChatGPT.** One prime chat can spawn worker chats, hand them tasks, read their reports and wake them again later. Workers are ordinary ChatGPT conversations in your own browser, brokered by the app, so you can watch every one of them.
 - **Sessions that outlive the context window.** Every tool call is recorded locally with its real result. When a chat gets heavy, Compact & Resume asks it for a handoff brief, opens a fresh chat and moves the same local session across. The new chat can query everything the old one did.
 - **Plans, Goal and Loop.** Split a request into editable tasks or generate follow-ups through a separate ChatGPT helper or the API. Astra can receive the next task through `session_finish` in the same turn, without opening another model turn.
+- **External MCP plugins.** Settings → Plugins installs integrations such as Blender MCP, Playwright, Memory and Web Fetch behind a separate **Chat On Steroids Plugins** connector. Enable individual tools, import MCPB bundles or connect custom local/remote servers. [Setup and supported sources](docs/plugins.md). External servers run with their own OS/service permissions, outside CoS's approved-folder sandbox.
 - **You stay the permission boundary.** Only the folders you approve are visible. Each capability is a switch. Read-only mode is a single kill switch. Nothing runs on this machine that you did not turn on.
 
 It runs in the tray, hosts no model of its own, and works with the ChatGPT you already use in the browser.

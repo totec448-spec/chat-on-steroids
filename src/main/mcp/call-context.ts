@@ -248,7 +248,8 @@ export function noteOutcome(outcome: ToolOutcome): void {
     ok: 0,
     process_exit_nonzero: 1,
     tool_rejected: 2,
-    tool_internal_error: 3
+    tool_execution_error: 3,
+    tool_internal_error: 4
   };
   if (store.outcome === null || rank[outcome] > rank[store.outcome]) store.outcome = outcome;
 }

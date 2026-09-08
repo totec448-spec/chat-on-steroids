@@ -68,6 +68,9 @@ function required(relative) {
 for (const relative of [
   'app.asar',
   'LICENSE',
+  'THIRD-PARTY-NOTICES.txt',
+  'LICENSE.electron.txt',
+  'LICENSES.chromium.html',
   'extension/manifest.json',
   'extension/background.js',
   'extension/chatgpt-dom.js',

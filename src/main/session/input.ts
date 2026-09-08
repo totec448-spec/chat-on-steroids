@@ -4,12 +4,12 @@ import { REASONING_EFFORTS } from '../../shared/session.js';
  * Tool delivery repeats under a stable message id until a later request proves receipt.
  */
 import { z } from 'zod';
-import type { InputImage } from '../../shared/input.js';
+import { browserInputModel, type InputImage } from '../../shared/input.js';
 import type { SessionSummary } from '../../shared/session.js';
 import { getConfig } from '../config.js';
 import { randomUUID } from 'node:crypto';
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
-import { getSession, findSessionByConversation, createSession, conversationWasSuperseded, readRecentEvents } from './store.js';
+import { getSession, findSessionByConversation, createSession, conversationWasSuperseded, readRecentEvents, listUsageSessions } from './store.js';
 import { assignSessionProject, projectWorkspace, getSessionProject } from '../projects.js';
 import { isChatBlocked } from './blocked-chats.js';
 import { wakeBrowserWork } from '../browser-wake.js';
@@ -65,6 +65,7 @@ const entrySchema = inputArgs.extend({
 });
 export type InputEntry = z.infer<typeof entrySchema>;
 const STATE = 'session-input';
+const TOOL_INPUT_TEXT_BYTES = 128000;
 type InputDeliveryHooks = {
   hasActivity?: (session: SessionSummary) => boolean;
   wakeDecision?: (entry: Readonly<InputEntry>, signal: AbortSignal) => Promise<void>;
@@ -113,7 +114,7 @@ export function hasEligibleToolInput(sessionId: string, finishBoundary = false):
     for (const row of current) {
       if (row.sessionId !== sessionId || row.dueAt > Date.now()) continue;
       if (row.attachments?.length) continue;
-      if (row.mode === 'finish' && !finishBoundary) continue;
+      if (row.mode === 'after-turn' || (row.mode === 'finish' && !finishBoundary)) continue;
       if (row.state === 'tool') return true;
       if (row.state === 'queued') return row.mode === 'auto' || (finishBoundary && row.mode === 'finish');
     }
@@ -145,6 +146,19 @@ async function load(): Promise<InputEntry[]> {
   const parsed = z.array(entrySchema).safeParse(raw ?? []);
   if (!parsed.success) throw new Error('The message outbox could not be read safely');
   entries = parsed.data;
+  // Old receipts are recovery evidence, not a reason to replay every already-stamped
+  // transcript before the sidebar appears. The existing catalog proves an origin is
+  // durable; only missing/ambiguous rows need the normal origin repair path below.
+  const stamped = new Set<string>();
+  const seen = new Set<string>();
+  if (entries.some(row => row.conversationId && (row.purpose === 'decision' || (!row.sessionId && row.deliveredAt !== undefined)))) {
+    for (const summary of await listUsageSessions()) {
+      if (!summary.conversationId) continue;
+      if (seen.has(summary.conversationId)) stamped.delete(summary.conversationId);
+      else if (summary.origin) stamped.add(summary.conversationId);
+      seen.add(summary.conversationId);
+    }
+  }
   // Durable decision receipts recover helper provenance even when recording/ACK raced
   // or this version first opens a helper recorded before origins were stamped.
   for (const row of entries) {
@@ -152,10 +166,10 @@ async function load(): Promise<InputEntry[]> {
     // before authoredText existed recover their original visible text too. This
     // is canonical history only; it never reopens transport or resends an input.
     if (row.historyRecorded && row.deliveryText && row.deliveryText !== row.text) row.historyRecorded = false;
-    if (!row.sessionId && row.purpose !== 'decision' && row.conversationId && row.deliveredAt !== undefined) {
+    if (!row.sessionId && row.purpose !== 'decision' && row.conversationId && row.deliveredAt !== undefined && !stamped.has(row.conversationId)) {
       await noteChatOrigin(row.conversationId, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
     }
-    if (row.purpose === 'decision' && row.lifetime !== 'temporary-planner' && row.conversationId) await deliveryHooks?.bindHelper?.(row.conversationId, row.decisionSourceSessionId ?? null);
+    if (row.purpose === 'decision' && row.lifetime !== 'temporary-planner' && row.conversationId && !stamped.has(row.conversationId)) await deliveryHooks?.bindHelper?.(row.conversationId, row.decisionSourceSessionId ?? null);
   }
   const recovered = entries.map((row): InputEntry => row.purpose === 'decision' && !terminal(row) && !decisionWaiters.has(row.id)
     ? { ...row, state: 'cancelled' } : row);
@@ -224,12 +238,22 @@ async function transition(current: InputEntry[], next: InputEntry[], automated: 
 }
 /** Freeze the exact transport bytes with its durable claim, never the authored enqueue payload. */
 function prepare(entry: InputEntry): InputEntry {
-  if (entry.deliveryText !== undefined || entry.purpose === 'decision') return entry;
-  const deliveryText = deliveryHooks?.prepareText?.(entry) ?? entry.text;
-  if (!deliveryText || deliveryText.length > 240000) throw new Error('Prepared message exceeds the delivery limit');
+  if (entry.purpose === 'decision') return entry;
+  // A plan schedules later verification, never withholds the job from its executor.
+  // Keep the authored stage intact in history; freeze the complete context in the
+  // same delivery claim so retries cannot reconstruct a different opening message.
+  const text = entry.stages !== undefined
+    ? `Original user request:\n${entry.objective || entry.text}\n\nComplete workflow:\n${[entry.text, ...entry.stages].map((stage, index) => `${index + 1}. ${stage}`).join('\n\n')}\n\nBegin the complete implementation now. Later queued messages are verification checkpoints; do not wait for them to learn or implement requirements. Carry out and verify each received checkpoint before asking for the next one with session_finish; never call it repeatedly just to collect the queue.`
+    : entry.text;
+  const deliveryText = entry.deliveryText ?? deliveryHooks?.prepareText?.({ ...entry, text }) ?? text;
+  // A single input must fit the tool envelope by itself. Aggregate batching below
+  // may defer a second input, but cannot silently defer an individually impossible one.
+  const envelope = `[User message ${entry.id}]\n${deliveryText}\n\n${finishInputInstruction(getConfig().ui.finishLeadMinutes)}`;
+  if (!deliveryText || deliveryText.length > 240000 || Buffer.byteLength(envelope) > TOOL_INPUT_TEXT_BYTES)
+    throw new Error('Prepared message exceeds the delivery limit; shorten the request or plan');
   return { ...entry, deliveryText };
 }
-/** Explicit follow-ups share one FIFO and spend one verified completed turn. */
+/** Explicit follow-ups spend one verified completed turn; each transport elects its eligible FIFO. */
 const queuedFollowup = (row: InputEntry): boolean => row.mode === 'finish' || (row.mode === 'after-turn' && !!row.sessionId && row.purpose !== 'decision');
 function append(current: InputEntry[], entry: InputEntry, stackDirect = false): InputEntry[] {
   if (queuedFollowup(entry)) {
@@ -281,6 +305,8 @@ async function finishInputCurrent(entry: InputEntry): Promise<boolean> {
 export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwner']): Promise<InputEntry> {
   return serial(async () => {
     const input = inputArgs.parse(raw);
+    if (input.stages !== undefined && JSON.stringify([input.text, ...input.stages]).length > 12000)
+      throw new Error('Keep the complete plan below 12,000 characters');
     const current = await load();
     const prior = current.find((entry) => entry.id === input.id);
     if (prior) {
@@ -333,9 +359,9 @@ export function listInputs(): Promise<InputEntry[]> {
       const targetId = entry.sessionId ?? entry.deliveredSessionId;
       if (entry.state !== 'sent' || !targetId || !entry.stages?.length || entry.stagesApplied) continue;
       const position = next.indexOf(entry); next[position] = { ...entry, stagesApplied: true };
-      // Later stages retain the exact requested picker settings instead of reverting to
-      // whatever native defaults happen to be active when the next stage is delivered.
-      for (const [index, text] of entry.stages.entries()) next = append(next, { id: randomUUID(), sessionId: targetId, projectId: entry.projectId, text, mode: 'finish', dueAt: entry.createdAt + index, model: entry.model, reasoningEffort: entry.reasoningEffort, state: 'queued', owner: null, createdAt: entry.createdAt + index, conversationId: entry.conversationId });
+      // Checkpoints continue the current chat model, including a later explicit
+      // user selection; only the plan's initial send owns its requested picker.
+      for (const [index, text] of entry.stages.entries()) next = append(next, { id: randomUUID(), sessionId: targetId, projectId: entry.projectId, text, mode: 'finish', dueAt: entry.createdAt + index, model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: entry.createdAt + index, conversationId: entry.conversationId });
     }
     if (next.length !== current.length || next.some((entry, index) => entry !== current[index])) await commit(next);
     await publishHistory();
@@ -458,7 +484,12 @@ export function noteInputStartupError(id: string, error: string | null): Promise
 /** Metadata only. Text is disclosed to one document only after an exclusive durable claim. */
 async function completedStageBoundary(entry: InputEntry, current: InputEntry[]): Promise<string | null> {
   if (!entry.sessionId || !queuedFollowup(entry)) return null;
-  const first = ordered(current).find(row => row.sessionId === entry.sessionId && queuedFollowup(row) && row.state === 'queued' && row.dueAt <= Date.now());
+  // Finish-only stages have no browser authority. They must not block a later
+  // explicit After This Turn instruction from spending this completed turn.
+  let first: InputEntry | undefined;
+  for (const row of ordered(current)) {
+    if (row.sessionId === entry.sessionId && queuedFollowup(row) && row.state === 'queued' && row.dueAt <= Date.now() && await browserInputAllowed(row)) { first = row; break; }
+  }
   if (first?.id !== entry.id) return null;
   const session = await getSession(entry.sessionId);
   if (!session || session.activeTurnId || session.origin?.kind === 'worker') return null;
@@ -471,15 +502,21 @@ async function completedStageBoundary(entry: InputEntry, current: InputEntry[]):
       row.dueAt <= Date.now() && ['queued', 'browser', 'tool'].includes(row.state))) return null;
   return end.turnId;
 }
-export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; lifetime?: 'temporary-planner' }>> {
+export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; supersededConversationId?: string; lifetime?: 'temporary-planner' }>> {
   return serial(async () => {
-    const result: Array<{ id: string; conversationId: string | null; lifetime?: 'temporary-planner' }> = [];
+    const result: Array<{ id: string; conversationId: string | null; supersededConversationId?: string; lifetime?: 'temporary-planner' }> = [];
     const current = await load();
     for (const entry of ordered(current)) {
       if (!preparable(entry) || entry.dueAt > Date.now()) continue;
       if (queuedFollowup(entry) && !(entry.state === 'browser' && entry.completedTurnId) && !(await completedStageBoundary(entry, current))) continue;
       if (!(await browserInputAllowed(entry))) continue;
-      try { result.push({ id: entry.id, conversationId: await target(entry), ...(entry.lifetime ? { lifetime: entry.lifetime } : {}) }); } catch { /* blocked/deleted stays user-visible */ }
+      try {
+        const conversationId = await target(entry);
+        result.push({ id: entry.id, conversationId,
+          ...(entry.state === 'queued' && entry.purpose !== 'decision' && entry.sessionId && entry.conversationId && entry.conversationId !== conversationId
+            ? { supersededConversationId: entry.conversationId } : {}),
+          ...(entry.lifetime ? { lifetime: entry.lifetime } : {}) });
+      } catch { /* blocked/deleted stays user-visible */ }
     }
     return result;
   });
@@ -498,23 +535,34 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (entry.sessionId) {
       if (current.some((row) => row.id !== id && row.sessionId === entry.sessionId && ['browser', 'tool'].includes(row.state))) return null;
       const first = ordered(current).find((row) => row.sessionId === entry.sessionId && row.state === 'queued' && queuedFollowup(row) === queuedFollowup(entry) && row.dueAt <= Date.now());
-      if (entry.state === 'queued' && first !== entry) return null;
+      // Follow-ups were already elected by completedStageBoundary with live
+      // transport eligibility. Direct messages retain their separate FIFO.
+      if (entry.state === 'queued' && !queuedFollowup(entry) && first !== entry) return null;
     }
-    const claimed: InputEntry = prepare({ ...entry, ...(completedTurnId ? { completedTurnId } : {}), state: 'browser', owner, conversationId, offeredAt: entry.offeredAt ?? Date.now(), requiresAuthorization });
+    let claimed: InputEntry;
+    try { claimed = prepare({ ...entry, ...(completedTurnId ? { completedTurnId } : {}), state: 'browser', owner, conversationId, offeredAt: entry.offeredAt ?? Date.now(), requiresAuthorization }); }
+    catch (error) {
+      // A never-handed-out oversized legacy row needs a visible terminal result,
+      // not an endless series of browser claims. Existing claims keep their receipt.
+      if (entry.state === 'queued') await commit(current.map(row => row === entry
+        ? { ...entry, state: 'failed', error: (error as Error).message.slice(0, 200) } : row));
+      throw error;
+    }
     // Normal sends (including opted-in stages) carry the short user-prompt appendix.
     // MCP delivery below owns the distinct tool-return reminder, never the planner.
     const session = entry.sessionId ? await getSession(entry.sessionId) : null;
     const observed = session?.selectedModel?.conversationId === conversationId ? session?.selectedModel : null;
+    const selection = browserInputModel(entry);
     const settings = getConfig().ui;
     if (settings.finishTool && entry.purpose !== 'decision' && session?.origin?.kind !== 'worker' && session?.origin?.kind !== 'helper' &&
-        isAstraModel(entry.model ?? observed?.model, entry.model ? entry.reasoningEffort ?? undefined : observed?.reasoningEffort)) {
+        isAstraModel(selection.model ?? observed?.model, selection.model ? selection.reasoningEffort ?? undefined : observed?.reasoningEffort)) {
       const instruction = finishInstruction(settings.finishLeadMinutes);
       if (!claimed.deliveryText!.includes(instruction)) claimed.deliveryText += '\n\n' + instruction;
     }
     await transition(current, current.map((row) => row === entry ? claimed : row),
       entry.state === 'queued' && entry.automation && conversationId && entry.purpose !== 'decision' ? [claimed] : [], 'before-send');
     logInfo(`input ${id}: browser claimed after ${Math.max(0, Date.now() - entry.createdAt)} ms`);
-    return { ...claimed, text: claimed.deliveryText ?? claimed.text };
+    return { ...claimed, ...selection, text: claimed.deliveryText ?? claimed.text };
   });
 }
 /** Commit exact project ownership before the document publishes any request-id evidence. */
@@ -607,7 +655,6 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
     // A claimed browser send owns this session until its send outcome is known.
     if (current.some((entry) => entry.sessionId === sessionId && entry.state === 'browser')) return [];
     const delivered: string[] = [];
-    let waitingForTurn = false;
     let inputTaken = false;
     let payloadBytes = 0;
     let payloadImages = 0;
@@ -615,17 +662,20 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
     const next = ordered(current).sort((a, b) => Number(a.mode === 'finish' || !!a.finishOwner) - Number(b.mode === 'finish' || !!b.finishOwner)).map((entry): InputEntry => {
       if (entry.sessionId !== sessionId || entry.dueAt > Date.now()) return entry;
       if (entry.attachments?.length) return entry;
-      if (entry.state === 'queued' && entry.mode === 'after-turn') waitingForTurn = true;
       // ChatGPT may reuse one request id for the whole server turn. Receipt follows
       // the actual invocation start, never a change in that grouping id.
       const received = toolInputReceipt(entry, sessionId, conversationId, startedAt);
       if (received !== entry) return received;
       if (payloadFull || (inputTaken && (entry.mode === 'finish' || entry.finishOwner)) || (entry.finishOwner && entry.createdAt >= startedAt)) return entry;
       if (entry.mode === 'finish' && !finishBoundary) return entry;
-      if ((entry.state === 'queued' && (entry.mode === 'finish' || (!waitingForTurn && entry.mode === 'auto'))) || entry.state === 'tool') {
-        const prepared = prepare({ ...entry, conversationId });
+      // After-turn tasks own a future browser turn; they cannot block an explicit
+      // Inject now message from the current tool response. Their own FIFO is unchanged.
+      if ((entry.state === 'queued' && (entry.mode === 'finish' || entry.mode === 'auto')) || entry.state === 'tool') {
+        let prepared: InputEntry;
+        try { prepared = prepare({ ...entry, conversationId }); }
+        catch (error) { return { ...entry, state: 'failed', error: (error as Error).message.slice(0, 200) }; }
         const message = `[User message ${entry.id}]\n${prepared.deliveryText ?? prepared.text}` + (finishReminder ? `\n\n${finishReminder}` : entry.mode === 'finish' ? '\nWork on this user task now.' : '');
-        if (payloadBytes + Buffer.byteLength(message) > 128000 || payloadImages + (entry.images?.length ?? 0) > 4) { payloadFull = true; return entry; }
+        if (payloadBytes + Buffer.byteLength(message) > TOOL_INPUT_TEXT_BYTES || payloadImages + (entry.images?.length ?? 0) > 4) { payloadFull = true; return entry; }
         payloadBytes += Buffer.byteLength(message);
         payloadImages += entry.images?.length ?? 0;
         inputTaken = true;
