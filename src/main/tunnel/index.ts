@@ -166,6 +166,23 @@ const OFFLINE_RECHECK_MS = 5_000;
  */
 const UNREACHABLE_CONFIRM_MS = 35_000;
 
+/**
+ * How long /readyz has to keep failing before the client is killed and replaced.
+ *
+ * The same reasoning as UNREACHABLE_CONFIRM_MS above, applied to the far more expensive
+ * action. That one governs a *caption*; this one governs terminating the process every live
+ * tool call is travelling through. A single missed probe used to be enough: /readyz is asked
+ * once, with a three-second timeout and no retry, and one `false` terminated the client. Any
+ * request in flight died with it, the model went on waiting for an answer that could no longer
+ * arrive, and the chat ended on ChatGPT's own "Message delivery timed out. Please try again."
+ *
+ * A probe can miss for reasons that are not a broken client — the client is mid-transfer, the
+ * machine is briefly loaded, the readiness check's own downstream probe is slow. Requiring the
+ * failure to survive into a second watch pass costs a genuinely dead client one extra interval
+ * before it is replaced, and costs a healthy one nothing at all.
+ */
+const UNREADY_CONFIRM_MS = 15_000;
+
 /** A run of unreachable complaints not yet contradicted by a completed poll. */
 export interface UnreachableRun {
   /** When the run began, or 0 when there is no run in progress. */
@@ -253,6 +270,8 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     unreachableReason: string;
     outage: UnreachableRun;
     lastHandshake: number | null;
+    /** When /readyz first failed in the current run of failures; 0 when it is answering. */
+    unreadySince: number;
     pollErrors: number;
     healthBase: string | null;
     health: TunnelHealth | null;
@@ -426,9 +445,25 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
           const ready = await probe(`${run.healthBase}/readyz`);
           if (stopped || current !== run) return;
           if (!ready.ok) {
+            const now = Date.now();
+            if (run.unreadySince === 0) {
+              run.unreadySince = now;
+              logWarn(`${tag} did not answer its readiness check: ${ready.detail || 'no detail'} — rechecking before replacing it`);
+              watch(run);
+              return;
+            }
+            if (now - run.unreadySince < UNREADY_CONFIRM_MS) {
+              watch(run);
+              return;
+            }
             logWarn(`${tag} went unready: ${ready.detail}`);
             restart(run, ready.detail || 'The tunnel stopped responding.', true);
             return;
+          }
+          // Answered: whatever the earlier miss was, it was not this client being down.
+          if (run.unreadySince !== 0) {
+            logInfo(`${tag} answered its readiness check again; not replacing it`);
+            run.unreadySince = 0;
           }
 
           const read = await refreshHealth(run);
@@ -488,6 +523,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
       unreachableReason: '',
       outage: NO_OUTAGE,
       lastHandshake: null,
+      unreadySince: 0,
       pollErrors: 0,
       healthBase: null,
       health: null,

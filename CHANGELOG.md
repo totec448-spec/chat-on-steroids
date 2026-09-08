@@ -9,6 +9,24 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## Unreleased
+
+### Fixed
+- **A chat no longer ends on "Message delivery timed out" because one readiness probe was
+  missed.** The tunnel watcher asks the client's `/readyz` once every 15 seconds, with a
+  three-second timeout and no retry, and a single `false` terminated the client and started a
+  replacement. Every request in flight travels through that process: the tool call the model
+  was waiting on died with it, no answer could arrive any more, and ChatGPT ended the turn with
+  its own transport error and a Retry button. Longer tasks were hit hardest, simply for being
+  in flight more of the time.
+
+  A probe can miss without the client being broken — mid-transfer, a briefly loaded machine, a
+  slow downstream readiness check. The watcher now requires the failure to survive into a
+  second pass before replacing anything, which is the rule the offline caption has followed
+  since `UNREACHABLE_CONFIRM_MS` was introduced: one failed poll is not a verdict. It was
+  applied there to a caption, and not to the action that kills live work. A client that really
+  is unready is still replaced, one interval later.
+
 ## [2.0.7] — 2026-09-07
 
 **plus = gpt 5.6; pro = astra**
