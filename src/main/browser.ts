@@ -18,7 +18,7 @@ export async function isPreferredBrowserRunning(
   try {
     // Probe only the selected family; another browser cannot prove its presence or absence.
     // Enumerate names only, never user command lines or profile data. Both names are constants.
-    const processName = browser === 'edge' ? 'msedge' : 'chrome';
+    const processName = browser === 'edge' ? 'msedge' : browser === 'brave' ? 'brave' : 'chrome';
     const result = await powershell(`$ErrorActionPreference='Stop'; if (@(Get-Process | Where-Object ProcessName -eq '${processName}').Count) { 'running' } else { 'absent' }`, os.tmpdir(), 5000);
     if (result.timedOut || result.exitCode !== 0) return null;
     return result.stdout.trim() === 'absent' ? false : result.stdout.trim() === 'running' ? true : null;
@@ -73,7 +73,9 @@ export function preferredBrowserCandidates(
     const p = path.win32;
     const parts = browser === 'edge'
       ? ['Microsoft', 'Edge', 'Application', 'msedge.exe']
-      : ['Google', 'Chrome', 'Application', 'chrome.exe'];
+      : browser === 'brave'
+        ? ['BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe']
+        : ['Google', 'Chrome', 'Application', 'chrome.exe'];
     return [env.LOCALAPPDATA, env.ProgramFiles, env['ProgramFiles(x86)']]
       .filter((root): root is string => Boolean(root))
       .map(root => p.join(root, ...parts));
@@ -87,6 +89,11 @@ export function preferredBrowserCandidates(
       ['Microsoft Edge Beta.app', 'Microsoft Edge Beta'],
       ['Microsoft Edge Dev.app', 'Microsoft Edge Dev'],
       ['Microsoft Edge Canary.app', 'Microsoft Edge Canary']
+    ] : browser === 'brave' ? [
+      ['Brave Browser.app', 'Brave Browser'],
+      ['Brave Browser Beta.app', 'Brave Browser Beta'],
+      ['Brave Browser Dev.app', 'Brave Browser Dev'],
+      ['Brave Browser Nightly.app', 'Brave Browser Nightly']
     ] : [
       ['Google Chrome.app', 'Google Chrome'],
       ['Google Chrome Beta.app', 'Google Chrome Beta'],
@@ -103,7 +110,13 @@ export function preferredBrowserCandidates(
   if (platform === 'linux') {
     const pathValue = env.PATH ?? '';
     // Search release-channel launchers too: the companion need not be installed in Stable.
-    const names = browser === 'edge' ? ['microsoft-edge', 'microsoft-edge-stable', 'microsoft-edge-beta', 'microsoft-edge-dev'] : [
+    const names = browser === 'edge' ? ['microsoft-edge', 'microsoft-edge-stable', 'microsoft-edge-beta', 'microsoft-edge-dev'] : browser === 'brave' ? [
+      'brave-browser',
+      'brave-browser-beta',
+      'brave-browser-dev',
+      'brave-browser-nightly',
+      'brave'
+    ] : [
       'google-chrome',
       'google-chrome-stable',
       'google-chrome-beta',
@@ -120,6 +133,18 @@ export function preferredBrowserCandidates(
       ...names.map(name => path.posix.join('/usr/bin', name)),
       '/opt/microsoft/msedge/msedge', '/opt/microsoft/msedge-beta/msedge', '/opt/microsoft/msedge-dev/msedge'
     ])];
+    if (browser === 'brave') return [...new Set([
+      ...fromPath,
+      ...names.map(name => path.posix.join('/usr/bin', name)),
+      '/opt/brave.com/brave/brave-browser',
+      '/opt/brave.com/brave-beta/brave-browser-beta',
+      '/opt/brave.com/brave-dev/brave-browser-dev',
+      '/opt/brave.com/brave-nightly/brave-browser-nightly',
+      '/snap/bin/brave',
+      '/usr/lib/brave-browser/brave-browser',
+      home ? path.posix.join(home, '.local', 'share', 'flatpak', 'exports', 'bin', 'com.brave.Browser') : '',
+      '/var/lib/flatpak/exports/bin/com.brave.Browser'
+    ].filter(Boolean))];
     // Chrome and Chromium are both widely installed through Flatpak on immutable Linux
     // desktops. Flatpak exports host launchers for installed applications under these
     // `exports/bin` directories (the exported Chrome desktop file uses the same path as
@@ -178,7 +203,7 @@ export async function openInPreferredBrowser(
   const usable = options.usable ?? ((candidate: string) => isExecutableBrowser(candidate, platform));
   const launch = options.launch ?? launchCommand;
   const selected = options.browser ?? getConfig().ui.chatBrowser ?? 'chrome';
-  const label = selected === 'edge' ? 'Microsoft Edge' : 'Google Chrome / Chromium';
+  const label = selected === 'edge' ? 'Microsoft Edge' : selected === 'brave' ? 'Brave Browser' : 'Google Chrome / Chromium';
   // These switches only affect a newly started Chrome process; handing a URL to an
   // existing instance cannot change its policy. Memory Saver exclusions alone do not
   // prevent background timer/renderer throttling of long-running orchestration tabs.

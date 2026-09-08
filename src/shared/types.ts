@@ -118,7 +118,7 @@ export interface TunnelSettings {
   binaryPath: string;
 }
 
-export const CHAT_BROWSERS = ['chrome', 'edge'] as const;
+export const CHAT_BROWSERS = ['chrome', 'edge', 'brave'] as const;
 export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 
 export interface UiPrefs {
