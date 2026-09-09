@@ -13,7 +13,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SessionEvent, SessionSummary, StoredText } from '../../shared/session.js';
-import { getSession, listAllSessions, readEvents } from '../session/store.js';
+import { getSession, readEverySummary, readEvents } from '../session/store.js';
 import { noteCount, noteDetail } from './call-context.js';
 import { expandStored, fail, guard, ok, type SurfaceRegistrar, type ToolResult } from './kernel.js';
 
@@ -189,7 +189,11 @@ async function searchSessions(queryInput?: string, cursorInput?: string): Promis
     offset = cursor.offset;
   }
 
-  const sessions = await listAllSessions();
+  // The bounded list would make the two answers below lie: past the cap this reports
+  // "No older recorded sessions remain" and search_complete to the model while older
+  // sessions exist. It is also the cheaper path once the catalog is warm, since it reads
+  // the in-process catalog instead of a readdir plus a meta read per folder.
+  const sessions = await readEverySummary();
   if (sessions.length === 0) return ok('No recorded sessions exist on this machine yet.');
   if (offset >= sessions.length) return ok('No older recorded sessions remain.\nsearch_complete: true');
 

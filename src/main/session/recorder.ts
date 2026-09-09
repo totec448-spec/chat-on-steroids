@@ -46,7 +46,7 @@ import {
   endSession,
   findSessionByConversation,
   getSession,
-  listAllSessions,
+  readEverySummary,
   readAsset,
   readEvents,
   readRecentEvents,
@@ -866,7 +866,9 @@ export async function repairDeterministicAttribution(): Promise<{ sessions: numb
   let repairedSessions = 0;
   let repairedCalls = 0;
 
-  for (const summary of await listAllSessions()) {
+  // Every Unattributed session, not a bounded page: this sweep promises to repair all of
+  // them, and one it cannot see is one it silently leaves misattributed forever.
+  for (const summary of await readEverySummary()) {
     if (summary.conversationId !== null || summary.title !== 'Unattributed activity') continue;
     const events = await readEvents(summary.id);
     const scannedThroughSeq = events.reduce((highest, event) => Math.max(highest, event.seq), 0);
