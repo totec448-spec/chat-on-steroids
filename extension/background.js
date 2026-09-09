@@ -1733,6 +1733,26 @@ async function inputReuseProbe(tabId, documentId) {
   } catch { return null; } finally { clearTimeout(timer); }
 }
 
+async function prepareDesktopInputReceipt(tabId, id, documentId) {
+  let timer;
+  try {
+    // The content-side maximum is 13s: reveal sidebar (3s), reach New Chat
+    // (5s), then switch Work to Chat (5s). Two more seconds carry the reply.
+    // Timeout is ambiguity: keep `preparing` custody and grant no fallback.
+    return await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: 'clf-prepare-desktop-input', id }, { documentId }),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 15000); })
+    ]);
+  } catch { return null; } finally { clearTimeout(timer); }
+}
+
+function offerDesktopInput(tabId, message) {
+  // The reply is not a delivery receipt: the content script synchronously owns
+  // one desktopInputBusy slot, then the app's durable browser claim and one-time
+  // sendAuthorizedAt fence every later offer. Waiting here only starves repairs.
+  void chrome.tabs.sendMessage(tabId, message).catch(() => undefined);
+}
+
 async function deliverDesktopInputs(inputs, background, reusableConversations = [], activeIds) {
   if (!Array.isArray(inputs)) return;
   // Only the app's complete outbox projection retires spent opening authority.
@@ -1764,6 +1784,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     const candidates = tabs.filter(tab => matchesInput(input, tab));
     let tab = candidates.sort((a, b) => a.id - b.id)[0];
     let elected = elections[input.id];
+    let recoveredReuse = null;
     // A queued checkpoint follows the app's durable session rebind. Transfer only
     // to an already-existing successor tab, never reopen a closed elected target.
     if (target && cleanConversationId(input.supersededConversationId) &&
@@ -1772,6 +1793,27 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       elected = elections[input.id];
     }
     if (elected?.tab != null) tab = candidates.find(candidate => candidate.id === elected.tab);
+    // A prepare receipt can be lost after its exact document changes nothing. Do
+    // not replay from elapsed time: only the still-elected, still-owned document
+    // can prove that it is idle again and therefore no old preparation is live.
+    if (!tab && !target && elected?.stage === 'preparing' && Number.isInteger(elected.tab)) {
+      const candidate = tabs.find(row => row.id === elected.tab);
+      const reusable = new Set(reusableConversations);
+      const conversation = conversationForTab(candidate);
+      if (candidate) {
+        if (candidate.pendingUrl || modelCatalogTarget?.tab === candidate.id || (conversation && !reusable.has(conversation))) continue;
+        const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
+        if (!ownsDocument(source)) continue;
+        const proof = await inputReuseProbe(candidate.id, source.documentId);
+        const current = await chrome.tabs.get(candidate.id).catch(() => null);
+        if (proof?.safe !== true || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source) ||
+            !current || current.pendingUrl || current.url !== candidate.url) continue;
+        // Logically clear this pass for one same-tab retry while the durable row
+        // remains custody if the document changes before preparation begins.
+        elected = null;
+        recoveredReuse = source;
+      }
+    }
     if (input.close === true && input.lifetime === 'temporary-planner') {
       if (!tab) continue;
       // Preserve the warm planner until newer app work has an actual browser tab.
@@ -1797,34 +1839,34 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     if (!tab) {
       // Handout is opening authority, not a missing delivery receipt. A closed or
       // unresponsive elected document never grants another opening attempt.
-      if (elections[input.id]) continue;
+      if (elections[input.id] && !recoveredReuse) continue;
       if (Object.keys(elections).length >= 1000) continue;
       const url = target ? `https://chatgpt.com/c/${encodeURIComponent(target)}` : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
       if (!target && input.lifetime !== 'temporary-planner') {
         const reusable = new Set(reusableConversations);
         const choices = tabs.filter(candidate => !candidate.pendingUrl && modelCatalogTarget?.tab !== candidate.id &&
-          (!conversationForTab(candidate) || reusable.has(conversationForTab(candidate))))
+          (!conversationForTab(candidate) || reusable.has(conversationForTab(candidate))) &&
+          (!recoveredReuse || candidate.id === recoveredReuse.tab))
           .sort((a, b) => Number(!!conversationForTab(a)) - Number(!!conversationForTab(b)) || a.id - b.id);
         for (const candidate of choices) {
           const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
           if (!ownsDocument(source)) continue;
-          const proof = await inputReuseProbe(candidate.id, source.documentId);
+          const proof = recoveredReuse?.tab === source.tab && recoveredReuse.documentId === source.documentId && recoveredReuse.navigationEpoch === source.navigationEpoch
+            ? { safe: true, navigationEpoch: source.navigationEpoch }
+            : await inputReuseProbe(candidate.id, source.documentId);
           const current = await chrome.tabs.get(candidate.id).catch(() => null);
           if (proof?.safe !== true || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source) ||
               !current || current.pendingUrl || current.url !== candidate.url) continue;
           await elect(input.id, { tab: candidate.id, stage: 'preparing' });
           const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
           if (owner?.tab === candidate.id) await chrome.storage.session.set({ modelCatalogOwner: { ...owner, handedToInput: input.id } });
-          let prepared;
-          try { prepared = await chrome.tabs.sendMessage(candidate.id, { type: 'clf-prepare-desktop-input', id: input.id }, { documentId: source.documentId }); }
-          catch { break; } // Ambiguous preparation is not a fallback authorization.
+          const prepared = await prepareDesktopInputReceipt(candidate.id, input.id, source.documentId);
           const latest = await chrome.tabs.get(candidate.id).catch(() => null);
           if (!latest || latest.pendingUrl || tabDocuments[String(candidate.id)] !== source.documentId) break;
           if (prepared?.ready === true && matchesInput(input, latest)) {
             await elect(input.id, { tab: candidate.id, stage: 'ready' });
             tab = latest;
-            try { await chrome.tabs.sendMessage(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: null }); }
-            catch { /* Claim/send ambiguity keeps this exact tab elected. */ }
+            offerDesktopInput(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: null });
           } else if (prepared?.fallback === true && prepared.preSend === true) {
             // Explicit native transition failure, before claim/insertion/send, owns
             // exactly one replacement. Persist that expenditure before Chrome awaits.
@@ -1843,8 +1885,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       tabs.push(tab);
       continue;
     }
-    try { await chrome.tabs.sendMessage(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: target, ...(input.lifetime ? { lifetime: input.lifetime } : {}) }); }
-    catch { /* Navigation is not a delivery receipt; a later maintenance pass can offer it. */ }
+    offerDesktopInput(tab.id, { type: 'clf-desktop-input', id: input.id, conversationId: target, ...(input.lifetime ? { lifetime: input.lifetime } : {}) });
   }
 }
 
@@ -2154,14 +2195,6 @@ async function maintainOnce() {
   if (reply.data.placement) await placeSuccessorChat(reply.data.placement, null);
   inspectRequestedModels(reply.data.modelCatalogRequest);
   inspectRequestedPluginRefresh(reply.data.pluginRefreshRequests, reply.data.background === true, reply.data.browserOnly === true);
-  await deliverDesktopInputs(reply.data.inputs, reply.data.background === true, reply.data.reusableConversations, reply.data.inputOpeningIds);
-  if (!backgroundReady) await reconcileBackgroundWindow(reply.data);
-  const monitoring = reply.data.recoveryMonitoring === true;
-  if (monitoring !== recoveryMonitoring) {
-    recoveryMonitoring = monitoring;
-    await persistLive().catch(() => undefined);
-  }
-  if (await acceptBrowserRevival(reply.data.revival)) await recoverDeferredRevivals();
   // Quoted back exactly as they arrived. A token names the handout being answered, so that a
   // receipt this pass sends late cannot close a repair the app has since raised for a different
   // turn. An entry missing either half is not actionable and is dropped rather than guessed at.
@@ -2172,6 +2205,20 @@ async function maintainOnce() {
       focus: Boolean(entry && entry.focus === true)
     }))
     .filter((entry) => entry.conversationId && entry.token);
+  const repairConversations = new Set(repairs.map(entry => entry.conversationId));
+  // Reloading the same document races its final input offer. Repair it now; the
+  // still-durable app row is offered on the next status pass after the reload.
+  const inputs = Array.isArray(reply.data.inputs)
+    ? reply.data.inputs.filter(input => !repairConversations.has(cleanConversationId(input?.conversationId)))
+    : reply.data.inputs;
+  await deliverDesktopInputs(inputs, reply.data.background === true, reply.data.reusableConversations, reply.data.inputOpeningIds);
+  if (!backgroundReady) await reconcileBackgroundWindow(reply.data);
+  const monitoring = reply.data.recoveryMonitoring === true;
+  if (monitoring !== recoveryMonitoring) {
+    recoveryMonitoring = monitoring;
+    await persistLive().catch(() => undefined);
+  }
+  if (await acceptBrowserRevival(reply.data.revival)) await recoverDeferredRevivals();
   const nonDiscardable = new Set(
     (Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : [])
       .map(cleanConversationId)
