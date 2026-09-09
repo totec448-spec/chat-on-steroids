@@ -135,7 +135,14 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     await computer.screenshot({ window: 77 });
     await replace();
     expect((await computer.findUi({ window: 77 })).elements[0]).toMatchObject({ imageBounds: null, imageCenter: null });
-    expect((await computer.act([{ type: 'type', text: 'example' }])).cursor).toMatchObject({ image: null, frameId: null });
+    // `targetWindow` is this branch's addition, not upstream's. Physical pointer and application
+    // text mutations require a proven destination here — INPUT_TARGET_REQUIRED — so a bare `type`
+    // is refused before it reaches the code this test is about. The subject is the pointer
+    // report's frame binding, and the action is only a way to get a cursor back, so naming the
+    // window the screenshot above already used keeps the subject intact rather than weakening a
+    // fence to suit a test.
+    expect((await computer.act([{ type: 'type', text: 'example' }], { targetWindow: 77 })).cursor)
+      .toMatchObject({ image: null, frameId: null });
   });
 
   it('refuses crops expressed in an earlier helper frame', async () => {

@@ -40,6 +40,7 @@ import {
   mouseButtonArg,
   ok,
   pointArg,
+  toolDisabledMessage,
   windowIdArg,
   type SurfaceRegistrar,
   type ToolContent
@@ -60,6 +61,92 @@ function newBrowserWindowHint(): string {
   return process.platform === 'darwin'
     ? 'open -na "Google Chrome" --args --new-window "$url"'
     : "Start-Process chrome.exe -ArgumentList '--new-window', $url";
+}
+
+/**
+ * The sentence a caller fenced out of a browser window most needs, and never saw.
+ *
+ * `computer` cannot click *into* a web page that has nothing focused yet: the fence asks the
+ * application which control has keyboard focus, a browser answers only when the page exposes one,
+ * and the click that would create that focus is itself what is being fenced. That is the fence
+ * failing closed on honest ignorance of where input would land, which is what it is for — the
+ * macOS helper carries a long note saying so and warning the next reader not to file it as a bug.
+ *
+ * The note is right and the refusal is correct. What neither said is the way out, which exists
+ * and is one tool away: `browser` speaks CDP and needs none of this. A QA run met these refusals
+ * five times in a row against a browser window, re-observing and retrying between each, and the
+ * report's closing judgement was that the app's failures are loud, correct, and read as a pattern
+ * of not working. A refusal that names its own remedy is the cheapest answer to that, and it
+ * costs no fence — this only appends a sentence to a refusal that has already happened.
+ *
+ * Best effort by construction: it runs only on the failure path, and any error looking up the
+ * window is swallowed, because failing to enrich a message is no reason to replace the real
+ * refusal with a worse one.
+ */
+async function browserInputHint(actions: Action[], targetWindow: number | undefined): Promise<string> {
+  try {
+    let focused: number | null = targetWindow ?? null;
+    for (const action of actions) if (action.type === 'focus') focused = action.window;
+    const target =
+      focused === null
+        ? (await activeWindow()).window
+        : ((await listWindows()).windows.find((window) => window.id === focused) ?? null);
+    if (!target || !isBrowserProcess(target.process)) return '';
+    return (
+      ` The window is a browser ("${target.title}"), and desktop input cannot reach a web page ` +
+      'that has no focused control yet — the click that would give it one is the click being ' +
+      'refused. Use the browser tool for the page itself: it drives Chrome directly and needs ' +
+      'no desktop focus.'
+    );
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Refusals that mean "desktop input could not be aimed", which is the browser case above.
+ *
+ * `INPUT_TARGET_REQUIRED` joined them after a QA round hit it twice in four minutes while trying
+ * to drive a browser window. It already names its own remedy and names it well — supply
+ * targetWindow, a window-bound frame, a semantic ref, or focus in the batch — but every one of
+ * those is a way to aim desktop input at a page, and against a browser the better answer is not
+ * to aim desktop input at all.
+ *
+ * `STALE_FRAME` is deliberately absent. That one is about a capture whose geometry moved, which
+ * is a real answer about the screenshot rather than about where input would land, and it says so.
+ */
+const INPUT_FENCE_CODES = [
+  'INPUT_TARGET_LOST',
+  'INPUT_TARGET_REQUIRED',
+  'STALE_UI_SNAPSHOT',
+  'FOCUS_FAILED'
+];
+
+/**
+ * Runs the batch, and on an input-fence refusal against a browser adds the way out.
+ *
+ * A rethrow rather than a mutation, because `ComputerError` carries the partial-batch accounting
+ * a caller needs to know how far it got — losing `completedCount` to improve a sentence would
+ * trade a fact for a nicety. Anything that is not one of those refusals is rethrown untouched.
+ */
+async function withBrowserInputHint<T>(
+  actions: Action[],
+  targetWindow: number | undefined,
+  run: () => Promise<T>
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (!(err instanceof ComputerError)) throw err;
+    if (!INPUT_FENCE_CODES.some((code) => err.message.includes(code))) throw err;
+    const hint = await browserInputHint(actions, targetWindow);
+    if (!hint) throw err;
+    throw new ComputerError(`${err.message}${hint}`, {
+      ...(typeof err.completedCount === 'number' ? { completedCount: err.completedCount } : {}),
+      ...(typeof err.failedIndex === 'number' ? { failedIndex: err.failedIndex } : {}),
+      ...(Array.isArray(err.completedRoutes) ? { completedRoutes: err.completedRoutes } : {})
+    });
+  }
 }
 
 async function browserChordRefusal(actions: Action[]): Promise<string | null> {
@@ -111,6 +198,24 @@ function desktopImageResult(text: string, data: string): { content: ToolContent[
   return result;
 }
 
+/**
+ * Web-page control, which is a different problem from desktop control.
+ *
+ * The desktop driver can already click anywhere in a browser window, but it cannot see a web
+ * page: Chromium keeps its renderer accessibility tree off until a real assistive client asks
+ * for it, so a UIA/AX walk returns the toolbar and one opaque pane. Inside a page the desktop
+ * driver has pixels and nothing else — which is exactly where refs stop being available.
+ *
+ * So this addresses elements by ref from `observe`, and the driver re-resolves a ref against
+ * the live document immediately before acting on it. Coordinates remain available for the
+ * cases refs cannot express, and they are in the screenshot's own pixels: the driver captures
+ * at a scale where one image pixel is one CSS pixel is one input unit.
+ */
+/** One scroll step, bounded the same on both surfaces: the two disagreed, and a page
+ * coordinate is a page coordinate whichever driver moves the pointer. */
+
+const scrollDeltaArg = z.number().int().min(-10_000).max(10_000);
+
 const computerActionArg = z.discriminatedUnion('type', [
   z.object({ type: z.literal('click_ref'), ref: z.string().min(1).max(64) }).strict().describe('Click a control by ref from observe.'),
   z
@@ -141,11 +246,11 @@ const computerActionArg = z.discriminatedUnion('type', [
       x: imageCoordinateArg,
       y: imageCoordinateArg,
       scroll_x: z.number().int().min(-10_000).max(10_000).optional(),
-      scroll_y: z.number().int().min(-10_000).max(10_000).optional()
+      scroll_y: scrollDeltaArg.optional()
     })
     .strict()
     .describe('Scroll at a point.'),
-  z.object({ type: z.literal('type'), text: z.string().max(4000) }).strict().describe('Type text into whatever has focus.'),
+  z.object({ type: z.literal('type'), text: z.string().max(4000) }).strict().describe('Type text into target.'),
   z
     .object({ type: z.literal('keypress'), keys: z.array(z.string().max(20)).min(1).max(6) })
     .strict()
@@ -302,8 +407,17 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           // A bare "what is on screen right now" with no window at all: cheapest possible
           // answer, and the only one that still works when there is no foreground window.
           if (what === 'active' && target === undefined && input.screenshot === false) {
-            const { window, screen } = await activeWindow();
-            if (!window) return ok(prefix(waited, `Desktop ${screen.width}x${screen.height}\nNo foreground window.`));
+            const { window, screen, foregroundIsSelf } = await activeWindow();
+            if (!window) {
+              // "None" and "this app" are different answers, and reporting the second as the
+              // first made a deliberate refusal look like a defect. Chat On Steroids hides its
+              // own windows from everything the model can see, on purpose: it must not be able
+              // to drive the app that is driving it.
+              const reason = foregroundIsSelf
+                ? 'Chat On Steroids itself is in front. Its own windows are never exposed, so there is nothing here to act on — switch to another application first.'
+                : 'No foreground window.';
+              return ok(prefix(waited, `Desktop ${screen.width}x${screen.height}\n${reason}`));
+            }
             return ok(prefix(waited, describeWindow(window)));
           }
 
@@ -329,10 +443,20 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               throw err;
             }
             const shot = await screenshot({ maxWidth: input.max_width });
+            // Why there is no window matters here as much as on the bare query, and this
+            // path was missed when that one was fixed — which is why QA still saw the old
+            // wording. Asked separately because the failure above tells us nothing about it.
+            let selfInFront = false;
+            try {
+              selfInFront = (await activeWindow())?.foregroundIsSelf === true;
+            } catch {
+              // Best effort. This only chooses between two ways of saying the same fallback, and
+              // failing to learn which would be a poor reason to fail the screenshot itself.
+            }
             return desktopImageResult(
               prefix(
                 waited,
-                `No foreground window, so this is the whole primary monitor.\nframe: ${shot.frameId}  ${shot.width}x${shot.height} — pass frameId ${shot.frameId} with any coordinates you read off it`
+                `${selfInFront ? 'Chat On Steroids itself is in front and its own windows are never exposed, so this is the whole primary monitor.' : 'No foreground window, so this is the whole primary monitor.'}\nframe: ${shot.frameId}  ${shot.width}x${shot.height} — pass frameId ${shot.frameId} with any coordinates you read off it`
               ),
               shot.data
             );
@@ -386,19 +510,25 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
       {
         title: 'Control mouse and keyboard',
         description:
-          'Run ordered desktop actions. Prefer refs from observe; pixels require frameId and target geometry is rechecked. ' +
-          'verify waits for a postcondition. Capture and clipboard steps stay in the batch.',
+          'One desktop decision. Prefer refs; pixels need frameId. Pointer/text needs a target; system keys stay global.',
         inputSchema: z
           .object({
-            actions: z.array(computerActionArg).min(1).max(20),
+            actions: z
+              .array(computerActionArg)
+              .min(1)
+              .max(20)
+              // Stated here rather than only in the rejection below: a run was spent discovering
+              // this rule by being refused. Kept terse — this surface has a discovery budget.
+              .describe('One UI-changing action per call; focus/move/wait/clipboard may accompany it.'),
             frameId: z
               .number()
               .int()
               .min(1)
               .optional()
               .describe('Required for coordinate actions or captureCrop.'),
+            targetWindow: windowIdArg.optional(),
             verify: verificationArg.optional(),
-            captureAfter: z.boolean().optional().describe('Return a fresh screenshot after the actions. Default false.'),
+            captureAfter: z.boolean().optional().describe('Capture result; default on for mutations.'),
             captureWindow: windowIdArg.optional().describe('Result capture: this window.'),
             captureFull: z.boolean().optional().describe('Result capture: all monitors.'),
             captureMaxWidth: z
@@ -411,6 +541,20 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
             captureCrop: cropArg.optional().describe('Result crop in the input frame.')
           })
           .superRefine((input, ctx) => {
+            const decisionActions = input.actions.filter((action) =>
+              action.type !== 'wait' &&
+              action.type !== 'read_clipboard' &&
+              action.type !== 'write_clipboard' &&
+              action.type !== 'move' &&
+              action.type !== 'focus'
+            );
+            if (decisionActions.length > 1) {
+              ctx.addIssue({
+                code: 'custom',
+                path: ['actions'],
+                message: 'Use one UI-changing decision per computer call; focus/move/wait/clipboard setup may accompany it.'
+              });
+            }
             if (input.verify) {
               const needsWindow = input.verify.until === 'foreground';
               const needsMatch = input.verify.until !== 'foreground';
@@ -432,7 +576,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
               }
             }
             const verifyCapture = input.verify?.capture === 'always' || input.verify?.capture === 'on_change';
-            const willCapture = input.captureAfter === true || verifyCapture;
+            const autoCapture =
+              caps.screen &&
+              input.captureAfter !== false &&
+              input.actions.some((action) =>
+                action.type !== 'wait' && action.type !== 'read_clipboard' && action.type !== 'write_clipboard' && action.type !== 'move'
+              );
+            const willCapture = input.captureAfter === true || verifyCapture || autoCapture;
             const captureFields = ['captureWindow', 'captureFull', 'captureMaxWidth', 'captureCrop'] as const;
             if (!willCapture) {
               for (const field of captureFields) {
@@ -457,16 +607,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           .strict(),
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
       },
-      async ({ actions, frameId, verify, captureAfter, captureWindow, captureFull, captureMaxWidth, captureCrop }) =>
+      async ({ actions, frameId, targetWindow, verify, captureAfter, captureWindow, captureFull, captureMaxWidth, captureCrop }) =>
         guard('computer', async () => {
           // Not reg.guarded: this tool covers two permissions. Pointer and keyboard steps
           // need "control", the clipboard steps need their own, and one blanket refusal
           // would hide which of them the user actually has to switch on.
           if (!caps.control && actions.some((a) => a.type !== 'wait' && !a.type.endsWith('_clipboard'))) {
-            return fail(
-              'TOOL_DISABLED: mouse and keyboard control is disabled by the current Chat On Steroids permissions. ' +
-                'Ask the user to enable "Control mouse and keyboard" in the app, then retry.'
-            );
+            return fail(toolDisabledMessage(ctx.readOnly, 'control', 'mouse and keyboard control', 'Control mouse and keyboard'));
           }
           const parsed: Action[] = [];
           for (const a of actions) {
@@ -507,13 +654,13 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
                 // schema is cached by ChatGPT, and a tool that quietly changes shape when
                 // a checkbox moves is worse than one that says plainly it is switched off.
                 if (!caps.clipboardRead) {
-                  return fail('TOOL_DISABLED: read_clipboard needs the Read the clipboard permission.');
+                  return fail(toolDisabledMessage(ctx.readOnly, 'clipboardRead', 'read_clipboard', 'Read the clipboard'));
                 }
                 parsed.push({ type: 'read_clipboard' });
                 break;
               case 'write_clipboard':
                 if (!caps.clipboardWrite) {
-                  return fail('TOOL_DISABLED: write_clipboard needs the Replace clipboard text permission.');
+                  return fail(toolDisabledMessage(ctx.readOnly, 'clipboardWrite', 'write_clipboard', 'Replace clipboard text'));
                 }
                 parsed.push({ type: 'write_clipboard', text: a.text });
                 break;
@@ -524,7 +671,11 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           logInfo(`tool computer ${parsed.map((a) => a.type).join(', ')}`);
           noteDetail(parsed.map((a) => a.type).join(', '));
           const verifyCapture = verify?.capture === 'always' || verify?.capture === 'on_change';
-          const wantsCapture = captureAfter === true || verifyCapture;
+          const mutatesDesktop = parsed.some((action) =>
+            action.type !== 'wait' && action.type !== 'read_clipboard' && action.type !== 'write_clipboard' && action.type !== 'move'
+          );
+          const autoCapture = caps.screen && captureAfter !== false && mutatesDesktop;
+          const wantsCapture = captureAfter === true || verifyCapture || autoCapture;
           if ((verify || wantsCapture) && !caps.screen) {
             return fail('TOOL_DISABLED: verification and result capture need the See the screen permission.');
           }
@@ -543,25 +694,30 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
             : undefined;
           // One lock, one operation: the picture that verifies these actions must be taken
           // before anyone else can touch the desktop.
-          const result = await actAndCapture(parsed, {
+          const result = await withBrowserInputHint(parsed, targetWindow, () => actAndCapture(parsed, {
             frameId,
+            targetWindow,
             verify: parsedVerify,
             capture:
               wantsCapture
                 ? {
-                    window: captureWindow,
+                    window: captureWindow ?? (captureFull === true || captureCrop !== undefined ? undefined : targetWindow),
                     full: captureFull,
-                    maxWidth: captureMaxWidth,
+                    maxWidth: captureMaxWidth ?? (autoCapture ? 1600 : undefined),
                     crop: captureCrop,
-                    preferActiveWindow: ctx.privacyScreenshots
+                    preferActiveWindow:
+                      ctx.privacyScreenshots ||
+                      (autoCapture && captureWindow === undefined && targetWindow === undefined && captureFull !== true && captureCrop === undefined)
                   }
                 : undefined
-          });
+          }));
           const cursor = result.cursor;
           const pointer = cursor
             ? cursor.image
               ? `Pointer image: ${cursor.image.x},${cursor.image.y} (frame ${cursor.frameId}, ${cursor.imageSize?.width}x${cursor.imageSize?.height}); desktop: ${cursor.screen.x},${cursor.screen.y}.`
-              : `Pointer desktop: ${cursor.screen.x},${cursor.screen.y}. No screenshot frame is active.`
+              : cursor.frameId === null
+                ? `Pointer desktop: ${cursor.screen.x},${cursor.screen.y}. No screenshot frame is active.`
+                : `Pointer desktop: ${cursor.screen.x},${cursor.screen.y}. It is outside frame ${cursor.frameId}, so it has no position in that image.`
             : 'Pointer position was not queried because this batch used only local wait/clipboard actions.';
           // Clipboard reads are the one action that returns something, so they are quoted
           // back in order rather than folded into the "Done:" line.
@@ -588,7 +744,36 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           const verified = result.verification
             ? `\nVerified ${result.verification.until} in ${result.verification.elapsedMs} ms: ${result.verification.detail}.`
             : '';
-          const done = `Done ${result.completedCount}/${parsed.length} via ${routeSummary}: ${parsed.map((a) => a.type).join(', ')}. ${pointer}${clipboard ? `\n${clipboard}` : ''}${verified}`;
+          const captureFallback = result.captureFallback ? `\nCapture note: ${result.captureFallback}.` : '';
+          // A scroll that reports only "sent" cannot be told apart from an application ignoring
+          // the wheel — and the window server delivers a wheel to whatever is under the pointer,
+          // which need not be the leased window. So say where it landed and whether it travelled.
+          const scroll = result.scroll
+            ? `
+Scroll: ${
+                result.scroll['reachedTarget'] === false
+                  ? `the wheel went to another window (${String(result.scroll['hitRole'] ?? 'unknown role')}, pid ${String(result.scroll['hitPid'] ?? '?')}), not the one leased`
+                  : `reached the leased window (${String(result.scroll['hitRole'] ?? 'unknown role')})`
+              }; ${
+                result.scroll['moved'] === true
+                  ? `it moved, ${String(result.scroll['positionBefore'])} → ${String(result.scroll['positionAfter'])}`
+                  : result.scroll['moved'] === false
+                    ? `nothing moved, still at ${String(result.scroll['positionAfter'])}`
+                    : `whether it moved is unreadable (${String(result.scroll['movedUnknown'] ?? 'no scroller')})`
+              }. ${JSON.stringify(result.scroll)}`
+            : '';
+          // Same reasoning as scroll's `moved`: a click_ref's semantic press can report success
+          // at the accessibility-API level while the control it named never actually changed —
+          // measured against a real System Settings toggle that answered success and stayed put
+          // until a coordinate click on the same spot moved it. Silence here would let that
+          // recur unnoticed on every other control shaped like it.
+          const uiChange =
+            result.uiChanged === true
+              ? '\nClick: the control’s reported value changed.'
+              : result.uiChanged === false
+                ? '\nClick: the accessibility action reported success, but the control’s reported value did not change. Try clicking the same coordinates instead.'
+                : '';
+          const done = `Done ${result.completedCount}/${parsed.length} via ${routeSummary}: ${parsed.map((a) => a.type).join(', ')}. ${pointer}${clipboard ? `\n${clipboard}` : ''}${verified}${captureFallback}${scroll}${uiChange}`;
           const shot = result.screenshot;
           if (shot) {
             return desktopImageResult(
@@ -599,8 +784,10 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           return ok(done);
         })
     );
+
   }
 }
+
 
 function prefix(note: string | null, body: string): string {
   return note ? `${note}\n\n${body}` : body;

@@ -831,7 +831,11 @@ describe('surface boundaries', () => {
       const bytes = Buffer.byteLength(JSON.stringify(tool), 'utf8');
       const budget =
         tool.name === 'computer'
-          ? 6_000
+          // 6.0k to 6.3k with the macOS pointer work: drag now spells out its own step budget
+          // and scroll its fraction, rather than leaving either to a free-form number the model
+          // has to guess at. Raised deliberately and asserted separately from the surface total,
+          // so the next growth still has to argue for itself.
+          ? 6_300
           : tool.name === 'apply_patch'
             ? 5_000
             : tool.name === 'agents'
@@ -1605,7 +1609,7 @@ describe('desktop capabilities', () => {
       arguments: { actions: [{ type: 'write_clipboard', text: 'nope' }] }
     });
     expect(written.body.result?.isError).toBe(true);
-    expect(textOf(written)).toContain('Replace clipboard text permission');
+    expect(textOf(written)).toContain('"Replace clipboard text"');
   });
 
   it('marks observing read-only and control destructive', async () => {

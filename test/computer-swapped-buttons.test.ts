@@ -68,8 +68,11 @@ describe('a swapped-button mouse still gets a primary click (issue #76)', () => 
       const start = HELPER_SCRIPT.indexOf(caller);
       expect(start, `${caller} should still exist`).toBeGreaterThan(-1);
       const body = HELPER_SCRIPT.slice(start, start + 600);
+      // The trailing out-param is optional on purpose: the side buttons (back/forward) are one
+      // event pair distinguished by mouseData, so ButtonFlags also hands back that word. What is
+      // being asserted is the delegation, not the arity.
       expect(body, `${caller} should ask ButtonFlags rather than choosing flags itself`)
-        .toMatch(/ButtonFlags\(button, out down, out up\)/);
+        .toMatch(/ButtonFlags\(button, out down, out up(?:, out data)?\)/);
     }
     // And the click_ref fallback goes through Click, so it inherits the same decision.
     expect(HELPER_SCRIPT).toMatch(/\[Clf\]::Click\(/);
