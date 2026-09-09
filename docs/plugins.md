@@ -31,6 +31,9 @@ refresh manually; the Plugins endpoint itself always serves the complete current
 - Pinned npm and Python recipes: Blender MCP, Knowledge Memory, Playwright Browser, Web Fetch and Unity Editor.
   Node.js/npm or Python/uv must be installed where the recipe requires them. CoS installs
   packages into private per-plugin directories and does not install missing system runtimes.
+  On Windows, the standard per-user uv directory (`%USERPROFILE%\.local\bin`) is also
+  searched, so installing uv there does not require restarting an already-running CoS.
+  For custom runtime locations, add the directory to PATH and restart CoS.
 - An executable with explicit arguments (no shell interpolation).
 - Remote Streamable HTTP MCP URLs, with HTTPS or loopback HTTP. Credentials use encrypted
   storage; do not embed them in URLs or arguments. HeyGen and Recraft use explicit browser OAuth
