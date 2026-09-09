@@ -1307,6 +1307,39 @@ describe('worker settings authority', () => {
     ]);
   });
 
+  it('carries destinationLost, and still refuses anything not on the checkpoint list', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { ok: true });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsGet: async () => ({ id: 44, url: `https://chatgpt.com/c/${CHAT}` }) });
+    await worker.registerTab(44);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 44);
+    const token = '0123456789abcdef0123456789abcdef';
+
+    // The page sends this and the app acts on it — it retires the lease and re-offers the brief
+    // to a fresh chat at once instead of waiting the lease out. The relay used to drop it.
+    await worker.send({ type: 'compact', conversationId: CHAT, token, destinationLost: true }, 44);
+    // A field nobody named must not ride along on a valid token.
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, invented: true }, 44);
+    // And a checkpoint without its token says nothing about any transaction.
+    await worker.send({ type: 'compact', conversationId: CHAT, destinationLost: true }, 44);
+
+    expect(posted).toHaveLength(3);
+    expect(posted[0]).toMatchObject({ conversationId: CHAT, token, destinationLost: true });
+    expect(posted[1]).toMatchObject({ conversationId: CHAT, token, sourceLost: true });
+    expect(posted[1]).not.toHaveProperty('invented');
+    expect(posted[2]).not.toHaveProperty('destinationLost');
+    expect(posted[2]).not.toHaveProperty('token');
+  });
+
   it.each(['new-chat', 'other-chat', 'pending-navigation'])('checks the current Chrome route for compaction after %s', async scenario => {
     const currentUrl = scenario === 'other-chat' ? 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
       : `https://chatgpt.com/g/g-p-abcdef1234567890abcdef1234567890/c/${CHAT}`;

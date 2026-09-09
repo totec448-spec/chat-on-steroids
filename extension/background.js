@@ -2414,6 +2414,49 @@ function isChatGptUrl(value) {
 /** Serializes every ownership transition and owned side effect for one browser tab. */
 const tabOperationQueues = new Map();
 
+/**
+ * Which checkpoint fields may cross to the app, and what each one has to look like.
+ *
+ * Named in one list rather than eight hand-copied ternaries, because this body is rebuilt
+ * field by field and a field nobody remembered to list is dropped in silence with both ends
+ * of the feature looking correct. `destinationLost` did exactly that: content.js sends it and
+ * bridge.ts acts on it, so the page could prove a brief never left it and the app would have
+ * retired the lease and re-offered the brief at once — but the relay never carried the field,
+ * so that path could not run and the chat waited out the whole lease instead.
+ *
+ * Still an allowlist, not a passthrough: nothing reaches the app unless it is named here, and
+ * every field stays token-paired, because the field only says anything about the transaction
+ * the token names.
+ */
+const COMPACT_CHECKPOINT_FLAGS = [
+  'sourceAttempt',
+  'sourceDispatch',
+  'sourceLost',
+  'destinationAttempt',
+  'destinationDispatch',
+  'destinationLost'
+];
+const COMPACT_CHECKPOINT_TEXT = ['summary', 'sourceMessageId', 'destinationMessageId'];
+// Not a checkpoint of its own: it qualifies `sourceMessageId` by saying how far that exact
+// marked response has grown. Sent only alongside the field it describes, so a bare count can
+// never move a deadline by itself.
+const COMPACT_CHECKPOINT_COUNTS = { sourceProgress: 'sourceMessageId' };
+
+function compactCheckpointFields(message) {
+  if (!message || typeof message.token !== 'string') return {};
+  const fields = {};
+  for (const flag of COMPACT_CHECKPOINT_FLAGS) {
+    if (message[flag] === true) fields[flag] = true;
+  }
+  for (const name of COMPACT_CHECKPOINT_TEXT) {
+    if (typeof message[name] === 'string') fields[name] = message[name];
+  }
+  for (const [name, requires] of Object.entries(COMPACT_CHECKPOINT_COUNTS)) {
+    if (Number.isSafeInteger(message[name]) && typeof fields[requires] === 'string') fields[name] = message[name];
+  }
+  return Object.keys(fields).length > 0 ? { token: message.token, ...fields } : {};
+}
+
 function serializeTab(tab, operation) {
   if (!Number.isInteger(tab)) return operation();
   const prior = tabOperationQueues.get(tab) || Promise.resolve();
@@ -2824,31 +2867,7 @@ const HANDLERS = {
         // verbatim and only together: the app refuses a brief whose token does not name an
         // open continuation for this chat, which is what keeps some other tab's text from
         // ever becoming this session's handoff.
-        ...(typeof message.token === 'string' && typeof message.summary === 'string'
-          ? { token: message.token, summary: message.summary }
-          : {}),
-        ...(typeof message.token === 'string' && message.sourceAttempt === true
-          ? { token: message.token, sourceAttempt: true }
-          : {}),
-        ...(typeof message.token === 'string' && message.sourceLost === true
-          ? { token: message.token, sourceLost: true }
-          : {}),
-        ...(typeof message.token === 'string' && message.sourceDispatch === true
-          ? { token: message.token, sourceDispatch: true }
-          : {}),
-        ...(typeof message.token === 'string' && typeof message.sourceMessageId === 'string'
-          ? { token: message.token, sourceMessageId: message.sourceMessageId,
-              ...(Number.isSafeInteger(message.sourceProgress) ? { sourceProgress: message.sourceProgress } : {}) }
-          : {}),
-        ...(typeof message.token === 'string' && message.destinationAttempt === true
-          ? { token: message.token, destinationAttempt: true }
-          : {}),
-        ...(typeof message.token === 'string' && message.destinationDispatch === true
-          ? { token: message.token, destinationDispatch: true }
-          : {}),
-        ...(typeof message.token === 'string' && typeof message.destinationMessageId === 'string'
-          ? { token: message.token, destinationMessageId: message.destinationMessageId }
-          : {})
+        ...compactCheckpointFields(message)
       })
     });
     // Chat B, for this window. The app produced it inside this very request precisely so that
