@@ -1552,6 +1552,101 @@ describe('automatic compaction', () => {
     expect(continuationForSession(session!.id)).toBeNull();
   });
 
+  it('durably ends an automatic ticket when the source page proves the handoff never reached Send', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac08';
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'composer rejected the handoff', messageId: 'm-auto-lost' }]
+      }
+    });
+    const filed = await request('POST', '/compact', {
+      body: { conversationId, ticket: true, automatic: true }
+    });
+    const token = filed.body.token as string;
+    expect((await request('POST', '/compact', { body: { conversationId, token, sourceAttempt: true } })).body.allowed).toBe(true);
+
+    const lost = await request('POST', '/compact', { body: { conversationId, token, sourceLost: true } });
+    expect(lost.status).toBe(200);
+    expect(lost.body.aborted).toBe(true);
+    expect(continuationByToken(token)).toMatchObject({ state: 'aborted', error: 'handoff_never_sent' });
+    expect(continuationForSession(filed.body.sessionId as string)).toBeNull();
+    expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).status).toBe(409);
+  });
+
+  it('does not immediately refile a rejected automatic compaction in the same working turn', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac09';
+    await withThreshold(10_000, async () => {
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-rejected-compact' }, ...over()]
+        }
+      });
+      await settled();
+      const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      const sessionId = activity.body.sessionId as string;
+      const first = continuationForSession(sessionId);
+      expect(first).toMatchObject({ automatic: true, state: 'awaiting-summary' });
+
+      const lost = await request('POST', '/compact', {
+        body: { conversationId, token: first!.token, sourceLost: true }
+      });
+      expect(lost.status).toBe(200);
+      expect(continuationForSession(sessionId)).toBeNull();
+
+      // More live evidence from this exact turn must not create a fresh token behind the
+      // persistent composer draft that just rejected the previous one.
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [{
+            kind: 'assistant_message',
+            time: Date.now(),
+            turnId: 'turn-rejected-compact',
+            text: 'still working',
+            renderedHtml: '<p>still working</p>',
+            messageId: 'a-rejected-compact',
+            state: 'streaming',
+            activeNow: true
+          }]
+        }
+      });
+      await settled();
+      expect(continuationForSession(sessionId)).toBeNull();
+
+      // A genuine turn boundary spends the refusal. The next working turn can compact again.
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [{ kind: 'turn_end', time: Date.now(), turnId: 'turn-rejected-compact', outcome: 'completed' }]
+        }
+      });
+      await request('POST', '/events', {
+        body: {
+          conversationId,
+          events: [
+            { kind: 'turn_start', time: Date.now(), turnId: 'turn-after-rejection' },
+            {
+              kind: 'assistant_message',
+              time: Date.now(),
+              turnId: 'turn-after-rejection',
+              text: 'new turn is working',
+              renderedHtml: '<p>new turn is working</p>',
+              messageId: 'a-after-rejection',
+              state: 'streaming',
+              activeNow: true
+            }
+          ]
+        }
+      });
+      await settled();
+      expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' });
+    });
+  });
+
   /**
    * Before the prompt has reached ChatGPT the pickup is a two-minute clock with five raised
    * reloads, and a ticket that still has not been sent after them is abandoned: nothing was

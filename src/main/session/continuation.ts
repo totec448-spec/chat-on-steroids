@@ -812,6 +812,30 @@ export async function dispatchContinuationSourceSendNow(token: string): Promise<
   });
 }
 
+/**
+ * Terminally abandons a source handoff when the page can still prove no Send happened.
+ *
+ * This is the source-side counterpart to releasing a lost destination draft, except there is
+ * nothing useful to retry automatically in chat A: a composer that rejected the instruction is
+ * liable to survive reloads with the same stale draft and turn one bounded pickup schedule into
+ * repeated UI churn. Both `not-attempted` and `attempted-unresolved` are pre-Send proofs; once
+ * the dispatch fence has been crossed the outcome is ambiguous and only ChatGPT's marker or an
+ * explicit user cancellation may end the transaction.
+ */
+export async function abortContinuationSourceBeforeSendNow(token: string, reason: string): Promise<boolean> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary' || !sendUnattempted(entry.sourceSend)) {
+      return false;
+    }
+    await transitionNow(entry, (current) => ({ ...current, state: 'aborted', error: reason }));
+    cancelPrimeTransfer(entry.from);
+    logWarn(`continuation ${entry.token.slice(0, 8)} durably abandoned before source Send — ${reason}`);
+    noteAbandoned(entry, reason);
+    return true;
+  });
+}
+
 /** Binds the marked source prompt to ChatGPT's stable user-message identity. */
 export async function bindContinuationSourceMessageNow(token: string, messageId: string, progress?: number): Promise<boolean> {
   if (!messageId || messageId.length > 200) return false;

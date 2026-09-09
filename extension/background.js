@@ -2830,6 +2830,9 @@ const HANDLERS = {
         ...(typeof message.token === 'string' && message.sourceAttempt === true
           ? { token: message.token, sourceAttempt: true }
           : {}),
+        ...(typeof message.token === 'string' && message.sourceLost === true
+          ? { token: message.token, sourceLost: true }
+          : {}),
         ...(typeof message.token === 'string' && message.sourceDispatch === true
           ? { token: message.token, sourceDispatch: true }
           : {}),

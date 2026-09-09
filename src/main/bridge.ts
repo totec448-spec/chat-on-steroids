@@ -143,6 +143,7 @@ import {
 import {
   abortContinuation,
   abortContinuationNow,
+  abortContinuationSourceBeforeSendNow,
   attachSummary,
   beginContinuationDestinationSendNow,
   beginContinuationSourceSendNow,
@@ -2221,6 +2222,30 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    if (body['sourceLost'] === true) {
+      const entry = continuationByToken(checkpointToken);
+      if (!entry || entry.from !== id) return json(res, 409, { error: 'no_such_continuation' }, origin);
+      let aborted = false;
+      try {
+        aborted = await abortContinuationSourceBeforeSendNow(checkpointToken, 'handoff_never_sent');
+      } catch (err) {
+        logWarn(
+          `bridge: could not durably abandon the unsent source handoff for ${entry.sessionId} — ${err instanceof Error ? err.message : String(err)}`
+        );
+        return json(
+          res,
+          503,
+          { error: 'source_abort_not_durable', retryable: true, sessionId: entry.sessionId, job: resumeJobFor(entry.sessionId) },
+          origin
+        );
+      }
+      if (!aborted) return json(res, 409, { error: 'source_send_not_releasable' }, origin);
+      rejectAutomaticCompactionForCurrentTurn(entry);
+      compactionWatch.delete(id);
+      if (repairsInFlight.get(id)?.reason === 'compaction') repairsInFlight.delete(id);
+      changed();
+      return json(res, 200, { aborted: true, sessionId: entry.sessionId, job: resumeJobFor(entry.sessionId) }, origin);
+    }
     // The last durable write before the click, quoting the claim handed out above. A false
     // answer means this document was reclaimed while it was composing and must submit nothing.
     if (body['sourceDispatch'] === true) {
@@ -4818,6 +4843,27 @@ interface ActivityGrant {
 
 const activeUntil = new Map<string, ActivityGrant>();
 
+/**
+ * A working turn whose automatic compaction was terminally refused before source Send.
+ *
+ * The context threshold is a level, so without this turn-local fence the very next interim/tool
+ * observation can immediately file a brand-new ticket for the same turn. A persistent composer
+ * draft would then retire that ticket too, and its pickup would recreate the reload loop under a
+ * new token. The refusal is therefore spent by a real turn boundary, not by another observation
+ * from the turn that already proved it cannot currently compact.
+ *
+ * Process memory is intentional. This is pickup/retry scheduling state, not continuation
+ * authority; the durable continuation WAL remains the only source of send/commit truth.
+ */
+const compactionRejectedTurn = new Map<string, { sessionId: string; turnId: string | null }>();
+
+function rejectAutomaticCompactionForCurrentTurn(entry: ContinuationView): void {
+  if (!entry.automatic) return;
+  const grant = activeUntil.get(entry.from);
+  if (!grant || grant.sessionId !== entry.sessionId) return;
+  compactionRejectedTurn.set(entry.from, { sessionId: entry.sessionId, turnId: grant.turnId });
+}
+
 /** Chats reloaded by the app whose page has given no sign of life since. */
 const awaitingReturn = new Set<string>();
 
@@ -4827,6 +4873,10 @@ function grantActivity(conversationId: string, sessionId: string, at = Date.now(
   if (!sessionId) return;
   const previous = activeUntil.get(conversationId);
   const ownership = turn ?? (previous?.sessionId === sessionId ? previous : { turnId: null, model: 'unknown' as const });
+  const rejected = compactionRejectedTurn.get(conversationId);
+  if (rejected && (rejected.sessionId !== sessionId || rejected.turnId !== ownership.turnId)) {
+    compactionRejectedTurn.delete(conversationId);
+  }
   if (ownership.model === 'pro' && (isChatBlocked(conversationId) || stopRequestedFor(conversationId))) return;
   const evidenceAt = previous?.sessionId === sessionId && previous.turnId === ownership.turnId ? Math.max(previous.evidenceAt, at) : at;
   activeUntil.set(conversationId, { sessionId, evidenceAt, until: evidenceAt + (ownership.model === 'pro' ? PRO_SILENCE_MS : window), turnId: ownership.turnId, model: ownership.model });
@@ -4959,6 +5009,7 @@ async function chatStillWorking(conversationId: string, turnId: string, sessionI
  */
 async function considerAutomaticCompaction(conversationId: string, sessionId: string): Promise<void> {
   if (!getConfig().compaction.auto || compactionFilings.has(conversationId)) return;
+  if (compactionRejectedTurn.get(conversationId)?.sessionId === sessionId) return;
   if (goalFencedChat(conversationId) || continuationForSession(sessionId) || !chatIsWorking(conversationId)) return;
   compactionFilings.add(conversationId);
   try {
@@ -5058,12 +5109,14 @@ function armResumedChat(sessionId: string, conversationId: string): void {
 /** A real terminal — stable final answer, explicit stop, worker finish — spends the deadline. */
 function endActivity(conversationId: string): void {
   activeUntil.delete(conversationId);
+  compactionRejectedTurn.delete(conversationId);
   armSilenceSweep();
 }
 
 /** Drops a chat out of the activity ledger entirely, once nothing is waiting on it. */
 function forgetActivity(conversationId: string): void {
   activeUntil.delete(conversationId);
+  compactionRejectedTurn.delete(conversationId);
   armSilenceSweep();
 }
 
@@ -6053,6 +6106,7 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
       if (repairsInFlight.get(entry.from)?.reason === 'compaction') repairsInFlight.delete(entry.from);
       try {
         await abortContinuationNow(entry.token, 'handoff_never_sent');
+        rejectAutomaticCompactionForCurrentTurn(entry);
         logWarn(
           `bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} was never sent after ${schedule.attempts} pickups — giving up`
         );
@@ -7621,6 +7675,7 @@ export function resetBridgeForTests(): void {
   bridgeShutdownRequested = false;
   clearUnattributedIncident();
   activeUntil.clear();
+  compactionRejectedTurn.clear();
   awaitingReturn.clear();
   lastAttributedCallAt.clear();
   goalWatch.clear();

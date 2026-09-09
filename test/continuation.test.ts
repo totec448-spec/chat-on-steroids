@@ -52,6 +52,7 @@ const {
   AUTOMATIC_HANDOVER_TTL_MS,
   CONTINUATION_TTL_MS,
   abortContinuation,
+  abortContinuationSourceBeforeSendNow,
   attachSummary,
   beginContinuationDestinationSendNow,
   beginContinuationSourceSendNow,
@@ -143,6 +144,32 @@ async function readyContinuation(): Promise<{ sessionId: string; token: string }
 }
 
 describe('capturing the brief', () => {
+  it('aborts only while the source checkpoint still proves no prompt was sent', async () => {
+    const untouched = await createSession({ title: 'untouched source', conversationId: CHAT_A });
+    const untouchedContinuation = await openContinuationNow(untouched.id, CHAT_A, true);
+    expect(await abortContinuationSourceBeforeSendNow(untouchedContinuation.token, 'handoff_never_sent')).toBe(true);
+    expect(continuationByToken(untouchedContinuation.token)).toMatchObject({
+      state: 'aborted',
+      error: 'handoff_never_sent'
+    });
+
+    const claimed = await createSession({ title: 'claimed source', conversationId: CHAT_B });
+    const claimedContinuation = await openContinuationNow(claimed.id, CHAT_B, true);
+    expect((await beginContinuationSourceSendNow(claimedContinuation.token))?.allowed).toBe(true);
+    expect(await abortContinuationSourceBeforeSendNow(claimedContinuation.token, 'handoff_never_sent')).toBe(true);
+    expect(continuationByToken(claimedContinuation.token)?.state).toBe('aborted');
+
+    const armed = await createSession({ title: 'armed source', conversationId: CHAT_C });
+    const armedContinuation = await openContinuationNow(armed.id, CHAT_C, true);
+    expect((await beginContinuationSourceSendNow(armedContinuation.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(armedContinuation.token)).toBe(true);
+    expect(await abortContinuationSourceBeforeSendNow(armedContinuation.token, 'handoff_never_sent')).toBe(false);
+    expect(continuationByToken(armedContinuation.token)).toMatchObject({
+      state: 'awaiting-summary',
+      sourceSend: { state: 'dispatched-unresolved' }
+    });
+  });
+
   it('answers a repeated capture with the handoff it already wrote', async () => {
     const summary = await createSession({ title: 'work', conversationId: CHAT_A });
     const opened = await openContinuationNow(summary.id, CHAT_A);
