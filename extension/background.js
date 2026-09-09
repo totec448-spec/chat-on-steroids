@@ -1799,9 +1799,14 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     if (!tab && !target && elected?.stage === 'preparing' && Number.isInteger(elected.tab)) {
       const candidate = tabs.find(row => row.id === elected.tab);
       const reusable = new Set(reusableConversations);
-      const conversation = conversationForTab(candidate);
+      // A completed conversation registry entry can survive New Chat and an
+      // extension reload. Only a concrete current/pending /c URL may protect a
+      // different conversation here; an unmarked home must reach the exact
+      // document/epoch/idle probe instead of deadlocking on stale metadata.
+      const concreteConversation = conversationFromUrl(candidate?.url) || conversationFromUrl(candidate?.pendingUrl);
       if (candidate) {
-        if (candidate.pendingUrl || modelCatalogTarget?.tab === candidate.id || (conversation && !reusable.has(conversation))) continue;
+        if (candidate.pendingUrl || modelCatalogTarget?.tab === candidate.id ||
+            (concreteConversation && !reusable.has(concreteConversation))) continue;
         const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
         if (!ownsDocument(source)) continue;
         const proof = await inputReuseProbe(candidate.id, source.documentId);
@@ -1845,8 +1850,8 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       if (!target && input.lifetime !== 'temporary-planner') {
         const reusable = new Set(reusableConversations);
         const choices = tabs.filter(candidate => !candidate.pendingUrl && modelCatalogTarget?.tab !== candidate.id &&
-          (!conversationForTab(candidate) || reusable.has(conversationForTab(candidate))) &&
-          (!recoveredReuse || candidate.id === recoveredReuse.tab))
+          (recoveredReuse ? candidate.id === recoveredReuse.tab :
+            (!conversationForTab(candidate) || reusable.has(conversationForTab(candidate)))))
           .sort((a, b) => Number(!!conversationForTab(a)) - Number(!!conversationForTab(b)) || a.id - b.id);
         for (const candidate of choices) {
           const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };

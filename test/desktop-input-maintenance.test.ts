@@ -490,6 +490,40 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-desktop-input')).toHaveLength(0);
     expect(h.create).not.toHaveBeenCalled();
   });
+  it('ignores a stale conversation registry entry on the exact elected home document', async () => {
+    const h = await worker([{ id: firstId, conversationId: null } as any], undefined,
+      { inputOpenings: { [firstId]: { tab: 7, stage: 'preparing' } } });
+    h.tabs.push({ id: 7, url: 'https://chatgpt.com/' });
+    const source = await h.authorizeDocument({ tab: { id: 7 }, documentId: 'idle', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    await h.noteTabConversation(source, secondId);
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-input-reuse-state') return { ok: true, safe: true, navigationEpoch: 1 } as never;
+      if (message.type === 'clf-prepare-desktop-input') {
+        h.tabs[0]!.url = `https://chatgpt.com/?cos-input=${firstId}`;
+        return { ready: true } as never;
+      }
+      return { ok: true };
+    });
+    await h.maintain();
+    expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-input-reuse-state')).toHaveLength(1);
+    expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-prepare-desktop-input')).toHaveLength(1);
+    expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-desktop-input')).toHaveLength(1);
+    expect((h.localSaved.inputOpenings as any)[firstId]).toEqual({ tab: 7, stage: 'ready' });
+    expect(h.create).not.toHaveBeenCalled();
+  });
+  it('still protects a concrete non-reusable conversation during preparing recovery', async () => {
+    const h = await worker([{ id: firstId, conversationId: null } as any], undefined,
+      { inputOpenings: { [firstId]: { tab: 7, stage: 'preparing' } } });
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'other-chat', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+    h.sendMessage.mockResolvedValue({ ok: true, safe: true, navigationEpoch: 1 } as never);
+    await h.maintain();
+    expect((h.localSaved.inputOpenings as any)[firstId]).toEqual({ tab: 7, stage: 'preparing' });
+    expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-input-reuse-state')).toHaveLength(0);
+    expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-prepare-desktop-input')).toHaveLength(0);
+    expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-desktop-input')).toHaveLength(0);
+    expect(h.create).not.toHaveBeenCalled();
+  });
   it('retries the same preparation only after an exact idle proof for its owned document', async () => {
     const h = await worker([{ id: firstId, conversationId: null, reopenUnclaimed: true } as any], undefined,
       { inputOpenings: { [firstId]: { tab: 7, stage: 'preparing' } } });
