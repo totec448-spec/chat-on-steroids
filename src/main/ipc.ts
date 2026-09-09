@@ -56,7 +56,7 @@ import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
 import {
   bridgeStatus,
   sessionActivityExpiresAt,
-  sessionHasInputActivity,
+  sessionInputActivity,
   sessionControlsFor, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, cancelSessionCompaction,
   cancelWorkerCommands,
   chatUrl,
@@ -1009,7 +1009,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     target.webContents.send(channel, ...args);
   };
   configureInputDelivery({
-    hasActivity: sessionHasInputActivity,
+    activity: sessionInputActivity,
     wakeDecision: async (entry, signal) => {
       signal.throwIfAborted();
       if (!await startBridge()) throw new Error('The browser bridge could not start');

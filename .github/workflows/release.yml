@@ -219,7 +219,21 @@ jobs:
         run: |
           set -euo pipefail
           deb_smoke_root="$(mktemp -d)"
-          trap 'rm -rf "$deb_smoke_root"' EXIT
+          cleanup_path_with_retries() {
+            target="$1"
+            for attempt in 1 2 3 4 5; do
+              rm -rf "$target" 2>/dev/null && return 0
+              sleep 0.2
+            done
+            # Cleanup is not product evidence, the same rule the AppImage smoke below follows.
+            # `timeout` signals xvfb-run rather than the process tree beneath it, so an Electron
+            # helper can still be writing into the sandbox here, and `rm -rf` over a directory
+            # that is still gaining entries fails with "Directory not empty". Under `set -e`
+            # that teardown race outranked a smoke test whose own assertions had all passed,
+            # and skipped the release assembly with every package job green.
+            rm -rf "$target" 2>/dev/null || true
+          }
+          trap 'cleanup_path_with_retries "$deb_smoke_root"' EXIT
           mkdir -p \
             "$deb_smoke_root/home" \
             "$deb_smoke_root/config" \

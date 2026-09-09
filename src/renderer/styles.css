@@ -1954,7 +1954,8 @@ input[readonly] {
   overflow-wrap: anywhere;
   padding: 4px 7px;
   border: 1px solid var(--line);
-  text-align: left;
+  /* `start`, not `left`: a table inside a right-to-left answer aligns with its own text. */
+  text-align: start;
   vertical-align: top;
 }
 
@@ -2544,7 +2545,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .composer-options { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px; }
 .composer-options select { border: 0; background: transparent; color: var(--soft); font: inherit; font-size: 11px; max-width: 130px; padding: 5px; }
 .input-queue { width: 100%; margin: 0 auto; }
-.pending-message { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin: 4px 0 26px auto; width: fit-content; max-width: 82%; text-align: left; }
+.pending-message { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin: 4px 0 26px auto; width: fit-content; max-width: 82%; text-align: start; }
 .pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.75; }
 .pending-message-status { position: absolute; right: 30px; top: calc(100% + 1px); height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1.45; color: var(--soft); }
 .pending-message.is-delivery-error .pending-message-status { position: static; display: block; height: auto; margin-top: 4px; font-size: 11px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

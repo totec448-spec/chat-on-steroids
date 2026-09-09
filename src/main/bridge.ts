@@ -2,7 +2,7 @@ import { conversationProgress } from './session/progress.js';
 import { pendingChatModelRequest, observeChatModels } from './chat-models.js';
 import { isProModel } from '../shared/chat-models.js';
 import type { SessionSummary } from '../shared/session.js';
-import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy } from './session/input.js';
+import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
 import { pluginRefreshPublications, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { wakeBrowserUrl } from './browser-startup.js';
@@ -93,7 +93,7 @@ import {
   readRecentEvents,
   sessionDurableModifiedAt
 } from './session/store.js';
-import { inFlightMcpRequests, runningToolCalls, settlingToolCalls } from './mcp/call-context.js';
+import { inFlightMcpRequests, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
 import {
@@ -143,6 +143,7 @@ import {
 import {
   abortContinuation,
   abortContinuationNow,
+  abortContinuationSourceBeforeSendNow,
   attachSummary,
   beginContinuationDestinationSendNow,
   beginContinuationSourceSendNow,
@@ -893,6 +894,7 @@ function parseObservations(input: unknown): ChatObservation[] {
     }
     if (typeof item['detail'] === 'string') observation.detail = item['detail'].slice(0, 500);
     if (typeof item['recoverable'] === 'boolean') observation.recoverable = item['recoverable'];
+    if (item['blocking'] === true) observation.blocking = true;
     if (Array.isArray(item['calls'])) observation.calls = parseCallEvidence(item['calls']);
     out.push(observation);
   }
@@ -1049,7 +1051,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
       live?.activeTurnId === session.activeTurnId)) ? session.activeTurnId : null;
   const finishHeld = !blocked && await sessionFinishHeld(sessionId, activeTurnId, id);
   const draft = goalViewFor(id);
-  const inputPolicy = await sessionInputPolicy(sessionId, sessionHasInputActivity(session));
+  const inputPolicy = await sessionInputPolicy(sessionId, sessionInputActivity(session));
   return { sessionId, conversationId: id, activeTurnId, finishHeld,
     queueAtFinish: !blocked && inputPolicy.queueAtFinish, canInject: !blocked && inputPolicy.canInject,
     finishGoalDraft: getSessionFinishDraft(sessionId, activeTurnId),
@@ -1502,7 +1504,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         await registerGoalDecisionChat(helperConversation, entry.decisionSourceSessionId);
       }
       if (route === '/input/answer') return json(res, 200, { ok: typeof body.response === 'string' && await completeBrowserDecision(body.id, body.owner, body.response, deliveredConversation) }, origin);
-      return json(res, 200, { ok: await acknowledgeBrowserInput(body.id, body.owner, deliveredConversation, typeof body.messageId === 'string' ? body.messageId : undefined) }, origin);
+      const acknowledged = await acknowledgeBrowserInput(body.id, body.owner, deliveredConversation, typeof body.messageId === 'string' ? body.messageId : undefined);
+      if (acknowledged && deliveredConversation) await collectRecordedBrowserDecision(deliveredConversation);
+      return json(res, 200, { ok: acknowledged }, origin);
     }
     const target = body.conversationId === null ? null : conversationId(body.conversationId);
     if (body.conversationId !== null && !target) return json(res, 400, { error: 'bad_conversation_id' }, origin);
@@ -1644,6 +1648,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
       const result = await recordChatObservations(id, observations, agent);
       const superseded = await conversationWasSuperseded(id);
+      if (!superseded && result.sessionId) await collectRecordedBrowserDecision(id);
       // The stable assistant message, not the page-local turn id, is the exactly-once Goal
       // checkpoint. Freeze app config/key policy before 200 lets the browser retire this
       // terminal observation from its durable journal.
@@ -2221,6 +2226,29 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     const id = conversationId(body['conversationId']);
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    if (body['sourceLost'] === true) {
+      const entry = continuationByToken(checkpointToken);
+      if (!entry || entry.from !== id) return json(res, 409, { error: 'no_such_continuation' }, origin);
+      let aborted = false;
+      try {
+        aborted = await abortContinuationSourceBeforeSendNow(checkpointToken, 'handoff_never_sent');
+      } catch (err) {
+        logWarn(
+          `bridge: could not durably abandon the unsent source handoff for ${entry.sessionId} — ${err instanceof Error ? err.message : String(err)}`
+        );
+        return json(
+          res,
+          503,
+          { error: 'source_abort_not_durable', retryable: true, sessionId: entry.sessionId, job: resumeJobFor(entry.sessionId) },
+          origin
+        );
+      }
+      if (!aborted) return json(res, 409, { error: 'source_send_not_releasable' }, origin);
+      compactionWatch.delete(id);
+      if (repairsInFlight.get(id)?.reason === 'compaction') repairsInFlight.delete(id);
+      changed();
+      return json(res, 200, { aborted: true, sessionId: entry.sessionId, job: resumeJobFor(entry.sessionId) }, origin);
+    }
     // The last durable write before the click, quoting the claim handed out above. A false
     // answer means this document was reclaimed while it was composing and must submit nothing.
     if (body['sourceDispatch'] === true) {
@@ -4870,12 +4898,14 @@ export const PRO_ACTIVITY_MS = 10 * 60_000;
 const activityLifetime = (grant: ActivityGrant): number => grant.model === 'pro' ? PRO_ACTIVITY_MS : PRO_SILENCE_RETIRE_MS;
 
 /** Runtime presentation of the same exact Pro work grant that owns silence recovery. */
-export function sessionHasInputActivity(summary: SessionSummary): boolean {
+export function sessionInputActivity(summary: SessionSummary): InputActivity {
   const id = summary.conversationId;
-  if (!id) return false;
+  if (!id) return { possible: false, exact: false };
   const expiry = sessionActivityExpiresAt(summary);
-  return runningToolCalls(id) > 0 || (expiry !== undefined && expiry !== null && expiry > Date.now()) ||
+  const exact = runningToolProgress(id) !== null ||
     liveConversations().some(row => row.sessionId === summary.id && row.conversationId === id && !!row.activeTurnId);
+  return { exact, possible: exact || runningToolCalls(id) > 0 ||
+    (expiry !== undefined && expiry !== null && expiry > Date.now()) };
 }
 export function sessionActivityExpiresAt(summary: SessionSummary): number | null | undefined {
   const id = summary.conversationId;
@@ -5535,7 +5565,16 @@ async function noteRecoveryObservations(
   const now = Date.now();
   for (const item of observations) {
     if (item.kind !== 'chat_error') continue;
-    if (/^too many requests\b.*temporarily limited.*access.*few minutes/i.test((item.text ?? '').replace(/\s+/g, ' '))) {
+    // A provider access limit is the page saying it will not carry this chat for a few
+    // minutes; reloading it is useless. The DOM classifier already identifies that dialog
+    // and marks it blocking, so honour its verdict rather than re-deriving one here — this
+    // prose only ever matched the English notice, so the same limit in Korean ran the
+    // silence watchdog down and asked the browser to recover against a live block. The
+    // English match stays for extension documents older than the flag.
+    if (
+      item.blocking === true ||
+      /^too many requests\b.*temporarily limited.*access.*few minutes/i.test((item.text ?? '').replace(/\s+/g, ' '))
+    ) {
       endActivity(conversationId);
       continue;
     }
@@ -6052,7 +6091,7 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
       compactionWatch.delete(entry.from);
       if (repairsInFlight.get(entry.from)?.reason === 'compaction') repairsInFlight.delete(entry.from);
       try {
-        await abortContinuationNow(entry.token, 'handoff_never_sent');
+        if (!await abortContinuationSourceBeforeSendNow(entry.token, 'handoff_never_sent')) continue;
         logWarn(
           `bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} was never sent after ${schedule.attempts} pickups — giving up`
         );

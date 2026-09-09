@@ -517,6 +517,8 @@ export interface SessionSummary {
   lastTurnOutcome: TurnOutcome | null;
   /** Durable open-turn projection. Undefined only on pre-1.8.8 metadata. */
   activeTurnId?: string | null;
+  /** A pre-Send automatic handoff refusal lasts until a different turn or frontend. */
+  autoCompactionRefusal?: { conversationId: string; turnId: string | null };
   /** Constant-size projection of app finish receipts for the most recently started turn. */
   finishTurn?: {
     turnId: string;

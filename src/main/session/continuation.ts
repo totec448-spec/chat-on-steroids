@@ -74,6 +74,7 @@ import {
   getSession,
   readEvents,
   readHandoff,
+  refuseAutomaticCompactionNow,
   rebindSession
 } from './store.js';
 
@@ -165,6 +166,7 @@ export function normalizeProjectId(value: unknown): string | null {
 }
 
 interface Continuation {
+  sourceTurnId: string | null;
   token: string;
   sessionId: string;
   /** Chat A: where the session is attached until the commit lands. */
@@ -230,6 +232,7 @@ export const CONTINUATIONS_STATE = 'continuations';
 const RESUME_SHADOW_COLLISION = 'the replacement chat already belongs to another local session';
 
 interface ContinuationRecord {
+  sourceTurnId?: string | null;
   token: string;
   sessionId: string;
   from: string;
@@ -264,6 +267,7 @@ export interface ContinuationSnapshot {
 
 function durableRecord(entry: Continuation): ContinuationRecord {
   return {
+    sourceTurnId: entry.sourceTurnId,
     token: entry.token,
     sessionId: entry.sessionId,
     from: entry.from,
@@ -688,6 +692,7 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
  */
 function makeContinuation(sessionId: string, fromConversationId: string, automatic: boolean, project: string | null): Continuation {
   return {
+    sourceTurnId: null,
     token: randomBytes(16).toString('base64url'),
     sessionId,
     from: fromConversationId,
@@ -727,6 +732,7 @@ export async function openContinuationNow(
     const again = [...byToken.values()].find((entry) => entry.sessionId === sessionId && isOpen(entry));
     if (again) return view(again);
     const entry = makeContinuation(sessionId, fromConversationId, automatic, normalizeProjectId(project));
+    entry.sourceTurnId = (await getSession(sessionId))?.activeTurnId ?? null;
     try {
       await writeDurableNow(CONTINUATIONS_STATE, snapshotWith(entry.token, durableRecord(entry)));
     } catch (err) {
@@ -808,6 +814,31 @@ export async function dispatchContinuationSourceSendNow(token: string): Promise<
       ...current,
       sourceSend: { state: 'dispatched-unresolved', messageId: null }
     }));
+    return true;
+  });
+}
+
+/**
+ * Terminally abandons a source handoff when the page can still prove no Send happened.
+ *
+ * This is the source-side counterpart to releasing a lost destination draft, except there is
+ * nothing useful to retry automatically in chat A: a composer that rejected the instruction is
+ * liable to survive reloads with the same stale draft and turn one bounded pickup schedule into
+ * repeated UI churn. Both `not-attempted` and `attempted-unresolved` are pre-Send proofs; once
+ * the dispatch fence has been crossed the outcome is ambiguous and only ChatGPT's marker or an
+ * explicit user cancellation may end the transaction.
+ */
+export async function abortContinuationSourceBeforeSendNow(token: string, reason: string): Promise<boolean> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || entry.state !== 'awaiting-summary' || !sendUnattempted(entry.sourceSend)) {
+      return false;
+    }
+    if (entry.automatic) await refuseAutomaticCompactionNow(entry.sessionId, entry.from, entry.sourceTurnId);
+    await transitionNow(entry, (current) => ({ ...current, state: 'aborted', error: reason }));
+    cancelPrimeTransfer(entry.from);
+    logWarn(`continuation ${entry.token.slice(0, 8)} durably abandoned before source Send — ${reason}`);
+    noteAbandoned(entry, reason);
     return true;
   });
 }
@@ -1452,6 +1483,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       continue;
     }
     const entry: Continuation = {
+      sourceTurnId: typeof raw.sourceTurnId === 'string' ? raw.sourceTurnId : null,
       token: raw.token,
       sessionId: raw.sessionId,
       from: raw.from,

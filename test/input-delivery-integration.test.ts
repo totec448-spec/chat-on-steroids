@@ -57,6 +57,71 @@ beforeEach(async () => {
   goal.resetGoalStateForTests(); input.resetInputForTests(); pushed.mockClear();
   await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
 });
+
+it.each([false, true])('collects an exact recorded helper final across document loss (final before ACK: %s)', async finalBeforeAck => {
+  const controller = new AbortController();
+  const helper = randomUUID();
+  await createSession({ title: 'Decision helper', conversationId: helper });
+  const answer = input.requestBrowserDecision('Choose the next action', controller.signal, { conversationId: helper });
+  void answer.catch(() => undefined);
+  try {
+    const [row] = await input.listInputs();
+    expect((await post('/input/claim', { id: row!.id, owner: 'lost-document', conversationId: helper })).body.input).toBeTruthy();
+    const final = () => post('/events', { conversationId: helper, events: [
+      { kind: 'user_message', messageId: 'decision-user', text: 'Choose the next action', time: Date.now() },
+      { kind: 'assistant_message', messageId: 'decision-final', turnId: 'decision-turn', text: '{"next":"continue"}',
+        state: 'final', final: true, goalEligible: true, time: Date.now() }
+    ] });
+    if (finalBeforeAck) expect((await final()).status).toBe(200);
+    expect((await post('/input/ack', { id: row!.id, owner: 'lost-document', conversationId: helper, messageId: 'decision-user' })).body.ok).toBe(true);
+    if (!finalBeforeAck) expect((await final()).status).toBe(200);
+    expect((await input.listInputs()).find(entry => entry.id === row!.id)).toMatchObject({ state: 'sent', response: '{"next":"continue"}' });
+    await expect(answer).resolves.toBe('{"next":"continue"}');
+    expect(await input.pendingBrowserInputs()).toEqual([]);
+  } finally { controller.abort(); await answer.catch(() => undefined); }
+});
+
+it('does not pin an idle chat to tool transport because another call is unattributed', async () => {
+  const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Completed target', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model: 'gpt-5.6-sol', time: Date.now() },
+    { kind: 'turn_start', turnId: 'completed-before-input', time: Date.now() },
+    { kind: 'turn_end', turnId: 'completed-before-input', outcome: 'completed', time: Date.now() }
+  ] });
+  let row!: import('../src/main/session/input.js').InputEntry;
+  await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+    caller: { requestId: null, transportKey: null, conversationId: null } }, async () => {
+    row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+    expect(row.transportIntent).toBeUndefined();
+    expect((await input.sessionInputPolicy(session.id)).canInject).toBe(false);
+    expect(await input.claimBrowserInput(row.id, 'fresh-document', conversationId)).toBeNull();
+  });
+  expect(await input.claimBrowserInput(row.id, 'fresh-document', conversationId)).not.toBeNull();
+});
+
+it.each(['different-user', 'streaming', 'cancelled', 'different-chat'])(
+  'refuses a recorded helper result with %s evidence', async condition => {
+    const controller = new AbortController();
+    const helper = randomUUID();
+    await createSession({ title: 'Exact helper', conversationId: helper });
+    const answer = input.requestBrowserDecision('Choose the next action', controller.signal, { conversationId: helper });
+    void answer.catch(() => undefined);
+    try {
+      const [row] = await input.listInputs();
+      await post('/input/claim', { id: row!.id, owner: 'original-document', conversationId: helper });
+      await post('/input/ack', { id: row!.id, owner: 'original-document', conversationId: helper, messageId: 'accepted-user' });
+      if (condition === 'cancelled') { controller.abort(); await answer.catch(() => undefined); }
+      const conversationId = condition === 'different-chat' ? randomUUID() : helper;
+      await post('/events', { conversationId, events: [
+        { kind: 'user_message', messageId: condition === 'different-user' ? 'foreign-user' : 'accepted-user', text: 'Choose the next action', time: Date.now() },
+        { kind: 'assistant_message', messageId: 'candidate-final', turnId: 'candidate-turn', text: 'candidate',
+          state: condition === 'streaming' ? 'streaming' : 'final', final: condition !== 'streaming', time: Date.now() }
+      ] });
+      expect((await input.listInputs()).find(entry => entry.id === row!.id)?.state).toBe(condition === 'cancelled' ? 'cancelled' : 'decision');
+    } finally { controller.abort(); await answer.catch(() => undefined); }
+  });
 it('serves staged attachment bytes only to the exact unsent browser input owner', async () => {
   const { stageInputAttachment } = await import('../src/main/session/input-attachments.js');
   const file = await stageInputAttachment({ text: 'Attachment payload' }, new Set());
