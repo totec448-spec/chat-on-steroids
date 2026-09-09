@@ -364,6 +364,9 @@ async function loadPreferences() {
   showTimes = stored[SHOW_TIMES_KEY] === true;
   syncOverwrite();
   $('timeToggle').checked = showTimes;
+  // The browser-control row reflects a browser permission rather than a stored preference,
+  // so it has to be read on open. Without this it only paints after somebody clicks it.
+  await syncBrowserControl();
 }
 
 /** Puts one value on the clipboard and says so in place, without moving anything. */
@@ -426,6 +429,145 @@ $('overwriteToggle').addEventListener('change', async () => {
   } catch {
     overwriteEnabled = previous;
     syncOverwrite();
+  }
+});
+
+/**
+ * Browser control is the one switch that changes what the extension is allowed to do.
+ *
+ * Chrome only shows a permission prompt from a real user gesture, which is why this lives in
+ * the popup rather than in a settings round trip: the click that turns it on *is* the consent.
+ * Turning it off both revokes the permissions and drops any live session, so "off" means the
+ * capability is gone, not merely unused.
+ */
+/**
+ * Chrome answers a callback and returns nothing; Firefox returns a promise and ignores the
+ * callback. Waiting only for the callback waits forever on Firefox, which this extension
+ * supports, so whichever the browser actually hands back is accepted.
+ */
+/*
+ * What browser control still asks for at runtime.
+ *
+ * `debugger` is deliberately absent, and this is the whole reason the switch used to be
+ * unusable: Chrome does not accept `debugger` in optional_permissions. It drops the entry when
+ * the manifest loads, so a later request for it comes back "Only permissions specified in the
+ * manifest may be requested" — verified against Chrome 152. Every request here failed on that
+ * one entry, the failure was swallowed, and the toggle simply snapped back off. `debugger` is a
+ * required permission now; site and tab access stay optional, which is what actually decides
+ * whether this extension can read a page.
+ */
+const BROWSER_CONTROL_PERMISSIONS = {
+  permissions: ['tabs', 'tabGroups'],
+  origins: ['<all_urls>']
+};
+
+/**
+ * Shows why browser control could not be switched on, or clears it.
+ *
+ * A permission refusal used to be invisible: the switch flipped back and said nothing, so a
+ * request Chrome was never going to grant looked like a broken control. The message is the
+ * browser's own wherever there is one, because a summary loses the detail that makes it fixable.
+ */
+function showBrowserControlError(message) {
+  const node = document.getElementById('browserControlError');
+  if (!node) return;
+  node.textContent = message ?? '';
+  node.hidden = !message;
+}
+
+/** The reason the last permission call failed, for the popup to show rather than hide. */
+let lastPermissionError = null;
+
+function browserPermissions(method) {
+  lastPermissionError = null;
+  return new Promise((resolve) => {
+    const api = webext?.permissions;
+    if (!api?.[method]) return resolve(false);
+    try {
+      const returned = api[method](BROWSER_CONTROL_PERMISSIONS, (granted) => {
+        // Kept, not discarded: a refusal the user cannot see reads as a broken switch, which is
+        // exactly how a permission Chrome would never grant went unnoticed.
+        lastPermissionError = chrome.runtime.lastError?.message ?? null;
+        resolve(Boolean(granted));
+      });
+      if (returned && typeof returned.then === 'function') {
+        returned.then(
+          (granted) => resolve(Boolean(granted)),
+          (error) => {
+            lastPermissionError = error?.message ?? String(error);
+            resolve(false);
+          }
+        );
+      }
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function syncBrowserControl() {
+  // Whether the browser knows this permission at all, which is not the same as holding it.
+  // `chrome.debugger` does not exist until the permission is granted, so testing for that
+  // object would hide the switch that grants it and make the feature unreachable — measured
+  // in a real Edge run, where the popup saw no debugger API before granting.
+  const supported = await new Promise((resolve) => {
+    try {
+      const returned = chrome.permissions.contains({ permissions: ['debugger'] }, (held) => {
+        resolve(!chrome.runtime.lastError && typeof held === 'boolean');
+      });
+      if (returned && typeof returned.then === 'function') {
+        returned.then(() => resolve(true), () => resolve(false));
+      }
+    } catch {
+      resolve(false);
+    }
+  });
+  $('browserControlToggle').closest('.row').hidden = !supported;
+  if (!supported) return;
+  try {
+    const status = await chrome.runtime.sendMessage({ type: 'browser_status' });
+    const on = status?.granted === true;
+    $('browserControlToggle').checked = on;
+    $('browserControlToggle').closest('.row')?.classList.toggle('on', on);
+    // A worker that answers with a failure is not the same as one that says "not granted", and
+    // the switch cannot show the difference. It showed off for both, which is how a worker that
+    // could not load the driver at all looked exactly like a permission nobody had granted.
+    showBrowserControlError(
+      status?.ok === false && status?.error
+        ? `Browser control is unavailable: ${status.error}`
+        : null
+    );
+  } catch (error) {
+    $('browserControlToggle').checked = false;
+    showBrowserControlError(
+      `Browser control could not be read from the extension worker: ${error?.message ?? String(error)}`
+    );
+  }
+}
+
+$('browserControlToggle').addEventListener('change', async () => {
+  const wanted = $('browserControlToggle').checked === true;
+  try {
+    if (wanted) {
+      if (!(await browserPermissions('request'))) {
+        $('browserControlToggle').checked = false;
+        showBrowserControlError(
+          lastPermissionError
+            ? `Browser control could not be enabled: ${lastPermissionError}`
+            : 'Browser control could not be enabled. The browser declined the permission request.'
+        );
+      } else {
+        showBrowserControlError(null);
+      }
+    } else {
+      showBrowserControlError(null);
+      // Stop first, then revoke: revoking under a live session would leave a debugger
+      // attachment this extension can no longer address, and the banner with it.
+      await chrome.runtime.sendMessage({ type: 'browser_detach' }).catch(() => null);
+      await browserPermissions('remove');
+    }
+  } finally {
+    await syncBrowserControl();
   }
 });
 

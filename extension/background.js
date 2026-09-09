@@ -20,6 +20,8 @@
  * record the app has not accepted yet.
  */
 
+import * as browserDriverModule from './browser-driver.js';
+
 const PORTS = [8765, 8766, 8767, 8768, 8769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -3090,8 +3092,98 @@ const HANDLERS = {
     // response itself was lost; the outbox is now the sole retry path.
     await forgetDeferredRevival(message.id);
     return result;
+  },
+
+  /**
+   * Browser control, which lives here because the worker is the only part of the extension
+   * allowed to hold a debugger session — the same reason it is the only part that holds the
+   * pairing token. A content script asks; it never drives.
+   *
+   * Loaded on first use rather than imported at the top. The worker is started for every
+   * ordinary observation and almost none of those touch a browser session, so the driver
+   * should not be on that path; and this file is also evaluated as a plain script by its own
+   * tests, where a static import is a parse error.
+   */
+  async browser_status() {
+    const driver = await browserControl();
+    return { ok: true, granted: await driver.hasBrowserPermissions(), ...(await driver.browserDriver.status()) };
+  },
+  async browser_attach(message) {
+    return browserResult(async (driver) => driver.browserDriver.attach(Number(message.tabId)), 'BROWSER_ATTACH_FAILED');
+  },
+  async browser_detach() {
+    const driver = await browserControl();
+    return { ok: true, ...(await driver.browserDriver.detach()) };
+  },
+  async browser_act(message) {
+    return browserResult(
+      async (driver) => ({ result: await driver.browserDriver.act(message.action) }),
+      'BROWSER_ACTION_FAILED'
+    );
+  },
+  /**
+   * Reports a browser action's outcome back to the app.
+   *
+   * Through the worker because the pairing token lives here and never in a content script —
+   * the same reason every other route the page needs is proxied rather than called directly.
+   */
+  async browser_result(message) {
+    await load();
+    try {
+      return await call('/browser/result', {
+        method: 'POST',
+        body: JSON.stringify({
+          conversationId: String(message.conversationId || ''),
+          id: String(message.id || ''),
+          ok: message.ok === true,
+          data: message.data,
+          error: message.error,
+          detail: message.detail
+        })
+      });
+    } catch (error) {
+      return { ok: false, error: 'bridge_unreachable', detail: String(error?.message ?? error) };
+    }
+  },
+  async browser_observe(message) {
+    return browserResult(
+      async (driver) => driver.browserDriver.observe({ includeScreenshot: message.includeScreenshot !== false }),
+      'BROWSER_OBSERVE_FAILED'
+    );
   }
 };
+
+/**
+ * The browser driver, loaded once and only when something actually asks for it.
+ *
+ * Statically imported, because a service worker may not do otherwise: dynamic `import()` is
+ * disallowed on ServiceWorkerGlobalScope by specification, and Chrome refuses it at runtime with
+ * exactly that message. It was dynamic here to keep the module off the hot path of ordinary
+ * observation and to let this file parse where a test evaluates it as a classic script — and
+ * that second reason quietly cost the whole feature: every browser_* message failed in a real
+ * browser while the tests, which never execute an import, stayed green. The test harness stubs
+ * the module now; the product does what the platform allows.
+ */
+let browserLifecycleInstalled = false;
+async function browserControl() {
+  if (!browserLifecycleInstalled) {
+    browserLifecycleInstalled = true;
+    // Registered on first use rather than at load: a session the browser tears down — a closed
+    // tab, Cancel on the debugging banner, DevTools opening — must not leave this worker
+    // believing it still owns one.
+    browserDriverModule.installBrowserDriverLifecycle();
+  }
+  return browserDriverModule;
+}
+
+async function browserResult(run, fallbackCode) {
+  try {
+    const driver = await browserControl();
+    return { ok: true, ...(await run(driver)) };
+  } catch (error) {
+    return { ok: false, error: error?.code ?? fallbackCode, detail: String(error?.message ?? error) };
+  }
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = message && typeof message.type === 'string' ? HANDLERS[message.type] : null;
@@ -3580,6 +3672,10 @@ if (chrome.alarms && chrome.alarms.onAlarm && typeof chrome.alarms.onAlarm.addLi
       .then(() => drain())
       .then(() => drainCloses())
       .then(() => maintain())
+      // Catches a "Chat On Steroids" tab group left behind by a session this worker no longer
+      // remembers - the MV3 recycle case sweepStaleDrivenGroups exists for - even when nothing
+      // ever attaches again to trigger the other place it runs.
+      .then(() => browserDriverModule.sweepStaleDrivenGroups())
       .catch(() => undefined)
       .then(() => {
         // Re-armed here and nowhere else. Every other caller of scheduleRetry() finds the

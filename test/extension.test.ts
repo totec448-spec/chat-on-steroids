@@ -599,7 +599,26 @@ function loadWorker(options: {
     }
   };
   const fetch = options.fetch ?? (async () => response(503, {}));
-  vm.runInNewContext(backgroundSource, {
+  /**
+   * background.js statically imports the browser driver, because a service worker may not
+   * import dynamically: the specification forbids it and Chrome refuses at runtime. This
+   * harness evaluates the file as a classic script, where an import statement is a parse
+   * error, so the statement is removed here and the binding supplied instead.
+   *
+   * Removed rather than accommodated by keeping the product dynamic, which is what used to
+   * happen: the import was dynamic so this line would parse, every browser_* message failed
+   * in a real browser, and these tests stayed green throughout because they never execute one.
+   * The check below fails loudly if the import stops looking the way this rewrite expects.
+   */
+  const importPattern = /^import \* as browserDriverModule from '\.\/browser-driver\.js';$/m;
+  if (!importPattern.test(backgroundSource)) {
+    throw new Error(
+      'background.js no longer statically imports browser-driver.js as expected; ' +
+        'update this harness rather than making the worker import dynamically'
+    );
+  }
+
+  vm.runInNewContext(backgroundSource.replace(importPattern, ''), {
     chrome,
     fetch,
     AbortController,
@@ -607,7 +626,22 @@ function loadWorker(options: {
     clearTimeout,
     URL,
     TextEncoder,
-    console
+    console,
+    // Stubbed: these tests exercise the worker's messaging, never a debugger session. A test
+    // that needs the real driver needs a real browser to run it in.
+    browserDriverModule: {
+      installBrowserDriverLifecycle() {},
+      sweepStaleDrivenGroups: async () => undefined,
+      hasBrowserPermissions: async () => false,
+      requestBrowserPermissions: async () => false,
+      browserDriver: {
+        status: () => ({ attached: false, tabId: null, url: null, title: null }),
+        attach: async () => ({ attached: false }),
+        detach: async () => ({ attached: false }),
+        act: async () => ({}),
+        observe: async () => ({})
+      }
+    }
   }, { filename: 'background.js' });
   if (!listener) throw new Error('background.js did not register a message listener');
 

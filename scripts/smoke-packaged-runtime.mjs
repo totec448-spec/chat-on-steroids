@@ -73,6 +73,7 @@ for (const relative of [
   'LICENSES.chromium.html',
   'extension/manifest.json',
   'extension/background.js',
+  'extension/browser-driver.js',
   'extension/chatgpt-dom.js',
   'extension/content.js',
   'extension/fiber.js',

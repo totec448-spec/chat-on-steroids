@@ -688,7 +688,7 @@ describe('surface boundaries', () => {
   it('advertises exactly Desktop’s tools on Desktop, with nothing from Core', async () => {
     everything();
     const names = toolNames(await desktop('tools/list'));
-    expect(names).toEqual(['computer', 'observe']);
+    expect(names).toEqual(['browser', 'computer', 'observe']);
     for (const name of surfaceDefinition('core').tools) expect(names, name).not.toContain(name);
   });
 
@@ -804,19 +804,25 @@ describe('surface boundaries', () => {
     const desktopTools = toolList(await desktop('tools/list'));
 
     // Counts are the design: Core is capped at eight live schemas because find and the exec
-    // pair cannot both exist, and Desktop is two.
+    // pair cannot both exist, and Desktop is three.
     expect(coreTools).toHaveLength(8);
-    expect(desktopTools).toHaveLength(2);
+    expect(desktopTools).toHaveLength(3);
 
     // And the size, which is what a discovery pull actually costs the model on every
     // conversation that touches the connector. The ceilings sit just above what the
-    // surface measures today (core 12.5k, desktop 7.9k on 2026-08-17) rather than at a
+    // surface measures today (core 12.5k, desktop 12.9k on 2026-09-09) rather than at a
     // round number well above it: a budget with room to spare is a budget that never
     // catches the regression it exists to catch.
+    //
+    // Desktop went from 7.9k to 12.9k when the browser tool arrived, and that is the whole
+    // cost of the capability at discovery time, paid by every conversation that touches the
+    // connector whether or not it drives a page. It is a discriminated union of nine actions;
+    // the ceiling is raised deliberately here rather than the schema trimmed to fit, so the
+    // number stays visible and the next growth still has to argue for itself.
     const coreBytes = Buffer.byteLength(JSON.stringify(coreTools), 'utf8');
     const desktopBytes = Buffer.byteLength(JSON.stringify(desktopTools), 'utf8');
     expect(coreBytes, `core tools/list is ${coreBytes} bytes`).toBeLessThan(18_000);
-    expect(desktopBytes, `desktop tools/list is ${desktopBytes} bytes`).toBeLessThan(8_500);
+    expect(desktopBytes, `desktop tools/list is ${desktopBytes} bytes`).toBeLessThan(13_500);
 
     // Per tool as well as per surface, so one schema cannot quietly eat the whole budget
     // while the total stays under it. `computer` is the largest by design: fourteen
@@ -842,7 +848,14 @@ describe('surface boundaries', () => {
                 // budget. The non-Windows number is the one that says whether *our* additions have
                 // grown, so both are asserted rather than one loose bound covering both.
                 ? (process.platform === 'win32' ? 3_800 : 3_500)
-                : 3_000;
+                : tool.name === 'browser'
+                  // Nine discriminated action variants, for the same reason `computer` has
+                  // fourteen: spelling each one out is what keeps its validation errors small
+                  // and its action set explicit rather than a free-form string the model has to
+                  // guess at. Smaller than `computer` and asserted separately, so the two cannot
+                  // hide each other's growth.
+                  ? 5_500
+                  : 3_000;
       expect(bytes, `${tool.name} schema is ${bytes} bytes`).toBeLessThan(budget);
     }
   });

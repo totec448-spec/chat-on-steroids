@@ -94,7 +94,7 @@ const MCP_RESPONSE_ENVELOPE_RESERVE_BYTES = 64 * 1024;
  * The image and its observation text share one MCP response budget. The capture layer can
  * bound PNG bytes, but only this final assembly layer knows the actual control metadata.
  */
-function desktopImageResult(text: string, data: string): { content: ToolContent[] } {
+export function desktopImageResult(text: string, data: string): { content: ToolContent[] } {
   const result = {
     content: [
       { type: 'text', text } as ToolContent,

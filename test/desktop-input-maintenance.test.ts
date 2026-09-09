@@ -3,7 +3,23 @@ import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
 import { BRIDGE_PROTOCOL } from '../src/main/version.js';
 
-const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+const backgroundSource = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
+
+/*
+ * background.js statically imports the browser driver, and this harness evaluates the worker as
+ * a classic script, where an import statement is a parse error. Strip the statement here and,
+ * where the worker actually calls the driver, supply the binding through the context instead.
+ * The import is static so that a broken browser_* message fails in a real browser rather than
+ * passing here; fail loudly if it stops looking the way this expects.
+ */
+const importPattern = /^import \* as browserDriverModule from '\.\/browser-driver\.js';$/m;
+if (!importPattern.test(backgroundSource)) {
+  throw new Error(
+    'background.js no longer statically imports browser-driver.js as expected; ' +
+      'update this harness rather than making the worker import dynamically'
+  );
+}
+const source = backgroundSource.replace(importPattern, '');
 const firstId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const secondId = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
 

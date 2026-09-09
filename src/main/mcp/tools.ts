@@ -19,6 +19,7 @@ import type { PluginToolSchema } from '../../shared/plugin-refresh.js';
 import { createRegistrar, type ToolContext } from './kernel.js';
 import { registerCoreTools } from './tools-core.js';
 import { registerDesktopTools } from './tools-desktop.js';
+import { registerBrowserTool } from './tools-browser.js';
 import { registerPluginTools } from './tools-plugins.js';
 import { surfaceDefinition, type SurfaceId } from './surfaces.js';
 import { serverInstructions } from './instructions.js';
@@ -45,7 +46,12 @@ export function buildServer(ctx: ToolContext, surface: SurfaceId, observe?: (con
     tools.push({ name, description: config.description, inputSchema: { type: 'object', ...schema }, ...(config.annotations ? { annotations: { ...config.annotations } } : {}) });
   } : undefined);
   if (surface === 'core') registerCoreTools(registrar);
-  else registerDesktopTools(registrar);
+  else {
+    registerDesktopTools(registrar);
+    // Driving a web page is its own capability with its own gate; it rides the Desktop
+    // surface because that is where control-class tools live, not because it is desktop input.
+    registerBrowserTool(registrar);
+  }
 
   // Cheap self-check on a property the tests assert and the design depends on: a surface
   // may register fewer tools than it declares — permissions decide that — but it may never
