@@ -1788,7 +1788,7 @@ async function readAllSummaries(): Promise<SessionSummary[]> {
  * folder after an arbitrary cap can resume the wrong work. Keep the expensive path explicit
  * and use it only where "every session" is part of the contract.
  */
-async function readEverySummary(): Promise<SessionSummary[]> {
+export async function readEverySummary(): Promise<SessionSummary[]> {
   const catalog = await ensureAttachmentCatalog();
   const summaries = new Map<string, SessionSummary>();
   for (const summary of catalog.summaries.values()) summaries.set(summary.id, summary);

@@ -25,7 +25,7 @@
  */
 
 import { readDurable, writeDurableSoon } from '../durable.js';
-import { listAllSessions, readRecentEvents } from './store.js';
+import { readEverySummary, readRecentEvents } from './store.js';
 
 export interface RequestCorrelation {
   requestId: string;
@@ -217,7 +217,12 @@ async function restoreRequestCorrelationsOnce(): Promise<void> {
   // is idempotent for the same conversation and still makes contradictions sticky.
   let sessions;
   try {
-    sessions = await listAllSessions();
+    // Every retained session, not the bounded list. This decides which conversation owns a
+    // request id, and `readAllSummaries()` behind `listAllSessions()` stops at
+    // MAX_SCANNED_SESSIONS and says so in its own doc comment: do not use it for identity.
+    // Past that cap it answers "no such session" for a session that exists, and the request
+    // is then reconciled against whatever else claims it.
+    sessions = await readEverySummary();
   } catch (error) {
     // A valid direct snapshot can be restored before the session store is initialized (some
     // tests and narrowly scoped consumers do exactly that). In the real app the store is ready
