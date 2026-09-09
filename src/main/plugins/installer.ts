@@ -12,7 +12,19 @@ import { envValue, pathEntries, setEnvValue } from '../env.js';
 /** One minimal environment for runtime discovery, installation and plugin startup. */
 export function pluginEnvironment(inherited = getDefaultEnvironment(), platform = process.platform): Record<string, string> {
   const env = { ...inherited };
-  if (platform === 'win32') return env;
+  if (platform === 'win32') {
+    // uv's standalone installer uses this per-user directory. An already-running
+    // desktop app has the old PATH, so use the same runtime environment for discovery,
+    // installation and startup instead of requiring a restart after installing uv.
+    const home = envValue(env, 'USERPROFILE');
+    if (home && path.win32.isAbsolute(home)) {
+      const directories = (envValue(env, 'PATH') ?? '').split(';').filter(Boolean);
+      const userBin = path.win32.join(home, '.local', 'bin');
+      if (!directories.some(directory => directory.toLowerCase() === userBin.toLowerCase())) directories.push(userBin);
+      setEnvValue(env, 'PATH', directories.join(';'));
+    }
+    return env;
+  }
   // Desktop launchers do not inherit interactive shell setup. Keep the inherited path
   // first, then the standard Node/Homebrew and uv user-install locations. Never execute
   // shell startup files or copy the application's wider secret-bearing environment.

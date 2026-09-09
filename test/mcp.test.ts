@@ -204,7 +204,7 @@ async function modern(
     headers['Mcp-Name'] = params['name'];
   }
   const res = await rawPost(endpoint.urls.core, JSON.stringify(body), headers);
-  return { status: res.status, body: decode(res) };
+  return { status: res.status, headers: res.headers, body: decode(res) };
 }
 
 const toolNames = (reply: any): string[] =>
@@ -986,6 +986,12 @@ describe('2025-era clients', () => {
 });
 
 describe('2026-07-28 clients', () => {
+  it.each(['server/discover', 'tools/list'])('returns JSON for modern %s', async method => {
+    const reply = await modern(method);
+    expect(reply.status).toBe(200);
+    expect(reply.body.error).toBeUndefined();
+    expect(reply.headers['content-type']).toContain('application/json');
+  });
   it('lists tools when the request carries the _meta envelope', async () => {
     const reply = await modern('tools/list');
     expect(reply.status).toBe(200);
