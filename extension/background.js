@@ -2159,6 +2159,8 @@ async function maintainOnce() {
     .map((entry) => ({
       conversationId: cleanConversationId(entry && entry.conversationId),
       token: entry && typeof entry.token === 'string' ? entry.token : '',
+      reason: entry && entry.reason === 'stale-render' ? 'stale-render' : '',
+      turnId: entry && typeof entry.turnId === 'string' ? entry.turnId.slice(0, 100) : '',
       focus: Boolean(entry && entry.focus === true)
     }))
     .filter((entry) => entry.conversationId && entry.token);
@@ -2216,7 +2218,7 @@ async function maintainOnce() {
     if (changed) await persistLive().catch(() => undefined);
   }
   if (repairs.length === 0) return clearRetryIfIdle();
-  for (const { conversationId, token, focus } of repairs) {
+  for (const { conversationId, token, reason, focus, turnId } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -2234,6 +2236,53 @@ async function maintainOnce() {
     const owned = candidates.filter((tab) => tabConversations[tab.id] === conversationId);
     const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
     const repairAction = target ? 'reloaded' : 'reopened';
+    if (reason === 'stale-render') {
+      // This repair belongs to the document that witnessed one exact still-open turn. Losing the
+      // tab cannot authorize reopening it, and the user may have typed, sent, or started a tool
+      // since the observation crossed the bridge. Ask that exact document to check and initiate
+      // reload in one JavaScript task, so no later background action can race a fresh draft.
+      if (!target || target.pendingUrl || typeof target.url !== 'string' || !target.url ||
+          typeof turnId !== 'string' || !turnId) {
+        await call(`/status?repairSkipped=${encodeURIComponent(token)}`);
+        continue;
+      }
+      const key = String(target.id);
+      const source = {
+        tab: target.id,
+        documentId: tabDocuments[key],
+        navigationEpoch: tabEpochs[key]
+      };
+      const scannedUrl = target.url;
+      let proof;
+      try {
+        const current = await chrome.tabs.get(target.id);
+        if (!ownsDocument(source) || current.pendingUrl || current.url !== scannedUrl ||
+            conversationForTab(current) !== conversationId) {
+          await call(`/status?repairSkipped=${encodeURIComponent(token)}`);
+          continue;
+        }
+        proof = await chrome.tabs.sendMessage(target.id, {
+          type: 'clf-stale-render-reload',
+          conversationId,
+          turnId
+        });
+      } catch {
+        await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=reloaded`);
+        continue;
+      }
+      if (proof?.safe !== true || proof.conversationId !== conversationId ||
+          proof.turnId !== turnId || proof.navigationEpoch !== source.navigationEpoch) {
+        await call(`/status?repairSkipped=${encodeURIComponent(token)}`);
+        continue;
+      }
+      if (proof.reloading !== true) {
+        await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=reloaded`);
+        continue;
+      }
+      // The exact page already initiated its own reload synchronously with the final check.
+      await call(`/status?repaired=${encodeURIComponent(token)}&repairAction=reloaded`);
+      continue;
+    }
     try {
       // Select the working tab within Chrome without stealing OS focus from the
       // desktop app. Tab selection and window activation are separate operations.

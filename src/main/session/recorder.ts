@@ -1556,6 +1556,7 @@ export interface ChatObservation {
     | 'turn_start'
     | 'turn_end'
     | 'chat_error'
+    | 'stale_render'
     | 'tool_evidence';
   time: number;
   /** Current native selection evidence, not a historical message or requested worker model. */
@@ -1984,6 +1985,15 @@ async function recordChatObservationsNow(
           message: await storeText(sessionId, item.text ?? '', 2000)
         });
         activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
+        break;
+      case 'stale_render':
+        // This is a lack of page progress, not activity. Keep its diagnosis in the durable
+        // timeline without moving the silence clock or pretending the assistant advanced.
+        await appendEvent(sessionId, {
+          ...base,
+          kind: 'chat_error',
+          message: await storeText(sessionId, item.text ?? '', 2000)
+        });
         break;
       case 'turn_start':
         // Lifecycle without a durable local id is not a lifecycle boundary a later reader

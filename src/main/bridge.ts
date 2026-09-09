@@ -759,6 +759,7 @@ const OBSERVATION_KINDS = new Set([
   'turn_start',
   'turn_end',
   'chat_error',
+  'stale_render',
   // Not stored as transcript content. These request records populate the exact
   // requestId -> conversationId correlation registry.
   'tool_evidence'
@@ -1414,12 +1415,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // mean the last repair did not happen. Empty, which is almost always, costs one request.
     const repaired = url.searchParams.get('repaired');
     const repairFailed = url.searchParams.get('repairFailed');
+    const repairSkipped = url.searchParams.get('repairSkipped');
     const repairAction = url.searchParams.get('repairAction');
     const action = repairAction === 'reloaded' || repairAction === 'reopened' ? repairAction : null;
     if (repaired) {
       await confirmRepair(repaired.slice(0, 64), action);
     } else if (repairFailed) {
       await failRepairAttempt(repairFailed.slice(0, 64), action);
+    } else if (repairSkipped) {
+      await skipRepairAttempt(repairSkipped.slice(0, 64));
     }
     const revival = pendingBrowserRevival();
     const inputRows = await listInputs();
@@ -1449,7 +1453,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         placement: pendingBrowserPlacement(null),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
-        repairs: repairFailed ? [] : await takePendingRepairs(),
+        repairs: repairFailed || repairSkipped ? [] : await takePendingRepairs(),
         ...tabPolicy,
         recoveryMonitoring: browserRecoveryMonitoring()
       },
@@ -5275,7 +5279,9 @@ interface Repair {
   state: 'queued' | 'handed' | 'done';
   /** Stable identity of the failure/inactivity episode. A new activity stamp mints a new one. */
   episode: string;
-  reason: 'unattributed' | 'assistant-error' | 'no-tab' | 'silence' | 'goal' | 'compaction';
+  reason: 'unattributed' | 'assistant-error' | 'stale-render' | 'no-tab' | 'silence' | 'goal' | 'compaction';
+  /** Exact open local turn whose still-current state authorizes a stale-render reload. */
+  sourceTurnId?: string;
   /** Cooldown boundary. The browser is never asked before this instant. */
   notBefore: number;
   /**
@@ -5374,7 +5380,8 @@ function queueBrowserRecovery(
   episode: string,
   reason: Repair['reason'],
   endedTurns = 0,
-  now = Date.now()
+  now = Date.now(),
+  sourceTurnId: string | null = null
 ): boolean {
   // A blocked chat is one the user took this app's hands off, and every repair here is a hand
   // going back on: a reload restarts the rogue page's turn machinery, and a reopen gives a
@@ -5387,7 +5394,7 @@ function queueBrowserRecovery(
   // The turn's one error reload, already spent. Checked before the episode and state guards
   // below because it outlives both: those forget a repair the moment its episode changes, and
   // the whole point here is that a *new* error on the same broken turn buys nothing.
-  if (reason === 'assistant-error') {
+  if (reason === 'assistant-error' || reason === 'stale-render') {
     // Read against the turn the chat is on *now*: the release in retireSpentRepairs runs on
     // the browser's pass, and an error on the next turn can arrive before that pass does.
     const spent = turnRepairSpent.get(conversationId);
@@ -5431,6 +5438,7 @@ function queueBrowserRecovery(
     state: 'queued',
     episode,
     reason,
+    ...(sourceTurnId ? { sourceTurnId } : {}),
     notBefore,
     token: '',
     progressId: `browser-repair:${randomBytes(9).toString('base64url')}`
@@ -5563,6 +5571,29 @@ async function noteRecoveryObservations(
   // watchdog may grant recovery authority. The error may precede a page turn, so turn identity,
   // agent binding and recent tool calls are still not prerequisites for a recognized failure.
   const now = Date.now();
+  for (const item of observations) {
+    if (item.kind !== 'stale_render' || !item.turnId || !sessionId) continue;
+    const live = liveConversations().find(
+      (entry) => entry.conversationId === conversationId && entry.sessionId === sessionId
+    );
+    // A page may deliver an old journal after the user has continued. Only the exact open local
+    // turn that emitted this observation can grant a reload, and the browser must prove it again.
+    if (live?.activeTurnId !== item.turnId) continue;
+    if (
+      queueBrowserRecovery(
+        conversationId,
+        sessionId,
+        `stale-render:${item.turnId}`,
+        'stale-render',
+        live.endedTurns,
+        now,
+        item.turnId
+      )
+    ) {
+      logInfo(`bridge: stale rendered response — asking the browser to recheck ${conversationId}`);
+    }
+    break;
+  }
   for (const item of observations) {
     if (item.kind !== 'chat_error') continue;
     // A provider access limit is the page saying it will not carry this chat for a few
@@ -6254,8 +6285,13 @@ function retireSpentRepairs(): void {
   for (const [conversationId, repair] of repairsInFlight) {
     // Both turn-scoped reasons, and only those. `silence` and `no-tab` are about a chat rather
     // than a turn, and keep the activity-driven lifecycle above.
-    if (!TURN_SCOPED_REPAIRS.has(repair.reason)) continue;
     const entry = live.get(conversationId);
+    if (repair.reason === 'stale-render') {
+      if (!entry || !repair.sourceTurnId || entry.sessionId !== repair.sessionId ||
+          entry.activeTurnId !== repair.sourceTurnId) repairsInFlight.delete(conversationId);
+      continue;
+    }
+    if (!TURN_SCOPED_REPAIRS.has(repair.reason)) continue;
     if (entry && entry.endedTurns > repair.endedTurns) repairsInFlight.delete(conversationId);
   }
   // The budget is released by the chat being on a different turn than the one it was charged
@@ -6523,7 +6559,7 @@ function tickUnattributedIncident(): void {
  */
 async function takePendingRepairs(
   now = Date.now()
-): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason']; focus: boolean }>> {
+): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason']; focus: boolean; turnId?: string }>> {
   retireSpentRepairs();
   // The queue can outlive the decision that filled it: a repair queued a minute before the user
   // pressed Block would otherwise still be handed to the browser, and the block's whole promise
@@ -6533,8 +6569,10 @@ async function takePendingRepairs(
   for (const [conversationId, repair] of [...repairsInFlight]) {
     const session = await getSession(repair.sessionId);
     const superseded = await conversationWasSuperseded(conversationId);
+    const staleRenderCurrent = repair.reason !== 'stale-render' ||
+      (!!repair.sourceTurnId && session?.activeTurnId === repair.sourceTurnId);
     if (!isChatBlocked(conversationId) && !superseded && session?.conversationId === conversationId &&
-        !stopRequestedFor(conversationId, session.activeTurnId)) continue;
+        staleRenderCurrent && !stopRequestedFor(conversationId, session.activeTurnId)) continue;
     repairsInFlight.delete(conversationId);
     turnRepairSpent.delete(conversationId);
     const grant = activeUntil.get(conversationId);
@@ -6561,6 +6599,8 @@ async function takePendingRepairs(
     reason: Repair['reason'];
     /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
     focus: boolean;
+    /** Present only for stale-render repair and rechecked by the exact browser document. */
+    turnId?: string;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'queued') continue;
@@ -6575,7 +6615,8 @@ async function takePendingRepairs(
       `Trying to reload chat to recover ${repairReason(repair)}…`
     );
     if (repairsInFlight.get(conversationId) === repair && !stopRequestedFor(conversationId))
-      ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction' });
+      ready.push({ conversationId, token: repair.token, reason: repair.reason,
+        focus: repair.reason === 'compaction', ...(repair.sourceTurnId ? { turnId: repair.sourceTurnId } : {}) });
   }
   return ready;
 }
@@ -6618,7 +6659,7 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
           goalActiveFor(conversationId) ? GOAL_SILENCE_LISTEN_MS : CHAT_SILENCE_MS
         );
       }
-      if (repair.reason === 'assistant-error') {
+      if (repair.reason === 'assistant-error' || repair.reason === 'stale-render') {
         // Charged to the turn the chat is on when the reload lands, running or not, and
         // released when it is on another one — see turnRepairSpent.
         const live = liveConversations().find((entry) => entry.conversationId === conversationId);
@@ -6631,6 +6672,20 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
       );
       return;
     }
+  }
+}
+
+/** A final page preflight disproved this exact handout; retire it without claiming a reload. */
+async function skipRepairAttempt(token: string): Promise<void> {
+  for (const [conversationId, repair] of repairsInFlight) {
+    if (repair.state !== 'handed' || repair.token !== token || repair.reason !== 'stale-render') continue;
+    repairsInFlight.delete(conversationId);
+    await updateRepairProgress(
+      conversationId,
+      repair,
+      `Skipped chat reload because ${repairReason(repair)} was no longer current.`
+    );
+    return;
   }
 }
 
@@ -6654,6 +6709,7 @@ function repairReason(repair: Repair): string {
   return {
     unattributed: 'missing connector attribution',
     'assistant-error': 'an interrupted response',
+    'stale-render': 'a frozen rendered response',
     'no-tab': 'a missing browser tab',
     silence: 'an unresponsive open turn',
     goal: 'a goal reply nothing collected',

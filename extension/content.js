@@ -108,6 +108,12 @@
   const STATUS_MS = 15_000;
   /** Longer than any honest tool call: past this a silent turn is called stalled. */
   const STALL_MS = 10 * 60 * 1000;
+  /**
+   * A rendered answer can stop updating even though ChatGPT continues and commits it on the
+   * server. When the page has returned to its Send control, keep the exact local turn open but
+   * ask the app for its one bounded same-chat reload after this much stable silence.
+   */
+  const STALE_RENDER_RECOVERY_MS = 30_000;
   /** How long the button says "Starting…" before believing something went wrong. */
   const PRESS_GRACE_MS = 12_000;
   /** Persistent popup preference. On by default as of 1.7.4; the popup can turn it off. */
@@ -555,6 +561,8 @@
     if (stagePanel?.root.dataset.clfStageKind === 'wait') removeStagePanel();
   }
   let stallReported = false;
+  /** The exact local generation has already asked the app for stale-render recovery. */
+  let staleRenderReported = false;
   let userStopped = false;
   /**
    * Final public ChatGPT message that already terminalised the local turn while the page's
@@ -1370,6 +1378,7 @@
     quietOutcome = null;
     userStopped = false;
     stallReported = false;
+    staleRenderReported = false;
     fiberTerminalMessageId = null;
     bindResumeGoalTurn(open);
     return true;
@@ -1570,6 +1579,7 @@
     baselineMarks = [];
     userStopped = false;
     stallReported = false;
+    staleRenderReported = false;
     fiberTerminalMessageId = null;
     // The settle window names a turn in the conversation being left behind. Carrying it
     // across would re-read chat B's tree and attribute what it finds to chat A's turn.
@@ -2294,6 +2304,7 @@
       quietOutcome = null;
       userStopped = false;
       stallReported = false;
+      staleRenderReported = false;
       genCount++;
       turnId = `g-${RUN_ID}-${epoch}-${genCount}`;
       unwitnessedGeneration = false;
@@ -2450,6 +2461,39 @@
       // never a terminal boundary on its own. User stop is already explicit; a new user
       // message is handled above, and Fiber end_turn closes independently in refreshFiber().
       const markerOnlyInterrupted = result.outcome === 'interrupted' && !userStopped;
+      const quietPageTurn = quietTurn || turn;
+      const quietFiberTurn = fiberTurnFor(quietPageTurn);
+      const fiberHasPendingCall = Boolean(
+        quietFiberTurn?.calls?.some((call) => call && call.answered !== true)
+      );
+      // Live 2026-09-09: the public answer froze at 156 characters and the native composer
+      // returned to Send, while the server continued to a 19,329-character final that appeared
+      // immediately after a manual refresh. This is neither completion evidence nor authority
+      // to submit anything again. It is exact-document evidence for the app's existing one-shot
+      // same-chat reload path. Require a generation witnessed running in this document, its
+      // current Fiber turn still nonterminal, stable visible prose, no outstanding browser/tool
+      // work, and the native Send control continuously back beyond the bounded window.
+      if (
+        !staleRenderReported &&
+        !unwitnessedGeneration &&
+        result.outcome === 'unknown' &&
+        quietFor >= STALE_RENDER_RECOVERY_MS &&
+        Date.now() - lastChangeAt >= STALE_RENDER_RECOVERY_MS &&
+        Boolean(CLF_DOM.sendButton?.()) &&
+        Boolean(quietFiberTurn) &&
+        !quietFiberTurn.endMessageId &&
+        !fiberHasPendingCall &&
+        pendingTools === 0 &&
+        answerText(quietPageTurn).length > 0 &&
+        turnId
+      ) {
+        staleRenderReported = true;
+        emit({
+          kind: 'stale_render',
+          text: 'ChatGPT stopped updating this answer after its Send control returned. Reloading the same chat may recover the server result.',
+          turnId
+        });
+      }
       if (
         userStopped ||
         (result.outcome !== 'unknown' && !markerOnlyInterrupted && quietFor >= TURN_SETTLE_MS)
@@ -10135,6 +10179,70 @@
       (home ? !rows.length && !marker.has('cos-input') && !marker.has('temporary-chat') :
         !!CLF_DOM.conversationId() && rows.at(-1)?.role === 'assistant');
   }
+
+  /**
+   * Final authority for reloading a page whose rendered assistant answer stopped moving.
+   *
+   * Detection and the browser maintenance pass are separated by two IPC hops. Everything that
+   * made the first observation safe can change between them: the user can start a new turn, type
+   * a draft, or a late tool call can appear. Re-read those facts in the exact document and exact
+   * local turn immediately before background.js reloads it. This never submits or completes a
+   * turn; it only authorizes one refresh of the same currently open server turn.
+   */
+  function staleRenderReloadSafe(expectedConversation, expectedTurnId) {
+    const pageTurn = quietTurn || generationTurn();
+    const fiberTurn = fiberTurnFor(pageTurn);
+    const pendingFiberCall = Boolean(
+      fiberTurn?.calls?.some((call) => !call || call.answered !== true)
+    );
+    return Boolean(
+      alive &&
+      staleRenderReported &&
+      generating &&
+      !unwitnessedGeneration &&
+      quietSince > 0 &&
+      Date.now() - quietSince >= STALE_RENDER_RECOVERY_MS &&
+      Date.now() - lastChangeAt >= STALE_RENDER_RECOVERY_MS &&
+      expectedConversation &&
+      expectedConversation === conversationId &&
+      CLF_DOM.conversationId() === expectedConversation &&
+      expectedTurnId &&
+      turnId === expectedTurnId &&
+      !CLF_DOM.generating() &&
+      CLF_DOM.sendButton?.() &&
+      pageTurn &&
+      endOutcome(pageTurn).outcome === 'unknown' &&
+      answerText(pageTurn).length > 0 &&
+      fiberTurn &&
+      !fiberTurn.endMessageId &&
+      !pendingFiberCall &&
+      pendingTools === 0 &&
+      !nativeBusy &&
+      !goalBusy &&
+      !(job && job.busy) &&
+      !objectiveBusy &&
+      !desktopInputBusy &&
+      !modelCatalogBusy &&
+      !pluginRefreshBusy &&
+      !desktopDecision &&
+      !commandAttempt &&
+      !commandJournalGate &&
+      queue.length === 0 &&
+      !flushWork &&
+      CLF_DOM.composer() &&
+      !(CLF_DOM.composer().textContent || '').trim() &&
+      !CLF_DOM.hasComposerAttachments()
+    );
+  }
+
+  /** Starts navigation in the same JavaScript task that made the final safety decision. */
+  function reloadStaleRenderDocument() {
+    if (TEST_MODE && typeof globalThis.CLF_TEST_RELOAD === 'function') {
+      globalThis.CLF_TEST_RELOAD();
+      return;
+    }
+    location.reload();
+  }
   async function prepareDesktopInputPage(message) {
     if (!/^[a-f0-9-]{36}$/i.test(message.id) || !inputReuseSafe()) return { ready: false };
     const startEpoch = epoch, startConversation = CLF_DOM.conversationId();
@@ -10249,6 +10357,24 @@
       }
       if (message.type === 'clf-input-reuse-state') {
         sendResponse({ safe: inputReuseSafe(), navigationEpoch: epoch });
+        return false;
+      }
+      if (message.type === 'clf-stale-render-reload') {
+        const safe = staleRenderReloadSafe(message.conversationId, message.turnId);
+        if (!safe) {
+          sendResponse({ safe: false, conversationId, turnId, navigationEpoch: epoch });
+          return false;
+        }
+        try {
+          // No await or callback belongs between the check above and this call. A user event,
+          // Fiber update, or tool start cannot interleave and invalidate the checked snapshot.
+          reloadStaleRenderDocument();
+          sendResponse({ safe: true, reloading: true, conversationId, turnId, navigationEpoch: epoch });
+        } catch {
+          // The checked state remains valid; only the browser action failed, so the app may keep
+          // this exact handout retryable rather than confusing failure with revoked authority.
+          sendResponse({ safe: true, reloading: false, conversationId, turnId, navigationEpoch: epoch });
+        }
         return false;
       }
       if (message.type === 'clf-prepare-desktop-input') {
@@ -10533,6 +10659,7 @@
       visibleStream,
       /** So a test settles a turn by the real window rather than a copy of the number. */
       TURN_SETTLE_MS,
+      STALE_RENDER_RECOVERY_MS,
       STALL_MS,
       GOAL_RETRY_MS,
       PRESENTATION_SCROLL_IDLE_MS,
