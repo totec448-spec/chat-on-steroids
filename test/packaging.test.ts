@@ -233,7 +233,11 @@ describe('cross-platform packaging targets', () => {
     expect(workflow).toContain("grep -Fxq 'Name=Chat On Steroids' \"$desktop\"");
     expect(workflow).toContain("grep -Fxq 'Icon=chat-on-steroids' \"$desktop\"");
     expect(debGui).toContain('deb_smoke_root="$(mktemp -d)"');
-    expect(debGui).toContain("trap 'rm -rf \"$deb_smoke_root\"' EXIT");
+    // Same shape the AppImage smoke below is held to: the teardown may retry, and may fail,
+    // but it may never decide the step. Only the assertions under it do that.
+    expect(debGui).toContain('cleanup_path_with_retries()');
+    expect(debGui).toContain("trap 'cleanup_path_with_retries \"$deb_smoke_root\"' EXIT");
+    expect(debGui).toContain('rm -rf "$target" 2>/dev/null || true');
     expect(debGui).toContain('HOME="$deb_smoke_root/home"');
     expect(debGui).toContain('XDG_CONFIG_HOME="$deb_smoke_root/config"');
     expect(debGui).toContain('XDG_CACHE_HOME="$deb_smoke_root/cache"');
