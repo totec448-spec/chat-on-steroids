@@ -400,6 +400,44 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.sendMessage).toHaveBeenCalledWith(7, { type: 'clf-desktop-input', id: firstId, conversationId: null });
     expect((h.localSaved.inputOpenings as any)[firstId].tab).toBe(7);
   });
+  it('bounds a hung reuse observation before electing one fresh tab for the same input', async () => {
+    vi.useFakeTimers();
+    let resolveReuse: ((value: unknown) => void) | undefined;
+    try {
+      const h = await worker([{ id: firstId, conversationId: null }]);
+      h.tabs.push({ id: 7, url: 'https://chatgpt.com/', active: true });
+      await h.authorizeDocument({ tab: { id: 7 }, documentId: 'idle', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 1 });
+      h.sendMessage.mockImplementation(async (_id, message) => {
+        if (message.type === 'clf-input-reuse-state') return new Promise(resolve => { resolveReuse = resolve; }) as never;
+        return { ok: true, ready: true };
+      });
+
+      let released = false;
+      const firstWake = h.maintain().then(() => { released = true; });
+      await vi.advanceTimersByTimeAsync(3000);
+      await Promise.resolve();
+      expect(released).toBe(true);
+      await firstWake;
+
+      const marked = h.tabs.filter(tab => String(tab.pendingUrl || tab.url || '').includes(`cos-input=${firstId}`));
+      expect(marked).toHaveLength(1);
+      expect(h.create).toHaveBeenCalledTimes(1);
+      expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-prepare-desktop-input')).toHaveLength(0);
+      expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-desktop-input')).toHaveLength(0);
+
+      resolveReuse?.({ ok: true, safe: true, navigationEpoch: 1 });
+      await Promise.resolve();
+      await h.maintain();
+      expect(h.create).toHaveBeenCalledTimes(1);
+      expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-prepare-desktop-input')).toHaveLength(0);
+      expect(h.sendMessage.mock.calls.filter(([, message]) => message.type === 'clf-desktop-input'))
+        .toEqual([[marked[0]!.id, { type: 'clf-desktop-input', id: firstId, conversationId: null }]]);
+    } finally {
+      resolveReuse?.({ ok: true, safe: true, navigationEpoch: 1 });
+      await vi.runOnlyPendingTimersAsync();
+      vi.useRealTimers();
+    }
+  });
   it.each(['explicit-failure', 'ambiguous', 'closed'])('allows a single pre-send fallback only for %s', async reason => {
     const h = await worker([{ id: firstId, conversationId: null }]);
     h.tabs.push({ id: 7, url: 'https://chatgpt.com/' });

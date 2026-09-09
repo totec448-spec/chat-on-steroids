@@ -1721,6 +1721,18 @@ async function createChatTab(url, background = false, active = !background) {
   });
 }
 
+async function inputReuseProbe(tabId, documentId) {
+  let timer;
+  try {
+    // This is only an observation. A silent document is ineligible for reuse and
+    // must not hold the one global maintenance flight or its fresh-tab election.
+    return await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: 'clf-input-reuse-state' }, { documentId }),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 3000); })
+    ]);
+  } catch { return null; } finally { clearTimeout(timer); }
+}
+
 async function deliverDesktopInputs(inputs, background, reusableConversations = [], activeIds) {
   if (!Array.isArray(inputs)) return;
   // Only the app's complete outbox projection retires spent opening authority.
@@ -1796,9 +1808,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
         for (const candidate of choices) {
           const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
           if (!ownsDocument(source)) continue;
-          let proof;
-          try { proof = await chrome.tabs.sendMessage(candidate.id, { type: 'clf-input-reuse-state' }, { documentId: source.documentId }); }
-          catch { continue; }
+          const proof = await inputReuseProbe(candidate.id, source.documentId);
           const current = await chrome.tabs.get(candidate.id).catch(() => null);
           if (proof?.safe !== true || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source) ||
               !current || current.pendingUrl || current.url !== candidate.url) continue;
