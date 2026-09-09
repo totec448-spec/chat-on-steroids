@@ -809,6 +809,102 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     return { fetch, asked, actions, failedActions, arm: (id: string) => { outstanding = id; } };
   }
 
+  function staleRenderApp() {
+    const asked: string[] = [];
+    let outstanding = false;
+    const token = 'stale-render-token';
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/closed') return response(200, { ok: true });
+      if (url.pathname === '/status') {
+        const skipped = url.searchParams.get('repairSkipped');
+        const repaired = url.searchParams.get('repaired');
+        const failed = url.searchParams.get('repairFailed');
+        if (skipped) { asked.push(`skipped:${skipped}`); outstanding = false; }
+        else if (repaired) { asked.push(`repaired:${repaired}`); outstanding = false; }
+        else if (failed) asked.push(`failed:${failed}`);
+        else asked.push('status');
+        return response(200, {
+          ok: true,
+          repairs: outstanding
+            ? [{ conversationId: CHAT, token, reason: 'stale-render', turnId: 'turn-stale-render', focus: false }]
+            : []
+        });
+      }
+      return response(404, {});
+    });
+    return { fetch, asked, token, arm: () => { outstanding = true; } };
+  }
+
+  it('reloads a frozen rendered answer only after the exact document approves a final preflight', async () => {
+    const app = staleRenderApp();
+    const tab = { id: 71, url: `https://chatgpt.com/c/${CHAT}` };
+    const reloadRequest = vi.fn(async () => ({ safe: true, reloading: true, conversationId: CHAT,
+      turnId: 'turn-stale-render', navigationEpoch: 0 }));
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(),
+      fetch: app.fetch, tabsGet: async () => tab, tabsSendMessage: reloadRequest });
+    await worker.registerTab(71);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 71);
+    app.arm();
+
+    await worker.fireAlarm();
+    expect(reloadRequest).toHaveBeenCalledWith(71, {
+      type: 'clf-stale-render-reload',
+      conversationId: CHAT,
+      turnId: 'turn-stale-render'
+    });
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(app.asked).toContain(`repaired:${app.token}`);
+  });
+
+  it('does not reload after a draft or late tool makes the stale-render preflight unsafe', async () => {
+    const app = staleRenderApp();
+    const tab = { id: 72, url: `https://chatgpt.com/c/${CHAT}` };
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(),
+      fetch: app.fetch, tabsGet: async () => tab,
+      tabsSendMessage: async () => ({ safe: false, conversationId: CHAT,
+        turnId: 'turn-stale-render', navigationEpoch: 0 }) });
+    await worker.registerTab(72);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 72);
+    app.arm();
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(app.asked).toContain(`skipped:${app.token}`);
+  });
+
+  it('never reopens a missing stale-render tab', async () => {
+    const app = staleRenderApp();
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch: app.fetch });
+    app.arm();
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(worker.tabsCreate).not.toHaveBeenCalled();
+    expect(app.asked).toContain(`skipped:${app.token}`);
+  });
+
+  it('refuses stale-render reload when the tab starts navigating before the page operation', async () => {
+    const app = staleRenderApp();
+    const tab = { id: 73, url: `https://chatgpt.com/c/${CHAT}` };
+    const reloadRequest = vi.fn(async () => ({ safe: true, reloading: true, conversationId: CHAT,
+      turnId: 'turn-stale-render', navigationEpoch: 0 }));
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(),
+      fetch: app.fetch,
+      tabsGet: async () => ({ ...tab, pendingUrl: 'https://chatgpt.com/' }),
+      tabsSendMessage: reloadRequest });
+    await worker.registerTab(73);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 73);
+    app.arm();
+
+    await worker.fireAlarm();
+    expect(worker.tabsReload).not.toHaveBeenCalled();
+    expect(reloadRequest).not.toHaveBeenCalled();
+    expect(app.asked).toContain(`skipped:${app.token}`);
+  });
+
   it('browser-only recovery waits for the missing chat and then reloads its exact existing tab', async () => {
     const { fetch, asked } = appWith(OTHER, true);
     const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch });

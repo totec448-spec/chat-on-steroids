@@ -148,6 +148,8 @@ interface Hook {
   visibleStream(entries: Array<Record<string, any>>, groupId?: string | null): Array<Record<string, any>>;
   /** How long the stop button must stay gone before content.js calls a turn finished. */
   TURN_SETTLE_MS: number;
+  /** Stable Send-state silence before requesting same-chat stale-render recovery. */
+  STALE_RENDER_RECOVERY_MS: number;
   /** Test seam for the no-visible-progress fallback. */
   STALL_MS: number;
   /** How long a failed Goal draft waits before it asks again. */
@@ -171,6 +173,8 @@ interface Harness {
   reply: Map<string, (message: Record<string, any>) => unknown>;
   /** Sends one popup/background message to the content script's runtime listener. */
   runtimeMessage(message: Record<string, any>): Promise<unknown>;
+  /** Same-task page reload seam used only by the stale-render recovery tests. */
+  pageReload: ReturnType<typeof vi.fn>;
   /** Browser-extension listeners still owned by live recorder instances in this document. */
   listenerCounts(): { runtime: number; storage: number };
   /** Moves the clock the script reads. Nothing else advances it between ticks. */
@@ -211,6 +215,8 @@ async function harness(
   });
 
   const sent: Array<Record<string, any>> = [];
+  const pageReload = vi.fn();
+  window.CLF_TEST_RELOAD = pageReload;
   const reply = new Map<string, (message: Record<string, any>) => unknown>();
   type RuntimeListener = (
     message: Record<string, any>,
@@ -349,6 +355,7 @@ async function harness(
         });
         if (async !== true && !answered) resolve(undefined);
       }),
+    pageReload,
     listenerCounts: () => ({ runtime: runtimeListeners.size, storage: storageListeners.size }),
     advance,
     close: () => dom.window.close()
@@ -703,7 +710,7 @@ describe('desktop input delivery and helper ownership', () => {
     const sending = live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA });
     await settle();
     expect(live.sent.some(message => message.type === 'desktop_input')).toBe(false);
-    expect(emitted(live.sent, 'chat_error')).toHaveLength(0);
+    expect(emitted(live.sent, 'stale_render')).toHaveLength(0);
     stopGenerating(live.document);
     live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
       userTurn(live!.document, 'next-stage-user', text);
@@ -712,7 +719,7 @@ describe('desktop input delivery and helper ownership', () => {
     });
     expect(await sending).toEqual({ ok: true });
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toHaveLength(1);
-    expect(emitted(live.sent, 'chat_error')).toHaveLength(0);
+    expect(emitted(live.sent, 'stale_render')).toHaveLength(0);
   });
 
   it.each([false, true])('handles autosaved text hydrated during model selection only for an owned fresh input (%s)', async (fresh) => {
@@ -5668,6 +5675,138 @@ describe('a stop button that goes missing while the turn is still running', () =
     live.hook.observe();
     await settle();
     expect(emitted(live.sent, 'turn_start').map((entry) => entry.event.turnId)).toEqual([opened]);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+  });
+
+  it('requests one same-chat recovery when Send returns over a frozen nonterminal Fiber reply', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'turn-stale-render', []);
+    prose(live.document, section, 'stale-render-partial', 'The reply started, but this rendered prefix stopped moving.');
+    live.hook.observe();
+    await settle();
+    const opened = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+
+    await bindFiberTurns([{ section, turn: {
+      turnId: 'turn-stale-render',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      endMessageId: null,
+      calls: [],
+      messages: [{
+        messageId: 'stale-render-partial',
+        rawMessageId: 'stale-render-partial',
+        stable: true,
+        rawText: 'The reply started, but this rendered prefix stopped moving.',
+        renderedHtml: '<p>The reply started, but this rendered prefix stopped moving.</p>'
+      }],
+      activities: []
+    } }]);
+    await settle();
+
+    stopGenerating(live.document);
+    live.hook.observe();
+    await settle();
+    // Fiber asks use bounded page-message timers that also move the harness clock. Stay well
+    // below the production threshold here instead of testing a fake-clock off-by-one.
+    live.advance(live.hook.STALE_RENDER_RECOVERY_MS / 2);
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'stale_render')).toHaveLength(0);
+
+    live.advance(live.hook.STALE_RENDER_RECOVERY_MS);
+    live.hook.observe();
+    await settle();
+    const errors = emitted(live.sent, 'stale_render').map((entry) => entry.event);
+    expect(errors).toEqual([expect.objectContaining({
+      text: expect.stringContaining('stopped updating this answer'),
+      turnId: opened
+    })]);
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
+    expect(live.sent.some((message) => message.type === 'reload_owned_chat')).toBe(false);
+
+    await live.hook.flush();
+    await settle();
+    const reload = live.runtimeMessage({
+      type: 'clf-stale-render-reload',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      turnId: opened
+    });
+    // The checked operation starts navigation before its caller can regain control and mutate
+    // draft/tool state. There is no successful preflight result that background.js acts on later.
+    expect(live.pageReload).toHaveBeenCalledTimes(1);
+    expect(await reload).toMatchObject({ safe: true, reloading: true, turnId: opened });
+
+    // A draft typed after detection revokes reload authority without erasing it.
+    const composer = live.document.querySelector('#prompt-textarea')!;
+    composer.textContent = 'new user draft';
+    expect(await live.runtimeMessage({
+      type: 'clf-stale-render-reload',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      turnId: opened
+    })).toMatchObject({ safe: false, turnId: opened });
+    expect(live.pageReload).toHaveBeenCalledTimes(1);
+    composer.textContent = '';
+
+    // A late connector request is newer work by the same turn and also revokes the reload.
+    await bindFiberTurns([{ section, turn: {
+      turnId: 'turn-stale-render',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      endMessageId: null,
+      calls: [{ messageId: 'stale-render-late-call', tool: 'read_file', order: 0, answered: false }],
+      messages: [{
+        messageId: 'stale-render-partial',
+        rawMessageId: 'stale-render-partial',
+        stable: true,
+        rawText: 'The reply started, but this rendered prefix stopped moving.',
+        renderedHtml: '<p>The reply started, but this rendered prefix stopped moving.</p>'
+      }],
+      activities: []
+    } }]);
+    await settle();
+    expect(await live.runtimeMessage({
+      type: 'clf-stale-render-reload',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      turnId: opened
+    })).toMatchObject({ safe: false, turnId: opened });
+    expect(live.pageReload).toHaveBeenCalledTimes(1);
+
+    live.advance(live.hook.STALE_RENDER_RECOVERY_MS * 2);
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'stale_render')).toHaveLength(1);
+  });
+
+  it('does not request stale-render recovery while the exact Fiber turn has pending work', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'turn-stale-render-tool', []);
+    prose(live.document, section, 'stale-render-tool-partial', 'Waiting for the tool result.');
+    live.hook.observe();
+    await settle();
+    await bindFiberTurns([{ section, turn: {
+      turnId: 'turn-stale-render-tool',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      endMessageId: null,
+      calls: [{ messageId: 'stale-render-call', tool: 'read_file', order: 0, answered: false, requestId: 'wfr-stale-render' }],
+      messages: [{
+        messageId: 'stale-render-tool-partial',
+        rawMessageId: 'stale-render-tool-partial',
+        stable: true,
+        rawText: 'Waiting for the tool result.',
+        renderedHtml: '<p>Waiting for the tool result.</p>'
+      }],
+      activities: []
+    } }]);
+    await settle();
+
+    stopGenerating(live.document);
+    live.hook.observe();
+    await settle();
+    live.advance(live.hook.STALE_RENDER_RECOVERY_MS * 2);
+    live.hook.observe();
+    await settle();
+
+    expect(emitted(live.sent, 'stale_render')).toHaveLength(0);
     expect(emitted(live.sent, 'turn_end')).toHaveLength(0);
   });
 

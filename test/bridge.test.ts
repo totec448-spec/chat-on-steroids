@@ -4823,7 +4823,7 @@ describe('unattributed activity recovery', () => {
   async function maintenanceBatch(
     repaired?: string,
     repairAction?: 'reloaded' | 'reopened'
-  ): Promise<Array<{ conversationId: string; token: string; reason: string }>> {
+  ): Promise<Array<{ conversationId: string; token: string; reason: string; turnId?: string }>> {
     const path = repaired
       ? `/status?repaired=${encodeURIComponent(repaired)}${repairAction ? `&repairAction=${repairAction}` : ''}`
       : '/status';
@@ -4842,7 +4842,7 @@ describe('unattributed activity recovery', () => {
   async function maintenance(
     repaired?: string,
     repairAction?: 'reloaded' | 'reopened'
-  ): Promise<{ conversationId: string; token: string; reason: string } | null> {
+  ): Promise<{ conversationId: string; token: string; reason: string; turnId?: string } | null> {
     const batch = await maintenanceBatch(repaired, repairAction);
     expect(batch.length).toBeLessThanOrEqual(1);
     return batch[0] ?? null;
@@ -5486,6 +5486,71 @@ describe('unattributed activity recovery', () => {
         recoverable: true
       }]);
       expect(chatOf(await maintenance())).toBe(PRIME);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hands out stale-render recovery only while its exact local turn remains current', async () => {
+    await pair();
+    await events(PRIME, [openTurn('turn-frozen-render')]);
+    await events(PRIME, [{
+      kind: 'stale_render',
+      time: Date.now(),
+      turnId: 'turn-frozen-render',
+      text: 'ChatGPT stopped updating this answer after its Send control returned.'
+    }]);
+    const repair = await maintenance();
+    expect(repair).toMatchObject({
+      conversationId: PRIME,
+      reason: 'stale-render',
+      turnId: 'turn-frozen-render'
+    });
+
+    // The browser has not acted yet. A next user turn makes the old handout stale, so its late
+    // receipt cannot reload or close anything belonging to the new turn.
+    await events(PRIME, [endTurn('turn-frozen-render', 'failed'), openTurn('turn-after-freeze')]);
+    expect(await maintenance()).toBeNull();
+    expect(await maintenance(repair!.token, 'reloaded')).toBeNull();
+  });
+
+  it('retires a stale-render handout when the final browser preflight refuses it', async () => {
+    await pair();
+    await events(PRIME, [openTurn('turn-draft-race')]);
+    await events(PRIME, [{
+      kind: 'stale_render',
+      time: Date.now(),
+      turnId: 'turn-draft-race',
+      text: 'ChatGPT stopped updating this answer after its Send control returned.'
+    }]);
+    const repair = await maintenance();
+    expect(repair?.reason).toBe('stale-render');
+
+    const skipped = await request('GET', `/status?repairSkipped=${encodeURIComponent(repair!.token)}`);
+    expect(skipped.status).toBe(200);
+    expect(skipped.body.repairs).toEqual([]);
+    expect(await maintenance()).toBeNull();
+  });
+
+  it('spends at most one confirmed stale-render reload per active turn', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [openTurn('turn-stale-budget')]);
+      const signal = (turnId: string) => ({ kind: 'stale_render', time: Date.now(), turnId,
+        text: 'ChatGPT stopped updating this answer after its Send control returned.' });
+      await events(OTHER, [signal('turn-stale-budget')]);
+      const first = await maintenance();
+      expect(first?.reason).toBe('stale-render');
+      expect(await maintenance(first!.token, 'reloaded')).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
+      await events(OTHER, [signal('turn-stale-budget')]);
+      expect(await maintenance()).toBeNull();
+
+      await events(OTHER, [endTurn('turn-stale-budget', 'failed'), openTurn('turn-stale-budget-2')]);
+      await events(OTHER, [signal('turn-stale-budget-2')]);
+      expect((await maintenance())?.reason).toBe('stale-render');
     } finally {
       vi.useRealTimers();
     }
