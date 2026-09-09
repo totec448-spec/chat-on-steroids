@@ -1090,6 +1090,11 @@ async function loadHandoff(): Promise<void> {
 
 function textBlock(className: string, value: string, truncated: boolean, chars: number): HTMLElement {
   const node = el('p', className, value);
+  // Recorded text is whatever language the user and ChatGPT were speaking. The stylesheet is
+  // written left-to-right throughout, so an Arabic or Hebrew message rendered without this
+  // reads with its punctuation and numbers on the wrong side. `auto` resolves from the first
+  // strong character, so Latin text is unaffected.
+  node.setAttribute('dir', 'auto');
   if (truncated) {
     node.append(el('span', 'cut', ` … cut, ${compactNumber(chars)} characters in the original`));
   }
@@ -1221,6 +1226,9 @@ export function renderedMarkdown(source: string, capture?: StoredText): HTMLElem
 
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
   const box = el('div', 'msg');
+  // Same reason as textBlock, for the markdown path — and it is the fallback rather than the
+  // authority: an element below that carried its own direction keeps it.
+  box.setAttribute('dir', 'auto');
   const safeFallback = fallback.slice(0, MAX_RENDERED_HTML_CHARS);
   // A capture the store had to cut is markup that stops mid-element — very often inside a
   // code block, whose wrapper chrome is far larger than the code in it — so it presents part
@@ -1257,7 +1265,14 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
       const start = tagName === 'OL' ? element.getAttribute('start') : null;
       const colSpan = tagName === 'TD' || tagName === 'TH' ? element.getAttribute('colspan') : null;
       const rowSpan = tagName === 'TD' || tagName === 'TH' ? element.getAttribute('rowspan') : null;
+      // ChatGPT marks the direction of its own right-to-left content. Stripping every
+      // attribute threw that away and re-rendered the message left-to-right; the container's
+      // `dir="auto"` then resolved the whole message from its first strong character, which a
+      // mixed-language answer gets wrong paragraph by paragraph. Presentational only, with a
+      // closed set of values, so it carries no script or navigation surface.
+      const dir = element.getAttribute('dir')?.toLowerCase();
       for (const attribute of [...element.attributes]) element.removeAttribute(attribute.name);
+      if (dir === 'ltr' || dir === 'rtl' || dir === 'auto') element.setAttribute('dir', dir);
       if (href) {
         element.setAttribute('href', href);
         element.setAttribute('target', '_blank');
@@ -2929,7 +2944,11 @@ async function refreshInputQueue(): Promise<void> {
     if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
     for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
     if (files.childElementCount) row.append(files);
-    if (entry.text) row.append(el('div', 'pending-message-text', entry.text));
+    if (entry.text) {
+      const text = el('div', 'pending-message-text', entry.text);
+      text.setAttribute('dir', 'auto');
+      row.append(text);
+    }
     const receipt = el('span', 'pending-message-status');
     receipt.title = status; receipt.setAttribute('aria-label', status);
     if (entry.error || entry.state === 'failed') {

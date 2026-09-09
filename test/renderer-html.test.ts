@@ -234,4 +234,24 @@ describe('a capture that could not be carried whole', () => {
     expect(rendered.classList.contains('rich')).toBe(false);
     expect(rendered.textContent).toBe(MARKDOWN);
   });
+
+  it('reads a right-to-left answer in its own direction', () => {
+    // Nothing in the recording says which way this runs, and the stylesheet is left-to-right
+    // throughout, so the container has to resolve it from the text itself.
+    expect(renderedMarkdown('مرحبا بالعالم').getAttribute('dir')).toBe('auto');
+  });
+
+  it('keeps the direction ChatGPT marked on a mixed-language answer', () => {
+    // One first strong character cannot describe two paragraphs that run opposite ways, so
+    // where the capture carried the answer, sanitisation has to leave it there.
+    const rendered = renderedMessage(whole('<p dir="rtl">مرحبا بالعالم</p><p dir="ltr">Hello world</p>'), 'fallback');
+
+    expect([...rendered.querySelectorAll('p')].map((node) => node.getAttribute('dir'))).toEqual(['rtl', 'ltr']);
+  });
+
+  it('drops a direction value that is not one of the three', () => {
+    const rendered = renderedMessage(whole('<p dir="javascript:alert(1)">text</p>'), 'fallback');
+
+    expect(rendered.querySelector('p')!.hasAttribute('dir')).toBe(false);
+  });
 });
