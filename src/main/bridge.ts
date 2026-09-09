@@ -893,6 +893,7 @@ function parseObservations(input: unknown): ChatObservation[] {
     }
     if (typeof item['detail'] === 'string') observation.detail = item['detail'].slice(0, 500);
     if (typeof item['recoverable'] === 'boolean') observation.recoverable = item['recoverable'];
+    if (item['blocking'] === true) observation.blocking = true;
     if (Array.isArray(item['calls'])) observation.calls = parseCallEvidence(item['calls']);
     out.push(observation);
   }
@@ -5535,7 +5536,16 @@ async function noteRecoveryObservations(
   const now = Date.now();
   for (const item of observations) {
     if (item.kind !== 'chat_error') continue;
-    if (/^too many requests\b.*temporarily limited.*access.*few minutes/i.test((item.text ?? '').replace(/\s+/g, ' '))) {
+    // A provider access limit is the page saying it will not carry this chat for a few
+    // minutes; reloading it is useless. The DOM classifier already identifies that dialog
+    // and marks it blocking, so honour its verdict rather than re-deriving one here — this
+    // prose only ever matched the English notice, so the same limit in Korean ran the
+    // silence watchdog down and asked the browser to recover against a live block. The
+    // English match stays for extension documents older than the flag.
+    if (
+      item.blocking === true ||
+      /^too many requests\b.*temporarily limited.*access.*few minutes/i.test((item.text ?? '').replace(/\s+/g, ' '))
+    ) {
       endActivity(conversationId);
       continue;
     }
