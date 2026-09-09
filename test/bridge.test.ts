@@ -5321,6 +5321,24 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // The same dialog, in the language the account is actually reading. The DOM classifier
+  // already recognises it and marks it blocking; only the app's English prose match decided
+  // whether the chat came off the silence clock, so a Korean user's rate limit ran the
+  // response watchdog down and asked the browser to reload against a provider block.
+  it('records a provider access limit the classifier flagged, whatever language it is in', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(PRIME, [openTurn('limited-turn-ko')]);
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'limited-turn-ko',
+        recoverable: false, blocking: true,
+        text: '요청이 너무 많습니다 요청을 너무 빠르게 보내고 있습니다. 데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다. 몇 분 후 다시 시도해 주세요.' }]);
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(180_000);
+      expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each([false, undefined])('does not spend recovery on an informational alert (recoverable: %s)', async recoverable => {
     await pair();
     // Older loaded extension documents queued this toast before New Chat had an id.
