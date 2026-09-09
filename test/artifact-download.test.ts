@@ -58,6 +58,29 @@ async function streamText(stream: AsyncIterable<unknown>): Promise<string> {
 // ------------------------------------------------------------------ fetch gateway
 
 describe('artifact file gateway', () => {
+  it.each(['sdmntprnortheu.oaiusercontent.com', 'sdmntpritalynorth.oaiusercontent.com'])(
+    'downloads native ImageGen files from the reported regional host %s', async host => {
+      const url = `https://${host}/private/generated.png?sig=test`;
+      expect(validateOpenAIFileUrl(url)).toBe(url);
+      const fetch = vi.fn(stubFetch(address => address === GOOD_URL
+        ? new Response(null, { status: 302, headers: { location: url } }) : okResponse('image-bytes')));
+      const opened = await openArtifactFile(fileRef(), { fetch });
+      expect(await streamText(opened.stream)).toBe('image-bytes');
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+  it.each([
+    'sdmntprnortheu.oaiusercontent.com.evil.example',
+    'eviloaiusercontent.com', 'oaiusercontent.com', 'other.blob.core.windows.net',
+    'sdmntprnortheu.oaiusercontent.com.'
+  ])('rejects a regional download lookalike or untrusted host %s before fetching it', async host => {
+    const fetch = vi.fn(stubFetch(() => new Response(null, {
+      status: 302, headers: { location: `https://${host}/private/image.png` }
+    })));
+    await expect(openArtifactFile(fileRef(), { fetch })).rejects.toThrow(/outside the trusted file host/);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it('accepts the exact image host published by the OpenAI image-generation cookbook', async () => {
     const imageUrl = 'https://oaidalleapiprodscus.blob.core.windows.net/private/generated.png?sig=test';
     expect(validateOpenAIFileUrl(imageUrl)).toBe(imageUrl);

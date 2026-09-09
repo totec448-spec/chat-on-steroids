@@ -8035,19 +8035,29 @@
       CLF_DOM.conversationId() === forId;
     let attemptCrossed = false;
     const automaticTicket = job && job.automatic === true;
-    const abandonBeforeSend = async (why) => {
+    const abandonBeforeSend = async (why, retireAutomatic = false) => {
       if (!current()) return;
       nativeBusy = false;
       nativePhase = '';
       pressedAt = 0;
       localError = why;
-      // A page/DOM failure is not a verdict on an automatic ticket. Keep it on the
-      // continuation WAL so the app's next pickup reload can collect the same work. A manual
-      // press keeps its historical immediate-abort behaviour; the user is still present and
-      // can retry it without leaving an invisible job behind.
+      // A transient page/DOM failure is not a verdict on an automatic ticket. Keep it on the
+      // continuation WAL so the app's next pickup reload can collect the same work. A composer
+      // already holding another draft is different: ChatGPT restores that draft across reloads,
+      // so the caller can retire this pre-Send ticket instead of scheduling the same refusal.
+      // A manual press keeps its historical immediate-abort behaviour; the user is still present
+      // and can retry it without leaving an invisible job behind.
       if (!automaticTicket) {
         job = null;
         await ask({ type: 'compact', conversationId: forId, cancel: true }).catch(() => undefined);
+      } else if (retireAutomatic) {
+        // This is not the user-facing Cancel path. The bridge accepts sourceLost only while its
+        // durable checkpoint still proves no Send happened (`not-attempted` or
+        // `attempted-unresolved`). If another page crossed sourceDispatch meanwhile, this refuses
+        // and the ambiguous attempt remains alive rather than being cancelled underneath it.
+        const lost = await ask({ type: 'compact', conversationId: forId, token, sourceLost: true }).catch(() => null);
+        if (lost && lost.ok === true && lost.data && lost.data.aborted === true) job = null;
+        else localError = replyError(lost) || 'The blocked handoff could not be safely retired; it was not sent twice.';
       }
       if (!current()) return;
       renderControl();
@@ -8063,9 +8073,18 @@
       renderControl();
       const squeeze = (value) => String(value || '').replace(/\s+/g, '');
       const existing = CLF_DOM.composer();
+      const occupiedByOtherDraft =
+        Boolean(existing && (existing.textContent || '').trim()) &&
+        squeeze(existing?.textContent) !== squeeze(prompt);
       if (squeeze(existing?.textContent) !== squeeze(prompt) && !CLF_DOM.insertPrompt(prompt)) {
         return void (await abandonBeforeSend(
-          'ChatGPT would not accept the handoff instruction — clear the message box and try again.'
+          'ChatGPT would not accept the handoff instruction — clear the message box and try again.',
+          // An occupied composer is durable state: ChatGPT restores drafts across reloads. Leaving
+          // an automatic ticket open here makes every compaction pickup reload the same draft and
+          // hit this same refusal forever. Retire only this provably pre-Send ticket; the draft
+          // itself stays untouched. Missing/replaced composer failures remain recoverable on the
+          // existing WAL.
+          occupiedByOtherDraft
         ));
       }
       await Promise.resolve();

@@ -371,6 +371,7 @@ const startedCompactions = (harness: Harness): any[] =>
       !message.cancel &&
       !message.summary &&
       !message.sourceAttempt &&
+      !message.sourceLost &&
       !message.sourceDispatch &&
       !message.sourceMessageId &&
       !message.destinationAttempt &&
@@ -9767,9 +9768,47 @@ describe('the Compact & resume control', () => {
     expect(compacts[compacts.length - 1]).toMatchObject({ cancel: true });
   });
 
-  it('keeps an automatic ticket open when a page-side composer error happens before Send', async () => {
+  it('durably retires an automatic ticket blocked by a persistent user draft without changing the draft', async () => {
     const automaticJob = {
       sessionId: 's-auto-page-error',
+      stage: 'handoff-pending',
+      automatic: true,
+      busy: true,
+      handoffId: null,
+      error: null
+    };
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0, job: null } }),
+      compact: (message) =>
+        message.sourceLost
+          ? { ok: true, data: { aborted: true, job: null } }
+          : {
+              ok: true,
+              data: {
+                started: true,
+                token: 'tok-auto-page-error',
+                prompt: 'write the automatic handoff brief',
+                job: automaticJob
+              }
+            }
+    });
+    live.hook.injectControl();
+    live.document.querySelector('#prompt-textarea')!.textContent = 'draft that makes prompt insertion fail';
+
+    await live.hook.startCompact(true);
+
+    const compacts = live.sent.filter((message) => message.type === 'compact');
+    expect(compacts[0]).toMatchObject({ ticket: true, automatic: true });
+    expect(compacts).toContainEqual(expect.objectContaining({ token: 'tok-auto-page-error', sourceLost: true }));
+    expect(compacts.some((message) => message.cancel === true)).toBe(false);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceAttempt === true)).toBe(false);
+    expect(composerText(live.document)).toBe('draft that makes prompt insertion fail');
+    expect(live.document.querySelector('.clf-pill-text')!.textContent).toContain('clear the message box');
+  });
+
+  it('keeps an automatic ticket recoverable when the composer itself is transiently missing', async () => {
+    const automaticJob = {
+      sessionId: 's-auto-missing-composer',
       stage: 'handoff-pending',
       automatic: true,
       busy: true,
@@ -9782,14 +9821,14 @@ describe('the Compact & resume control', () => {
         ok: true,
         data: {
           started: true,
-          token: 'tok-auto-page-error',
+          token: 'tok-auto-missing-composer',
           prompt: 'write the automatic handoff brief',
           job: automaticJob
         }
       })
     });
     live.hook.injectControl();
-    live.document.querySelector('#prompt-textarea')!.textContent = 'draft that makes prompt insertion fail';
+    live.document.querySelector('#prompt-textarea')!.remove();
 
     await live.hook.startCompact(true);
 
@@ -9797,6 +9836,64 @@ describe('the Compact & resume control', () => {
     expect(compacts[0]).toMatchObject({ ticket: true, automatic: true });
     expect(compacts.some((message) => message.cancel === true)).toBe(false);
     expect(live.document.querySelector('.clf-pill-text')!.textContent).toContain('clear the message box');
+  });
+
+  it('preserves a stale COS handoff draft including user edits and retires the unsent ticket', async () => {
+    const pendingJob = {
+      sessionId: 's-auto-stale-draft',
+      stage: 'handoff-pending',
+      automatic: true,
+      busy: true,
+      handoffId: null,
+      error: null,
+      sourceSend: { state: 'not-attempted', messageId: null }
+    };
+    live = await harness(undefined, {
+      activity: () => ({
+        ok: true,
+        data: {
+          entries: [],
+          stream: [],
+          nextSince: 0,
+          pendingTools: 0,
+          job: pendingJob
+        }
+      }),
+      compact: (message) => {
+        if (message.sourceAttempt) {
+          return { ok: true, data: { allowed: true } };
+        }
+        if (message.sourceDispatch) return { ok: true, data: { armed: true } };
+        if (message.sourceLost) return { ok: true, data: { aborted: true } };
+        return {
+          ok: true,
+          data: {
+            started: false,
+            token: '0123456789abcdef0123456789abcdef',
+            prompt: '[[CLF-HANDOFF:0123456789abcdef0123456789abcdef]]\n\ncurrent handoff prompt',
+            job: pendingJob
+          }
+        };
+      }
+    });
+    live.hook.injectControl();
+    const stale =
+      '[[CLF-HANDOFF:fedcba9876543210fedcba9876543210]]\n\n' +
+      'Chat On Steroids is compacting this conversation so a fresh chat can continue the work. Stop whatever you were doing and do only this.\n\n' +
+      'stale rejected handoff prompt';
+    live.document.querySelector('#prompt-textarea')!.textContent = stale;
+
+    await live.hook.pullActivity();
+    await settle();
+    await live.hook.pullActivity();
+    await settle();
+
+    expect(startedCompactions(live)).toHaveLength(1);
+    expect(live.sent.some((message) => message.type === 'compact' && message.cancel === true)).toBe(false);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(true);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceAttempt === true)).toBe(false);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceDispatch === true)).toBe(false);
+    expect(composerText(live.document)).toBe(stale);
   });
 
   it('does not submit a compaction prompt after the composer changes during its pre-send wait', async () => {
