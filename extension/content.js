@@ -369,7 +369,7 @@
    * The stop button is the only signal ChatGPT gives for "a turn is running", and it is not
    * continuous: the page tears it down and remounts it across tool phases, streaming
    * reconnects and plain rerenders. Ending the turn on the first sample that misses it is
-   * what session `2026-08-17-d1354db2` records again and again — `turn_start` at seq 342 and
+   * what session `2000-01-01-00000001` records again and again — `turn_start` at seq 342 and
    * `turn_end` at 343 four hundred milliseconds later with `outcome: "unknown"`, then the
    * same run reopened at 347 under a fresh generation id; the same shape at 357/358/360 with
    * a 2.7 s gap, and at 249/251. `unknown` is the signature: endOutcome() found no answer, no
@@ -451,7 +451,7 @@
    * button, finds no generation of its own, and opens a second one: one assistant run
    * recorded as two, its progress and prose ids keyed off a name the first half never used,
    * and the app's live-turn evidence reset underneath the calls still in flight. Session
-   * `2026-08-17-d1354db2` has that at seq 367/368.
+   * `2000-01-01-00000001` has that at seq 367/368.
    *
    * The app holds the durable half of that identity, so the new document asks for it before
    * it observes anything.
@@ -702,19 +702,26 @@
   let userSendReceipt = null;
   const pageViewChecks = new Set(); // Existing readiness waits also observe accepted MAIN-world snapshots.
   const sendText = (value) => String(value || '').replace(/\s+/g, '');
-  /** Exact submitted text belongs to a stable user id, never its Markdown decoration. */
-  function matchesSubmittedUser(message, expected) {
+  /** Receipt, transcript and presentation share the same exact native user source. */
+  function userMessageSource(message) {
     if (!message || message.role !== 'user' || !message.id || !message.node?.isConnected ||
-        retiredMessages.has(message.id) || isStale(message.node) || typeof expected !== 'string' || expected.length > 240000) return false;
+        retiredMessages.has(message.id) || isStale(message.node)) return null;
     const turn = stampedFiberTurn({ node: message.node }, [...fiberTurns.values()], fiberScanToken);
-    if (turn && turn.conversationId !== CLF_DOM.conversationId()) return false;
+    const temporary = desktopDecision?.temporary && desktopDecision.onTarget() &&
+      (!desktopDecision.messageId || desktopDecision.messageId === message.id);
+    if (turn && (turn.conversationConflict || (!temporary && turn.conversationId !== CLF_DOM.conversationId()))) return null;
     const authored = (turn?.messages || []).filter(candidate => candidate.role === 'user' && candidate.stable === true &&
       (candidate.rawMessageId === message.id || candidate.messageId === message.id));
-    if (authored.length > 1) return false;
+    if (authored.length > 1) return null;
     // A current exact-id provider object supersedes display text. If absent, an unchanged
     // plain-text bubble retains the existing exact-text receipt contract; no Markdown stripping.
     const actual = authored.length === 1 ? authored[0].rawText : message.text;
-    return typeof actual === 'string' && actual.length <= 256000 && sendText(actual) === sendText(expected);
+    return typeof actual === 'string' && actual.length <= 256000 ? { text: actual, canonical: authored.length === 1 } : null;
+  }
+  function matchesSubmittedUser(message, expected) {
+    if (typeof expected !== 'string' || expected.length > 240000) return false;
+    const source = userMessageSource(message);
+    return source !== null && sendText(source.text) === sendText(expected);
   }
   // A first fresh route may await authored evidence. A second route (including an
   // observed return to New Chat) revokes this send; text proof is not its lifetime.
@@ -1950,7 +1957,14 @@
       // conversation, so filing it here would be filing chat A's transcript into chat B.
       if (retiredMessages.has(message.id) || isStale(message.node)) continue;
       if (message.role === 'user') {
-        const key = occurrenceKey(message.id, message.text);
+        const source = userMessageSource(message);
+        if (!source) continue;
+        // Rendered inline code can remove Markdown bytes even inside a pre-wrap
+        // bubble. Do not publish a broken transport frame while its exact source
+        // is pending. A canonical user-authored marker remains literal text.
+        if (!source.canonical && /^\[\[COS_CONTEXT:\d{1,6}\]\]/.test(source.text) && CLF_DOM.userPromptText(source.text) === null) continue;
+        const text = source.text;
+        const key = occurrenceKey(message.id, text);
         // Dedupe answers "have we journalled this row?"; authoredNow answers "did this row
         // cross the send boundary?" The boundary is intentionally evaluated first. Fiber can
         // journal the canonical row first, but that must not consume the later DOM proof which
@@ -1966,7 +1980,7 @@
         // the stable ChatGPT-authored identity. This is the reload path after the URL command
         // marker has already disappeared. reconcileContinuationMarker() releases the gate on
         // the app's answer, committed or refused; only an unreachable app keeps it shut.
-        const continuation = message.text.match(CONTINUATION_MARKER);
+        const continuation = text.match(CONTINUATION_MARKER);
         // The app's settled disposition outlives this DOM row. A remount or a later
         // quotation of its marker cannot turn a committed chat back into a shadow.
         const settledContinuation = continuation && [...reconciledContinuations.keys()].some(
@@ -1980,7 +1994,7 @@
         if (justAuthored) newUserMessage = message.id;
         emit({
           kind: 'user_message',
-          text: message.text,
+          text,
           messageId: message.id,
           turnId: message.turnId || undefined,
           ...(justAuthored ? { authoredNow: true } : {})
@@ -2059,6 +2073,7 @@
   }
 
   function observe() {
+    CLF_DOM.presentUserPrompts?.(message => userMessageSource(message)?.text ?? null);
     publishDesktopDecisionPartial();
     const id = CLF_DOM.conversationId();
     // One DOM turn snapshot per observation, created lazily because a transient id-less route
@@ -2444,7 +2459,7 @@
       // answer/error/interrupt closes after the settle window, and ten minutes of genuine
       // silence upgrades itself to `stalled` through endOutcome().
       // ChatGPT also flips `data-interrupted=true` transiently between tool/reasoning phases.
-      // Session 2026-08-19-86fa06c9 proved it: that marker closed a turn as interrupted and
+      // Session 2000-01-01-00000002 proved it: that marker closed a turn as interrupted and
       // the same website turn emitted commentary 9 ms later, followed by MCP calls for almost
       // two minutes. The marker is therefore an *outcome* if a terminal boundary is proven,
       // never a terminal boundary on its own. User stop is already explicit; a new user
@@ -3123,7 +3138,7 @@
    * lifecycle. Everything else used to be recorded with no turn at all, and that is a real
    * gap rather than a tidy conservatism: ChatGPT does not always expose a turn's thinking
    * headline in its message model while the turn is running, so the headline is first seen
-   * long afterwards — in session `2026-08-21-ce135bff`, three and a half minutes and one page
+   * long afterwards — in session `2000-01-01-00000003`, three and a half minutes and one page
    * load after the turn it describes. A row with no turn belongs to no group, and a group
    * missing a row ChatGPT is visibly showing cannot be proven complete, so one late headline
    * dropped that entire response back to ChatGPT's native rendering.
@@ -3144,9 +3159,9 @@
    * Makes request ownership an explicit acknowledged operation for the current live turn.
    *
    * Fresh-chat ordering is the reason this exists. Live 2026-08-21, the real chat session
-   * `2026-08-21-e24b18f3` existed before the first call, while normalized request
-   * `77186fb4-bdda-4849-8cd7-879bb08a1617` still never reached the correlation registry and
-   * every call fell into `2026-08-21-9d5892a4` (Unattributed activity). ChatGPT can expose a
+   * `2000-01-01-00000004` existed before the first call, while normalized request
+   * `00000005-0000-4000-8000-000000000005` still never reached the correlation registry and
+   * every call fell into `2000-01-01-00000006` (Unattributed activity). ChatGPT can expose a
    * connector request and its metadata.request_id while its internal clientThreadId still names the provisional
    * thread, then assign the real /c/<conversation-id> a moment later. Transcript delivery can
    * safely wait for that convergence; MCP attribution cannot, because the recorder has a finite
@@ -3413,22 +3428,20 @@
     fiberRows = answer.rows;
     fiberScanToken = answer.scanToken;
     fiberTurns = new Map();
-    // User messages have one normal owner: the DOM recorder above. Its stable
-    // data-message-id is also the send receipt that opens the local turn. Publishing the
-    // same visible row first from Fiber marked it seen while an SPA identity pull was still
-    // gated; the later DOM pass then quite correctly treated it as already recorded and
-    // never emitted turn_start. Keep Fiber only for the narrow thing it adds: page-model
-    // messages whose stable id is not rendered in the DOM yet.
-    const renderedUserMessageIds = new Set(
+    // DOM still owns the visible send boundary. The provider model owns text when
+    // the native renderer has transformed it; the DOM pass evaluates authoredNow
+    // independently of transcript deduplication, so this cannot consume turn_start.
+    const renderedUserTexts = new Map(
       CLF_DOM.messages()
         .filter((message) => message.role === 'user' && message.id)
-        .map((message) => message.id)
+        .map((message) => [message.id, message.text])
     );
     for (const turn of answer.turns) {
       if (fiberTurns.has(turn.index)) fiberTurns.set(turn.index, null);
       else fiberTurns.set(turn.index, turn);
     }
     for (const [index, value] of fiberTurns) if (value === null) fiberTurns.delete(index);
+    CLF_DOM.presentUserPrompts?.(message => userMessageSource(message)?.text ?? null);
     for (const check of pageViewChecks) void check();
     completeDesktopDecision();
     const markedTurns = markedContinuationTurns();
@@ -3579,7 +3592,7 @@
     // `settledTurnOwner` claims a page turn for the local turn that recorded its request
     // id, which is exact only while an id names one request. ChatGPT reuses a single
     // `request_id` across the retries within a turn — live 2026-08-21, session
-    // `2026-08-21-204027d1` had one id on three calls and a second on two — so after a
+    // `2000-01-01-00000007` had one id on three calls and a second on two — so after a
     // Retry several distinct page turns resolve to the same local turn, every one of them
     // emits its prose under that id, and the app paints one answer twice.
     //
@@ -3590,7 +3603,7 @@
     // turn id out from under the turn currently being written.
     //
     // The seed is not conditional on that binding being *resolvable*. Live 2026-08-31,
-    // session `2026-08-31-7c0253f2`: ChatGPT held a tool-heavy turn's whole output back and
+    // session `2000-01-01-00000008`: ChatGPT held a tool-heavy turn's whole output back and
     // released it in one burst at 12:00:41, while generation `…-0-3` was live and
     // `ownedPageTurn` unresolved. `activeTurnIndex` was therefore -1, the seed was skipped,
     // and a historical section — carrying prose authored at 11:28:07, two minutes before
@@ -3656,7 +3669,7 @@
 
         const message = item.value;
         if (message.role === 'user') {
-          if (renderedUserMessageIds.has(message.messageId)) continue;
+          if (renderedUserTexts.get(message.messageId) === message.rawText) continue;
           const key = occurrenceKey(message.messageId, message.rawText);
           if (message.createTime) {
             if (userAuthoredTimesReported.get(key) === message.createTime) continue;
@@ -4856,7 +4869,7 @@
     const lookup = index || streamRenderIndex(streamEntries, groups);
     // Website message/thought ids are turn-local objects. `metadata.request_id` is not: a
     // user can interrupt an in-flight response and ChatGPT can keep the same request id
-    // across the next visible assistant turn. Session 2026-08-19-e1052dd7 captured exactly
+    // across the next visible assistant turn. Session 2000-01-01-00000009 captured exactly
     // that shape: one request id across three honest local turn groups plus null-turn calls.
     // Treating that response-level id as a turn-local join made every historical renderer
     // reject the turn as soon as a second group existed, which is why a fully reconstructed
@@ -7162,6 +7175,7 @@
 
     const input = document.createElement('textarea');
     input.className = 'clf-menu-goal-input';
+    input.dir = 'auto';
     input.dataset.clfGoalInput = '1';
     input.rows = 3;
     input.placeholder = 'What does this chat have to reach?';
@@ -7391,7 +7405,8 @@
     // click. A clamped block of the text itself is as wide closed as it is open.
     const preview = document.createElement('span');
     preview.className = 'clf-boot-preview';
-    preview.textContent = String(node.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+    const rawPreview = String(node.textContent || '');
+    preview.textContent = (CLF_DOM.userPromptText(rawPreview) ?? rawPreview).replace(/\s+/g, ' ').trim().slice(0, 240);
     head.append(preview);
     box.append(head);
 
@@ -9871,8 +9886,19 @@
     // The accepted user and its current assistant message survive that remount; a captured
     // section, reusable data-turn-id or previous terminal must never own the helper result.
     const turn = stampedFiberTurn(pageTurn, [...fiberTurns.values()], fiberScanToken);
-    if (!turn?.endMessageId || turn.conversationId !== decision.conversationId || turn.endMessageId !== assistant.id ||
+    if (!turn?.endMessageId || turn.conversationConflict || turn.endMessageId !== assistant.id ||
         (turn.calls || []).some(call => call.answered !== true)) return;
+    if (decision.temporary) {
+      // Temporary Chat has no /c route, but its canonical messages carry a WEB: thread.
+      // Join the final to the accepted user in this same scan instead of comparing that
+      // provider identity to the deliberately null route identity.
+      const userTurn = CLF_DOM.turns().find(candidate => candidate.role === 'user' &&
+        (candidate.nodes || [candidate.node]).some(node => node?.contains(messages[userIndex].node)));
+      const user = stampedFiberTurn(userTurn, [...fiberTurns.values()], fiberScanToken);
+      if (!user || user.conversationConflict || user.conversationId !== turn.conversationId ||
+          !(user.messages || []).some(message => message.role === 'user' &&
+            (message.rawMessageId === decision.messageId || message.messageId === decision.messageId))) return;
+    } else if (turn.conversationId !== decision.conversationId) return;
     const terminal = (turn.messages || []).filter(message => message.role === 'assistant' &&
       (message.rawMessageId === turn.endMessageId || message.messageId === turn.endMessageId));
     if (terminal.length !== 1) return;

@@ -1,3 +1,4 @@
+import { toolDeclaration } from './tool-declarations.js';
 /**
  * The Desktop connector: seeing and driving the native desktop.
  *
@@ -180,7 +181,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
   if (exposedCaps.screen) {
     reg.register(
       'observe',
-      {
+      toolDeclaration('observe', () => ({
         title: 'Look at the desktop',
         description:
           'Look at the desktop without touching it. With no arguments, returns the foreground window, its picture and snapshot-scoped UI controls. ' +
@@ -236,7 +237,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           })
           .strict(),
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true }
-      },
+      })),
       async (input) =>
         reg.guarded('screen', 'observe', async () => {
           // wait_for happens first and then answers the ordinary question about whatever it
@@ -383,7 +384,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
   if (exposedCaps.control || exposedCaps.clipboardRead || exposedCaps.clipboardWrite) {
     reg.register(
       'computer',
-      {
+      toolDeclaration('computer', () => ({
         title: 'Control mouse and keyboard',
         description:
           'Run ordered desktop actions. Prefer refs from observe; pixels require frameId and target geometry is rechecked. ' +
@@ -456,7 +457,7 @@ export function registerDesktopTools(reg: SurfaceRegistrar): void {
           })
           .strict(),
         annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
-      },
+      })),
       async ({ actions, frameId, verify, captureAfter, captureWindow, captureFull, captureMaxWidth, captureCrop }) =>
         guard('computer', async () => {
           // Not reg.guarded: this tool covers two permissions. Pointer and keyboard steps

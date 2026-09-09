@@ -3,6 +3,7 @@ import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
+import { prependUserPrompt } from '../src/shared/user-prompt.js';
 import type { SessionEvent, SessionSummary } from '../src/shared/session.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import type { LocalProject } from '../src/shared/projects.js';
@@ -427,6 +428,12 @@ it('shows original user text while retaining transport instructions outside the 
   expect(w.document.querySelector('.said.is-user .msg')?.textContent).toBe('hello');
   expect(w.document.body.textContent).toContain('hello');
 });
+it('hides the complete instruction prefix on a browser echo without an app receipt', async () => {
+  const sent = prependUserPrompt('Visible authored message', 'Invisible complete guidance');
+  const { w } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'echo', message: text(sent) }]);
+  expect(w.document.querySelector('.said.is-user .msg')?.textContent).toBe('Visible authored message');
+  expect(w.document.body.textContent).not.toContain('Invisible complete guidance');
+});
 
 it('appends dropped files to the originating composer draft and caps attachments', async () => {
   const { w } = await boot([], false);
@@ -448,6 +455,50 @@ it('appends dropped files to the originating composer draft and caps attachments
   await settle();
   expect(api.dropFiles).toHaveBeenCalledTimes(1);
   expect(w.document.querySelectorAll('#composerImages .attachment-card')).toHaveLength(1);
+});
+
+it('removes a project group in one click, keeps its chats and draft, and rejects an older refresh', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Removed', path: '/removed', createdAt: 1 };
+  const other = { id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', name: 'Other', path: '/other', createdAt: 2 };
+  const parent = { ...summary([]), projectId: project.id };
+  const child = { ...summary([]), id: 'child-session', conversationId: 'child-chat', projectId: project.id,
+    origin: { kind: 'worker' as const, fromSessionId: parent.id, agentId: 'worker-1', task: 'Keep working' } };
+  const { w, live } = await boot([], false, [], [project, other], { sessions: [parent, child] });
+  const api = (w as any).api;
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  (w.document.querySelector('.worker-toggle') as HTMLButtonElement).click();
+  (w.document.querySelector(`[data-new-project="${project.id}"]`) as HTMLButtonElement).click();
+  input.value = 'Keep my draft';
+  let finishList!: (value: unknown) => void;
+  api.listSessions = () => new Promise(resolve => { finishList = resolve; });
+  (w.document.getElementById('chatRefresh') as HTMLButtonElement).click();
+  await settle();
+  api.removeProject = vi.fn(async () => ({ ok: true, data: { ...project, ungrouped: true } }));
+  (w.document.querySelector('.project-remove') as HTMLButtonElement).click();
+  await settle();
+  expect(api.removeProject).toHaveBeenCalledExactlyOnceWith(project.id);
+  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)).toBeNull();
+  expect(w.document.querySelector(`[data-project-id="${other.id}"]`)).not.toBeNull();
+  expect(w.document.querySelector(`#sessionList > [data-id="${parent.id}"]`)).not.toBeNull();
+  expect(w.document.querySelector('#sessionList > .worker-group [data-id="child-session"]')).not.toBeNull();
+  expect(input.value).toBe('Keep my draft');
+  expect(input.placeholder).toBe('Ask anything…');
+  finishList({ ok: true, data: { sessions: [parent, child], activeId: null, pressure: [], blocked: [] } });
+  await settle();
+  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)).toBeNull();
+  (w.document.getElementById('chatSend') as HTMLButtonElement).click();
+  await settle();
+  expect(live.sent[0]).toMatchObject({ sessionId: null, projectId: null, text: 'Keep my draft' });
+});
+
+it('keeps the project visible when its removal fails', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Keep', path: '/keep', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  (w as any).api.removeProject = async () => ({ ok: false, error: 'Could not save' });
+  (w.document.querySelector('.project-remove') as HTMLButtonElement).click();
+  await settle();
+  expect(w.document.querySelector('.project-group')).not.toBeNull();
+  expect((w.document.querySelector('.project-remove') as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
@@ -1014,6 +1065,40 @@ it.each([true, false])('hands plan presentation to queued stages while sending a
   if (!accepted) expect(input.value).toBe('Build the whole task');
 });
 
+it.each(['delivery', 'model', 'refresh-failed', 'enqueue-failed'])('retries the durable full plan without pasting stage one (%s)', async failure => {
+  const { w, live, append } = await boot([], false);
+  const api = (w as any).api;
+  const original: InputEntry = { id: 'failed-plan', sessionId: null, projectId: null, text: 'Implement everything',
+    objective: 'Original complete request', stages: ['Verify gameplay', 'Verify voice', 'Final review'], automation: 'off',
+    model: 'gpt-5.6-sol', reasoningEffort: 'high', mode: 'auto', dueAt: 1, createdAt: 1, state: 'failed',
+    owner: 'old-page', conversationId: null, error: failure === 'model' || failure === 'refresh-failed'
+      ? 'Requested model or reasoning could not be confirmed' : 'Delivery failed' };
+  live.inputs = [original]; await append([]);
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'An independent draft'; input.dispatchEvent(new w.Event('input'));
+  api.requestChatModels = vi.fn(async () => ({ ok: true, data: failure === 'refresh-failed'
+    ? { state: 'unavailable', models: [], error: 'Unavailable' }
+    : { state: 'ready', models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high'] }] } }));
+  if (failure === 'enqueue-failed') api.sendInput = vi.fn(async () => ({ ok: false, error: 'Connection failed' }));
+  const retry = w.document.querySelector<HTMLButtonElement>('[aria-label="Retry delivery"]')!;
+  retry.click(); retry.click(); await settle(); await append([]);
+  expect(input.value).toBe('An independent draft');
+  if (failure === 'refresh-failed' || failure === 'enqueue-failed') {
+    expect(live.sent).toHaveLength(0);
+    expect(w.document.querySelector('[aria-label="Retry delivery"]')).not.toBeNull();
+    expect(live.inputs[0]!.stages).toEqual(original.stages);
+    expect(w.localStorage.getItem('dismissed-input-notices') ?? '').not.toContain(original.id);
+  } else {
+    expect(live.sent).toHaveLength(1);
+    expect(live.sent[0]).toMatchObject({ text: original.text, objective: original.objective, stages: original.stages,
+      automation: 'off', model: original.model, reasoningEffort: 'high', mode: 'auto' });
+    expect(live.sent[0]!.id).not.toBe(original.id);
+    expect(live.sent[0]).not.toHaveProperty('owner');
+    expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(3);
+  }
+  expect(api.requestChatModels).toHaveBeenCalledTimes(failure === 'model' || failure === 'refresh-failed' ? 1 : 0);
+});
+
 it('disables empty task actions and confirms saving without the old helper sentence', async () => {
   const { w } = await boot([], false);
   const save = w.document.getElementById('saveSessionObjective') as HTMLButtonElement;
@@ -1237,7 +1322,9 @@ it('keeps actual-turn Stop through two authored sends and stops only the capture
 it('does not retarget an awaiting Stop after leaving and reselecting the same chat', async () => {
   const { w } = await boot([]);
   const api = (w as any).api;
-  const original = api.getSessionControls;
+  const baseControls = api.getSessionControls;
+  const original = async (id: string) => ({ ok: true, data: { ...(await baseControls(id)).data,
+    plan: { updatedAt: 2, plan: [{ step: 'Current plan', status: 'in_progress', details: 'Current selection' }] } } });
   const stop = vi.fn(async () => ({ ok: true, data: {} }));
   api.stopSessionTurn = stop;
   let resolve!: (value: any) => void;
@@ -1247,10 +1334,14 @@ it('does not retarget an awaiting Stop after leaving and reselecting the same ch
   w.document.getElementById('newChat')!.click();
   (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();
   await settle();
-  resolve(await original('2026-09-02-test0001'));
+  expect(w.document.getElementById('agentPlan')!.textContent).toContain('Current plan');
+  resolve({ ok: true, data: { ...(await original('2026-09-02-test0001')).data,
+    plan: { updatedAt: 1, plan: [{ step: 'Stale plan', status: 'pending' }] } } });
   await settle();
   expect(stop).not.toHaveBeenCalled();
   expect(w.document.getElementById('chatSend')!.dataset.action).toBe('stop');
+  expect(w.document.getElementById('agentPlan')!.textContent).toContain('Current plan');
+  expect(w.document.getElementById('agentPlan')!.textContent).not.toContain('Stale plan');
 });
 
 it('streams a new Goal opening, queues it once, and displays authoritative delivery failure', async () => {

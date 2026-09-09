@@ -391,6 +391,12 @@ function build(
     }
 
     // ----------------------------------------------------------- session
+    case 'update_plan': {
+      const steps = arr(args['plan']);
+      const completed = steps.filter(step => record(step)['status'] === 'completed').length;
+      return { kind: 'session', tone: 'neutral', title: steps.length ? 'Updated the task plan' : 'Cleared the task plan',
+        ...(steps.length ? { detail: `${completed} / ${steps.length} completed` } : {}) };
+    }
     case 'session': {
       const action = str(args['action']) ?? 'search';
       const query = str(args['query']);

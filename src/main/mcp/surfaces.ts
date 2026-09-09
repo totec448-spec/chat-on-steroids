@@ -91,9 +91,9 @@ export interface SurfaceDefinition {
  *    it here. A dedicated connector for one conditional schema is pure setup overhead with
  *    no discovery benefit.
  *
- * Core declares 10 possible tool names below, but at most 9 schemas are live at once.
+ * Each surface also exposes JavaScript exec, restricted to that surface's own tools.
  * `find` and the exec pair are mutually exclusive — `find` exists only when command
- * execution is off — so no runtime tools/list reaches all 10 declarations.
+ * execution is off — so not all declarations are exposed together.
  */
 const CORE: SurfaceDefinition = {
   id: 'core',
@@ -108,7 +108,7 @@ const CORE: SurfaceDefinition = {
     'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations.',
   cardSummary: 'Files, patches and the terminal. Required — this is the coding connector.',
   required: true,
-  tools: ['read', 'view_image', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'download_artifact', 'session', 'agents', 'session_finish']
+  tools: ['read', 'view_image', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'download_artifact', 'session', 'update_plan', 'agents', 'session_finish', 'exec']
 };
 
 /**
@@ -133,7 +133,7 @@ const DESKTOP: SurfaceDefinition = {
   cardSummary:
     'Screenshots, windows, mouse/keyboard control and the clipboard. Optional — connect it only if you want desktop automation.',
   required: false,
-  tools: ['observe', 'computer']
+  tools: ['observe', 'computer', 'exec']
 };
 
 const PLUGINS: SurfaceDefinition = {
@@ -143,7 +143,7 @@ const PLUGINS: SurfaceDefinition = {
   cardSummary: 'One shared connector for your enabled external MCP plugins.',
   required: false,
   // Dynamic declarations are owned and bounded by the plugin manager.
-  tools: []
+  tools: ['exec']
 };
 
 export const SURFACES: Record<SurfaceId, SurfaceDefinition> = { core: CORE, desktop: DESKTOP, plugins: PLUGINS };

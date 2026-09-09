@@ -217,8 +217,8 @@ function discoverModels(): Promise<void> {
   return discovery;
 }
 
-export async function ensureComposerModel(): Promise<ReturnType<typeof confirmedComposerModel>> {
-  if (catalog.models.length) return confirmedComposerModel();
+export async function ensureComposerModel(refresh = false): Promise<ReturnType<typeof confirmedComposerModel>> {
+  if (!refresh && catalog.models.length && catalog.state !== 'pending') return confirmedComposerModel();
   const ready = new Promise<void>(resolve => {
     const finish = () => { clearTimeout(timer); catalogWaiters.delete(check); resolve(); };
     const check = () => { if (catalog.state === 'ready' || catalog.state === 'unavailable') finish(); };
@@ -227,7 +227,7 @@ export async function ensureComposerModel(): Promise<ReturnType<typeof confirmed
   });
   await discoverModels();
   await ready;
-  return confirmedComposerModel();
+  return catalog.state === 'ready' && !catalog.error ? confirmedComposerModel() : null;
 }
 
 export function applyChatModels(config: Config, previous?: Config): void {

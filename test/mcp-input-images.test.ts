@@ -5,7 +5,7 @@ import sharp from 'sharp';
 import { expect, it } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
-import { initSessionStore, createSession, appendEvent, resetSessionStoreForTests } from '../src/main/session/store.js';
+import { initSessionStore, createSession, appendEvent, observeSessionModel, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import { enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
 import { validateInputImages } from '../src/main/session/input-images.js';
@@ -24,6 +24,7 @@ it('carries validated user image bytes through an exact-session MCP result and a
   try {
     const conversationId = randomUUID(), requestId = 'wfr_input_image_test';
     const session = await createSession({ conversationId, title: 'Image injection test' });
+    await observeSessionModel(session.id, conversationId, 'gpt-6-astra', Date.now());
     await appendEvent(session.id, { kind: 'turn_start', source: 'extension', turnId: 'held-image-turn', time: Date.now() });
     expect(observeRequestCorrelation({ requestId, conversationId, sessionId: session.id, messageId: 'image-message', tool: 'read', observedAt: Date.now() })).toBe('stored');
     const bytes = await sharp({ create: { width: 12, height: 12, channels: 3, background: '#437b79' } }).webp().toBuffer();
@@ -32,7 +33,7 @@ it('carries validated user image bytes through an exact-session MCP result and a
     const input = await enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'Use this image', images, mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
     const additional = [];
     for (const text of ['Use the connected plugin', 'Include the requested movements']) {
-      additional.push(await enqueueInput({ id: randomUUID(), sessionId: session.id, text, mode: 'auto', dueAt: 0, model: null, reasoningEffort: null }));
+      additional.push(await enqueueInput({ id: randomUUID(), sessionId: session.id, text, ...(text === 'Include the requested movements' ? { images } : {}), mode: 'auto', dueAt: 0, model: null, reasoningEffort: null }));
     }
     const call = async (name = 'read', args: Record<string, unknown> = { paths: ['/workspace/example.txt'] }) => {
       const response = await fetch(endpoint.urls.core, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'x-request-id': `${requestId}/att1` }, body: JSON.stringify({ jsonrpc: '2.0', id: randomUUID(), method: 'tools/call', params: { name, arguments: args } }) });
@@ -44,10 +45,17 @@ it('carries validated user image bytes through an exact-session MCP result and a
     const first = await call();
     expect(first.result.isError).not.toBe(true);
     expect(first.result.content).toContainEqual({ type: 'image', mimeType: 'image/webp', data: bytes.toString('base64') });
-    expect(first.result.content.some((row: { text?: string }) => row.text?.includes(input.id))).toBe(true);
-    const injected = first.result.content.filter((row: { text?: string }) => row.text?.includes('--- New instructions from the user ---'));
-    expect(injected).toHaveLength(3);
-    for (const [index, entry] of [input, ...additional].entries()) expect(injected[index].text).toContain(`[User message ${entry.id}]\n${entry.text}`);
+    const texts = first.result.content.filter((row: { type: string }) => row.type === 'text').map((row: { text: string }) => row.text).join('\n');
+    expect(texts.match(/--- New instructions from the user ---/g)).toHaveLength(1);
+    expect(texts.match(/Use session_finish/g)).toHaveLength(1);
+    const start = first.result.content.findIndex((row: { text?: string }) => row.text?.includes('--- New instructions from the user ---'));
+    const injected = first.result.content.slice(start);
+    expect(injected.map((row: { type: string }) => row.type)).toEqual(['text', 'image', 'text', 'text', 'image', 'text']);
+    for (const [index, entry] of [input, ...additional].entries()) {
+      expect(injected[[0, 2, 3][index]!].text).toBe((index === 0 ? '\n--- New instructions from the user ---\n' : '\n\n') + entry.text);
+      expect(texts).not.toContain(entry.id);
+    }
+    expect(injected.at(-1).text).toContain('about 5 minutes of final verification remain');
     const second = await call();
     expect(second.result.content.some((row: { type: string }) => row.type === 'image')).toBe(false);
     expect((await listInputs()).find(row => row.id === input.id)?.state).toBe('sent');
@@ -55,21 +63,21 @@ it('carries validated user image bytes through an exact-session MCP result and a
       expect(second.result.content.some((row: { text?: string }) => row.text?.includes(entry.id))).toBe(false);
       expect((await listInputs()).find(row => row.id === entry.id)?.state).toBe('sent');
     }
-    expect(second.result.content.some((row: { text?: string }) => row.text?.includes(stageOne.id))).toBe(false);
-    expect(second.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.id))).toBe(false);
+    expect(second.result.content.some((row: { text?: string }) => row.text?.includes(stageOne.text))).toBe(false);
+    expect(second.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.text))).toBe(false);
     expect((await listInputs()).find(row => row.id === stageOne.id)?.state).toBe('queued');
     const refusedFinish = await call('session_finish', { summary: '' });
     expect(refusedFinish.result.isError).toBe(true);
     expect((await listInputs()).find(row => row.id === stageOne.id)?.state).toBe('queued');
     const finish = await call('session_finish', { summary: 'The current stage is complete' });
     expect(finish.result.isError).not.toBe(true);
-    expect(finish.result.content.some((row: { text?: string }) => row.text?.includes(stageOne.id))).toBe(true);
-    expect(finish.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.id))).toBe(false);
+    expect(finish.result.content.some((row: { text?: string }) => row.text?.includes(stageOne.text))).toBe(true);
+    expect(finish.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.text))).toBe(false);
     const ordinary = await call();
-    expect(ordinary.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.id))).toBe(false);
+    expect(ordinary.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.text))).toBe(false);
     expect((await listInputs()).find(row => row.id === stageOne.id)?.state).toBe('sent');
     const third = await call('session_finish', { summary: 'The next stage is complete' });
-    expect(third.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.id))).toBe(true);
+    expect(third.result.content.some((row: { text?: string }) => row.text?.includes(stageTwo.text))).toBe(true);
     expect((await listInputs()).find(row => row.id === stageOne.id)?.state).toBe('sent');
     // The last injected stage is still a tool claim until the next invocation
     // proves receipt. Finish must acknowledge it before checking for pending work.

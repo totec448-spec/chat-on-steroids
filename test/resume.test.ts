@@ -46,8 +46,8 @@ const { makeTempDir, removeTempDir, SAMPLE_BRIEF } = await import('./helpers.js'
 const { BRIDGE_PROTOCOL } = await import('../src/main/version.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
-const CHAT_A = '6a805197-b090-83eb-bbd8-a32b482941da';
-const CHAT_B = '7b916208-c1a1-94fc-cce9-b43c593a52eb';
+const CHAT_A = '00000010-0000-8000-b000-000000000010';
+const CHAT_B = '0000005b-0000-9000-c000-00000000005b';
 const BRIEF = SAMPLE_BRIEF;
 
 let dir: string;

@@ -14,6 +14,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { userPromptText } from '../../shared/user-prompt.js';
 import type {
   ActivitySummary,
   AgentMessage,
@@ -30,6 +31,7 @@ import type {
 import { estimateTokens, originTitle } from '../../shared/session.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
+import { redactCredentialText } from '../redaction.js';
 import { currentCall, emptyEvidence, type CallEvidence } from '../mcp/call-context.js';
 import {
   MAX_MESSAGE_CHARS,
@@ -42,14 +44,13 @@ import {
   conversationAttachment,
   createSession,
   conversationWasSuperseded,
-  deleteSession,
   endSession,
   findSessionByConversation,
   getSession,
-  listAllSessions,
   readAsset,
   readEvents,
   readRecentEvents,
+  indexedSessions,
   renameSession,
   reopenSession,
   rewriteUnattributedToolCalls,
@@ -134,6 +135,7 @@ const pendingOrigins = new Map<string, SessionOrigin>();
 const MAX_PENDING_ORIGINS = 50;
 /** Calls whose exact request id never resolves to a conversation are stored here. */
 let unattributedSessionId: string | null = null;
+let unattributedInitialization: Promise<string | null> | null = null;
 let lastActiveSessionId: string | null = null;
 
 /**
@@ -426,8 +428,11 @@ async function promoteConversationTitle(sessionId: string, title?: string): Prom
     return;
   }
   const [firstUser] = await readEvents(sessionId, { kinds: ['user_message'], limit: 1 });
-  const fallback = firstUser?.kind === 'user_message' ? firstUser.message.text.trim().slice(0, 80) : '';
-  if (!fallback || summary.title !== fallback) return;
+  const fallback = firstUser?.kind === 'user_message' ? (firstUser.authoredText ?? userPromptText(firstUser.message.text) ?? firstUser.message.text).trim().slice(0, 80) : '';
+  // An earlier Markdown observation could name the session before its app receipt
+  // supplied authoredText. Only that exact durable fallback is eligible for repair.
+  const observedFallback = firstUser?.kind === 'user_message' ? firstUser.message.text.trim().slice(0, 80) : '';
+  if (!fallback || (summary.title !== fallback && summary.title !== observedFallback)) return;
   await renameSession(sessionId, next);
   notifyChanged();
 }
@@ -584,18 +589,23 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
 async function ensureUnattributedSession(): Promise<string | null> {
   if (!recordingEnabled()) return null;
   if (unattributedSessionId) return unattributedSessionId;
-  const summary = await createSession({ title: 'Unattributed activity' });
-  unattributedSessionId = summary.id;
-  lastActiveSessionId = summary.id;
-  await appendEvent(summary.id, {
-    time: Date.now(),
-    source: 'app',
-    kind: 'session_start',
-    conversationId: null,
-    title: summary.title
-  });
-  notifyChanged();
-  return summary.id;
+  if (unattributedInitialization) return unattributedInitialization;
+  const initializing = (async () => {
+    const summary = await createSession({ title: 'Unattributed activity' });
+    await appendEvent(summary.id, {
+      time: Date.now(), source: 'app', kind: 'session_start', conversationId: null, title: summary.title
+    });
+    unattributedSessionId = summary.id;
+    lastActiveSessionId = summary.id;
+    notifyChanged();
+    return summary.id;
+  })();
+  unattributedInitialization = initializing;
+  try {
+    return await initializing;
+  } finally {
+    if (unattributedInitialization === initializing) unattributedInitialization = null;
+  }
 }
 
 /** The session the UI opens by default: whatever was written to most recently. */
@@ -699,14 +709,23 @@ export const REQUEST_ID_GRACE_MS = evidenceWindow(20_000);
  */
 let attributionRepairTimer: NodeJS.Timeout | null = null;
 let attributionRepairRequested = false;
+let fullAttributionRepair = false;
+const repairRequestIds = new Set<string>();
+// Derived negative-read cache only: exact ownership still comes from correlation.ts.
+const repairBuckets = new Map<string, { toolCalls: number; updatedAt: number; requestIds: Set<string> }>();
+const MAX_REPAIR_BUCKETS = 128;
+const MAX_REPAIR_REQUEST_IDS = 50_000;
 let attributionRepairChain: Promise<void> = Promise.resolve();
 
 function startAttributionRepair(): void {
   if (!attributionRepairRequested) return;
   attributionRepairRequested = false;
+  const affected = fullAttributionRepair ? undefined : new Set(repairRequestIds);
+  fullAttributionRepair = false;
+  repairRequestIds.clear();
   const run = attributionRepairChain.then(async () => {
     try {
-      await repairDeterministicAttribution();
+      await repairDeterministicAttribution(affected);
     } catch (err) {
       logWarn(`late request attribution repair failed: ${(err as Error).message}`);
     }
@@ -725,6 +744,7 @@ function startAttributionRepair(): void {
  */
 export function queueDeterministicAttributionRepair(): void {
   attributionRepairRequested = true;
+  fullAttributionRepair = true;
   if (attributionRepairTimer) {
     clearTimeout(attributionRepairTimer);
     attributionRepairTimer = null;
@@ -732,8 +752,10 @@ export function queueDeterministicAttributionRepair(): void {
   startAttributionRepair();
 }
 
-function scheduleAttributionRepair(): void {
+function scheduleAttributionRepair(requestId: string): void {
   attributionRepairRequested = true;
+  repairRequestIds.add(requestId);
+  if (repairRequestIds.size > 50_000) { repairRequestIds.clear(); fullAttributionRepair = true; }
   if (attributionRepairTimer) return;
   attributionRepairTimer = setTimeout(() => {
     attributionRepairTimer = null;
@@ -811,7 +833,7 @@ function noteCallEvidence(
       }
     } else if (result === 'stored') {
       logInfo(`request attribution: ${call.requestId} -> conversation ${conversationId}`);
-      if (unattributedSessionId) scheduleAttributionRepair();
+      scheduleAttributionRepair(call.requestId);
     }
   }
 }
@@ -861,18 +883,37 @@ export async function awaitFreshCallOrigin(
  * Calls keep their original callId, so a crash after copying some rows but before rewriting the
  * old bucket is idempotent on the next launch. Assets are copied before any history is removed.
  */
-export async function repairDeterministicAttribution(): Promise<{ sessions: number; calls: number }> {
+export async function repairDeterministicAttribution(affected?: ReadonlySet<string>): Promise<{ sessions: number; calls: number }> {
   if (!recordingEnabled()) return { sessions: 0, calls: 0 };
   let repairedSessions = 0;
   let repairedCalls = 0;
 
-  for (const summary of await listAllSessions()) {
+  for (const summary of await indexedSessions()) {
     if (summary.conversationId !== null || summary.title !== 'Unattributed activity') continue;
+    const cached = repairBuckets.get(summary.id);
+    if (affected && cached?.toolCalls === summary.toolCalls && cached.updatedAt === summary.updatedAt &&
+        ![...affected].some((id) => cached.requestIds.has(id))) continue;
     const events = await readEvents(summary.id);
     const scannedThroughSeq = events.reduce((highest, event) => Math.max(highest, event.seq), 0);
     const tools = events.filter(
       (event): event is Extract<SessionEvent, { kind: 'tool_call' }> => event.kind === 'tool_call'
     );
+    const requestIds = new Set<string>();
+    for (const event of tools) {
+      if (event.call.requestId) requestIds.add(event.call.requestId);
+      if (requestIds.size > MAX_REPAIR_REQUEST_IDS) break;
+    }
+    repairBuckets.delete(summary.id);
+    if (requestIds.size <= MAX_REPAIR_REQUEST_IDS) {
+      let total = requestIds.size;
+      for (const bucket of repairBuckets.values()) total += bucket.requestIds.size;
+      while (repairBuckets.size >= MAX_REPAIR_BUCKETS || total > MAX_REPAIR_REQUEST_IDS) {
+        const oldest = repairBuckets.keys().next().value!;
+        total -= repairBuckets.get(oldest)!.requestIds.size;
+        repairBuckets.delete(oldest);
+      }
+      repairBuckets.set(summary.id, { toolCalls: summary.toolCalls, updatedAt: summary.updatedAt, requestIds });
+    }
     if (tools.length === 0) continue;
     if (events.some((event) => event.kind !== 'session_start' && event.kind !== 'tool_call')) continue;
 
@@ -966,18 +1007,21 @@ export async function repairDeterministicAttribution(): Promise<{ sessions: numb
       }
     }
 
-    if (unknown.length === 0) {
-      await deleteSession(summary.id);
-      if (unattributedSessionId === summary.id) unattributedSessionId = null;
-      if (lastActiveSessionId === summary.id) lastActiveSessionId = firstTargetSessionId;
-    } else {
-      await rewriteUnattributedToolCalls(summary.id, unknown, scannedThroughSeq);
-      if (unattributedSessionId === null) unattributedSessionId = summary.id;
+    let repaired: { retained: number; deleted: boolean };
+    try {
+      repaired = await rewriteUnattributedToolCalls(summary.id, unknown, scannedThroughSeq, summary.id !== unattributedSessionId);
+    } finally {
+      // Concurrent arrivals can replace removed rows with the same count and max timestamp.
+      // The old negative-read cache cannot describe the rewritten bucket, even after an
+      // uncertain filesystem failure; its next lookup must rebuild from the authoritative log.
+      repairBuckets.delete(summary.id);
     }
+    if (repaired.retained === 0 && lastActiveSessionId === summary.id) lastActiveSessionId = firstTargetSessionId;
+    if (!repaired.deleted && unattributedSessionId === null) unattributedSessionId = summary.id;
     repairedSessions += 1;
     logInfo(
       `repaired ${tools.length - unknown.length} deterministically attributed call(s) from session ${summary.id}; ` +
-        `${unknown.length} remain unknown`
+        `${repaired.retained} remain unknown`
     );
   }
 
@@ -1063,6 +1107,7 @@ function redactArgs(tool: string, args: unknown): unknown {
 }
 
 function redactResult(tool: string, text: string): string {
+  text = redactCredentialText(text);
   // The other half of the clipboard rule: what was read comes back as its own line in
   // computer's reply, and only that line is dropped, so the rest of the result — which
   // actions ran, where the pointer ended up — still says what happened.
@@ -1125,8 +1170,19 @@ export interface ToolCallInput {
   endsActivity?: boolean;
 }
 
-/** Writing runs one at a time, so the log keeps call order. See recordToolCall. */
-let recordChain: Promise<unknown> = Promise.resolve();
+/** A workflow orders its calls before identity resolves; a session orders their storage.
+ * Neither queue can make an unrelated proven chat wait for browser evidence. */
+const requestRecordings = new Map<string, Promise<void>>();
+const sessionRecordings = new Map<string, Promise<void>>();
+const pendingRecordings = new Set<Promise<unknown>>();
+
+function serializeRecording<T>(queues: Map<string, Promise<void>>, key: string, run: () => Promise<T>): Promise<T> {
+  const work = (queues.get(key) ?? Promise.resolve()).then(run);
+  const settled = work.then(() => undefined, () => undefined);
+  queues.set(key, settled);
+  void settled.then(() => { if (queues.get(key) === settled) queues.delete(key); });
+  return work;
+}
 
 /**
  * Records one MCP tool call.
@@ -1134,25 +1190,24 @@ let recordChain: Promise<unknown> = Promise.resolve();
  * Never throws into the caller: a broken recorder must not break the connector, so a
  * storage failure is logged and the tool result is returned to ChatGPT regardless.
  *
- * The work is queued rather than run inline. Attribution can have to wait a moment for
- * the page to report the exact request-id/message evidence that proves where the call came from, and nothing
- * ChatGPT is waiting on may wait on the browser: with sequential file and command tools
- * a second of that per call is the difference between a companion that feels immediate
- * and one that feels broken. The connector fires this and moves on; the returned promise
- * is for tests and for the flush at quit.
+ * The returned promise includes preparation and durable append. The dispatcher awaits it
+ * for a proven caller. Unresolved identity can still need browser evidence, so that degraded
+ * path releases the response and keeps this promise charged to its settling/shutdown barrier.
  *
- * The two halves are queued differently on purpose. Every call's request-specific evidence
- * window opens the moment the call lands, all of them at once, so a burst of calls costs one
- * grace period rather than one per call. Only the write is serialised, in call order, so the
- * log stays in order. There is no shared pool of rows/evidence to claim.
+ * Evidence windows open at admission. Calls from the same request keep their admission order,
+ * and known sessions serialize preparation plus append. A late owner may append behind another
+ * workflow already committed to that session: seq remains commit/cursor order, while the existing
+ * turn-local chronology uses the original startedAt. Unknown identity must never reserve every
+ * other session's writer merely to impose a global order that no individual chat needs.
  *
- * The cost of not blocking the connector is a crash window: a call whose evidence has not
+ * The unidentified path has a crash window: a call whose evidence has not
  * resolved yet exists only in memory, so a power loss inside those couple of seconds
  * loses it, where the old inline write would not have. Quitting flushes. That is the
  * whole of the tradeoff, and it is bounded by REQUEST_ID_GRACE_MS.
  */
 export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | null> {
   if (!recordingEnabled()) return Promise.resolve(null);
+  let attributing: Promise<Target>;
   if (input.conversationId) {
     const live = conversations.get(input.conversationId);
     const correlation = input.requestId ? requestCorrelation(input.requestId) : null;
@@ -1165,58 +1220,53 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
       turnId: live?.turnId ?? null
     };
     if (input.bind) bindAgentConversation(input.bind, input.conversationId);
-    // Exact attribution skips the browser wait, not the write-order/quit-flush barrier. The
-    // old fast path called fileToolCall() directly, so a large first result could finish its
-    // asset/text work after a tiny second call and be appended second despite being invoked
-    // first; flushRecorder() also had no promise covering it. Queue the write like every other
-    // call while keeping attribution itself immediate.
-    const filed = recordChain.then(() => fileToolCall(input, target));
-    recordChain = filed.then(
-      () => undefined,
-      () => undefined
-    );
-    return filed;
+    attributing = Promise.resolve(target);
+  } else {
+    // Open the evidence wait before entering this workflow's queue, so sequential calls never
+    // restart its deadline. No other request or page state can satisfy this exact join.
+    attributing = input.requestId
+      ? awaitRequestCorrelation(input.requestId, REQUEST_ID_GRACE_MS).then((correlation) => {
+          const conversationId = correlation?.conversationId ?? null;
+          // Say which request id gave up, not just that something did. `unattributed` is the
+          // one outcome whose cause always lives in the browser half of the join, so the log
+          // has to carry the id that the page never confirmed — it is the only handle anyone
+          // has for matching this against what the extension believed it sent.
+          if (!conversationId) {
+            logWarn(
+              `request attribution: no page evidence for ${input.requestId} within ` +
+                `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity`
+            );
+          }
+          if (input.bind && conversationId) bindAgentConversation(input.bind, conversationId);
+          return {
+            conversationId,
+            sessionId: correlation?.sessionId ?? null,
+            attribution: conversationId ? ('request_id' as const) : ('unattributed' as const),
+            turnId: conversationId ? conversations.get(conversationId)?.turnId ?? null : null
+          };
+        })
+      : Promise.resolve<Target>({ conversationId: null, sessionId: null, attribution: 'unattributed', turnId: null });
   }
-
-  // Late browser evidence is the only wait left in attribution. It can prove this exact
-  // request after the MCP handler already completed, but no different request/page state can
-  // ever satisfy it. Chrome-off or unmatched modern ids therefore end in Unattributed.
-  const attributing = input.requestId
-    ? awaitRequestCorrelation(input.requestId, REQUEST_ID_GRACE_MS).then((correlation) => {
-        const conversationId = correlation?.conversationId ?? null;
-        // Say which request id gave up, not just that something did. `unattributed` is the
-        // one outcome whose cause always lives in the browser half of the join, so the log
-        // has to carry the id that the page never confirmed — it is the only handle anyone
-        // has for matching this against what the extension believed it sent.
-        if (!conversationId) {
-          logWarn(
-            `request attribution: no page evidence for ${input.requestId} within ` +
-              `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity`
-          );
-        }
-        if (input.bind && conversationId) bindAgentConversation(input.bind, conversationId);
-        return {
-          conversationId,
-          sessionId: correlation?.sessionId ?? null,
-          attribution: conversationId ? ('request_id' as const) : ('unattributed' as const),
-          turnId: conversationId ? conversations.get(conversationId)?.turnId ?? null : null
-        };
-      })
-    : Promise.resolve<Target>({ conversationId: null, sessionId: null, attribution: 'unattributed', turnId: null });
-  const filed = recordChain.then(async () => fileToolCall(input, await attributing));
-  recordChain = filed.then(
-    () => undefined,
-    () => undefined
-  );
+  const file = async (): Promise<ToolCallRecord | null> => {
+    const target = await attributing;
+    const owner = target.sessionId ?? (target.conversationId ? conversations.get(target.conversationId)?.sessionId : null);
+    // Cold/historical owners use the existing targetSession authority, never a guessed chat.
+    const sessionId = owner ?? await targetSession(target);
+    if (!sessionId) return null;
+    return serializeRecording(sessionRecordings, sessionId, () => fileToolCall(input, target));
+  };
+  const filed = (input.requestId ? serializeRecording(requestRecordings, input.requestId, file) : file())
+    .catch((err: Error) => { logWarn(`session recorder could not admit a tool call: ${err.message}`); return null; });
+  pendingRecordings.add(filed);
+  void filed.then(() => pendingRecordings.delete(filed));
   return filed;
 }
 
 /** Waits for every queued tool call to be written. Called before the app quits. */
 export async function flushRecorder(): Promise<void> {
-  // Every call appends its eventual write to recordChain synchronously, before its attribution
-  // promise resolves. One snapshot therefore already covers every call admitted before shutdown;
-  // the old second await was leftover from the earlier design that queued only after attribution.
-  await recordChain.catch(() => undefined);
+  // Admission is synchronous even while a request is still waiting for its owner. Include work
+  // admitted during a flush too; endpoint/bridge shutdown closes producers before this barrier.
+  while (pendingRecordings.size) await Promise.all([...pendingRecordings]);
   if (attributionRepairTimer) {
     clearTimeout(attributionRepairTimer);
     attributionRepairTimer = null;
@@ -1306,7 +1356,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
           : target.conversationId && input.requestId
             ? 'request_id'
             : 'unattributed',
-      args: await storeText(sessionId, safeJson(redactArgs(input.tool, input.args)), MAX_TOOL_ARGS_CHARS),
+      args: await storeText(sessionId, redactCredentialText(safeJson(redactArgs(input.tool, input.args))), MAX_TOOL_ARGS_CHARS),
       result: await storeText(sessionId, resultText, MAX_TOOL_RESULT_CHARS),
       outcome: input.outcome,
       durationMs: input.durationMs,
@@ -1660,6 +1710,42 @@ async function recordPageTool(
 
 const observationChains = new Map<string, Promise<void>>();
 
+function observedUserTitle(first?: string): string | undefined {
+  if (!first) return undefined;
+  const authored = userPromptText(first);
+  // Native Markdown can consume whitespace in the frame. It is not safe to parse
+  // that as wire text, and a transport header is never a useful fallback title.
+  if (authored === null && /^\[\[COS_CONTEXT:\d{1,6}\]\]/.test(first)) return undefined;
+  return (authored ?? first).slice(0, 80);
+}
+
+function observationTitle(observations: readonly ChatObservation[]): string | undefined {
+  const title = observations.find((item) => item.kind === 'conversation_title')?.text?.trim();
+  const first = observations.find((item) => item.kind === 'user_message')?.text;
+  return title || observedUserTitle(first);
+}
+
+/** The one ownership ingress used by both /correlations and transcript batches.
+ * Exact proof needs a committed session/lineage, but must never wait behind that chat's
+ * streamed text, HTML or image writes. Session initialization already has its own owner. */
+export async function recordRequestEvidence(
+  conversationId: string,
+  observations: readonly ChatObservation[]
+): Promise<string | null> {
+  if (!recordingEnabled()) return null;
+  const lineage = !conversations.has(conversationId) ? await supersededLineage(conversationId) : null;
+  const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations));
+  if (!sessionId) return null;
+  // Proof identifies even a retired caller; kernel/recorder attachment checks then refuse it
+  // as superseded. Never turn an exact historical owner into anonymous executable authority.
+  for (const item of observations) {
+    if (item.kind === 'tool_evidence' && item.calls?.length) {
+      noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time);
+    }
+  }
+  return sessionId;
+}
+
 export function recordChatObservations(
   conversationId: string,
   observations: readonly ChatObservation[],
@@ -1670,8 +1756,17 @@ export function recordChatObservations(
   activity: { meaningful: boolean; working: boolean; terminal: boolean; at?: number; toolStartedAt?: number; endedTurnId?: string };
   goalCandidates: Array<{ replyId: string; turnId: string; eventSeq: number }>;
 }> {
+  const hasEvidence = observations.some((item) => item.kind === 'tool_evidence');
+  const ownership = hasEvidence ? recordRequestEvidence(conversationId, observations) : null;
+  // Observe rejection now even if an earlier transcript batch is still blocked. The queued
+  // work below rethrows it to the journal owner, which retains the batch for its normal retry.
+  void ownership?.catch(() => undefined);
+  const transcript = hasEvidence ? observations.filter((item) => item.kind !== 'tool_evidence') : observations;
   const prior = observationChains.get(conversationId) ?? Promise.resolve();
-  const work = prior.then(() => recordChatObservationsNow(conversationId, observations, agent));
+  const work = prior.then(async () => {
+    await ownership;
+    return recordChatObservationsNow(conversationId, transcript, agent);
+  });
   const tracked = work.then(
     () => undefined,
     () => undefined
@@ -1706,21 +1801,11 @@ async function supersededLineage(conversationId: string): Promise<string | null>
  * moves none of the projections the replacement now owns.
  */
 async function recordSupersededMessages(
-  conversationId: string,
   sessionId: string,
   observations: readonly ChatObservation[]
 ): Promise<number> {
   let stored = 0;
   for (const item of observations) {
-    // Request evidence still joins a request to this retired chat, so its call is refused as
-    // superseded — a message that names the handover — rather than waiting out the identity
-    // window and being refused as nobody's.
-    if (item.kind === 'tool_evidence') {
-      if (item.calls && item.calls.length > 0) {
-        noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time);
-      }
-      continue;
-    }
     if (!item.messageId) continue;
     const base = {
       time: item.time,
@@ -1779,7 +1864,7 @@ async function recordChatObservationsNow(
   if (!conversations.has(conversationId)) {
     const lineage = await supersededLineage(conversationId);
     if (lineage) {
-      const stored = await recordSupersededMessages(conversationId, lineage, observations);
+      const stored = await recordSupersededMessages(lineage, observations);
       return { sessionId: lineage, stored, activity, goalCandidates: [] };
     }
   }
@@ -1802,7 +1887,7 @@ async function recordChatObservationsNow(
   }
   const sessionId = await sessionForConversation(
     conversationId,
-    pageTitle?.text?.trim() || (firstUser?.text ? firstUser.text.slice(0, 80) : undefined)
+    pageTitle?.text?.trim() || observedUserTitle(firstUser?.text)
   );
   if (!sessionId) return { sessionId: null, stored: 0, activity, goalCandidates: [] };
   const live = conversations.get(conversationId);
@@ -2012,14 +2097,6 @@ async function recordChatObservationsNow(
         activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
         activity.working = true;
         break;
-      // Also not stored, and for the same reason: this is the page describing which calls
-      // it made, which is a fact about attribution rather than something that happened in
-      // the chat. The calls themselves are recorded by the connector, once each.
-      case 'tool_evidence':
-        if (item.calls && item.calls.length > 0) {
-          noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time);
-        }
-        continue;
       case 'turn_end':
         // An unnamed end closes nothing durable and, worse, used to clear whichever named
         // turn happened to be live. Ignore it. A stale named end is still useful history for
@@ -2312,6 +2389,10 @@ export function resetRecorderForTests(): void {
   sessionInitializations.clear();
   pendingOrigins.clear();
   unattributedSessionId = null;
+  unattributedInitialization = null;
+  requestRecordings.clear();
+  sessionRecordings.clear();
+  pendingRecordings.clear();
   lastActiveSessionId = null;
   if (attributionRepairTimer) {
     clearTimeout(attributionRepairTimer);
@@ -2319,6 +2400,9 @@ export function resetRecorderForTests(): void {
   }
   attributionRepairRequested = false;
   attributionRepairChain = Promise.resolve();
+  fullAttributionRepair = false;
+  repairRequestIds.clear();
+  repairBuckets.clear();
   agentConversationLookup = () => null;
   agentBinder = () => undefined;
   // The attribution listener is deliberately not cleared here: it belongs to the bridge's

@@ -8,6 +8,7 @@ import { getMcpConfigForManifest, vAny } from '@anthropic-ai/mcpb/browser';
 import { getSecret, setSecret, clearSecret } from '../secrets.js';
 import { readDurable, writeDurableNow } from '../durable.js';
 import { setEnvValue } from '../env.js';
+import { redactCredentialText } from '../redaction.js';
 import type { PluginConfigPatch, PluginInstallRequest, PluginSnapshot, PluginView } from '../../shared/plugins.js';
 import { installSource, pluginEnvironment, resolveGithub, stopInstallers, type InstalledLaunch } from './installer.js';
 import { terminateProcessTree } from '../exec.js';
@@ -60,6 +61,7 @@ export class PluginManager {
   private starting = new Map<string, { promise: Promise<void>; controller: AbortController }>();
   private secretValues = new Set<string>();
   private revision = 0;
+  private exposureCache: ReturnType<typeof pluginExposure> | null = null;
   private closing = false;
   private connecting = new Map<Client, StdioClientTransport | undefined>();
   private authenticating = new Map<string, { controller: AbortController; promise: Promise<void> }>();
@@ -68,6 +70,7 @@ export class PluginManager {
     return () => this.listeners.delete(listener);
   }
   private changed(): void {
+    this.exposureCache = null;
     this.revision++;
     for (const listener of this.listeners) listener();
   }
@@ -79,6 +82,8 @@ export class PluginManager {
     return next;
   }
   private async save(): Promise<void> {
+    // Catalog/configuration mutations are observable while their durable write awaits.
+    this.exposureCache = null;
     await writeDurableNow('plugins', this.records);
   }
   async initialize(userDataDir: string): Promise<void> {
@@ -99,7 +104,7 @@ export class PluginManager {
     void Promise.all(this.records.filter(row => row.enabled).map(row => this.connect(row))).catch(() => undefined);
   }
   private exposure() {
-    return pluginExposure(this.records.map(row => ({
+    return this.exposureCache ??= pluginExposure(this.records.map(row => ({
       id: row.id, name: row.name, enabled: row.enabled && !['error', 'needs-auth', 'authenticating'].includes(row.status) && (row.source.auth !== 'oauth' || this.live.has(row.id)),
       tools: row.catalog, disabledTools: row.disabledTools,
     })));
@@ -130,7 +135,7 @@ export class PluginManager {
   }
   redact(value: unknown): unknown {
     if (typeof value === 'string') {
-      let out = value;
+      let out = redactCredentialText(value);
       for (const secret of this.secretValues) if (secret) out = out.split(secret).join('[redacted]');
       return out;
     }
@@ -295,6 +300,7 @@ export class PluginManager {
           await this.save();
         } catch (e) {
           this.records = this.records.filter((p) => p !== row);
+          this.exposureCache = null;
           throw e;
         }
         await this.connect(row);
@@ -394,6 +400,7 @@ export class PluginManager {
       await this.disconnect(row);
       // Installation rollback must not undo a newer user policy request.
       Object.assign(row, old, { enabled: row.enabled, disabledTools: row.disabledTools });
+      this.exposureCache = null;
       await fs.rm(directory, { recursive: true, force: true });
       if (row.enabled) await this.connect(row);
       throw new Error(`Update rolled back: ${String(this.redact((e as Error).message))}`);
@@ -445,6 +452,7 @@ export class PluginManager {
         await this.save();
       } catch (e) {
         this.records.push(row);
+        this.exposureCache = null;
         throw e;
       }
       for (const key of row.credentialKeys) await clearSecret(`plugin:${id}:${key}`);
@@ -460,6 +468,8 @@ export class PluginManager {
     const live = this.live.get(row.id);
     this.live.delete(row.id);
     row.status = !row.enabled ? 'disabled' : ['error', 'needs-auth'].includes(row.status) ? row.status : 'installed';
+    // Revocation happens before process/transport retirement can yield.
+    this.exposureCache = null;
     if (live) {
       live.oauth?.dispose();
       if (live.transport?.pid) await terminateProcessTree(live.transport.pid, true);
@@ -553,6 +563,7 @@ export class PluginManager {
   private publishTools(row: RecordEntry, tools: Tool[]): void {
     row.catalog = tools;
     row.status = 'ready';
+    this.exposureCache = null;
   }
   private release(row: RecordEntry, live: Live): void {
     live.users--;
@@ -659,6 +670,11 @@ export class PluginManager {
           if (manifest.server.type === 'binary') launch.command = await packagedPath(launch.command);
         }
         const env = pluginEnvironment();
+        // Use the upstream response policy, not markdown surgery after execution. Apply at
+        // launch so existing official installations also stop echoing submitted/generated code.
+        // Explicit user configuration/CLI options retain their normal precedence.
+        if (row.source.kind === 'npm' && row.source.package === '@playwright/mcp')
+          setEnvValue(env, 'PLAYWRIGHT_MCP_CODEGEN', 'none');
         for (const [k, v] of Object.entries({ ...row.config, ...secrets, ...launch.env })) setEnvValue(env, k, v);
         const data = path.join(this.root, row.id, 'data');
         await fs.mkdir(data, { recursive: true });
@@ -738,6 +754,7 @@ export class PluginManager {
     } catch (e) {
       oauth?.dispose();
       if (this.live.get(row.id)?.client === client) this.live.delete(row.id);
+      this.exposureCache = null;
       if (transport?.pid) await terminateProcessTree(transport.pid, true);
       await client.close().catch(() => undefined);
       if (!signal.aborted) {
@@ -751,14 +768,14 @@ export class PluginManager {
     }
     this.changed();
   }
-  tools(): Tool[] { return this.exposure().tools; }
+  tools(): Tool[] { return [...this.exposure().tools]; }
   async call(name: string, args: Record<string, unknown> = {},
     onOutcome?: (outcome: 'tool_rejected' | 'tool_execution_error') => void): Promise<CallToolResult> {
     // The invocation owner knows whether a tool failed or was never admitted.
     // Keep this internal evidence out of the upstream MCP result/content contract.
     const errorResult = (text: string, outcome: 'tool_rejected' | 'tool_execution_error' = 'tool_execution_error'): CallToolResult => {
       onOutcome?.(outcome);
-      return { isError: true, content: [{ type: 'text', text }] };
+      return this.redactResult({ isError: true, content: [{ type: 'text', text }] });
     };
     let startupFailed = false;
     let acquired: { row: RecordEntry; live: Live; tool: Tool } | undefined;

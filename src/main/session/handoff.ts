@@ -13,6 +13,7 @@ import type { Handoff } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
 import { getSession, saveHandoff } from './store.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
+import { userPromptText } from '../../shared/user-prompt.js';
 
 export interface PrepareHandoffInput {
   sessionId: string;
@@ -54,7 +55,8 @@ export function resumeBootstrapText(summary: string, token = ''): string {
 export function resumeBootstrapMatches(recorded: string, summary: string): boolean {
   const canonical = (value: string): string =>
     value.replace(/\u00c2\u00a0/g, ' ').replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n');
-  const withoutMarker = canonical(recorded).replace(/^\[\[CLF-RESUME:[A-Za-z0-9_-]{16,64}\]\]\n\n/, '');
+  const normalized = canonical(recorded);
+  const withoutMarker = (userPromptText(normalized) ?? normalized).replace(/^\[\[CLF-RESUME:[A-Za-z0-9_-]{16,64}\]\]\n\n/, '');
   return withoutMarker === canonical(resumeBootstrapText(summary));
 }
 

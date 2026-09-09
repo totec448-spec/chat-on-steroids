@@ -15,6 +15,7 @@ import { z } from 'zod';
 import type { SessionEvent, SessionSummary, StoredText } from '../../shared/session.js';
 import { getSession, listAllSessions, readEvents } from '../session/store.js';
 import { noteCount, noteDetail } from './call-context.js';
+import { toolDeclaration } from './tool-declarations.js';
 import { expandStored, fail, guard, ok, type SurfaceRegistrar, type ToolResult } from './kernel.js';
 
 const SEARCH_RESULT_TOKENS = 3_000;
@@ -157,7 +158,7 @@ const inputSchema = z
 export function registerSessionTool(reg: SurfaceRegistrar): void {
   reg.register(
     'session',
-    {
+    toolDeclaration('session', () => ({
       title: 'Recorded sessions',
       description:
         'Search and read this app’s local recordings, including other and concurrently running chats. ' +
@@ -167,7 +168,7 @@ export function registerSessionTool(reg: SurfaceRegistrar): void {
         'Pass a short T… reference as tool_call to inspect exact arguments and result. Cursors are short tokens; copy them exactly.',
       inputSchema,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-    },
+    })),
     async (input) =>
       guard('session', async () => {
         if (!reg.sessionToolsLive) return reg.featureDisabled('Session recording', 'Record sessions');

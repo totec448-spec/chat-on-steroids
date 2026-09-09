@@ -56,6 +56,43 @@ var CLF_DOM = (() => {
   const text = (node, cap = 256_000) =>
     node ? (node.textContent || '').replace(/ /g, ' ').trim().slice(0, cap) : '';
 
+  // Wire framing matches shared/user-prompt.ts; neither reader changes provider text.
+  const promptContinuation = value => /^\[\[CLF-(?:HANDOFF|RESUME):[A-Za-z0-9_-]{16,64}\]\]\n\n/.exec(value)?.[0] ?? '';
+  function userPromptText(value) {
+    value = value.replace(/\r\n?/g, '\n');
+    const identity = promptContinuation(value);
+    const header = /^\[\[COS_CONTEXT:(\d{1,6})\]\]\n/.exec(value.slice(identity.length));
+    if (!header) return null;
+    const end = identity.length + header[0].length + Number(header[1]);
+    const boundary = '\n[[/COS_CONTEXT]]\n\n';
+    return value.startsWith(boundary, end) ? identity + value.slice(end + boundary.length) : null;
+  }
+  function presentUserPrompts(readUserText) {
+    return safe(() => {
+      for (const raw of document.querySelectorAll('[data-message-author-role="user"] :is(.whitespace-pre-wrap, .markdown):not([data-clf-user-text])')) {
+        // Both native renderers can consume Markdown bytes. Parse the same
+        // exact-id source used by receipts/recording, never reconstructed HTML.
+        const holder = raw.closest('[data-message-author-role="user"]');
+        const source = readUserText ? readUserText({ role: 'user', id: holder?.getAttribute('data-message-id'),
+          node: raw.closest(TURN), text: messageText(holder, 'user') }) : raw.textContent;
+        const authored = typeof source === 'string' ? userPromptText(source) : null;
+        let display = raw.nextElementSibling?.matches('[data-clf-user-text]') ? raw.nextElementSibling : null;
+        if (authored === null) {
+          raw.removeAttribute('data-clf-prompt-hidden'); display?.remove(); continue;
+        }
+        if (!display) {
+          display = document.createElement('div');
+          display.setAttribute('data-clf-user-text', '');
+          display.className = 'whitespace-pre-wrap';
+          display.dir = 'auto';
+          raw.after(display);
+        }
+        if (display.textContent !== authored) display.textContent = authored;
+        if (!raw.hasAttribute('data-clf-prompt-hidden')) raw.setAttribute('data-clf-prompt-hidden', '');
+      }
+    });
+  }
+
   /**
    * Visible page text with every CLF-owned surface removed first.
    *
@@ -65,7 +102,7 @@ var CLF_DOM = (() => {
    * That is the exact loop that produced twenty copies of the same assistant update. Clone
    * and strip our nodes before extracting page text. Unknown/fake DOMs fall back safely.
    */
-  const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
+  const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot, [data-clf-user-text]';
 
   /**
    * Removes this extension's own rendered surfaces from a clone, in place.
@@ -135,6 +172,7 @@ var CLF_DOM = (() => {
       if (!node) return '';
       if (role === 'user') {
         const parts = [...node.querySelectorAll('.whitespace-pre-wrap')]
+          .filter(part => !part.hasAttribute?.('data-clf-user-text'))
           .map((part) => text(part))
           .filter(Boolean);
         if (parts.length > 0) return parts.join('\n');
@@ -2041,6 +2079,8 @@ var CLF_DOM = (() => {
     });
   }
   return {
+    userPromptText,
+    presentUserPrompts,
     composerVisible,
     prepareChatModelSurface,
     newChatControl,

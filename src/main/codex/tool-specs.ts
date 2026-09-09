@@ -76,14 +76,11 @@ export const EXEC_COMMAND_YIELD_TIME_DESCRIPTION = IS_WINDOWS
  *
  * It is still *accepted* because these schemas are `.strict()` and ChatGPT caches tool definitions:
  * dropping the key turned older chats' calls into `Unrecognized key`, refusing the whole command.
- * So take the key, ignore it, and say so once in the notes.
+ * Accept it silently; the declaration already explains that it is ignored. Repeating the
+ * migration advice on every result only amplified stale-schema calls into transcript noise.
  */
 export const MAX_OUTPUT_TOKENS_DESCRIPTION =
   'Ignored; still accepted so older cached schemas keep working. Omit it.';
-
-/** The note a call that still sends the retired budget gets back, once, alongside its output. */
-export const MAX_OUTPUT_TOKENS_RETIRED_NOTE =
-  'max_output_tokens is retired and was ignored; output uses the fixed 10000-token budget. Omit the parameter.';
 
 export const EXEC_COMMAND_SHELL_DESCRIPTION = "Shell binary to launch. Defaults to the user's default shell.";
 

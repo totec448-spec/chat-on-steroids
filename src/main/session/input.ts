@@ -17,7 +17,7 @@ import { logInfo } from '../logger.js';
 import { noteChatOrigin } from './recorder.js';
 import { isAstraModel } from '../../shared/chat-models.js';
 import { automaticFinishEnabled } from '../goal.js';
-import { finishInstruction, finishInputInstruction } from '../../shared/finish.js';
+import { finishInstruction } from '../../shared/finish.js';
 import { attachmentSchema, validateInputAttachments } from './input-attachments.js';
 
 export const inputArgs = z.object({
@@ -66,13 +66,19 @@ const entrySchema = inputArgs.extend({
 export type InputEntry = z.infer<typeof entrySchema>;
 const STATE = 'session-input';
 const TOOL_INPUT_TEXT_BYTES = 128000;
+export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
+export interface ToolInputBatch {
+  messages: Array<{ text: string; images: InputImage[] }>;
+  /** One transport instruction after the complete batch, including its images. */
+  reminder: string;
+}
 export interface InputActivity { possible: boolean; exact: boolean }
 type InputDeliveryHooks = {
   activity?: (session: SessionSummary) => InputActivity;
   wakeDecision?: (entry: Readonly<InputEntry>, signal: AbortSignal) => Promise<void>;
   bindHelper?: (conversationId: string, sourceSessionId: string | null) => Promise<void>;
   recordDelivered?: (entry: Readonly<InputEntry>) => Promise<boolean>;
-  prepareText?: (entry: Readonly<InputEntry>) => string;
+  prepareText?: (entry: Readonly<InputEntry>) => string | Promise<string>;
   applyAutomation: (conversationId: string, automation: NonNullable<InputArgs['automation']>, phase: 'before-send' | 'after-send', objective?: string) => Promise<void>;
   changed: () => void;
 };
@@ -244,7 +250,7 @@ async function transition(current: InputEntry[], next: InputEntry[], automated: 
   await commit(next);
 }
 /** Freeze the exact transport bytes with its durable claim, never the authored enqueue payload. */
-function prepare(entry: InputEntry): InputEntry {
+async function prepare(entry: InputEntry): Promise<InputEntry> {
   if (entry.purpose === 'decision') return entry;
   // A plan schedules later verification, never withholds the job from its executor.
   // Keep the authored stage intact in history; freeze the complete context in the
@@ -252,10 +258,10 @@ function prepare(entry: InputEntry): InputEntry {
   const text = entry.stages !== undefined
     ? `Original user request:\n${entry.objective || entry.text}\n\nComplete workflow:\n${[entry.text, ...entry.stages].map((stage, index) => `${index + 1}. ${stage}`).join('\n\n')}\n\nBegin the complete implementation now. Later queued messages are verification checkpoints; do not wait for them to learn or implement requirements. Carry out and verify each received checkpoint before asking for the next one with session_finish; never call it repeatedly just to collect the queue.`
     : entry.text;
-  const deliveryText = entry.deliveryText ?? deliveryHooks?.prepareText?.({ ...entry, text }) ?? text;
+  const deliveryText = entry.deliveryText ?? await deliveryHooks?.prepareText?.({ ...entry, text }) ?? text;
   // A single input must fit the tool envelope by itself. Aggregate batching below
   // may defer a second input, but cannot silently defer an individually impossible one.
-  const envelope = `[User message ${entry.id}]\n${deliveryText}\n\n${finishInputInstruction(getConfig().ui.finishLeadMinutes)}`;
+  const envelope = `${TOOL_INPUT_HEADER}${deliveryText}\n\n${finishInstruction(getConfig().ui.finishLeadMinutes)}`;
   if (!deliveryText || deliveryText.length > 240000 || Buffer.byteLength(envelope) > TOOL_INPUT_TEXT_BYTES)
     throw new Error('Prepared message exceeds the delivery limit; shorten the request or plan');
   return { ...entry, deliveryText };
@@ -550,7 +556,7 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
       if (entry.state === 'queued' && !queuedFollowup(entry) && first !== entry) return null;
     }
     let claimed: InputEntry;
-    try { claimed = prepare({ ...entry, ...(completedTurnId ? { completedTurnId } : {}),
+    try { claimed = await prepare({ ...entry, ...(completedTurnId ? { completedTurnId } : {}),
       ...(entry.transportIntent === 'tool' ? { transportIntent: 'browser' } : {}),
       state: 'browser', owner, conversationId, offeredAt: entry.offeredAt ?? Date.now(), requiresAuthorization }); }
     catch (error) {
@@ -651,27 +657,27 @@ export function acknowledgeToolInput(sessionId: string | null | undefined, conve
   });
 }
 
-export function offerToolInput(sessionId: string | null | undefined, conversationId: string | null | undefined, requestId: string | null | undefined, startedAt: number, finishBoundary = false): Promise<Array<{ text: string; images: InputImage[] }>> {
+export function offerToolInput(sessionId: string | null | undefined, conversationId: string | null | undefined, requestId: string | null | undefined, startedAt: number, finishBoundary = false): Promise<ToolInputBatch> {
   return serial(async () => {
-    if (!sessionId || !conversationId || !requestId || isChatBlocked(conversationId)) return [];
+    const batch: ToolInputBatch = { messages: [], reminder: '' };
+    if (!sessionId || !conversationId || !requestId || isChatBlocked(conversationId)) return batch;
     const session = await getSession(sessionId);
-    if (session?.conversationId !== conversationId) return [];
+    if (session?.conversationId !== conversationId) return batch;
     const finishSettings = getConfig().ui;
     finishBoundary = finishBoundary && finishSettings.finishTool === true && session.origin?.kind !== 'worker';
     const finishReminder = finishSettings.finishTool === true && !session.finishTurn?.released &&
       session.origin?.kind !== 'worker' && session.origin?.kind !== 'helper' &&
       session.selectedModel?.conversationId === conversationId && isAstraModel(session.selectedModel.model, session.selectedModel.reasoningEffort)
-      ? finishInputInstruction(finishSettings.finishLeadMinutes) : '';
+      ? finishInstruction(finishSettings.finishLeadMinutes) : '';
     const current = await load();
-    const result: Array<{ text: string; images: InputImage[] }> = [];
     // A claimed browser send owns this session until its send outcome is known.
-    if (current.some((entry) => entry.sessionId === sessionId && entry.state === 'browser')) return [];
+    if (current.some((entry) => entry.sessionId === sessionId && entry.state === 'browser')) return batch;
     const delivered: string[] = [];
     let inputTaken = false;
-    let payloadBytes = 0;
+    let payloadBytes = Buffer.byteLength(TOOL_INPUT_HEADER);
     let payloadImages = 0;
     let payloadFull = false;
-    const next = ordered(current).sort((a, b) => Number(a.mode === 'finish' || !!a.finishOwner) - Number(b.mode === 'finish' || !!b.finishOwner)).map((entry): InputEntry => {
+    const prepareEntry = async (entry: InputEntry): Promise<InputEntry> => {
       if (entry.sessionId !== sessionId || entry.dueAt > Date.now()) return entry;
       if (entry.attachments?.length) return entry;
       // ChatGPT may reuse one request id for the whole server turn. Receipt follows
@@ -684,19 +690,25 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
       // Inject now message from the current tool response. Their own FIFO is unchanged.
       if ((entry.state === 'queued' && (entry.mode === 'finish' || entry.mode === 'auto')) || entry.state === 'tool') {
         let prepared: InputEntry;
-        try { prepared = prepare({ ...entry, conversationId }); }
+        try { prepared = await prepare({ ...entry, conversationId }); }
         catch (error) { return { ...entry, state: 'failed', error: (error as Error).message.slice(0, 200) }; }
-        const message = `[User message ${entry.id}]\n${prepared.deliveryText ?? prepared.text}` + (finishReminder ? `\n\n${finishReminder}` : entry.mode === 'finish' ? '\nWork on this user task now.' : '');
-        if (payloadBytes + Buffer.byteLength(message) > TOOL_INPUT_TEXT_BYTES || payloadImages + (entry.images?.length ?? 0) > 4) { payloadFull = true; return entry; }
-        payloadBytes += Buffer.byteLength(message);
+        const message = prepared.deliveryText ?? prepared.text;
+        const reminder = finishReminder || batch.reminder || (entry.mode === 'finish' ? 'Work on this user task now.' : '');
+        const messageBytes = Buffer.byteLength(message) + (inputTaken ? 2 : 0);
+        const reminderBytes = reminder ? Buffer.byteLength(reminder) + 2 : 0;
+        if (payloadBytes + messageBytes + reminderBytes > TOOL_INPUT_TEXT_BYTES || payloadImages + (entry.images?.length ?? 0) > 4) { payloadFull = true; return entry; }
+        payloadBytes += messageBytes;
         payloadImages += entry.images?.length ?? 0;
         inputTaken = true;
-        result.push({ text: message, images: entry.images ?? [] });
+        batch.messages.push({ text: message, images: entry.images ?? [] });
+        batch.reminder = reminder;
         delivered.push(entry.id);
         return { ...prepared, state: 'tool', offeredAt: entry.offeredAt ?? Date.now(), owner: entry.state === 'tool' ? entry.owner : requestId, conversationId };
       }
       return entry;
-    });
+    };
+    const next: InputEntry[] = [];
+    for (const entry of ordered(current).sort((a, b) => Number(a.mode === 'finish' || !!a.finishOwner) - Number(b.mode === 'finish' || !!b.finishOwner))) next.push(await prepareEntry(entry));
     if (next.some((entry, index) => entry !== current[index])) {
       const automated = next.filter((entry) => entry.state === 'tool' && entry.automation && current.some((row) => row.id === entry.id && row.state === 'queued'));
       await transition(current, next, automated, 'before-send');
@@ -704,7 +716,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
     for (const id of delivered) if (!offered.has(id)) offered.set(id, Date.now());
     for (const entry of next) if (terminal(entry)) offered.delete(entry.id);
     await publishHistory();
-    return result;
+    return batch;
   });
 }
 

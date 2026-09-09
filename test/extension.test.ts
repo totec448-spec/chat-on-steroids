@@ -1942,6 +1942,136 @@ describe('extension revival delivery', () => {
 });
 
 describe('extension observation journal', () => {
+  it('delivers another chat and its Goal while a slow chat holds one slot, without overlapping same-chat batches', async () => {
+    const a = '11111111-2222-3333-4444-555555555555';
+    const b = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    const gateA = new Promise<void>(resolve => { releaseA = resolve; });
+    const gateB = new Promise<void>(resolve => { releaseB = resolve; });
+    const posted: Array<{ conversationId: string; events: Array<{ text: string }> }> = [];
+    const active = new Set<string>();
+    let maximum = 0;
+    let overlaps = 0;
+    let drafts = 0;
+    const worker = loadWorker({ local, session, fetch: async (input, init = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/events') {
+        const batch = JSON.parse(String(init.body));
+        posted.push(batch);
+        if (active.has(batch.conversationId)) overlaps++;
+        active.add(batch.conversationId);
+        maximum = Math.max(maximum, active.size);
+        if (batch.conversationId === a) await gateA;
+        if (batch.conversationId === b && batch.events[0].text === 'B1') await gateB;
+        active.delete(batch.conversationId);
+        return response(200, { stored: batch.events.length });
+      }
+      if (url.pathname === '/goal/draft') { drafts++; return response(200, { goal: { stage: 'drafting' } }); }
+      return response(404, {});
+    } });
+    const event = (conversationId: string, text: string) => ({
+      type: 'events', conversationId,
+      entries: [{ conversationId, event: { kind: 'progress', time: Date.now(), text } }]
+    });
+    let aFinished = false;
+    const pendingA = worker.send(event(a, 'A1'), 61).then(result => { aFinished = true; return result; });
+    try {
+      await vi.waitFor(() => expect(active.has(a)).toBe(true));
+      await worker.send(event(b, 'B1'), 62);
+      await vi.waitFor(() => expect(active.has(b)).toBe(true));
+      await worker.send(event(b, 'B2'), 62);
+      expect(posted.filter(batch => batch.conversationId === b)).toHaveLength(1);
+      const goal = worker.send({ type: 'goal_draft', conversationId: b, turnId: 'B-final' }, 62);
+      releaseB();
+      await expect(goal).resolves.toMatchObject({ ok: true });
+      expect(aFinished).toBe(false);
+      expect(drafts).toBe(1);
+      expect(posted.filter(batch => batch.conversationId === b).flatMap(batch => batch.events.map(row => row.text))).toEqual(['B1', 'B2']);
+      expect(maximum).toBe(2);
+      expect(overlaps).toBe(0);
+      expect(journalOf(session).map(entry => entry.conversationId)).toEqual([a]);
+    } finally { releaseA(); releaseB(); }
+    await pendingA;
+    expect(journalOf(session)).toEqual([]);
+  });
+
+  it('keeps command-receipt custody and failed batches isolated while another transport slot is busy', async () => {
+    const a = '11111111-2222-3333-4444-555555555555';
+    const b = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const c = '33333333-4444-5555-6666-777777777777';
+    const d = '44444444-5555-6666-7777-888888888888';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let healthy = false;
+    const posted: string[] = [];
+    const worker = loadWorker({ local, session, fetch: async (input, init = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/commands/ack') return healthy ? response(200, { ok: true }) : response(503, {});
+      if (url.pathname === '/events') {
+        const id = JSON.parse(String(init.body)).conversationId;
+        posted.push(id);
+        if (id === a) await gate;
+        if (id === c && !healthy) return response(503, {});
+        return response(200, { stored: 1 });
+      }
+      return response(404, {});
+    } });
+    await worker.send({ type: 'ack', id: 'blocked-command', status: 'sent', conversationId: b }, 62);
+    const row = (conversationId: string) => ({ conversationId, event: { kind: 'progress', time: Date.now(), text: conversationId } });
+    const pending = worker.send({ type: 'events', entries: [a, b, c, d].map(row) }, 61);
+    try {
+      await vi.waitFor(() => expect(posted).toContain(d));
+      expect(posted).not.toContain(b);
+      expect(posted.filter(id => id === c)).toHaveLength(1);
+      await expect(worker.send({ type: 'goal_draft', conversationId: b, turnId: 'blocked' }, 62))
+        .resolves.toMatchObject({ ok: false, error: 'transcript_not_delivered' });
+      expect(journalOf(session).map(entry => entry.conversationId)).toEqual([a, b, c]);
+    } finally { release(); }
+    await pending;
+    healthy = true;
+    await worker.send({ type: 'status' }, 62);
+    await vi.waitFor(() => expect(journalOf(session)).toEqual([]));
+    expect(posted).toContain(b);
+    expect(posted.filter(id => id === c)).toHaveLength(2);
+  });
+
+  it('yields a hot conversation to an unserved conversation between batches', async () => {
+    const a = '11111111-2222-3333-4444-555555555555';
+    const b = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const c = '33333333-4444-5555-6666-777777777777';
+    const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
+    const session = new FakeStorageArea();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const posted: string[] = [];
+    const worker = loadWorker({ local, session, fetch: async (input, init = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/events') {
+        const id = JSON.parse(String(init.body)).conversationId;
+        posted.push(id);
+        if (id === a) await gate;
+        return response(200, { stored: 1 });
+      }
+      return response(404, {});
+    } });
+    const row = (conversationId: string, index: number) => ({ conversationId, event: { kind: 'progress', time: index, text: String(index) } });
+    const pending = worker.send({ type: 'events', entries: [row(a, 0), ...Array.from({ length: 101 }, (_, i) => row(b, i)), row(c, 0)] });
+    try {
+      await vi.waitFor(() => expect(posted).toHaveLength(4));
+      expect(posted).toEqual([a, b, c, b]);
+    } finally { release(); }
+    await pending;
+    expect(journalOf(session)).toEqual([]);
+  });
+
   it('does not permanently settle a worker command merely because its bootstrap message was sent', async () => {
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
     const session = new FakeStorageArea();
@@ -3000,7 +3130,7 @@ describe('extension connection', () => {
    */
   it('forwards an exact live request ownership handshake and returns the app read-back', async () => {
     const conversationId = 'abababab-cdcd-efef-1212-343434343434';
-    const requestId = '77186fb4-bdda-4849-8cd7-879bb08a1617';
+    const requestId = '00000005-0000-4000-8000-000000000005';
     let body: any = null;
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);

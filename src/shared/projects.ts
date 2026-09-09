@@ -4,4 +4,6 @@ export interface LocalProject {
   name: string;
   path: string;
   createdAt: number;
+  /** Removed sidebar group; existing conversations and queued work retain their folder. */
+  ungrouped?: boolean;
 }

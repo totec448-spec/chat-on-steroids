@@ -44,7 +44,7 @@ interface Descriptor {
 
 // ------------------------------------------------------------------ fixtures
 
-const THREAD = '6a81871f-bbec-83eb-8595-4a292446b686';
+const THREAD = '00000050-0000-8000-8000-000000000050';
 /**
  * The connector name the live page actually holds, taken from a real conversation.
  *
@@ -57,9 +57,9 @@ const DESKTOP_APP = 'Chat On Steroids Desktop';
 /** What the connector was called before 1.7.1 split it. Older chats still hold it. */
 const LEGACY_APP = 'TobisComputer';
 /** The connector's link id, as it appears in a request path. */
-const LINK = 'link_6a7f78baf7e881918261b0731fac4c35';
+const LINK = 'link_00000000000000000000000000000001';
 /** A result's resource uri names the app instance rather than the connector. */
-const ASDK = 'asdk_app_6a7f78b22adc8191b61ddd83beba7da5';
+const ASDK = 'asdk_app_00000000000000000000000000000002';
 /** The depth the live page put the group node at. The old limit was 30 exclusive. */
 const LIVE_DEPTH = 30;
 
@@ -101,7 +101,7 @@ function request(
       text: options.truncate === undefined ? body : body.slice(0, options.truncate)
     },
     metadata: {
-      parent_id: options.parent ?? '699e6497-0000-4000-8000-000000000001',
+      parent_id: options.parent ?? '00000051-0000-4000-8000-000000000051',
       request_id: 'wfr_01a009',
       turn_exchange_id: '82f67b26',
       tool_icons: ['api_tool']
@@ -571,6 +571,34 @@ describe('the calls a turn says it made', () => {
     expect(turns[0]).toMatchObject({ conversationId: THREAD, conversationConflict: false });
   });
 
+  it('reads the durable server identity instead of the mounted WEB identity', async () => {
+    const conversation = { id: 'WEB:11111111-2222-4333-8444-555555555555', serverId$: () => THREAD };
+    const { turns } = await scan([], [{
+      id: 'server-bound-user', messages: [{ ...authored('native-user', 'Keep `literal` text.'), author: { role: 'user' } }],
+      conversationProps: { conversation }
+    }]);
+    expect(turns[0]).toMatchObject({ conversationId: THREAD, conversationConflict: false });
+    expect(turns[0]!.messages[0]).toMatchObject({ role: 'user', rawText: 'Keep `literal` text.' });
+    expect(JSON.stringify(turns)).not.toContain('WEB:');
+  });
+
+  it.each([undefined, () => null, () => { throw new Error('unresolved'); }])('does not promote a local WEB identity when the durable signal is unavailable (%s)', async (serverId$) => {
+    const { turns } = await scan([], [{
+      id: 'unresolved-server-owner', messages: [authored('native-answer', 'Answer.')],
+      conversationProps: { conversation: { id: 'WEB:11111111-2222-4333-8444-555555555555', serverId$ } }
+    }]);
+    expect(turns[0]).toMatchObject({ conversationId: null, conversationConflict: false });
+  });
+
+  it('keeps a contradictory durable server identity conflicted', async () => {
+    const { turns } = await scan([], [{
+      id: 'conflicting-server-owner', messages: [authored('native-answer', 'Answer.')],
+      conversationProps: { conversationId: THREAD,
+        conversation: { id: 'WEB:11111111-2222-4333-8444-555555555555', serverId$: () => '22222222-3333-4444-8555-666666666666' } }
+    }]);
+    expect(turns[0]).toMatchObject({ conversationId: null, conversationConflict: true });
+  });
+
   it.each([{ clientThreadId: THREAD }, { conversation: { id: THREAD } }])('distinguishes contradictory conversation metadata from missing conversation metadata: %j', async (identity) => {
     const other = '11111111-2222-3333-4444-555555555555';
     const messages = [authored('assistant-conflicted-chat', 'Stale mounted answer.')];
@@ -746,7 +774,7 @@ describe('the calls a turn says it made', () => {
   });
 
   it('preserves distinct authored segments even when raw, working and exchange UUIDs all repeat', async () => {
-    const id = 'b7d6231f-1174-42f0-8ee0-e828d132020c';
+    const id = '00000052-0000-4000-8000-000000000052';
     const times = [1788644947400, 1788644965847, 1788645029019, 1788645099694];
     const ids: string[] = [];
     for (const [index, time] of times.entries()) {

@@ -560,7 +560,7 @@ describe('session store', () => {
   it('keeps rich HTML when the same canonical prose is reobserved without rendered HTML', async () => {
     const summary = await createSession({ title: 'sparse rich final' });
     const messageId = 'msg-sparse-rich';
-    const providerMessageId = 'bdc7b4c3-5f89-4e1d-a9ca-6c0f6a5ffb4a';
+    const providerMessageId = '0000005c-0000-4000-a000-00000000005c';
     const message = { text: 'Bold answer', truncated: false, chars: 11 };
     await upsertMessageEvent(summary.id, {
       time: 200,
@@ -2405,6 +2405,30 @@ describe('naming the chats this app opened', () => {
       { kind: 'conversation_title', time: Date.now(), text: 'A Later ChatGPT Rename' }
     ]);
     expect((await getSession(opened.sessionId!))?.title).toBe('My manual title');
+  });
+
+  it('keeps rendered instruction frames out of titles and repairs only their exact recorded fallback', async () => {
+    const conversationId = 'conv-rendered-prompt-title';
+    const rendered = '[[COS_CONTEXT:100]]\nGuidance whose Markdown whitespace changed.\n[[/COS_CONTEXT]]\n\nReal request';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: Date.now(), text: rendered, messageId: 'framed-title-user' }
+    ]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('ChatGPT session');
+    await upsertMessageEvent(opened.sessionId!, {
+      time: Date.now(), source: 'app', kind: 'user_message', messageId: 'framed-title-user',
+      authoredText: 'Real request', message: { text: rendered, chars: rendered.length, truncated: false }
+    });
+    // Reproduce the old build's durable title, then receive the real page title.
+    await renameSession(opened.sessionId!, rendered.slice(0, 80));
+    await recordChatObservations(conversationId, [
+      { kind: 'conversation_title', time: Date.now(), text: 'Readable generated title' }
+    ]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Readable generated title');
+    await renameSession(opened.sessionId!, 'My title');
+    await recordChatObservations(conversationId, [
+      { kind: 'conversation_title', time: Date.now(), text: 'Later generated title' }
+    ]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('My title');
   });
 
   it('does not persist native file credentials in recorded artifact arguments', async () => {

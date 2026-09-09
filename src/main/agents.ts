@@ -2022,9 +2022,8 @@ function planFinish(agent: Agent, result: string): { info: AgentInfo; report: Ag
 (${agent.info.id} is finished for good: its own chat has reached the context limit, so it cannot be woken again. ` +
       `${slots}Spawn a new worker for any remaining work.)`
     : `
-(${agent.info.id} is sleeping, not gone. ${slots}It keeps this chat and everything it has already worked out. For ` +
-      `related follow-up work, reuse it first with agents action=message to="${agent.info.id}" — that wakes it up where ` +
-      'it left off. Use action=spawn only when no sleeping worker is suitable or true parallel capacity is needed.)';
+(${agent.info.id} sleeping; ${slots}Reuse first: agents action=message to="${agent.info.id}". ` +
+      'Spawn only when no sleeping worker is suitable or more parallel capacity is needed.)';
   const report = newMessage(
     agent.info.id,
     PRIME_ID,

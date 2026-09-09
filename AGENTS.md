@@ -287,7 +287,7 @@ src/main/connection.ts        MCP + tunnel lifecycle, per-surface publication & 
 src/main/ipc.ts               every renderer→main operation and main→renderer push
 src/preload/index.ts          the complete renderer-facing API allowlist
 src/main/secrets.ts           Electron safeStorage-backed secret storage
-src/main/logger.ts            redacted operational log: 500-entry ring + userData/app.log mirror (not the session store)
+src/main/logger.ts            redacted 500-entry ring + bounded asynchronous app.log batches; final flush and separate crash snapshot
 src/main/durable.ts           small named JSON state files under userData/state
 src/main/diagnostics.ts       the UI self-test chain, hop by hop
 src/main/update.ts            process-lifetime updater: startup + 6h checks, one in-flight pass; apply only on ordinary quit
@@ -306,8 +306,14 @@ src/main/mcp/kernel.ts        dispatch, live guards, caller/workspace identity, 
 src/main/mcp/tools-core.ts    Core registration + connector wrappers
 src/main/mcp/tools-desktop.ts Desktop registration + wrappers
 src/main/mcp/inbound.ts       x-request-id extraction and normalization
+src/main/mcp/tool-declarations.ts immutable declaration/JSON-schema reuse; fresh SDK handlers and live guards
+src/main/mcp/code-mode-tool.ts exec declaration and exact-caller entry to bounded tool composition
+src/main/mcp/code-mode-runtime.ts host limits, worker admission and validated explicit emissions
+src/main/mcp/code-mode-worker.ts isolated QuickJS WASM interpreter; JSON-only host bridge
 src/main/mcp/call-context.ts  AsyncLocalStorage per call + in-flight accounting
 src/main/mcp/instructions.ts  model-facing server instructions
+src/main/mcp/coding-instructions.ts adapted upstream Codex collaboration prose (provenance in header)
+src/main/mcp/plan-tool.ts     update_plan for the exact proven session, never a queue executor
 
 ── filesystem / execution ─────────────────────────────────────────────────
 src/main/sandbox.ts           approved-root authority; virtual↔native containment
@@ -371,6 +377,7 @@ extension/popup.html/.css/.js extension status/reconnect UI only; no tool/sessio
 ── other ──────────────────────────────────────────────────────────────────
 src/renderer/main.ts          setup/settings/connection/activity UI
 src/renderer/chat.ts          session timeline, handoff, swarm UI
+src/renderer/agent-plan.ts    current plan headlines and expandable details above the queue dock
 src/renderer/dom.ts           shared text-only renderer DOM/icon/toast/IPC-result helpers; no app state or innerHTML
 src/main/computer/index.ts    Desktop action policy, frame/ref lifetimes, batching and postconditions
 src/main/computer/helper.ts   Windows PowerShell/Win32/UIA helper protocol; no model text in argv
@@ -403,7 +410,7 @@ durable or externally re-observable fact can reconstruct it.
 | approved roots + permissions + feature toggles | `config.ts` | `userData/config.json`, atomic temp→rename; validated/migrated on every load | `effectiveCapabilities()` is the live permission projection; malformed existing config recovers conservatively, never as fresh-install consent |
 | host capability availability | `platform.ts` + `shared/capabilities.ts` | derived, not stored | Desktop capabilities are impossible off Windows/macOS; every newly added capability is root-required until explicitly classified rootless |
 | secrets | `secrets.ts` | OS `safeStorage`; never config/log/renderer | OpenAI, bridge and OpenRouter credentials never cross into untrusted renderer/page state |
-| small cross-restart control state | `durable.ts` | named `userData/state/*.json`; temp→rename; debounced generations + explicit `writeDurableNow` barriers | swarm, continuations, correlations, bridge commands, Goal ledgers; a failed file must not poison later files or publish a rejected generation |
+| small cross-restart control state | `durable.ts` | named `userData/state/*.json`; per-filename queues, temp→rename; lazy debounced snapshots + explicit `writeDurableNow` generations | independent files can flush concurrently; cross-file transactions require explicit caller awaits; failed generations remain retryable |
 | MCP surface shape | `mcp/surfaces.ts` + `server.ts` exposure cache | endpoint lifetime | discovery is a cached schema promise; live permission enforcement is separate and current |
 | one MCP request identity | `mcp/inbound.ts` | request lifetime in AsyncLocalStorage | normalize `x-request-id` before any higher-level routing |
 | one in-flight call's mutable evidence | `mcp/call-context.ts` | request lifetime | tool outcome/changes/assets/caller travel with the call; wider “settling” lifetime includes attribution + recording after the handler returned |
@@ -414,6 +421,7 @@ durable or externally re-observable fact can reconstruct it.
 | mutable timeline progress/activity identity | `shared/session.ts::foldProgress` + recorder/store origins | append snapshots from page/native **or app-owned** progress, folded on read by namespaced `progressId` / page-tool `messageId` | newest content stays at the earliest logical position; unknown identity is never guessed into a fold; app recovery status uses this same mechanism rather than a parallel status store |
 | session retention | `session/retention.ts` | process timer, current config read each sweep | startup prune + one coarse six-hour sweep; retention applies to existing history even with recording off |
 | model-facing session cursor | `mcp/session-tool.ts` | opaque cursor carried by the caller | cursors pin snapshot/filter/range/open-message checkpoints; stale boundaries fail explicitly rather than silently skipping/repeating history |
+| agent-maintained task plan | `session/store.ts::updateSessionPlan` + `shared/agent-plan.ts` | one atomically replaced `sessions/<id>/plan.json`, serialized with session rebind | `update_plan` requires exact request-to-session proof even without workers; retired chats and older calls cannot replace it. `sessionControlsFor` projects it through the existing renderer refresh, scoped to selection generation. Short headlines disclose bounded details above the narrower-than-queue plan card; no queue stages execute or complete from plan status. |
 | browser pairing / presence | `extension/background.js` + `bridge.ts` | token/intent in extension `storage.local` and app secret store; presence memory-only/re-observed | pairing token never reaches content/page; “browser absent” and “one chat absent” are different facts |
 | shared broken-page recovery | `bridge.ts` `activeUntil` + `repairsInFlight` + `unattributedIncident` + `goalWatch` | **process memory**, not a recovery WAL; handout tokens/cooldowns/episode ids are ephemeral and re-earned from live evidence | restart must not resurrect an old browser action merely because it was once queued. A durable Goal reply obligation is separate truth and may cause a new Goal watch after this run observes/accepts eligible work; the old repair token itself never survives as authority |
 | browser observation custody | `extension/background.js` journal | `storage.session` until app `/events` accepts it | content-script success means “journal owns it”, not “app stored it”; an acknowledged observation must never vanish on worker suspension |
@@ -618,6 +626,36 @@ authenticated extension header; duplicating it in the updater would create two a
 
 ## 6. MCP surfaces and discovery — `surfaces.ts`, `tools.ts`, `server.ts`
 
+**Full prompt delivery:** MCP initialize.instructions remains advertised, but host projection
+does not prove that the model received it. App-authored input freezes the complete current Core
+instructions in its existing durable deliveryText before handout (IPC prepareText + input.ts).
+The same formatter prefixes the pre-summary request and browser-redeemed worker/resume/revival
+commands. Shared `user-prompt.ts` frames the full text without shortening it; existing continuation
+markers stay first. The renderer and extension hide only that framed prefix. Native message bytes,
+recording, token accounting and exact Send receipts remain complete. Direct user sends in Chrome
+are not intercepted. Internal planner/decision prompts retain their separate role-specific contract.
+Goal/Loop reference history uses authored user text rather than the executor's instruction envelope.
+Native user bubbles can consume Markdown bytes even inside `whitespace-pre-wrap`. Receipts,
+recording and presentation share the exact native message source through `userMessageSource()`;
+the mounted conversation's read-only `serverId$` signal supplies its durable identity, while its
+`WEB:` local id supplies no chat ownership. Conflicting durable IDs remain rejected. The display
+uses strict framing on original text and preserves the native DOM and controls. `COS_CONTEXT` is length-delimited
+transport framing, not chat identity. Core guidance starts directly with the coding instructions;
+one sentence under Local tools describes the connectors without a setup URL or app-ID lookup.
+Do not add an instructions tool or a per-chat "prompt sent" flag alongside these delivery owners.
+
+**Code mode** (`docs/code-mode.md`): every populated surface adds `exec({code})` alongside its
+direct tools. MCP requires object arguments and the host owns the outer namespace; inside the
+code, `tools.<name>(args)`, top-level await, Promise.all, text and image provide Codex-style
+composition. Exact request/conversation/durable-session identity is required before evaluation.
+QuickJS runs inside a disposable bounded worker with no ambient host APIs. Children reuse the
+same registrar/schema/handler and dispatcher with fresh evidence, inherited caller proof and a
+fresh live permission/root projection. Plugins still use their manager and redact generated
+outer output. Only explicit emissions enter the model result; individual children remain recorded.
+Only the outer call owns input/inbox delivery. Finish signals stay direct. Runtime termination
+closes new admission; accepted actions retain their normal execution/recording lifetime. Limits
+live only in `CODE_MODE_LIMITS`; do not add another executor, identity registry or delivery queue.
+
 ChatGPT discovers **one server's entire tool list as a unit**: a no-query
 `list_resources` returns every schema that server advertises. Splitting into separate
 servers is therefore the only mechanism that actually bounds the worst case. Core and Desktop
@@ -646,6 +684,14 @@ stdio/Streamable HTTP servers and enabled tools. `mcp/tools-plugins.ts` preserve
 schemas/results through the SDK and existing attribution/recording dispatcher. Installation and
 credentials stay in the main process; external processes do not inherit the CoS folder sandbox.
 Discovery is bounded to 64 tools / 250 KB. Stale calls check live plugin policy. See `docs/plugins.md`.
+Static Core/Desktop/session declarations and JSON conversions are cached; SDK server instances
+and handler closures stay per request. Plugin exposure is invalidated at publication/revocation
+before async work can yield. The manager sanitizes external results once; the dispatcher sanitizes
+only appended inbox/input/recovery content and records the same final object that it returns.
+Official npm Playwright launches default `PLAYWRIGHT_MCP_CODEGEN=none` through its upstream
+response policy; explicit launch/configuration still takes precedence. `redaction.ts` masks
+recognizable sk-prefixed credentials in authored plugin output and recorded tool arguments/results,
+including overflow assets. Invocation inputs and opaque image bytes keep their original values.
 Only installed and enabled plugins own a running connection; no catalog recipe is preinstalled.
 Enabled connections restore in the background on app startup and remain alive until disabled,
 uninstalled, failed, restarted or app shutdown. Tool inactivity does not retire their process state.
@@ -841,7 +887,12 @@ The local execution wrapper adds several mechanisms around that port. They are n
   process can accumulate while keeping a stable head, rolling tail and exact omitted-byte count.
   `truncate.ts`/`exec-output.ts` separately bound what is serialized to the model in UTF-8 byte /
   approximate-token space. Do not collapse the collection ceiling into the default response
-  budget: an explicit larger `max_output_tokens` is supposed to work up to the collection cap.
+  budget. The connector accepts legacy `max_output_tokens` values but enforces its fixed response
+  ceiling, without adding a migration note to every result. Command batches keep their random
+  delimiter internal: `composeCommandBatch()` hands the exact marker to both the raw section parser
+  and `CommandBatchDisplay`. Only batches allocate a second bounded head/tail stream for presentation;
+  nonce removal occurs on incoming bytes before collection/truncation and survives poll boundaries.
+  Text and structured output share that projection; command numbers and exit codes remain visible.
 - **A finished background command still owns an unread result.** `UnifiedExecProcessManager` no
   longer evicts exited sessions to make room. `backgroundState()` projects the caller-owned
   `running` and `exitedUnread` rows, and `ownership.ts::backgroundExecObligations()` is the one
@@ -854,12 +905,13 @@ The local execution wrapper adds several mechanisms around that port. They are n
   `ownership.ts::noteExecOwner()` starts its attendance clock and `noteExecAttended()` refreshes it
   around `write_stdin`; after `UNATTENDED_EXEC_NOTICE_MS = 120s`,
   `backgroundExecRecoveryNotices()` may append one "running unpolled" reminder for that exact owned
-  session to the next MCP result delivered to the same conversation. `kernel.ts::
+  session to the next MCP result delivered to the same durable session. `kernel.ts::
   withBackgroundExecRecovery()` is the single consuming path — merely inspecting runtime state must
   not spend the notice. A live dev server/tail does **not** consume the four-result unread admission
-  budget and is never killed or auto-polled by this mechanism. Once the live-session reminder was
-  delivered it does not nag again; if the process later exits, the separate `exitedUnread` reminder
-  repeats on later calls until the owning chat actually drains the terminal output.
+  budget and is never killed or auto-polled by this mechanism. A distinct authenticated request
+  started after a notice was offered acknowledges that prose; same-request retries and older
+  concurrent calls reoffer it. A later exit owns a fresh notice under the same receipt rule.
+  Acknowledging either notice never drains output or releases the unread-result admission fence.
 
 **`apply_patch`.** Model syntax is Codex V4A. MCP cannot expose a true freeform tool, so
 the raw patch rides inside the `patch` string while the grammar lives in the description.
@@ -926,6 +978,10 @@ HTTP x-request-id                       (inbound.ts, normalized before '/')
 ```
 
 This acknowledged `/correlations` operation is deliberately **separate from transcript `/events`**.
+Both routes publish exact evidence through `recorder.ts::recordRequestEvidence`, outside the
+per-conversation transcript queue. Session initialization and historical lineage remain the one
+owner; late proof for a retired source identifies that source so the normal superseded checks can
+refuse it. Slow canonical text/image writes cannot delay the ownership acknowledgement.
 A fresh ChatGPT chat can expose `metadata.request_id` while its newest React/Fiber turn still carries
 a provisional client thread id, then converge on the real `/c/<conversation-id>` route shortly
 after. For the one page turn this document locally owns, `content.js` may retain that provisional
@@ -1058,7 +1114,8 @@ never fix a display-size problem by discarding the durable source. Durable state
 authority across restart, and `meta.json` must never claim events that `events.jsonl` does
 not contain. Unattributed is a **first-class state**, not a bug to paper over.
 
-Distinct from `logger.ts`, which is small, redacted, RAM-only and operational.
+Distinct from `logger.ts`, which keeps a redacted operational ring and bounded asynchronous file
+mirror. Final shutdown flushes the mirror; fatal failures use a separate bounded crash snapshot.
 
 ### The store has three write models, because the data has three different semantics
 
@@ -1086,6 +1143,10 @@ mechanism for evidence, mutable website messages and derived metadata:
 That distinction also explains why **per-session serialization** is enough for many reads/writes:
 `flushSession(id)` joins only that session's queue rather than flushing every open session. A poll
 of one chat must not force metadata rewrites for dozens of unrelated generating chats.
+`readActivityEvents()` joins committed writes without flushing metadata. A reopened session hydrates
+one bounded journal tail, then its existing append tail and canonical-message map serve cursor
+pages and revisions. `tailFrom` describes proven journal coverage; an older canonical message
+cannot lower that floor across missing journal rows. Resume boundaries use canonical origins.
 
 Large data has bounds at every representation. Inline tool args/results are 8k chars; ordinary
 assistant-message inline text is 12k, user messages may be much larger, and overflow text can spill
@@ -1099,11 +1160,12 @@ raising a UI budget is not permission to remove the durable-store or transport b
 For a tool call that **has a request id** whose owner is not yet in the registry, `recorder.ts` waits
 the current **20-second `REQUEST_ID_GRACE_MS`** for the browser's exact evidence. A headerless/no-id
 call has no exact ownership proof to wait for and proceeds directly to the Unattributed verdict. The
-grace does not delay every later write behind one global timer: calls with unresolved ids start their
-attribution waits independently, but each call
-synchronously reserves its eventual position on `recordChain`, so invocation order is preserved
-when the waits resolve at different times. Already-proven calls skip the wait but not the ordered
-write/quit-flush discipline.
+grace does not delay unrelated chats: evidence waits open at admission, calls sharing one request
+serialize in admission order, and each resolved session serializes preparation plus append.
+Different workflows may resolve out of order; sequence numbers remain commit/cursor order and
+existing turn chronology retains original call times. `pendingRecordings` accounts for every
+admitted wait/write through shutdown. Already-proven calls await their own durable recording;
+unidentified calls release the MCP response and remain charged to the settling counter.
 
 If the exact proof still has not arrived, the call lands in the Unattributed session. That is a
 durable truthful state, not a final guess. A later exact proof queues deterministic repair:
@@ -1120,6 +1182,9 @@ Mixed buckets are split call-by-call; timing, tool name, current tab and "only c
 never participate. When correlation names an older `sessionId`, recorder searches that exact
 conversation lineage historically and **refuses to downgrade into a newer owner** just because it
 is easier to find.
+Correlation snapshots materialize at the debounced write boundary. Restore and repair use the
+existing uncapped session catalog. Late repair carries exact affected request ids; a bounded
+derived bucket cache avoids rereading unchanged irrelevant history and is invalidated on rewrite.
 
 One proven outcome is deliberately terminal in that stream: `superseded` means the request id
 proved a conversation whose durable session attachment has already moved elsewhere. The proof is
@@ -1239,6 +1304,10 @@ Irreversible command ACKs outrank ordinary transcript draining for the same conv
 send ACK is waiting in `commandAckOutbox`, `nextJournalBatch` will not let later observations from
 that route overtake it. Otherwise the app could record the post-send assistant turn before it knew
 the worker/resume user message had actually crossed its semantic boundary.
+The journal has two transport slots and one in-flight batch per conversation. Fair selection
+between batches prevents a hot chat monopolizing the transport; Goal joins its own transcript
+delivery instead of another chat's stalled request. Retry/gap handling and journal custody remain
+shared owners, with the original drain-level persistence cadence.
 
 `commandAckOutbox` is also deliberately **browser-restart durable**. `persistLive()` mirrors the
 bounded outbox to both `storage.session` and `storage.local`; `loadOnce()` prefers the local copy and
@@ -1470,6 +1539,11 @@ A storage/broker failure at either Goal or worker-final barrier returns retryabl
 the browser-owned journal row for replay. This is why worker completion, Goal exactly-once and
 broken-page recovery can all consume the same observation without inventing three independent
 receipt systems.
+
+Worker-final eligibility uses `chronology.ts::positionOf()` (canonical origin before revision seq)
+and the final's own durable turn start when present. Any newer different turn start disqualifies
+that old final. Refreshing an old final's HTML advances its storage cursor, never its authority to
+put a revived worker to sleep.
 
 Browser recovery now has **one per-conversation queue** in `bridge.ts::queueBrowserRecovery()`;
 silence, recoverable assistant transport errors, missing mid-turn tabs and broken request-id joins
@@ -2276,6 +2350,10 @@ the same complete worker history to the child conversation or move nothing.
 for Astra when explicitly requested by the user prompt; worker completion still uses
 `agents action=finish`. Planning helpers receive only task content. Finish reminders are attached
 at delivery, independently of plan text, and hidden from the app's authored prompt display.
+Browser and tool delivery share `shared/finish.ts::finishInstruction()`: complete the requested
+implementation before calling with the configured 3/5 minutes of final verification remaining.
+New instructions extend the task and do not each require another finish call. HELD responses use
+the same policy; empty holds still allow waiting via session_finish without invented work.
 
 Plans deliver one stage directly in a successful finish-tool return, or after a verified completed
 turn for ordinary chats. Ordinary tool injections may stack and share the next tool response;
@@ -2658,6 +2736,10 @@ Async loads use generation counters so a slow load for session A cannot paint ov
 user selected, and unsolicited state pushes must not clobber a focused unsaved form field.
 Captured ChatGPT HTML is untrusted: `chat.ts::renderedMessage()` allowlists semantic tags,
 strips attributes, drops executable/form/embed content and non-safe link schemes.
+Text direction is automatic on prose blocks, chat titles, queued text and prose editors;
+the app shell stays LTR. Lists/quotes and explicit captured `dir` values own their subtrees,
+while code defaults to LTR. CSS uses logical list/quote edges and per-paragraph bidi for
+plain messages. No language preference or direction watcher is required.
 Tests: `ipc.test.ts`, `renderer-html.test.ts`, `renderer-layout.test.ts`, `renderer-state.test.ts`, `renderer-timeline.test.ts` (compaction card, stable rows).
 
 Chats **Open Chat** is another example of the same narrow boundary. `renderer/chat.ts::sessionRow()`
@@ -2819,7 +2901,16 @@ projection. If a fact is needed for restart recovery, it does not belong in this
 real durable owner instead. Since 2.0.3 the same redacted lines are also mirrored to
 `userData/app.log` (`initLogFile()` in `index.ts`; 4 MB, one `.1` rotation, self-disabling on write
 failure) so a failed overnight run can still be read the next morning — the 2026-09-02 run left no
-log at all. Nothing reads that file back; it is for humans.
+log at all. Ordinary writes use ordered asynchronous batches (64 KiB batches, 256 KiB pending,
+16 KiB per entry); overload leaves an explicit omission count. Final exit waits up to two seconds.
+Fatal failure or a failed final flush writes a separate bounded `.crash` snapshot. Nothing reads
+those files back as state authority; they are for humans.
+
+MCP HTTP completion lines include bounded numeric timing for ingress, identity/admission, handler,
+delivery preparation, recorder and local response completion. Unidentified recordings report their
+asynchronous settle time separately. A handler's own identity wait remains inside its handler time.
+These measurements do not prove remote ChatGPT receipt. `scripts/benchmark-mcp-latency.mjs` compares
+explicit local/tunnel routes with the same read-only discovery request; it never invokes a tool.
 
 **On-disk state to inspect.** Electron `userData` — `%APPDATA%\chat-on-steroids\` on Windows,
 `~/Library/Application Support/chat-on-steroids/` on macOS, `${XDG_CONFIG_HOME:-~/.config}/chat-on-steroids/`
@@ -3167,6 +3258,11 @@ private process in `SECURITY.md`, not in public issues, comments, or fixtures.
 
 Intentional `after-turn` inputs for an existing ordinary chat share the durable staged-task FIFO and composer queue dock. Multiple waits are admitted, but each browser claim spends one distinct verified completed `turn_end`; repeated observations or restart cannot drain the next item. An after-turn wait does not block later Inject now messages from an eligible tool response. Initial and immediate browser sends retain single-send admission. Edits and reordering apply only before claim; the durable edit receipt ends the renderer's editing state without waiting for another queue read.
 Immediate inputs are batched into one eligible MCP response in queue order within the existing payload bounds; after-turn and finish stages retain their separate one-boundary-at-a-time policy. Model catalog election requires a visible composer, so an editor hidden behind Settings cannot claim the refresh. Captured provider citation ranges use Unicode code points; the renderer maps them to UTF-16 and emits exact uploaded-file chip names as plain text, omitting unresolved file citations.
+Tool input delivery carries ordered messages plus one batch reminder. The dispatcher renders one
+user-instruction heading, each authored message followed by its images, and the reminder once at
+the end. Input UUIDs stay in durable claims/history and never decorate model-visible messages;
+receipts still use exact session/conversation custody and the later invocation start. Text bounds
+include the one heading, separators and reminder before any input is claimed.
 
 Finish checkpoints inherit the current chat model. `shared/input.ts::browserInputModel`
 projects null picker settings for finish entries, including legacy rows whose authored fields

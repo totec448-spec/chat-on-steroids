@@ -35,8 +35,9 @@ import type {
   SessionSummary,
   StoredText
 } from '../../shared/session.js';
-import { eventTokens, normalizedToolOutcome } from '../../shared/session.js';
+import { CONTINUATION_MARKER, eventTokens, normalizedToolOutcome } from '../../shared/session.js';
 import { chronological } from '../../shared/chronology.js';
+import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 
@@ -163,6 +164,9 @@ interface OpenSession {
   historySeq: number;
   /** Recent durable events, so incremental /activity polls do not reread the whole JSONL. */
   tail: SessionEvent[];
+  /** Earliest cursor covered by tail; reopening starts with no journal rows cached. */
+  tailFrom: number;
+  activityHydrated: boolean;
   /** Serialises appends so two events can never interleave inside one line. */
   queue: Promise<void>;
   /** Canonical ChatGPT messages. A later streaming/final snapshot replaces by stable id. */
@@ -401,6 +405,8 @@ export async function createSession(options: {
     nextSeq: 1,
     historySeq: 0,
     tail: [],
+    tailFrom: 1,
+    activityHydrated: true,
     queue: Promise.resolve(),
     messages: new Map(),
     metaDirty: false,
@@ -789,6 +795,8 @@ async function ensureOpen(id: string): Promise<OpenSession> {
       nextSeq: snapshot.historySeq + 1,
       historySeq: snapshot.historySeq,
       tail: [],
+      tailFrom: snapshot.historySeq + 1,
+      activityHydrated: false,
       queue: Promise.resolve(),
       messages: snapshot.messages,
       metaDirty: false,
@@ -973,7 +981,10 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
       }
       entry.nextSeq += 1;
       entry.tail.push(full);
-      if (entry.tail.length > MAX_EVENT_TAIL) entry.tail.splice(0, entry.tail.length - MAX_EVENT_TAIL);
+      if (entry.tail.length > MAX_EVENT_TAIL) {
+        const removed = entry.tail.splice(0, entry.tail.length - MAX_EVENT_TAIL);
+        entry.tailFrom = removed[removed.length - 1]!.seq + 1;
+      }
       applyToSummary(entry.summary, full);
       entry.historySeq = full.seq;
       scheduleMeta(entry);
@@ -1190,7 +1201,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
   const active = open.get(sessionId);
   if (options.from !== undefined && active) {
     if (from >= active.nextSeq) return [];
-    const cacheFloor = Math.max(1, active.nextSeq - MAX_EVENT_TAIL);
+    const cacheFloor = active.tailFrom;
     if (from >= cacheFloor) {
       const cached: SessionEvent[] = [...active.tail, ...active.messages.values()].filter((parsed) => {
         if (parsed.seq < from) return false;
@@ -1273,6 +1284,14 @@ export async function readRecentEvents(
 ): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
   await flushSession(sessionId);
+  return readRecentEventsFromDisk(sessionId, limit, options);
+}
+
+async function readRecentEventsFromDisk(
+  sessionId: string,
+  limit: number,
+  options: Pick<ReadOptions, 'kinds' | 'agent'> & { maxBytes?: number; before?: number } = {}
+): Promise<SessionEvent[]> {
   const cap = Math.max(1, Math.min(MAX_EVENT_TAIL, Math.floor(limit)));
   const active = open.get(sessionId);
   const needsMessages =
@@ -1375,6 +1394,37 @@ export async function readRecentEvents(
   return chronological(selected);
 }
 
+/** Browser projection joins committed writes without forcing the debounced metadata to disk.
+ * A cold store hydrates one bounded journal tail. Thereafter the existing append/message owners
+ * maintain it, including revisions whose origin is older than the browser cursor. */
+export async function readActivityEvents(sessionId: string, since: number, limit = 1200): Promise<{
+  events: SessionEvent[]; reset: boolean; resumeBoundary: number;
+}> {
+  const entry = await ensureOpen(sessionId);
+  return enqueueSessionOperation(entry, 'activity read', async () => {
+    if (!entry.activityHydrated) {
+      const recent = await readRecentEventsFromDisk(sessionId, MAX_EVENT_TAIL);
+      entry.tail = recent.filter((event) => !((event.kind === 'user_message' || event.kind === 'assistant_message') && entry.messages.has(messageKey(event)!)));
+      // Old canonical messages do not prove that intervening journal rows fitted inside
+      // the byte budget. Only the retained journal suffix establishes cursor coverage.
+      entry.tailFrom = entry.tail.reduce((first, event) => Math.min(first, event.seq), entry.nextSeq);
+      entry.activityHydrated = true;
+    }
+    const cap = Math.max(1, Math.min(MAX_EVENT_TAIL, Math.floor(limit)));
+    const cursor = Number.isFinite(since) ? Math.max(0, since) : 0;
+    const candidates = [...entry.tail, ...entry.messages.values()].sort((a, b) => a.seq - b.seq);
+    const reset = cursor < entry.tailFrom && !(cursor === 0 && entry.tailFrom === 1);
+    const selected = reset || cursor === 0
+      ? candidates.slice(-cap)
+      : candidates.filter((event) => event.seq >= cursor).slice(0, cap);
+    // All canonical messages remain authoritative after tail eviction and message revision.
+    const resumeBoundary = candidates.reduce((boundary, event) =>
+      event.kind === 'user_message' && CONTINUATION_MARKER.exec(event.message.text)?.[1] === 'RESUME'
+        ? Math.max(boundary, event.origin ?? event.seq) : boundary, 0);
+    return { events: chronological(selected), reset: reset || (cursor === 0 && candidates.length > cap), resumeBoundary };
+  });
+}
+
 /**
  * Atomically keeps only the supplied tool calls in an Unattributed activity session.
  *
@@ -1387,8 +1437,9 @@ export async function readRecentEvents(
 export async function rewriteUnattributedToolCalls(
   sessionId: string,
   calls: readonly Extract<SessionEvent, { kind: 'tool_call' }>[],
-  scannedThroughSeq: number
-): Promise<void> {
+  scannedThroughSeq: number,
+  deleteEmpty = false
+): Promise<{ retained: number; deleted: boolean }> {
   assertSessionId(sessionId);
   const entry = await ensureOpen(sessionId);
   const rewrite = entry.queue.then(async () => {
@@ -1429,6 +1480,17 @@ export async function rewriteUnattributedToolCalls(
       title: entry.summary.title
     };
     const retainedCalls = [...calls, ...concurrentCalls].sort((left, right) => left.seq - right.seq);
+    // Only the recorder can prove this is not its writable bucket: a live call may hold
+    // that bucket's id while preparing assets outside this queue. For inactive history,
+    // the empty check and deletion share the same queue operation as concurrent-row capture.
+    if (deleteEmpty && retainedCalls.length === 0 && entry.queue === settled) {
+      if (entry.metaTimer) clearTimeout(entry.metaTimer);
+      await fs.rm(sessionDir(sessionId), { recursive: true, force: true });
+      if (open.get(sessionId) === entry) open.delete(sessionId);
+      invalidateAssetUsage(sessionId);
+      publishAttachmentRemoval(sessionId);
+      return { retained: 0, deleted: true };
+    }
     const kept: SessionEvent[] = [start, ...retainedCalls.map((event, index) => ({ ...event, seq: index + 2 }))];
 
     const target = path.join(sessionDir(sessionId), 'events.jsonl');
@@ -1466,13 +1528,17 @@ export async function rewriteUnattributedToolCalls(
     entry.nextSeq = kept.length + 1;
     entry.historySeq = rewrittenHistorySeq;
     entry.tail = kept.slice(-MAX_EVENT_TAIL);
+    entry.tailFrom = entry.tail[0]?.seq ?? entry.nextSeq;
+    entry.activityHydrated = true;
     entry.metaDirty = false;
+    return { retained: retainedCalls.length, deleted: false };
   });
-  entry.queue = rewrite.then(
+  const settled = rewrite.then(
     () => undefined,
     (err: Error) => logError(`session unattributed repair failed: ${err.message}`)
   );
-  await rewrite;
+  entry.queue = settled;
+  return rewrite;
 }
 
 function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
@@ -1889,6 +1955,11 @@ export async function listAllSessions(): Promise<SessionSummary[]> {
   return readAllSummaries();
 }
 
+/** Uncapped authoritative catalog plus live projections, without reopening every metadata file. */
+export async function indexedSessions(): Promise<SessionSummary[]> {
+  return readEverySummary();
+}
+
 /**
  * Finds the durable session that owns one ChatGPT conversation id.
  *
@@ -2028,6 +2099,55 @@ export async function getSession(id: string): Promise<SessionSummary | null> {
   assertSessionId(id);
   const summary = await readAuthoritativeSummary(id);
   return summary ? { ...summary } : null;
+}
+
+/** A plan is one replaceable session document, not another execution queue. */
+async function readPlanFile(id: string): Promise<AgentPlan | null> {
+  let handle;
+  try {
+    handle = await fs.open(path.join(sessionDir(id), 'plan.json'), 'r');
+    const buffer = Buffer.alloc(MAX_AGENT_PLAN_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > MAX_AGENT_PLAN_BYTES) return null;
+    const parsed = agentPlanSchema.safeParse(JSON.parse(buffer.toString('utf8', 0, bytesRead)));
+    return parsed.success ? parsed.data : null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
+export async function readSessionPlan(id: string): Promise<AgentPlan | null> {
+  assertSessionId(id);
+  await open.get(id)?.queue;
+  return readPlanFile(id);
+}
+
+export async function updateSessionPlan(
+  id: string, conversationId: string, input: AgentPlanUpdate, startedAt: number
+): Promise<boolean> {
+  const plan = agentPlanSchema.parse({ ...agentPlanUpdateSchema.parse(input), updatedAt: startedAt });
+  const bytes = JSON.stringify(plan);
+  if (Buffer.byteLength(bytes) > MAX_AGENT_PLAN_BYTES) throw new Error('Plan exceeds its storage budget');
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'plan', async () => {
+    // Rebind and plan updates use this same queue. A delayed A call cannot overwrite
+    // B's plan after Compact & Resume, even if A was current when the tool started.
+    if (entry.summary.conversationId !== conversationId) return false;
+    const previous = await readPlanFile(id);
+    if (previous && previous.updatedAt > startedAt) return false;
+    const target = path.join(sessionDir(id), 'plan.json');
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, bytes, 'utf8');
+      await fs.rename(temporary, target);
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+    }
+    return true;
+  });
 }
 
 export async function endSession(id: string): Promise<void> {

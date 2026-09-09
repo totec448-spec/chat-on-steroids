@@ -1,4 +1,4 @@
-import { offerToolInput, acknowledgeToolInput } from '../session/input.js';
+import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER } from '../session/input.js';
 import { pluginManager } from '../plugins/manager.js';
 /**
  * The machinery every model-facing tool sits on, independent of which surface it lives on.
@@ -22,12 +22,13 @@ import { pluginManager } from '../plugins/manager.js';
  */
 
 import { rawPromises as fs } from '../rawfs.js';
-import { inboundRequestId } from './inbound.js';
+import { beginToolTiming, inboundRequestId } from './inbound.js';
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { Capabilities, Root } from '../../shared/types.js';
 import { FsOpError, formatBytes, type FileInfo } from '../fsops.js';
 import { logInfo, logWarn } from '../logger.js';
+import { toolSchema } from './tool-declarations.js';
 import {
   SandboxError,
   isAbsoluteVirtualPath,
@@ -323,9 +324,11 @@ function noteTransportIdentity(transportKey: string | null): void {
 /** Appends same-conversation background reminders without consuming terminal output. */
 function withBackgroundExecRecovery(
   sessionId: string | null | undefined,
+  requestId: string | null,
+  startedAt: number,
   result: ToolResult
 ): ToolResult {
-  const notices = backgroundExecRecoveryNotices(sessionId);
+  const notices = backgroundExecRecoveryNotices(sessionId, requestId, startedAt);
   if (notices.length === 0) return result;
   return {
     ...result,
@@ -399,7 +402,7 @@ function withInbox(
   const lines = messages
     .map(
       (message) =>
-        `• [${message.id}] from ${message.from}${message.offers > 1 ? ' (repeat — you may have seen this)' : ''}: ${message.text}`
+        `• ${message.from}${message.offers > 1 ? ' (delivery retry)' : ''}: ${message.text}`
     )
     .join('\n');
   return {
@@ -428,7 +431,8 @@ export async function dispatch(
   transportKey: string | null,
   requestId: string | null,
   surface: SurfaceId,
-  run: () => Promise<ToolResult>
+  run: () => Promise<ToolResult>,
+  parent?: CallContext
 ): Promise<ToolResult> {
   // The context is built here, one layer out from where the work happens, because the
   // compaction barrier asks about the whole request and not just the handler. A call is
@@ -440,12 +444,12 @@ export async function dispatch(
     startedAt: Date.now(),
     transportKey,
     agent: null,
-    caller: { transportKey, requestId, conversationId: null, sessionId: null },
+    caller: parent ? { ...parent.caller } : { transportKey, requestId, conversationId: null, sessionId: null },
     outcome: null,
     evidence: emptyEvidence()
   };
   return trackMcpRequest(() =>
-    trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run))
+    trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent))
   );
 }
 
@@ -470,9 +474,11 @@ async function dispatchTracked(
   transportKey: string | null,
   requestId: string | null,
   surface: SurfaceId,
-  run: () => Promise<ToolResult>
+  run: () => Promise<ToolResult>,
+  nested: boolean
 ): Promise<ToolResult> {
   noteTransportIdentity(transportKey);
+  const markTiming = beginToolTiming();
   // Recorded here rather than in `guard` because only this layer knows which server
   // answered, and "was this connector ever actually used from ChatGPT" is a per-connector
   // question the setup screen has to answer honestly.
@@ -483,7 +489,7 @@ async function dispatchTracked(
   // request id, identity-sensitive handlers (workspace/session/agents) see it before they
   // touch state. If the page is one tick late this stays null; only handlers that actually
   // require identity wait for their own exact mate. Ordinary absolute reads/execs never wait.
-  setCallerConversation(context, callerConversation(name, startedAt, requestId));
+  if (!nested) setCallerConversation(context, callerConversation(name, startedAt, requestId));
   // Only calls that need an *existing* per-chat workspace before the handler runs are
   // identity-sensitive here. An absolute read or an exec with an explicit absolute workdir is
   // self-contained and must stay fast; if its exact page mate is late, workspace.ts simply
@@ -492,7 +498,9 @@ async function dispatchTracked(
   // mate while a swarm is active. Use the full exact-id window, not the shorter prime window:
   // the live worker failure that motivated IDENTITY_EVIDENCE_MS arrived ~8 seconds late.
   const identitySensitive = needsWorkspaceIdentity(name, args);
-  if (!context.caller.conversationId && identitySensitive && swarmRunning() && requestId) {
+  // update_plan always consumes this exact session, even outside a swarm. Resolve it
+  // before the shared blocked/superseded checks rather than guessing from selection.
+  if (!context.caller.conversationId && (name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())) && requestId) {
     setCallerConversation(
       context,
       await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId })
@@ -646,8 +654,14 @@ async function dispatchTracked(
   // Refuse and let the model retry once page evidence is healthy instead.
   // The arrival of this exact call acknowledges earlier injected input before the
   // handler reads the queue. New queued input is still offered only with its result.
-  await acknowledgeToolInput(context.caller.sessionId, context.caller.conversationId, requestId, startedAt)
+  if (!nested) await acknowledgeToolInput(context.caller.sessionId, context.caller.conversationId, requestId, startedAt)
     .catch(() => logWarn('Prior user input receipt could not be saved; its existing claim is preserved'));
+  let handlerRan = false;
+  markTiming('identity');
+  const invokeHandler = (): Promise<ToolResult> => {
+    handlerRan = true;
+    return run();
+  };
   const result = await runInCallContext(context, () =>
       blockedChat
         ? Promise.resolve(fail(BLOCKED_CHAT_REFUSAL))
@@ -687,8 +701,11 @@ async function dispatchTracked(
               'CALLER_IDENTITY_REQUIRED: this operation needs this chat’s exact workspace, but the connector could not prove which ChatGPT conversation made the call. Retry after the extension reconnects; no file or command was changed.'
             )
           )
-        : run()
+        : nested && (name === 'exec' || name === 'session_finish' || isFinish)
+        ? Promise.resolve(fail('DIRECT_CALL_REQUIRED: call this lifecycle tool directly, outside exec. No action was taken.'))
+        : invokeHandler()
   );
+  markTiming('handler');
   // Identity, once, from this call's own evidence — see callerConversation. `agents` has
   // already established its own inside the call and adopted it, and re-reading here would
   // only be able to disagree with the stronger answer it waited for.
@@ -709,7 +726,7 @@ async function dispatchTracked(
   // retry after a lost result. The SDK exposes the JSON-RPC id, but a model-issued retry is
   // a new MCP request with a new id, so that id cannot prove the previous finish result was
   // seen. The broker therefore re-offers rather than assuming; see acknowledgeOffers.
-  const acknowledgedForConversation = supersededConversation
+  const acknowledgedForConversation = supersededConversation || nested
     ? null
     : acknowledgeOffersForConversation(
         context.caller.conversationId,
@@ -724,41 +741,53 @@ async function dispatchTracked(
     // while Prime B is active could file the delivery into B's `prime` session (or Unattributed).
     await recordAgentMessage(message, 'delivered', context.caller.conversationId);
   }
-  // This is the MCP call's wall-clock latency. A managed child can outlive the call, and
-  // its own lifetime is process evidence; letting that number overwrite ToolCallRecord's
-  // duration is what made a 10s yield read like a command that had completed in 10s.
-  const durationMs = Date.now() - startedAt;
   // Inbox messages are part of the MCP result ChatGPT actually receives. Build the delivered
   // result before recording so session(action=read, tool_call=T…) is genuine wire forensics rather than a
   // subtly earlier internal value that omits the worker report most likely to matter later.
-  let delivered = withUnattributedNotice(
+  // The Plugins handler owns validation/redaction of external results. A dispatcher refusal
+  // never visited that owner and therefore needs its own single redaction pass.
+  const baseResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
+  let delivered = nested ? baseResult : withUnattributedNotice(
     context.caller.conversationId,
     withBackgroundExecRecovery(
       context.caller.sessionId,
-      withInbox(context.caller.conversationId, context.agent, result, isFinish)
+      context.caller.requestId,
+      startedAt,
+      withInbox(context.caller.conversationId, context.agent, baseResult, isFinish)
     )
   );
   // Ordinary tools carry direct user input, but only the explicit finish signal
   // advances a planned stage. Successful work is not evidence that a stage is done.
-  const userInput = await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError).catch(() => {
+  const userInput = nested ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError).catch(() => {
     logWarn('User input could not be attached; the completed tool result is preserved');
-    return [];
+    return { messages: [], reminder: '' };
   });
-  if (userInput.length) {
+  if (userInput.messages.length) {
     const attachments: ToolResult['content'] = [];
-    for (const message of userInput) {
-      attachments.push({ type: 'text', text: '\n--- New instructions from the user ---\n' + message.text });
+    for (const [index, message] of userInput.messages.entries()) {
+      attachments.push({ type: 'text', text: (index === 0 ? TOOL_INPUT_HEADER : '\n\n') + message.text });
       for (const image of message.images) attachments.push({ type: 'image', mimeType: 'image/webp', data: image.dataUrl.slice(image.dataUrl.indexOf(',') + 1) });
     }
+    if (userInput.reminder) attachments.push({ type: 'text', text: '\n\n' + userInput.reminder });
     delivered = { ...delivered, content: [...delivered.content, ...attachments] };
   }
+  if (surface === 'plugins' && delivered.content.length > baseResult.content.length) {
+    // All delivery projections above append to the immutable handler result. Only these
+    // new app-authored blocks need redacting; traversing its large external payload again
+    // wastes work and can make the recorded result differ from what the caller received.
+    const added = pluginManager.redactResult({ content: delivered.content.slice(baseResult.content.length) });
+    delivered = { ...delivered, content: [...baseResult.content, ...added.content as ToolResult['content']] };
+  }
   const recorderStartedAt = Date.now();
-  const recordedResult = surface === 'plugins' ? pluginManager.redactResult(delivered) : delivered;
+  // Event duration includes identity/handler/delivery work. Recorder and local HTTP finish
+  // are measured separately because a row cannot contain the time of its own later commit.
+  const durationMs = recorderStartedAt - startedAt;
+  markTiming('delivery');
   const recording = recordToolCall({
     tool: name,
     args: surface === 'plugins' ? pluginManager.redact(args) : args,
-    content: recordedResult.content as ToolResult['content'],
-    ...(surface === 'plugins' ? { protocolResult: recordedResult } : {}),
+    content: delivered.content,
+    ...(surface === 'plugins' ? { protocolResult: delivered } : {}),
     // guard() already marks unexpected defects; an unclassified isError is an expected rejection.
     outcome: context.outcome ?? (result.isError ? 'tool_rejected' : 'ok'),
     durationMs,
@@ -777,15 +806,8 @@ async function dispatchTracked(
   // fire-and-forget because it may still spend a grace window waiting for page evidence.
   if (context.caller.conversationId) {
     await recording;
-    if (name === 'observe' || name === 'computer') {
-      logInfo(`desktop timing recorder_wait_ms=${Date.now() - recorderStartedAt} attributed=true`);
-    }
   } else {
-    if (name === 'observe' || name === 'computer') {
-      void recording.then(() =>
-        logInfo(`desktop timing recorder_wait_ms=0 recorder_async_ms=${Date.now() - recorderStartedAt} attributed=false`)
-      );
-    }
+    void recording.then(() => logInfo(`mcp recording surface=${surface} recorder_async_ms=${Date.now() - recorderStartedAt}`));
     holdWhileSettling(context, recording);
   }
   // Retire a completed run only after this call has had every chance to acknowledge and
@@ -793,6 +815,7 @@ async function dispatchTracked(
   // the run halfway through identifying itself; here the handler and result are already done.
   const callerRunId = context.caller.conversationId ? currentRunId(context.caller.conversationId) : null;
   if (callerRunId) releaseQuiescentRun({}, callerRunId);
+  markTiming('recorder', true);
   return delivered;
 }
 
@@ -998,9 +1021,12 @@ export interface SurfaceRegistrar {
   featureDisabled(feature: string, setting: string): ToolResult;
   /** Names actually registered on this server, in registration order. */
   registered(): string[];
+  /** Same registered handler/schema, with a fresh child recording context and inherited proof. */
+  invokeNested(name: string, args: unknown, parent: CallContext): Promise<ToolResult>;
+  descriptions(): Array<{ name: string; description: string }>;
 }
 
-export function createRegistrar(server: McpServer, ctx: ToolContext, surface: SurfaceId, observe?: (name: string, config: { description: string; inputSchema: z.ZodType; annotations?: ToolAnnotations }) => void): SurfaceRegistrar {
+export function createRegistrar(server: McpServer | null, ctx: ToolContext, surface: SurfaceId, observe?: (name: string, config: { description: string; inputSchema: z.ZodType; annotations?: ToolAnnotations }) => void): SurfaceRegistrar {
   const caps = ctx.caps;
   const exposedCaps = ctx.exposedCaps ?? caps;
   // These two do not follow a capability checkbox: they are whole features the user
@@ -1013,6 +1039,7 @@ export function createRegistrar(server: McpServer, ctx: ToolContext, surface: Su
   const agentToolsExposed = ctx.exposedAgentTools ?? agentToolsLive;
   const findExposed = ctx.exposedFind ?? (!exposedCaps.command && exposedCaps.search);
   const names: string[] = [];
+  const handlers = new Map<string, { description: string; run: (args: unknown) => Promise<ToolResult> }>();
 
   return {
     ctx,
@@ -1024,13 +1051,28 @@ export function createRegistrar(server: McpServer, ctx: ToolContext, surface: Su
     agentToolsExposed,
     findExposed,
     registered: () => [...names],
+    descriptions: () => [...handlers].map(([name, entry]) => ({ name, description: entry.description })),
+    invokeNested(name, args, parent) {
+      return dispatch(name, args, parent.caller.transportKey, parent.caller.requestId, surface, async () => {
+        const entry = handlers.get(name);
+        return entry ? entry.run(args) : fail('UNKNOWN_TOOL: this tool is not available on this connector.');
+      }, parent);
+    },
     register(name, config, handler) {
       names.push(name);
+      handlers.set(name, { description: config.description, run: async args => {
+        const parsed = await config.inputSchema.safeParseAsync(args);
+        return parsed.success ? handler(parsed.data) : fail('INVALID_ARGUMENTS: arguments do not match this tool’s schema.');
+      } });
       observe?.(name, config);
       // No identity field is ever added here. Every tool's schema is exactly what its
       // surface declared: who is calling is a fact about the conversation, established from
       // page evidence in `dispatch`, and never something the model is asked to carry.
-      server.registerTool(name, config, ((args: never, mcpCtx?: McpCallContext) =>
+      server?.registerTool(name, {
+        ...config,
+        inputSchema: toolSchema(config.inputSchema),
+        ...(config.outputSchema ? { outputSchema: toolSchema(config.outputSchema) } : {})
+      }, ((args: never, mcpCtx?: McpCallContext) =>
         dispatch(name, args, mcpCtx?.sessionId ?? null, requestIdOf(mcpCtx), surface, () =>
           handler(args)
         )) as never);

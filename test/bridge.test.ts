@@ -12,6 +12,8 @@ import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
+import { userPromptText } from '../src/shared/user-prompt.js';
+import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
 import { foldProgress, type SessionEvent } from '../src/shared/session.js';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import type { SwarmSnapshot } from '../src/main/agents.js';
@@ -596,9 +598,9 @@ describe('active agent tab discard projection', () => {
     await pair();
     const { registerGoalDecisionChat } = await import('../src/main/goal.js');
     const { resetInputForTests } = await import('../src/main/session/input.js');
-    const main = 'cafe0189-0000-4000-8000-000000000189';
+    const main = '0000000c-0000-4000-8000-00000000000c';
     const helper = `cafe0190-0000-4000-8000-00000000019${['opening', 'established', 'missing-source', 'same-source'].indexOf(kind)}`;
-    const personal = 'cafe0191-0000-4000-8000-000000000191';
+    const personal = '0000000d-0000-4000-8000-00000000000d';
     const source = await createSession({ conversationId: kind === 'same-source' ? helper : main, title: 'Source' });
     const sourceId = kind === 'opening' ? undefined : kind === 'missing-source' ? '2026-09-07-missing' : source.id;
     const eligible = kind === 'opening' || kind === 'established';
@@ -644,8 +646,8 @@ describe('active agent tab discard projection', () => {
 
   it('projects only the owning prime worker status without task or conversation details', async () => {
     await pair();
-    const primeConversation = '11223344-1111-4222-8333-444444444444';
-    const workerConversation = 'aabbccdd-1111-4222-8333-444444444444';
+    const primeConversation = '0000000e-0000-4000-8000-00000000000e';
+    const workerConversation = '0000000f-0000-4000-8000-00000000000f';
     await createSession({ conversationId: primeConversation, title: 'Prime' });
     await createSession({ conversationId: workerConversation, title: 'Worker' });
     await recordFinalForTest(primeConversation, 'prime-progress');
@@ -721,7 +723,7 @@ describe('observations', () => {
 
   it('stores what the page reported and skips what it does not recognise', async () => {
     await pair();
-    const conversationId = '6a805197-b090-83eb-bbd8-a32b482941da';
+    const conversationId = '00000010-0000-8000-b000-000000000010';
     const reply = await request('POST', '/events', {
       body: {
         conversationId,
@@ -839,7 +841,7 @@ describe('activity feed', () => {
   it('atomically registers and verifies a live request id against its chat before the MCP call is filed', async () => {
     await pair();
     const conversationId = '13131313-3535-5757-7979-919191919191';
-    const requestId = '77186fb4-bdda-4849-8cd7-879bb08a1617';
+    const requestId = '00000005-0000-4000-8000-000000000005';
     const mapped = await request('POST', '/correlations', {
       body: {
         conversationId,
@@ -1101,7 +1103,7 @@ describe('activity feed', () => {
 
   it('returns nothing for a conversation it has never seen', async () => {
     await pair();
-    const reply = await request('GET', '/activity?conversationId=deadbeef-0000-0000-0000-000000000000');
+    const reply = await request('GET', '/activity?conversationId=00000011-0000-0000-0000-000000000011');
     expect(reply.status).toBe(200);
     expect(reply.body.entries).toEqual([]);
     expect(reply.body.sessionId).toBeNull();
@@ -1119,7 +1121,7 @@ describe('activity feed', () => {
    */
   it('answers what drives a chat before the recorder has attached to it', async () => {
     await pair();
-    const chat = 'cafe0044-0000-4000-8000-000000000044';
+    const chat = '00000012-0000-4000-8000-000000000012';
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'api', enabled: false, mode: 'goal' } });
     await writeDurableNow(GOAL_SWITCHES_STATE, null);
 
@@ -1370,10 +1372,11 @@ describe('automatic compaction', () => {
       await request('POST', '/events', { body: { conversationId, events: [
         { kind: 'turn_start', time: Date.now(), turnId: 'before-astra' }, ...over()
       ] } });
-      await settled();
       const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      // Ticket persistence runs after event ingestion; wait for that fact rather
+      // than assuming the hosted runner commits it within a 25 ms sleep.
+      await vi.waitFor(() => expect(continuationForSession(activity.body.sessionId)).toMatchObject({ automatic: true }), { timeout: 3000 });
       const ticket = continuationForSession(activity.body.sessionId)!;
-      expect(ticket.automatic).toBe(true);
       await request('POST', '/events', { body: { conversationId, events: [
         { kind: 'model_selection', model: 'gpt-6', reasoningEffort: 'pro', time: Date.now() }
       ] } });
@@ -1436,7 +1439,7 @@ describe('automatic compaction', () => {
    */
   it('suspends Goal, Loop and compaction for a chat the user blocked, until it is released', async () => {
     await pair();
-    const conversationId = 'b10cced0-0000-4000-8000-00000000ac05';
+    const conversationId = '00000013-0000-4000-8000-000000000013';
     await request('POST', '/goal/objective', { body: { conversationId, text: 'finish the level editor' } });
     await request('POST', '/settings', { body: { conversationId, loop: true } });
     setChatBlocked(conversationId, true);
@@ -1588,8 +1591,8 @@ describe('automatic compaction', () => {
       await settled();
       const activity = await request('GET', `/activity?conversationId=${conversationId}`);
       const sessionId = activity.body.sessionId as string;
+      await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
       const first = continuationForSession(sessionId);
-      expect(first).toMatchObject({ automatic: true, state: 'awaiting-summary' });
 
       const lost = await request('POST', '/compact', {
         body: { conversationId, token: first!.token, sourceLost: true }
@@ -1643,7 +1646,7 @@ describe('automatic compaction', () => {
         }
       });
       await settled();
-      expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' });
+      await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
     });
   });
 
@@ -2247,11 +2250,13 @@ describe('delivering a bootstrap', () => {
     const command = await redeem();
 
     expect(command.agent).toBe('worker-1');
-    // The task itself is the first message. That is the whole invariant: the chat this app
-    // opened is already a worker, so there is nothing for the model to do about identity.
-    expect(command.text.startsWith('Audit the compaction transaction end to end')).toBe(true);
-    expect(command.text).not.toMatch(/join/i);
-    expect(command.text).not.toMatch(/agent[_ ]key/i);
+    // Shared guidance comes before the task. The app still binds worker identity;
+    // there is no joining/key handshake for the model to invent.
+    expect(command.text).toContain(await currentCoreInstructions());
+    const task = userPromptText(command.text)!;
+    expect(task.startsWith('Audit the compaction transaction end to end')).toBe(true);
+    expect(task).not.toMatch(/join/i);
+    expect(task).not.toMatch(/agent[_ ]key/i);
     expect(command.text).not.toContain('joinKey');
     // It still says how to report, because that is about the work rather than about who it is.
     expect(command.text).toContain('action=message');
@@ -3422,7 +3427,7 @@ describe('delivering a bootstrap', () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
     const bootstrap = await redeem();
-    const conversationId = 'bacabaca-7654-3210-fedc-ba9876543210';
+    const conversationId = '00000014-0000-3000-f000-000000000014';
     await request('POST', '/commands/ack', {
       body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
     });
@@ -3487,7 +3492,7 @@ describe('delivering a bootstrap', () => {
     await pair();
     spawn({ workers: [{ task: 'prime A worker' }], caller: { conversationId: PRIME_CHAT } });
     const bootstrap = await redeem();
-    const workerConversation = 'cafe0024-0000-4000-8000-000000000024';
+    const workerConversation = '00000015-0000-4000-8000-000000000015';
     await request('POST', '/commands/ack', {
       body: { id: bootstrap.id, status: 'sent', conversationId: workerConversation, agent: 'worker-1' }
     });
@@ -3507,7 +3512,7 @@ describe('delivering a bootstrap', () => {
     // A second owner may now reuse the same friendly worker id. An old page report from A must
     // stay in A's exact session and retain its worker attribution rather than becoming an
     // unattributed/solo row or being confused with B's worker-1.
-    spawn({ workers: [{ task: 'prime B worker' }], caller: { conversationId: 'cafe0025-0000-4000-8000-000000000025' } });
+    spawn({ workers: [{ task: 'prime B worker' }], caller: { conversationId: '00000016-0000-4000-8000-000000000016' } });
     // Simulate session retention having removed A's old recorder file while its worker history
     // remains intentionally permanent. Forget recorder caches too, as a later app process would.
     await deleteSession(sessionId);
@@ -3593,6 +3598,56 @@ describe('delivering a bootstrap', () => {
     expect(worker.state).toBe('sleeping');
     expect(worker.revivable).toBe(true);
     expect(worker.result).toContain('one journal flush after its turn_end');
+  });
+
+  it('keeps a revived worker active when an older final answer receives a new canonical revision', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'initial docs task' }], caller: { conversationId: PRIME_CHAT } });
+    const command = await redeem();
+    const conversationId = 'decafbad-7654-3210-fedc-ba9876543212';
+    await request('POST', '/commands/ack', { body: { id: command.id, status: 'sent', conversationId, agent: 'worker-1' } });
+    const time = Date.now();
+    const oldFinal = { kind: 'assistant_message', time: time + 1, turnId: 'worker-old-turn',
+      messageId: 'worker-old-final', text: 'Docs done. No new validator yet.', state: 'final', final: true };
+    const initial = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time, turnId: 'worker-old-turn' }, oldFinal,
+      { kind: 'turn_end', time: time + 2, turnId: 'worker-old-turn', outcome: 'completed' }
+    ] } });
+    expect(initial.status).toBe(200);
+    expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find(row => row.id === 'worker-1')?.state).toBe('sleeping');
+    const oldRow = (await readEvents(initial.body.sessionId)).find(row => row.kind === 'assistant_message' && row.messageId === oldFinal.messageId)!;
+
+    wake([{ to: 'worker-1', text: 'Now implement and verify the validator.' }]);
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: time + 10, turnId: 'worker-new-turn' }
+    ] } });
+    noteAgentAlive(conversationId, 'call');
+    expect(swarmState().agents.find(row => row.id === 'worker-1')?.state).toBe('active');
+
+    // The new turn receives its work on an ordinary tool result. Its eventual final can
+    // acknowledge that offer; an old final must never acknowledge it or end the new task.
+    offerMessages('worker-1');
+
+    // The live failure was a late rendered-HTML refresh: the old row kept its origin and turn
+    // but received a revision seq AFTER the new turn_start. That cursor is not a new finish.
+    const replay = await request('POST', '/events', { body: { conversationId, events: [
+      { ...oldFinal, renderedHtml: '<p><strong>Docs done.</strong> No new validator yet.</p>' }
+    ] } });
+    expect(replay.status).toBe(200);
+    const rows = await readEvents(initial.body.sessionId);
+    const revised = rows.find(row => row.kind === 'assistant_message' && row.messageId === oldFinal.messageId)!;
+    const newerStart = rows.find(row => row.kind === 'turn_start' && row.turnId === 'worker-new-turn')!;
+    if (revised.kind !== 'assistant_message' || oldRow.kind !== 'assistant_message') throw new Error('Missing final rows');
+    expect(revised.origin).toBe(oldRow.origin ?? oldRow.seq);
+    expect(revised.seq).toBeGreaterThan(newerStart.seq);
+    expect(swarmState().agents.find(row => row.id === 'worker-1')?.state).toBe('active');
+
+    await request('POST', '/events', { body: { conversationId, events: [
+      { ...oldFinal, time: time + 20, turnId: 'worker-new-turn', messageId: 'worker-new-final', text: 'Validator implemented and verified.' }
+    ] } });
+    expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find(row => row.id === 'worker-1')).toMatchObject({
+      state: 'sleeping', result: 'Validator implemented and verified.'
+    });
   });
 
   it('retires a worker on its stable final answer even when no turn_end ever arrives', async () => {
@@ -3946,14 +4001,14 @@ describe('delivering a bootstrap', () => {
     });
 
     await waitForOpened(2);
-    expect(second.text.startsWith('second audit')).toBe(true);
+    expect(userPromptText(second.text)?.startsWith('second audit')).toBe(true);
     expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.conversationId).toBe(firstConversation);
     expect(swarmState().agents.find(agent => agent.id === 'worker-2')?.conversationId).toBe(secondConversation);
   });
 
   it('starts a worker while an unrelated resume awaits its exact receipt', async () => {
     await pair();
-    const source = await createSession({ conversationId: 'cafe0391-0000-4000-8000-000000000391', title: 'Stalled automatic resume' });
+    const source = await createSession({ conversationId: '00000017-0000-4000-8000-000000000017', title: 'Stalled automatic resume' });
     const continuation = await openContinuationNow(source.id, source.conversationId!, true);
     await attachSummary(continuation.token, SAMPLE_BRIEF);
     const resume = queueResume(source.id, continuation.token)!;
@@ -4041,7 +4096,7 @@ describe('delivering a bootstrap', () => {
     await waitForOpened(1);
     const offeredB = await redeem(undefined, 'run-b-page');
     expect(offeredB.id).not.toBe(offeredA.id);
-    expect(offeredB.text.startsWith('run B task')).toBe(true);
+    expect(userPromptText(offeredB.text)?.startsWith('run B task')).toBe(true);
   });
 
   it('restores a resume when its continuation WAL is restored first', async () => {
@@ -6366,7 +6421,7 @@ describe('unattributed activity recovery', () => {
   });
 
   it.each(['late picker', 'exact call', 'picker after start in same batch'])('resolves an initially unknown Pro turn through %s before silence recovery', async proof => {
-    const id = proof === 'late picker' ? 'a2222222-1111-4111-8111-111111111111' : proof === 'exact call' ? 'a3333333-1111-4111-8111-111111111111' : 'a4444444-1111-4111-8111-111111111111';
+    const id = proof === 'late picker' ? '00000018-0000-4000-8000-000000000018' : proof === 'exact call' ? '00000019-0000-4000-8000-000000000019' : '0000001a-0000-4000-8000-00000000001a';
     vi.useFakeTimers();
     try {
       await pair();
@@ -6395,7 +6450,7 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
   it.each(['gpt-6-pro', 'gpt-5-6-pro'])('extends %s activity from fresh observed tool starts and exact calls, not replayed tool rows', async model => {
-    const timingChat = model === 'gpt-6-pro' ? 'a1111111-1111-4111-8111-111111111111' : 'a5555555-1111-4111-8111-111111111111';
+    const timingChat = model === 'gpt-6-pro' ? '0000001b-0000-4000-8000-00000000001b' : '0000001c-0000-4000-8000-00000000001c';
     vi.useFakeTimers();
     try {
       await pair();
@@ -6569,19 +6624,19 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events('a6666666-1111-4111-8111-000000000006', [openTurn('turn-loop-slow')]);
+      await events('0000001d-0000-4000-8000-00000000001d', [openTurn('turn-loop-slow')]);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const handout = await maintenance();
-      expect(handout).toMatchObject({ conversationId: 'a6666666-1111-4111-8111-000000000006', reason: 'silence' });
+      expect(handout).toMatchObject({ conversationId: '0000001d-0000-4000-8000-00000000001d', reason: 'silence' });
       expect(await maintenance(handout!.token)).toBeNull();
 
       // A tool call flutters in twenty seconds after the reload: the chat is working.
       await vi.advanceTimersByTimeAsync(20_000);
-      await attributed('a6666666-1111-4111-8111-000000000006');
+      await attributed('0000001d-0000-4000-8000-00000000001d');
       await vi.advanceTimersByTimeAsync(50_000);
       await sweepStaleSwarm(Date.now());
-      expect(goalPendingReplyFor('a6666666-1111-4111-8111-000000000006')).toBeNull();
+      expect(goalPendingReplyFor('0000001d-0000-4000-8000-00000000001d')).toBeNull();
     } finally {
       resetGoalStateForTests();
       await setSecret('openRouterApiKey', '');
@@ -7173,7 +7228,7 @@ describe('unattributed activity recovery', () => {
     await pair();
     spawn({ workers: [{ task: 'measure exact recorded context' }], caller: { conversationId: PRIME } });
     const bootstrap = await redeem();
-    const workerChat = model === 'gpt-5-6-pro' ? 'b1111111-1111-4111-8111-111111111111' : 'b2222222-1111-4111-8111-111111111111';
+    const workerChat = model === 'gpt-5-6-pro' ? '0000001e-0000-4000-8000-00000000001e' : '0000001f-0000-4000-8000-00000000001f';
     await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId: workerChat, agent: 'worker-1' } });
     const began = Date.now();
     await events(workerChat, [{ kind: 'model_selection', model, reasoningEffort: 'pro', time: began }, { kind: 'turn_start', time: began, turnId: 'meter-' + model }]);
@@ -7440,7 +7495,7 @@ describe('the goal loop over the bridge', () => {
   it('advertises the configured Loop helper rather than the inactive API model', async () => {
     await pair();
     const config = defaultConfig();
-    const conversation = 'cafe0081-0000-4000-8000-000000000081';
+    const conversation = '00000020-0000-4000-8000-000000000020';
     await saveConfig({ ...config, goal: { ...config.goal, enabled: true, mode: 'loop', backend: 'api',
       loopBackend: 'chatgpt', helperModel: 'gpt-5.6-sol', model: 'z-ai/glm-5.3-flash' } });
     expect((await request('GET', `/activity?conversationId=${conversation}`)).body.goal)
@@ -7457,8 +7512,8 @@ describe('the goal loop over the bridge', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      const from = 'cafe0091-0000-4000-8000-000000000091';
-      const to = 'cafe0092-0000-4000-8000-000000000092';
+      const from = '00000021-0000-4000-8000-000000000021';
+      const to = '00000022-0000-4000-8000-000000000022';
       const recorded = await request('POST', '/events', {
         body: {
           conversationId: from,
@@ -7504,8 +7559,8 @@ describe('the goal loop over the bridge', () => {
 
   it('repairs Goal onto the exact pre-fix resume-shadow chat and can draft there', async () => {
     await pair();
-    const from = 'cafe0031-0000-4000-8000-000000000031';
-    const to = 'cafe0032-0000-4000-8000-000000000032';
+    const from = '00000023-0000-4000-8000-000000000023';
+    const to = '00000024-0000-4000-8000-000000000024';
     const source = await createSession({ title: 'prime before resume-shadow collision', conversationId: from });
     spawn({ workers: [{ task: 'keep one worker alive across the broken resume' }], caller: { conversationId: from } });
     setGoalObjective(from, 'finish the release from the resumed prime chat');
@@ -7544,7 +7599,7 @@ describe('the goal loop over the bridge', () => {
 
     // `/activity` must not turn a plausible-looking resume origin into takeover authority. The
     // exact bootstrap is the second half of the proof and this chat deliberately does not have it.
-    const unrelated = 'cafe0033-0000-4000-8000-000000000033';
+    const unrelated = '00000025-0000-4000-8000-000000000025';
     await createSession({
       title: 'resume-looking but unrelated',
       conversationId: unrelated,
@@ -7591,8 +7646,8 @@ describe('the goal loop over the bridge', () => {
 
   it('does not report the same no-Goal resume-shadow repair on every activity poll', async () => {
     await pair();
-    const from = 'cafe0041-0000-4000-8000-000000000041';
-    const to = 'cafe0042-0000-4000-8000-000000000042';
+    const from = '00000026-0000-4000-8000-000000000026';
+    const to = '00000027-0000-4000-8000-000000000027';
     const source = await createSession({ title: 'prime before no-goal resume-shadow collision', conversationId: from });
     spawn({ workers: [{ task: 'keep reusable ownership across the broken resume' }], caller: { conversationId: from } });
 
@@ -7643,12 +7698,12 @@ describe('the goal loop over the bridge', () => {
     await pair();
     await request('POST', '/events', {
       body: {
-        conversationId: 'cafe0001-0000-4000-8000-000000000001',
+        conversationId: '00000028-0000-4000-8000-000000000028',
         events: [{ kind: 'user_message', time: Date.now(), text: 'do the work', messageId: 'm-goal-1' }]
       }
     });
 
-    const reply = await request('GET', '/activity?conversationId=cafe0001-0000-4000-8000-000000000001');
+    const reply = await request('GET', '/activity?conversationId=00000028-0000-4000-8000-000000000028');
     expect(reply.status).toBe(200);
     expect(reply.body.goal).toMatchObject({
       enabled: true,
@@ -7660,7 +7715,7 @@ describe('the goal loop over the bridge', () => {
 
   it('makes an accepted Goal turn durable before the provider can fail or the page can reload', async () => {
     await pair();
-    const chat = 'cafe0050-0000-4000-8000-000000000050';
+    const chat = '00000029-0000-4000-8000-000000000029';
     const turnId = 'g-provider-failed-before-reload';
     await recordFinalForTest(chat, turnId);
     await request('POST', '/events', {
@@ -7713,7 +7768,7 @@ describe('the goal loop over the bridge', () => {
 
   it('turns a post-reload stable final answer into one durable Goal model call', async () => {
     await pair();
-    const chat = 'cafe0051-0000-4000-8000-000000000051';
+    const chat = '0000002a-0000-4000-8000-00000000002a';
     await request('POST', '/events', {
       body: {
         conversationId: chat,
@@ -7814,12 +7869,12 @@ describe('the goal loop over the bridge', () => {
     await pair();
     spawn({ workers: [{ task: 'Audit the settings sheet' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
-    const worker = 'cafe0011-0000-4000-8000-000000000011';
+    const worker = '0000002b-0000-4000-8000-00000000002b';
     await request('POST', '/commands/ack', {
       body: { id: command.id, status: 'sent', agent: 'worker-1', conversationId: worker }
     });
 
-    const solo = 'cafe0012-0000-4000-8000-000000000012';
+    const solo = '0000002c-0000-4000-8000-00000000002c';
     for (const conversationId of [worker, solo]) {
       await request('POST', '/events', {
         body: {
@@ -7848,7 +7903,7 @@ describe('the goal loop over the bridge', () => {
     await pair();
     await request('POST', '/events', {
       body: {
-        conversationId: 'cafe0002-0000-4000-8000-000000000002',
+        conversationId: '0000002d-0000-4000-8000-00000000002d',
         events: [{ kind: 'user_message', time: Date.now(), text: 'go', messageId: 'm-goal-2' }]
       }
     });
@@ -7858,7 +7913,7 @@ describe('the goal loop over the bridge', () => {
       sessions: { ...defaultConfig().sessions, record: true },
       goal: { ...defaultConfig().goal, backend: 'api', enabled: false }
     });
-    const off = await request('POST', '/goal/draft', { body: { conversationId: 'cafe0002-0000-4000-8000-000000000002', turnId: 'g-1' } });
+    const off = await request('POST', '/goal/draft', { body: { conversationId: '0000002d-0000-4000-8000-00000000002d', turnId: 'g-1' } });
     expect(off.status).toBe(409);
     expect(off.body.error).toBe('goal_disabled');
 
@@ -7868,7 +7923,7 @@ describe('the goal loop over the bridge', () => {
       goal: { ...defaultConfig().goal, backend: 'api', enabled: true }
     });
     await setSecret('openRouterApiKey', '');
-    const keyless = await request('POST', '/goal/draft', { body: { conversationId: 'cafe0002-0000-4000-8000-000000000002', turnId: 'g-1' } });
+    const keyless = await request('POST', '/goal/draft', { body: { conversationId: '0000002d-0000-4000-8000-00000000002d', turnId: 'g-1' } });
     expect(keyless.status).toBe(409);
     expect(keyless.body.error).toBe('no_api_key');
   });
@@ -7876,7 +7931,7 @@ describe('the goal loop over the bridge', () => {
   /** A generation is the draft's identity, so it has to be given one. */
   it('refuses a draft with no generation to answer', async () => {
     await pair();
-    const reply = await request('POST', '/goal/draft', { body: { conversationId: 'cafe0001-0000-4000-8000-000000000001' } });
+    const reply = await request('POST', '/goal/draft', { body: { conversationId: '00000028-0000-4000-8000-000000000028' } });
     expect(reply.status).toBe(400);
     expect(reply.body.error).toBe('bad_turn_id');
   });
@@ -7885,7 +7940,7 @@ describe('the goal loop over the bridge', () => {
   it('refuses a chat this app has never recorded', async () => {
     await pair();
     const reply = await request('POST', '/goal/draft', {
-      body: { conversationId: 'cafe0004-0000-4000-8000-000000000004', turnId: 'g-1' }
+      body: { conversationId: '0000002e-0000-4000-8000-00000000002e', turnId: 'g-1' }
     });
     expect(reply.status).toBe(409);
     expect(reply.body.error).toBe('session_not_recorded');
@@ -7899,7 +7954,7 @@ describe('the goal loop over the bridge', () => {
       goal: { ...defaultConfig().goal, backend: 'api', enabled: true }
     });
     await setSecret('openRouterApiKey', 'sk-or-test');
-    const conversationId = 'cafe0099-0000-4000-8000-000000000099';
+    const conversationId = '0000002f-0000-4000-8000-00000000002f';
     await createSession({ title: 'older but still owned', conversationId });
     for (let index = 0; index < 65; index++) {
       await createSession({ title: `newer session ${index}`, conversationId: null });
@@ -7919,10 +7974,10 @@ describe('the goal loop over the bridge', () => {
    */
   it('drafts once, hands the message over once, and forgets it on acknowledgement', async () => {
     await pair();
-    await recordFinalForTest('cafe0003-0000-4000-8000-000000000003', 'g-1');
+    await recordFinalForTest('00000030-0000-4000-8000-000000000030', 'g-1');
     await request('POST', '/events', {
       body: {
-        conversationId: 'cafe0003-0000-4000-8000-000000000003',
+        conversationId: '00000030-0000-4000-8000-000000000030',
         events: [{ kind: 'user_message', time: Date.now(), text: 'write the parser', messageId: 'm-goal-3' }]
       }
     });
@@ -7944,20 +7999,20 @@ describe('the goal loop over the bridge', () => {
 
     try {
       const started = await request('POST', '/goal/draft', {
-        body: { conversationId: 'cafe0003-0000-4000-8000-000000000003', turnId: 'g-1' }
+        body: { conversationId: '00000030-0000-4000-8000-000000000030', turnId: 'g-1' }
       });
       expect(started.status).toBe(200);
       expect(started.body.goal.turnId).toBe('g-1');
 
       // A retried POST is the same draft, not a second message into somebody's chat.
       const again = await request('POST', '/goal/draft', {
-        body: { conversationId: 'cafe0003-0000-4000-8000-000000000003', turnId: 'g-1' }
+        body: { conversationId: '00000030-0000-4000-8000-000000000030', turnId: 'g-1' }
       });
       expect(again.body.goal.token).toBe(started.body.goal.token);
 
       let feed: any = null;
       for (let attempt = 0; attempt < 200; attempt++) {
-        feed = await request('GET', '/activity?conversationId=cafe0003-0000-4000-8000-000000000003');
+        feed = await request('GET', '/activity?conversationId=00000030-0000-4000-8000-000000000030');
         if (feed.body.goal?.draft?.stage === 'ready') break;
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
@@ -7965,11 +8020,11 @@ describe('the goal loop over the bridge', () => {
       expect(feed.body.goal.draft.reply).toBe(humanReply('what about the tests'));
 
       const acked = await request('POST', '/goal/ack', {
-        body: { conversationId: 'cafe0003-0000-4000-8000-000000000003', token: started.body.goal.token }
+        body: { conversationId: '00000030-0000-4000-8000-000000000030', token: started.body.goal.token }
       });
       expect(acked.body.acknowledged).toBe(true);
 
-      const after = await request('GET', '/activity?conversationId=cafe0003-0000-4000-8000-000000000003');
+      const after = await request('GET', '/activity?conversationId=00000030-0000-4000-8000-000000000030');
       expect(after.body.goal.draft).toBeNull();
     } finally {
       globalThis.fetch = realFetch;
@@ -8049,7 +8104,7 @@ describe('the goal loop over the bridge', () => {
    */
   it('arms the loop for one chat from its own goal, with the standing switch off', async () => {
     await pair();
-    const chat = 'cafe0021-0000-4000-8000-000000000021';
+    const chat = '00000031-0000-4000-8000-000000000031';
     await saveConfig({
       ...defaultConfig(),
       sessions: { ...defaultConfig().sessions, record: true },
@@ -8122,7 +8177,7 @@ describe('the goal loop over the bridge', () => {
    */
   it('stops a chat that switched itself off, and keeps its goal for when it starts again', async () => {
     await pair();
-    const chat = 'cafe0023-0000-4000-8000-000000000023';
+    const chat = '00000032-0000-4000-8000-000000000032';
     await saveConfig({
       ...defaultConfig(),
       sessions: { ...defaultConfig().sessions, record: true },
@@ -8180,7 +8235,7 @@ describe('the goal loop over the bridge', () => {
    */
   it('pins the mode a goal was written in as that chat’s own switch', async () => {
     await pair();
-    const chat = 'cafe0022-0000-4000-8000-000000000022';
+    const chat = '00000033-0000-4000-8000-000000000033';
     await saveConfig({
       ...defaultConfig(),
       sessions: { ...defaultConfig().sessions, record: true },
@@ -8247,8 +8302,8 @@ describe('the goal loop over the bridge', () => {
    */
   it('stores the Goal switch against the chat whose composer sent it', async () => {
     await pair();
-    const driven = 'cafe0071-0000-4000-8000-000000000071';
-    const other = 'cafe0072-0000-4000-8000-000000000072';
+    const driven = '00000034-0000-4000-8000-000000000034';
+    const other = '00000035-0000-4000-8000-000000000035';
     for (const chat of [driven, other]) {
       await request('POST', '/events', {
         body: {
@@ -8297,7 +8352,7 @@ describe('the goal loop over the bridge', () => {
 
   it.each(['browser', 'native'])('re-arms the newest completed reply when %s edits its Loop objective during compaction', async surface => {
     await pair();
-    const chat = 'cafe0188-0000-4000-8000-000000000188';
+    const chat = '00000036-0000-4000-8000-000000000036';
     const first = await request('POST', '/events', { body: { conversationId: chat, events: [
       { kind: 'user_message', time: Date.now(), text: 'finish the first file', messageId: 'objective-user' },
       { kind: 'assistant_message', time: Date.now(), messageId: 'objective-old-final', turnId: 'objective-old-turn',
@@ -8332,7 +8387,7 @@ describe('the goal loop over the bridge', () => {
 
   it('makes Goal Off a durable ticket cancel and On a fresh pickup of the same final', async () => {
     await pair();
-    const chat = 'cafe0076-0000-4000-8000-000000000076';
+    const chat = '00000037-0000-4000-8000-000000000037';
     await request('POST', '/events', {
       body: {
         conversationId: chat,
@@ -8386,7 +8441,7 @@ describe('the goal loop over the bridge', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      const chat = 'cafe0173-0000-4000-8000-000000000173';
+      const chat = '00000038-0000-4000-8000-000000000038';
       await request('POST', '/events', { body: { conversationId: chat, events: [
         { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-cold-goal' },
         { kind: 'assistant_message', time: Date.now(), messageId: 'a-cold-goal', text: 'First part done.',
@@ -8421,7 +8476,7 @@ describe('the goal loop over the bridge', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      const chat = 'cafe0073-0000-4000-8000-000000000073';
+      const chat = '00000039-0000-4000-8000-000000000039';
       await request('POST', '/events', {
         body: {
           conversationId: chat,
@@ -8499,7 +8554,7 @@ describe('the goal loop over the bridge', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      const chat = 'cafe0074-0000-4000-8000-000000000074';
+      const chat = '0000003a-0000-4000-8000-00000000003a';
       await request('POST', '/events', {
         body: {
           conversationId: chat,
@@ -8563,7 +8618,7 @@ describe('the goal loop over the bridge', () => {
     await pair();
     spawn({ workers: [{ task: 'Audit the settings sheet' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
-    const worker = 'cafe0022-0000-4000-8000-000000000022';
+    const worker = '00000033-0000-4000-8000-000000000033';
     await request('POST', '/commands/ack', {
       body: { id: command.id, status: 'sent', agent: 'worker-1', conversationId: worker }
     });
@@ -8589,7 +8644,7 @@ describe('the goal loop over the bridge', () => {
     await pair();
     spawn({ workers: [{ task: 'Audit the settings sheet' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
-    const worker = 'cafe0023-0000-4000-8000-000000000023';
+    const worker = '00000032-0000-4000-8000-000000000032';
     await request('POST', '/commands/ack', {
       body: { id: command.id, status: 'sent', agent: 'worker-1', conversationId: worker }
     });
@@ -8616,7 +8671,7 @@ describe('the goal loop over the bridge', () => {
     await pair();
     spawn({ workers: [{ task: 'temporary worker' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
-    const worker = 'cafe0026-0000-4000-8000-000000000026';
+    const worker = '0000003b-0000-4000-8000-00000000003b';
     await request('POST', '/commands/ack', {
       body: { id: command.id, status: 'sent', agent: 'worker-1', conversationId: worker }
     });
@@ -8638,7 +8693,7 @@ describe('the goal loop over the bridge', () => {
     await pair();
     spawn({ workers: [{ task: 'Audit the settings sheet' }], caller: { conversationId: PRIME_CHAT } });
     const command = await redeem();
-    const worker = 'cafe0024-0000-4000-8000-000000000024';
+    const worker = '00000015-0000-4000-8000-000000000015';
     await request('POST', '/commands/ack', {
       body: { id: command.id, status: 'sent', agent: 'worker-1', conversationId: worker }
     });
@@ -8757,9 +8812,9 @@ describe('the goal loop over the bridge', () => {
   it('refuses every goal route without the bearer token', async () => {
     await pair();
     const routes: Array<[string, Record<string, unknown>]> = [
-      ['/goal/draft', { conversationId: 'cafe0003-0000-4000-8000-000000000003', turnId: 'g-1' }],
-      ['/goal/ack', { conversationId: 'cafe0003-0000-4000-8000-000000000003', token: 'x' }],
-      ['/goal/objective', { conversationId: 'cafe0003-0000-4000-8000-000000000003', text: 'finish it' }],
+      ['/goal/draft', { conversationId: '00000030-0000-4000-8000-000000000030', turnId: 'g-1' }],
+      ['/goal/ack', { conversationId: '00000030-0000-4000-8000-000000000030', token: 'x' }],
+      ['/goal/objective', { conversationId: '00000030-0000-4000-8000-000000000030', text: 'finish it' }],
       ['/goal/open', { text: 'finish it' }],
       ['/settings', { goal: true }]
     ];
@@ -8782,7 +8837,7 @@ describe('shutting the listener down', () => {
     // and every quit sat for the full 15s force: long enough to look like the app has hung.
     await pair();
     const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
-    const payload = Buffer.from(JSON.stringify({ conversationId: 'cafe0009-0000-4000-8000-000000000009', events: [] }), 'utf8');
+    const payload = Buffer.from(JSON.stringify({ conversationId: '0000003c-0000-4000-8000-00000000003c', events: [] }), 'utf8');
 
     let req!: http.ClientRequest;
     const answered = new Promise<number>((resolve, reject) => {
@@ -8923,7 +8978,7 @@ describe('independent prime browser transports', () => {
 describe('app requests to stop one exact active turn', () => {
   it('does not present a persisted unfinished turn as live after recorder restart', async () => {
     const { sessionControlsFor } = await import('../src/main/bridge.js');
-    const sessionId = await active('e5555555-aaaa-4bbb-8ccc-111111111111');
+    const sessionId = await active('0000003d-0000-4000-8000-00000000003d');
     expect((await sessionControlsFor(sessionId)).activeTurnId).toBe('stop-turn-one');
     resetRecorderForTests();
     resetBridgeForTests(); // A process restart clears the live activity owner too.
@@ -8940,7 +8995,7 @@ describe('app requests to stop one exact active turn', () => {
   }
   it('allows an exact worker Stop and suppresses recovery while that request is pending', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');
-    const conversationId = 'e4444444-aaaa-4bbb-8ccc-111111111111';
+    const conversationId = '0000003e-0000-4000-8000-00000000003e';
     spawn({ workers: [{ task: 'work until the user stops this turn' }], caller: { conversationId: PRIME_CHAT } });
     expect(bindConversation('worker-1', conversationId)).toBe(true);
     const sessionId = await active(conversationId);
@@ -8952,7 +9007,7 @@ describe('app requests to stop one exact active turn', () => {
   });
   it('persists one request, disables automation and releases finish without declaring the turn ended', async () => {
     const { stopSessionTurn, setSessionAutomation } = await import('../src/main/bridge.js');
-    const conversationId = 'e1111111-aaaa-4bbb-8ccc-111111111111';
+    const conversationId = '0000003f-0000-4000-8000-00000000003f';
     const sessionId = await active(conversationId);
     await setSessionAutomation(sessionId, 'loop');
     const control = await stopSessionTurn(sessionId, 'stop-turn-one');
@@ -8963,7 +9018,7 @@ describe('app requests to stop one exact active turn', () => {
     expect(status.body.stopTurns).toHaveLength(1);
     expect(opened).toEqual([]);
     const command = status.body.stopTurns[0];
-    const wrong = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'stop-page', conversationId: 'e2222222-aaaa-4bbb-8ccc-111111111111' } });
+    const wrong = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'stop-page', conversationId: '00000040-0000-4000-8000-000000000040' } });
     expect(wrong.status).toBe(409);
     const valid = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'stop-page', conversationId } });
     expect(valid.body.command).toMatchObject({ kind: 'stop-turn', turnId: 'stop-turn-one', conversationId, text: '' });
@@ -8979,7 +9034,7 @@ describe('app requests to stop one exact active turn', () => {
   });
   it('refuses stale turn controls and an old request after the next turn starts', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');
-    const conversationId = 'e3333333-aaaa-4bbb-8ccc-111111111111';
+    const conversationId = '00000041-0000-4000-8000-000000000041';
     const sessionId = await active(conversationId);
     await expect(stopSessionTurn(sessionId, 'wrong-turn')).rejects.toThrow('active_turn_changed');
     await stopSessionTurn(sessionId, 'stop-turn-one');
@@ -9002,7 +9057,7 @@ it('retires an already armed ordinary Goal repair when its conversation is now A
     await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
     await setSecret('openRouterApiKey', 'test-goal-key');
     await pair();
-    const chat = 'a5555555-1111-4111-8111-000000000005';
+    const chat = '00000042-0000-4000-8000-000000000042';
     await request('POST', '/events', { body: { conversationId: chat, events: [
       { kind: 'model_selection', model: 'gpt-5.6-sol', reasoningEffort: 'high', time: Date.now() },
       { kind: 'turn_start', turnId: 'legacy-goal-turn', time: Date.now() },

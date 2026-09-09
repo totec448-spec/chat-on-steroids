@@ -1,5 +1,7 @@
 import { conversationProgress } from './session/progress.js';
-import { pendingChatModelRequest, observeChatModels } from './chat-models.js';
+import { currentCoreInstructions } from './mcp/instructions.js';
+import { prependUserPrompt } from '../shared/user-prompt.js';
+import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
 import { isProModel } from '../shared/chat-models.js';
 import type { SessionSummary } from '../shared/session.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, type InputActivity } from './session/input.js';
@@ -38,7 +40,8 @@ import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindB
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { BridgeStatus } from '../shared/types.js';
-import { CHAT_SILENCE_MS, CONTINUATION_MARKER, isReasoningEffort, type ReasoningEffort, type SessionEvent, type SessionOrigin } from '../shared/session.js';
+import { positionOf } from '../shared/chronology.js';
+import { CHAT_SILENCE_MS, isReasoningEffort, type ReasoningEffort, type SessionEvent, type SessionOrigin } from '../shared/session.js';
 import { isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
 export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { getConfig, updateConfig } from './config.js';
@@ -77,6 +80,7 @@ import {
   noteChatOrigin,
   recordAgentMessage,
   recordChatObservations,
+  recordRequestEvidence,
   recordProgress,
   restoreRecordedConversation,
   setCallAttributionListener,
@@ -89,8 +93,10 @@ import {
   conversationWasSuperseded,
   findSessionByConversation,
   getSession,
+  readSessionPlan,
   listUsageSessions,
   readRecentEvents,
+  readActivityEvents,
   sessionDurableModifiedAt
 } from './session/store.js';
 import { inFlightMcpRequests, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
@@ -308,10 +314,10 @@ const MAX_BRIEF_CHARS = 256_000;
  * two ends are the parts that must survive, so the middle goes instead, with a marker in
  * its place. Both halves therefore end and begin at a line boundary where one is near.
  */
-function boundBrief(text: string): string {
-  if (text.length <= MAX_BRIEF_CHARS) return text;
+function boundBrief(text: string, maxChars = MAX_BRIEF_CHARS): string {
+  if (text.length <= maxChars) return text;
   const marker = '\n\n[… the middle of this brief was longer than the app carries across and was left out …]\n\n';
-  const room = MAX_BRIEF_CHARS - marker.length;
+  const room = maxChars - marker.length;
   // The tail is the actionable half, so it gets the larger share.
   const headRoom = Math.floor(room * 0.4);
   const head = text.slice(0, headRoom);
@@ -951,9 +957,14 @@ async function workerFinalAcrossBatches(
     const end = [...recent]
       .reverse()
       .find((entry) => entry.kind === 'turn_end' && entry.turnId === turnId);
-    const at = Math.max(final.seq, end?.seq ?? 0);
-    // A replay of turn A after turn B has begun is history, not current completion evidence.
-    if (recent.some((entry) => entry.kind === 'turn_start' && entry.turnId !== turnId && entry.seq > at)) continue;
+    const start = recent.find((entry) => entry.kind === 'turn_start' && entry.turnId === turnId);
+    const at = Math.max(positionOf(final), end ? positionOf(end) : 0);
+    // A canonical HTML/text refresh gets a NEW cursor seq but retains its ORIGINAL position.
+    // Worker-2's old docs final was refreshed after its QA turn began, falsely putting the
+    // working agent back to sleep. Compare turn starts (or original position when the start
+    // is outside this bounded window); a late final revision never advances its turn.
+    const turnPosition = start ? positionOf(start) : at;
+    if (recent.some((entry) => entry.kind === 'turn_start' && entry.turnId !== turnId && positionOf(entry) > turnPosition)) continue;
     if (!best || at > best.at) best = { at, text: final.message.text };
   }
   return best?.text ?? null;
@@ -1010,6 +1021,7 @@ function goalBlockReason(id: string): 'worker' | 'blocked' | '' {
 
 export type SessionControlsView = {
   sessionId: string;
+  plan: import('../shared/agent-plan.js').AgentPlan | null;
   conversationId: string;
   automation: 'off' | 'goal' | 'loop';
   objective: string;
@@ -1052,7 +1064,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const finishHeld = !blocked && await sessionFinishHeld(sessionId, activeTurnId, id);
   const draft = goalViewFor(id);
   const inputPolicy = await sessionInputPolicy(sessionId, sessionInputActivity(session));
-  return { sessionId, conversationId: id, activeTurnId, finishHeld,
+  return { sessionId, plan: await readSessionPlan(sessionId), conversationId: id, activeTurnId, finishHeld,
     queueAtFinish: !blocked && inputPolicy.queueAtFinish, canInject: !blocked && inputPolicy.canInject,
     finishGoalDraft: getSessionFinishDraft(sessionId, activeTurnId),
     finishWaiting: await sessionFinishWaiting(sessionId, activeTurnId, id),
@@ -1477,7 +1489,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const { readInputAttachmentChunk } = await import('./session/input-attachments.js');
       return json(res, 200, { chunk: await readInputAttachmentChunk(attachment, body.offset) }, origin);
     }
-    if (route === '/input/fail') return json(res, 200, { ok: await failBrowserInput(body.id, body.owner, typeof body.error === 'string' ? body.error : 'Unable to prepare ChatGPT') }, origin);
+    if (route === '/input/fail') {
+      const ok = await failBrowserInput(body.id, body.owner, typeof body.error === 'string' ? body.error : 'Unable to prepare ChatGPT');
+      // A rejected picker choice invalidates cached availability. Reobserve existing
+      // browser documents through the catalog owner; failure grants no new-tab authority.
+      if (ok && body.error === 'Requested model or reasoning could not be confirmed') requestChatModels(false);
+      return json(res, 200, { ok }, origin);
+    }
     if (route === '/input/progress') {
       const target = conversationId(body.conversationId);
       const temporary = (await listInputs()).some(row => row.id === body.id && row.owner === body.owner && row.lifetime === 'temporary-planner');
@@ -1535,10 +1553,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // tool_evidence meant that harmless bootstrap mismatch could cause the recorder to throw
     // away the exact join, wait fifteen seconds, and file every call under Unattributed.
     //
-    // Live 2026-08-21: conversation `6a88144a-4434-83eb-b06c-5022b77af09e` already had local
-    // session `2026-08-21-e24b18f3` before its first MCP call, and every call carried normalized
-    // request `77186fb4-bdda-4849-8cd7-879bb08a1617`; nevertheless that id never entered the
-    // durable correlation registry and the calls accumulated in `2026-08-21-9d5892a4`
+    // Live 2026-08-21: conversation `0000000a-0000-8000-b000-00000000000a` already had local
+    // session `2000-01-01-00000004` before its first MCP call, and every call carried normalized
+    // request `00000005-0000-4000-8000-000000000005`; nevertheless that id never entered the
+    // durable correlation registry and the calls accumulated in `2000-01-01-00000006`
     // (Unattributed activity). The missing fact was therefore browser -> app ownership, not MCP
     // request-id parsing.
     //
@@ -1560,12 +1578,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       : [];
     // Even an already-confirmed mapping must ensure/reuse the chat session, matching /events'
     // first-observation semantics and making this one atomic operation from the page's view.
-    const result = await recordChatObservations(id, observations, agentForOwnedConversation(id));
+    const sessionId = await recordRequestEvidence(id, observations);
     const confirmed = requestIds.filter((requestId) => requestCorrelation(requestId)?.conversationId === id);
     return json(res, 200, {
       ok: true,
       conversationId: id,
-      sessionId: result.sessionId,
+      sessionId,
       requestIds,
       confirmed,
       conflicts,
@@ -1893,13 +1911,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // large audited sessions used to freeze the Electron main process here for tens of
     // seconds. The browser stream is presentation state, so send a bounded newest window and
     // explicitly tell the page to replace its local projection when its cursor predates it.
-    const recent = await readRecentEvents(live.sessionId, 1200);
-    const firstAvailable = recent.reduce((first, event) => Math.min(first, event.seq), Number.MAX_SAFE_INTEGER);
-    const resetActivity =
-      firstAvailable !== Number.MAX_SAFE_INTEGER &&
-      requestedSince < firstAvailable &&
-      !(requestedSince === 0 && firstAvailable === 1);
-    const events = recent.filter((event) => resetActivity || event.seq >= requestedSince);
+    const { events, reset: resetActivity, resumeBoundary } = await readActivityEvents(live.sessionId, requestedSince);
     // Where this conversation begins inside a session that has been compacted and resumed.
     //
     // The session keeps its identity across Compact & Resume, so its log carries chat A's rows
@@ -1911,13 +1923,6 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // Repairs before the newest one belong to a chat that no longer exists on this feed. The
     // whole window is scanned, not only the events past the cursor, so a page resuming from a
     // cursor still knows a boundary it consumed earlier.
-    const resumeBoundary = recent.reduce(
-      (boundary, event) =>
-        event.kind === 'user_message' && CONTINUATION_MARKER.exec(event.message.text)?.[1] === 'RESUME'
-          ? Math.max(boundary, event.origin ?? event.seq)
-          : boundary,
-      0
-    );
     const earlierChatRepair = (event: SessionEvent): boolean =>
       event.kind === 'progress' &&
       typeof event.progressId === 'string' &&
@@ -2093,7 +2098,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         stream,
         userAnchors,
         resetActivity,
-        truncatedFrom: resetActivity ? firstAvailable : null,
+        truncatedFrom: resetActivity && events.length ? events.reduce((first, event) => Math.min(first, event.seq), Number.MAX_SAFE_INTEGER) : null,
         nextSince,
         // How this chat's own Compact & Resume is going, so the page can say what is
         // happening instead of spinning.
@@ -2414,7 +2419,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const token = typeof body['token'] === 'string' ? body['token'] : '';
       const entry = continuationByToken(token);
       if (!entry || entry.sessionId !== sessionId) return json(res, 409, { error: 'no_such_continuation' }, origin);
-      const brief = boundBrief(String(body['summary']));
+      // Reserve the complete instruction prefix inside the existing browser-send
+      // budget. Only the brief uses its existing explicit middle-omission policy.
+      const overhead = prependUserPrompt(resumeBootstrapText('', token), await currentCoreInstructions()).length;
+      const brief = boundBrief(String(body['summary']), Math.min(MAX_BRIEF_CHARS, 240000 - overhead));
       // Refused here rather than deeper, because this is where the reason can still be said
       // in words the page will put on screen. A brief that cannot be a brief is a failed
       // compaction, and a failed compaction leaves the session exactly where it is — which
@@ -2527,7 +2535,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (already) {
       const prompt =
         already.state === 'awaiting-summary' && sendUnattempted(already.sourceSend)
-          ? nativeHandoffPrompt(already.token, getConfig().goal.includeToolCalls === true)
+          ? prependUserPrompt(nativeHandoffPrompt(already.token, getConfig().goal.includeToolCalls === true), await currentCoreInstructions())
           : null;
       return json(
         res,
@@ -2566,7 +2574,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         token: opened.token,
         sourceSend: opened.sourceSend,
         // The prompt the page injects as the compaction turn. Its answer is the brief.
-        prompt: nativeHandoffPrompt(opened.token, getConfig().goal.includeToolCalls === true),
+        prompt: prependUserPrompt(nativeHandoffPrompt(opened.token, getConfig().goal.includeToolCalls === true), await currentCoreInstructions()),
         job: resumeJobFor(sessionId)
       },
       origin
@@ -3151,7 +3159,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         return json(res, 503, { error: 'continuation_claim_not_durable', retryable: true }, origin);
       }
     }
-    return json(res, 200, { command: describe(command, client, claimedSummary) }, origin);
+    const described = describe(command, client, claimedSummary);
+    if (described.text) described.text = prependUserPrompt(described.text, await currentCoreInstructions());
+    if (!commands.includes(command) || command.owner !== client) return json(res, 409, { error: 'command_taken' }, origin);
+    const liveResume = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
+    if (command.spec.type === 'resume' && (!liveResume || !sendUnattempted(liveResume.destinationSend)))
+      return json(res, 409, { error: 'command_already_sent', final: true }, origin);
+    if (described.text.length > 240000) return json(res, 409, { error: 'command_text_too_large', message: 'The complete prompt and task exceed the browser message limit.' }, origin);
+    return json(res, 200, { command: described }, origin);
   }
 
   if (route === '/commands/ack' && req.method === 'POST') {

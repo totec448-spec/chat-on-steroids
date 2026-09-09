@@ -71,14 +71,27 @@ afterEach(() => {
 });
 
 describe('the user’s own connector instructions', () => {
-  it('describes unattributed shutdown only when unattributed command execution is allowed', async () => {
-    const config = getConfig();
-    await saveConfig({ ...config, multiAgent: { ...config.multiAgent, allowUnattributedCalls: true } });
-    expect(serverInstructions(ctx, 'core', 'win32')).toContain('user-requested computer shutdown');
-    expect(serverInstructions({ ...ctx, readOnly: true }, 'core', 'win32')).not.toContain('user-requested computer shutdown');
-    expect(serverInstructions({ ...ctx, caps: { ...ctx.caps, command: false } }, 'core', 'win32')).not.toContain('user-requested computer shutdown');
-    await saveConfig({ ...config, multiAgent: { ...config.multiAgent, allowUnattributedCalls: false } });
-    expect(serverInstructions(ctx, 'core', 'win32')).not.toContain('user-requested computer shutdown');
+  it('starts with the coding guidance and explains connectors once beside the local tools without a setup link', () => {
+    const text = serverInstructions(ctx, 'core', 'win32');
+    expect(text.startsWith('You are a coding agent working with the user through Chat On Steroids.')).toBe(true);
+    const intro = text.split('\n').find(line => line.startsWith('Use the connected tools as needed:'))!;
+    expect(intro).toContain('Chat On Steroids Core for files');
+    expect(intro).toContain('Chat On Steroids Desktop for screen');
+    expect(intro).toContain('Chat On Steroids Plugins for enabled external apps');
+    expect(text.indexOf(intro)).toBeGreaterThan(text.indexOf('# Local tools'));
+    expect(text).not.toMatch(/This is Chat On Steroids|https:\/\/chatgpt.com\/#settings\/Plugins/);
+    expect(serverInstructions(ctx, 'core', 'linux')).not.toContain('Chat On Steroids Desktop');
+  });
+  it('adapts upstream instructions without unsupported facilities and projects live tools', () => {
+    const text = serverInstructions(ctx, 'core', 'win32');
+    expect(text).toContain('Do not settle for a partial or "helpful enough" solution');
+    expect(text).toContain('look for AGENTS.md');
+    expect(text).not.toMatch(/SKILL\.md|functions\.|tool_search|approval auto-review|user-requested computer shutdown/);
+    expect(text).not.toContain('Use update_plan');
+    expect(serverInstructions({ ...ctx, sessionTools: true }, 'core', 'win32')).toContain('Use update_plan');
+    const withoutCommands = serverInstructions({ ...ctx, caps: { ...ctx.caps, command: false } }, 'core', 'linux');
+    expect(withoutCommands).toContain('find searches');
+    expect(withoutCommands).not.toContain('exec_command runs');
   });
 
   it('adds nothing at all when empty, not even the heading', () => {

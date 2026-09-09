@@ -626,7 +626,7 @@
                 <div class="pane">
                   <div class="field">
                     <label for="mcpInstructions">Your own instructions</label>
-                    <textarea id="mcpInstructions" rows="6" maxlength="4000" spellcheck="false" placeholder="e.g. Always run the test suite before saying a change works."></textarea>
+                    <textarea dir="auto" id="mcpInstructions" rows="6" maxlength="4000" spellcheck="false" placeholder="e.g. Always run the test suite before saying a change works."></textarea>
                     <p class="hint">Added to the end of what each connector tells ChatGPT about itself, marked as yours. Kept across app updates. Leave empty for none.</p>
                   </div>
                   <p class="muted">ChatGPT reads connector instructions once, when it loads the tools, so a change reaches an existing conversation only after the connector is loaded again.</p>
@@ -751,7 +751,7 @@
 
                   <div class="field goal-prompt" id="goalPromptPanel" hidden>
                     <label for="goalPrompt">Goal prompt, no task</label>
-                    <textarea id="goalPrompt" rows="14" spellcheck="false"></textarea>
+                    <textarea dir="auto" id="goalPrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
                     <div class="step-actions">
                       <button class="btn" id="goalPromptReset" type="button">Restore default</button>
@@ -768,7 +768,7 @@
 
                   <div class="field goal-prompt" id="goalObjectivePromptPanel" hidden>
                     <label for="goalObjectivePrompt">Goal prompt, with a task</label>
-                    <textarea id="goalObjectivePrompt" rows="14" spellcheck="false"></textarea>
+                    <textarea dir="auto" id="goalObjectivePrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
                     <div class="step-actions">
                       <button class="btn" id="goalObjectivePromptReset" type="button">Restore default</button>
@@ -785,7 +785,7 @@
 
                   <div class="field goal-prompt" id="goalLoopPromptPanel" hidden>
                     <label for="goalLoopPrompt">Loop prompt</label>
-                    <textarea id="goalLoopPrompt" rows="14" spellcheck="false"></textarea>
+                    <textarea dir="auto" id="goalLoopPrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. There is no stop response here - the app refuses one and asks again.</p>
                     <div class="step-actions">
                       <button class="btn" id="goalLoopPromptReset" type="button">Restore default</button>
@@ -827,10 +827,10 @@
                 </div>
               </div>
             </div>
-            <div class="composer-dock" id="composerDock"><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
+            <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
             <form class="composer" id="composer">
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
-              <div id="composerImages" class="composer-images" hidden></div><textarea id="chatInput" rows="1" maxlength="16000" placeholder="Ask anything…"></textarea>
+              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" maxlength="16000" placeholder="Ask anything…"></textarea>
               <div class="composer-toolbar">
                 <details class="composer-menu" id="attachmentMenu">
                   <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
@@ -851,7 +851,7 @@
               <div id="sessionControls" hidden>
                 <div class="session-controls-menu">
                   <label for="sessionObjective">This chat's goal</label>
-                  <textarea id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
+                  <textarea dir="auto" id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
                   <button id="saveSessionObjective" data-keep-menu="true" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check" /></svg><span>Save task</span></button>
                   <select hidden id="sessionObjectiveMode" aria-label="Goal behavior"><option value="goal">Goal · stop when complete</option><option value="loop">Loop · keep going</option></select>
                   <button id="createPlan" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg><span>Create plan</span></button>

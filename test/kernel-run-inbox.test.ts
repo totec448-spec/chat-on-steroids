@@ -18,8 +18,9 @@ vi.mock('../src/main/session/recorder.js', async (original) => ({
 vi.mock('../src/main/session/store.js', async (original) => ({
   ...await original<typeof import('../src/main/session/store.js')>(), conversationAttachment: async () => 'current'
 }));
-vi.mock('../src/main/session/input.js', () => ({ offerToolInput: async () => [], acknowledgeToolInput: async () => undefined }));
-import { createRegistrar, ok } from '../src/main/mcp/kernel.js';
+vi.mock('../src/main/session/input.js', () => ({ offerToolInput: async () => ({ messages: [], reminder: '' }), acknowledgeToolInput: async () => undefined, TOOL_INPUT_HEADER: '\n--- New instructions from the user ---\n' }));
+import { createRegistrar, dispatch, ok } from '../src/main/mcp/kernel.js';
+import { currentCall } from '../src/main/mcp/call-context.js';
 import { withInboundRequestId } from '../src/main/mcp/inbound.js';
 import { defaultConfig } from '../src/main/config.js';
 beforeEach(() => {
@@ -48,6 +49,8 @@ it('routes identical friendly workers through their exact conversation inbox and
   const [a, b] = await Promise.all([call('req-chat-a'), call('req-chat-b')]);
   expect(JSON.stringify(a)).toContain('private-chat-a'); expect(JSON.stringify(a)).not.toContain('private-chat-b');
   expect(JSON.stringify(b)).toContain('private-chat-b'); expect(JSON.stringify(b)).not.toContain('private-chat-a');
+  expect(JSON.stringify(a)).toContain('• prime: private-chat-a');
+  expect(JSON.stringify(a)).not.toContain('m-chat-a');
   expect(broker.release).toHaveBeenCalledWith({}, 'run-chat-a');
   expect(broker.release).toHaveBeenCalledWith({}, 'run-chat-b');
   expect(broker.bareOffer).not.toHaveBeenCalled(); expect(broker.bareAck).not.toHaveBeenCalled();
@@ -57,4 +60,21 @@ it('does not fall back to a friendly-id inbox when exact conversation ownership 
   expect(JSON.stringify(result)).not.toContain('foreign-private');
   expect(broker.bareOffer).not.toHaveBeenCalled(); expect(broker.bareAck).not.toHaveBeenCalled();
   expect(broker.release).not.toHaveBeenCalled();
+});
+
+it('offers and acknowledges the worker inbox only on the outer call, outside nested filtering', async () => {
+  const registrar = createRegistrar(null, { roots: [], caps: defaultConfig().capabilities, readOnly: true }, 'core');
+  registrar.register('read', { description: 'fixture', inputSchema: z.object({}) }, async () => ok('private tool value'));
+  const result = await dispatch('exec', {}, null, 'req-chat-a', 'core', async () => {
+    const parent = currentCall()!;
+    const children = await Promise.all([registrar.invokeNested('read', {}, parent), registrar.invokeNested('read', {}, parent)]);
+    expect(children).toEqual([ok('private tool value'), ok('private tool value')]);
+    expect(broker.offer).not.toHaveBeenCalled();
+    expect(broker.ack).not.toHaveBeenCalled();
+    return ok('filtered');
+  });
+  expect(broker.offer).toHaveBeenCalledTimes(1);
+  expect(broker.ack).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(result)).toContain('private-chat-a');
+  expect(JSON.stringify(result)).not.toContain('private tool value');
 });
