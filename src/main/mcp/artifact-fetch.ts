@@ -1,4 +1,4 @@
-/** Validates bounded native-file references and streams from an exact file-host allowlist.
+/** Validates bounded native-file references and streams from trusted file hosts.
  * The schema requests ChatGPT native-file injection; a URL shape is not proof of who
  * authored a reference. Host/path checks and the approved-root write policy still apply.
  */
@@ -171,7 +171,11 @@ export function validateOpenAIFileUrl(value: string): string {
 }
 
 function isTrustedOpenAIFileHost(hostname: string): boolean {
-  return OPENAI_FILE_HOSTS.has(hostname);
+  // ChatGPT ImageGen uses regional hosts within OpenAI's documented file namespace:
+  // https://help.openai.com/en/articles/9247338
+  // A DNS-label boundary accepts those regions without accepting lookalike suffixes.
+  // Azure remains exact-only: other Azure account names are independently controlled.
+  return OPENAI_FILE_HOSTS.has(hostname) || hostname.endsWith('.oaiusercontent.com');
 }
 
 function isRedirectStatus(status: number): boolean {

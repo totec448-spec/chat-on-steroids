@@ -1049,7 +1049,7 @@ describe('Astra delivery boundaries and stacked direct input', () => {
   });
   it('rechecks newer bridge activity at the final browser authorization boundary', async () => {
     let active = false;
-    configureInputDelivery({ applyAutomation: automate, changed, hasActivity: () => active });
+    configureInputDelivery({ applyAutomation: automate, changed, activity: () => ({ possible: active, exact: active }) });
     const row = await enqueueInput(input());
     expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).not.toBeNull();
     active = true;
@@ -1130,6 +1130,8 @@ it('allows one browser send alongside other-chat tool input but prevents same-ch
   binding.activeTurnId = 'active';
   const tool = await enqueueInput(input());
   binding.activeTurnId = null;
+  // No terminal proof for the previously active turn: the tool route is still held.
+  binding.end = null;
   const browser = await enqueueInput(input({ sessionId: null }));
   expect(browser.transportIntent).toBe('browser');
   expect(await pendingBrowserInputs()).toEqual([{ id: browser.id, conversationId: null }]);
@@ -1137,6 +1139,28 @@ it('allows one browser send alongside other-chat tool input but prevents same-ch
   await cancelInput(browser.id);
   await expect(enqueueInput(input())).rejects.toThrow('One message');
   expect((await listInputs()).find(row => row.id === tool.id)?.state).toBe('queued');
+});
+
+it('recovers only an unoffered tool intent after the target is positively settled', async () => {
+  binding.activeTurnId = 'old-active';
+  const row = await enqueueInput(input());
+  expect(row.transportIntent).toBe('tool');
+  binding.activeTurnId = null;
+  binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'old-active', time: now + 1 };
+  const claimed = await claimBrowserInput(row.id, 'recovery-page', binding.conversationId, true);
+  expect(claimed).toMatchObject({ state: 'browser', transportIntent: 'browser' });
+  expect(await offerToolInput(sessionId, binding.conversationId, 'competing-tool', now + 2)).toEqual([]);
+  expect(await authorizeBrowserInput(row.id, 'recovery-page', binding.conversationId)).toBe(true);
+});
+
+it('never redirects a tool input whose offer may already have reached the model', async () => {
+  binding.activeTurnId = 'active-tool-turn';
+  const row = await enqueueInput(input());
+  expect(await offerToolInput(sessionId, binding.conversationId, 'offered-request', now)).toHaveLength(1);
+  binding.activeTurnId = null;
+  binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'active-tool-turn', time: now + 1 };
+  expect(await claimBrowserInput(row.id, 'other-page', binding.conversationId, true)).toBeNull();
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'tool', offeredAt: now });
 });
 
 it('keeps Astra finish-only tasks off browser transport across restart and permits explicit per-task opt-in', async () => {

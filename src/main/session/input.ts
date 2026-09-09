@@ -66,8 +66,9 @@ const entrySchema = inputArgs.extend({
 export type InputEntry = z.infer<typeof entrySchema>;
 const STATE = 'session-input';
 const TOOL_INPUT_TEXT_BYTES = 128000;
+export interface InputActivity { possible: boolean; exact: boolean }
 type InputDeliveryHooks = {
-  hasActivity?: (session: SessionSummary) => boolean;
+  activity?: (session: SessionSummary) => InputActivity;
   wakeDecision?: (entry: Readonly<InputEntry>, signal: AbortSignal) => Promise<void>;
   bindHelper?: (conversationId: string, sourceSessionId: string | null) => Promise<void>;
   recordDelivered?: (entry: Readonly<InputEntry>) => Promise<boolean>;
@@ -79,27 +80,33 @@ let deliveryHooks: InputDeliveryHooks | null = null;
 /** Installed once by IPC before bridge/MCP startup; avoids a Goal/input import cycle. */
 export function configureInputDelivery(hooks: InputDeliveryHooks): void { deliveryHooks = hooks; }
 /** One delivery policy for composer presentation, admission and the final send fence. */
-export async function sessionInputPolicy(sessionId: string, observedActivity?: boolean): Promise<{ queueAtFinish: boolean; canInject: boolean; browserAllowed: boolean }> {
+export async function sessionInputPolicy(sessionId: string, observedActivity?: InputActivity): Promise<{ queueAtFinish: boolean; canInject: boolean; browserAllowed: boolean; settled: boolean }> {
   const session = await getSession(sessionId);
-  if (!session?.conversationId || isChatBlocked(session.conversationId)) return { queueAtFinish: false, canInject: false, browserAllowed: false };
-  const activity = observedActivity ?? deliveryHooks?.hasActivity?.(session) ?? false;
+  if (!session?.conversationId || isChatBlocked(session.conversationId)) return { queueAtFinish: false, canInject: false, browserAllowed: false, settled: false };
+  const activity = observedActivity ?? deliveryHooks?.activity?.(session) ?? { possible: !!session.activeTurnId, exact: !!session.activeTurnId };
   const stopped = session.finishTurn?.released === true;
-  const canInject = !stopped && (!!session.activeTurnId || activity);
+  const canInject = !stopped && activity.exact;
   const astra = session.origin?.kind !== 'worker' && session.origin?.kind !== 'helper' &&
     session.selectedModel?.conversationId === session.conversationId && isAstraModel(session.selectedModel.model, session.selectedModel.reasoningEffort);
-  const [end] = astra ? await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end'] }) : [];
+  const [end] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
   const terminal = end?.kind === 'turn_end' && !!end.turnId && end.outcome !== 'unknown';
   return { canInject, queueAtFinish: astra && canInject && getConfig().ui.finishTool === true,
-    browserAllowed: !session.activeTurnId && (!astra || (!activity && terminal)) };
+    browserAllowed: !session.activeTurnId && !activity.possible && !activity.exact && (!astra || terminal),
+    settled: terminal && (session.lastToolCallAt ?? 0) <= end.time };
 }
 async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
-  if (entry.transportIntent === 'tool') return false;
   if (entry.mode === 'finish' && entry.sessionId && entry.afterTurn !== true) {
     const session = await getSession(entry.sessionId);
     const selection = session?.selectedModel;
     if (selection?.conversationId === session?.conversationId && isAstraModel(selection?.model, selection?.reasoningEffort)) return false;
   }
-  return !entry.sessionId || (await sessionInputPolicy(entry.sessionId)).browserAllowed;
+  if (!entry.sessionId) return entry.transportIntent !== 'tool';
+  const policy = await sessionInputPolicy(entry.sessionId);
+  // Only a never-offered ordinary input may change routes after positive terminal evidence.
+  // A tool handout or ambiguous browser claim retains its original exclusive custody.
+  return policy.browserAllowed && (entry.transportIntent !== 'tool' ||
+    (entry.mode === 'auto' && !entry.finishOwner && entry.purpose !== 'decision' && entry.state === 'queued' &&
+      entry.owner === null && entry.offeredAt === undefined && policy.settled));
 }
 const inputListeners = new Set<() => void>();
 export function onInputChange(listener: () => void): () => void {
@@ -129,7 +136,7 @@ const offered = new Map<string, number>();
 const terminal = (row: InputEntry): boolean => ['sent', 'cancelled', 'failed'].includes(row.state);
 const preparable = (row: InputEntry): boolean => row.state === 'queued' ||
   (row.state === 'browser' && row.requiresAuthorization === true && row.sendAuthorizedAt === undefined);
-const needsHistory = (row: InputEntry): boolean => !row.historyRecorded &&
+const needsHistory = (row: InputEntry): boolean => row.purpose !== 'decision' && !row.historyRecorded &&
   ((row.state === 'tool' && Number.isFinite(row.offeredAt)) || ((row.state === 'sent' || row.state === 'cancelled') && !!row.messageId));
 const pendingStages = (row: InputEntry): boolean => row.state === 'sent' && !!row.stages?.length && !row.stagesApplied;
 const ordered = (rows: InputEntry[]): InputEntry[] => [...rows].sort((a, b) =>
@@ -325,7 +332,10 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
       const session = input.sessionId ? await getSession(input.sessionId) : null;
       if ((input.mode === 'finish' && !session?.conversationId) || session?.origin?.kind === 'worker') throw new Error('Queue staged tasks in a normal chat');
     }
-    const transportIntent = input.attachments?.length ? 'browser' as const : input.mode === 'auto' && !finishOwner ? policy?.canInject ? 'tool' as const : 'browser' as const : undefined;
+    // Unattributed work can fence browser Send without making this chat a tool recipient.
+    // Leave that input neutral until the existing serialized claim selects a safe transport.
+    const transportIntent = input.attachments?.length ? 'browser' as const : input.mode === 'auto' && !finishOwner
+      ? policy?.canInject ? 'tool' as const : !policy || policy.browserAllowed ? 'browser' as const : undefined : undefined;
     const entry: InputEntry = { ...input, ...(transportIntent ? { transportIntent } : {}), ...(requestedMode !== input.mode ? { requestedMode } : {}), ...(finishOwner ? { finishOwner } : {}), state: 'queued', owner: null, createdAt: Date.now(), conversationId: null };
     if (input.projectId) {
       await projectWorkspace(input.projectId);
@@ -540,7 +550,9 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
       if (entry.state === 'queued' && !queuedFollowup(entry) && first !== entry) return null;
     }
     let claimed: InputEntry;
-    try { claimed = prepare({ ...entry, ...(completedTurnId ? { completedTurnId } : {}), state: 'browser', owner, conversationId, offeredAt: entry.offeredAt ?? Date.now(), requiresAuthorization }); }
+    try { claimed = prepare({ ...entry, ...(completedTurnId ? { completedTurnId } : {}),
+      ...(entry.transportIntent === 'tool' ? { transportIntent: 'browser' } : {}),
+      state: 'browser', owner, conversationId, offeredAt: entry.offeredAt ?? Date.now(), requiresAuthorization }); }
     catch (error) {
       // A never-handed-out oversized legacy row needs a visible terminal result,
       // not an endless series of browser claims. Existing claims keep their receipt.
@@ -610,7 +622,7 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
     const acknowledged: InputEntry = { ...entry, conversationId: deliveredConversation,
       deliveredSessionId: delivered?.id ?? null, state: entry.state === 'cancelled' ? 'cancelled' : entry.purpose === 'decision' ? 'decision' : 'sent',
       ...(entry.state === 'cancelled' ? { error: 'Cancelled locally; delivery was later confirmed in ChatGPT.' } : {}),
-      ...(entry.purpose !== 'decision' ? { ...(messageId ? { messageId } : {}), deliveredAt: Date.now() } : {}) };
+      ...(messageId ? { messageId } : {}), deliveredAt: Date.now() };
     await transition(current, current.map((row) => row === entry ? acknowledged : row),
       entry.state !== 'cancelled' && !entry.sessionId && entry.automation && deliveredConversation && entry.purpose !== 'decision' ? [acknowledged] : [], 'after-send');
     logInfo(`input ${id}: browser acknowledged after ${Math.max(0, Date.now() - entry.createdAt)} ms`);
@@ -808,4 +820,25 @@ export function completeBrowserDecision(id: string, owner: string, response: str
     waiter?.resolve(response);
     return !!waiter;
   });
+}
+
+/** The outbox's exact native-send receipt survives losing the helper document.
+ * Collect through the existing completion transaction when the recorder carries that
+ * user's final answer. This grants no new browser claim and never resubmits a prompt.
+ */
+export async function collectRecordedBrowserDecision(conversationId: string): Promise<void> {
+  const pending = (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'decision' &&
+    row.conversationId === conversationId && row.messageId && row.owner && decisionWaiters.has(row.id));
+  if (pending.length !== 1 || isChatBlocked(conversationId) || await conversationWasSuperseded(conversationId)) return;
+  const row = pending[0]!;
+  const session = await findSessionByConversation(conversationId, { requireUnique: true });
+  if (!session || (row.deliveredSessionId && session.id !== row.deliveredSessionId)) return;
+  const events = await readRecentEvents(session.id, 32, { kinds: ['user_message', 'assistant_message'], maxBytes: 1_048_576 });
+  const user = events.findLastIndex(event => event.kind === 'user_message');
+  const prompt = events[user];
+  const final = events.at(-1);
+  if (user < 0 || prompt?.kind !== 'user_message' || prompt.messageId !== row.messageId ||
+      final?.kind !== 'assistant_message' || !final.final || final.state !== 'final' || !final.messageId ||
+      final.message.truncated || final.message.text.length > 16000) return;
+  await completeBrowserDecision(row.id, row.owner!, final.message.text, conversationId);
 }

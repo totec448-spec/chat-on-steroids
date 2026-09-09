@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
   appendEvent,
@@ -14,12 +14,71 @@ import {
   observeRequestCorrelation,
   observeRequestCorrelations,
   requestCorrelation,
+  awaitRequestCorrelation,
   restoreRequestCorrelations,
   resetCorrelationRegistryForTests
 } from '../src/main/session/correlation.js';
 
 describe('request correlation ownership', () => {
   beforeEach(() => resetCorrelationRegistryForTests());
+  afterEach(() => vi.useRealTimers());
+
+  it('spends grace once per request while accepting late exact evidence', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    const first = awaitRequestCorrelation('wfr-missing', 60);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(await first).toBeNull();
+    expect(await awaitRequestCorrelation('wfr-missing', 60)).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+
+    const other = awaitRequestCorrelation('wfr-other', 60);
+    expect(vi.getTimerCount()).toBe(1);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(await other).toBeNull();
+
+    observeRequestCorrelation({ requestId: 'wfr-missing', conversationId: 'conv-late',
+      sessionId: 'session-late', messageId: 'message-late', tool: '', observedAt: 1 });
+    expect((await awaitRequestCorrelation('wfr-missing', 60))?.conversationId).toBe('conv-late');
+  });
+
+  it('shares a deadline across overlapping callers instead of restarting their grace', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    const first = awaitRequestCorrelation('wfr-overlap', 100);
+    await vi.advanceTimersByTimeAsync(40);
+    const second = awaitRequestCorrelation('wfr-overlap', 100);
+    await vi.advanceTimersByTimeAsync(60);
+    expect(await first).toBeNull();
+    expect(await second).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('retains the remaining longer recorder grace after a shorter identity timeout', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    const short = awaitRequestCorrelation('wfr-longer', 15);
+    await vi.advanceTimersByTimeAsync(15);
+    expect(await short).toBeNull();
+    const longer = awaitRequestCorrelation('wfr-longer', 20);
+    await vi.advanceTimersByTimeAsync(4);
+    expect(vi.getTimerCount()).toBe(1);
+    observeRequestCorrelation({ requestId: 'wfr-longer', conversationId: 'conv-proved',
+      sessionId: 'session-proved', messageId: 'message-proved', tool: '', observedAt: 1 });
+    expect((await longer)?.conversationId).toBe('conv-proved');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('ends the longer grace at its original deadline and leaves zero-time lookups uncharged', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    expect(await awaitRequestCorrelation('wfr-budget', 0)).toBeNull();
+    await vi.advanceTimersByTimeAsync(100);
+    const short = awaitRequestCorrelation('wfr-budget', 15);
+    await vi.advanceTimersByTimeAsync(15);
+    expect(await short).toBeNull();
+    const longer = awaitRequestCorrelation('wfr-budget', 20);
+    await vi.advanceTimersByTimeAsync(5);
+    expect(await longer).toBeNull();
+    expect(await awaitRequestCorrelation('wfr-budget', 20)).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it('keeps one turn-level request id owned across different MCP messages and tools', () => {
     const requestId = 'wfr_shared_turn';
