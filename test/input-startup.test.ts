@@ -14,8 +14,8 @@ beforeEach(() => {
   ports.rows = []; ports.listeners.clear(); ports.backgroundChats = false; ports.running = false;
   ports.status = { state: 'connected', detail: '' }; ports.browser = { connected: false, present: false, lastSeenAt: null };
   ports.bridge.mockResolvedValue(8765); ports.open.mockResolvedValue('chrome.exe');
-  ports.enqueue.mockImplementation(async (input: InputArgs, _finishOwner?: InputEntry['finishOwner'], options?: { backgroundDelivery?: true }): Promise<InputEntry> => {
-    const row: InputEntry = { ...input, ...(options?.backgroundDelivery ? { backgroundDelivery: true } : {}), state: 'queued', owner: null, createdAt: 1, conversationId: input.sessionId ? 'exact-conversation' : null };
+  ports.enqueue.mockImplementation(async (input: InputArgs): Promise<InputEntry> => {
+    const row: InputEntry = { ...input, state: 'queued', owner: null, createdAt: 1, conversationId: input.sessionId ? 'exact-conversation' : null };
     ports.rows.push(row); return row;
   });
   ports.note.mockImplementation(async (id, error) => { const row = ports.rows.find(entry => entry.id === id); if (row) row.error = error ?? undefined; return row; });
@@ -97,12 +97,6 @@ it('preserves background placement for a cold authored send and its explicit ret
   expect(ports.open).toHaveBeenCalledTimes(2);
   for (const call of ports.open.mock.calls) expect(call[1]).toEqual({ backgroundStartup: true });
   expect(ports.enqueue).toHaveBeenCalledTimes(1);
-});
-it('forces a control send into background placement without changing the saved preference', async () => {
-  expect(ports.backgroundChats).toBe(false);
-  await sendDesktopInput(request, { backgroundDelivery: true });
-  expect(ports.open).toHaveBeenCalledWith(expect.stringContaining('cos-input='), { backgroundStartup: true });
-  expect(ports.enqueue).toHaveBeenCalledWith(request, undefined, { backgroundDelivery: true });
 });
 it('cancels an enqueue that commits after the user stopped startup', async () => {
   let commit!: () => void;

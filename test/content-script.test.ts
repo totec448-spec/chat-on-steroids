@@ -760,7 +760,7 @@ describe('desktop input delivery and helper ownership', () => {
     });
     const notice = live.document.createElement('div'); notice.setAttribute('role', 'dialog');
     Object.defineProperty(notice, 'getClientRects', { value: () => [{ width: 400, height: 200 }] });
-    notice.innerHTML = '<h2>Too many requests</h2><p>We have temporarily limited access to conversations to protect your data. Please wait a few minutes.</p><button>Got it</button>';
+    notice.innerHTML = '<h2>Too many requests</h2><p>We have temporarily limited access to conversations to protect your data. Please wait a few minutes.</p>';
     const selection = vi.fn(async () => { live!.document.body.append(notice); return false; });
     (live.window as any).CLF_DOM.selectModelSettings = selection;
     if (!duringPicker) live.document.body.append(notice);
@@ -770,25 +770,6 @@ describe('desktop input delivery and helper ownership', () => {
     expect(failure?.error).toContain('Too many requests');
     expect(failure?.error).toContain('few minutes');
     expect(live.sent.some(message => message.type === 'desktop_input' && (message.ack || message.authorize))).toBe(false);
-  });
-
-  it('records and then acknowledges one exact Korean access-limit modal once', async () => {
-    live = await harness(`https://chatgpt.com/c/${chatA}`);
-    const notice = live.document.createElement('div'); notice.setAttribute('role', 'dialog');
-    Object.defineProperty(notice, 'getClientRects', { value: () => [{ width: 400, height: 200 }] });
-    notice.innerHTML = '<h2>요청이 너무 많습니다</h2><p>요청을 너무 빠르게 보내고 있습니다. 데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다. 몇 분 후 다시 시도해 주세요.</p><button>알겠습니다</button>';
-    const button = notice.querySelector('button')!;
-    Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 80, height: 30 }] });
-    const clicked = vi.fn(); button.addEventListener('click', clicked);
-    live.document.body.append(notice);
-    live.hook.observe();
-    await Promise.resolve();
-    expect(emitted(live.sent, 'chat_error').map(message => message.event)).toEqual([expect.objectContaining({
-      text: expect.stringContaining('요청이 너무 많습니다'), recoverable: false
-    })]);
-    expect(clicked).toHaveBeenCalledTimes(1);
-    live.hook.observe();
-    expect(clicked).toHaveBeenCalledTimes(1);
   });
 
   it.each([false, true])('sends exact High settings only after picker confirmation (%s)', async (confirmed) => {
@@ -15271,7 +15252,7 @@ describe('the goal loop', () => {
 });
 
 describe('app Stop command uses current native turn proof', () => {
-  async function setup(delayedNative = false, minimized = false) {
+  async function setup(delayedNative = false) {
     live = await harness(undefined, {
       stop_redeem: message => ({ ok: true, command: { type: 'stop', conversationId: message.conversationId, turnId: 'placeholder' } }),
       stop_ack: () => ({ ok: true })
@@ -15284,7 +15265,7 @@ describe('app Stop command uses current native turn proof', () => {
     const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
     live.reply.set('stop_redeem', () => ({ ok: true, command: { type: 'stop', turnId, conversationId } }));
     const button = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
-    Object.defineProperty(button, 'getClientRects', { value: () => minimized ? [] : [{ width: 10, height: 10 }] });
+    Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
     let clicks = 0; button.addEventListener('click', () => { clicks++; });
     return { request: { type: 'clf-stop-turn', id: '1111111111111111', turnId, conversationId }, clicks: () => clicks };
   }
@@ -15374,11 +15355,6 @@ describe('app Stop command uses current native turn proof', () => {
   });
   it('refreshes native turn proof when a background render has not observed the mounted assistant yet', async () => {
     const h = await setup(true);
-    expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
-    expect(h.clicks()).toBe(1);
-  });
-  it('stops the proven turn when the app-owned browser is minimized', async () => {
-    const h = await setup(false, true);
     expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
     expect(h.clicks()).toBe(1);
   });

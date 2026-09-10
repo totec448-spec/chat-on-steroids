@@ -13,7 +13,7 @@ import {
   type ControlDependencies,
   type ControlServer
 } from '../src/main/control.js';
-import { controlInputFingerprint, type InputArgs, type InputEntry } from '../src/main/session/input.js';
+import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 
 const model = { id: 'gpt-5-6-thinking', label: 'GPT-5.6 Thinking', efforts: ['high', 'xhigh'] as const };
 const catalog: ChatModelCatalog = { state: 'ready', requestedAt: 1, observedAt: 2,
@@ -31,7 +31,7 @@ function summary(id = 'session-control'): SessionSummary {
 function row(state: InputEntry['state'], overrides: Partial<InputEntry> = {}): InputEntry {
   const input: InputArgs = { id: requestId, sessionId: null, text: 'Run the task', mode: 'auto', dueAt: 100,
     model: model.id, reasoningEffort: 'xhigh' };
-  return { ...input, backgroundDelivery: true, controlFingerprint: controlInputFingerprint(input), state,
+  return { ...input, state,
     owner: null, createdAt: 100, conversationId: null, ...overrides };
 }
 
@@ -44,19 +44,13 @@ function dependencies(): ControlDependencies & { rows: InputEntry[]; sessionsByI
   return {
     rows, sessionsById, eventsById,
     send: vi.fn(async input => {
-      const entry = row('queued', { ...input, backgroundDelivery: true, controlFingerprint: controlInputFingerprint(input), createdAt: Date.now() });
+      const entry = row('queued', { ...input, createdAt: Date.now() });
       rows.push(entry);
       return entry;
     }),
     cancel: vi.fn(async id => {
       const entry = rows.find(candidate => candidate.id === id);
       if (!entry || !['queued', 'browser'].includes(entry.state)) return false;
-      entry.state = 'cancelled';
-      return true;
-    }),
-    cancelDelivered: vi.fn(async id => {
-      const entry = rows.find(candidate => candidate.id === id);
-      if (!entry || entry.state !== 'sent' || entry.backgroundDelivery !== true) return false;
       entry.state = 'cancelled';
       return true;
     }),
@@ -102,7 +96,7 @@ describe('authenticated external control', () => {
     expect(await incompatible.json()).toMatchObject({ error: { code: 'incompatible_version' } });
     const compatible = await call('/v1/capabilities');
     expect(compatible.status).toBe(200);
-    expect(await compatible.json()).toMatchObject({ protocolVersion: 1, backgroundDelivery: 'required', exactModelSelection: 'required', roots: [{ name: 'coin' }] });
+    expect(await compatible.json()).toMatchObject({ protocolVersion: 1, backgroundDelivery: 'app-settings', exactModelSelection: 'required', roots: [{ name: 'coin' }] });
   });
 
   it('reads connection status and invokes only the existing connect lifecycle', async () => {
@@ -124,7 +118,7 @@ describe('authenticated external control', () => {
     expect(await duplicate.json()).toMatchObject({ idempotent: true, request: { requestId, state: 'queued' } });
     expect(deps.send).toHaveBeenCalledTimes(1);
     expect(deps.rows).toHaveLength(1);
-    expect(deps.rows[0]).toMatchObject({ id: requestId, backgroundDelivery: true });
+    expect(deps.rows[0]).toMatchObject({ id: requestId });
   });
 
   it('fails closed for unknown ids and unavailable exact model selections', async () => {
@@ -150,9 +144,8 @@ describe('authenticated external control', () => {
       conversationId: session.conversationId, deliveredAt: 200 }));
 
     const response = await call(`/v1/requests/${requestId}/cancel`, { method: 'POST' });
-    expect(await response.json()).toMatchObject({ cancelAccepted: true, request: { state: 'cancelled' } });
+    expect(await response.json()).toMatchObject({ cancelAccepted: true, request: { state: 'running' } });
     expect(deps.stop).toHaveBeenCalledWith(session.id, 'generation-exact');
-    expect(deps.cancelDelivered).toHaveBeenCalledWith(requestId);
   });
 
   it('never cancels a newer turn through an older controller request', async () => {
@@ -188,7 +181,6 @@ describe('authenticated external control', () => {
 
     const response = await call(`/v1/requests/${requestId}/cancel`, { method: 'POST' });
     expect(response.status).toBe(500);
-    expect(deps.cancelDelivered).not.toHaveBeenCalled();
     expect(deps.rows[0]?.state).toBe('sent');
   });
 

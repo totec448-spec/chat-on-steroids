@@ -7,8 +7,7 @@ import { enqueueInput, cancelInput, listInputs, noteInputStartupError, type Inpu
 
 function wakeBrowser(entry: InputEntry, retry = false): Promise<void> {
   const marker = `cos-input=${encodeURIComponent(entry.id)}`;
-  return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry,
-    entry.backgroundDelivery === true || getConfig().ui.backgroundChats === true);
+  return wakeBrowserUrl(entry.conversationId ? `https://chatgpt.com/c/${encodeURIComponent(entry.conversationId)}` : `https://chatgpt.com/?${marker}#${marker}`, retry, getConfig().ui.backgroundChats === true);
 }
 async function ready(signal?: AbortSignal): Promise<void> {
   await connect();
@@ -47,14 +46,14 @@ export async function cancelDesktopInput(id: string): Promise<boolean> {
   if (start) { start.abort(new Error('Input cancelled')); return true; }
   return cancelInput(id);
 }
-export async function sendDesktopInput(input: InputArgs, options: { backgroundDelivery?: true } = {}): Promise<InputEntry> {
-  if (input.mode === 'finish') return enqueueInput(input, undefined, options);
+export async function sendDesktopInput(input: InputArgs): Promise<InputEntry> {
+  if (input.mode === 'finish') return enqueueInput(input);
   if (starting.has(input.id)) throw new Error('Input already starting');
   const controller = new AbortController(); starting.set(input.id, controller);
   try {
     await ready(controller.signal);
     controller.signal.throwIfAborted();
-    const entry = await enqueueInput(input, undefined, options);
+    const entry = await enqueueInput(input);
     // Cancellation can arrive while the durable enqueue is committing.
     if (controller.signal.aborted) { await cancelInput(input.id); controller.signal.throwIfAborted(); }
     starting.delete(input.id);

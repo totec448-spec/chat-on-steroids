@@ -2501,10 +2501,6 @@
         blocking: error.blocking === true
       });
     }
-    // Keep the failure as session evidence before removing the one known provider
-    // rate-limit obstruction. The DOM adapter owns the exact localized copy, unique
-    // acknowledgement control and per-element once fence; no retry is initiated here.
-    CLF_DOM.acknowledgeProviderAccessLimit?.();
 
     // Last, so the next generation's idea of "what was already on the page" is this tick's
     // page rather than the one it is about to change. Marks are kept only for the newest

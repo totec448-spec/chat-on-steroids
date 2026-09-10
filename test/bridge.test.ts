@@ -65,7 +65,6 @@ const {
   PRO_SILENCE_RETIRE_MS,
   PRO_SILENCE_MS,
   PRO_ACTIVITY_MS,
-  sessionInputActivity,
   COMMAND_DEADLINE_MS,
   REVIVAL_ACTIVITY_MS,
   REVIVAL_DEADLINE_MS,
@@ -1064,44 +1063,6 @@ describe('activity feed', () => {
     expect(reply.body.stream[2]).not.toHaveProperty('args');
     expect(reply.body.stream[2]).not.toHaveProperty('result');
     expect(reply.body.generating).toBe(true);
-  });
-
-  it('keeps the latest durable user anchor when a reconnect resets a tool-heavy activity tail', async () => {
-    await pair();
-    const conversationId = '99999999-8888-7777-6666-555555555556';
-    const observations: Array<Record<string, unknown>> = [
-      {
-        kind: 'user_message',
-        time: Date.now(),
-        text: 'the already completed prompt',
-        messageId: 'user-before-long-answer'
-      }
-    ];
-    for (let index = 0; index < 1200; index++) {
-      observations.push({
-        kind: 'page_tool',
-        time: Date.now() + index + 1,
-        turnId: 'completed-long-turn',
-        messageId: `long-answer-activity-${index}`,
-        text: `step ${index}`
-      });
-    }
-    for (let offset = 0; offset < observations.length; offset += 200) {
-      const recorded = await request('POST', '/events', {
-        body: { conversationId, events: observations.slice(offset, offset + 200) }
-      });
-      expect(recorded.status).toBe(200);
-    }
-
-    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
-    expect(feed.status).toBe(200);
-    expect(feed.body.resetActivity).toBe(true);
-    expect(feed.body.stream).toHaveLength(1200);
-    expect(feed.body.userAnchors).toContainEqual(
-      expect.objectContaining({ messageId: 'user-before-long-answer' })
-    );
-    expect(feed.body.userAnchors.find((anchor: { messageId: string }) =>
-      anchor.messageId === 'user-before-long-answer')).not.toHaveProperty('text');
   });
 
   /**
@@ -5442,16 +5403,13 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it.each([
-    'Too many requests We have temporarily limited access to conversations to protect your data. Please wait a few minutes.',
-    '요청이 너무 많습니다 요청을 너무 빠르게 보내고 있습니다. 데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다. 몇 분 후 다시 시도해 주세요.'
-  ])('records explicit provider access limits without scheduling a reload or silence retry (%s)', async text => {
+  it('records explicit provider access limits without scheduling a reload or silence retry', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       await events(PRIME, [openTurn('limited-turn')]);
       await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'limited-turn', recoverable: false,
-        text }]);
+        text: 'Too many requests We have temporarily limited access to conversations to protect your data. Please wait a few minutes.' }]);
       expect(await maintenance()).toBeNull();
       await vi.advanceTimersByTimeAsync(180_000);
       expect(await maintenance()).toBeNull();
@@ -6476,16 +6434,6 @@ describe('unattributed activity recovery', () => {
       await attributed(timingChat, false, Date.now());
       expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(Date.now() + PRO_ACTIVITY_MS);
     } finally { vi.useRealTimers(); }
-  });
-
-  it('does not treat a stale page-only turn id as exact session activity', async () => {
-    await pair();
-    await events(OTHER, [openTurn('stale-page-turn')]);
-    const sessionId = (await request('GET', `/activity?conversationId=${OTHER}`)).body.sessionId;
-    const summary = (await getSession(sessionId))!;
-    expect(sessionInputActivity({ ...summary, lastTurnOutcome: null }).exact).toBe(true);
-    expect(sessionInputActivity({ ...summary, activeTurnId: null, lastTurnOutcome: null }).exact).toBe(false);
-    expect(sessionInputActivity({ ...summary, lastTurnOutcome: 'completed' }).exact).toBe(false);
   });
 
   for (const fence of ['stop', 'block']) it(`does not revive Pro activity across an explicit ${fence}`, async () => {

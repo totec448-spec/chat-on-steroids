@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 interface DomApi {
-  acknowledgeProviderAccessLimit(): boolean;
   composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
   generating(): boolean;
   sendButton(): HTMLButtonElement | null;
@@ -89,13 +88,6 @@ describe('one native Send and bounded acceptance observation', () => {
     let checks = 0;
     expect(api.stopGeneration(() => ++checks === 1)).toBe(false);
     expect(clicks).not.toHaveBeenCalled();
-    expect(api.stopGeneration(() => true)).toBe(true);
-    expect(clicks).toHaveBeenCalledTimes(1);
-  });
-  it('stops the exact enabled native control while its app-owned browser is minimized', () => {
-    button.dataset.testid = 'stop-button';
-    Object.defineProperty(button, 'getClientRects', { value: () => [] });
-    const clicks = vi.fn(); button.addEventListener('click', clicks);
     expect(api.stopGeneration(() => true)).toBe(true);
     expect(clicks).toHaveBeenCalledTimes(1);
   });
@@ -347,10 +339,8 @@ describe('provider limit notice', () => {
     document.body.append(notice);
     const click = vi.fn(); notice.querySelector('button')!.addEventListener('click', click);
     expect(api.errors()).toEqual([expect.objectContaining({ blocking: true, recoverable: false })]);
-    expect(click).not.toHaveBeenCalled();
-    api.acknowledgeProviderAccessLimit();
     expect(click).toHaveBeenCalledTimes(1);
-    api.errors(); api.acknowledgeProviderAccessLimit(); expect(click).toHaveBeenCalledTimes(1);
+    api.errors(); expect(click).toHaveBeenCalledTimes(1);
     const unrelated = notice.cloneNode(true) as HTMLElement;
     unrelated.querySelector('h2')!.textContent = 'Permission required';
     const accept = vi.fn(); unrelated.querySelector('button')!.addEventListener('click', accept);
@@ -372,37 +362,6 @@ describe('provider limit notice', () => {
     notice.querySelector('p')!.removeAttribute('role');
     notice.removeAttribute('aria-hidden'); notice.querySelector('p')!.textContent = 'An article about rate limits';
     expect(api.errors()).toEqual([]);
-  });
-
-  it.each([
-    ['Too many requests', 'We have temporarily limited access to conversations to protect your data. Please wait a few minutes.', 'Got it'],
-    ['요청이 너무 많습니다', '요청을 너무 빠르게 보내고 있습니다. 데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다. 몇 분 후 다시 시도해 주세요.', '알겠습니다']
-  ])('acknowledges the exact visible provider limit once (%s)', (heading, body, label) => {
-    const notice = document.createElement('div'); notice.setAttribute('role', 'dialog');
-    notice.innerHTML = `<h2>${heading}</h2><p>${body}</p><button>${label}</button>`;
-    document.body.append(notice);
-    const clicked = vi.fn(); notice.querySelector('button')!.addEventListener('click', clicked);
-    expect(api.errors()).toEqual([expect.objectContaining({ blocking: true, recoverable: false })]);
-    expect(api.acknowledgeProviderAccessLimit()).toBe(true);
-    expect(api.acknowledgeProviderAccessLimit()).toBe(false);
-    expect(clicked).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not acknowledge hidden, owned, approximate, ambiguous, consent, login or payment dialogs', () => {
-    const exact = '<h2>요청이 너무 많습니다</h2><p>요청을 너무 빠르게 보내고 있습니다. 데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다. 몇 분 후 다시 시도해 주세요.</p>';
-    const cases = [
-      `<div role="dialog" aria-hidden="true">${exact}<button>알겠습니다</button></div>`,
-      `<div role="dialog" class="clf-stage">${exact}<button>알겠습니다</button></div>`,
-      `<div role="dialog">${exact}<button>계속</button></div>`,
-      `<div role="dialog">${exact}<button>알겠습니다</button><button>로그인</button></div>`,
-      '<div role="dialog"><h2>쿠키 사용 동의</h2><p>환경을 개선하기 위해 쿠키를 사용합니다.</p><button>알겠습니다</button></div>',
-      '<div role="dialog"><h2>로그인</h2><p>계속하려면 로그인하세요.</p><button>알겠습니다</button></div>',
-      '<div role="dialog"><h2>결제 필요</h2><p>요금제를 업그레이드하세요.</p><button>알겠습니다</button></div>'
-    ];
-    document.body.insertAdjacentHTML('beforeend', cases.join(''));
-    const clicked = vi.fn(); document.querySelectorAll('[role="dialog"] button').forEach(button => button.addEventListener('click', clicked));
-    expect(api.acknowledgeProviderAccessLimit()).toBe(false);
-    expect(clicked).not.toHaveBeenCalled();
   });
 });
 

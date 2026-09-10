@@ -8,20 +8,18 @@ import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writ
 import {
   inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
-  authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy,
-  cancelDeliveredControlInput, cancelledControlRequestForSession
+  authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
 import { listUsageSessions } from '../src/main/session/store.js';
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
 
-const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; turnId: string; time: number }, users: [] as Array<Record<string, unknown>> }));
+const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; turnId: string; time: number } }));
 vi.mock('../src/main/session/store.js', () => ({
   listUsageSessions: vi.fn(async () => []),
   conversationWasSuperseded: vi.fn(async () => false),
-  readRecentEvents: vi.fn(async (_id: string, _limit: number, options?: { kinds?: string[] }) =>
-    options?.kinds?.includes('user_message') ? binding.users : binding.end ? [binding.end] : []),
+  readRecentEvents: vi.fn(async () => binding.end ? [binding.end] : []),
   getSession: vi.fn(async (id: string) => ({ id, conversationId: id === 'session-two' ? 'conversation-b' : binding.conversationId, activeTurnId: binding.activeTurnId,
     origin: { kind: binding.origin },
     finishTurn: { turnId: binding.activeTurnId, released: binding.finishReleased },
@@ -61,29 +59,8 @@ beforeEach(async () => {
   binding.activeTurnId = null;
   binding.finishEnabled = true; binding.finishReleased = false; binding.model = 'gpt-6-astra'; binding.leadMinutes = 5; binding.impulseMinutes = 0;
   binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: 0 };
-  binding.users = [];
   now = 1000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
-});
-
-it('fences a cancelled delivered controller request until a later real user input', async () => {
-  const args = input({ model: 'gpt-5.6-sol', reasoningEffort: 'xhigh' });
-  const delivered: InputEntry = { ...args, backgroundDelivery: true, controlFingerprint: 'a'.repeat(64),
-    state: 'sent', owner: 'page', createdAt: now, conversationId: binding.conversationId,
-    deliveredSessionId: sessionId, deliveredAt: now + 1, messageId: 'controller-message' };
-  await writeDurableNow('session-input', [delivered]);
-  resetInputForTests();
-  binding.users = [{ kind: 'user_message', source: 'app', inputId: args.id, time: now + 1 }];
-  expect(await cancelDeliveredControlInput(args.id)).toBe(true);
-  expect(await cancelledControlRequestForSession(sessionId, binding.conversationId)).toBe(args.id);
-
-  // Automatic compaction text is app-owned and has no input id, so it cannot undo Stop.
-  binding.users.push({ kind: 'user_message', source: 'app', time: now + 2 });
-  expect(await cancelledControlRequestForSession(sessionId, binding.conversationId)).toBe(args.id);
-
-  // A later user-authored page message begins a new request and releases only this fence.
-  binding.users.push({ kind: 'user_message', source: 'extension', time: now + 3 });
-  expect(await cancelledControlRequestForSession(sessionId, binding.conversationId)).toBeNull();
 });
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -541,43 +518,6 @@ describe('durable user input ownership', () => {
     expect((await enqueueInput(args)).text).toBe(args.text);
     await expect(enqueueInput({ ...args, text: 'changed' })).rejects.toThrow('different input');
     expect(await listInputs()).toHaveLength(1);
-  });
-  it('keeps a compact durable control receipt as the duplicate authority', async () => {
-    configureInputDelivery({ applyAutomation: automate, changed, recordDelivered: async () => true });
-    const args = input({ dueAt: now, model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
-    const first = await enqueueInput(args, undefined, { backgroundDelivery: true });
-    expect(await claimBrowserInput(first.id, 'page', binding.conversationId)).toMatchObject({ backgroundDelivery: true });
-    expect(await acknowledgeBrowserInput(first.id, 'page', binding.conversationId, 'native-control')).toBe(true);
-    const later = input({ dueAt: now + 1, model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
-    await enqueueInput(later, undefined, { backgroundDelivery: true });
-    resetInputForTests();
-    expect(await enqueueInput(args, undefined, { backgroundDelivery: true })).toMatchObject({
-      id: args.id, state: 'sent', text: '[Control request receipt]', controlFingerprint: expect.any(String)
-    });
-    await expect(enqueueInput({ ...args, text: 'changed' }, undefined, { backgroundDelivery: true })).rejects.toThrow('different input');
-  });
-  it('sends a controller auto request immediately when only a stale activity grant remains', async () => {
-    binding.model = 'gpt-5.6-pro';
-    configureInputDelivery({ applyAutomation: automate, changed, activity: () => ({ possible: true, exact: false }) });
-    const row = await enqueueInput(input(), undefined, { backgroundDelivery: true });
-    expect(row).toMatchObject({ mode: 'auto', transportIntent: 'browser', backgroundDelivery: true });
-    expect(row.requestedMode).toBeUndefined();
-    expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).toMatchObject({ id: row.id, state: 'browser' });
-  });
-  it('recovers a persisted controller auto request misclassified as after-turn', async () => {
-    binding.model = 'gpt-5.6-pro';
-    binding.activeTurnId = 'persisted-completed-turn';
-    configureInputDelivery({ applyAutomation: automate, changed, activity: () => ({ possible: false, exact: false }) });
-    const args = input();
-    const stuck: InputEntry = {
-      ...args, mode: 'after-turn', requestedMode: 'auto', transportIntent: 'browser',
-      backgroundDelivery: true, controlFingerprint: '0'.repeat(64), state: 'queued', owner: null,
-      createdAt: now, conversationId: binding.conversationId
-    };
-    await writeDurableNow('session-input', [stuck]);
-    resetInputForTests();
-    expect(await pendingBrowserInputs()).toEqual([{ id: stuck.id, conversationId: binding.conversationId, reopenUnclaimed: true }]);
-    expect(await claimBrowserInput(stuck.id, 'page', binding.conversationId, true)).toMatchObject({ id: stuck.id, state: 'browser' });
   });
   it('uses the durable session current binding after resume and refuses retired callers', async () => {
     const row = await enqueueInput(input());
@@ -1176,16 +1116,6 @@ it('expires an unclaimed ordinary initial browser attempt 60 seconds after its d
   now++;
   expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed', error: expect.stringContaining('60 seconds') });
   expect(await claimBrowserInput(row.id, 'late', null)).toBeNull();
-});
-it('retains an unclaimed controller request until the browser can pick up the same identity', async () => {
-  binding.model = 'gpt-5.6-pro';
-  const row = await enqueueInput(input(), undefined, { backgroundDelivery: true });
-  now += 24 * 60 * 60_000;
-  resetInputForTests();
-  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', backgroundDelivery: true });
-  expect(await pendingBrowserInputs()).toEqual([
-    { id: row.id, conversationId: binding.conversationId, reopenUnclaimed: true }
-  ]);
 });
 it('never times out an intentional after-turn wait or a finish stage', async () => {
   binding.activeTurnId = 'active';

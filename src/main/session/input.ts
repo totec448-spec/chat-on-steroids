@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { browserInputModel, type InputImage } from '../../shared/input.js';
 import type { SessionSummary } from '../../shared/session.js';
 import { getConfig } from '../config.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
 import { getSession, findSessionByConversation, createSession, conversationWasSuperseded, readRecentEvents, listUsageSessions } from './store.js';
 import { assignSessionProject, projectWorkspace, getSessionProject } from '../projects.js';
@@ -38,10 +38,6 @@ export const inputArgs = z.object({
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({
-  /** Authenticated loopback control must never raise or reuse the user's foreground browser. */
-  backgroundDelivery: z.literal(true).optional(),
-  /** Stable identity survives compacting terminal control rows after history publication. */
-  controlFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   finishOwner: z.object({ turnId: z.string().min(1).max(256), periodic: z.boolean(), userRequested: z.boolean().optional() }).optional(),
   requestedMode: z.enum(['auto', 'after-turn', 'finish']).optional(),
   transportIntent: z.enum(['tool', 'browser']).optional(),
@@ -95,9 +91,7 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
   const [end] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
   const terminal = end?.kind === 'turn_end' && !!end.turnId && end.outcome !== 'unknown';
   return { canInject, queueAtFinish: astra && canInject && getConfig().ui.finishTool === true,
-    // The durable active turn is history after a renderer loss or restart. Live page/tool
-    // evidence owns admission; otherwise a completed turn can strand controller input forever.
-    browserAllowed: !activity.possible && !activity.exact && (!astra || terminal),
+    browserAllowed: !session.activeTurnId && !activity.possible && !activity.exact && (!astra || terminal),
     settled: terminal && (session.lastToolCallAt ?? 0) <= end.time };
 }
 async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
@@ -107,12 +101,7 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
     if (selection?.conversationId === session?.conversationId && isAstraModel(selection?.model, selection?.reasoningEffort)) return false;
   }
   if (!entry.sessionId) return entry.transportIntent !== 'tool';
-  const session = entry.backgroundDelivery ? await getSession(entry.sessionId) : null;
-  const activity = session ? deliveryHooks?.activity?.(session) : undefined;
-  // A completed controller request may retain a conservative `possible` activity grant for
-  // minutes. Exact live work still blocks the next native send; the stale grant does not.
-  const policy = await sessionInputPolicy(entry.sessionId,
-    entry.backgroundDelivery && activity && !activity.exact ? { possible: false, exact: false } : activity);
+  const policy = await sessionInputPolicy(entry.sessionId);
   // Only a never-offered ordinary input may change routes after positive terminal evidence.
   // A tool handout or ambiguous browser claim retains its original exclusive custody.
   return policy.browserAllowed && (entry.transportIntent !== 'tool' ||
@@ -152,9 +141,6 @@ const needsHistory = (row: InputEntry): boolean => row.purpose !== 'decision' &&
 const pendingStages = (row: InputEntry): boolean => row.state === 'sent' && !!row.stages?.length && !row.stagesApplied;
 const ordered = (rows: InputEntry[]): InputEntry[] => [...rows].sort((a, b) =>
   (a.queueOrder ?? a.dueAt) - (b.queueOrder ?? b.dueAt) || a.createdAt - b.createdAt);
-export function controlInputFingerprint(input: InputArgs): string {
-  return createHash('sha256').update(JSON.stringify(inputArgs.parse(input))).digest('hex');
-}
 
 function serial<T>(work: () => Promise<T>): Promise<T> {
   const result = chain.then(work, work);
@@ -208,7 +194,7 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     // Only an ordinary browser attempt has an unclaimed startup deadline. Tool
     // intent survives a later terminal observation/restart; legacy bound-chat
     // rows are ambiguous and cannot safely be reclassified from today's activity.
-    if (row.state === 'queued' && row.backgroundDelivery !== true && row.mode === 'auto' && !row.finishOwner &&
+    if (row.state === 'queued' && row.mode === 'auto' && !row.finishOwner &&
         (row.transportIntent === 'browser' || (!row.transportIntent && !row.sessionId)) &&
         Date.now() - Math.max(row.createdAt, row.dueAt) >= 60_000)
       return { ...row, state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
@@ -275,9 +261,7 @@ function prepare(entry: InputEntry): InputEntry {
   return { ...entry, deliveryText };
 }
 /** Explicit follow-ups spend one verified completed turn; each transport elects its eligible FIFO. */
-const queuedFollowup = (row: InputEntry): boolean =>
-  !(row.backgroundDelivery === true && row.requestedMode === 'auto') &&
-  (row.mode === 'finish' || (row.mode === 'after-turn' && !!row.sessionId && row.purpose !== 'decision'));
+const queuedFollowup = (row: InputEntry): boolean => row.mode === 'finish' || (row.mode === 'after-turn' && !!row.sessionId && row.purpose !== 'decision');
 function append(current: InputEntry[], entry: InputEntry, stackDirect = false): InputEntry[] {
   if (queuedFollowup(entry)) {
     const positioned = current.filter(row => row.sessionId === entry.sessionId && queuedFollowup(row) && !terminal(row) && row.queueOrder !== undefined);
@@ -298,16 +282,11 @@ function append(current: InputEntry[], entry: InputEntry, stackDirect = false): 
   const imageBytes = (row: InputEntry): number => (row.images ?? []).reduce((sum, image) => sum + image.dataUrl.length, 0) +
     (row.attachments ?? []).reduce((sum, file) => sum + (file.preview?.length ?? 0), 0);
   if ([...active, entry].reduce((sum, row) => sum + imageBytes(row), 0) > 4 * 1024 * 1024) throw new Error('The image queue is full');
-  const receiptFloor = Date.now() - 24 * 60 * 60_000;
-  const controlHistory = current.filter(row => row.backgroundDelivery === true && terminal(row) && !needsHistory(row) &&
-    !pendingStages(row) && row.dueAt >= receiptFloor).map(row => ({ ...row, text: '[Control request receipt]', deliveryText: undefined,
-      images: undefined, attachments: undefined, objective: undefined, stages: undefined, response: undefined }));
-  if (entry.backgroundDelivery === true && controlHistory.length >= 1000) throw new Error('Control request receipt capacity reached; retry after older receipts expire');
-  const history = current.filter((row) => row.backgroundDelivery !== true && terminal(row) && !needsHistory(row) && !pendingStages(row)).slice(-50);
+  const history = current.filter((row) => terminal(row) && !needsHistory(row) && !pendingStages(row)).slice(-50);
   const bytes = (row: InputEntry): number => Buffer.byteLength(row.text) + Buffer.byteLength(row.deliveryText ?? '') + Buffer.byteLength(row.response ?? '') + Buffer.byteLength(JSON.stringify(row.stages ?? [])) + imageBytes(row);
-  let retainedBytes = [...history, ...controlHistory, ...active, entry].reduce((sum, row) => sum + bytes(row), 0);
+  let retainedBytes = [...history, ...active, entry].reduce((sum, row) => sum + bytes(row), 0);
   while (history.length && retainedBytes > 2048000) retainedBytes -= bytes(history.shift()!);
-  return [...history, ...controlHistory, ...active, entry];
+  return [...history, ...active, entry];
 }
 async function target(entry: InputEntry): Promise<string | null> {
   if (entry.purpose === 'decision') {
@@ -330,11 +309,7 @@ async function finishInputCurrent(entry: InputEntry): Promise<boolean> {
     session.origin?.kind !== 'worker' && session.origin?.kind !== 'helper' &&
     (entry.finishOwner.userRequested === true || automaticFinishEnabled(session.conversationId));
 }
-export function enqueueInput(
-  raw: InputArgs,
-  finishOwner?: InputEntry['finishOwner'],
-  options: { backgroundDelivery?: true } = {}
-): Promise<InputEntry> {
+export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwner']): Promise<InputEntry> {
   return serial(async () => {
     const input = inputArgs.parse(raw);
     if (input.stages !== undefined && JSON.stringify([input.text, ...input.stages]).length > 12000)
@@ -342,13 +317,7 @@ export function enqueueInput(
     const current = await load();
     const prior = current.find((entry) => entry.id === input.id);
     if (prior) {
-      const sameControl = options.backgroundDelivery === true && prior.backgroundDelivery === true &&
-        prior.controlFingerprint === controlInputFingerprint(input);
-      const sameOrdinary = options.backgroundDelivery !== true && prior.backgroundDelivery !== true &&
-        JSON.stringify(inputArgs.parse({ ...prior, mode: prior.requestedMode ?? prior.mode })) === JSON.stringify(input);
-      if (!sameControl && !sameOrdinary) {
-        throw new Error('Message id already belongs to different input');
-      }
+      if (JSON.stringify(inputArgs.parse({ ...prior, mode: prior.requestedMode ?? prior.mode })) !== JSON.stringify(input)) throw new Error('Message id already belongs to different input');
       return { ...prior };
     }
     const policy = input.sessionId ? await sessionInputPolicy(input.sessionId) : null;
@@ -363,17 +332,11 @@ export function enqueueInput(
       const session = input.sessionId ? await getSession(input.sessionId) : null;
       if ((input.mode === 'finish' && !session?.conversationId) || session?.origin?.kind === 'worker') throw new Error('Queue staged tasks in a normal chat');
     }
-    // External control always crosses the native picker/send path. Tool injection cannot
-    // change or prove a requested model, and foreground placement is forbidden for this authority.
-    // A controller `auto` request waits behind an actually open turn, but a recently
-    // completed Pro activity grant is not a turn. Treating that grant as one leaves the
-    // request waiting for a future completion that may never exist.
-    if (options.backgroundDelivery && input.sessionId && (await getSession(input.sessionId))?.activeTurnId) input.mode = 'after-turn';
-    // Unattributed ordinary work remains neutral when policy forbids both tool and browser
-    // delivery; the existing serialized claim selects transport only when it is allowed.
-    const transportIntent = options.backgroundDelivery || input.attachments?.length ? 'browser' as const : input.mode === 'auto' && !finishOwner
+    // Unattributed work can fence browser Send without making this chat a tool recipient.
+    // Leave that input neutral until the existing serialized claim selects a safe transport.
+    const transportIntent = input.attachments?.length ? 'browser' as const : input.mode === 'auto' && !finishOwner
       ? policy?.canInject ? 'tool' as const : !policy || policy.browserAllowed ? 'browser' as const : undefined : undefined;
-    const entry: InputEntry = { ...input, ...(options.backgroundDelivery ? { backgroundDelivery: true as const, controlFingerprint: controlInputFingerprint({ ...input, mode: requestedMode }) } : {}), ...(transportIntent ? { transportIntent } : {}), ...(requestedMode !== input.mode ? { requestedMode } : {}), ...(finishOwner ? { finishOwner } : {}), state: 'queued', owner: null, createdAt: Date.now(), conversationId: null };
+    const entry: InputEntry = { ...input, ...(transportIntent ? { transportIntent } : {}), ...(requestedMode !== input.mode ? { requestedMode } : {}), ...(finishOwner ? { finishOwner } : {}), state: 'queued', owner: null, createdAt: Date.now(), conversationId: null };
     if (input.projectId) {
       await projectWorkspace(input.projectId);
       if (input.sessionId) {
@@ -442,41 +405,6 @@ export function cancelInput(id: string): Promise<boolean> {
     decisionWaiters.get(id)?.reject(new Error('goal_browser_cancelled'));
     decisionWaiters.delete(id);
     return true;
-  });
-}
-
-/** Mark a delivered external-control request cancelled only after its exact native Stop was queued. */
-export function cancelDeliveredControlInput(id: string): Promise<boolean> {
-  return serial(async () => {
-    const current = await load();
-    const found = current.find(entry => entry.id === id);
-    if (!found || found.backgroundDelivery !== true || found.state !== 'sent' || found.deliveredAt === undefined) return false;
-    await commit(current.map(entry => entry === found
-      ? { ...entry, state: 'cancelled' as const, error: 'Cancelled by the external controller.' }
-      : entry));
-    return true;
-  });
-}
-
-/**
- * A native Stop can end the visible generation while its server-side tool loop starts another
- * turn. Keep that exact controller request fenced until a later real user input is recorded.
- * App-owned continuation/handoff messages have no input id and do not revoke user cancellation.
- */
-export function cancelledControlRequestForSession(sessionId: string, conversationId: string): Promise<string | null> {
-  return serial(async () => {
-    const session = await getSession(sessionId);
-    if (!session || session.conversationId !== conversationId) return null;
-    const candidates = (await load()).filter(entry => entry.backgroundDelivery === true && entry.state === 'cancelled' &&
-      entry.deliveredAt !== undefined && (entry.sessionId === sessionId || entry.deliveredSessionId === sessionId));
-    const cancelled = candidates.sort((a, b) => b.deliveredAt! - a.deliveredAt!)[0];
-    if (!cancelled) return null;
-    const users = await readRecentEvents(sessionId, 512, { kinds: ['user_message'] });
-    const authored = users.findIndex(event => event.kind === 'user_message' && event.inputId === cancelled.id);
-    if (authored < 0) return null;
-    const supersededByUser = users.slice(authored + 1).some(event => event.kind === 'user_message' &&
-      ((event.inputId !== undefined && event.inputId !== cancelled.id) || event.source === 'extension'));
-    return supersededByUser ? null : cancelled.id;
   });
 }
 
@@ -584,9 +512,9 @@ async function completedStageBoundary(entry: InputEntry, current: InputEntry[]):
       row.dueAt <= Date.now() && ['queued', 'browser', 'tool'].includes(row.state))) return null;
   return end.turnId;
 }
-export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; supersededConversationId?: string; lifetime?: 'temporary-planner'; reopenUnclaimed?: true }>> {
+export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; supersededConversationId?: string; lifetime?: 'temporary-planner' }>> {
   return serial(async () => {
-    const result: Array<{ id: string; conversationId: string | null; supersededConversationId?: string; lifetime?: 'temporary-planner'; reopenUnclaimed?: true }> = [];
+    const result: Array<{ id: string; conversationId: string | null; supersededConversationId?: string; lifetime?: 'temporary-planner' }> = [];
     const current = await load();
     for (const entry of ordered(current)) {
       if (!preparable(entry) || entry.dueAt > Date.now()) continue;
@@ -597,8 +525,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         result.push({ id: entry.id, conversationId,
           ...(entry.state === 'queued' && entry.purpose !== 'decision' && entry.sessionId && entry.conversationId && entry.conversationId !== conversationId
             ? { supersededConversationId: entry.conversationId } : {}),
-          ...(entry.lifetime ? { lifetime: entry.lifetime } : {}),
-          ...(entry.state === 'queued' && entry.backgroundDelivery === true ? { reopenUnclaimed: true as const } : {}) });
+          ...(entry.lifetime ? { lifetime: entry.lifetime } : {}) });
       } catch { /* blocked/deleted stays user-visible */ }
     }
     return result;

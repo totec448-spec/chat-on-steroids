@@ -14,7 +14,7 @@ import { connect, getStatus } from './connection.js';
 import { getConfig } from './config.js';
 import { listProjects } from './projects.js';
 import { cancelDesktopInput, sendDesktopInput } from './session/start-input.js';
-import { cancelDeliveredControlInput, controlInputFingerprint, listInputs, type InputArgs, type InputEntry } from './session/input.js';
+import { inputArgs, listInputs, type InputArgs, type InputEntry } from './session/input.js';
 import { getSession, listSessionPage, readOverflowText, readRecentEvents, type SessionListCursor } from './session/store.js';
 import { stopSessionTurn } from './bridge.js';
 import { APP_VERSION } from './version.js';
@@ -51,7 +51,6 @@ export interface ControlRequestView {
 export interface ControlDependencies {
   send(input: InputArgs): Promise<InputEntry>;
   cancel(id: string): Promise<boolean>;
-  cancelDelivered(id: string): Promise<boolean>;
   inputs(): Promise<InputEntry[]>;
   models(): ChatModelCatalog;
   refreshModels(): Promise<ChatModelCatalog>;
@@ -68,14 +67,13 @@ export interface ControlDependencies {
 }
 
 const productionDependencies: ControlDependencies = {
-  send: input => sendDesktopInput(input, { backgroundDelivery: true }),
+  send: sendDesktopInput,
   cancel: cancelDesktopInput,
-  cancelDelivered: cancelDeliveredControlInput,
   inputs: listInputs,
   models: getChatModels,
-  // An explicit refresh may need the companion to start. The discovery wake
-  // uses the app's background startup path and never submits a conversation.
-  refreshModels: () => startChatModelDiscovery(true, true),
+  // The adapter only asks the stock discovery owner to inspect an available page.
+  // Opening or focusing a browser remains an app/UI decision.
+  refreshModels: () => startChatModelDiscovery(false),
   projects: listProjects,
   session: getSession,
   sessions: listSessionPage,
@@ -89,7 +87,7 @@ const productionDependencies: ControlDependencies = {
 };
 
 function sameInput(entry: InputEntry, input: InputArgs): boolean {
-  return entry.backgroundDelivery === true && entry.controlFingerprint === controlInputFingerprint(input);
+  return JSON.stringify(inputArgs.parse({ ...entry, mode: entry.requestedMode ?? entry.mode })) === JSON.stringify(input);
 }
 
 function targetSessionId(entry: InputEntry): string | null {
@@ -160,6 +158,9 @@ export async function controlRequestView(deps: ControlDependencies, entry: Input
     return { ...base, state: 'completed', result: await exactText(deps, sessionId, final.message) };
   }
   const ended = span.findLast(event => event.kind === 'turn_end' && belongsToGeneration(event));
+  if (ended?.kind === 'turn_end' && ended.outcome === 'stopped') {
+    return { ...base, state: 'cancelled', error: ended.detail || 'ChatGPT turn stopped' };
+  }
   if (ended?.kind === 'turn_end' && ended.outcome !== 'completed') {
     return { ...base, state: 'failed', error: ended.detail || `ChatGPT turn ended ${ended.outcome}` };
   }
@@ -237,7 +238,7 @@ export function createControlHandler(deps: ControlDependencies, token: string): 
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
       if (req.method === 'GET' && url.pathname === '/v1/capabilities') {
         return json(res, 200, { protocolVersion: CONTROL_PROTOCOL_VERSION, appVersion: APP_VERSION, recording: deps.recording(), roots: deps.roots(),
-          backgroundDelivery: 'required', exactModelSelection: 'required', statuses: ['queued', 'delivering', 'running', 'completed', 'failed', 'cancelled'],
+          backgroundDelivery: 'app-settings', exactModelSelection: 'required', statuses: ['queued', 'delivering', 'running', 'completed', 'failed', 'cancelled'],
           operations: ['connection', 'connect', 'models', 'model-refresh', 'projects', 'sessions', 'submit', 'status', 'result', 'cancel'] });
       }
       if (req.method === 'GET' && url.pathname === '/v1/connection') return json(res, 200, { connection: deps.connection() });
@@ -300,12 +301,12 @@ export function createControlHandler(deps: ControlDependencies, token: string): 
       const requestMatch = url.pathname.match(/^\/v1\/requests\/([0-9a-f-]{36})(?:\/(cancel))?$/i);
       if (requestMatch && req.method === 'GET' && !requestMatch[2]) {
         const entry = (await deps.inputs()).find(row => row.id === requestMatch[1]);
-        if (!entry || entry.backgroundDelivery !== true) throw new ControlError(404, 'unknown_request', 'The control request does not exist');
+        if (!entry) throw new ControlError(404, 'unknown_request', 'The control request does not exist');
         return json(res, 200, { request: await controlRequestView(deps, entry) });
       }
       if (requestMatch && req.method === 'POST' && requestMatch[2] === 'cancel') {
         const entry = (await deps.inputs()).find(row => row.id === requestMatch[1]);
-        if (!entry || entry.backgroundDelivery !== true) throw new ControlError(404, 'unknown_request', 'The control request does not exist');
+        if (!entry) throw new ControlError(404, 'unknown_request', 'The control request does not exist');
         let accepted = await deps.cancel(entry.id);
         if (!accepted && entry.state === 'sent') {
           const sessionId = targetSessionId(entry);
@@ -313,7 +314,7 @@ export function createControlHandler(deps: ControlDependencies, token: string): 
           const turnId = sessionId && summary ? await exactActiveRequestTurn(deps, entry, summary) : null;
           if (sessionId && turnId) {
             await deps.stop(sessionId, turnId);
-            accepted = await deps.cancelDelivered(entry.id);
+            accepted = true;
           }
         }
         const current = (await deps.inputs()).find(row => row.id === entry.id) ?? entry;

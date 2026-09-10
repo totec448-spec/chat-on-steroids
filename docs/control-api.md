@@ -36,7 +36,7 @@ Errors have one shape:
   "appVersion": "2.0.7",
   "recording": true,
   "roots": [{"name":"coin","path":"F:\\Coin"}],
-  "backgroundDelivery": "required",
+  "backgroundDelivery": "app-settings",
   "exactModelSelection": "required",
   "statuses": ["queued","delivering","running","completed","failed","cancelled"],
   "operations": ["connection","connect","models","model-refresh","projects","sessions","submit","status","result","cancel"]
@@ -80,11 +80,11 @@ Errors have one shape:
 
 Session recording must be enabled so the API can associate the exact submitted user message with its answer. Submission otherwise fails with `409 recording_required`.
 
-The API always uses background native composer delivery for control requests, independently of the user's global **Background chats** preference. It never changes that preference and never raises or reuses a foreground browser window. For an existing busy session, the instruction waits for the current turn to finish. The existing outbox and extension journal remain the only delivery workflow and preserve the same no-automatic-resend rule after an ambiguous browser send.
+The API passes the request to the same native composer delivery path used by the desktop app. Window visibility follows the app's **Background chats** setting; the API neither overrides that setting nor implements a separate delivery or recovery loop. For an existing busy session, the stock outbox decides when the instruction can be delivered.
 
 A new submission returns `202`. Repeating the same UUID and byte-equivalent request returns the original request with `idempotent:true` and does not send again. Reusing it with different content returns `409 request_id_conflict`.
 
-Terminal control receipts are compacted and retained for 24 hours, with a bound of 1,000 current receipts. Callers may retry a request only inside that documented window and must preserve the original `submittedAt`. After the window, use a new UUID; the API returns `410 request_expired` rather than claiming indefinite exactly-once behavior.
+The request ID is the stock outbox message ID. Callers may retry a submission only inside the 24-hour `submittedAt` validation window and must preserve the original ID and timestamp. Retention and compaction remain owned by the app's outbox; the adapter does not add a second receipt lifecycle.
 
 ## Status, result, and cancellation
 
