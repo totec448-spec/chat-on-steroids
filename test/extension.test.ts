@@ -3373,3 +3373,23 @@ it.each(['matching', 'wrong-document', 'unsafe-draft', 'newer-navigation'])('ret
   expect(tabsRemove).toHaveBeenCalledTimes(scenario === 'matching' ? 1 : 0);
   if (scenario === 'matching') expect(sendMessage.mock.calls[0]?.[1]).toMatchObject({ cancelledDecisions: claims });
 });
+
+it.each(['already-pinned', 'pinned-during-close-proof'])('never closes a tab the user pinned: %s', async scenario => {
+  const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const tab = { id: 72, url: `https://chatgpt.com/c/${conversationId}`, active: false, pinned: scenario === 'already-pinned' };
+  const tabsRemove = vi.fn();
+  const sendMessage = vi.fn(async (..._args: unknown[]) => ({ safe: true, conversationId, navigationEpoch: 0 }));
+  let reads = 0;
+  const code = backgroundSource.slice(backgroundSource.indexOf('async function pruneManagedTabs('), backgroundSource.indexOf('\nfunction maintain(', backgroundSource.indexOf('async function pruneManagedTabs(')));
+  const prune = vm.runInNewContext(`${code}\npruneManagedTabs`, {
+    cleanConversationId: (id: string) => id, conversationForTab: () => conversationId,
+    conversationFromUrl: (url: string) => url.split('/c/')[1], tabDocuments: { '72': 'doc' }, tabEpochs: { '72': 0 },
+    ownsDocument: () => true, journalCountForConversation: () => 0,
+    // The second fresh read is the one right before the close: pinning by then must still count.
+    chrome: { tabs: { get: async () => ({ ...tab, pinned: tab.pinned || ++reads === 2 }), sendMessage, remove: tabsRemove } }
+  });
+  const remaining = await prune([tab], { managedConversations: [conversationId], retiredConversations: [conversationId] }, new Set(), new Set());
+  expect(tabsRemove).not.toHaveBeenCalled();
+  expect(remaining).toEqual([tab]);
+  if (scenario === 'already-pinned') expect(sendMessage).not.toHaveBeenCalled();
+});

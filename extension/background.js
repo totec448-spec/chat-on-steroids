@@ -1252,7 +1252,7 @@ async function retireFailedCommandTab(entry) {
       failedCommand: { id: entry.id, client: entry.client } }, { documentId: source.documentId });
     const latest = await chrome.tabs.get(source.tab);
     if (proof?.safe === true && proof.conversationId === null && proof.navigationEpoch === source.navigationEpoch &&
-        latest && !latest.pendingUrl && latest.url === url && ownsDocument(source)) await chrome.tabs.remove(source.tab);
+        latest && latest.pinned !== true && !latest.pendingUrl && latest.url === url && ownsDocument(source)) await chrome.tabs.remove(source.tab);
   } catch { /* A busy, edited, replaced or unreadable page stays open. */ }
 }
 
@@ -1774,7 +1774,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
         const proof = await chrome.tabs.sendMessage(tab.id, { type: 'clf-close-temporary-planner', id: input.id, owner: input.owner }, { documentId });
         const current = await chrome.tabs.get(tab.id);
         const successor = replacement ? await chrome.tabs.get(replacement.id) : null;
-        if (proof?.safe === true && ownsDocument(source) && String(current.url || '').includes(marker) &&
+        if (proof?.safe === true && current.pinned !== true && ownsDocument(source) && String(current.url || '').includes(marker) &&
             (input.retire === true || (successor && replacements.some(next => matchesInput(next, successor))))) await chrome.tabs.remove(tab.id);
       } catch { /* only the exact still-owned temporary document may close */ }
       continue;
@@ -1896,7 +1896,8 @@ function inspectRequestedPluginRefresh(publications, background, browserOnly = f
       let timer;
       const proof = await Promise.race([chrome.tabs.sendMessage(tab.id, { type: 'clf-plugin-refresh-state', id }).catch(() => null), new Promise(resolve => { timer = setTimeout(() => resolve(null), 3000); })]).finally(() => clearTimeout(timer));
       if (proof?.safe !== true) return;
-      if (pluginRefreshMarker(await chrome.tabs.get(tab.id).catch(() => null)) === id) await chrome.tabs.remove(tab.id);
+      const latest = await chrome.tabs.get(tab.id).catch(() => null);
+      if (latest?.pinned !== true && pluginRefreshMarker(latest) === id) await chrome.tabs.remove(tab.id);
     }
     if (!requests.length) return;
     const held = tabs.find(tab => requests.some(request => request.id === pluginRefreshMarker(tab)));
@@ -1980,7 +1981,7 @@ function inspectRequestedModels(request) {
           ]).finally(() => clearTimeout(timer));
           const latest = await chrome.tabs.get(candidate.id);
           if (proof?.safe !== true || proof.conversationId !== null || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source) ||
-            latest.pendingUrl || latest.url !== candidate.url) continue;
+            latest.pinned === true || latest.pendingUrl || latest.url !== candidate.url) continue;
           await chrome.tabs.remove(candidate.id);
         } catch { /* Busy, drafting or changed documents keep their tab for ordinary maintenance. */ }
       }
@@ -2083,6 +2084,9 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
   for (const tab of candidates) {
     const conversationId = conversationForTab(tab);
     if (!Number.isInteger(tab.id)) continue;
+    // A tab the user pinned is theirs to close. Retirement, closable and duplicate
+    // state stay recorded; the tab closes once the user unpins it.
+    if (tab.pinned === true) continue;
     const duplicate = keeper.get(conversationId) !== tab.id && remaining.some(other => other.id !== tab.id && conversationForTab(other) === conversationId);
     if (protectedChats.has(conversationId)) continue;
     // Idleness and broker slot pressure are not retirement. Reusable chats stay
@@ -2097,13 +2101,14 @@ async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
     if (cancelledClaims.length && !cancelledDecisions.length) continue;
     try {
       const current = await chrome.tabs.get(tab.id);
-      if (conversationFromUrl(current.url) !== conversationId || current.pendingUrl) continue;
+      if (current.pinned === true || conversationFromUrl(current.url) !== conversationId || current.pendingUrl) continue;
 
       const proof = await chrome.tabs.sendMessage(tab.id, { type: 'clf-tab-close-check', conversationId,
         allowGenerating: blocked.has(conversationId), ...(cancelledDecisions.length ? { cancelledDecisions } : {}) }, { documentId: source.documentId });
       if (proof?.safe !== true || proof.conversationId !== conversationId || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source)) continue;
       const latest = await chrome.tabs.get(tab.id);
-      if (latest.pendingUrl || conversationFromUrl(latest.url) !== conversationId || !ownsDocument(source) || journalCountForConversation(conversationId) > 0) continue;
+      // Pinning during the close proof counts too: the last read before the close decides.
+      if (latest.pinned === true || latest.pendingUrl || conversationFromUrl(latest.url) !== conversationId || !ownsDocument(source) || journalCountForConversation(conversationId) > 0) continue;
 
       await chrome.tabs.remove(tab.id);
       remaining = remaining.filter(other => other.id !== tab.id);
@@ -2530,7 +2535,7 @@ const HANDLERS = {
       // that navigated while the app durably committed the decision.
       try {
         const current = await chrome.tabs.get(source.tab);
-        if (ownsDocument(source) && conversationFromUrl(current.url) === conversationId) await chrome.tabs.remove(source.tab);
+        if (current.pinned !== true && ownsDocument(source) && conversationFromUrl(current.url) === conversationId) await chrome.tabs.remove(source.tab);
       } catch { /* already closed; the accepted app-side answer remains authoritative */ }
     }
     return result;
