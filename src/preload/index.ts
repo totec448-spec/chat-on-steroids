@@ -140,6 +140,7 @@ const api = {
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
   addProject: () => call<LocalProject | null>('projects:add'),
+  removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   getSessionImage: (id: string, assetId: string) => call<string | null>('sessions:image', { id, assetId }),
   getSession: (id: string, options?: { from?: number; before?: number; limit?: number }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),

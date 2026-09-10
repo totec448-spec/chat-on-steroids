@@ -7,12 +7,14 @@ import { randomUUID } from 'node:crypto';
 import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
   inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
-  failBrowserInput, listInputs, offerToolInput, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
+  failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
 import { listUsageSessions } from '../src/main/session/store.js';
+// Ownership tests inspect messages; batch-specific assertions use the complete delivery below.
+const offerToolInput = async (...args: Parameters<typeof offerToolInputBatch>) => (await offerToolInputBatch(...args)).messages;
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
 
 const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; turnId: string; time: number } }));
@@ -87,20 +89,20 @@ describe('durable user input ownership', () => {
     expect(await hasEligibleToolInput(sessionId, true)).toBe(true);
   });
 
-  it.each([3, 5])('repeats the configured %s-minute Astra reminder for direct input and each planned stage without changing authored text', async lead => {
+  it.each([3, 5])('adds the configured %s-minute reminder once per delivery, preserving each authored message and staged boundary', async lead => {
     binding.leadMinutes = lead;
     const direct = await enqueueInput(input({ text: 'Check the new requirement' }));
     const stage = await enqueueInput(input({ text: 'Verify the next stage', mode: 'finish' }));
-    const first = await offerToolInput(sessionId, binding.conversationId, 'ordinary-tool', now, true);
-    expect(first).toHaveLength(1);
-    expect(first[0]?.text).toContain('The user just sent this instruction.');
-    expect(first[0]?.text).toContain(`Use the session_finish tool ${lead} minutes before you finish the task.`);
-    expect(first[0]?.text).toContain('verify the whole request is complete');
+    const first = await offerToolInputBatch(sessionId, binding.conversationId, 'ordinary-tool', now, true);
+    expect(first.messages).toEqual([{ text: direct.text, images: [] }]);
+    expect(first.reminder).toContain(`about ${lead} minutes of final verification remain`);
+    expect(first.reminder).toContain('only when the requested implementation is complete');
+    expect(first.reminder).toContain('New instructions extend the work; they do not require another finish call');
     now += 1;
-    const second = await offerToolInput(sessionId, binding.conversationId, 'finish-tool', now, true);
-    expect(second).toHaveLength(1);
-    expect(second[0]?.text).toContain(`Use the session_finish tool ${lead} minutes before you finish the task.`);
-    expect(second[0]?.text.match(/Use the session_finish tool/g)).toHaveLength(1);
+    const second = await offerToolInputBatch(sessionId, binding.conversationId, 'finish-tool', now, true);
+    expect(second.messages).toEqual([{ text: stage.text, images: [] }]);
+    expect(second.reminder).toContain(`about ${lead} minutes of final verification remain`);
+    expect(second.reminder.match(/Use session_finish/g)).toHaveLength(1);
     const rows = await listInputs();
     expect(rows.find(row => row.id === direct.id)?.text).toBe('Check the new requirement');
     expect(rows.find(row => row.id === stage.id)?.text).toBe('Verify the next stage');
@@ -112,9 +114,9 @@ describe('durable user input ownership', () => {
     if (condition === 'released') binding.finishReleased = true;
     if (condition === 'helper' || condition === 'worker') binding.origin = condition;
     await enqueueInput(input());
-    const result = await offerToolInput(sessionId, binding.conversationId, 'ordinary-tool', now, true);
-    expect(result).toHaveLength(1);
-    expect(result[0]?.text).not.toContain('session_finish');
+    const result = await offerToolInputBatch(sessionId, binding.conversationId, 'ordinary-tool', now, true);
+    expect(result.messages).toHaveLength(1);
+    expect(result.reminder).toBe('');
   });
 
   it('supersedes only the receiving session Goal and preserves another session queued Goal across restart', async () => {
@@ -152,7 +154,7 @@ describe('durable user input ownership', () => {
     now += 1;
     const next = await offerToolInput(sessionId, binding.conversationId, 'poll', now, true);
     expect(next).toHaveLength(1);
-    expect(next[0]?.text).toContain(stage.id);
+    expect(next[0]?.text).toBe(stage.text);
     now += 1;
     const last = await offerToolInput(sessionId, binding.conversationId, 'poll', now, true);
     expect(last).toHaveLength(1);
@@ -569,7 +571,7 @@ describe('durable user input ownership', () => {
     const row = await seedLegacyInput(input());
     const after = await seedLegacyInput(input({ mode: 'after-turn' }));
     const first = await offerToolInput(sessionId, binding.conversationId, 'same-server-turn', 500);
-    expect(first[0]?.text).toContain(row.id);
+    expect(first[0]?.text).toBe(row.text);
     expect(await offerToolInput(sessionId, binding.conversationId, 'same-server-turn', 500)).toEqual(first);
     expect(await offerToolInput(sessionId, binding.conversationId, 'same-server-turn', now)).toEqual(first);
     now += 1;
@@ -578,13 +580,13 @@ describe('durable user input ownership', () => {
     binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'fresh-end', time: now };
     expect(await claimBrowserInput(after.id, 'after-turn-page', binding.conversationId)).toMatchObject({ id: after.id });
   });
-  it('reoffers stable tool ids after restart instead of treating old timestamps as receipt', async () => {
+  it('reoffers the same input after restart, retaining its internal id rather than treating old timestamps as receipt', async () => {
     const row = await enqueueInput(input());
     await offerToolInput(sessionId, binding.conversationId, 'first', 0);
     resetInputForTests();
     now = 5000;
-    expect((await offerToolInput(sessionId, binding.conversationId, 'after-restart', 4000))[0]?.text).toContain(row.id);
-    expect((await listInputs())[0]?.state).toBe('tool');
+    expect((await offerToolInput(sessionId, binding.conversationId, 'after-restart', 4000))[0]?.text).toBe(row.text);
+    expect((await listInputs())[0]).toMatchObject({ id: row.id, state: 'tool' });
   });
   it('honors due times without letting an after-turn wait block immediate tool input', async () => {
     const later = await seedLegacyInput(input({ dueAt: 2000 }));
@@ -592,7 +594,7 @@ describe('durable user input ownership', () => {
     const auto = await seedLegacyInput(input({ dueAt: 600 }));
     expect((await pendingBrowserInputs()).map(row => row.id)).toEqual([auto.id]);
     expect(await hasEligibleToolInput(sessionId)).toBe(true);
-    expect((await offerToolInput(sessionId, binding.conversationId, 'request', 0)).map(row => row.text)).toEqual([expect.stringContaining(auto.id)]);
+    expect((await offerToolInput(sessionId, binding.conversationId, 'request', 0)).map(row => row.text)).toEqual([auto.text]);
     expect(await pendingBrowserInputs()).not.toContainEqual({ id: after.id, conversationId: binding.conversationId });
     expect(await claimBrowserInput(later.id, 'page', binding.conversationId)).toBeNull();
     expect((await listInputs()).find(row => row.id === after.id)?.state).toBe('queued');
@@ -608,7 +610,7 @@ describe('durable user input ownership', () => {
     expect(await hasEligibleToolInput(sessionId)).toBe(true);
     expect(await offerToolInput(sessionId, 'wrong-conversation', 'request', now)).toEqual([]);
     expect(await offerToolInput(sessionId, binding.conversationId, 'request', now)).toEqual([
-      { text: expect.stringContaining(first.id), images: [] }, { text: expect.stringContaining(second.id), images: [] }
+      { text: first.text, images: [] }, { text: second.text, images: [] }
     ]);
     now += 1;
     await acknowledgeToolInput(sessionId, binding.conversationId, 'request', now);
@@ -951,6 +953,17 @@ it('rejects an oversized restored plan before browser handout and leaves a visib
   expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed', owner: null, error: expect.stringContaining('delivery limit') });
   expect(await pendingBrowserInputs()).toEqual([]);
 });
+it.each(['goal', 'loop'] as const)('delivers the complete saved %s objective even when its generated opening omits constraints', async automation => {
+  configureInputDelivery({ applyAutomation: automate, changed, prepareText: entry => entry.text + '\nHarness reminder' });
+  const first = await enqueueInput(input({ sessionId: null, automation, objective: 'Report numbered arithmetic replies. Use no tools, files or workers.', text: 'LOOP_CEDAR_1' }));
+  const claimed = await claimBrowserInput(first.id, 'page', null, true);
+  expect(claimed?.deliveryText).toContain(first.objective);
+  expect(claimed?.deliveryText).toContain(first.text);
+  expect(claimed?.deliveryText).toContain('Harness reminder');
+  expect((await listInputs()).find(row => row.id === first.id)?.text).toBe(first.text);
+  resetInputForTests();
+  expect((await listInputs()).find(row => row.id === first.id)?.deliveryText).toBe(claimed?.deliveryText);
+});
 it('delivers the original objective and complete workflow in the first plan message', async () => {
   configureInputDelivery({ applyAutomation: automate, changed, prepareText: entry => entry.text + '\nHarness reminder' });
   const first = await enqueueInput(input({ sessionId: null, objective: 'Build the whole requested application with two subagents.', text: 'Implement all requirements; delegate immediately.', stages: ['Exercise the app with computer use and fix failures.', 'Independent code review and final acceptance.'] }));
@@ -962,6 +975,30 @@ it('delivers the original objective and complete workflow in the first plan mess
   resetInputForTests();
   expect((await listInputs()).find(row => row.id === first.id)?.deliveryText).toBe(claimed?.deliveryText);
 });
+it('durably queues all finish-plan stages immediately and keeps manual deletion and edits independent', async () => {
+  const args = input({ mode: 'finish', text: 'First checkpoint', stages: ['Delete this checkpoint', 'Last checkpoint'] });
+  const first = await enqueueInput(args);
+  expect(first.stagesApplied).toBe(true);
+  const initial = await listInputs();
+  expect(initial.map(row => row.text)).toEqual([args.text, ...args.stages!]);
+  expect(initial.every(row => row.state === 'queued' && row.mode === 'finish')).toBe(true);
+  expect(await pendingBrowserInputs()).toEqual([]);
+  resetInputForTests();
+  await enqueueInput(args); // An admission retry must not duplicate the children.
+  expect((await listInputs()).map(row => row.id)).toEqual(initial.map(row => row.id));
+  await cancelInput(initial[1]!.id);
+  await editQueuedInput(initial[2]!.id, 'Edited last checkpoint');
+  const offered = await offerToolInput(sessionId, binding.conversationId, 'finish-first', now, true);
+  expect(offered).toHaveLength(1);
+  expect(offered[0]!.text).toBe('First checkpoint');
+  now++;
+  await acknowledgeToolInput(sessionId, binding.conversationId, 'next-request', now);
+  resetInputForTests();
+  const remaining = (await listInputs()).filter(row => row.state === 'queued');
+  expect(remaining.map(row => row.text)).toEqual(['Edited last checkpoint']);
+  expect((await listInputs()).filter(row => row.text === 'Delete this checkpoint')).toHaveLength(1);
+});
+
 it('materializes remaining plan stages once after exact delivery, across restart', async () => {
   const first = input({ sessionId: null, model: 'gpt-5.6-sol', reasoningEffort: 'high', stages: ['Implement remaining work', 'Verify acceptance'] });
   await enqueueInput(first);
@@ -1077,20 +1114,36 @@ describe('Astra delivery boundaries and stacked direct input', () => {
     binding.activeTurnId = 'active';
     const stage = await enqueueInput(input({ mode: 'finish', text: 'Stage' }));
     const rows: InputEntry[] = [];
-    for (let n = 0; n < 12; n++) rows.push(await enqueueInput(input({ text: `Instruction ${n}` })));
-    const offered = await offerToolInput(sessionId, binding.conversationId, 'poll', now, true);
-    expect(offered).toHaveLength(12);
-    offered.forEach((row, n) => expect(row.text).toContain(`[User message ${rows[n]!.id}]`));
+    for (let n = 0; n < 66; n++) rows.push(await enqueueInput(input({ text: `Instruction ${n}` })));
+    const offered = await offerToolInputBatch(sessionId, binding.conversationId, 'poll', now, true);
+    expect(offered.messages).toHaveLength(66);
+    expect(offered.messages.map(row => row.text)).toEqual(rows.map(row => row.text));
+    expect(JSON.stringify(offered).match(/Use session_finish/g)).toHaveLength(1);
+    for (const row of rows) expect(JSON.stringify(offered)).not.toContain(row.id);
     expect((await listInputs()).find(row => row.id === stage.id)?.state).toBe('queued');
-    expect(await offerToolInput(sessionId, binding.conversationId, 'same', now, true)).toEqual(offered);
+    expect(await offerToolInputBatch(sessionId, binding.conversationId, 'same', now, true)).toEqual(offered);
     now++;
     await acknowledgeToolInput(sessionId, binding.conversationId, 'same', now);
-    expect((await listInputs()).filter(row => row.state === 'sent')).toHaveLength(12);
+    expect((await listInputs()).filter(row => row.state === 'sent')).toHaveLength(66);
     expect(await offerToolInput(sessionId, binding.conversationId, 'same', now, true)).toHaveLength(1);
   });
   it('keeps the one pending normal browser send limit when no turn is active', async () => {
     await enqueueInput(input());
     await expect(enqueueInput(input())).rejects.toThrow('One message');
+  });
+  it('bounds a multibyte batch with one reminder and delivers the remaining input on the next invocation', async () => {
+    binding.activeTurnId = 'active';
+    const rows: InputEntry[] = [];
+    for (let index = 0; index < 3; index++) rows.push(await enqueueInput(input({ text: `${index}:` + '界'.repeat(15998) })));
+    const first = await offerToolInputBatch(sessionId, binding.conversationId, 'request', now);
+    expect(first.messages.map(row => row.text)).toEqual(rows.slice(0, 2).map(row => row.text));
+    const envelope = '\n--- New instructions from the user ---\n' + first.messages.map(row => row.text).join('\n\n') + '\n\n' + first.reminder;
+    expect(Buffer.byteLength(envelope)).toBeLessThanOrEqual(128000);
+    expect((await listInputs()).find(row => row.id === rows[2]!.id)?.state).toBe('queued');
+    const second = await offerToolInputBatch(sessionId, binding.conversationId, 'request', ++now);
+    expect(second.messages.map(row => row.text)).toEqual([rows[2]!.text]);
+    expect(second.reminder).toBe(first.reminder);
+    expect((await listInputs()).filter(row => row.state === 'sent')).toHaveLength(2);
   });
 });
 

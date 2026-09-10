@@ -248,7 +248,7 @@ export async function announceSessionFinish(sessionId: string, summary: string):
     } else if (!queued) notice = await prepareNotice(sessionId, summary);
     const held = await waitForFinishBoundary(sessionId, session.activeTurnId, session.conversationId, deadline - Date.now());
     return held
-      ? `HELD: Keep this same turn open. Do not write a final answer. Process user input attached to this result and any useful remaining work, then call session_finish again. Empty waits do not require invented work. The user can stop generation with the composer Stop button.\n${notice}`
+      ? `HELD: Keep this turn open. Complete and verify the remaining requested work, including attached instructions, before calling session_finish again. New messages and progress updates are not finish checkpoints. If no requested work remains, wait here with session_finish; do not invent work. The user can stop generation with the composer Stop button.\n${notice}`
       : `RELEASED: This hold has ended or its turn changed. Do not repeat the hold; follow the latest user instruction. This is not confirmation that provider generation stopped.\n${notice}`;
   } finally {
     const remaining = (finishCalls.get(key) ?? 1) - 1;

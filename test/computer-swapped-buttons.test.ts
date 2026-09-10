@@ -64,10 +64,13 @@ describe('a swapped-button mouse still gets a primary click (issue #76)', () => 
     // the first version of this test counted them, and the count moved the moment the fix's own
     // comment mentioned a flag by name. A test that a comment can break is measuring the wrong
     // thing.
-    for (const caller of ['public static void Click', 'public static void Drag']) {
+    for (const [caller, nextMethod] of [
+      ['public static void Click', 'public static void Scroll'],
+      ['public static void Drag', 'static INPUT Key']
+    ] as const) {
       const start = HELPER_SCRIPT.indexOf(caller);
       expect(start, `${caller} should still exist`).toBeGreaterThan(-1);
-      const body = HELPER_SCRIPT.slice(start, start + 600);
+      const body = HELPER_SCRIPT.slice(start, HELPER_SCRIPT.indexOf(nextMethod, start));
       expect(body, `${caller} should ask ButtonFlags rather than choosing flags itself`)
         .toMatch(/ButtonFlags\(button, out down, out up\)/);
     }

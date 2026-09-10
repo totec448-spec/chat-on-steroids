@@ -257,6 +257,18 @@ describe('what leaves this machine', () => {
     expect(sent.includes('/project/example')).toBe(includeToolCalls);
   });
 
+  it('gives decision helpers authored requests without executor guidance in the reference transcript', async () => {
+    const { prependUserPrompt } = await import('../src/shared/user-prompt.js');
+    const session = await createSession({ title: 'authored helper context', conversationId: 'authored-helper-context' });
+    const framed = prependUserPrompt('Full workflow carrier', 'EXECUTOR_GUIDANCE_ONLY');
+    await appendEvent(session.id, { time: 100, source: 'app', kind: 'user_message', messageId: 'authored-helper-user',
+      authoredText: 'Original user requirements', message: { text: framed.replace(/\n\n/g, '\n'), chars: framed.length, truncated: false } });
+    const next = prependUserPrompt('Next checkpoint', 'EXECUTOR_GUIDANCE_ONLY');
+    expect(await goal.conversationMessages(session.id, [next])).toEqual([
+      { role: 'user', content: 'Original user requirements' }, { role: 'user', content: 'Next checkpoint' }
+    ]);
+  });
+
   /**
    * The privacy boundary. The goal model decides whether the user's request has been met,
    * and the conversation is the only evidence it needs for that — every tool call,

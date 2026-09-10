@@ -211,7 +211,7 @@ describe('the session-row chat actions', () => {
 
   it('keeps a block visible without hovering, because it is state and not just an action', () => {
     expect(rule('.session-status.is-failed')).toContain('background: var(--red)');
-    expect(chatSource).toContain("indicator.setAttribute('aria-label', status.text)");
+    expect(chatSource).toContain("ui(indicator, 'aria-label', () => t(status.text))");
   });
 
   /**
@@ -271,9 +271,10 @@ describe('the chat panel cards', () => {
 
   it('gives the session card one row per child, including its navigation row', () => {
     const card = document.getElementById('chatBody')!.closest('.card')!;
-    // Subhead, scrolling conversation, finish-task cards, composer and footer.
+    // Subhead, scrolling conversation, shared plan/queue dock, composer and footer.
     const layoutChildren = [...card.children].filter(child => child.id !== 'chatSettingsBtn');
     expect(layoutChildren.length).toBe(5);
+    expect(document.getElementById('composerDock')!.firstElementChild?.id).toBe('agentPlan');
     expect(document.getElementById('inputQueue')!.closest('#chatBody')).not.toBeNull();
     expect(card.classList.contains('is-session')).toBe(true);
     expect(tracks("[data-panel='chat'] .card.is-session")).toHaveLength(layoutChildren.length);
@@ -445,6 +446,9 @@ describe('the settings sheet', () => {
     }
     // Selects and textareas save through the same change listener.
     for (const field of pane.querySelectorAll('select, textarea')) {
+      // Interface language persists in the renderer; the event/storage behavior is
+      // covered by renderer-i18n, independently of the app configuration channel.
+      if (field.id === 'uiLanguage') continue;
       expect(listened![1], `#${field.id} never saves`).toContain(`'${field.id}'`);
     }
   });

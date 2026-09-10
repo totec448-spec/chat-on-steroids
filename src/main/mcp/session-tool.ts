@@ -13,8 +13,9 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { SessionEvent, SessionSummary, StoredText } from '../../shared/session.js';
-import { getSession, readEverySummary, readEvents } from '../session/store.js';
+import { getSession, indexedSessions, readEvents } from '../session/store.js';
 import { noteCount, noteDetail } from './call-context.js';
+import { toolDeclaration } from './tool-declarations.js';
 import { expandStored, fail, guard, ok, type SurfaceRegistrar, type ToolResult } from './kernel.js';
 
 const SEARCH_RESULT_TOKENS = 3_000;
@@ -157,7 +158,7 @@ const inputSchema = z
 export function registerSessionTool(reg: SurfaceRegistrar): void {
   reg.register(
     'session',
-    {
+    toolDeclaration('session', () => ({
       title: 'Recorded sessions',
       description:
         'Search and read this app’s local recordings, including other and concurrently running chats. ' +
@@ -167,7 +168,7 @@ export function registerSessionTool(reg: SurfaceRegistrar): void {
         'Pass a short T… reference as tool_call to inspect exact arguments and result. Cursors are short tokens; copy them exactly.',
       inputSchema,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-    },
+    })),
     async (input) =>
       guard('session', async () => {
         if (!reg.sessionToolsLive) return reg.featureDisabled('Session recording', 'Record sessions');
@@ -189,11 +190,9 @@ async function searchSessions(queryInput?: string, cursorInput?: string): Promis
     offset = cursor.offset;
   }
 
-  // The bounded list would make the two answers below lie: past the cap this reports
-  // "No older recorded sessions remain" and search_complete to the model while older
-  // sessions exist. It is also the cheaper path once the catalog is warm, since it reads
-  // the in-process catalog instead of a readdir plus a meta read per folder.
-  const sessions = await readEverySummary();
+  // Search must not report completion while retained sessions remain beyond the
+  // compatibility list's scan cap. Share the same full catalog as identity repair.
+  const sessions = await indexedSessions();
   if (sessions.length === 0) return ok('No recorded sessions exist on this machine yet.');
   if (offset >= sessions.length) return ok('No older recorded sessions remain.\nsearch_complete: true');
 

@@ -9,7 +9,8 @@ import {
   readDurable,
   resetDurableForTests,
   writeDurableNow,
-  writeDurableSoon
+  writeDurableSoon,
+  writeDurableSnapshotSoon
 } from '../src/main/durable.js';
 
 const cleanup: string[] = [];
@@ -28,6 +29,84 @@ async function tempStore(): Promise<string> {
 }
 
 describe('durable state commit boundary', () => {
+  it('starts independent pending files during flush without duplicating an active immediate write', async () => {
+    await tempStore();
+    let release!: () => void;
+    let entered!: () => void;
+    const blocked = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const realRename = fs.rename.bind(fs);
+    const rename = vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args) => {
+      entered();
+      await gate;
+      return realRename(...args);
+    });
+    const first = writeDurableNow('first', { version: 1 });
+    await blocked;
+    writeDurableSoon('independent', { ready: true });
+    const flushing = flushDurable();
+    try {
+      await vi.waitFor(async () => expect(await readDurable('independent')).toEqual({ ready: true }));
+    } finally { release(); }
+    await Promise.all([first, flushing]);
+    expect(rename).toHaveBeenCalledTimes(2);
+  });
+
+  it('lets an independent file commit while preserving the blocked file FIFO', async () => {
+    await tempStore();
+    let release!: () => void;
+    let entered!: () => void;
+    const blocked = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const realRename = fs.rename.bind(fs);
+    vi.spyOn(fs, 'rename').mockImplementationOnce(async (...args) => {
+      entered();
+      await gate;
+      return realRename(...args);
+    });
+    const first = writeDurableNow('first', { version: 1 });
+    await blocked;
+    const second = writeDurableNow('first', { version: 2 });
+    try {
+      await writeDurableNow('independent', { ready: true });
+      await expect(readDurable('independent')).resolves.toEqual({ ready: true });
+      await expect(readDurable('first')).resolves.toBeNull();
+    } finally { release(); }
+    await Promise.all([first, second]);
+    await expect(readDurable('first')).resolves.toEqual({ version: 2 });
+  });
+
+  it('coalesces lazy allocations and retains a captured snapshot after a failed write', async () => {
+    await tempStore();
+    let version = 1;
+    const snapshot = vi.fn(() => ({ version }));
+    for (let i = 0; i < 50; i++) writeDurableSnapshotSoon('projection', snapshot);
+    expect(snapshot).not.toHaveBeenCalled();
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('busy'));
+    await expect(flushDurable()).rejects.toThrow('busy');
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    version = 2;
+    rename.mockRestore();
+    await flushDurable();
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    await expect(readDurable('projection')).resolves.toEqual({ version: 1 });
+  });
+
+  it('never substitutes a later lazy projection for an immediate commit generation', async () => {
+    await tempStore();
+    const writes: unknown[] = [];
+    const realWrite = fs.writeFile.bind(fs);
+    vi.spyOn(fs, 'writeFile').mockImplementation(async (...args) => {
+      writes.push(JSON.parse(String(args[1])));
+      return realWrite(...args);
+    });
+    const immediate = writeDurableNow('projection', { version: 1 });
+    writeDurableSnapshotSoon('projection', () => ({ version: 2 }));
+    await immediate;
+    await flushDurable();
+    expect(writes).toEqual([{ version: 1 }, { version: 2 }]);
+  });
+
   it('rejects a failed immediate atomic rename and preserves the snapshot for retry', async () => {
     await tempStore();
     const busy = Object.assign(new Error('injected rename contention'), { code: 'EBUSY' });

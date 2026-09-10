@@ -9,7 +9,8 @@
  * no amount of DOM reading from the isolated world can recover the ones it folded away.
  * The same bounded bridge also reads account-evaluated model choices and the installed
  * connector's public tool declarations. Neither path exports account/session objects or
- * invokes React callbacks; the isolated world owns UI actions and operation claims.
+ * invokes React action callbacks; the named serverId$ signal is read only for durable
+ * conversation identity. The isolated world owns UI actions and operation claims.
  *
  * Everything here is written on the assumption that it is the least trusted code in the
  * extension:
@@ -218,18 +219,30 @@
    */
   function conversationEvidenceOf(fiber) {
     let found = null;
+    const conversations = new Map();
     let at = fiber;
     for (let up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
       const props = at.memoizedProps;
       if (!props || typeof props !== 'object') continue;
       const turn = props.turn && typeof props.turn === 'object' ? props.turn : null;
-      // Mounted helper turns now carry the owner in conversation.id. Read it here,
-      // alongside older shapes, so terminal consumers keep their exact-chat fence.
+      // The mounted conversation.id can be a local WEB identity, not the /c id.
+      // Its serverId$ signal is the read-only durable identity used by that same
+      // conversation object. Read it once per object; never equate the local id
+      // with the page route or infer ownership from the URL itself.
       const conversation = props.conversation && typeof props.conversation === 'object' ? props.conversation : null;
-      const values = [props.clientThreadId, props.conversationId, conversation && conversation.id, turn && turn.clientThreadId, turn && turn.conversationId];
+      if (conversation && !conversations.has(conversation)) {
+        let serverId = null;
+        try {
+          const value = typeof conversation.serverId$ === 'function' ? conversation.serverId$() : null;
+          if (typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value)) serverId = value;
+        } catch { /* Unresolved signal carries no durable identity. */ }
+        conversations.set(conversation, serverId);
+      }
+      const values = [props.clientThreadId, props.conversationId, conversation && conversation.id,
+        conversations.get(conversation), turn && turn.clientThreadId, turn && turn.conversationId];
       for (let index = 0; index < values.length; index++) {
         const value = str(values[index]);
-        if (!value) continue;
+        if (!value || value.startsWith('WEB:')) continue;
         if (found && found !== value) return { conversationId: null, conflict: true };
         found = value;
       }

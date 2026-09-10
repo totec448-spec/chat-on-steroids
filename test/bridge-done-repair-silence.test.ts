@@ -41,7 +41,7 @@ const {
 const { recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
-const CHAT = '6a9705af-0d44-83ed-a5e3-b7b68df77df1';
+const CHAT = '0000000b-0000-8000-a000-00000000000b';
 const TURN = 'g-1cn09rgnc5jts-1-1';
 const ERROR_TEXT = 'Connection interrupted. Waiting for the complete answer';
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';

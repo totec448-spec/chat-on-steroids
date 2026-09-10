@@ -287,6 +287,8 @@ export type SessionEvent =
       final: boolean;
       /** This exact stable reply was proven terminal and may enter Goal policy. */
       goalEligible?: boolean;
+      /** Store-owned sequence of the latest final text/state change; rendering/metadata cannot advance it. */
+      finalContentSeq?: number;
       /** First sequence assigned to this logical message; later revisions keep this anchor. */
       origin?: number;
     })

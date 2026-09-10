@@ -1,3 +1,4 @@
+import { t, ui } from './i18n.js';
 /**
  * The handful of DOM helpers both panels need.
  *
@@ -18,10 +19,11 @@ export function icon(name: string, className = 'ico'): SVGElement {
   return svg;
 }
 
-export function el(tag: string, className = '', text = ''): HTMLElement {
+export function el(tag: string, className = '', text: string | (() => string) = ''): HTMLElement {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text) node.textContent = text;
+  if (typeof text === 'function') ui(node, 'textContent', text);
+  else if (text) node.textContent = text;
   return node;
 }
 
@@ -66,19 +68,19 @@ export async function run<T>(
 
 /** "12s ago" for a timestamp the main process vouched for, "never" for null. */
 export function ago(atMs: number | null): string {
-  if (atMs === null) return 'never';
+  if (atMs === null) return t("never");
   const seconds = Math.max(0, Math.round((Date.now() - atMs) / 1000));
-  if (seconds < 3) return 'just now';
-  if (seconds < 90) return `${seconds}s ago`;
+  if (seconds < 3) return t("just now");
+  if (seconds < 90) return t("{0}s ago", [seconds]);
   const minutes = Math.round(seconds / 60);
-  return minutes < 90 ? `${minutes}m ago` : `${Math.round(minutes / 60)}h ago`;
+  return minutes < 90 ? t("{0}m ago", [minutes]) : t("{0}h ago", [Math.round(minutes / 60)]);
 }
 
 /** The same age as one glanceable token: "8s", "2m", "—" when there is nothing. */
 export function shortAgo(atMs: number | null): string {
   if (atMs === null) return '—';
   const seconds = Math.max(0, Math.round((Date.now() - atMs) / 1000));
-  if (seconds < 3) return 'now';
+  if (seconds < 3) return t("now");
   if (seconds < 90) return `${seconds}s`;
   const minutes = Math.round(seconds / 60);
   return minutes < 90 ? `${minutes}m` : `${Math.round(minutes / 60)}h`;

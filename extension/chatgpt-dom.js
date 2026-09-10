@@ -56,6 +56,43 @@ var CLF_DOM = (() => {
   const text = (node, cap = 256_000) =>
     node ? (node.textContent || '').replace(/ /g, ' ').trim().slice(0, cap) : '';
 
+  // Wire framing matches shared/user-prompt.ts; neither reader changes provider text.
+  const promptContinuation = value => /^\[\[CLF-(?:HANDOFF|RESUME):[A-Za-z0-9_-]{16,64}\]\]\n\n/.exec(value)?.[0] ?? '';
+  function userPromptText(value) {
+    value = value.replace(/\r\n?/g, '\n');
+    const identity = promptContinuation(value);
+    const header = /^\[\[COS_CONTEXT:(\d{1,6})\]\]\n/.exec(value.slice(identity.length));
+    if (!header) return null;
+    const end = identity.length + header[0].length + Number(header[1]);
+    const boundary = '\n[[/COS_CONTEXT]]\n\n';
+    return value.startsWith(boundary, end) ? identity + value.slice(end + boundary.length) : null;
+  }
+  function presentUserPrompts(readUserText) {
+    return safe(() => {
+      for (const raw of document.querySelectorAll('[data-message-author-role="user"] :is(.whitespace-pre-wrap, .markdown):not([data-clf-user-text])')) {
+        // Both native renderers can consume Markdown bytes. Parse the same
+        // exact-id source used by receipts/recording, never reconstructed HTML.
+        const holder = raw.closest('[data-message-author-role="user"]');
+        const source = readUserText ? readUserText({ role: 'user', id: holder?.getAttribute('data-message-id'),
+          node: raw.closest(TURN), text: messageText(holder, 'user') }) : raw.textContent;
+        const authored = typeof source === 'string' ? userPromptText(source) : null;
+        let display = raw.nextElementSibling?.matches('[data-clf-user-text]') ? raw.nextElementSibling : null;
+        if (authored === null) {
+          raw.removeAttribute('data-clf-prompt-hidden'); display?.remove(); continue;
+        }
+        if (!display) {
+          display = document.createElement('div');
+          display.setAttribute('data-clf-user-text', '');
+          display.className = 'whitespace-pre-wrap';
+          display.dir = 'auto';
+          raw.after(display);
+        }
+        if (display.textContent !== authored) display.textContent = authored;
+        if (!raw.hasAttribute('data-clf-prompt-hidden')) raw.setAttribute('data-clf-prompt-hidden', '');
+      }
+    });
+  }
+
   /**
    * Visible page text with every CLF-owned surface removed first.
    *
@@ -65,7 +102,7 @@ var CLF_DOM = (() => {
    * That is the exact loop that produced twenty copies of the same assistant update. Clone
    * and strip our nodes before extracting page text. Unknown/fake DOMs fall back safely.
    */
-  const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
+  const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot, [data-clf-user-text]';
 
   /**
    * Removes this extension's own rendered surfaces from a clone, in place.
@@ -135,6 +172,7 @@ var CLF_DOM = (() => {
       if (!node) return '';
       if (role === 'user') {
         const parts = [...node.querySelectorAll('.whitespace-pre-wrap')]
+          .filter(part => !part.hasAttribute?.('data-clf-user-text'))
           .map((part) => text(part))
           .filter(Boolean);
         if (parts.length > 0) return parts.join('\n');
@@ -598,13 +636,32 @@ var CLF_DOM = (() => {
     };
   }
 
-  /** True while ChatGPT is producing a turn. The stop button is the honest signal. */
+  /** A native control must belong to the rendered composer, never quoted history or a stale hidden tree. */
+  function renderedComposerNode(node) {
+    if (!node?.isConnected || node.closest(`${OWN_SURFACES}, ${TURN}, [data-message-author-role], [hidden], [aria-hidden="true"], [inert]`)) return false;
+    for (let parent = node; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+    }
+    return true;
+  }
+
+  function nativeComposerControls(selector) {
+    const form = composer()?.closest('form');
+    return [...(form || document).querySelectorAll(selector)].filter(button =>
+      renderedComposerNode(button) && (!form || button.closest('form') === form));
+  }
+
+  /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */
   function generating() {
-    return safe(() => document.querySelector(STOP) !== null, false);
+    return safe(() => nativeComposerControls(STOP).length > 0, false);
   }
 
   function stopButton() {
-    return safe(() => document.querySelector(STOP), null);
+    return safe(() => {
+      const buttons = nativeComposerControls(STOP);
+      return buttons.length === 1 ? buttons[0] : null;
+    }, null);
   }
 
   /** Only a visible, enabled native Stop control may end a proven turn. */
@@ -621,7 +678,10 @@ var CLF_DOM = (() => {
 
   /** The page-owned Send control, exposed so content.js can witness an actual submission. */
   function sendButton() {
-    return safe(() => document.querySelector(SEND), null);
+    return safe(() => {
+      const buttons = nativeComposerControls(SEND);
+      return buttons.length === 1 ? buttons[0] : null;
+    }, null);
   }
 
   // File tiles can appear while ChatGPT is still processing them and disables Send
@@ -1390,13 +1450,13 @@ var CLF_DOM = (() => {
     return safe(() => {
       // The current provider microphone has no stable button test id; its sprite and
       // composer trailing parent identify it without interpreting a translated label.
-      const anchor = document.querySelector(SEND) || document.querySelector(STOP) || document.querySelector(SPEECH) ||
+      const anchor = sendButton() || stopButton() || nativeComposerControls(SPEECH)[0] ||
         [...(composerBox()?.querySelectorAll(`${TRAILING} button`) || [])]
         .find(button => !button.closest(OWN_SURFACES) && [...button.querySelectorAll('svg use')].some(use => {
           const href = use.getAttribute('href') || use.getAttribute('xlink:href') || '';
           return href.slice(href.lastIndexOf('#')) === '#microphone-regular-24';
         }));
-      const explicit = anchor ? anchor.closest(TRAILING) : document.querySelector(TRAILING);
+      const explicit = anchor ? anchor.closest(TRAILING) : [...(composerBox() || document).querySelectorAll(TRAILING)].find(renderedComposerNode);
       if (!anchor) return explicit ? { host: explicit, before: null } : null;
 
       // The row that holds several controls, not the wrapper around this one button.
@@ -1608,15 +1668,16 @@ var CLF_DOM = (() => {
     }, false);
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null } = {}) {
     try {
       const box = composer();
       if (!box || !box.isConnected || !stillCurrent() || generating() || stopButton()) return false;
       if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return false;
       // Rich editors use adjacent paragraphs for newlines; textContent concatenates
       // their words. Preserve those boundaries when matching the rendered user message.
-      const submitted = (typeof box.innerText === 'string' ? box.innerText : [...box.childNodes]
+      const draftText = () => (typeof box.innerText === 'string' ? box.innerText : [...box.childNodes]
         .map((node) => (node.textContent || '') + (/^(P|DIV|BR)$/.test(node.nodeName) ? '\n' : '')).join('')).trim();
+      const submitted = draftText();
       if (!submitted) return false;
       const compact = (value) => String(value || '').replace(/\s+/g, ' ').trim();
       const expected = compact(submitted);
@@ -1656,6 +1717,8 @@ var CLF_DOM = (() => {
 
       return await new Promise((resolve) => {
         let done = false;
+        let attempted = false;
+        let authorizing = false;
         let observer = null;
         let timer = null;
         let unsubscribeEvidence = null;
@@ -1673,8 +1736,39 @@ var CLF_DOM = (() => {
           resolve(value);
         };
         const check = () => {
+          if (done) return;
           if (!stillCurrent() || (beforeConversation && conversationId() !== beforeConversation)) return finish(false);
-          if (accepted()) finish(true);
+          if (attempted) {
+            if (accepted()) finish(true);
+            return;
+          }
+          // React can enable/mount Send after accepting our editor input. Observe that
+          // readiness through this same bounded operation; neither a guessed Enter nor
+          // an unrelated Stop/composer-clear is evidence that this draft was submitted.
+          if (conversationId() !== beforeConversation || composer() !== box || !box.isConnected ||
+              draftText() !== submitted || generating()) return finish(false);
+          if (box.getAttribute('aria-disabled') === 'true' || box.getAttribute('contenteditable') === 'false') return;
+          const button = sendButton();
+          if (!sendButtonEnabled(button)) return;
+          if (authorizing) return;
+          const click = () => {
+            if (done) return;
+            // Authorization can await the app. The exact editor, text and native control
+            // must still be the ones it authorized; a late answer cannot revive this send.
+            if (!stillCurrent() || conversationId() !== beforeConversation || composer() !== box ||
+                !box.isConnected || draftText() !== submitted || generating() || sendButton() !== button ||
+                !sendButtonEnabled(button) || box.getAttribute('aria-disabled') === 'true' ||
+                box.getAttribute('contenteditable') === 'false') return finish(false);
+            attempted = true;
+            try { button.click(); } catch { return finish(false); }
+            check(); // Synchronous navigation/cancellation during click also re-proves ownership.
+          };
+          if (!beforeSend) return click();
+          authorizing = true;
+          // Claim/dispatch authority belongs at readiness, not before a possibly long
+          // disabled-Send wait. This is still one attempt under the existing deadline.
+          try { Promise.resolve(beforeSend(() => !done && stillCurrent())).then(allowed => allowed === true ? click() : finish(false), () => finish(false)); }
+          catch { finish(false); }
         };
 
         observer = new MutationObserver(check);
@@ -1685,28 +1779,10 @@ var CLF_DOM = (() => {
           attributes: true
         });
         if (observeEvidence) unsubscribeEvidence = observeEvidence(check);
-        // Observe this one click through late React acceptance; never click again. The
-        // upper bound remains below the app's command lease/deadline.
+        // Readiness and acceptance share one deadline below the app's command lease.
         const timeout = Number.isFinite(acceptanceTimeoutMs) ? Math.max(1, Math.min(30000, acceptanceTimeoutMs)) : 30000;
-        timer = setTimeout(() => { check(); finish(false); }, timeout);
-
-        try {
-          const button = document.querySelector(SEND);
-          if (button && !sendButtonEnabled(button)) return finish(false);
-          if (!stillCurrent()) return finish(false);
-          if (button) {
-            button.click();
-          } else {
-            const key = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
-            box.dispatchEvent(new KeyboardEvent('keydown', key));
-            box.dispatchEvent(new KeyboardEvent('keyup', key));
-          }
-          // Close the race where the acceptance mutation happens synchronously inside the
-          // click/keyboard handler before MutationObserver gets its microtask callback.
-          check();
-        } catch {
-          finish(false);
-        }
+        timer = setTimeout(() => { if (attempted) check(); finish(false); }, timeout);
+        check();
       });
     } catch {
       return false;
@@ -2016,6 +2092,62 @@ var CLF_DOM = (() => {
     }
   }
 
+  function projectHomeId(pathname = location.pathname) {
+    return /^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?\/project\/?$/i.exec(pathname)?.[1]?.toLowerCase() || null;
+  }
+
+  /** Enter a Project through its source chat's native link. Cold /project loads can error. */
+  async function enterProject(entry, stillCurrent = () => true) {
+    if (!entry || !/^g-p-[0-9a-f]{32}$/.test(entry.id) || conversationId() !== entry.sourceConversationId) return false;
+    return new Promise(resolve => {
+      let clicked = false, done = false, sourceComposer = null;
+      const interrupt = event => { if (event.isTrusted) finish(false); };
+      const finish = result => {
+        if (done) return;
+        done = true; observer.disconnect(); clearTimeout(timer);
+        document.removeEventListener('pointerdown', interrupt, true);
+        document.removeEventListener('keydown', interrupt, true);
+        resolve(result);
+      };
+      const check = () => {
+        if (done) return;
+        if (!stillCurrent()) return finish(false);
+        if (clicked && projectHomeId() === entry.id && composer()?.isConnected && composer() !== sourceComposer && !turns().length) return finish(true);
+        if (conversationId() !== entry.sourceConversationId) {
+          if (projectHomeId() !== entry.id) finish(false);
+          return;
+        }
+        if (clicked) return;
+        // The native header arrives before the source chat finishes loading. Its link
+        // alone is not readiness: an early click can be swallowed during hydration and
+        // would also leave us comparing the destination editor with a null source.
+        // Preserve the source draft/generation and spend our one click only once its
+        // actual editor is mounted and ready.
+        const source = composer();
+        if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
+        const links = [...document.querySelectorAll('header a[href], [role="banner"] a[href]')].filter(link =>
+          link.querySelector('[data-testid="project-folder-icon"]') && !link.closest(OWN_SURFACES) &&
+          new URL(link.href, location.href).origin === location.origin && projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
+        if (links.length !== 1) return;
+        sourceComposer = source;
+        clicked = true;
+        // Loading the source and following its link are separate page transitions.
+        // Reuse the same deadline timer; source loading must not consume the budget
+        // for observing the replacement editor after the one permitted click.
+        clearTimeout(timer);
+        timer = setTimeout(() => finish(false), 12_000);
+        links[0].click();
+        check();
+      };
+      const observer = new MutationObserver(check);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
+      let timer = setTimeout(() => finish(false), 12_000);
+      document.addEventListener('pointerdown', interrupt, true);
+      document.addEventListener('keydown', interrupt, true);
+      check();
+    });
+  }
+
   async function newChatControl(stillCurrent = () => true) {
     const shown = node => node && !node.closest(OWN_SURFACES) && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const link = (root = document) => [...root.querySelectorAll('a[data-testid="create-new-chat-button"][data-sidebar-item="true"][href="/"]')].find(shown) || null;
@@ -2041,9 +2173,13 @@ var CLF_DOM = (() => {
     });
   }
   return {
+    userPromptText,
+    presentUserPrompts,
     composerVisible,
     prepareChatModelSurface,
     newChatControl,
+    projectHomeId,
+    enterProject,
     visibleModelSelection,
     inspectModelSettings,
     uploadImages,

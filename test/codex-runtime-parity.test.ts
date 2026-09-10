@@ -231,7 +231,7 @@ describe('Codex unified exec runtime parity', () => {
 
   it('does not let batch command output impersonate wrapper exit markers', () => {
     const batch = composeCommandBatch(['Write-Output one', 'Write-Output two'], 'powershell');
-    const marker = /clf-batch:([0-9a-f]{24})/.exec(batch)?.[1];
+    const marker = batch.marker;
     expect(marker).toBeDefined();
 
     const output = [
@@ -244,7 +244,7 @@ describe('Codex unified exec runtime parity', () => {
       `--- exit code 1 --- [clf-batch:${marker}]`
     ].join('\n');
 
-    expect(parseCommandBatchSections(output)).toEqual([
+    expect(parseCommandBatchSections(output, marker)).toEqual([
       { index: 1, exitCode: 5, text: '--- exit code 0 ---\nreal failure' },
       { index: 2, exitCode: 1, text: 'no matches' }
     ]);

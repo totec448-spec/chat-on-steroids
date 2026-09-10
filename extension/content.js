@@ -369,7 +369,7 @@
    * The stop button is the only signal ChatGPT gives for "a turn is running", and it is not
    * continuous: the page tears it down and remounts it across tool phases, streaming
    * reconnects and plain rerenders. Ending the turn on the first sample that misses it is
-   * what session `2026-08-17-d1354db2` records again and again — `turn_start` at seq 342 and
+   * what session `2000-01-01-00000001` records again and again — `turn_start` at seq 342 and
    * `turn_end` at 343 four hundred milliseconds later with `outcome: "unknown"`, then the
    * same run reopened at 347 under a fresh generation id; the same shape at 357/358/360 with
    * a 2.7 s gap, and at 249/251. `unknown` is the signature: endOutcome() found no answer, no
@@ -451,7 +451,7 @@
    * button, finds no generation of its own, and opens a second one: one assistant run
    * recorded as two, its progress and prose ids keyed off a name the first half never used,
    * and the app's live-turn evidence reset underneath the calls still in flight. Session
-   * `2026-08-17-d1354db2` has that at seq 367/368.
+   * `2000-01-01-00000001` has that at seq 367/368.
    *
    * The app holds the durable half of that identity, so the new document asks for it before
    * it observes anything.
@@ -702,19 +702,26 @@
   let userSendReceipt = null;
   const pageViewChecks = new Set(); // Existing readiness waits also observe accepted MAIN-world snapshots.
   const sendText = (value) => String(value || '').replace(/\s+/g, '');
-  /** Exact submitted text belongs to a stable user id, never its Markdown decoration. */
-  function matchesSubmittedUser(message, expected) {
+  /** Receipt, transcript and presentation share the same exact native user source. */
+  function userMessageSource(message) {
     if (!message || message.role !== 'user' || !message.id || !message.node?.isConnected ||
-        retiredMessages.has(message.id) || isStale(message.node) || typeof expected !== 'string' || expected.length > 240000) return false;
+        retiredMessages.has(message.id) || isStale(message.node)) return null;
     const turn = stampedFiberTurn({ node: message.node }, [...fiberTurns.values()], fiberScanToken);
-    if (turn && turn.conversationId !== CLF_DOM.conversationId()) return false;
+    const temporary = desktopDecision?.temporary && desktopDecision.onTarget() &&
+      (!desktopDecision.messageId || desktopDecision.messageId === message.id);
+    if (turn && (turn.conversationConflict || (!temporary && turn.conversationId !== CLF_DOM.conversationId()))) return null;
     const authored = (turn?.messages || []).filter(candidate => candidate.role === 'user' && candidate.stable === true &&
       (candidate.rawMessageId === message.id || candidate.messageId === message.id));
-    if (authored.length > 1) return false;
+    if (authored.length > 1) return null;
     // A current exact-id provider object supersedes display text. If absent, an unchanged
     // plain-text bubble retains the existing exact-text receipt contract; no Markdown stripping.
     const actual = authored.length === 1 ? authored[0].rawText : message.text;
-    return typeof actual === 'string' && actual.length <= 256000 && sendText(actual) === sendText(expected);
+    return typeof actual === 'string' && actual.length <= 256000 ? { text: actual, canonical: authored.length === 1 } : null;
+  }
+  function matchesSubmittedUser(message, expected) {
+    if (typeof expected !== 'string' || expected.length > 240000) return false;
+    const source = userMessageSource(message);
+    return source !== null && sendText(source.text) === sendText(expected);
   }
   // A first fresh route may await authored evidence. A second route (including an
   // observed return to New Chat) revokes this send; text proof is not its lifetime.
@@ -737,8 +744,8 @@
       return !revoked;
     };
   }
-  function sendSubmittedText(stillCurrent, clearAcceptedDraft = true) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, matchesUser: matchesSubmittedUser,
+  function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null) {
+    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, matchesUser: matchesSubmittedUser,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -1950,7 +1957,14 @@
       // conversation, so filing it here would be filing chat A's transcript into chat B.
       if (retiredMessages.has(message.id) || isStale(message.node)) continue;
       if (message.role === 'user') {
-        const key = occurrenceKey(message.id, message.text);
+        const source = userMessageSource(message);
+        if (!source) continue;
+        // Rendered inline code can remove Markdown bytes even inside a pre-wrap
+        // bubble. Do not publish a broken transport frame while its exact source
+        // is pending. A canonical user-authored marker remains literal text.
+        if (!source.canonical && /^\[\[COS_CONTEXT:\d{1,6}\]\]/.test(source.text) && CLF_DOM.userPromptText(source.text) === null) continue;
+        const text = source.text;
+        const key = occurrenceKey(message.id, text);
         // Dedupe answers "have we journalled this row?"; authoredNow answers "did this row
         // cross the send boundary?" The boundary is intentionally evaluated first. Fiber can
         // journal the canonical row first, but that must not consume the later DOM proof which
@@ -1966,7 +1980,7 @@
         // the stable ChatGPT-authored identity. This is the reload path after the URL command
         // marker has already disappeared. reconcileContinuationMarker() releases the gate on
         // the app's answer, committed or refused; only an unreachable app keeps it shut.
-        const continuation = message.text.match(CONTINUATION_MARKER);
+        const continuation = text.match(CONTINUATION_MARKER);
         // The app's settled disposition outlives this DOM row. A remount or a later
         // quotation of its marker cannot turn a committed chat back into a shadow.
         const settledContinuation = continuation && [...reconciledContinuations.keys()].some(
@@ -1980,7 +1994,7 @@
         if (justAuthored) newUserMessage = message.id;
         emit({
           kind: 'user_message',
-          text: message.text,
+          text,
           messageId: message.id,
           turnId: message.turnId || undefined,
           ...(justAuthored ? { authoredNow: true } : {})
@@ -2059,6 +2073,10 @@
   }
 
   function observe() {
+    // This duplicate source document is only the native Project entry point. Its transcript
+    // belongs to A's original recorder; do not adopt it while preparing the fresh composer.
+    if (commandAttempt?.projectEntry && CLF_DOM.conversationId() === OPENED_CONVERSATION) return;
+    CLF_DOM.presentUserPrompts?.(message => userMessageSource(message)?.text ?? null);
     publishDesktopDecisionPartial();
     const id = CLF_DOM.conversationId();
     // One DOM turn snapshot per observation, created lazily because a transient id-less route
@@ -2444,7 +2462,7 @@
       // answer/error/interrupt closes after the settle window, and ten minutes of genuine
       // silence upgrades itself to `stalled` through endOutcome().
       // ChatGPT also flips `data-interrupted=true` transiently between tool/reasoning phases.
-      // Session 2026-08-19-86fa06c9 proved it: that marker closed a turn as interrupted and
+      // Session 2000-01-01-00000002 proved it: that marker closed a turn as interrupted and
       // the same website turn emitted commentary 9 ms later, followed by MCP calls for almost
       // two minutes. The marker is therefore an *outcome* if a terminal boundary is proven,
       // never a terminal boundary on its own. User stop is already explicit; a new user
@@ -2587,9 +2605,15 @@
     let urgentQueued = false;
     const observer = new MutationObserver((records) => {
       if (!alive || !sameChat()) return;
+      // Attribute-only native updates matter when React reuses the submit button.
+      // Ignore unrelated styling/Fiber stamps; they cannot change composer readiness.
+      if (records.every(record => record.type === 'attributes')) {
+        const composer = CLF_DOM.composerBox();
+        if (!composer || !records.some(record => composer.contains(record.target) || record.target.contains?.(composer))) return;
+      }
       // Stop is mounted under the composer, outside TURN_SECTION. In a background tab the final
       // prose can arrive while Stop still exists (scheduling the throttled debounce below), and
-      // Stop removal can then be the *only* terminal mutation. Check the local->page generation
+      // Stop removal/relabel/hiding can then be the *only* terminal mutation. Check the local->page generation
       // edge before filtering to transcript mutations so that composer-side Stop removal wakes
       // the recorder in a microtask. observe() still owns every completion rule and therefore
       // remains conservative on transient tool-phase dropouts.
@@ -2658,7 +2682,8 @@
         observe();
       }, TRANSCRIPT_OBSERVE_MS);
     });
-    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true, attributes: true,
+      attributeFilter: ['data-testid', 'aria-label', 'hidden', 'aria-hidden', 'inert', 'style', 'class'] });
     rememberCleanup(() => {
       observer.disconnect();
       if (timer !== null) clearTimeout(timer);
@@ -3123,7 +3148,7 @@
    * lifecycle. Everything else used to be recorded with no turn at all, and that is a real
    * gap rather than a tidy conservatism: ChatGPT does not always expose a turn's thinking
    * headline in its message model while the turn is running, so the headline is first seen
-   * long afterwards — in session `2026-08-21-ce135bff`, three and a half minutes and one page
+   * long afterwards — in session `2000-01-01-00000003`, three and a half minutes and one page
    * load after the turn it describes. A row with no turn belongs to no group, and a group
    * missing a row ChatGPT is visibly showing cannot be proven complete, so one late headline
    * dropped that entire response back to ChatGPT's native rendering.
@@ -3144,9 +3169,9 @@
    * Makes request ownership an explicit acknowledged operation for the current live turn.
    *
    * Fresh-chat ordering is the reason this exists. Live 2026-08-21, the real chat session
-   * `2026-08-21-e24b18f3` existed before the first call, while normalized request
-   * `77186fb4-bdda-4849-8cd7-879bb08a1617` still never reached the correlation registry and
-   * every call fell into `2026-08-21-9d5892a4` (Unattributed activity). ChatGPT can expose a
+   * `2000-01-01-00000004` existed before the first call, while normalized request
+   * `00000005-0000-4000-8000-000000000005` still never reached the correlation registry and
+   * every call fell into `2000-01-01-00000006` (Unattributed activity). ChatGPT can expose a
    * connector request and its metadata.request_id while its internal clientThreadId still names the provisional
    * thread, then assign the real /c/<conversation-id> a moment later. Transcript delivery can
    * safely wait for that convergence; MCP attribution cannot, because the recorder has a finite
@@ -3413,22 +3438,20 @@
     fiberRows = answer.rows;
     fiberScanToken = answer.scanToken;
     fiberTurns = new Map();
-    // User messages have one normal owner: the DOM recorder above. Its stable
-    // data-message-id is also the send receipt that opens the local turn. Publishing the
-    // same visible row first from Fiber marked it seen while an SPA identity pull was still
-    // gated; the later DOM pass then quite correctly treated it as already recorded and
-    // never emitted turn_start. Keep Fiber only for the narrow thing it adds: page-model
-    // messages whose stable id is not rendered in the DOM yet.
-    const renderedUserMessageIds = new Set(
+    // DOM still owns the visible send boundary. The provider model owns text when
+    // the native renderer has transformed it; the DOM pass evaluates authoredNow
+    // independently of transcript deduplication, so this cannot consume turn_start.
+    const renderedUserTexts = new Map(
       CLF_DOM.messages()
         .filter((message) => message.role === 'user' && message.id)
-        .map((message) => message.id)
+        .map((message) => [message.id, message.text])
     );
     for (const turn of answer.turns) {
       if (fiberTurns.has(turn.index)) fiberTurns.set(turn.index, null);
       else fiberTurns.set(turn.index, turn);
     }
     for (const [index, value] of fiberTurns) if (value === null) fiberTurns.delete(index);
+    CLF_DOM.presentUserPrompts?.(message => userMessageSource(message)?.text ?? null);
     for (const check of pageViewChecks) void check();
     completeDesktopDecision();
     const markedTurns = markedContinuationTurns();
@@ -3579,7 +3602,7 @@
     // `settledTurnOwner` claims a page turn for the local turn that recorded its request
     // id, which is exact only while an id names one request. ChatGPT reuses a single
     // `request_id` across the retries within a turn — live 2026-08-21, session
-    // `2026-08-21-204027d1` had one id on three calls and a second on two — so after a
+    // `2000-01-01-00000007` had one id on three calls and a second on two — so after a
     // Retry several distinct page turns resolve to the same local turn, every one of them
     // emits its prose under that id, and the app paints one answer twice.
     //
@@ -3590,7 +3613,7 @@
     // turn id out from under the turn currently being written.
     //
     // The seed is not conditional on that binding being *resolvable*. Live 2026-08-31,
-    // session `2026-08-31-7c0253f2`: ChatGPT held a tool-heavy turn's whole output back and
+    // session `2000-01-01-00000008`: ChatGPT held a tool-heavy turn's whole output back and
     // released it in one burst at 12:00:41, while generation `…-0-3` was live and
     // `ownedPageTurn` unresolved. `activeTurnIndex` was therefore -1, the seed was skipped,
     // and a historical section — carrying prose authored at 11:28:07, two minutes before
@@ -3656,7 +3679,7 @@
 
         const message = item.value;
         if (message.role === 'user') {
-          if (renderedUserMessageIds.has(message.messageId)) continue;
+          if (renderedUserTexts.get(message.messageId) === message.rawText) continue;
           const key = occurrenceKey(message.messageId, message.rawText);
           if (message.createTime) {
             if (userAuthoredTimesReported.get(key) === message.createTime) continue;
@@ -4856,7 +4879,7 @@
     const lookup = index || streamRenderIndex(streamEntries, groups);
     // Website message/thought ids are turn-local objects. `metadata.request_id` is not: a
     // user can interrupt an in-flight response and ChatGPT can keep the same request id
-    // across the next visible assistant turn. Session 2026-08-19-e1052dd7 captured exactly
+    // across the next visible assistant turn. Session 2000-01-01-00000009 captured exactly
     // that shape: one request id across three honest local turn groups plus null-turn calls.
     // Treating that response-level id as a turn-local join made every historical renderer
     // reject the turn as soon as a second group existed, which is why a fully reconstructed
@@ -7162,6 +7185,7 @@
 
     const input = document.createElement('textarea');
     input.className = 'clf-menu-goal-input';
+    input.dir = 'auto';
     input.dataset.clfGoalInput = '1';
     input.rows = 3;
     input.placeholder = 'What does this chat have to reach?';
@@ -7391,7 +7415,8 @@
     // click. A clamped block of the text itself is as wide closed as it is open.
     const preview = document.createElement('span');
     preview.className = 'clf-boot-preview';
-    preview.textContent = String(node.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 240);
+    const rawPreview = String(node.textContent || '');
+    preview.textContent = (CLF_DOM.userPromptText(rawPreview) ?? rawPreview).replace(/\s+/g, ' ').trim().slice(0, 240);
     head.append(preview);
     box.append(head);
 
@@ -8839,7 +8864,7 @@
     }
     goalBusy = true;
     const composerBefore = CLF_DOM.composer()?.textContent || '';
-    let preparedText = null, sendAttempted = false;
+    let preparedDraft = null, sendAttempted = false;
     try {
       if (goalTypingSince === 0) goalTypingSince = Date.now();
       setGoalPhase('sending');
@@ -8855,40 +8880,48 @@
         await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
         return;
       }
-      preparedText = CLF_DOM.composer()?.textContent || '';
+      // Reuse the same exact editor/draft lease as desktop delivery. Cancellation
+      // must not restore text into a replacement editor or a user's intervening edit.
+      preparedDraft = CLF_DOM.captureComposerDraft(CLF_DOM.composer()?.textContent || '', onDocument);
       await sleep(200);
-      if (!onDocument() || !goalUsable()) return;
-      // Re-read the existing draft authority after the last awaited preparation.
-      // Off in the app retires this token even before this document's next poll.
-      const authorization = await ask({ type: 'activity', conversationId: target, since });
-      if (!onDocument() || !authorization?.ok || !authorization.data) return;
-      const allowed = authorization.data.goal;
-      const ready = allowed?.draft;
-      if (!allowed || !ready || ready.token !== draft.token || ready.stage !== 'ready' || ready.reply !== draft.reply ||
-          !(allowed.enabled === true || (allowed.own !== true && allowed.objective)) || allowed.hasKey !== true ||
-          allowed.blocked || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
-          !goalUsable() || generating || CLF_DOM.generating() || nativeBusy || job?.busy) return;
-      rememberUserSend();
-      sendAttempted = true;
-      const sent = await sendSubmittedText(() => onDocument() && goalUsable());
-      if (!onDocument()) return;
-      goalDraft = null;
+      const current = () => onDocument() && goalUsable() &&
+        (sendAttempted || (goalDraft?.token === draft.token && preparedDraft.current()));
+      if (!current()) return;
+      const sent = await sendSubmittedText(current, true, async sendCurrent => {
+        // Off or a replacement task retires this exact token in the app. Re-read it
+        // when native Send is ready, including after a delayed React update.
+        const authorization = await ask({ type: 'activity', conversationId: target, since });
+        if (!sendCurrent() || !current() || !authorization?.ok || !authorization.data) return false;
+        const allowed = authorization.data.goal;
+        const ready = allowed?.draft;
+        if (!allowed || !ready || ready.token !== draft.token || ready.stage !== 'ready' || ready.reply !== draft.reply ||
+            !(allowed.enabled === true || (allowed.own !== true && allowed.objective)) || allowed.hasKey !== true ||
+            allowed.blocked || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
+            generating || CLF_DOM.generating() || nativeBusy || job?.busy) return false;
+        rememberUserSend();
+        sendAttempted = true;
+        return true;
+      });
+      if (!onDocument() || !sendAttempted) return;
+      const ownsDraft = goalDraft?.token === draft.token;
+      if (ownsDraft) goalDraft = null;
       if (!sent) {
         await ask({ type: 'goal_ack', conversationId: target, token: draft.token }).catch(() => undefined);
-        setGoalPhase('sending', 'ChatGPT would not send the message');
+        if (ownsDraft) setGoalPhase('sending', 'ChatGPT would not send the message');
         return;
       }
       // Sending is the irreversible step. Record it before the fallible ACK hop so a lost
       // receipt can never turn the same ready draft into a second user message.
       rememberGoalSpent(target, draft.token);
       await ask({ type: 'goal_ack', conversationId: target, token: draft.token }).catch(() => undefined);
-      setGoalPhase('');
+      if (ownsDraft && !goalDraft) setGoalPhase('');
     } finally {
-      if (!onDocument()) return;
       // Undo only our unchanged, definitely pre-wire insertion. Never erase a user's
       // intervening edit or roll back an ambiguous native send.
-      if (!sendAttempted && preparedText !== null && CLF_DOM.composer()?.textContent === preparedText)
+      if (!sendAttempted && preparedDraft?.current())
         CLF_DOM.insertPrompt(composerBefore, true);
+      preparedDraft?.dispose();
+      if (!onDocument()) return;
       goalBusy = false;
       // Only once the draft is spent. This marks when *this draft* first found the composer
       // in use, and the retry path above measures its two-minute patience against it — so
@@ -9018,6 +9051,8 @@
    * failed the target fence instead of typing into the worker's own chat.
    */
   const OPENED_CONVERSATION = CLF_DOM.conversationFromPath(location.pathname);
+  const OPENED_PROJECT_ENTRY = new URLSearchParams(location.search).get('clf_project') === '1' ||
+    new URLSearchParams(location.hash.slice(1)).get('clf_project') === '1';
 
   /**
    * The command id this page was opened for, from ?clf= or #clf=.
@@ -9361,7 +9396,8 @@
     // session, and its *previous* assistant turn may still be finishing while this command waits.
     // Gating that existing chat would suppress exactly the final /events we need to durably close
     // the turn before the new user message is allowed through.
-    const gateJournal = fromUrl && !OPENED_CONVERSATION;
+    const gateJournal = fromUrl && (!OPENED_CONVERSATION || OPENED_PROJECT_ENTRY);
+    attempt.projectEntry = fromUrl && OPENED_PROJECT_ENTRY;
     if (gateJournal) commandJournalGate = true;
     let claimReported = false;
     const reportClaim = (claimed) => {
@@ -9403,7 +9439,7 @@
     // because its composer exists: ChatGPT keeps that composer mounted while the worker's final
     // assistant answer is still streaming. Busy is a waiting state, not a failed revival, and
     // waiting must leave both the durable command and the user's composer untouched.
-    if (openedConversation) {
+    if (openedConversation && !OPENED_PROJECT_ENTRY) {
       // Persist only the inert marker/conversation correlation before waiting. If this document,
       // its MV3 service worker, or the whole browser disappears, the replacement browser process
       // can put the same marker back in front of this exact chat. The prime's text stays solely in
@@ -9423,6 +9459,7 @@
       type: 'redeem',
       id,
       client: RUN_ID,
+      ...(fromUrl && OPENED_PROJECT_ENTRY ? { projectEntry: true } : {}),
       ...(openedConversation ? { conversationId: openedConversation } : {})
     });
     if (!reply || reply.ok !== true) {
@@ -9456,7 +9493,26 @@
     // will not be typed anywhere else; the two chat-opening commands name none, and their
     // precondition is the opposite one — that this page still has no conversation at all.
     const target = typeof boot.conversationId === 'string' && boot.conversationId ? boot.conversationId : null;
-    if (fromUrl && openedConversation && !target) {
+    const projectEntry = boot.type === 'resume' ? boot.projectEntry : null;
+    if (projectEntry) {
+      if (!fromUrl || !OPENED_PROJECT_ENTRY || target || openedConversation !== projectEntry.sourceConversationId ||
+          markerId() !== id || CLF_DOM.conversationId() !== openedConversation) {
+        return void (await fail('the Project entry no longer matches the source conversation; nothing was sent'));
+      }
+      if (!(await CLF_DOM.enterProject(projectEntry, () => alive && !attempt?.cancelled))) {
+        return void (await fail('ChatGPT could not open the source Project through its native link; nothing was sent'));
+      }
+      // The provider's own SPA link consumes the opening URL. Carry this claimed command
+      // onto the proven Project route, then fence every later await to that navigation epoch.
+      const marked = new URL(location.href);
+      marked.searchParams.set('clf', id);
+      marked.hash = `clf=${encodeURIComponent(id)}`;
+      history.replaceState(history.state, '', marked.href);
+      observe();
+    } else if (OPENED_PROJECT_ENTRY) {
+      return void (await fail('the command did not authorize Project entry; nothing was sent'));
+    }
+    if (fromUrl && openedConversation && !target && !projectEntry) {
       // Current bridges reject this before leasing the command. Keep the page-side half too:
       // an older bridge (or a stale test fixture) must still never let a worker/resume marker
       // found in an existing chat terminalise the command that belongs to a fresh page.
@@ -9472,7 +9528,9 @@
     if (!target && CLF_DOM.conversationId()) {
       return void (await fail('the marked fresh chat changed before bootstrap send; nothing was sent'));
     }
-    const onTarget = () => (target ? CLF_DOM.conversationId() === target : !CLF_DOM.conversationId());
+    const sendEpoch = epoch;
+    const onTarget = () => (target ? CLF_DOM.conversationId() === target : !CLF_DOM.conversationId()) &&
+      (!projectEntry || CLF_DOM.projectHomeId() === projectEntry.id);
     // Redeeming the command proves which *document* owns it, not which SPA route that
     // document will still be showing after the await. ChatGPT can navigate this same
     // document to an existing conversation while the worker/app answer is in flight. An
@@ -9481,7 +9539,7 @@
     // the marker still names this command, and ChatGPT still has not assigned/opened a chat.
     // A command handed over by the service worker has no marker in this tab's URL to check;
     // the conversation fence above is the stronger half of the same proof and applies to it.
-    const stillOnTarget = () => alive && (!fromUrl || markerId() === id) && onTarget();
+    const stillOnTarget = () => alive && epoch === sendEpoch && (!fromUrl || markerId() === id) && onTarget();
     const failIfRetargeted = async () => {
       if (stillOnTarget()) return false;
       await fail(
@@ -9616,7 +9674,7 @@
     // Record it before send() clicks so reportMessages can open B's turn immediately instead
     // of waiting until Fiber eventually exposes the first connector request.
     rememberUserSend();
-    if (!(await sendSubmittedText(sendingBootstrap, false))) {
+    if (!(await sendSubmittedText(() => !attempt?.cancelled && sendingBootstrap(), false))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.
       if (boot.type === 'resume') {
@@ -9871,8 +9929,19 @@
     // The accepted user and its current assistant message survive that remount; a captured
     // section, reusable data-turn-id or previous terminal must never own the helper result.
     const turn = stampedFiberTurn(pageTurn, [...fiberTurns.values()], fiberScanToken);
-    if (!turn?.endMessageId || turn.conversationId !== decision.conversationId || turn.endMessageId !== assistant.id ||
+    if (!turn?.endMessageId || turn.conversationConflict || turn.endMessageId !== assistant.id ||
         (turn.calls || []).some(call => call.answered !== true)) return;
+    if (decision.temporary) {
+      // Temporary Chat has no /c route, but its canonical messages carry a WEB: thread.
+      // Join the final to the accepted user in this same scan instead of comparing that
+      // provider identity to the deliberately null route identity.
+      const userTurn = CLF_DOM.turns().find(candidate => candidate.role === 'user' &&
+        (candidate.nodes || [candidate.node]).some(node => node?.contains(messages[userIndex].node)));
+      const user = stampedFiberTurn(userTurn, [...fiberTurns.values()], fiberScanToken);
+      if (!user || user.conversationConflict || user.conversationId !== turn.conversationId ||
+          !(user.messages || []).some(message => message.role === 'user' &&
+            (message.rawMessageId === decision.messageId || message.messageId === decision.messageId))) return;
+    } else if (turn.conversationId !== decision.conversationId) return;
     const terminal = (turn.messages || []).filter(message => message.role === 'assistant' &&
       (message.rawMessageId === turn.endMessageId || message.messageId === turn.endMessageId));
     if (terminal.length !== 1) return;
@@ -9975,10 +10044,6 @@
       }
       if (!(await CLF_DOM.uploadImages(input.images, onTarget, draft, files))) return fail('Attachment upload was not confirmed. Check the unsent draft and any file error in ChatGPT before trying again.');
       await Promise.resolve();
-      // Cancellation revokes this exact claim while model/image preparation awaits.
-      // A cancellation after this check can race the click; only the receipt proves delivery.
-      const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
-      if (authorized?.data?.ok !== true) return false;
       if (!onTarget() || !draft.current() || sendText(CLF_DOM.composer()?.textContent) !== sendText(input.text)) return fail('The composer changed; your draft was preserved');
       const previousUserId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id;
       rememberUserSend();
@@ -9988,8 +10053,13 @@
         desktopDecision = decision;
       }
       if (input.projectId) desktopProjectInput = { id: input.id, owner: input.owner };
-      sendAttempted = true;
-      if (!(await sendSubmittedText(sendingTarget, false))) return false;
+      if (!(await sendSubmittedText(sendingTarget, false, async sendCurrent => {
+        // Preserve the outbox's revocable claim until the actual native Send is ready.
+        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+        if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) return false;
+        sendAttempted = true;
+        return true;
+      }))) return false;
       // Composer clear/Stop can prove acceptance before React mounts the user row.
       // Wait for that exact receipt, not merely /c navigation: Temporary Chat never
       // acquires a /c URL and used to discard its live decision during this gap.
@@ -10291,24 +10361,26 @@
           (!commandAttempt || (commandAttempt.id === startupCommandId && commandAttempt.phase === 'failed'));
         // Maintenance carries the app's terminal tombstone for this exact claimed
         // document. Revocation is independent of whether the renderer is safe to close.
-        const cancelled = (Array.isArray(message.cancelledDecisions) ? message.cancelledDecisions : [])
+        const retired = (Array.isArray(message.cancelledDecisions) ? message.cancelledDecisions : [])
           .find(claim => claim.id === desktopDecision?.id && claim.owner === desktopDecision?.owner);
-        if (desktopDecision && cancelled?.id === desktopDecision.id && cancelled.owner === desktopDecision.owner &&
+        const completed = desktopDecision?.response && message.completedDecision;
+        const settled = retired || completed;
+        if (desktopDecision && settled?.id === desktopDecision.id && settled.owner === desktopDecision.owner &&
             desktopDecision.epoch === epoch && desktopDecision.onTarget() && message.conversationId === conversationId) {
           desktopDecision = null;
         }
         void (async () => {
           const observedEpoch = epoch;
           const expectedTerminal = fiberTerminalMessageId;
-          const terminal = message.allowGenerating !== true && !generating && CLF_DOM.generating()
+          const terminal = !generating && CLF_DOM.generating()
             ? await confirmedProviderTerminal() : false;
           // A terminal probe may capture a newer final revision. Persist it before
           // authorizing closure; the final answer must survive the document.
           if (terminal) { await flush(); observe(); }
           sendResponse({ conversationId: CLF_DOM.conversationId(), navigationEpoch: epoch,
             safe: alive && epoch === observedEpoch && message.conversationId === conversationId && CLF_DOM.conversationId() === conversationId &&
-              (message.allowGenerating === true || (!generating && (!CLF_DOM.generating() ||
-                (terminal && expectedTerminal === fiberTerminalMessageId && fiberTurnFor(currentAssistantTurn())?.endMessageId === expectedTerminal)))) && !desktopInputBusy && !modelCatalogBusy && !pluginRefreshBusy && !desktopDecision &&
+              !generating && pendingTools === 0 && (!CLF_DOM.generating() ||
+                (terminal && expectedTerminal === fiberTerminalMessageId && fiberTurnFor(currentAssistantTurn())?.endMessageId === expectedTerminal)) && !desktopInputBusy && !modelCatalogBusy && !pluginRefreshBusy && !desktopDecision &&
               ((!commandAttempt && !commandJournalGate) || failedBootstrap) && (!message.failedCommand || failedBootstrap) &&
               queue.length === 0 && !flushWork && !!CLF_DOM.composer() &&
               !(CLF_DOM.composer().textContent || '').trim() && !CLF_DOM.hasComposerAttachments() });
@@ -10385,7 +10457,7 @@
   // Chat and need no prior conversation lifecycle. A revival is the opposite. Let the recorder
   // restore this existing chat's durable open turn first, otherwise a reload during a Stop-button
   // flicker could call the page idle before it has learned that the previous turn is still open.
-  const commandStartup = startupCommandId && !OPENED_CONVERSATION ? runCommand(startupCommandId) : Promise.resolve();
+  const commandStartup = startupCommandId && (!OPENED_CONVERSATION || OPENED_PROJECT_ENTRY) ? runCommand(startupCommandId) : Promise.resolve();
   void commandStartup
     .catch(() => undefined)
     .then(loadRenderPreference)
@@ -10397,7 +10469,7 @@
       notifyCommandReadiness();
       injectControl();
       injectStage();
-      if (startupCommandId && OPENED_CONVERSATION) void runCommand(startupCommandId);
+      if (startupCommandId && OPENED_CONVERSATION && !OPENED_PROJECT_ENTRY) void runCommand(startupCommandId);
     });
 
   syncTheme();

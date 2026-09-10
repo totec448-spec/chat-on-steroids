@@ -14,6 +14,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AssetRef, FileChange, ToolOutcome } from '../../shared/session.js';
+import type { OutputPublication } from '../codex/unified-exec.js';
 
 export interface CallEvidence {
   changes: FileChange[];
@@ -62,6 +63,8 @@ export interface CallCaller {
 }
 
 export interface CallContext {
+  /** Result publication belongs to the transport, not to the generation-wide request ID. */
+  publication?: OutputPublication;
   /** Wall-clock start of this MCP request, shared by identity-sensitive handlers. */
   startedAt: number;
   /** Stable per-conversation key when the transport offers one, else null. */

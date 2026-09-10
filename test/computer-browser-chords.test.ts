@@ -12,6 +12,11 @@ describe('browser tab and window chords', () => {
     expect(browserTabChord(['alt', 'f4'])).toBe('alt+f4');
     expect(browserTabChord(['ctrl', '4'])).toBe('ctrl+4');
     expect(browserTabChord(['ctrl', 'l'])).toBe('ctrl+l');
+    expect(browserTabChord(['Control_L', 'w'])).toBe('ctrl+w');
+    expect(browserTabChord([' Control_R ', 'Shift_R', 'Tab'])).toBe('ctrl+shift+tab');
+    expect(browserTabChord(['Ctrl_R', 'Prior'])).toBe('ctrl+pageup');
+    expect(browserTabChord(['Ctrl_L', 'Next'])).toBe('ctrl+pagedown');
+    expect(browserTabChord(['Alt_L', 'Left'])).toBe('alt+left');
     // macOS spellings, refused on every host: the model names the keys, not the OS.
     expect(browserTabChord(['cmd', 'w'])).toBe('cmd+w');
     expect(browserTabChord(['command', 'shift', 't'])).toBe('cmd+shift+t');

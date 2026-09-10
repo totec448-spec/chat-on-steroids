@@ -17,6 +17,9 @@ import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
+import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt } from '../src/shared/user-prompt.js';
+import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
+import { handoffPlanNotice, resumeBootstrapText } from '../src/main/session/handoff.js';
 
 vi.mock('electron', () => ({
   safeStorage: {
@@ -46,8 +49,8 @@ const { makeTempDir, removeTempDir, SAMPLE_BRIEF } = await import('./helpers.js'
 const { BRIDGE_PROTOCOL } = await import('../src/main/version.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
-const CHAT_A = '6a805197-b090-83eb-bbd8-a32b482941da';
-const CHAT_B = '7b916208-c1a1-94fc-cce9-b43c593a52eb';
+const CHAT_A = '00000010-0000-8000-b000-000000000010';
+const CHAT_B = '0000005b-0000-9000-c000-00000000005b';
 const BRIEF = SAMPLE_BRIEF;
 
 let dir: string;
@@ -459,15 +462,18 @@ describe('a brief longer than the app can type', () => {
     // And the cut is in the brief where the model reading it will see it, not silent.
     expect(text).toMatch(/left out/);
     expect(text.length).toBeLessThan(huge.length);
+    expect(text.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
   });
 
   it('carries a large near-budget handoff without a hidden character-budget truncation', async () => {
     await connect();
     await record();
     const { token: continuation } = await press();
-    const brief = `TASK — keep all of this.\n${'dense operational detail '.repeat(6500)}\nNEXT — continue exactly here.`;
-    expect(brief.length).toBeGreaterThan(150_000);
-    expect(brief.length).toBeLessThan(256_000);
+    const head = 'TASK — keep all of this.\n', tail = '\nNEXT — continue exactly here.';
+    const noticeBudget = handoffPlanNotice('x'.repeat(64)).length;
+    const overhead = prependUserPrompt(resumeBootstrapText('', continuation), await currentCoreInstructions()).length + noticeBudget;
+    const brief = head + 'dense operational detail '.repeat(6500).slice(0,
+      MAX_CHATGPT_MESSAGE_CHARS - overhead - head.length - tail.length - 8) + tail;
 
     const stored = await capture(continuation, brief);
     const commandId = stored.body.commandId as string;
@@ -475,6 +481,8 @@ describe('a brief longer than the app can type', () => {
 
     expect(text).toContain(brief);
     expect(text).not.toMatch(/middle of this brief.*left out/);
+    expect(text.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
+    expect(text.length).toBeGreaterThan(MAX_CHATGPT_MESSAGE_CHARS - noticeBudget - 100);
   });
 });
 

@@ -2818,9 +2818,9 @@ describe('through the MCP endpoint', () => {
     );
     // worker-2 is still live against a limit of 3, so two slots are free — not three.
     expect(report?.text).toContain('2 of 3 worker slots are free');
-    expect(report?.text).toContain('is sleeping, not gone');
-    expect(report?.text).toContain('reuse it first with agents action=message');
-    expect(report?.text).toContain('action=spawn only when no sleeping worker is suitable');
+    expect(report?.text).toContain('worker-1 sleeping');
+    expect(report?.text).toContain('Reuse first: agents action=message to="worker-1"');
+    expect(report?.text).toContain('Spawn only when no sleeping worker is suitable');
     expect(report?.text).not.toContain('cannot be reused');
 
     const status = await asChat(PRIME_CHAT, 'status');

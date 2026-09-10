@@ -31,7 +31,7 @@ vi.mock('../src/main/computer/index.js', () => ({
   waitForWindow: vi.fn()
 }));
 
-import { registerDesktopTools } from '../src/main/mcp/tools-desktop.js';
+import { registerMacOSDesktopTools as registerDesktopTools } from '../src/main/mcp/tools-desktop-macos.js';
 
 function caps(over: Partial<Capabilities>): Capabilities {
   return {
@@ -53,7 +53,7 @@ function caps(over: Partial<Capabilities>): Capabilities {
   };
 }
 
-describe('Desktop computer permission normalization', () => {
+describe('macOS Desktop computer permission normalization', () => {
   it('allows wait in a clipboard-only batch without demanding mouse/keyboard control', async () => {
     const liveCaps = caps({ clipboardRead: true });
     let computerHandler: ((input: any) => Promise<any>) | null = null;

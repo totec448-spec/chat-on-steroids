@@ -1,3 +1,4 @@
+import { t } from './i18n.js';
 /** Presentation only. The stored result and overflow asset remain byte-for-byte intact. */
 export function toolResultText(text: string, truncated: boolean, hasImages: boolean): string {
   try {
@@ -13,6 +14,6 @@ export function toolResultText(text: string, truncated: boolean, hasImages: bool
       if (hasImages) return '';
     }
   } catch { /* An overflow prefix may end inside a binary field; never paint that payload. */ }
-  if (hasImages && truncated) return 'Image result. Full response retained in the recording.';
+  if (hasImages && truncated) return t("Image result. Full response retained in the recording.");
   return text;
 }

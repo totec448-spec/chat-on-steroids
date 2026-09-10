@@ -1,7 +1,12 @@
 import { GOAL_MARKER_INSTRUCTION } from '../src/shared/goal-templates.js';
+import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
+import { prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
 import { finishInstruction } from '../src/shared/finish.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { addProject, assignSessionProject } from '../src/main/projects.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import * as browserWake from '../src/main/browser-wake.js';
 type Handler = (event: unknown, payload: unknown) => Promise<any>;
@@ -56,6 +61,20 @@ beforeEach(async () => {
   await writeDurableNow('plugin-refresh', []);
   goal.resetGoalStateForTests(); input.resetInputForTests(); pushed.mockClear();
   await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+});
+it('refreshes account models after an owned picker failure without authorizing another tab', async () => {
+  const catalog = await import('../src/main/chat-models.js');
+  catalog.resetChatModelsForTests();
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto' });
+  await post('/input/claim', { id: row.id, owner: 'picker-page', conversationId: null });
+  const failure = { id: row.id, owner: 'foreign-page', error: 'Requested model or reasoning could not be confirmed' };
+  expect((await post('/input/fail', failure)).body.ok).toBe(false);
+  expect(catalog.pendingChatModelRequest()).toBeNull();
+  expect((await post('/input/fail', { ...failure, owner: 'picker-page' })).body.ok).toBe(true);
+  expect(catalog.pendingChatModelRequest()).toMatchObject({ allowOpen: false });
+  expect(pushed).toHaveBeenCalledWith('chatModels:changed', expect.objectContaining({ state: 'pending' }));
+  expect((await input.listInputs()).find(input => input.id === row.id)?.state).toBe('failed');
+  catalog.resetChatModelsForTests();
 });
 
 it.each([false, true])('collects an exact recorded helper final across document loss (final before ACK: %s)', async finalBeforeAck => {
@@ -167,6 +186,59 @@ afterAll(async () => {
 const message = (sessionId: string | null, automation: 'off' | 'goal' | 'loop') => ({
   id: randomUUID(), sessionId, automation, text: 'Complete this request', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null
 });
+it('freezes the complete current prompt with each browser claim and leaves the authored input intact', async () => {
+  const config = defaultConfig();
+  const standing = 'ä 🐱 Complete standing guidance\n'.repeat(100) + 'FINAL_STANDING_MARKER';
+  await saveConfig({ ...config, mcp: { ...config.mcp, instructions: standing } });
+  const first = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'First request' });
+  const canonical = await currentCoreInstructions();
+  const claim = await input.claimBrowserInput(first.id, 'exact-document', null, true);
+  expect(claim?.text).toBe(prependUserPrompt('First request', canonical));
+  expect(claim?.text).toContain(standing);
+  expect((await input.listInputs()).find(row => row.id === first.id)?.text).toBe('First request');
+  await saveConfig({ ...config, mcp: { ...config.mcp, instructions: 'Updated standing guidance' } });
+  expect((await input.claimBrowserInput(first.id, 'exact-document', null, true))?.text).toBe(claim?.text);
+  await input.cancelInput(first.id);
+  const second = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Second request' });
+  const next = await input.claimBrowserInput(second.id, 'next-document', null, true);
+  expect(next?.text).toBe(prependUserPrompt('Second request', await currentCoreInstructions()));
+  expect(userPromptText(next!.text)).toBe('Second request');
+});
+
+it('delivers only the selected project AGENTS.md, freezes claims across restart, and budgets the Astra appendix before cutting', async () => {
+  const folder = path.join(directory, 'project-' + randomUUID());
+  await fs.mkdir(folder);
+  const file = path.join(folder, 'AGENTS.md');
+  await fs.writeFile(file, 'PROJECT_HEAD\n' + 'project instructions\n'.repeat(30000) + '\nPROJECT_TAIL');
+  const config = defaultConfig();
+  await saveConfig({ ...config, roots: [{ name: 'project', path: folder }], ui: { ...config.ui, finishTool: true } });
+  const project = await addProject(folder);
+  const request = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id,
+    model: 'gpt-6-pro', reasoningEffort: 'pro' });
+  const claim = await input.claimBrowserInput(request.id, 'project-document', null, true);
+  expect(claim!.text.length).toBeLessThanOrEqual(96000);
+  expect(claim!.text).toContain(await currentCoreInstructions());
+  expect(claim!.text).toContain('PROJECT_HEAD');
+  expect(claim!.text).not.toContain('PROJECT_TAIL');
+  expect(claim!.text).toContain('Read AGENTS.md yourself');
+  expect(userPromptText(claim!.text)).toBe(request.text + '\n\n' + finishInstruction());
+  expect((await input.listInputs()).find(row => row.id === request.id)!.text).toBe(request.text);
+  await fs.writeFile(file, 'PROJECT_CHANGED');
+  input.resetInputForTests();
+  expect((await input.claimBrowserInput(request.id, 'project-document', null, true))!.text).toBe(claim!.text);
+  await input.cancelInput(request.id);
+  const normal = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto' });
+  const ordinary = await input.claimBrowserInput(normal.id, 'ordinary-document', null);
+  expect(ordinary!.text).not.toMatch(/PROJECT_HEAD|PROJECT_CHANGED|# AGENTS.md instructions for/);
+  await input.cancelInput(normal.id);
+  const session = await createSession({ title: 'Project follow-up', conversationId: 'project-followup-chat' });
+  await assignSessionProject(session.id, project.id);
+  const followup = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+  const tool = await input.offerToolInput(session.id, session.conversationId, 'project-tool-call', Date.now());
+  expect(tool.messages).toHaveLength(1);
+  expect(tool.messages[0]!.text).toContain('PROJECT_CHANGED');
+  expect(userPromptText((await input.listInputs()).find(row => row.id === followup.id)!.deliveryText!)).toBe(followup.text);
+});
 it.each(['finish', 'after-turn'] as const)('wakes browser delivery after a committed final makes %s input eligible', async mode => {
   const conversationId = randomUUID();
   const session = await createSession({ title: 'Final-boundary wake', conversationId });
@@ -191,7 +263,7 @@ describe('IPC input delivery and Goal control integration', () => {
     const request = { ...message(null, 'off'), model: 'gpt-6-pro', reasoningEffort: 'pro' };
     await input.enqueueInput(request as Parameters<typeof input.enqueueInput>[0]);
     const claimed = await input.claimBrowserInput(request.id, 'opening', null);
-    expect(claimed?.text).toBe(request.text + '\n\n' + finishInstruction(lead));
+    expect(userPromptText(claimed!.text)).toBe(request.text + '\n\n' + finishInstruction(lead));
     expect((await input.listInputs()).find(row => row.id === request.id)?.text).toBe(request.text);
     await saveConfig(config);
     input.resetInputForTests();
@@ -200,17 +272,17 @@ describe('IPC input delivery and Goal control integration', () => {
 
     const ordinary = message(null, 'off');
     await input.enqueueInput(ordinary as Parameters<typeof input.enqueueInput>[0]);
-    expect((await input.claimBrowserInput(ordinary.id, 'disabled', null))?.text).toBe(ordinary.text);
+    expect(userPromptText((await input.claimBrowserInput(ordinary.id, 'disabled', null))!.text)).toBe(ordinary.text);
     await input.cancelInput(ordinary.id);
     await saveConfig({ ...config, ui: { ...config.ui, finishTool: true, finishLeadMinutes: lead } });
     const sol = { ...message(null, 'off'), model: 'gpt-5.6-sol', reasoningEffort: 'high' };
     await input.enqueueInput(sol as Parameters<typeof input.enqueueInput>[0]);
-    expect((await input.claimBrowserInput(sol.id, 'sol', null))?.text).toBe(sol.text);
+    expect(userPromptText((await input.claimBrowserInput(sol.id, 'sol', null))!.text)).toBe(sol.text);
     await input.cancelInput(sol.id);
     const chat = await createSession({ title: 'Existing native chat', conversationId: randomUUID() });
     const later = message(chat.id, 'off');
     await input.enqueueInput(later as Parameters<typeof input.enqueueInput>[0]);
-    expect((await input.claimBrowserInput(later.id, 'later', chat.conversationId))?.text).toBe(later.text);
+    expect(userPromptText((await input.claimBrowserInput(later.id, 'later', chat.conversationId))!.text)).toBe(later.text);
     await input.cancelInput(later.id);
   });
   it('requires an exact plugin claim and matching schema before a refresh completion', async () => {
@@ -280,12 +352,12 @@ describe('IPC input delivery and Goal control integration', () => {
       expect((await post('/input/claim', { id: authored.id, owner: 'exact-page', conversationId })).body.input).toBeDefined();
       expect((await post('/input/ack', { id: authored.id, owner: 'exact-page', conversationId, messageId: 'native-message' })).body.ok).toBe(true);
     } else {
-      expect(await input.offerToolInput(session.id, conversationId, 'same-request', 0)).toHaveLength(1);
+      expect((await input.offerToolInput(session.id, conversationId, 'same-request', 0)).messages).toHaveLength(1);
       await input.offerToolInput(session.id, conversationId, 'same-request', Date.now() + 1);
     }
     const rows = (await readEvents(session.id)).filter(event => event.kind === 'user_message');
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ inputId: authored.id, message: { text: authored.text } });
+    expect(rows[0]).toMatchObject({ inputId: authored.id, authoredText: authored.text, message: { text: prependUserPrompt(authored.text, await currentCoreInstructions()) } });
     const assetId = rows[0]!.kind === 'user_message' ? rows[0]!.assets![0]!.id : '';
     expect((await handlers.get('sessions:image')!(null, { id: session.id, assetId })).data).toBe(dataUrl);
     expect((await input.listInputs()).find(row => row.id === authored.id)?.historyRecorded).toBe(true);
@@ -412,14 +484,14 @@ describe('IPC input delivery and Goal control integration', () => {
     const request = message(null, 'goal');
     await input.enqueueInput(request as Parameters<typeof input.enqueueInput>[0]);
     const claimed = await input.claimBrowserInput(request.id, 'offline-document', null);
-    expect(claimed?.text).toBe(request.text + GOAL_MARKER_INSTRUCTION);
+    expect(userPromptText(claimed!.text)).toBe(request.text + GOAL_MARKER_INSTRUCTION);
     expect((await input.enqueueInput(request as Parameters<typeof input.enqueueInput>[0])).text).toBe(request.text);
     expect((await input.listInputs()).find(row => row.id === request.id)?.deliveryText).toBe(claimed?.text);
     await input.cancelInput(request.id);
     for (const automation of ['off', 'loop'] as const) {
       const manual = message(null, automation);
       await input.enqueueInput(manual as Parameters<typeof input.enqueueInput>[0]);
-      expect((await input.claimBrowserInput(manual.id, automation, null))?.text).toBe(manual.text);
+      expect(userPromptText((await input.claimBrowserInput(manual.id, automation, null))!.text)).toBe(manual.text);
       await input.cancelInput(manual.id);
     }
   });
@@ -428,12 +500,12 @@ describe('IPC input delivery and Goal control integration', () => {
     const session = await createSession({ title: 'Scheduled offline', conversationId });
     const request = { ...message(session.id, 'goal'), dueAt: Date.now() + 60000 };
     await input.enqueueInput(request as Parameters<typeof input.enqueueInput>[0]);
-    expect(await input.offerToolInput(session.id, conversationId, 'early', 0)).toEqual([]);
+    expect(await input.offerToolInput(session.id, conversationId, 'early', 0)).toEqual({ messages: [], reminder: '' });
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false, backend: 'templates' } });
     const clock = vi.spyOn(Date, 'now').mockReturnValue(request.dueAt + 1);
     try {
       const offered = await input.offerToolInput(session.id, conversationId, 'first', 0);
-      expect(offered[0]?.text).toContain(request.text + GOAL_MARKER_INSTRUCTION);
+      expect(offered.messages[0]?.text).toContain(request.text + GOAL_MARKER_INSTRUCTION);
       await saveConfig(defaultConfig());
       input.resetInputForTests();
       expect(await input.offerToolInput(session.id, conversationId, 'repeat', 0)).toEqual(offered);
@@ -448,7 +520,7 @@ describe('IPC input delivery and Goal control integration', () => {
     const enqueued = await handlers.get('sessions:send')!(null, request);
     expect(enqueued.ok).toBe(true);
     expect(goal.goalSwitchFor(conversationId).mode).toBe('goal');
-    expect(await input.offerToolInput(session.id, conversationId, 'tool-request', 0)).toHaveLength(1);
+    expect((await input.offerToolInput(session.id, conversationId, 'tool-request', 0)).messages).toHaveLength(1);
     expect(goal.goalSwitchFor(conversationId)).toMatchObject({ mode: 'loop', enabled: true });
     expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
     await goal.setGoalSwitchNow(conversationId, 'loop', false);
@@ -512,7 +584,7 @@ it.each(['auto', 'finish'] as const)('adds one short reminder to every later Ast
   const request = { ...message(chat.id, 'off'), mode, afterTurn: true } as Parameters<typeof input.enqueueInput>[0];
   await input.enqueueInput(request);
   const claimed = await input.claimBrowserInput(request.id, 'later-page', conversationId, true);
-  expect(claimed?.text).toBe(request.text + '\n\n' + finishInstruction(3));
+  expect(userPromptText(claimed!.text)).toBe(request.text + '\n\n' + finishInstruction(3));
   expect(claimed?.text).not.toContain('The user just sent');
   input.resetInputForTests();
   const restored = (await input.listInputs()).find(row => row.id === request.id)!;

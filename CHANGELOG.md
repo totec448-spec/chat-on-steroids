@@ -11,6 +11,125 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## Unreleased
 
+### Planned for 2.0.9
+
+These changes are implemented in the development tree since 2.0.8. The version
+declarations still read 2.0.8; this section does not announce a published release.
+
+#### Added
+
+- **Plugin refresh reminder after updates.** A small banner at the top of the chat
+  reminds you to refresh plugins in ChatGPT. It stays until dismissed with its X,
+  remembers that choice across restarts, and appears again for the next app version.
+- **Complete executor instructions in app-authored messages.** Normal sends, worker
+  starts/revivals and Compact & Resume use the current Core guidance, including adapted
+  OpenAI Codex collaboration instructions. The app delivers this context with the message;
+  it no longer depends solely on the host exposing MCP initialization instructions.
+- **Project `AGENTS.md` insertion.** Messages include the root `AGENTS.md` of the explicitly
+  linked local folder. Workers inherit the owning project and resumed chats retain it.
+  Unfiled chats receive no project file. Reads are bounded and permission-checked; long
+  project instructions carry a notice to read the remainder.
+- **Code mode on MCP connectors.** `exec({code})` composes a connector's existing tools
+  with JavaScript, `await`, `Promise.all`, `text()` and `image()`. It runs in a bounded
+  isolated runtime, preserves live permissions and exact chat ownership, and records
+  individual calls. Existing plugin tools named `exec` keep their own contract.
+- **Agent-maintained task plans.** `update_plan` stores a plan with expandable details
+  under the local session and shows its progress above the queue. Completed cards dismiss
+  after their completion animation; saved plans remain available across restart and
+  Compact & Resume. These plans are separate from queued workflow checkpoints.
+- **Automatic background command results.** Completed process output and exit status
+  arrive through later tools in the same owning session. Output is paged within the
+  response budget and retained until receipt; four unread completed results pause new
+  process admission. Running unattended processes can supply a bounded reminder.
+- **Simplified Chinese desktop interface.** English / 简体中文 selectors in Setup and
+  Settings update desktop labels immediately and preserve drafts, selections and authored
+  content. The preference persists, with CJK font and narrow-layout adjustments.
+
+#### Improved
+
+- **Prompt presentation and reference history.** Authored text is projected separately
+  from the delivered instruction frame in the desktop and companion. Goal/planner
+  reference history uses the authored request, while recording and receipt matching retain
+  the actual delivered text. The full message has a 96,000-character ceiling; mandatory
+  user/Core instructions are never silently truncated to fit.
+- **Plans survive composer edits and navigation.** A completed generated plan retains its
+  captured objective when the composer is cleared. In an existing chat, its stages enter
+  the finish queue atomically; a new-chat plan stays editable until Send. Individual stage
+  edits, deletion and retries keep their own delivery identity.
+- **Project sidebar controls.** Add folders from the conversation heading, page more tasks
+  within a project, and remove a grouping while retaining its conversations and folder
+  association. Adding the same folder again restores its grouping.
+- **Right-to-left content.** Arabic and other RTL prose use per-content direction and
+  bidirectional isolation; code and terminal content remain left-to-right.
+- **Less blocking background work.** Recording serializes by request/session, independent
+  state files write independently, and browser observations use two fair transport slots
+  while retaining per-chat ordering and command receipts. Session history reads avoid
+  unrelated pending writes; attribution repair reuses bounded derived indexes.
+- **MCP and plugin efficiency.** Immutable tool declarations and plugin exposure are cached
+  without caching permissions. Images avoid duplicate structured base64 payloads, command
+  batch markers stay out of displayed output, and official Playwright MCP launches disable
+  generated-code echo unless explicitly configured otherwise.
+- **Operational diagnostics.** Bounded asynchronous logs, credential redaction, crash
+  snapshots, shutdown flushing and phase-specific MCP timing make failures easier to
+  inspect. A discovery benchmark separates local and tunnel latency.
+
+#### Fixed
+
+- **Retry preserves the complete generated workflow.** Failed opening plans resend the
+  original objective and every checkpoint with a fresh input identity, instead of restoring
+  only stage one. Existing composer drafts remain intact.
+- **Rejected model selections refresh the observed catalog.** Retry waits for a successful
+  refresh and preserves the selected model/reasoning pair without opening another helper tab.
+- **Temporary planners recognize their own final answer.** Accepted user-message and
+  assistant identities are matched within the temporary document even when it has no
+  ordinary conversation URL; conflicting or unrelated results remain refused.
+- **Goal helpers retain completed decisions after a page reload.** The outbox keeps the
+  accepted user-message receipt and collects its exact recorded final response through
+  the existing completion transaction, including either event/acknowledgement order.
+- **Compact & Resume in native ChatGPT Projects.** Successors enter through the source
+  conversation's native Project link instead of cold-loading the Project home, which
+  could show ChatGPT's central retry page. Delivery requires the exact Project, a fresh
+  composer and removal of source turns before sending the handoff. The native link now
+  waits for the source editor to be ready, empty and idle; loading that editor no longer
+  consumes the navigation deadline. The corrected entry passed a cold Chrome probe;
+  full installed continuation acceptance remains pending.
+- **Chinese connector explanations update with the interface language.** Setup now
+  translates the Core and Desktop summaries through the existing live language bindings.
+- **Rejected automatic handoffs no longer loop on the same source turn.** A proven
+  pre-Send refusal is retained across restart; ambiguous dispatched sends keep their
+  original receipt authority.
+- **Lost destination evidence reaches the continuation owner.** The extension now relays
+  the validated `destinationLost` signal instead of dropping it.
+- **New-chat receipts use durable provider identity.** Exact locally owned provisional
+  turns can gain the real conversation ID when ChatGPT exposes it; a `WEB:` ID or active
+  tab alone never substitutes for that proof.
+- **Caller-evidence waits are shared by request.** Sequential and overlapping tool calls
+  spend the remaining allowance instead of restarting it, while preserving the recorder's
+  longer grace and accepting later exact evidence.
+- **Large session catalogs remain searchable and repairable.** Session search,
+  correlation restoration and late attribution repair use the full catalog instead of
+  stopping at the first 5,000 directory entries. Repair retains concurrent new records.
+- **Input routing respects actual activity.** Ambiguous activity no longer claims an
+  immediate tool recipient. Never-offered eligible input can return to browser delivery
+  after a proven completion; handed-out input keeps its original custody.
+- **Localized access-limit messages remain blocking.** The native classifier's verdict
+  survives recording and bridge delivery instead of being reclassified only in English.
+- **ImageGen downloads accept regional OpenAI file hosts.** HTTPS subdomains of
+  `oaiusercontent.com` are supported with DNS-boundary, redirect and destination checks.
+- **Windows plugins find standard standalone `uv` installations.** Runtime discovery,
+  installation and plugin startup share the per-user `.local/bin` path while retaining
+  inherited PATH precedence.
+- **Reopening the app preserves its window size.** Tray/Dock activation restores the
+  existing window instead of maximizing it again.
+- **Linux DEB release smoke cleanup tolerates delayed process teardown.** Cleanup no
+  longer turns a passed product smoke check into a failed release job.
+
+#### Remaining acceptance checks
+
+- The September 10 installed build failed native ChatGPT Project entry before Send.
+  The development fix has not been installed or exercised through a complete successor
+  receipt/rebind. Ordinary-chat compaction passed the earlier installed run.
+
 ## [2.0.8] — 2026-09-08
 
 **Darkex by dark tibo**

@@ -130,10 +130,8 @@ const DEFAULT_ARTIFACTS: ArtifactSettings = {
 /**
  * The goal loop's defaults.
  *
- * Off, because it types into somebody's chat on its own and because it cannot work at all
- * until an OpenRouter API key exists. The model is a starting point rather than a
- * recommendation: the Chat settings picker lists what OpenRouter actually publishes,
- * newest first, and whatever is chosen there is stored here verbatim.
+ * Off until explicitly enabled, with ChatGPT as the default response source.
+ * API provider/model settings apply only when API is selected; saved choices remain exact.
  */
 /**
  * The shipped Goal baseline. Keep the exact OpenRouter model id here rather than a provider
@@ -154,8 +152,7 @@ const DEFAULT_GOAL: GoalSettings = {
   // the one that can end by itself: a loop that never stops is a deliberate choice, not a
   // default anybody should discover by turning something on.
   mode: 'goal',
-  // OpenRouter stays the default provider so an upgrade changes nothing for anyone who
-  // never touches the switch; a hand-written config predating the field parses the same way.
+  // Default for the optional API backend only; ChatGPT does not read this block.
   provider: { kind: 'openrouter', baseUrl: '' },
   model: DEFAULT_GOAL_MODEL,
   reasoning: 'default',
