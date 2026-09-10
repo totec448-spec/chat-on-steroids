@@ -48,8 +48,10 @@ import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, r
 import { forgetExposedSurface } from './mcp/server.js';
 import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
-import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, listProjects } from './projects.js';
+import { SandboxError } from './sandbox.js';
+import { hideProject, listProjects } from './projects.js';
+import { selectProjectFolder } from './project-selection.js';
+import { approveFolder, removeApprovedFolder, renameApprovedFolder } from './folder-access.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
 import { TUNNEL_ID_PATTERN } from './tunnel/index.js';
@@ -89,7 +91,6 @@ import {
   swarmState
 } from './agents.js';
 import { tokenPressure } from '../shared/session.js';
-import { forgetWorkspaceRoot, renameWorkspaceRoot } from './workspace.js';
 import { hostPlatformInfo } from './platform.js';
 import { openInPreferredBrowser } from './browser.js';
 import { markInstallOnQuit, onUpdateChange, updateStatus } from './update.js';
@@ -491,20 +492,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (loginStartupError) throw loginStartupError;
     return buildState();
   });
-
-  /** Approves one folder by path. The picker dialog and the drop zone both end here. */
-  const approveRoot = async (folderPath: string): Promise<AppState> => {
-    let addedName = '';
-    await updateConfig(async (config) => {
-      const real = await validateNewRoot(folderPath, config.roots);
-      const name = uniqueRootName(real, config.roots);
-      addedName = name;
-      return { ...config, roots: [...config.roots, { name, path: real }] };
-    });
-    logInfo(`approved folder /${addedName}`);
-    return buildState();
-  };
-
   handle('roots:add', async () => {
     const window = getWindow();
     if (!window) throw new Error('No window');
@@ -513,25 +500,32 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       properties: ['openDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
-    return approveRoot(result.filePaths[0]);
+    await approveFolder(result.filePaths[0]);
+    return buildState();
   });
 
   handle('projects:list', () => listProjects());
-  handle('projects:add', async () => {
+  handle('projects:add', async (payload) => {
+    const { sessionId } = z
+      .object({ sessionId: z.string().min(1).max(128).nullable().optional() })
+      .parse(payload ?? {});
     const window = getWindow();
     if (!window) throw new Error('No window');
-    const result = await dialog.showOpenDialog(window, { title: 'Choose a project folder for ChatGPT', properties: ['openDirectory'] });
+    const result = await dialog.showOpenDialog(window, {
+      title: sessionId ? 'Choose a folder for this conversation' : 'Choose a project folder',
+      properties: ['openDirectory']
+    });
     if (result.canceled || !result.filePaths[0]) return null;
-    const folder = result.filePaths[0];
-    try { await resolvePath(getConfig().roots, folder); }
-    catch (error) {
-      if (!(error instanceof SandboxError)) throw error;
-      const state = await approveRoot(folder);
-      push('state:changed', state);
-    }
-    const project = await addProject(folder);
+    const { project, approvalChanged } = await selectProjectFolder(result.filePaths[0], sessionId);
+    if (approvalChanged) push('state:changed', await buildState());
     push('session:changed');
     return project;
+  });
+  handle('projects:remove', async (payload) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(payload);
+    await hideProject(id);
+    push('session:changed');
+    return true;
   });
 
   // A folder dropped onto the Folders card. The renderer never sees a system path itself:
@@ -539,39 +533,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // through decides whether it is a folder this app may approve at all.
   handle('roots:addPath', async (payload) => {
     const { path: folderPath } = z.object({ path: z.string().min(1).max(4096) }).parse(payload);
-    return approveRoot(folderPath);
+    await approveFolder(folderPath);
+    return buildState();
   });
 
   handle('roots:remove', async (payload) => {
     const { name } = z.object({ name: z.string().min(1).max(32) }).parse(payload);
-    await updateConfig((config) => {
-      if (!config.roots.some((root) => root.name === name)) throw new Error(`/${name} is not an approved folder`);
-      return {
-        ...config,
-        roots: config.roots.filter((r) => r.name !== name)
-      };
-    });
-    forgetWorkspaceRoot(name);
-    logInfo(`removed folder /${name}`);
+    await removeApprovedFolder(name);
     return buildState();
   });
 
   handle('roots:rename', async (payload) => {
     const { name, newName } = renameRoot.parse(payload);
-    if (RESERVED_ROOT_NAMES.has(newName)) {
-      throw new SandboxError(`/${newName} is reserved by Chat On Steroids and cannot be used as a folder name`);
-    }
-    await updateConfig((config) => {
-      if (!config.roots.some((root) => root.name === name)) throw new Error(`/${name} is not an approved folder`);
-      if (config.roots.some((r) => r.name !== name && r.name === newName)) {
-        throw new Error(`/${newName} is already used`);
-      }
-      return {
-        ...config,
-        roots: config.roots.map((r) => (r.name === name ? { ...r, name: newName } : r))
-      };
-    });
-    renameWorkspaceRoot(name, newName);
+    await renameApprovedFolder(name, newName);
     return buildState();
   });
 

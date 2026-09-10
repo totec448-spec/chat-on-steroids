@@ -189,8 +189,9 @@ everywhere, because Goal/Loop chats are recovered regardless of it (see §11).
 That `true` is `FIRST_LAUNCH_MULTI_AGENT` only; `DEFAULT_MULTI_AGENT` — the schema/migration
 baseline that fills the field in when an older config never wrote it — stays `false`.
 Fresh installs also start with **zero approved roots**: enabled permissions are not usable
-filesystem/command authority until the user approves a root, and `connection.ts` refuses to
-publish a root-requiring Core surface until one exists. The limit is
+filesystem/command authority until the user approves an exact folder. Connection/discovery may
+come online before that first approval so a conversation can pick its own repository directly;
+individual file/command calls still fail closed until that conversation has an approved project/cwd. The limit is
 derived, never typed: the Chat panel offers one threshold and writes `limit = threshold × 4/3`,
 so the defaults have to satisfy that relation or the first save in that panel moves the red
 line. Existing
@@ -353,7 +354,6 @@ src/main/mcp/session-tool.ts  model-facing search/read projection over recorded 
 src/shared/chronology.ts      timeline ordering and folding
 src/shared/session.ts         session/activity/swarm wire types
 src/shared/goal.ts            Goal prompts (continuation + specific goal) and their bounds
-src/shared/capabilities.ts    root-required vs rootless capability classification
 src/shared/types.ts           config/app/IPC types and Capabilities
 
 ── browser ────────────────────────────────────────────────────────────────
@@ -369,9 +369,13 @@ extension/overlay.css         every CLF-owned surface injected into the ChatGPT 
 extension/popup.html/.css/.js extension status/reconnect UI only; no tool/session authority
 
 ── other ──────────────────────────────────────────────────────────────────
-src/renderer/main.ts          setup/settings/connection/activity UI
-src/renderer/chat.ts          session timeline, handoff, swarm UI
-src/renderer/dom.ts           shared text-only renderer DOM/icon/toast/IPC-result helpers; no app state or innerHTML
+src/renderer/main.tsx         React renderer composition root
+src/renderer/app.tsx          renderer page/session/navigation composition and exact fresh-chat ACK following
+src/renderer/components/**   reusable React UI, chat, pages, settings and Base UI-backed primitives
+src/renderer/state/**        generation-fenced renderer state/hooks; no filesystem or Node authority
+src/renderer/chat.ts          rendered-message compatibility exports only; no renderer state or DOM ownership
+src/renderer/icons.ts         library-backed Hugeicons registry plus Solar Bold sidebar symbols; currentColor only
+src/renderer/styles.css       Tailwind v4 + semantic/shadcn-compatible token authority for the Electron renderer
 src/main/computer/index.ts    Desktop action policy, frame/ref lifetimes, batching and postconditions
 src/main/computer/helper.ts   Windows PowerShell/Win32/UIA helper protocol; no model text in argv
 src/main/computer/browser-chords.ts  pure: which chords manage browser tabs/windows, which processes are browsers
@@ -2995,7 +2999,7 @@ count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating 
 | `public-history-privacy` | public Git history/session/path privacy gate |
 | `read-backend` | connector read/list/decode semantics below the public wrapper |
 | `renderer-html` | sanitization of captured ChatGPT HTML |
-| `renderer-layout` | session card / timeline layout contracts |
+| `renderer-layout` | session card / timeline layout plus renderer token/icon contracts |
 | `renderer-state` | unsolicited pushes must not clobber a focused dirty field |
 | `resume` | resume and handoff paths |
 | `runtime-enable-and-extension` | feature toggles start/stop bridge/extension dependencies correctly |

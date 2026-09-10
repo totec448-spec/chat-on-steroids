@@ -4,11 +4,15 @@ import path from 'node:path';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
-import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, assignSessionProject, getSessionProject, inheritSessionProject, listProjects } from '../src/main/projects.js';
+import { addProject, assignSessionProject, getSessionProject, hideProject, inheritSessionProject, listProjects } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
+import { selectProjectFolder } from '../src/main/project-selection.js';
+import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
+import { resolveIn } from '../src/main/mcp/kernel.js';
+import { resetWorkspaces, setWorkspaceFor, workspaceForChat } from '../src/main/workspace.js';
 
 let directory: string, approved: string;
 beforeEach(async () => {
@@ -23,7 +27,7 @@ beforeEach(async () => {
   initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
   await saveConfig({ ...defaultConfig(), roots: [{ name: 'work', path: approved }] });
 });
-afterEach(async () => { resetSessionStoreForTests(); resetDurableForTests(); await fs.rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { resetWorkspaces(); resetSessionStoreForTests(); resetDurableForTests(); await fs.rm(directory, { recursive: true, force: true }); });
 
 it('persists one project per canonical directory and validates approved directories', async () => {
   const [one, again] = await Promise.all([addProject(path.join(approved, 'first')), addProject(path.join(approved, 'first'))]);
@@ -35,6 +39,21 @@ it('persists one project per canonical directory and validates approved director
   await expect(addProject('first')).rejects.toThrow(/absolute/);
   resetDurableForTests(); initDurableStore(directory);
   expect(await listProjects()).toEqual([one]);
+});
+
+it('hides a repository without orphaning bound sessions and restores the same identity when re-added', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const session = await createSession({ title: 'Bound project' });
+  await assignSessionProject(session.id, project.id);
+
+  await hideProject(project.id);
+  expect(await listProjects()).toEqual([{ ...project, hidden: true }]);
+  expect((await getSession(session.id))?.projectId).toBe(project.id);
+  expect(await getSessionProject(session.id)).toMatchObject({ virtual: '/work/first' });
+
+  const restored = await addProject(path.join(approved, 'first'));
+  expect(restored).toEqual(project);
+  expect((await listProjects())[0]).toEqual(project);
 });
 
 it('resolves a native picker alias to the approved identity without granting outside aliases', async () => {
@@ -100,4 +119,40 @@ it('fails closed when explicit project permission is removed and follows approve
   await saveConfig({ ...defaultConfig(), roots: [] });
   await expect(getSessionProject(session.id)).rejects.toThrow();
   expect((await getSession(session.id))?.projectId).toBe(project.id);
+});
+
+it('selects an unapproved native folder through the application service and binds only the exact session', async () => {
+  const picked = path.join(directory, 'picked-directly');
+  await fs.mkdir(picked);
+  const first = await selectProjectFolder(picked);
+  expect(first.approvalChanged).toBe(true);
+  expect(first.project.path).toBe(await validateNewRoot(picked, []));
+  expect(getConfig().roots.some(root => root.path === first.project.path)).toBe(true);
+
+  const exact = await createSession({ title: 'Exact picker owner', conversationId: 'picker-owner' });
+  const other = await createSession({ title: 'Other chat', conversationId: 'other-chat' });
+  const second = await selectProjectFolder(picked, exact.id);
+  expect(second.approvalChanged).toBe(false);
+  expect(second.project.id).toBe(first.project.id);
+  expect((await getSession(exact.id))?.projectId).toBe(first.project.id);
+  expect((await getSession(other.id))?.projectId).toBeUndefined();
+  expect(workspaceForChat('picker-owner')).toBeNull();
+});
+
+it('makes an explicit session project override stale learned cwd for that exact MCP call', async () => {
+  await fs.writeFile(path.join(approved, 'first', 'owned.txt'), 'first');
+  await fs.writeFile(path.join(approved, 'second', 'owned.txt'), 'second');
+  const first = await addProject(path.join(approved, 'first'));
+  const exact = await createSession({ title: 'Bound', conversationId: 'bound-conversation' });
+  await assignSessionProject(exact.id, first.id);
+  setWorkspaceFor('chat:bound-conversation', { virtual: '/work/second', real: path.join(approved, 'second') });
+
+  const context = {
+    startedAt: Date.now(), transportKey: null, agent: null,
+    caller: { transportKey: null, requestId: 'request-1', conversationId: 'bound-conversation', sessionId: exact.id },
+    outcome: null, evidence: emptyEvidence(),
+  } as CallContext;
+  const resolved = await runInCallContext(context, () => resolveIn(getConfig().roots, 'owned.txt'));
+  expect(resolved.real).toBe(path.join(approved, 'first', 'owned.txt'));
+  expect(workspaceForChat('bound-conversation')?.virtual).toBe('/work/first');
 });

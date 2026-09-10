@@ -301,21 +301,23 @@ describe('connection surface state', () => {
     expect(mocks.prewarm).toHaveBeenCalledTimes(process.platform === 'win32' || process.platform === 'darwin' ? 1 : 0);
   });
 
-  it('does not let a Desktop permission hide a missing root required by Core capabilities', async () => {
+  it('can publish Core before the first conversation picks a folder, even when Desktop is also enabled', async () => {
     mocks.config.roots = [];
     mocks.caps.screen = true;
     const connection = await import('../src/main/connection.js');
 
     await connection.connect();
 
-    expect(mocks.starts).toBe(0);
+    // Connection/discovery is not filesystem authority. Individual Core calls still fail closed
+    // in the sandbox until an exact approved conversation project supplies their path/cwd.
+    expect(mocks.starts).toBe(1);
     expect(connection.getStatus()).toMatchObject({
-      state: 'disconnected',
-      detail: 'Add a folder before connecting.'
+      state: 'connected',
+      detail: 'Connected.'
     });
   });
 
-  it('still requires a root for command even though command execution itself is not root-confined', async () => {
+  it('can connect before command has an approved cwd without granting command a cwd', async () => {
     mocks.config.roots = [];
     mocks.config.readOnly = false;
     Object.assign(mocks.caps, {
@@ -330,8 +332,8 @@ describe('connection surface state', () => {
 
     await connection.connect();
 
-    expect(mocks.starts).toBe(0);
-    expect(connection.getStatus().detail).toBe('Add a folder before connecting.');
+    expect(mocks.starts).toBe(1);
+    expect(connection.getStatus()).toMatchObject({ state: 'connected', detail: 'Connected.' });
   });
 
   it('keeps genuinely rootless Desktop and clipboard setups connectable', async () => {

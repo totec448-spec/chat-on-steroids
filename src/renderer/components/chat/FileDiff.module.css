@@ -1,0 +1,51 @@
+.diff {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--card-foreground);
+  font-family: var(--font-mono);
+}
+
+.diffHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.diffFileWrap { display: inline-flex; min-width: 0; align-items: center; gap: 7px; }
+.diffIcon { width: 15px; height: 15px; flex: none; color: var(--muted-foreground); }
+.diffFile { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diffStat, .rowStat { display: inline-flex; flex: none; align-items: center; gap: 8px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.diffStat { margin-left: auto; }
+.add { color: #15a06a; }
+.del { color: #dc2626; }
+:global(.dark) .add { color: #34d399; }
+:global(.dark) .del { color: #f87171; }
+
+.diffBody { padding: 4px 0; }
+.diffRow {
+  position: relative;
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 15px;
+  font-size: 11.5px;
+}
+.diffRow::before {
+  content: '';
+  position: absolute;
+  inset: 4px auto 4px 0;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(to bottom, #15a06a 0 50%, #dc2626 50% 100%);
+}
+:global(.dark) .diffRow::before { background: linear-gradient(to bottom, #34d399 0 50%, #f87171 50% 100%); }
+.path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); }
+.approx { flex: none; color: var(--muted-foreground); font-family: var(--font-sans); font-size: 10.5px; }
+.note { border-top: 1px solid var(--border); padding: 6px 12px; color: var(--muted-foreground); font-family: var(--font-sans); font-size: 10.5px; line-height: 16px; }

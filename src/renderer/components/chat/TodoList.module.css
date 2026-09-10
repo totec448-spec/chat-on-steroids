@@ -1,0 +1,38 @@
+.todo {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  color: var(--card-foreground);
+}
+
+.headRow { display: flex; min-height: 38px; align-items: center; padding: 0 10px 0 12px; border-bottom: 1px solid var(--border); }
+.todoHead { display: flex; min-width: 0; flex: 1; cursor: pointer; align-items: center; gap: 8px; border: 0; background: transparent; padding: 0; color: inherit; text-align: left; }
+.headIcon { display: grid; width: 16px; height: 16px; flex: none; place-items: center; color: var(--muted-foreground); }
+.headIcon > svg { width: 15px; height: 15px; }
+.check { color: #15a06a; }
+:global(.dark) .check { color: #34d399; }
+.progressDot { width: 9px; height: 9px; border: 2px solid currentColor; border-radius: 999px; border-right-color: transparent; }
+.title { min-width: 0; flex: 1; font-size: 12.5px; font-weight: 500; }
+.count { color: var(--muted-foreground); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chevron { width: 13px; height: 13px; color: var(--muted-foreground); transition: transform 180ms ease; }
+.collapsedChevron { transform: rotate(-90deg); }
+.actions { display: flex; flex: none; align-items: center; margin-left: 4px; }
+.collapsible { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 180ms ease, opacity 140ms ease; }
+.collapsed { grid-template-rows: 0fr; opacity: 0; }
+.inner { min-height: 0; overflow: hidden; }
+.list { display: flex; flex-direction: column; gap: 7px; margin: 0; padding: 10px 12px 12px; list-style: none; }
+.item { display: flex; align-items: flex-start; gap: 9px; min-width: 0; color: var(--muted-foreground); font-size: 12.5px; line-height: 18px; }
+.iconWrap { position: relative; display: grid; width: 16px; height: 18px; flex: none; place-items: center; }
+.iconWrap > svg { width: 15px; height: 15px; }
+.pendingRing { width: 13px; height: 13px; border: 1.5px dashed currentColor; border-radius: 999px; }
+.active { color: var(--foreground); }
+.done .iconWrap { color: #15a06a; }
+:global(.dark) .done .iconWrap { color: #34d399; }
+.done .label { color: var(--muted-foreground); text-decoration: line-through; }
+.label { min-width: 0; flex: 1; color: inherit; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chevron, .collapsible { transition: none; }
+}

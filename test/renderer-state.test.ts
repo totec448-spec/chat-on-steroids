@@ -1,1156 +1,276 @@
-import { promises as fs } from 'node:fs';
-import path from 'node:path';
-import { JSDOM } from 'jsdom';
+import { act, createElement } from 'react';
+import type { Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
-import { DEFAULT_GOAL_MODEL, DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
+import { defaultConfig } from '../src/main/config.js';
+import type { InputEntry, SessionControlsView } from '../src/preload/index.js';
+import type { SessionSummary } from '../src/shared/session.js';
+import type { AppState } from '../src/shared/types.js';
+import { createRendererRoot, flushReact, installRendererDom, ok, setNativeValue } from './renderer-react-helpers.js';
 
-let dom: JSDOM | null = null;
-afterEach(() => {
-  dom?.window.close();
-  dom = null;
-  vi.resetModules();
+let dom: ReturnType<typeof installRendererDom>['dom'] | null = null;
+let root: Root | null = null;
+
+afterEach(async () => {
+  if (root) await act(async () => root?.unmount());
+  root = null;
+  dom?.window.close(); dom = null;
+  vi.restoreAllMocks(); vi.resetModules();
 });
 
-it('does not overwrite a focused dirty settings field on an unsolicited state push', async () => {
-  const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
-  dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
-  const w = dom.window;
-  Object.assign(globalThis, {
-    window: w,
-    document: w.document,
-    HTMLElement: w.HTMLElement,
-    Element: w.Element,
-    Node: w.Node,
-    DocumentFragment: w.DocumentFragment,
-    HTMLInputElement: w.HTMLInputElement,
-    HTMLSelectElement: w.HTMLSelectElement,
-    HTMLTextAreaElement: w.HTMLTextAreaElement,
-    HTMLButtonElement: w.HTMLButtonElement
-  });
-  if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
-
-  let stateListener: (state: any) => void = () => undefined;
-  const baseConfig = {
-    roots: [{ name: 'repo', path: 'C:\\repo' }],
-    readOnly: true,
-    capabilities: {
-      browse: true, search: true, read: true, metadata: true,
-      create: false, edit: false, move: false, deleteFile: false, command: false,
-      screen: false, control: false, clipboardRead: false, clipboardWrite: false
-    },
-    tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' },
-    sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
-    compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
-    goal: {
-      enabled: false,
-      model: 'deepseek/deepseek-v4-flash',
-      reasoning: 'default' as const,
-      prompt: DEFAULT_GOAL_SYSTEM_PROMPT
-    }
-  };
-  const state = {
-    config: baseConfig,
-    status: { state: 'disconnected', detail: '', publicUrl: null, localUrl: null, handshakeAt: null, lastRequestAt: null, lastToolCallAt: null, health: null, surfaces: [] },
-    hasApiKey: false,
-    hasGoalKey: false,
-    resolvedBinary: null,
-    bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
-    update: { current: '2.0.2', latest: null, stage: 'idle', error: null, checkedAt: null }
-  };
-  const ok = (data: any) => Promise.resolve({ ok: true, data });
-  const api: any = new Proxy({
-    getState: () => ok(state),
-    getLog: () => ok([]),
-    getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
-    onStateChanged: (fn: any) => { stateListener = fn; return () => undefined; },
-    onLogEntry: () => () => undefined,
-    onSwarmChanged: () => () => undefined,
-    onSessionChanged: () => () => undefined,
-    listSessions: () => ok({ sessions: [], activeId: null, pressure: [] })
-  }, { get(target, prop) { if (prop in target) return (target as any)[prop]; return (..._args: any[]) => ok(null); } });
-  Object.defineProperty(w, 'api', { value: api, configurable: true });
-
-  await import('../src/renderer/main.js');
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  const field = w.document.getElementById('tunnelId') as HTMLInputElement;
-  expect(field.value).toBe(baseConfig.tunnel.tunnelId);
-  field.focus();
-  field.value = 'tunnel_USER_IS_STILL_TYPING';
-
-  stateListener(structuredClone(state));
-
-  expect(w.document.activeElement).toBe(field);
-  expect(field.value).toBe('tunnel_USER_IS_STILL_TYPING');
-
-  const multiAgent = w.document.getElementById('homeMaEnabled') as HTMLInputElement;
-  multiAgent.focus();
-  multiAgent.checked = true;
-  stateListener(structuredClone(state));
-  expect(w.document.activeElement).toBe(multiAgent);
-  expect(multiAgent.checked).toBe(true);
-
-  const allowUnattributed = w.document.getElementById('allowUnattributedCalls') as HTMLInputElement;
-  allowUnattributed.focus();
-  allowUnattributed.checked = true;
-  stateListener(structuredClone(state));
-  expect(w.document.activeElement).toBe(allowUnattributed);
-  expect(allowUnattributed.checked).toBe(true);
-
-  // The settings sheet used to bypass the dirty-field guard used by Home. An unrelated
-  // status push therefore erased this value while the user was still typing it.
-  const compactionThreshold = w.document.getElementById('autoCompactTokens') as HTMLInputElement;
-  compactionThreshold.focus();
-  compactionThreshold.value = '355000';
-  stateListener(structuredClone(state));
-  expect(w.document.activeElement).toBe(compactionThreshold);
-  expect(compactionThreshold.value).toBe('355000');
-
-  compactionThreshold.blur();
-  const updatedThreshold = structuredClone(state) as any;
-  updatedThreshold.config.compaction.autoTokens = 320000;
-  stateListener(updatedThreshold);
-  expect(compactionThreshold.value).toBe('320000');
-
-  const goalPrompt = w.document.getElementById('goalPrompt') as HTMLTextAreaElement;
-  goalPrompt.focus();
-  goalPrompt.value = 'USER IS STILL EDITING THIS PROMPT';
-  stateListener(structuredClone(state));
-  expect(w.document.activeElement).toBe(goalPrompt);
-  expect(goalPrompt.value).toBe('USER IS STILL EDITING THIS PROMPT');
-
-  // The health card reports the live surface projection rather than a hand-maintained
-  // denominator. Tool consolidation/additions should never leave the UI saying "of 9"
-  // when nine is no longer the product's actual maximum.
-  const withTools = structuredClone(state) as any;
-  withTools.status.surfaces = [
-    {
-      id: 'core', connectorName: 'Core', description: '', cardSummary: '', optional: false,
-      available: true, localUrl: null, publicUrl: null, tools: ['read', 'apply_patch'],
-      state: 'off', detail: '', lastRequestAt: null, lastToolCallAt: null
-    },
-    {
-      id: 'desktop', connectorName: 'Desktop', description: '', cardSummary: '', optional: true,
-      available: true, localUrl: null, publicUrl: null, tools: ['observe'],
-      state: 'off', detail: '', lastRequestAt: null, lastToolCallAt: null
-    }
-  ];
-  stateListener(withTools);
-  expect(w.document.getElementById('facts')!.textContent).toContain('Tools across Core + Desktop3 total');
-  expect(w.document.getElementById('facts')!.textContent).not.toContain('of 9');
-
-  const withMissingMacAccess = structuredClone(withTools) as any;
-  withMissingMacAccess.platform = { family: 'macos', name: 'macOS', desktopAutomation: true };
-  withMissingMacAccess.config.readOnly = false;
-  withMissingMacAccess.config.capabilities.screen = true;
-  withMissingMacAccess.config.capabilities.control = true;
-  withMissingMacAccess.desktopAccess = {
-    screen: 'granted',
-    accessibility: 'missing',
-    checkedAt: 1,
-    error: null
-  };
-  stateListener(withMissingMacAccess);
-  const accessWarning = w.document.getElementById('desktopAccess')!;
-  expect(accessWarning.hidden).toBe(false);
-  expect(accessWarning.textContent).toContain('Accessibility: missing');
-  expect(accessWarning.textContent).toContain('live verdicts from the native backend');
-  expect((w.document.getElementById('openDesktopScreen') as HTMLButtonElement).hidden).toBe(true);
-  expect((w.document.getElementById('openDesktopAccessibility') as HTMLButtonElement).hidden).toBe(false);
-
-  const withReadOnlyMacAccess = structuredClone(withMissingMacAccess) as any;
-  withReadOnlyMacAccess.config.readOnly = true;
-  stateListener(withReadOnlyMacAccess);
-  expect(accessWarning.hidden).toBe(true);
-});
-
-it('serializes settings intent so rapid toggles and later UI changes cannot undo each other', async () => {
-  const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
-  dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
-  const w = dom.window;
-  Object.assign(globalThis, {
-    window: w,
-    document: w.document,
-    HTMLElement: w.HTMLElement,
-    Element: w.Element,
-    Node: w.Node,
-    DocumentFragment: w.DocumentFragment,
-    HTMLInputElement: w.HTMLInputElement,
-    HTMLSelectElement: w.HTMLSelectElement,
-    HTMLTextAreaElement: w.HTMLTextAreaElement,
-    HTMLButtonElement: w.HTMLButtonElement
-  });
-  if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
-
-  const baseConfig = {
-    roots: [{ name: 'repo', path: 'C:\\repo' }],
-    readOnly: false,
-    capabilities: {
-      browse: true, search: true, read: true, metadata: true,
-      create: true, edit: true, move: true, deleteFile: true, command: true,
-      screen: true, control: true, clipboardRead: true, clipboardWrite: true
-    },
-    tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as 'light' | 'dark' },
-    sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
-    compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
-    goal: {
-      enabled: false,
-      model: 'deepseek/deepseek-v4-flash',
-      reasoning: 'default' as const,
-      prompt: DEFAULT_GOAL_SYSTEM_PROMPT
-    }
-  };
-  const appState = (config: typeof baseConfig) => ({
+function state(overrides: Partial<AppState['config']['ui']> = {}): AppState {
+  const config = defaultConfig('win32');
+  config.ui = { ...config.ui, ...overrides };
+  return {
     config,
     status: { state: 'disconnected', detail: '', publicUrl: null, localUrl: null, handshakeAt: null, lastRequestAt: null, lastToolCallAt: null, health: null, surfaces: [] },
-    hasApiKey: false,
-    hasGoalKey: false,
-    resolvedBinary: null,
-    bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
-    update: { current: '2.0.2', latest: null, stage: 'idle', error: null, checkedAt: null }
-  });
-  let current = appState(baseConfig);
-  const calls: any[] = [];
-  const pending: Array<(reply: any) => void> = [];
-  const ok = (data: any) => Promise.resolve({ ok: true as const, data });
-  const saveSettings = (patch: any) => {
-    calls.push(structuredClone(patch));
-    return new Promise<any>((resolve) => pending.push(resolve));
+    platform: { family: 'windows', name: 'Windows', desktopAutomation: true },
+    secureStorage: { available: true, detail: null },
+    hasApiKey: false, hasGoalKey: false, hasCustomProviderKey: false,
+    resolvedBinary: null, bundledTunnelVersion: null,
+    bridge: { running: true, port: 8765, paired: true, present: true, lastSeenAt: 1, extensionVersion: '2.0.8' },
+    update: { current: '2.0.8', latest: null, stage: 'idle', error: null, checkedAt: 1 },
   };
-  const api: any = new Proxy({
-    getState: () => ok(current),
-    getLog: () => ok([]),
-    getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
-    saveSettings,
-    onStateChanged: () => () => undefined,
-    onLogEntry: () => () => undefined,
-    onSwarmChanged: () => () => undefined,
-    onSessionChanged: () => () => undefined,
-    listSessions: () => ok({ sessions: [], activeId: null, pressure: [] })
-  }, { get(target, prop) { if (prop in target) return (target as any)[prop]; return (..._args: any[]) => ok(null); } });
-  Object.defineProperty(w, 'api', { value: api, configurable: true });
-
-  await import('../src/renderer/main.js');
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  // First save toggles a value that has no form control of its own. Keep the IPC unresolved,
-  // matching a real save that is waiting for bridge/tunnel lifecycle work in the main process.
-  (w.document.getElementById('readOnlyBtn') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(calls).toHaveLength(1));
-  expect(calls[0].readOnly).toBe(true);
-
-  // A second click before the first acknowledgement means "back off". The old handler derived
-  // both clicks from state.config.readOnly=false, so both snapshots requested true and the two
-  // clicks behaved like one.
-  (w.document.getElementById('readOnlyBtn') as HTMLButtonElement).click();
-
-  // While both are queued, change an unrelated checkbox. It must inherit the latest requested
-  // read-only intent rather than the stale acknowledged state.
-  const auto = w.document.getElementById('autoConnect') as HTMLInputElement;
-  auto.checked = true;
-  auto.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(calls).toHaveLength(1);
-
-  current = appState({ ...baseConfig, readOnly: true });
-  pending.shift()!({ ok: true, data: current });
-  await vi.waitFor(() => expect(calls).toHaveLength(2));
-  expect(calls[1].readOnly).toBe(false);
-  expect(calls[1].ui.autoConnect).toBe(false);
-
-  current = appState({ ...baseConfig, readOnly: false });
-  pending.shift()!({ ok: true, data: current });
-  await vi.waitFor(() => expect(calls).toHaveLength(3));
-  expect(calls[2].readOnly).toBe(false);
-  expect(calls[2].ui.autoConnect).toBe(true);
-
-  current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true } });
-  pending.shift()!({ ok: true, data: current });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-
-  // Theme has the same no-form-control shape. Two rapid clicks must request dark then light,
-  // even though the first dark save has not answered yet.
-  const theme = w.document.getElementById('themeBtn') as HTMLButtonElement;
-  theme.click();
-  await vi.waitFor(() => expect(calls).toHaveLength(4));
-  expect(calls[3].ui.theme).toBe('dark');
-  theme.click();
-  expect(calls).toHaveLength(4);
-
-  current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'dark' } });
-  pending.shift()!({ ok: true, data: current });
-  await vi.waitFor(() => expect(calls).toHaveLength(5));
-  expect(calls[4].ui.theme).toBe('light');
-
-  current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'light' } });
-  pending.shift()!({ ok: true, data: current });
-  await new Promise((resolve) => setTimeout(resolve, 0));
-});
-
-/**
- * The goal loop's settings panel.
- *
- * Three things are worth pinning here and the rest is layout: the key never travels with the
- * settings, the catalogue is only fetched when somebody asks for it, and an install with no
- * key says so in the words the extension says it in.
- */
-
-interface GoalMount {
-  window: JSDOM['window'];
-  calls: any[];
-  keys: Array<{ method: string; value: string }>;
-  modelPages: any[];
-  push(state: any): void;
-  state: any;
 }
 
-async function mountChat(
-  overrides: Record<string, unknown> = {},
-  models: any[] = [],
-  apiOverrides: Record<string, (...args: any[]) => any> = {},
-  initialGoal: Record<string, unknown> = {}
-): Promise<GoalMount> {
-  const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
-  dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
-  const w = dom.window;
-  Object.assign(globalThis, { Event: w.Event });
-  Object.assign(globalThis, {
-    window: w,
-    document: w.document,
-    HTMLElement: w.HTMLElement,
-    Element: w.Element,
-    Node: w.Node,
-    DocumentFragment: w.DocumentFragment,
-    HTMLInputElement: w.HTMLInputElement,
-    HTMLSelectElement: w.HTMLSelectElement,
-    HTMLTextAreaElement: w.HTMLTextAreaElement,
-    HTMLButtonElement: w.HTMLButtonElement
-  });
-  if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
-
-  const config = {
-    roots: [{ name: 'repo', path: 'C:\\repo' }],
-    readOnly: false,
-    capabilities: {
-      browse: true, search: true, read: true, metadata: true,
-      create: true, edit: true, move: true, deleteFile: true, command: true,
-      screen: true, control: true, clipboardRead: true, clipboardWrite: true
-    },
-    tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light' as const },
-    sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
-    compaction: { auto: true, autoTokens: 300000 },
-    multiAgent: { enabled: false, maxWorkers: 2, allowUnattributedCalls: false, recoverAgentTabs: true },
-    goal: {
-      enabled: false,
-      model: 'deepseek/deepseek-v4-flash',
-      reasoning: 'default' as const,
-      prompt: DEFAULT_GOAL_SYSTEM_PROMPT,
-      ...initialGoal
-    }
+function summary(id = 'session-aaaaaaaa'): SessionSummary {
+  return {
+    id, title: 'Conversation', conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', chatIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'],
+    startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastHandoffId: null, lastHandoffAt: null,
+    lastTurnOutcome: null, activeTurnId: 'historical-turn', agents: [], origin: null,
   };
-  const state: any = {
-    config,
-    status: { state: 'disconnected', detail: '', publicUrl: null, localUrl: null, handshakeAt: null, lastRequestAt: null, lastToolCallAt: null, health: null, surfaces: [] },
-    hasApiKey: false,
-    hasGoalKey: false,
-    resolvedBinary: null,
-    bundledTunnelVersion: null,
-    bridge: { running: true, port: 8765, paired: false, present: false, lastSeenAt: null, extensionVersion: null },
-    update: { current: '2.0.2', latest: null, stage: 'idle', error: null, checkedAt: null },
-    ...overrides
-  };
-  let listener: (next: any) => void = () => undefined;
-  const calls: any[] = [];
-  const keys: Array<{ method: string; value: string }> = [];
-  const modelPages: any[] = [];
-  const ok = (data: any) => Promise.resolve({ ok: true as const, data });
-  const api: any = new Proxy(
-    {
-      getState: () => ok(state),
-      getLog: () => ok([]),
-      getSwarm: () => ok({ running: false, runId: null, agents: [], maxWorkers: 2, pendingReports: 0 }),
-      onStateChanged: (fn: any) => {
-        listener = fn;
-        return () => undefined;
-      },
-      onLogEntry: () => () => undefined,
-      onSwarmChanged: () => () => undefined,
-      onSessionChanged: () => () => undefined,
-      listSessions: () => ok({ sessions: [], activeId: null, pressure: [] }),
-      // Answers with the config it just stored, the way the real handler does. The panel
-      // paints from the app's answer rather than from what it just clicked, so a fake that
-      // replied with the old config would be testing a revert.
-      saveSettings: (patch: any) => {
-        calls.push(structuredClone(patch));
-        state.config = { ...state.config, ...structuredClone(patch) };
-        return ok(state);
-      },
-      setGoalKey: (value: string) => {
-        keys.push({ method: 'setGoalKey', value });
-        return ok({ ...state, hasGoalKey: value !== '' });
-      },
-      setApiKey: (value: string) => {
-        keys.push({ method: 'setApiKey', value });
-        return ok(state);
-      },
-      listGoalModels: (offset: number) => {
-        const page = { models: models.slice(offset, offset + 20), total: models.length, offset };
-        modelPages.push(page);
-        return ok(page);
-      },
-      ...apiOverrides
-    },
-    {
-      get(target, prop) {
-        if (prop in target) return (target as any)[prop];
-        return (..._args: any[]) => ok(null);
-      }
-    }
-  );
-  Object.defineProperty(w, 'api', { value: api, configurable: true });
-  await import('../src/renderer/main.js');
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  return { window: w, calls, keys, modelPages, state, push: (next) => listener(next) };
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+function controls(activeTurnId: string | null = null): SessionControlsView {
+  return {
+    sessionId: 'session-aaaaaaaa', conversationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    automation: 'off', objective: '', activeTurnId, finishHeld: false, queueAtFinish: false,
+    canInject: !!activeTurnId, finishWaiting: false, stopPending: false, goalDraft: null,
+    finishGoalDraft: null, blocked: '', job: null,
+  };
+}
 
-it('attaches pasted screenshot files with previews while preserving ordinary text paste', async () => {
-  const dropFiles = vi.fn(async () => ({ ok: true, data: [{ id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'screenshot.png', size: 4, mimeType: 'image/png', preview: 'data:image/webp;base64,AAAA' }] }));
-  const mounted = await mountChat({}, [], { dropFiles });
-  const w = mounted.window, input = w.document.getElementById('chatInput')!;
-  const file = new w.File(['image'], 'screenshot.png', { type: 'image/png' });
-  const paste = new w.Event('paste', { bubbles: true, cancelable: true });
-  Object.defineProperty(paste, 'clipboardData', { value: { files: [file] } });
-  input.dispatchEvent(paste);
-  await vi.waitFor(() => expect(dropFiles).toHaveBeenCalledWith([file]));
-  expect(paste.defaultPrevented).toBe(true);
-  await vi.waitFor(() => expect(w.document.querySelector('img[src="data:image/webp;base64,AAAA"]')).not.toBeNull());
-  const text = new w.Event('paste', { bubbles: true, cancelable: true });
-  Object.defineProperty(text, 'clipboardData', { value: { files: [] } });
-  input.dispatchEvent(text);
-  expect(text.defaultPrevented).toBe(false);
-  const overflow = new w.Event('paste', { bubbles: true, cancelable: true });
-  Object.defineProperty(overflow, 'clipboardData', { value: { files: Array(20).fill(file) } });
-  input.dispatchEvent(overflow);
-  expect(overflow.defaultPrevented).toBe(true);
-  expect(dropFiles).toHaveBeenCalledTimes(1);
+it('keeps dirty settings through an unrelated authoritative push and saves against the original base', async () => {
+  const first = state({ theme: 'light' });
+  const pushed = state({ theme: 'dark' });
+  const saveSettings = vi.fn(async (patch: any, _base: any) => ok({ ...pushed, config: { ...pushed.config, ...patch } } as AppState));
+  const installed = installRendererDom({ saveSettings, removeRoot: () => ok(first), addRoot: () => ok(first) });
+  dom = installed.dom;
+  const { CustomizePage } = await import('../src/renderer/components/settings/customize-page.js');
+  root = await createRendererRoot(installed.container);
+  await act(async () => { root!.render(createElement(CustomizePage, { appState: first })); await flushReact(); });
+
+  const readOnly = installed.container.querySelector<HTMLButtonElement>('[role="switch"]')!;
+  expect(readOnly.getAttribute('aria-checked')).toBe('false');
+  await act(async () => { readOnly.click(); await flushReact(); });
+  expect(readOnly.getAttribute('aria-checked')).toBe('true');
+
+  await act(async () => { root!.render(createElement(CustomizePage, { appState: pushed })); await flushReact(); });
+  expect(installed.container.querySelector<HTMLButtonElement>('[role="switch"]')!.getAttribute('aria-checked')).toBe('true');
+
+  const save = [...installed.container.querySelectorAll('button')].find((button) => button.textContent === 'Save changes')!;
+  await act(async () => { save.click(); await flushReact(); });
+  expect(saveSettings).toHaveBeenCalledTimes(1);
+  expect(saveSettings.mock.calls[0]![0].readOnly).toBe(true);
+  expect(saveSettings.mock.calls[0]![1].ui.theme).toBe('light');
 });
 
-it('preserves the selected OpenRouter model through an unchanged custom-provider round trip', async () => {
-  const mounted = await mountChat();
-  const w = mounted.window;
-  const original = 'z-ai/glm-5.3-flash';
-  mounted.state.config.goal = { ...mounted.state.config.goal, model: original, provider: { kind: 'openrouter', baseUrl: '' } };
-  mounted.push(mounted.state);
-  const provider = w.document.getElementById('goalProvider') as HTMLSelectElement;
-  provider.value = 'custom'; provider.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
-  // Repainting custom settings must not replace the hidden OpenRouter picker's model.
-  mounted.push({ ...mounted.state, hasCustomProviderKey: false });
-  provider.value = 'openrouter'; provider.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
-  expect(mounted.calls[1].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: original });
-  expect(w.document.getElementById('goalModelName')!.textContent).toBe(original);
-});
-
-it('uses the OpenRouter default when opened directly on an unrelated custom deployment', async () => {
-  const mounted = await mountChat({}, [], {}, { model: 'llama3.1', provider: { kind: 'custom', baseUrl: 'http://localhost:8000/v1' } });
-  const provider = mounted.window.document.getElementById('goalProvider') as HTMLSelectElement;
-  provider.value = 'openrouter';
-  provider.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
-  expect(mounted.calls[0].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: DEFAULT_GOAL_MODEL });
-});
-
-it('saves a custom deployment id and returns to the known OpenRouter model', async () => {
-  const mounted = await mountChat();
-  const w = mounted.window;
-  const provider = w.document.getElementById('goalProvider') as HTMLSelectElement;
-  provider.value = 'custom';
-  provider.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
-  expect(mounted.calls[0].goal.provider.kind).toBe('custom');
-  expect(w.document.getElementById('goalCustomPanel')?.hidden).toBe(false);
-  const model = w.document.getElementById('goalCustomModel') as HTMLInputElement;
-  model.value = 'llama3.1';
-  model.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
-  expect(mounted.calls[1].goal.model).toBe('llama3.1');
-  provider.value = 'openrouter';
-  provider.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(3));
-  expect(mounted.calls[2].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: 'deepseek/deepseek-v4-flash' });
-});
-
-it('saves the ChatGPT browser choice from its settings control and restores it on state push', async () => {
-  const mounted = await mountChat();
-  const w = mounted.window;
-  const browser = w.document.getElementById('chatBrowser') as HTMLSelectElement;
-  expect(browser.value).toBe('chrome'); // older config has no field
-  browser.value = 'edge';
-  browser.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
-  expect(mounted.calls[0].ui.chatBrowser).toBe('edge');
-  expect(browser.value).toBe('edge');
-  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
-  expect(browser.value).toBe('chrome');
-});
-
-it('preserves native Desktop permissions when saving unrelated settings on Linux', async () => {
-  const mounted = await mountChat({
-    platform: { family: 'linux', name: 'Linux', desktopAutomation: false }
-  });
-  const w = mounted.window;
-
-  const desktopGroup = w.document.querySelector<HTMLElement>('[data-group="desktop"]')!;
-  expect(desktopGroup.hidden).toBe(true);
-
-  const autoConnect = w.document.getElementById('autoConnect') as HTMLInputElement;
-  autoConnect.checked = true;
-  autoConnect.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await settle();
-
-  expect(mounted.calls).toHaveLength(1);
-  expect(mounted.calls[0].ui.autoConnect).toBe(true);
-  expect(mounted.calls[0].capabilities).toMatchObject({
-    screen: true,
-    control: true,
-    clipboardRead: true,
-    clipboardWrite: true
-  });
-});
-
-it('uses native menu-bar/Dock wording on macOS instead of Windows tray copy', async () => {
-  const mounted = await mountChat({
-    platform: { family: 'macos', name: 'macOS', desktopAutomation: true }
-  });
-  const doc = mounted.window.document;
-
-  expect(doc.getElementById('backgroundRunningCopy')!.textContent).toContain('menu bar and Dock');
-  expect(doc.getElementById('backgroundRunningCopy')!.textContent).not.toContain('tray');
-  expect(doc.getElementById('minimizeToTrayCopy')!.textContent).toBe('Hide the window to the menu bar when closed');
-});
-
-it('surfaces the existing root rename API in the folder row', async () => {
-  const renames: Array<[string, string]> = [];
-  const mounted = await mountChat({}, [], {
-    renameRoot: (name: string, newName: string) => {
-      renames.push([name, newName]);
-      return Promise.resolve({ ok: false, error: 'test stops before mutation' });
-    }
-  });
-  const doc = mounted.window.document;
-  const button = doc.querySelector<HTMLButtonElement>('.root button[title="Rename /repo"]');
-  expect(button).not.toBeNull();
-
-  button!.click();
-  const input = doc.querySelector<HTMLInputElement>('.root .root-rename')!;
-  input.value = 'New-Repo';
-  input.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await settle();
-
-  expect(renames).toEqual([['repo', 'new-repo']]);
-});
-
-it('preserves an in-progress root rename across unrelated state pushes and cancels it if the root disappears', async () => {
-  const renames: Array<[string, string]> = [];
-  const mounted = await mountChat({}, [], {
-    renameRoot: (name: string, newName: string) => {
-      renames.push([name, newName]);
-      return Promise.resolve({ ok: false, error: 'rename failed for retry test' });
-    }
-  });
-  const doc = mounted.window.document;
-  doc.querySelector<HTMLButtonElement>('.root button[title="Rename /repo"]')!.click();
-
-  const original = doc.querySelector<HTMLInputElement>('.root .root-rename')!;
-  original.value = 'new-name';
-  original.setSelectionRange(3, 7);
-
-  const unrelated = structuredClone(mounted.state) as any;
-  unrelated.status.detail = 'unrelated live status push';
-  mounted.push(unrelated);
-
-  const preserved = doc.querySelector<HTMLInputElement>('.root .root-rename')!;
-  expect(preserved).not.toBeNull();
-  expect(doc.activeElement).toBe(preserved);
-  expect(preserved.value).toBe('new-name');
-  expect(preserved.selectionStart).toBe(3);
-  expect(preserved.selectionEnd).toBe(7);
-
-  preserved.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await settle();
-  expect(renames).toEqual([['repo', 'new-name']]);
-  const retry = doc.querySelector<HTMLInputElement>('.root .root-rename')!;
-  expect(retry.value).toBe('new-name');
-  retry.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await settle();
-  expect(renames).toEqual([['repo', 'new-name'], ['repo', 'new-name']]);
-
-  const escape = doc.querySelector<HTMLInputElement>('.root .root-rename')!;
-  escape.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  expect(doc.querySelector('.root-rename')).toBeNull();
-
-  doc.querySelector<HTMLButtonElement>('.root button[title="Rename /repo"]')!.click();
-  expect(doc.querySelector('.root-rename')).not.toBeNull();
-
-  const removed = structuredClone(unrelated) as any;
-  removed.config.roots = [];
-  mounted.push(removed);
-  expect(doc.querySelector('.root-rename')).toBeNull();
-  expect(doc.querySelector('.root')).toBeNull();
-});
-
-/** Fake OpenRouter catalogue, already in the order the app is expected to keep. */
-const catalogue = (count: number) =>
-  Array.from({ length: count }, (_, index) => ({
-    id: `vendor${index}/model-${index}`,
-    name: `Model ${index}`,
-    created: 1_800_000_000 - index * 86_400,
-    contextLength: 128_000
+it('deduplicates rapid React submits and sends the exact observed model/reasoning pair', async () => {
+  let release!: (value: { ok: true; data: InputEntry }) => void;
+  const sendInput = vi.fn((args: any) => new Promise<{ ok: true; data: InputEntry }>((resolve) => {
+    release = resolve;
+    void args;
   }));
-
-it('guides rootless setup from the capabilities that actually need a filesystem root', async () => {
-  const mounted = await mountChat({ hasApiKey: true });
-  const mixed = structuredClone(mounted.state) as any;
-  mixed.hasApiKey = true;
-  mixed.config.roots = [];
-  mixed.config.readOnly = false;
-  for (const capability of Object.keys(mixed.config.capabilities)) mixed.config.capabilities[capability] = false;
-  mixed.config.capabilities.browse = true;
-  mixed.config.capabilities.screen = true;
-  mixed.status.surfaces = [
-    {
-      id: 'core', connectorName: 'Core', description: '', cardSummary: '', optional: false,
-      available: true, localUrl: null, publicUrl: null, tools: ['read'], state: 'off', detail: '',
-      lastRequestAt: null, lastToolCallAt: null
-    },
-    {
-      id: 'desktop', connectorName: 'Desktop', description: '', cardSummary: '', optional: true,
-      available: true, localUrl: null, publicUrl: null, tools: ['observe'], state: 'off', detail: '',
-      lastRequestAt: null, lastToolCallAt: null
-    }
-  ];
-
-  mounted.push(mixed);
-  const connect = mounted.window.document.getElementById('connectBtn') as HTMLButtonElement;
-  expect(connect.disabled).toBe(true);
-  expect(connect.title).toContain('Choose a folder');
-  expect(mounted.window.document.querySelector('[data-step="folder"]')?.classList.contains('is-current')).toBe(true);
-
-  const commandAndDesktop = structuredClone(mixed) as any;
-  commandAndDesktop.config.capabilities.browse = false;
-  commandAndDesktop.config.capabilities.command = true;
-  mounted.push(commandAndDesktop);
-  expect(connect.disabled).toBe(true);
-  expect(connect.title).toContain('Choose a folder');
-
-  const desktopOnly = structuredClone(mixed) as any;
-  desktopOnly.config.capabilities.browse = false;
-  mounted.push(desktopOnly);
-  expect(connect.disabled).toBe(false);
-  expect(connect.title).toBe('');
-
-  const clipboardOnly = structuredClone(desktopOnly) as any;
-  clipboardOnly.config.capabilities.screen = false;
-  clipboardOnly.config.capabilities.clipboardRead = true;
-  clipboardOnly.status.surfaces[1].tools = ['computer'];
-  mounted.push(clipboardOnly);
-  expect(connect.disabled).toBe(false);
-});
-
-it('keeps folder access discoverable after setup and navigates without granting access', async () => {
-  const addRoot = vi.fn();
-  const mounted = await mountChat({ hasApiKey: true }, [], { addRoot });
-  const connected = structuredClone(mounted.state);
-  connected.status.state = 'connected';
-  connected.status.lastRequestAt = Date.now();
-  connected.bridge.present = true;
-  mounted.push(connected);
-  const doc = mounted.window.document;
-  const styles = doc.createElement('style');
-  styles.textContent = await fs.readFile(path.join(process.cwd(), 'src/renderer/styles.css'), 'utf8');
-  doc.head.append(styles);
-  doc.querySelector<HTMLButtonElement>('[data-tab="setup"]')!.click();
-
-  expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(true);
-  const manage = doc.getElementById('wizManageFolders')!;
-  expect(mounted.window.getComputedStyle(manage.parentElement!).display).not.toBe('none');
-  expect(doc.getElementById('wizFolders')!.textContent).toBe('/repo');
-  manage.click();
-
-  expect(doc.querySelector('.panel.is-active')?.getAttribute('data-panel')).toBe('home');
-  expect(doc.activeElement).toBe(doc.getElementById('addFolder'));
-  expect(doc.getElementById('rootList')!.textContent).toContain('/repo');
-  expect(addRoot).not.toHaveBeenCalled();
-  expect(mounted.calls).toEqual([]);
-});
-
-it('requires a live browser only when a browser-backed feature is actually enabled', async () => {
-  const mounted = await mountChat({
-    hasApiKey: true,
-    status: {
-      state: 'connected',
-      detail: 'Connected.',
-      publicUrl: null,
-      localUrl: 'http://127.0.0.1:1234',
-      handshakeAt: Date.now(),
-      lastRequestAt: Date.now(),
-      lastToolCallAt: Date.now(),
-      health: null,
-      surfaces: [
-        {
-          id: 'core', connectorName: 'Core', description: '', cardSummary: '', optional: false,
-          available: true, localUrl: 'http://127.0.0.1:1234', publicUrl: null, tools: ['read', 'session'],
-          state: 'live', detail: '', lastRequestAt: Date.now(), lastToolCallAt: Date.now()
-        }
-      ]
-    },
-    // The token survived, but this process has not heard from the extension. This is the
-    // disabled/uninstalled-extension-after-app-restart repro.
-    bridge: { running: true, port: 8765, paired: true, present: false, lastSeenAt: null, extensionVersion: null },
-    update: { current: '2.0.2', latest: null, stage: 'idle', error: null, checkedAt: null }
+  const catalog = { state: 'ready' as const, requestedAt: 1, observedAt: 2, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high' as const] }] };
+  const installed = installRendererDom({
+    getChatModels: () => ok(catalog), requestChatModels: () => ok(catalog), onChatModelsChanged: () => () => undefined,
+    chooseFiles: () => ok([]), dropFiles: () => ok([]), sendInput, cancelTaskRequest: () => ok(false),
   });
-  const doc = mounted.window.document;
-  const browserStep = doc.querySelector<HTMLElement>('[data-step="browser"]')!;
-
-  expect(browserStep.classList.contains('is-done')).toBe(false);
-  expect(browserStep.classList.contains('is-current')).toBe(true);
-  expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(false);
-  expect(doc.getElementById('bridgeState')!.textContent).toContain('Authorized');
-  expect(doc.getElementById('bridgeState')!.textContent).not.toContain('Connected.');
-
-  const live = structuredClone(mounted.state) as any;
-  live.hasApiKey = true;
-  live.status = (mounted.state as any).status;
-  live.bridge = { running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now() };
-  mounted.push(live);
-  expect(browserStep.classList.contains('is-done')).toBe(true);
-  expect(doc.getElementById('bridgeState')!.textContent).toContain('Connected.');
-
-  // Recording and multi-agent are the two independently viable bridge features. Goal is
-  // browser-driven too, but it requires a recorded session and cannot run by itself when
-  // recording is off, so goal.enabled alone must not keep setup blocked on an inert bridge.
-  const browserFree = structuredClone(live) as any;
-  browserFree.config.sessions.record = false;
-  browserFree.config.multiAgent.enabled = false;
-  browserFree.config.goal.enabled = true;
-  browserFree.bridge = { running: false, port: null, paired: true, present: false, lastSeenAt: Date.now() };
-  mounted.push(browserFree);
-  expect(browserStep.hidden).toBe(true);
-  expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(true);
-  expect(doc.getElementById('bridgeState')!.textContent).toContain('not needed');
-  expect((doc.getElementById('chatAutomation') as HTMLSelectElement).disabled).toBe(true);
-  expect(doc.getElementById('chatAutomation')!.title).toMatch(/recording/i);
-});
-
-/**
- * "Up to date" is a claim, and a claim needs somebody to have checked.
- *
- * Before GitHub answers, `{latest: null, stage: 'idle'}` means only that nothing has been
- * established - the same record a check that never ran would leave - so the Activity line stays
- * empty and no notification is shown. The timestamp is what turns that silence into an answer.
- */
-it('says nothing about being current until the check has actually answered', async () => {
-  const mounted = await mountChat({
-    bridge: { running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.2' }
+  dom = installed.dom;
+  const { Composer } = await import('../src/renderer/components/chat/composer.js');
+  root = await createRendererRoot(installed.container);
+  await act(async () => {
+    root!.render(createElement(Composer, {
+      session: null, projects: [], draftProjectId: null, controls: null,
+      onProjectSelected: vi.fn(), onSent: vi.fn(), onControlsChanged: vi.fn(), onDraftChanged: vi.fn(),
+      onOpenCustomize: vi.fn(), planBackend: 'chatgpt',
+    }));
+    await flushReact();
   });
-  const doc = mounted.window.document;
-  const line = doc.getElementById('updateLine')!;
-  expect(line.hidden).toBe(true);
-  expect(doc.querySelector('.toast')).toBeNull();
-
-  const checked = structuredClone(mounted.state) as any;
-  checked.update.checkedAt = Date.now();
-  mounted.push(checked);
-
-  // Green, both versions, and the same sentence as the one notification this window shows.
-  expect(line.hidden).toBe(false);
-  expect(line.className).toBe('upline is-ok');
-  expect(line.textContent).toBe('Up to date! Chat On Steroids 2.0.2 · extension 2.0.2');
-  expect(doc.querySelector('.toast')!.textContent).toBe(line.textContent);
-  // Nothing to act on, so the header bar stays out of the way.
-  expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
-
-  // The news is told once. A later push of the same fact repaints the line and nothing else.
-  doc.querySelector('.toast')!.remove();
-  mounted.push(structuredClone(checked) as any);
-  expect(doc.querySelector('.toast')).toBeNull();
-  expect(line.textContent).toBe('Up to date! Chat On Steroids 2.0.2 · extension 2.0.2');
-});
-
-/**
- * A staged update is not "up to date", and it is not a failure either.
- */
-it('reports a staged update in the Activity line and the header bar', async () => {
-  const mounted = await mountChat();
-  const staged = structuredClone(mounted.state) as any;
-  staged.update = { current: '2.0.2', latest: '2.0.3', stage: 'ready', error: null, checkedAt: Date.now() };
-  mounted.push(staged);
-
-  const doc = mounted.window.document;
-  const line = doc.getElementById('updateLine')!;
-  expect(line.className).toBe('upline');
-  expect(line.textContent).toContain('2.0.3 is downloaded and ready');
-  expect(doc.getElementById('updateNotice')!.hidden).toBe(false);
-  // There is nothing to fetch by hand once it is on disk.
-  expect((doc.getElementById('updateGet') as HTMLButtonElement).hidden).toBe(true);
-  // ...and this is the one state in which there is something to install. Both buttons show,
-  // because a tray app closed to the tray may not see the header for days.
-  expect((doc.getElementById('updateInstall') as HTMLButtonElement).hidden).toBe(false);
-  expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(false);
-
-  const checking = structuredClone(staged) as any;
-  checking.update.stage = 'checking';
-  mounted.push(checking);
-  expect(line.textContent).toContain('Checking for the latest update');
-  expect(line.textContent).not.toContain('by hand');
-  expect((doc.getElementById('updateGet') as HTMLButtonElement).hidden).toBe(true);
-  expect((doc.getElementById('updateInstall') as HTMLButtonElement).hidden).toBe(true);
-  // Still downloading is not yet installable: there is no verified file to hand over.
-  const downloading = structuredClone(staged) as any;
-  downloading.update = { ...downloading.update, stage: 'downloading' };
-  mounted.push(downloading);
-  expect((doc.getElementById('updateInstall') as HTMLButtonElement).hidden).toBe(true);
-  expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(true);
-
-  const broken = structuredClone(staged) as any;
-  broken.update = { current: '2.0.2', latest: null, stage: 'failed', error: 'latest answered 503', checkedAt: null };
-  mounted.push(broken);
-  expect(line.className).toBe('upline is-bad');
-  expect(line.textContent).toContain('503');
-  // A check that could not reach GitHub is a diagnostic, not something the user can act on.
-  expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
-  expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(true);
-});
-
-/**
- * The version difference has a direction, and only one of them is the user's to act on.
- *
- * An extension newer than the app is the ordinary state while an app update is downloading, and
- * the bundled folder is then the older copy: "load the extension folder again" would talk that
- * user into downgrading a working extension. The app-update line already owns being behind.
- */
-it('asks for an extension reload only when the extension is older than this app', async () => {
-  const mounted = await mountChat({
-    bridge: {
-      running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.1'
-    }
+  const input = installed.container.querySelector<HTMLTextAreaElement>('#chatInput')!;
+  await act(async () => {
+    setNativeValue(input, 'Ship this once');
+    await flushReact();
   });
-  const doc = mounted.window.document;
-  const notice = doc.getElementById('updateNotice')!;
-  expect(notice.hidden).toBe(false);
-  expect(doc.getElementById('updateText')!.textContent).toContain('2.0.1');
-  const action = doc.getElementById('updateExtension') as HTMLButtonElement;
-  expect(action.hidden).toBe(false);
-  action.click();
-  expect(doc.querySelector('[data-panel="setup"]')!.classList.contains('is-active')).toBe(true);
-  const rejected = structuredClone(mounted.state) as any;
-  rejected.bridge.present = false;
-  mounted.push(rejected);
-  expect(notice.hidden, 'an old companion rejected by the protocol gate still needs an update').toBe(false);
-
-  const ahead = structuredClone(mounted.state) as any;
-  ahead.bridge.extensionVersion = '2.0.3';
-  mounted.push(ahead);
-  expect(notice.hidden, 'a newer extension is not a downgrade prompt').toBe(true);
-  expect(action.hidden).toBe(true);
-});
-
-it('shows a missing-extension reminder while connected and clears it after the companion reports in', async () => {
-  const mounted = await mountChat();
-  const connected = structuredClone(mounted.state) as any;
-  connected.status.state = 'connected'; connected.bridge.running = true; connected.bridge.present = false;
-  mounted.push(connected);
-  const doc = mounted.window.document;
-  expect(doc.getElementById('updateText')!.textContent).toContain('Browser extension not connected');
-  expect(doc.getElementById('updateExtension')!.hidden).toBe(false);
-  connected.bridge.present = true; connected.bridge.extensionVersion = connected.update.current;
-  mounted.push(connected);
-  expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
-});
-
-it('keeps plugin connection controls out of general Setup and preserves its tunnel during unrelated saves', async () => {
-  const mounted = await mountChat(); const doc = mounted.window.document;
-  const next = structuredClone(mounted.state); next.config.tunnel.pluginsTunnelId = 'tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-  mounted.push(next);
-  expect(doc.querySelector('[data-panel="setup"] #pluginsTunnelId')).toBeNull();
-  const input = doc.getElementById('tunnelId') as HTMLInputElement;
-  input.value = 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-  input.dispatchEvent(new mounted.window.Event('change')); await settle();
-  expect(mounted.calls.at(-1).tunnel.pluginsTunnelId).toBe(next.config.tunnel.pluginsTunnelId);
-  expect(doc.querySelector('[data-panel="setup"] [data-link="https://chatgpt.com/#settings/Plugins"]')).not.toBeNull();
-});
-
-/**
- * The exact sentence, because it is the same sentence the composer's settings sheet shows
- * and the two are meant to be recognisably one message rather than two paraphrases.
- */
-it('reports stored API credentials without exposing app-wide Goal switches', async () => {
-  const mounted = await mountChat();
-  expect(mounted.window.document.getElementById('goalEnabled')).toBeNull();
-  expect((mounted.window.document.getElementById('goalKeyRemove') as HTMLButtonElement).disabled).toBe(true);
-
-  mounted.push({ ...mounted.state, hasGoalKey: true });
-  await settle();
-  expect(mounted.window.document.getElementById('goalKeyState')!.textContent).toContain('A key is stored');
-  expect((mounted.window.document.getElementById('goalKeyRemove') as HTMLButtonElement).disabled).toBe(false);
-});
-
-/**
- * The key goes to the one channel that encrypts it and never to the settings file. This is
- * the whole reason the goal request is made by the app and not by the extension, so it is
- * worth an assertion rather than a comment.
- */
-it('sends the key to the secret store and never into the settings patch', async () => {
-  const mounted = await mountChat();
-  const field = mounted.window.document.getElementById('goalKey') as HTMLInputElement;
-  field.value = 'sk-or-v1-not-a-real-key';
-  field.dispatchEvent(new mounted.window.Event('blur'));
-  await settle();
-
-  expect(mounted.keys).toEqual([{ method: 'setGoalKey', value: 'sk-or-v1-not-a-real-key' }]);
-  // Cleared from the input as well: a stored key has no reason to stay on screen.
-  expect(field.value).toBe('');
-  expect(JSON.stringify(mounted.calls)).not.toContain('sk-or-v1');
-});
-
-it('keeps secret-key input on secure-storage failure', async () => {
-  const failed = await mountChat({}, [], {
-    setGoalKey: () => Promise.resolve({ ok: false, error: 'safeStorage unavailable' }),
-    setApiKey: () => Promise.resolve({ ok: false, error: 'safeStorage unavailable' })
+  const form = installed.container.querySelector<HTMLFormElement>('#composer')!;
+  act(() => {
+    form.dispatchEvent(new dom!.window.Event('submit', { bubbles: true, cancelable: true }));
+    form.dispatchEvent(new dom!.window.Event('submit', { bubbles: true, cancelable: true }));
   });
-  const goalFailed = failed.window.document.getElementById('goalKey') as HTMLInputElement;
-  goalFailed.value = 'sk-or-v1-retry-me';
-  goalFailed.dispatchEvent(new failed.window.Event('blur'));
-  const apiFailed = failed.window.document.getElementById('apiKey') as HTMLInputElement;
-  apiFailed.value = 'sk-retry-me';
-  apiFailed.dispatchEvent(new failed.window.Event('blur'));
-  await settle();
-  expect(goalFailed.value).toBe('sk-or-v1-retry-me');
-  expect(apiFailed.value).toBe('sk-retry-me');
+  expect(sendInput).toHaveBeenCalledTimes(1);
+  expect(sendInput.mock.calls[0]![0]).toMatchObject({ text: 'Ship this once', model: 'gpt-6', reasoningEffort: 'high' });
+  const args = sendInput.mock.calls[0]![0];
+  release({ ok: true, data: { ...args, state: 'queued', owner: null, createdAt: Date.now(), conversationId: null } });
+  await act(async () => { await flushReact(); });
 });
 
-it('never lets an older secret save erase a newer value typed while IPC is in flight', async () => {
-  let releaseGoal!: (value: any) => void;
-  let releaseApi!: (value: any) => void;
-  const deferred = await mountChat({}, [], {
-    setGoalKey: () => new Promise((resolve) => (releaseGoal = resolve)),
-    setApiKey: () => new Promise((resolve) => (releaseApi = resolve))
+it('only stops an active turn from an explicit Stop control activation, never an empty form submit', async () => {
+  const catalog = { state: 'ready' as const, requestedAt: 1, observedAt: 2, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high' as const] }] };
+  const active = controls('turn-live');
+  const stopSessionTurn = vi.fn(() => ok({ ...active, stopPending: true }));
+  const installed = installRendererDom({
+    getChatModels: () => ok(catalog), requestChatModels: () => ok(catalog), onChatModelsChanged: () => () => undefined,
+    cancelTaskRequest: () => ok(false), stopSessionTurn,
   });
-  const goal = deferred.window.document.getElementById('goalKey') as HTMLInputElement;
-  goal.value = 'sk-or-v1-old';
-  goal.dispatchEvent(new deferred.window.Event('blur'));
-  goal.value = 'sk-or-v1-new';
-  const api = deferred.window.document.getElementById('apiKey') as HTMLInputElement;
-  api.value = 'sk-old';
-  api.dispatchEvent(new deferred.window.Event('blur'));
-  api.value = 'sk-new';
-
-  releaseGoal({ ok: true, data: { ...deferred.state, hasGoalKey: true } });
-  releaseApi({ ok: true, data: { ...deferred.state, hasApiKey: true } });
-  await settle();
-  await settle();
-  expect(goal.value).toBe('sk-or-v1-new');
-  expect(api.value).toBe('sk-new');
-});
-
-it('does not turn whitespace in the OpenRouter key field into a remove-key request', async () => {
-  const mounted = await mountChat({ hasGoalKey: true });
-  const field = mounted.window.document.getElementById('goalKey') as HTMLInputElement;
-  field.value = '   ';
-  field.dispatchEvent(new mounted.window.Event('blur'));
-  await settle();
-  expect(mounted.keys).toEqual([]);
-  expect(field.value).toBe('   ');
-});
-
-it('opens, saves and restores the editable goal prompt', async () => {
-  const mounted = await mountChat({ hasGoalKey: true });
-  const doc = mounted.window.document;
-  const panel = doc.getElementById('goalPromptPanel')!;
-  const edit = doc.getElementById('goalPromptEdit') as HTMLButtonElement;
-  const prompt = doc.getElementById('goalPrompt') as HTMLTextAreaElement;
-
-  expect(panel.hidden).toBe(true);
-  edit.click();
-  expect(panel.hidden).toBe(false);
-  expect(prompt.value).toBe(DEFAULT_GOAL_SYSTEM_PROMPT);
-
-  prompt.value = 'custom gate: continue only explicit missing work. otherwise NO_REPLY.';
-  prompt.dispatchEvent(new mounted.window.Event('change'));
-  await settle();
-  await settle();
-  expect(mounted.calls.at(-1)?.goal.prompt).toBe(prompt.value);
-
-  (doc.getElementById('goalPromptReset') as HTMLButtonElement).click();
-  await settle();
-  await settle();
-  expect(prompt.value).toBe(DEFAULT_GOAL_SYSTEM_PROMPT);
-  expect(mounted.calls.at(-1)?.goal.prompt).toBe(DEFAULT_GOAL_SYSTEM_PROMPT);
-});
-
-/**
- * The catalogue is a network request to somebody else's service, so it happens when a person
- * asks for it and not when the settings tab is opened.
- */
-it('loads the model catalogue only when the picker is opened, twenty at a time', async () => {
-  const mounted = await mountChat({ hasGoalKey: true }, catalogue(45));
-  const doc = mounted.window.document;
-  expect(mounted.modelPages).toEqual([]);
-
-  (doc.getElementById('goalPick') as HTMLButtonElement).click();
-  await settle();
-  expect(mounted.modelPages).toHaveLength(1);
-  expect(doc.querySelectorAll('.goal-model')).toHaveLength(20);
-  // Newest first, which is the whole point of the ordering.
-  expect((doc.querySelector('.goal-model .goal-model-name') as HTMLElement).textContent).toBe('Model 0');
-  expect(doc.getElementById('goalModelsState')!.textContent).toContain('45');
-
-  (doc.getElementById('goalMore') as HTMLButtonElement).click();
-  await settle();
-  expect(doc.querySelectorAll('.goal-model')).toHaveLength(40);
-  (doc.getElementById('goalMore') as HTMLButtonElement).click();
-  await settle();
-  expect(doc.querySelectorAll('.goal-model')).toHaveLength(45);
-  // Nothing left to page, so the control stops offering.
-  expect((doc.getElementById('goalMore') as HTMLButtonElement).hidden).toBe(true);
-});
-
-/**
- * "Load 20 more" is the deliberate way to ask for the next page. Scrolling to the bottom of
- * the list is the way people actually ask, and it did nothing at all: the list simply ended
- * at twenty with four hundred still to come and no sign that there was a button below it.
- *
- * The repaint is the other half. The list is rebuilt whole on every page, and emptying an
- * element scrolls it back to the top — so even once it paged, the reader was thrown back to
- * the newest model, which is the one they had just scrolled away from.
- */
-it('pages the catalogue in as the list is scrolled, without losing the reader\'s place', async () => {
-  const mounted = await mountChat({ hasGoalKey: true }, catalogue(45));
-  const doc = mounted.window.document;
-  (doc.getElementById('goalPick') as HTMLButtonElement).click();
-  await settle();
-  expect(doc.querySelectorAll('.goal-model')).toHaveLength(20);
-
-  // jsdom does no layout, so the box has to be described: a 260px window onto a list whose
-  // height follows the number of rows actually in it, the way the real one does.
-  const list = doc.getElementById('goalModelList')!;
-  Object.defineProperty(list, 'clientHeight', { value: 260, configurable: true });
-  Object.defineProperty(list, 'scrollHeight', {
-    get: () => list.querySelectorAll('.goal-model').length * 50,
-    configurable: true
+  dom = installed.dom;
+  const { Composer } = await import('../src/renderer/components/chat/composer.js');
+  root = await createRendererRoot(installed.container);
+  await act(async () => {
+    root!.render(createElement(Composer, {
+      session: summary(), projects: [], draftProjectId: null, controls: active,
+      onProjectSelected: vi.fn(), onSent: vi.fn(), onControlsChanged: vi.fn(), onDraftChanged: vi.fn(),
+      onOpenCustomize: vi.fn(), planBackend: 'chatgpt',
+    }));
+    await flushReact();
   });
-  Object.defineProperty(list, 'scrollTop', { value: 0, writable: true, configurable: true });
-  const scroll = (top: number): void => {
-    (list as unknown as { scrollTop: number }).scrollTop = top;
-    list.dispatchEvent(new mounted.window.Event('scroll'));
+
+  const form = installed.container.querySelector<HTMLFormElement>('#composer')!;
+  await act(async () => {
+    form.dispatchEvent(new dom!.window.Event('submit', { bubbles: true, cancelable: true }));
+    await flushReact();
+  });
+  expect(stopSessionTurn).not.toHaveBeenCalled();
+
+  const stop = installed.container.querySelector<HTMLButtonElement>('#chatSend')!;
+  expect(stop.getAttribute('aria-label')).toBe('Stop turn');
+  await act(async () => { stop.click(); await flushReact(); });
+  expect(stopSessionTurn).toHaveBeenCalledOnce();
+  expect(stopSessionTurn).toHaveBeenCalledWith('session-aaaaaaaa', 'turn-live');
+});
+
+it('compacts the composer only after a conversation exists and keeps the new-chat composer roomy', async () => {
+  const catalog = { state: 'ready' as const, requestedAt: 1, observedAt: 2, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high' as const] }] };
+  const installed = installRendererDom({ getChatModels: () => ok(catalog), requestChatModels: () => ok(catalog), onChatModelsChanged: () => () => undefined, cancelTaskRequest: () => ok(false) });
+  dom = installed.dom;
+  const { Composer } = await import('../src/renderer/components/chat/composer.js');
+  root = await createRendererRoot(installed.container);
+  const common = { projects: [], draftProjectId: null, controls: null, onProjectSelected: vi.fn(), onSent: vi.fn(), onControlsChanged: vi.fn(), onDraftChanged: vi.fn(), onOpenCustomize: vi.fn(), planBackend: 'chatgpt' as const };
+
+  await act(async () => { root!.render(createElement(Composer, { ...common, session: null })); await flushReact(); });
+  expect(installed.container.querySelector<HTMLTextAreaElement>('#chatInput')!.rows).toBe(3);
+  expect(installed.container.textContent).toContain('Plan New Idea');
+  expect(installed.container.querySelector<HTMLFormElement>('#composer')!.className).not.toContain('shadow');
+
+  await act(async () => { root!.render(createElement(Composer, { ...common, session: summary(), controls: controls(null) })); await flushReact(); });
+  expect(installed.container.querySelector<HTMLTextAreaElement>('#chatInput')!.rows).toBe(1);
+  expect(installed.container.textContent).not.toContain('Plan New Idea');
+  expect(installed.container.textContent).not.toContain('New chat');
+});
+
+it('groups worker chats under a blue primary row and collapses repository conversations without losing them', async () => {
+  const installed = installRendererDom({});
+  dom = installed.dom;
+  const { AppSidebar } = await import('../src/renderer/components/layout/app-sidebar.js');
+  root = await createRendererRoot(installed.container);
+  const project = { id: 'project-one', name: 'alpha', path: 'C:\\work\\alpha', createdAt: 1 };
+  const prime: SessionSummary = { ...summary('prime-session'), title: 'Primary conversation', projectId: project.id, agents: ['prime', 'worker-1'] };
+  const worker: SessionSummary = {
+    ...summary('worker-session'),
+    title: 'Inspect renderer',
+    projectId: project.id,
+    agents: ['worker-1'],
+    origin: { kind: 'worker', fromSessionId: prime.id, agentId: 'worker-1', task: 'Inspect renderer' },
   };
+  const props = {
+    open: true,
+    page: 'chat' as const,
+    sessions: [prime, worker],
+    projects: [project],
+    selectedId: prime.id,
+    onPage: vi.fn(),
+    onSelectSession: vi.fn(),
+    onNewChat: vi.fn(),
+    onAddProject: vi.fn(),
+    onRemoveProject: vi.fn(),
+    onDeleteSession: vi.fn(),
+    onLoadMore: vi.fn(),
+    hasMore: false,
+  };
+  await act(async () => { root!.render(createElement(AppSidebar, props)); await flushReact(); });
 
-  // Halfway down twenty rows: nothing is asked for.
-  scroll(300);
-  await settle();
-  expect(mounted.modelPages).toHaveLength(1);
-  expect(doc.querySelectorAll('.goal-model')).toHaveLength(20);
+  const scrollContent = installed.container.querySelector<HTMLElement>('#sessionList')!.parentElement!;
+  expect(scrollContent.getAttribute('role')).toBe('presentation');
+  expect(scrollContent.style.minWidth).toBe('0px');
+  expect(scrollContent.style.width).toBe('100%');
 
-  // At the end of them: the next twenty arrive without the button being touched.
-  scroll(740);
-  await settle();
-  expect(doc.querySelectorAll('.goal-model')).toHaveLength(40);
-  // And the list is still where it was left, not back at the newest model.
-  expect(list.scrollTop).toBe(740);
+  const primaryRow = installed.container.querySelector<HTMLElement>('[data-session-id="prime-session"]')!;
+  const workerRow = installed.container.querySelector<HTMLElement>('[data-session-id="worker-session"]')!;
+  expect(primaryRow.dataset.sessionRole).toBe('primary');
+  expect(primaryRow.className).toContain('text-brand');
+  expect(primaryRow.textContent).toContain('primary');
+  expect(workerRow.dataset.sessionRole).toBe('worker');
+  expect(workerRow.className).toContain('ml-3');
+  const projectHeader = installed.container.querySelector<HTMLElement>('[data-project-header="project-one"]')!;
+  const newConversation = projectHeader.querySelector<HTMLButtonElement>('button[aria-label="New conversation in alpha"]')!;
+  expect(newConversation).not.toBeNull();
+  expect(installed.container.querySelector('#project-sessions-project-one')?.textContent).not.toContain('New conversation');
+  await act(async () => { newConversation.click(); await flushReact(); });
+  expect(props.onNewChat).toHaveBeenCalledWith(project.id);
 
-  // Forty rows is 2000px now, so arriving at the end again pages in the last five.
-  scroll(1740);
-  await settle();
-  expect(doc.querySelectorAll('.goal-model')).toHaveLength(45);
-  expect((doc.getElementById('goalMore') as HTMLButtonElement).hidden).toBe(true);
+  expect(primaryRow.querySelector('button[aria-label="Actions for Primary conversation"]')).toBeNull();
+  const deleteButton = primaryRow.querySelector<HTMLButtonElement>('button[aria-label="Delete Primary conversation"]')!;
+  expect(deleteButton).not.toBeNull();
+  await act(async () => { deleteButton.click(); await flushReact(); });
+  expect(props.onDeleteSession).toHaveBeenCalledWith(prime.id);
+  expect(document.body.textContent).not.toContain('Delete chat?');
 
-  // Nothing left to page: scrolling on does not ask OpenRouter again.
-  const spent = mounted.modelPages.length;
-  scroll(2200);
-  await settle();
-  expect(mounted.modelPages).toHaveLength(spent);
+  const collapse = installed.container.querySelector<HTMLButtonElement>('button[aria-label="Collapse alpha"]')!;
+  expect(collapse.getAttribute('aria-expanded')).toBe('true');
+  await act(async () => { collapse.click(); await flushReact(); });
+  expect(installed.container.querySelector('[data-session-id="prime-session"]')).toBeNull();
+  expect(installed.container.querySelector('[data-session-id="worker-session"]')).toBeNull();
+  const expand = installed.container.querySelector<HTMLButtonElement>('button[aria-label="Expand alpha"]')!;
+  expect(expand.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => { expand.click(); await flushReact(); });
+  expect(installed.container.querySelector('[data-session-id="prime-session"]')).not.toBeNull();
+  expect(installed.container.querySelector('[data-session-id="worker-session"]')).not.toBeNull();
 });
 
-/**
- * A closed picker measures zero in every direction, which reads as "scrolled to the end".
- * Left unguarded, every repaint of the settings sheet would page the whole catalogue in
- * behind a panel nobody has open — hundreds of models, on somebody else's service.
- */
-it('never pages the catalogue while the picker is closed', async () => {
-  const mounted = await mountChat({ hasGoalKey: true }, catalogue(45));
-  const doc = mounted.window.document;
-  (doc.getElementById('goalPick') as HTMLButtonElement).click();
-  await settle();
-  expect(mounted.modelPages).toHaveLength(1);
-
-  // Close it again, then push a fresh state through: applyGoal repaints the list.
-  (doc.getElementById('goalPick') as HTMLButtonElement).click();
-  expect(doc.getElementById('goalModels')!.hidden).toBe(true);
-  mounted.push({ ...mounted.state, hasGoalKey: true });
-  await settle();
-
-  expect(mounted.modelPages).toHaveLength(1);
-  expect(doc.querySelectorAll('.goal-model')).toHaveLength(20);
+it('stages pasted files through preload while leaving ordinary text paste untouched', async () => {
+  const attachment = { id: 'file-1', name: 'shot.png', mimeType: 'image/png', size: 10, preview: 'data:image/png;base64,AA==' };
+  const dropFiles = vi.fn(() => ok([attachment]));
+  const catalog = { state: 'ready' as const, requestedAt: 1, observedAt: 2, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high' as const] }] };
+  const installed = installRendererDom({ getChatModels: () => ok(catalog), requestChatModels: () => ok(catalog), onChatModelsChanged: () => () => undefined, dropFiles, chooseFiles: () => ok([]), cancelTaskRequest: () => ok(false) });
+  dom = installed.dom;
+  const { Composer } = await import('../src/renderer/components/chat/composer.js');
+  root = await createRendererRoot(installed.container);
+  await act(async () => { root!.render(createElement(Composer, { session: null, projects: [], draftProjectId: null, controls: null, onProjectSelected: vi.fn(), onSent: vi.fn(), onControlsChanged: vi.fn(), onDraftChanged: vi.fn(), onOpenCustomize: vi.fn(), planBackend: 'chatgpt' })); await flushReact(); });
+  const input = installed.container.querySelector<HTMLTextAreaElement>('#chatInput')!;
+  const ordinary = new dom.window.Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(ordinary, 'clipboardData', { value: { files: [] } });
+  expect(input.dispatchEvent(ordinary)).toBe(true);
+  expect(dropFiles).not.toHaveBeenCalled();
+  const imagePaste = new dom.window.Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(imagePaste, 'clipboardData', { value: { files: [{ name: 'shot.png' }] } });
+  await act(async () => { input.dispatchEvent(imagePaste); await flushReact(); });
+  expect(dropFiles).toHaveBeenCalledTimes(1);
+  expect(installed.container.querySelector('img[alt="shot.png"]')).not.toBeNull();
 });
 
-/** Choosing one stores it verbatim: the id is what OpenRouter wants, not a display name. */
-it('saves the chosen model id', async () => {
-  const mounted = await mountChat({ hasGoalKey: true }, catalogue(3));
-  const doc = mounted.window.document;
-  (doc.getElementById('goalPick') as HTMLButtonElement).click();
-  await settle();
-  (doc.querySelectorAll('.goal-model')[1] as HTMLButtonElement).click();
-  await settle();
-
-  expect(doc.getElementById('goalModelName')!.textContent).toBe('vendor1/model-1');
-  expect(mounted.calls.at(-1)?.goal).toMatchObject({ model: 'vendor1/model-1' });
-});
-
-/** A provider that cannot be reached says so and changes nothing about what is in use. */
-it('keeps the model in use when OpenRouter cannot be reached', async () => {
-  const mounted = await mountChat({ hasGoalKey: true }, catalogue(2));
-  const doc = mounted.window.document;
-  (mounted.window as any).api.listGoalModels = () => Promise.resolve({ ok: false, error: 'offline' });
-
-  (doc.getElementById('goalPick') as HTMLButtonElement).click();
-  await settle();
-  expect(doc.getElementById('goalModelsState')!.textContent).toContain('unchanged');
-  expect(doc.getElementById('goalModelName')!.textContent).toBe('deepseek/deepseek-v4-flash');
-});
-
-it('edits a fresh Goal before first send and clears it on an independent New Chat', async () => {
-  const sendInput = vi.fn(async () => ({ ok: false, error: 'test delivery stopped' }));
-  const mounted = await mountChat({}, [], { sendInput,
-    getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['none', 'high'] }] } }),
-    draftGoalOpening: async () => ({ ok: true, data: { reply: 'Generated opening', model: 'fixture' } })
-  });
-  const w = mounted.window, doc = w.document;
-  (doc.getElementById('newChat') as HTMLButtonElement).click();
-  await settle();
-  expect(doc.getElementById('sessionControls')!.hidden).toBe(false);
-  (doc.querySelector('[data-mode="goal"]') as HTMLButtonElement).click();
-  const objective = doc.getElementById('sessionObjective') as HTMLTextAreaElement;
-  objective.value = 'Build and verify the requested feature';
-  objective.dispatchEvent(new w.Event('input', { bubbles: true }));
-  (doc.getElementById('saveSessionObjective') as HTMLButtonElement).click();
-  await settle();
-  expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ text: 'Generated opening', sessionId: null, automation: 'goal', objective: 'Build and verify the requested feature' }));
-  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
-  input.value = 'Start with the existing code';
-  doc.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-  await settle();
-  expect(sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: null, automation: 'goal', objective: 'Build and verify the requested feature' }));
-  (doc.getElementById('newChat') as HTMLButtonElement).click();
-  await settle();
-  expect(objective.value).toBe('');
+it('offers Stop only from authoritative current-turn controls and captures that exact turn id', async () => {
+  const stopSessionTurn = vi.fn((_id: string, expectedTurnId: string) => ok(controls(expectedTurnId)));
+  const catalog = { state: 'ready' as const, requestedAt: 1, observedAt: 2, models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high' as const] }] };
+  const installed = installRendererDom({ getChatModels: () => ok(catalog), requestChatModels: () => ok(catalog), onChatModelsChanged: () => () => undefined, stopSessionTurn, cancelTaskRequest: () => ok(false) });
+  dom = installed.dom;
+  const { Composer } = await import('../src/renderer/components/chat/composer.js');
+  root = await createRendererRoot(installed.container);
+  const props = { session: summary(), projects: [], draftProjectId: null, onProjectSelected: vi.fn(), onSent: vi.fn(), onControlsChanged: vi.fn(), onDraftChanged: vi.fn(), onOpenCustomize: vi.fn(), planBackend: 'chatgpt' as const };
+  await act(async () => { root!.render(createElement(Composer, { ...props, controls: controls(null) })); await flushReact(); });
+  expect(installed.container.querySelector<HTMLButtonElement>('#chatSend')!.disabled).toBe(true);
+  await act(async () => { root!.render(createElement(Composer, { ...props, controls: controls('live-turn-42') })); await flushReact(); });
+  const send = installed.container.querySelector<HTMLButtonElement>('#chatSend')!;
+  expect(send.getAttribute('aria-label')).toBe('Stop turn');
+  await act(async () => { send.click(); await flushReact(); });
+  expect(stopSessionTurn).toHaveBeenCalledWith('session-aaaaaaaa', 'live-turn-42');
 });

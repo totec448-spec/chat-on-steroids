@@ -6,6 +6,12 @@ no LICENSE at the repository root. `flora-colossus-LICENSE` preserves the explic
 published by its author at https://github.com/MarshallOfSound/flora-colossus/blob/main/LICENSE,
 retrieved 2026-09-07. It retains the upstream copyright and complete permission/warranty text.
 
+`@hugeicons/core-free-icons` 4.3.2 likewise declares MIT and lists `LICENSE` in its published
+file manifest, but the installed npm archive omits that file. `hugeicons-core-free-icons-LICENSE`
+preserves the upstream Hugeicons MIT license from https://github.com/hugeicons/hugeicons/blob/main/LICENSE.md,
+retrieved 2026-09-10. The upstream license explicitly applies its MIT terms to the free icons and
+repository source code; paid Pro icon packs are governed separately and are not used here.
+
 Other dependency notices are collected directly from the installed packages. The @img native
 packages publish composite library attribution in their README files; those are also preserved.
 The packaging pipeline separately supplies the target-specific tunnel, ripgrep, image-library

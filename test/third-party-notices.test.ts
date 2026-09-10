@@ -36,6 +36,15 @@ it('preserves license and NOTICE text; check mode leaves the shipped inventory u
   expect(await fs.readFile(path.join(root, 'THIRD-PARTY-NOTICES.txt'), 'utf8')).toBe('other platform inventory');
 });
 
+it('does not treat runtime modules named copyright as legal notice files', async () => {
+  await write('node_modules/fixture/dist/icons/copyright.mjs', 'not a legal notice\n');
+  await write('node_modules/fixture/dist/icons/copyright.d.mts', 'also not a legal notice\n');
+  expect(generate().status).toBe(0);
+  const notice = await fs.readFile(path.join(root, 'THIRD-PARTY-NOTICES.txt'), 'utf8');
+  expect(notice).not.toContain('not a legal notice');
+  expect(notice).not.toContain('also not a legal notice');
+});
+
 it('rejects a manifest license label with no license or NOTICE material', async () => {
   await fs.unlink(path.join(root, 'node_modules/fixture/LICENSE'));
   await fs.unlink(path.join(root, 'node_modules/fixture/NOTICE'));

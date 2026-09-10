@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { windowLayoutForWorkArea } from '../src/main/window-layout.js';
+import { titleBarOverlayForTheme, windowLayoutForWorkArea } from '../src/main/window-layout.js';
 
 describe('main window accessibility', () => {
   it('caps its initial outer bounds to a small Windows work area', () => {
@@ -41,5 +41,10 @@ describe('main window accessibility', () => {
       width: 1600,
       height: 900
     });
+  });
+
+  it('uses neutral native caption colors in both themes', () => {
+    expect(titleBarOverlayForTheme('light')).toEqual({ height: 36, color: '#ffffff', symbolColor: '#171717' });
+    expect(titleBarOverlayForTheme('dark')).toEqual({ height: 36, color: '#111111', symbolColor: '#ececec' });
   });
 });
