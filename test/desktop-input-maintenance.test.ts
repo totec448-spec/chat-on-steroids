@@ -6,6 +6,7 @@ import { BRIDGE_PROTOCOL } from '../src/main/version.js';
 const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
 const firstId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const secondId = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+const thirdId = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
 
 it('missing models retain the elected Work document without a New Chat or helper fallback', async () => {
   const h = await worker([]);
@@ -399,6 +400,81 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(h.create).not.toHaveBeenCalled();
     expect(h.sendMessage).toHaveBeenCalledWith(7, { type: 'clf-desktop-input', id: firstId, conversationId: null });
     expect((h.localSaved.inputOpenings as any)[firstId].tab).toBe(7);
+  });
+  it('resumes the exact elected tab when native New Chat replaces the document before replying', async () => {
+    const h = await worker([{ id: firstId, conversationId: null }]);
+    const conversationUrl = `https://chatgpt.com/c/${secondId}`;
+    h.tabs.push({ id: 7, url: conversationUrl, active: true });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'conversation', frameId: 0, url: conversationUrl }, { navigationEpoch: 1 });
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL,
+      compatible: true, paired: true, ok: true, inputs: [{ id: firstId, conversationId: null }], reusableConversations: [secondId] }) });
+    let preparations = 0;
+    h.sendMessage.mockImplementation(async (_id, message) => {
+      if (message.type === 'clf-input-reuse-state') {
+        return { safe: true, navigationEpoch: h.tabs[0]!.url === conversationUrl ? 1 : 2 } as never;
+      }
+      if (message.type === 'clf-prepare-desktop-input') {
+        preparations += 1;
+        if (preparations === 1) {
+          h.tabs[0]!.url = 'https://chatgpt.com/';
+          await h.authorizeDocument({ tab: { id: 7 }, documentId: 'home', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 2 });
+          throw new Error('old document closed before the reply');
+        }
+        h.tabs[0]!.url = `https://chatgpt.com/?cos-input=${firstId}#cos-input=${firstId}`;
+        return { ready: true } as never;
+      }
+      return { ok: true };
+    });
+
+    await h.maintain();
+    expect(h.localSaved.inputOpenings).toMatchObject({
+      [firstId]: { tab: 7, stage: 'preparing', sourceConversationId: secondId, sourceUrl: conversationUrl }
+    });
+    await h.maintain();
+
+    expect(preparations).toBe(2);
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.sendMessage).toHaveBeenCalledWith(7, { type: 'clf-desktop-input', id: firstId, conversationId: null });
+    expect(h.localSaved.inputOpenings).toMatchObject({ [firstId]: { tab: 7, stage: 'ready', conversationId: null } });
+  });
+  it.each(['unsafe', 'stale-epoch', 'other-conversation'])('does not resume a preparing election from an %s document', async reason => {
+    const sourceUrl = `https://chatgpt.com/c/${secondId}`;
+    const currentUrl = reason === 'other-conversation' ? `https://chatgpt.com/c/${thirdId}` : 'https://chatgpt.com/';
+    const h = await worker([{ id: firstId, conversationId: null }], undefined, { inputOpenings: {
+      [firstId]: { tab: 7, stage: 'preparing', sourceConversationId: secondId, sourceUrl }
+    } });
+    h.tabs.push({ id: 7, url: currentUrl });
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'current', frameId: 0, url: currentUrl }, { navigationEpoch: 2 });
+    h.sendMessage.mockImplementation(async (_id, message) => message.type === 'clf-input-reuse-state'
+      ? { safe: reason !== 'unsafe', navigationEpoch: reason === 'stale-epoch' ? 1 : 2 } as never
+      : { ok: true, ready: true });
+
+    await h.maintain();
+
+    expect(h.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-prepare-desktop-input')).toBe(false);
+    expect(h.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-desktop-input')).toBe(false);
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.localSaved.inputOpenings).toMatchObject({ [firstId]: { tab: 7, stage: 'preparing' } });
+  });
+  it('bounds an unresponsive preparing-document proof without opening a fallback tab', async () => {
+    vi.useFakeTimers();
+    try {
+      const sourceUrl = `https://chatgpt.com/c/${secondId}`;
+      const h = await worker([{ id: firstId, conversationId: null }], undefined, { inputOpenings: {
+        [firstId]: { tab: 7, stage: 'preparing', sourceConversationId: secondId, sourceUrl }
+      } });
+      h.tabs.push({ id: 7, url: 'https://chatgpt.com/' });
+      await h.authorizeDocument({ tab: { id: 7 }, documentId: 'home', frameId: 0, url: h.tabs[0]!.url }, { navigationEpoch: 2 });
+      h.sendMessage.mockImplementation(async (_id, message) => message.type === 'clf-input-reuse-state'
+        ? new Promise(() => {}) : { ok: true, ready: true });
+
+      const maintenance = h.maintain();
+      await vi.advanceTimersByTimeAsync(3000);
+      await maintenance;
+
+      expect(h.create).not.toHaveBeenCalled();
+      expect(h.localSaved.inputOpenings).toMatchObject({ [firstId]: { tab: 7, stage: 'preparing' } });
+    } finally { vi.useRealTimers(); }
   });
   it.each(['explicit-failure', 'ambiguous', 'closed'])('allows a single pre-send fallback only for %s', async reason => {
     const h = await worker([{ id: firstId, conversationId: null }]);

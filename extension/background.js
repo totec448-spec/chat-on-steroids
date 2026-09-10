@@ -1721,6 +1721,16 @@ async function createChatTab(url, background = false, active = !background) {
   });
 }
 
+async function boundedDocumentMessage(tabId, message, documentId, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      chrome.tabs.sendMessage(tabId, message, { documentId }).catch(() => null),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
+
 async function deliverDesktopInputs(inputs, background, reusableConversations = [], activeIds) {
   if (!Array.isArray(inputs)) return;
   // Only the app's complete outbox projection retires spent opening authority.
@@ -1783,6 +1793,45 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     // A later user-close or duplicate document cannot transfer that election.
     if (tab && !elected) await elect(input.id, { tab: tab.id, stage: 'ready', conversationId: target });
     if (!tab) {
+      // Native New Chat can replace the document before sendMessage returns. The durable
+      // preparing election already spent this operation's one-tab authority, so resume only
+      // that exact tab after the replacement recorder proves it is still an eligible page.
+      // Never turn a lost reply into authority to open or take over a different tab.
+      if (!target && elected?.stage === 'preparing' && Number.isInteger(elected.tab)) {
+        const candidate = tabs.find(row => row.id === elected.tab);
+        const documentId = candidate && tabDocuments[String(candidate.id)];
+        const navigationEpoch = candidate && tabEpochs[String(candidate.id)];
+        const source = candidate && { tab: candidate.id, documentId, navigationEpoch };
+        if (candidate && !candidate.pendingUrl && ownsDocument(source)) {
+          const proof = await boundedDocumentMessage(candidate.id, { type: 'clf-input-reuse-state' }, documentId, 3000);
+          const current = proof?.safe === true ? await chrome.tabs.get(candidate.id).catch(() => null) : null;
+          const currentConversation = conversationForTab(current);
+          const sourceConversation = cleanConversationId(elected.sourceConversationId);
+          let transitionedHome = false;
+          try {
+            const currentUrl = new URL(current?.url || '');
+            transitionedHome = currentUrl.origin === 'https://chatgpt.com' && currentUrl.pathname === '/' &&
+              !currentUrl.searchParams.has('cos-input') && !currentUrl.searchParams.has('cos-model-catalog') &&
+              !currentUrl.searchParams.has('cos-plugin-refresh') && !currentUrl.searchParams.has('temporary-chat') &&
+              !currentUrl.hash.startsWith('#settings/') && !new URLSearchParams(currentUrl.hash.slice(1)).has('cos-input');
+          } catch { /* not an eligible ChatGPT transition */ }
+          const sameTransition = sourceConversation
+            ? currentConversation === sourceConversation || (!currentConversation && transitionedHome)
+            : current?.url === elected.sourceUrl;
+          if (proof?.navigationEpoch === navigationEpoch && ownsDocument(source) && current &&
+              !current.pendingUrl && current.url === candidate.url && sameTransition) {
+            const prepared = await boundedDocumentMessage(candidate.id, { type: 'clf-prepare-desktop-input', id: input.id }, documentId, 15000);
+            const latest = prepared?.ready === true ? await chrome.tabs.get(candidate.id).catch(() => null) : null;
+            if (latest && !latest.pendingUrl && tabDocuments[String(candidate.id)] === documentId && matchesInput(input, latest)) {
+              await elect(input.id, { tab: candidate.id, stage: 'ready', conversationId: target });
+              elected = elections[input.id];
+              tab = latest;
+            }
+          }
+        }
+      }
+    }
+    if (!tab) {
       // Handout is opening authority, not a missing delivery receipt. A closed or
       // unresponsive elected document never grants another opening attempt.
       if (elections[input.id]) continue;
@@ -1796,18 +1845,16 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
         for (const candidate of choices) {
           const source = { tab: candidate.id, documentId: tabDocuments[String(candidate.id)], navigationEpoch: tabEpochs[String(candidate.id)] };
           if (!ownsDocument(source)) continue;
-          let proof;
-          try { proof = await chrome.tabs.sendMessage(candidate.id, { type: 'clf-input-reuse-state' }, { documentId: source.documentId }); }
-          catch { continue; }
+          const proof = await boundedDocumentMessage(candidate.id, { type: 'clf-input-reuse-state' }, source.documentId, 3000);
           const current = await chrome.tabs.get(candidate.id).catch(() => null);
           if (proof?.safe !== true || proof.navigationEpoch !== source.navigationEpoch || !ownsDocument(source) ||
               !current || current.pendingUrl || current.url !== candidate.url) continue;
-          await elect(input.id, { tab: candidate.id, stage: 'preparing' });
+          await elect(input.id, { tab: candidate.id, stage: 'preparing',
+            sourceConversationId: conversationForTab(current), sourceUrl: current.url });
           const owner = (await chrome.storage.session.get('modelCatalogOwner')).modelCatalogOwner;
           if (owner?.tab === candidate.id) await chrome.storage.session.set({ modelCatalogOwner: { ...owner, handedToInput: input.id } });
-          let prepared;
-          try { prepared = await chrome.tabs.sendMessage(candidate.id, { type: 'clf-prepare-desktop-input', id: input.id }, { documentId: source.documentId }); }
-          catch { break; } // Ambiguous preparation is not a fallback authorization.
+          const prepared = await boundedDocumentMessage(candidate.id, { type: 'clf-prepare-desktop-input', id: input.id }, source.documentId, 15000);
+          if (!prepared) break; // Ambiguous preparation is not a fallback authorization.
           const latest = await chrome.tabs.get(candidate.id).catch(() => null);
           if (!latest || latest.pendingUrl || tabDocuments[String(candidate.id)] !== source.documentId) break;
           if (prepared?.ready === true && matchesInput(input, latest)) {
