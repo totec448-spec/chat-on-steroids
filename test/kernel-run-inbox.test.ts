@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-const broker = vi.hoisted(() => ({ offer: vi.fn(), ack: vi.fn(), bareOffer: vi.fn(), bareAck: vi.fn(), release: vi.fn(), alive: vi.fn(), record: vi.fn() }));
+const broker = vi.hoisted(() => ({ offer: vi.fn(), ack: vi.fn(), bareOffer: vi.fn(), bareAck: vi.fn(), release: vi.fn(), alive: vi.fn(), record: vi.fn(), cancelled: vi.fn() }));
 vi.mock('../src/main/agents.js', async (original) => ({
   ...await original<typeof import('../src/main/agents.js')>(),
   agentForCaller: () => 'worker-1', agentForFinishCaller: () => 'worker-1',
@@ -18,13 +18,24 @@ vi.mock('../src/main/session/recorder.js', async (original) => ({
 vi.mock('../src/main/session/store.js', async (original) => ({
   ...await original<typeof import('../src/main/session/store.js')>(), conversationAttachment: async () => 'current'
 }));
-vi.mock('../src/main/session/input.js', () => ({ offerToolInput: async () => [], acknowledgeToolInput: async () => undefined }));
+vi.mock('../src/main/session/correlation.js', async (original) => ({
+  ...await original<typeof import('../src/main/session/correlation.js')>(),
+  requestCorrelation: (requestId: string | null) => requestId?.startsWith('req-') ? {
+    requestId, conversationId: requestId.slice(4), sessionId: `session-${requestId.slice(4)}`,
+    messageId: 'page-message', tool: 'read', observedAt: 1
+  } : null
+}));
+vi.mock('../src/main/session/input.js', () => ({
+  offerToolInput: async () => [], acknowledgeToolInput: async () => undefined,
+  cancelledControlRequestForSession: broker.cancelled
+}));
 import { createRegistrar, ok } from '../src/main/mcp/kernel.js';
 import { withInboundRequestId } from '../src/main/mcp/inbound.js';
 import { defaultConfig } from '../src/main/config.js';
 beforeEach(() => {
   vi.clearAllMocks();
   broker.alive.mockReturnValue(null);
+  broker.cancelled.mockResolvedValue(null);
   broker.offer.mockImplementation((conversationId) => conversationId ? { agentId: 'worker-1', messages: [{ id: `m-${conversationId}`, from: 'prime', text: `private-${conversationId}`, offers: 1 }] } : null);
   broker.ack.mockReturnValue(null);
   broker.bareOffer.mockReturnValue([{ id: 'foreign', from: 'prime', text: 'foreign-private', offers: 1 }]);
@@ -36,13 +47,21 @@ it('records same-named worker liveness reports under the exact author conversati
   expect(broker.record).toHaveBeenCalledWith(expect.objectContaining({ id: 'report-chat-a' }), 'sent', 'chat-a');
   expect(broker.record).toHaveBeenCalledWith(expect.objectContaining({ id: 'report-chat-b' }), 'sent', 'chat-b');
 });
-function handler() {
+function handler(run: () => Promise<ReturnType<typeof ok>> = async () => ok('result')) {
   let call!: (args: object) => Promise<{ content: Array<{ text?: string }> }>;
   const server = { registerTool: (_name: string, _schema: unknown, callback: typeof call) => { call = callback; } };
   const registrar = createRegistrar(server as never, { roots: [], caps: defaultConfig().capabilities, readOnly: true }, 'core');
-  registrar.register('read', { description: 'test real dispatch', inputSchema: z.object({}) }, async () => ok('result'));
+  registrar.register('read', { description: 'test real dispatch', inputSchema: z.object({}) }, run);
   return (requestId: string | null) => withInboundRequestId(requestId, () => call({}));
 }
+it('refuses local work after exact controller cancellation until a later user input clears the fence', async () => {
+  broker.cancelled.mockResolvedValue('controller-request-id');
+  const run = vi.fn(async () => ok('should not run'));
+  const result = await handler(run)('req-chat-a');
+  expect(JSON.stringify(result)).toContain('CONTROL_REQUEST_CANCELLED');
+  expect(run).not.toHaveBeenCalled();
+  expect(broker.cancelled).toHaveBeenCalledWith('session-chat-a', 'chat-a');
+});
 it('routes identical friendly workers through their exact conversation inbox and run cleanup', async () => {
   const call = handler();
   const [a, b] = await Promise.all([call('req-chat-a'), call('req-chat-b')]);

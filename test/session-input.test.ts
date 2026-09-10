@@ -8,18 +8,20 @@ import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writ
 import {
   inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
-  authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy
+  authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy,
+  cancelDeliveredControlInput, cancelledControlRequestForSession
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
 import { listUsageSessions } from '../src/main/session/store.js';
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
 
-const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; turnId: string; time: number } }));
+const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; turnId: string; time: number }, users: [] as Array<Record<string, unknown>> }));
 vi.mock('../src/main/session/store.js', () => ({
   listUsageSessions: vi.fn(async () => []),
   conversationWasSuperseded: vi.fn(async () => false),
-  readRecentEvents: vi.fn(async () => binding.end ? [binding.end] : []),
+  readRecentEvents: vi.fn(async (_id: string, _limit: number, options?: { kinds?: string[] }) =>
+    options?.kinds?.includes('user_message') ? binding.users : binding.end ? [binding.end] : []),
   getSession: vi.fn(async (id: string) => ({ id, conversationId: id === 'session-two' ? 'conversation-b' : binding.conversationId, activeTurnId: binding.activeTurnId,
     origin: { kind: binding.origin },
     finishTurn: { turnId: binding.activeTurnId, released: binding.finishReleased },
@@ -59,8 +61,29 @@ beforeEach(async () => {
   binding.activeTurnId = null;
   binding.finishEnabled = true; binding.finishReleased = false; binding.model = 'gpt-6-astra'; binding.leadMinutes = 5; binding.impulseMinutes = 0;
   binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'previous-turn', time: 0 };
+  binding.users = [];
   now = 1000;
   vi.spyOn(Date, 'now').mockImplementation(() => now);
+});
+
+it('fences a cancelled delivered controller request until a later real user input', async () => {
+  const args = input({ model: 'gpt-5.6-sol', reasoningEffort: 'xhigh' });
+  const delivered: InputEntry = { ...args, backgroundDelivery: true, controlFingerprint: 'a'.repeat(64),
+    state: 'sent', owner: 'page', createdAt: now, conversationId: binding.conversationId,
+    deliveredSessionId: sessionId, deliveredAt: now + 1, messageId: 'controller-message' };
+  await writeDurableNow('session-input', [delivered]);
+  resetInputForTests();
+  binding.users = [{ kind: 'user_message', source: 'app', inputId: args.id, time: now + 1 }];
+  expect(await cancelDeliveredControlInput(args.id)).toBe(true);
+  expect(await cancelledControlRequestForSession(sessionId, binding.conversationId)).toBe(args.id);
+
+  // Automatic compaction text is app-owned and has no input id, so it cannot undo Stop.
+  binding.users.push({ kind: 'user_message', source: 'app', time: now + 2 });
+  expect(await cancelledControlRequestForSession(sessionId, binding.conversationId)).toBe(args.id);
+
+  // A later user-authored page message begins a new request and releases only this fence.
+  binding.users.push({ kind: 'user_message', source: 'extension', time: now + 3 });
+  expect(await cancelledControlRequestForSession(sessionId, binding.conversationId)).toBeNull();
 });
 afterEach(async () => {
   vi.restoreAllMocks();

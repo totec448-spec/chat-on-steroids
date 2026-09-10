@@ -443,6 +443,41 @@ export function cancelInput(id: string): Promise<boolean> {
   });
 }
 
+/** Mark a delivered external-control request cancelled only after its exact native Stop was queued. */
+export function cancelDeliveredControlInput(id: string): Promise<boolean> {
+  return serial(async () => {
+    const current = await load();
+    const found = current.find(entry => entry.id === id);
+    if (!found || found.backgroundDelivery !== true || found.state !== 'sent' || found.deliveredAt === undefined) return false;
+    await commit(current.map(entry => entry === found
+      ? { ...entry, state: 'cancelled' as const, error: 'Cancelled by the external controller.' }
+      : entry));
+    return true;
+  });
+}
+
+/**
+ * A native Stop can end the visible generation while its server-side tool loop starts another
+ * turn. Keep that exact controller request fenced until a later real user input is recorded.
+ * App-owned continuation/handoff messages have no input id and do not revoke user cancellation.
+ */
+export function cancelledControlRequestForSession(sessionId: string, conversationId: string): Promise<string | null> {
+  return serial(async () => {
+    const session = await getSession(sessionId);
+    if (!session || session.conversationId !== conversationId) return null;
+    const candidates = (await load()).filter(entry => entry.backgroundDelivery === true && entry.state === 'cancelled' &&
+      entry.deliveredAt !== undefined && (entry.sessionId === sessionId || entry.deliveredSessionId === sessionId));
+    const cancelled = candidates.sort((a, b) => b.deliveredAt! - a.deliveredAt!)[0];
+    if (!cancelled) return null;
+    const users = await readRecentEvents(sessionId, 512, { kinds: ['user_message'] });
+    const authored = users.findIndex(event => event.kind === 'user_message' && event.inputId === cancelled.id);
+    if (authored < 0) return null;
+    const supersededByUser = users.slice(authored + 1).some(event => event.kind === 'user_message' &&
+      ((event.inputId !== undefined && event.inputId !== cancelled.id) || event.source === 'extension'));
+    return supersededByUser ? null : cancelled.id;
+  });
+}
+
 /** Editing is possible only before handout; claimed text is immutable. */
 export function reorderQueuedInputs(sessionId: string, ids: string[]): Promise<boolean> {
   return serial(async () => {

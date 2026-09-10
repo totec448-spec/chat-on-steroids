@@ -54,6 +54,12 @@ function dependencies(): ControlDependencies & { rows: InputEntry[]; sessionsByI
       entry.state = 'cancelled';
       return true;
     }),
+    cancelDelivered: vi.fn(async id => {
+      const entry = rows.find(candidate => candidate.id === id);
+      if (!entry || entry.state !== 'sent' || entry.backgroundDelivery !== true) return false;
+      entry.state = 'cancelled';
+      return true;
+    }),
     inputs: async () => rows.map(entry => ({ ...entry })),
     models: () => structuredClone(catalog),
     refreshModels: vi.fn(async (): Promise<ChatModelCatalog> => ({ ...structuredClone(catalog), state: 'pending' })),
@@ -144,8 +150,9 @@ describe('authenticated external control', () => {
       conversationId: session.conversationId, deliveredAt: 200 }));
 
     const response = await call(`/v1/requests/${requestId}/cancel`, { method: 'POST' });
-    expect(await response.json()).toMatchObject({ cancelAccepted: true });
+    expect(await response.json()).toMatchObject({ cancelAccepted: true, request: { state: 'cancelled' } });
     expect(deps.stop).toHaveBeenCalledWith(session.id, 'generation-exact');
+    expect(deps.cancelDelivered).toHaveBeenCalledWith(requestId);
   });
 
   it('never cancels a newer turn through an older controller request', async () => {
@@ -165,6 +172,24 @@ describe('authenticated external control', () => {
     const response = await call(`/v1/requests/${requestId}/cancel`, { method: 'POST' });
     expect(await response.json()).toMatchObject({ cancelAccepted: false });
     expect(deps.stop).not.toHaveBeenCalled();
+  });
+
+  it('does not publish a cancellation fence when native Stop was not accepted', async () => {
+    const session = summary();
+    session.activeTurnId = 'generation-exact';
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-a', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'A', chars: 1, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-exact' }
+    ]);
+    deps.rows.push(row('sent', { sessionId: session.id, deliveredSessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    deps.stop = vi.fn(async () => { throw new Error('native stop unavailable'); });
+
+    const response = await call(`/v1/requests/${requestId}/cancel`, { method: 'POST' });
+    expect(response.status).toBe(500);
+    expect(deps.cancelDelivered).not.toHaveBeenCalled();
+    expect(deps.rows[0]?.state).toBe('sent');
   });
 
   it('returns bounded projects/sessions and requests model discovery without submitting a message', async () => {

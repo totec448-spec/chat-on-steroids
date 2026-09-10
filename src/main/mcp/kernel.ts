@@ -1,4 +1,4 @@
-import { offerToolInput, acknowledgeToolInput } from '../session/input.js';
+import { offerToolInput, acknowledgeToolInput, cancelledControlRequestForSession } from '../session/input.js';
 import { pluginManager } from '../plugins/manager.js';
 /**
  * The machinery every model-facing tool sits on, independent of which surface it lives on.
@@ -546,6 +546,9 @@ async function dispatchTracked(
   const supersededConversation = context.caller.conversationId
     ? (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded'
     : false;
+  const cancelledControlRequest = context.caller.sessionId && context.caller.conversationId
+    ? await cancelledControlRequestForSession(context.caller.sessionId, context.caller.conversationId)
+    : null;
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.
   //
@@ -561,7 +564,7 @@ async function dispatchTracked(
   // thought asleep takes the free execution slot back for that family, so the liveness
   // bookkeeping below sees the same run it would have seen had the parking not happened. A
   // chat the user stopped from the app is refused below anyway and reclaims nothing.
-  if (!supersededConversation && !isFinish && !isChatBlocked(context.caller.conversationId)) {
+  if (!supersededConversation && !cancelledControlRequest && !isFinish && !isChatBlocked(context.caller.conversationId)) {
     reactivateDormantRunForConversation(context.caller.conversationId);
   }
   const quietWorkers = supersededConversation ? [] : sleepSilentDetachedWorkers();
@@ -649,7 +652,11 @@ async function dispatchTracked(
   await acknowledgeToolInput(context.caller.sessionId, context.caller.conversationId, requestId, startedAt)
     .catch(() => logWarn('Prior user input receipt could not be saved; its existing claim is preserved'));
   const result = await runInCallContext(context, () =>
-      blockedChat
+      cancelledControlRequest
+        ? Promise.resolve(fail(
+            `CONTROL_REQUEST_CANCELLED: external request ${cancelledControlRequest} was cancelled. No local tool was run. Stop this work; a later user message starts a new request.`
+          ))
+        : blockedChat
         ? Promise.resolve(fail(BLOCKED_CHAT_REFUSAL))
         : compacting
         ? Promise.resolve(fail(COMPACTION_IN_PROGRESS_REFUSAL))

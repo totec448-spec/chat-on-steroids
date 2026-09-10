@@ -14,7 +14,7 @@ import { connect, getStatus } from './connection.js';
 import { getConfig } from './config.js';
 import { listProjects } from './projects.js';
 import { cancelDesktopInput, sendDesktopInput } from './session/start-input.js';
-import { controlInputFingerprint, listInputs, type InputArgs, type InputEntry } from './session/input.js';
+import { cancelDeliveredControlInput, controlInputFingerprint, listInputs, type InputArgs, type InputEntry } from './session/input.js';
 import { getSession, listSessionPage, readOverflowText, readRecentEvents, type SessionListCursor } from './session/store.js';
 import { stopSessionTurn } from './bridge.js';
 import { APP_VERSION } from './version.js';
@@ -51,6 +51,7 @@ export interface ControlRequestView {
 export interface ControlDependencies {
   send(input: InputArgs): Promise<InputEntry>;
   cancel(id: string): Promise<boolean>;
+  cancelDelivered(id: string): Promise<boolean>;
   inputs(): Promise<InputEntry[]>;
   models(): ChatModelCatalog;
   refreshModels(): Promise<ChatModelCatalog>;
@@ -69,6 +70,7 @@ export interface ControlDependencies {
 const productionDependencies: ControlDependencies = {
   send: input => sendDesktopInput(input, { backgroundDelivery: true }),
   cancel: cancelDesktopInput,
+  cancelDelivered: cancelDeliveredControlInput,
   inputs: listInputs,
   models: getChatModels,
   // An explicit refresh may need the companion to start. The discovery wake
@@ -302,7 +304,10 @@ export function createControlHandler(deps: ControlDependencies, token: string): 
           const sessionId = targetSessionId(entry);
           const summary = sessionId ? await deps.session(sessionId) : null;
           const turnId = sessionId && summary ? await exactActiveRequestTurn(deps, entry, summary) : null;
-          if (sessionId && turnId) { await deps.stop(sessionId, turnId); accepted = true; }
+          if (sessionId && turnId) {
+            await deps.stop(sessionId, turnId);
+            accepted = await deps.cancelDelivered(entry.id);
+          }
         }
         const current = (await deps.inputs()).find(row => row.id === entry.id) ?? entry;
         return json(res, 200, { cancelAccepted: accepted, request: await controlRequestView(deps, current) });
