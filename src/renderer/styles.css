@@ -2733,6 +2733,7 @@ select option { background: var(--card); color: var(--ink); }
 
 .model-menu .composer-popover { width: 272px; padding: 8px 12px 15px; }
 .model-menu .model-reload { display: flex; width: 28px; height: 28px; min-height: 28px; padding: 5px; justify-content: center; }
+.composer-default-btn { width: 100%; margin-top: 12px; font-size: 12px; padding: 6px 10px; text-align: center; border-radius: 6px; }
 #composerModelStatus { font-size: 12px; padding: 4px 10px; line-height: 1.5; }
 .power-header { display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; gap: 8px; margin-bottom: 17px; }
 .power-caption { grid-column: 2; display: flex; flex-direction: column; align-items: center; min-width: 0; gap: 3px; }

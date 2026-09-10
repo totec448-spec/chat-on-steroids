@@ -1,4 +1,4 @@
-import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, ensureComposerModel } from './chat-models.js';
+import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, ensureComposerModel, isNativeComposerMode } from './chat-models.js';
 import { marked, Marked } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel } from './agent-panel.js';
@@ -8,6 +8,7 @@ import { communicationTitle, foldAgentCommunication } from './agent-communicatio
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { isAstraModel } from '../shared/chat-models.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
+import type { ReasoningEffort } from '../shared/session.js';
 import type { InputEntry } from '../main/session/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
@@ -3052,15 +3053,21 @@ async function sendComposer(delivery?: 'finish', plan?: string[]): Promise<boole
     }
     return;
   }
-  const discoveryGeneration = ++composerDiscoveryGeneration;
-  const discoverySelection = selectionGeneration, discoverySession = selectedId, discoveryDraft = input.value;
-  const modelSettings = confirmedComposerModel() ?? await ensureComposerModel();
-  // Discovery can outlive navigation or draft edits. Only the latest unchanged
-  // authored send may continue; a second click must never send the same text twice.
-  if (discoveryGeneration !== composerDiscoveryGeneration || discoverySelection !== selectionGeneration || discoverySession !== selectedId ||
-      input.value !== discoveryDraft || (imageDrafts.get(key) ?? []).some((image, index) => image !== images[index]) ||
-      (imageDrafts.get(key)?.length ?? 0) !== images.length) return false;
-  if (!modelSettings) { toast('Model discovery could not confirm your selection. Choose an available model and thinking effort, then send again.'); return false; }
+  let modelSettings: { model: string | null; reasoningEffort: ReasoningEffort | null } | null;
+  if (isNativeComposerMode()) {
+    modelSettings = { model: null, reasoningEffort: null };
+  } else {
+    const discoveryGeneration = ++composerDiscoveryGeneration;
+    const discoverySelection = selectionGeneration, discoverySession = selectedId, discoveryDraft = input.value;
+    const confirmed = confirmedComposerModel() ?? await ensureComposerModel();
+    // Discovery can outlive navigation or draft edits. Only the latest unchanged
+    // authored send may continue; a second click must never send the same text twice.
+    if (discoveryGeneration !== composerDiscoveryGeneration || discoverySelection !== selectionGeneration || discoverySession !== selectedId ||
+        input.value !== discoveryDraft || (imageDrafts.get(key) ?? []).some((image, index) => image !== images[index]) ||
+        (imageDrafts.get(key)?.length ?? 0) !== images.length) return false;
+    if (!confirmed) { toast('Model discovery could not confirm your selection. Choose an available model and thinking effort, then send again.'); return false; }
+    modelSettings = confirmed;
+  }
   const sessionId = selectedId;
   const generation = selectionGeneration;
   const chosenMode = delivery ?? $<HTMLSelectElement>('sendMode').value;
