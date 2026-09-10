@@ -1086,10 +1086,13 @@ export const PRIME_EVIDENCE_MS = evidenceWindow(2_500);
  * Two and a half seconds was measured too short for the case that matters most: a worker's
  * first `agents` call runs seconds after its tab opened, and on 2026-08-18 worker-1 was
  * told WORKER_IDENTITY_LOST at 16:33:56 with the page evidence for that very call arriving
- * at 16:34:04. The wait is event-driven and ends the instant the mate lands, so the extra
- * seconds are only ever spent by a call that was going to be refused anyway.
+ * at 16:34:04. A fresh controller-opened GPT-5.6 Pro chat on 2026-09-10 needed about 38
+ * seconds to publish the exact mate for its first `agents status`; the old 15-second wait
+ * refused it and the retry inherited the already-expired request-id window. The wait is
+ * event-driven and ends the instant the mate lands, so the extra seconds are only ever spent
+ * by a call that was going to be refused anyway.
  */
-export const IDENTITY_EVIDENCE_MS = evidenceWindow(15_000);
+export const IDENTITY_EVIDENCE_MS = evidenceWindow(45_000);
 
 /**
  * The same window again for the two `agents` actions whose refusal cannot be retried cheaply.
@@ -1099,11 +1102,11 @@ export const IDENTITY_EVIDENCE_MS = evidenceWindow(15_000);
  * no run, and the model's own retry costs the user another full generation — on 2026-08-21 it
  * cost two, and the run still never started. The wait is event-driven and returns the instant
  * the page's request-id mate lands, so a longer ceiling is only ever spent by a call that was
- * going to be refused anyway; against that, the live evidence shows ids arriving twenty
- * seconds after the window that refused them. Kept well inside ChatGPT's own connector
+ * going to be refused anyway; against that, live evidence now includes an exact id arriving
+ * about 38 seconds after the call began. Kept well inside ChatGPT's own connector
  * timeout, so a slow proof still comes back as a spawned run rather than as a dead call.
  */
-export const SPAWN_EVIDENCE_MS = evidenceWindow(30_000);
+export const SPAWN_EVIDENCE_MS = evidenceWindow(45_000);
 
 /**
  * Recovers the complete text behind a stored field.
