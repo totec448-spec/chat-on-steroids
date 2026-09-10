@@ -12,6 +12,22 @@ let discovery: Promise<void> | null = null;
 let catalogSubscribed = false;
 type ObservedSelection = { model: string; reasoningEffort?: ReasoningEffort; observedAt: number };
 let composerContext: { scope: string | null; observation: ObservedSelection | null; edited: boolean } | null = null;
+export type ComposerMode = 'native' | 'explicit';
+let composerMode: ComposerMode = 'native';
+
+export function getComposerMode(): ComposerMode {
+  return composerMode;
+}
+
+export function setComposerMode(mode: ComposerMode): void {
+  composerMode = mode;
+  paintStatus();
+}
+
+export function isNativeComposerMode(): boolean {
+  return composerMode === 'native';
+}
+
 const pairs = [['composerModel', 'composerReasoning'], ['workerModel', 'workerReasoning'], ['helperModel', 'helperReasoning']] as const;
 const effortNames: Record<string, string> = { none: 'Instant', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', pro: 'Pro' } satisfies Record<ReasoningEffort, string>;
 const composerEfforts = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro'] as const;
@@ -34,9 +50,15 @@ function paintComposerContext(): void {
 export function applyComposerSessionModel(scope: string | null, observation: ObservedSelection | null): void {
   if (!composerContext || composerContext.scope !== scope) {
     composerContext = { scope, observation, edited: false };
-    if (scope === null) paintPair('composerModel', 'composerReasoning', '', '');
+    if (scope === null) {
+      composerMode = 'native';
+      paintPair('composerModel', 'composerReasoning', '', '');
+    } else if (observation?.model) {
+      composerMode = 'explicit';
+    }
   } else if (observation && (!composerContext.observation || observation.observedAt >= composerContext.observation.observedAt)) {
     composerContext.observation = observation;
+    if (observation.model) composerMode = 'explicit';
   }
   paintComposerContext(); paintStatus();
 }
@@ -100,7 +122,7 @@ function paintComposerChoices(): void {
   const selected = $<HTMLSelectElement>('composerModel');
   const effort = $<HTMLSelectElement>('composerReasoning');
   const choices = composerModels();
-  const signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
+  const signature = JSON.stringify([catalog.state, choices, selected.value, effort.value, composerMode]);
   if (models.dataset.signature === signature) return;
   models.dataset.signature = signature;
   models.replaceChildren();
@@ -111,9 +133,16 @@ function paintComposerChoices(): void {
   })));
   const title = document.getElementById('composerPowerTitle');
   const subtitle = document.getElementById('composerPowerModel');
+  const defaultBtn = document.getElementById('composerDefaultBtn') as HTMLButtonElement | null;
+  if (defaultBtn) {
+    defaultBtn.hidden = composerMode === 'native' || !steps.length;
+    defaultBtn.onclick = () => {
+      setComposerMode('native');
+    };
+  }
   if (!steps.length) {
-    if (title) title.textContent = catalog.state === 'pending' ? 'Loading models…' : 'Models unavailable';
-    if (subtitle) subtitle.textContent = catalog.state === 'pending' ? 'Reading your ChatGPT account' : 'Reload models';
+    if (title) title.textContent = catalog.state === 'pending' ? 'Loading models…' : composerMode === 'native' ? 'ChatGPT Default' : 'Models unavailable';
+    if (subtitle) subtitle.textContent = catalog.state === 'pending' ? 'Reading your ChatGPT account' : composerMode === 'native' ? 'Native account model & reasoning' : 'Reload models';
     return;
   }
   const current = steps.findIndex(step => step.model === selected.value && step.effort === effort.value);
@@ -125,27 +154,33 @@ function paintComposerChoices(): void {
   slider.setAttribute('aria-label', 'Model and thinking effort');
   const show = () => {
     const step = steps[Number(slider.value)]!;
-    if (title) title.textContent = effortNames[step.effort] ?? step.effort;
-    if (subtitle) subtitle.textContent = step.modelLabel;
+    if (title) title.textContent = composerMode === 'native' ? 'ChatGPT Default' : (effortNames[step.effort] ?? step.effort);
+    if (subtitle) subtitle.textContent = composerMode === 'native' ? 'Native account model & reasoning' : step.modelLabel;
     slider.setAttribute('aria-valuetext', step.label);
     track.style.setProperty('--power-position', `${steps.length > 1 ? Number(slider.value) / (steps.length - 1) * 100 : 100}%`);
     return step;
   };
   if (current >= 0) show();
-  else {
+  else if (composerMode === 'native') {
+    if (title) title.textContent = 'ChatGPT Default';
+    if (subtitle) subtitle.textContent = 'Native account model & reasoning';
+    slider.setAttribute('aria-valuetext', 'Choose an available model and effort');
+  } else {
     if (title) title.textContent = 'Choose a level';
     if (subtitle) subtitle.textContent = 'Previous selection unavailable';
     slider.setAttribute('aria-valuetext', 'Choose an available model and effort');
   }
   const choose = () => {
+    composerMode = 'explicit';
     if (composerContext) composerContext.edited = true;
     const step = show();
     paintPair('composerModel', 'composerReasoning', step.model, step.effort);
     paintComposerLabel();
-    models.dataset.signature = JSON.stringify([catalog.state, choices, selected.value, effort.value]);
+    if (defaultBtn) defaultBtn.hidden = false;
+    models.dataset.signature = JSON.stringify([catalog.state, choices, selected.value, effort.value, composerMode]);
   };
   slider.oninput = choose;
-  slider.onclick = () => { if (current < 0) choose(); };
+  slider.onclick = () => { if (current < 0 || composerMode === 'native') choose(); };
   // Keep the range node alive through pointer/keyboard adjustment; hidden selects remain
   // the existing send authority, and no separate model selection state is introduced.
   track.append(dots, slider); powers.append(track);
@@ -163,9 +198,11 @@ export function confirmedComposerModel(): { model: string; reasoningEffort: Reas
 function paintComposerLabel(): void {
   // Display the same admission decision as Send, including discovery and removed efforts.
   const confirmed = confirmedComposerModel();
-  const label = confirmed
-    ? chatModelDisplayLabel(catalog.models.find(model => model.id === confirmed.model)!.label, confirmed.reasoningEffort, effortNames[confirmed.reasoningEffort]!)
-    : catalog.state === 'pending' ? 'Loading models…' : 'Select model';
+  const label = composerMode === 'native'
+    ? 'ChatGPT Default'
+    : confirmed
+      ? chatModelDisplayLabel(catalog.models.find(model => model.id === confirmed.model)!.label, confirmed.reasoningEffort, effortNames[confirmed.reasoningEffort]!)
+      : catalog.state === 'pending' ? 'Loading models…' : 'Select model';
   const node = $('composerModelLabel');
   node.textContent = label;
   node.title = label;
@@ -218,6 +255,7 @@ function discoverModels(): Promise<void> {
 }
 
 export async function ensureComposerModel(): Promise<ReturnType<typeof confirmedComposerModel>> {
+  composerMode = 'explicit';
   if (catalog.models.length) return confirmedComposerModel();
   const ready = new Promise<void>(resolve => {
     const finish = () => { clearTimeout(timer); catalogWaiters.delete(check); resolve(); };
@@ -251,6 +289,7 @@ export function applyChatModels(config: Config, previous?: Config): void {
 
 export function initChatModels(onPaint?: () => void): void {
   onComposerPaint = onPaint;
+  composerMode = 'native';
   if (window.api.onChatModelsChanged) {
     catalogSubscribed = true;
     window.api.onChatModelsChanged(value => {
@@ -263,16 +302,25 @@ export function initChatModels(onPaint?: () => void): void {
   document.getElementById('modelMenu')?.addEventListener('toggle', () => {
     if (($('modelMenu') as HTMLDetailsElement).open && !catalog.models.length) $('refreshComposerModels').click();
   });
+  document.getElementById('composerDefaultBtn')?.addEventListener('click', () => {
+    setComposerMode('native');
+  });
   for (const [modelId, effortId] of pairs) {
     document.getElementById(modelId)?.addEventListener('change', () => {
-      if (modelId === 'composerModel' && composerContext) composerContext.edited = true;
+      if (modelId === 'composerModel') {
+        composerMode = 'explicit';
+        if (composerContext) composerContext.edited = true;
+      }
       const model = $<HTMLSelectElement>(modelId);
       const supported = catalog.models.find(item => item.id === model.value)?.efforts ?? [];
       paintPair(modelId, effortId, model.value, supported.includes('high') ? 'high' : supported[0] ?? '');
       paintStatus();
     });
     document.getElementById(effortId)?.addEventListener('change', () => {
-      if (effortId === 'composerReasoning' && composerContext) composerContext.edited = true;
+      if (effortId === 'composerReasoning') {
+        composerMode = 'explicit';
+        if (composerContext) composerContext.edited = true;
+      }
       paintStatus();
     });
   }

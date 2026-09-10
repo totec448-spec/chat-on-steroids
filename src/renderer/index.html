@@ -871,12 +871,13 @@
                 </div>
                 </div>
                 <details class="composer-menu model-menu" id="modelMenu">
-                  <summary><span id="composerModelLabel">Model</span><svg class="ico picker-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></summary>
+                  <summary><span id="composerModelLabel">ChatGPT Default</span><svg class="ico picker-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" /></svg></summary>
                   <div class="composer-popover">
                     <div class="power-header"><div class="power-caption"><strong id="composerPowerTitle">Choose a level</strong><span id="composerPowerModel">Observed models</span></div><button class="btn model-reload" id="refreshComposerModels" data-keep-menu="true" type="button" title="Reload ChatGPT models" aria-label="Reload ChatGPT models"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M20 12a8 8 0 1 0-2 5M20 7l-3 3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" /></svg></button>
                     </div><p id="composerModelStatus" class="muted" role="status" hidden></p>
                     <div id="composerModelChoices" role="group" aria-label="Model"></div><div id="composerPowerChoices" role="group" aria-label="Thinking effort"></div><label hidden>Model<select id="composerModel" aria-label="ChatGPT model"><option value="" disabled>No observed choices</option></select></label>
                     <label hidden>Reasoning<select id="composerReasoning" aria-label="Reasoning effort"><option value="" disabled>No observed choices</option></select></label>
+                    <button class="btn composer-default-btn" id="composerDefaultBtn" data-keep-menu="true" type="button" hidden>Use ChatGPT Default</button>
                   </div>
                 </details>
                 <button class="btn" id="generateFinishGoal" type="button" hidden>Generate Goal</button>

@@ -261,9 +261,9 @@ it('keeps the trigger consistent with send admission during reload and a removed
     getChatModels: async () => ({ ok: true, data: catalog }),
     requestChatModels: async () => ({ ok: true, data: { ...catalog, state: 'pending', requestedAt: 3 } })
   } });
-  const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
+  const { initChatModels, applyChatModels, confirmedComposerModel, setComposerMode } = await import('../src/renderer/chat-models.js');
   const config = { multiAgent: {}, goal: {} } as Config;
-  initChatModels(); applyChatModels(config); await Promise.resolve();
+  initChatModels(); setComposerMode('explicit'); applyChatModels(config); await Promise.resolve();
   const label = dom.window.document.getElementById('composerModelLabel')!;
   expect(label.textContent).toBe('GPT-5.6 Sol · High');
   expect(confirmedComposerModel()).toEqual({ model: 'sol', reasoningEffort: 'high' });
