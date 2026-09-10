@@ -1,4 +1,12 @@
-/** Passive, bounded usage projection. Never reads request headers, cookies or credentials. */
+/**
+ * Passive, bounded page-response projection.
+ *
+ * Never reads request headers, cookies, credentials, prompt text or tool arguments. Besides
+ * quota metadata, it observes the two opaque identifiers ChatGPT itself puts in the live
+ * conversation event stream: `conversation_id` and `metadata.request_id`. The latter can
+ * reach the stream tens of seconds before React publishes it, which is the difference between
+ * an exact Core caller and CALLER_IDENTITY_REQUIRED. Only that pair crosses worlds.
+ */
 (() => {
   'use strict';
   if (window.__cosUsageObserver) return;
@@ -7,6 +15,10 @@
   const post = window.postMessage.bind(window);
   let latest = null;
   let requestOrder = 0, latestOrder = 0;
+  const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const REQUEST = /^wfr_[a-zA-Z0-9_-]{1,96}$/;
+  const CONVERSATION_FIELD = /(?:^|[,{\s])\"conversation_id\"\s*:\s*\"([0-9a-f-]{36})\"/gi;
+  const REQUEST_FIELD = /(?:^|[,{\s])\"request_id\"\s*:\s*\"(wfr_[a-zA-Z0-9_-]{1,96})\"/g;
   const project = (data, observedAt, order) => {
     if (!data || typeof data !== 'object') return;
     const rows = [];
@@ -60,11 +72,80 @@
     } catch { /* Unsupported metadata is unavailable, never guessed. */ }
     finally { clearTimeout(timer); void reader.cancel().catch(() => {}); }
   }
+  /**
+   * Reads only complete SSE frames from the cloned response. Regexes are anchored to JSON
+   * field syntax, so quoted user/model text (whose quotes are escaped) cannot manufacture an
+   * identifier. A concrete server conversation id and a wfr request id must both occur in the
+   * same response before anything is emitted. The original response is never delayed or
+   * replaced, and this clone is cancelled after the first 4 MiB or 90 seconds.
+   */
+  async function inspectRequestOrigins(response, observedAt) {
+    let url;
+    try { url = new URL(response.url); } catch { return; }
+    if (url.origin !== location.origin || url.pathname !== '/backend-api/conversation') return;
+    if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) return;
+    const copy = response.clone(), reader = copy.body?.getReader();
+    if (!reader) return;
+    const timer = setTimeout(() => void reader.cancel().catch(() => {}), 90_000);
+    const decoder = new TextDecoder();
+    const emitted = new Set();
+    let bytes = 0, buffer = '';
+    const scan = (frame) => {
+      if (!frame || frame.length > 512 * 1024) return;
+      const conversations = new Set();
+      CONVERSATION_FIELD.lastIndex = 0;
+      for (let match; (match = CONVERSATION_FIELD.exec(frame));) {
+        if (CONVERSATION.test(match[1])) conversations.add(match[1]);
+      }
+      // One complete server event must carry both sides of the join. Retaining an id from a
+      // prior frame would turn response order into authority; a contradictory frame abstains.
+      if (conversations.size !== 1) return;
+      const conversationId = conversations.values().next().value;
+      const requestIds = new Set();
+      REQUEST_FIELD.lastIndex = 0;
+      for (let match; (match = REQUEST_FIELD.exec(frame));) if (REQUEST.test(match[1])) requestIds.add(match[1]);
+      const fresh = [...requestIds].filter((id) => !emitted.has(id)).slice(0, 16);
+      if (fresh.length === 0) return;
+      for (const id of fresh) emitted.add(id);
+      post({ type: 'cos-request-origin', conversationId, requestIds: fresh, observedAt }, location.origin);
+    };
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > 4 * 1024 * 1024) return;
+        buffer += decoder.decode(value, { stream: true });
+        for (;;) {
+          const lf = buffer.indexOf('\n\n');
+          const crlf = buffer.indexOf('\r\n\r\n');
+          const split = lf < 0 ? crlf : crlf < 0 ? lf : Math.min(lf, crlf);
+          if (split < 0) break;
+          const width = buffer.startsWith('\r\n\r\n', split) ? 4 : 2;
+          scan(buffer.slice(0, split));
+          buffer = buffer.slice(split + width);
+        }
+        if (buffer.length > 512 * 1024) return;
+      }
+      buffer += decoder.decode();
+      scan(buffer);
+    } catch { /* A missing stream observation leaves the existing Fiber path in charge. */ }
+    finally { clearTimeout(timer); void reader.cancel().catch(() => {}); }
+  }
   window.fetch = function (...args) {
     // Request order fences late responses, not accounts. No account identity is inferred.
     const observedAt = Date.now(), order = ++requestOrder;
     const result = originalFetch.apply(this, args);
-    void result.then((response) => inspect(response, observedAt, order)).catch(() => {});
+    void result.then((response) => {
+      void inspect(response, observedAt, order);
+      let method = 'GET';
+      try {
+        const explicit = args[1] && typeof args[1].method === 'string' ? args[1].method : null;
+        const inherited = args[0] && typeof args[0] === 'object' && typeof args[0].method === 'string' ? args[0].method : null;
+        method = String(explicit || inherited || 'GET').toUpperCase();
+      } catch { return; }
+      if (method === 'POST') void inspectRequestOrigins(response, observedAt);
+    }).catch(() => {});
     return result;
   };
   window.addEventListener('message', (event) => {

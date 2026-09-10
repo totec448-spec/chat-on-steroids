@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 const script = readFileSync(new URL('../extension/usage.js', import.meta.url), 'utf8');
 function harness() {
-  const posts: Array<{ type: string; observedAt: number; rows: Array<Record<string, unknown>> }> = [];
+  const posts: Array<Record<string, any>> = [];
   let now = Date.parse('2026-09-05T12:00:00Z');
   class Clock extends Date { static override now() { return now; } }
   let response: unknown;
@@ -16,7 +16,7 @@ function harness() {
     addEventListener: (_type: string, handler: typeof listener) => { listener = handler; }
   };
   runInNewContext(script, { window, location: { origin: 'https://chatgpt.com' }, URL, Date: Clock, TextDecoder, setTimeout, clearTimeout });
-  async function feed(data: unknown, url = 'https://chatgpt.com/backend-api/wham/usage') {
+  async function feed(data: unknown, url = 'https://chatgpt.com/backend-api/wham/usage', init: Record<string, unknown> = {}) {
     let done: () => void = () => {};
     const inspected = new Promise<void>(resolve => { done = resolve; });
     let read = false;
@@ -27,12 +27,32 @@ function harness() {
       cancel: async () => { done(); }
     }) } }) };
     const expectedResponse = response;
-    const returned = await window.fetch('/endpoint', { headers: { Authorization: 'private-test-value' } });
+    const returned = await window.fetch('/endpoint', { headers: { Authorization: 'private-test-value' }, ...init });
     expect(returned).toBe(expectedResponse);
     if (new URL(url).origin === 'https://chatgpt.com' && /^\/backend-api\/(wham\/usage|conversation\/init|conversation\/prepare|models)$/.test(new URL(url).pathname)) await inspected;
     else await new Promise(resolve => setTimeout(resolve, 0));
   }
-  return { posts, feed, holdNextBody: () => { let release = () => {}; nextBodyGate = new Promise<void>(resolve => { release = resolve; }); return () => release(); }, advance: (ms: number) => { now += ms; }, request: (source: unknown = window, origin = 'https://chatgpt.com') => listener({ source, origin, data: { type: 'cos-usage-request' } }) };
+  async function feedSse(chunks: string[], init: Record<string, unknown> = { method: 'POST' }) {
+    let done: () => void = () => {};
+    const inspected = new Promise<void>(resolve => { done = resolve; });
+    let at = 0;
+    response = {
+      url: 'https://chatgpt.com/backend-api/conversation',
+      ok: true,
+      headers: { get: () => 'text/event-stream; charset=utf-8' },
+      clone: () => ({ body: { getReader: () => ({
+        read: async () => at < chunks.length
+          ? { done: false, value: new TextEncoder().encode(chunks[at++]!) }
+          : { done: true },
+        cancel: async () => { done(); }
+      }) } })
+    };
+    const returned = await window.fetch('/backend-api/conversation', init);
+    expect(returned).toBe(response);
+    if (String(init.method || 'GET').toUpperCase() === 'POST') await inspected;
+    else await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  return { posts, feed, feedSse, holdNextBody: () => { let release = () => {}; nextBodyGate = new Promise<void>(resolve => { release = resolve; }); return () => release(); }, advance: (ms: number) => { now += ms; }, request: (source: unknown = window, origin = 'https://chatgpt.com') => listener({ source, origin, data: { type: 'cos-usage-request' } }) };
 }
 
 describe('MAIN-world usage projection', () => {
@@ -129,5 +149,33 @@ describe('MAIN-world usage projection', () => {
     });
     expect(h.posts[1]?.rows).toHaveLength(80);
     expect(JSON.stringify(h.posts)).not.toMatch(/private@example|<script>/);
+  });
+
+  it('publishes an exact conversation/request pair from a chunked live response before React renders it', async () => {
+    const h = harness();
+    const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    await h.feedSse([
+      `data: {"conversation_id":"${conversationId}","message":{"metadata":{"request_`,
+      'id":"wfr_early_exact"},"content":{"parts":["private prompt and tool args"]}}}\n\n',
+      `data: {"conversation_id":"${conversationId}","message":{"metadata":{"request_id":"wfr_early_exact"}}}\n\n`,
+      `data: {"conversation_id":"${conversationId}","message":{"metadata":{"request_id":"wfr_second"}}}\n\n`
+    ]);
+
+    expect(h.posts).toEqual([
+      { type: 'cos-request-origin', conversationId, requestIds: ['wfr_early_exact'], observedAt: expect.any(Number) },
+      { type: 'cos-request-origin', conversationId, requestIds: ['wfr_second'], observedAt: expect.any(Number) }
+    ]);
+    expect(JSON.stringify(h.posts)).not.toContain('private prompt');
+    expect(JSON.stringify(h.posts)).not.toContain('tool args');
+  });
+
+  it('ignores non-POST, foreign, malformed and contradictory stream identity', async () => {
+    const h = harness();
+    const a = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const b = '11111111-2222-4333-8444-555555555555';
+    await h.feedSse([`data: {"conversation_id":"${a}","request_id":"wfr_get"}\n\n`], { method: 'GET' });
+    await h.feedSse([`data: {"conversation_id":"${a}","request_id":"not-a-workflow"}\n\n`]);
+    await h.feedSse([`data: {"conversation_id":"${a}","nested":{"conversation_id":"${b}"},"request_id":"wfr_conflict"}\n\n`]);
+    expect(h.posts).toEqual([]);
   });
 });
