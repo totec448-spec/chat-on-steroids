@@ -9830,23 +9830,39 @@
     if (encoded.length > 24000 || encoded === lastUsageProjection) return;
     void ask({ type: 'usage_observation', rows, observedAt }).then((reply) => { if (reply?.ok) lastUsageProjection = encoded; });
   });
+  function confirmStreamRequestOrigin(claimed, requestIds, observedAt) {
+    const pending = { timer: null, deadline: Date.now() + 30_000 };
+    const attempt = () => {
+      pending.timer = null;
+      if (!alive) return;
+      const route = CLF_DOM.conversationId();
+      if (route === claimed) {
+        void confirmLiveRequestOwners(
+          requestIds.map((requestId) => ({ requestId, messageId: null, createTime: observedAt / 1000 })),
+          route
+        );
+        return;
+      }
+      // A fresh chat receives its server conversation id in the response stream before the SPA
+      // publishes /c/<id> in the address bar. Keep that exact response pair briefly and require
+      // the route to converge before granting it authority. A different concrete route is a hard
+      // mismatch and is never retried, so a response finishing after navigation cannot cross chats.
+      if (route || Date.now() >= pending.deadline) return;
+      pending.timer = setTimeout(attempt, 100);
+    };
+    rememberCleanup(() => { if (pending.timer !== null) clearTimeout(pending.timer); });
+    attempt();
+  }
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-origin') return;
-    const route = CLF_DOM.conversationId();
     const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
-    // The stream names its server conversation and the address bar independently names this
-    // document. Both must agree. A response that finishes after SPA navigation therefore has
-    // no authority in the destination chat.
-    if (!route || claimed !== route || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claimed)) return;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claimed)) return;
     const raw = Array.isArray(event.data.requestIds) ? event.data.requestIds : [];
     if (raw.length === 0 || raw.length > 16) return;
     const requestIds = [...new Set(raw.filter((id) => typeof id === 'string' && /^wfr_[a-zA-Z0-9_-]{1,96}$/.test(id)))];
     if (requestIds.length === 0) return;
     const observedAt = Number.isFinite(event.data.observedAt) ? event.data.observedAt : Date.now();
-    void confirmLiveRequestOwners(
-      requestIds.map((requestId) => ({ requestId, messageId: null, createTime: observedAt / 1000 })),
-      route
-    );
+    confirmStreamRequestOrigin(claimed, requestIds, observedAt);
   });
   window.postMessage({ type: 'cos-usage-request' }, location.origin);
   let desktopDecision = null;

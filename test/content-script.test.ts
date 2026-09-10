@@ -7956,6 +7956,36 @@ describe('evidence from the page context', () => {
     ]);
   });
 
+  it('keeps a fresh-chat stream identity until the address bar publishes its exact route', async () => {
+    live = await harness('https://chatgpt.com/?cos-input=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const requestId = 'wfr_fresh_route_convergence';
+    live.reply.set('correlate', () => ({
+      ok: true,
+      status: 200,
+      data: { ok: true, conversationId, confirmed: [requestId], complete: true }
+    }));
+
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window,
+      origin: 'https://chatgpt.com',
+      data: { type: 'cos-request-origin', conversationId, requestIds: [requestId], observedAt: 1_700_000_001_000 }
+    }));
+    await settle();
+    expect(live.sent.filter((message) => message.type === 'correlate')).toEqual([]);
+
+    live.window.history.replaceState({}, '', `/c/${conversationId}`);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await settle();
+
+    expect(live.sent.filter((message) => message.type === 'correlate')).toEqual([
+      expect.objectContaining({
+        conversationId,
+        calls: [{ requestId, messageId: null, createTime: 1_700_000_001 }]
+      })
+    ]);
+  });
+
   it('does not grant stream identity from another route or malformed requests', async () => {
     live = await harness();
     const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
