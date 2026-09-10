@@ -65,6 +65,7 @@ const {
   PRO_SILENCE_RETIRE_MS,
   PRO_SILENCE_MS,
   PRO_ACTIVITY_MS,
+  sessionInputActivity,
   COMMAND_DEADLINE_MS,
   REVIVAL_ACTIVITY_MS,
   REVIVAL_DEADLINE_MS,
@@ -6475,6 +6476,15 @@ describe('unattributed activity recovery', () => {
       await attributed(timingChat, false, Date.now());
       expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(Date.now() + PRO_ACTIVITY_MS);
     } finally { vi.useRealTimers(); }
+  });
+
+  it('does not treat a stale page-only turn id as exact session activity', async () => {
+    await pair();
+    await events(OTHER, [openTurn('stale-page-turn')]);
+    const sessionId = (await request('GET', `/activity?conversationId=${OTHER}`)).body.sessionId;
+    const summary = (await getSession(sessionId))!;
+    expect(sessionInputActivity(summary).exact).toBe(true);
+    expect(sessionInputActivity({ ...summary, activeTurnId: null }).exact).toBe(false);
   });
 
   for (const fence of ['stop', 'block']) it(`does not revive Pro activity across an explicit ${fence}`, async () => {

@@ -4912,7 +4912,8 @@ export function sessionInputActivity(summary: SessionSummary): InputActivity {
   if (!id) return { possible: false, exact: false };
   const expiry = sessionActivityExpiresAt(summary);
   const exact = runningToolProgress(id) !== null ||
-    liveConversations().some(row => row.sessionId === summary.id && row.conversationId === id && !!row.activeTurnId);
+    (!!summary.activeTurnId && liveConversations().some(row => row.sessionId === summary.id && row.conversationId === id &&
+      row.activeTurnId === summary.activeTurnId));
   return { exact, possible: exact || runningToolCalls(id) > 0 ||
     (expiry !== undefined && expiry !== null && expiry > Date.now()) };
 }
