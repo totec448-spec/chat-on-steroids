@@ -1440,7 +1440,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
               retire: true,
               replacements: inputRows.filter(next => next.createdAt > row.createdAt && next.purpose !== 'decision')
                 .map(next => ({ id: next.id, conversationId: next.conversationId })) }))],
-        background: getConfig().ui.backgroundChats === true,
+        // Authenticated external submissions carry this durable outbox marker. Reuse the
+        // companion's existing background-window path without changing the saved UI preference.
+        background: getConfig().ui.backgroundChats === true || inputRows.some(row => row.backgroundDelivery === true && !['sent', 'failed', 'cancelled'].includes(row.state)),
         browserOnly: getConfig().ui.browserOnly === true,
         browserWorkArea: currentBrowserWorkArea(),
         browserWindowBounds: browserWindowBounds(),
@@ -2009,17 +2011,24 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // turn_start/turn_end lifecycle was split by a reload or a transient terminal marker.
     // Keeping anchors separate from `stream` means they can participate in the join without
     // ever becoming synthetic transcript rows.
-    const userAnchors = events.flatMap((event) =>
-      event.kind === 'user_message' && event.messageId
-        ? [
-            {
-              seq: event.origin ?? event.seq,
-              time: event.time,
-              messageId: event.messageId
-            }
-          ]
-        : []
-    );
+    // A reset replaces the mixed presentation tail, but the latest durable user boundary may
+    // sit before it when one long answer produced more than MAX_EVENT_TAIL activity rows. The
+    // reloaded content script must still be able to distinguish that settled prompt from a new
+    // send. Read a small user-only tail as a separate identity projection; filtering at the
+    // store keeps this bounded without making tool/progress rows compete with user anchors.
+    const anchorEvents = resetActivity
+      ? [...events, ...(await readRecentEvents(live.sessionId, 64, { kinds: ['user_message'] }))]
+      : events;
+    const userAnchorsByMessage = new Map<string, { seq: number; time: number; messageId: string }>();
+    for (const event of anchorEvents) {
+      if (event.kind !== 'user_message' || !event.messageId) continue;
+      userAnchorsByMessage.set(event.messageId, {
+        seq: event.origin ?? event.seq,
+        time: event.time,
+        messageId: event.messageId
+      });
+    }
+    const userAnchors = [...userAnchorsByMessage.values()].sort((left, right) => left.seq - right.seq);
 
     // Legacy tool-only view, kept only while the old native-row relabeller is still a
     // fallback. It is derived from the same stream cursor and contains no raw args/result.

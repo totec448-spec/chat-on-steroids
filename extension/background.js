@@ -1760,6 +1760,14 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       elected = elections[input.id];
     }
     if (elected?.tab != null) tab = candidates.find(candidate => candidate.id === elected.tab);
+    // The app still has an unclaimed controller row, so no browser document has
+    // committed ownership. If its elected document was closed or navigated away,
+    // reopen the same request id instead of abandoning it or inventing a new send.
+    if (!tab && elected && input.reopenUnclaimed === true) {
+      delete elections[input.id];
+      await persistLive();
+      elected = null;
+    }
     if (input.close === true && input.lifetime === 'temporary-planner') {
       if (!tab) continue;
       // Preserve the warm planner until newer app work has an actual browser tab.
@@ -2564,7 +2572,7 @@ const HANDLERS = {
     // The registry is authoritative for session lifetime, but it is populated only after a
     // page has bound/observed something. A valid ChatGPT tab can therefore be absent at the
     // exact moment the user turns Overwrite on. Discover the same host allowlist used by
-    // extension-reload recovery and union it with the durable registry. Host permissions in
+    // browser-restart recovery and union it with the durable registry. Host permissions in
     // manifest.json already authorize URL-filtered tabs.query on these origins.
     let discovered = [];
     try {

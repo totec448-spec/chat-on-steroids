@@ -519,6 +519,41 @@ describe('durable user input ownership', () => {
     await expect(enqueueInput({ ...args, text: 'changed' })).rejects.toThrow('different input');
     expect(await listInputs()).toHaveLength(1);
   });
+  it('keeps a compact durable control receipt as the duplicate authority', async () => {
+    configureInputDelivery({ applyAutomation: automate, changed, recordDelivered: async () => true });
+    const args = input({ dueAt: now, model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
+    const first = await enqueueInput(args, undefined, { backgroundDelivery: true });
+    expect(await claimBrowserInput(first.id, 'page', binding.conversationId)).toMatchObject({ backgroundDelivery: true });
+    expect(await acknowledgeBrowserInput(first.id, 'page', binding.conversationId, 'native-control')).toBe(true);
+    const later = input({ dueAt: now + 1, model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' });
+    await enqueueInput(later, undefined, { backgroundDelivery: true });
+    resetInputForTests();
+    expect(await enqueueInput(args, undefined, { backgroundDelivery: true })).toMatchObject({
+      id: args.id, state: 'sent', text: '[Control request receipt]', controlFingerprint: expect.any(String)
+    });
+    await expect(enqueueInput({ ...args, text: 'changed' }, undefined, { backgroundDelivery: true })).rejects.toThrow('different input');
+  });
+  it('sends a controller auto request immediately when only a stale activity grant remains', async () => {
+    binding.model = 'gpt-5.6-pro';
+    configureInputDelivery({ applyAutomation: automate, changed, activity: () => ({ possible: true, exact: false }) });
+    const row = await enqueueInput(input(), undefined, { backgroundDelivery: true });
+    expect(row).toMatchObject({ mode: 'auto', transportIntent: 'browser', backgroundDelivery: true });
+    expect(row.requestedMode).toBeUndefined();
+    expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).toMatchObject({ id: row.id, state: 'browser' });
+  });
+  it('recovers a persisted controller auto request misclassified as after-turn', async () => {
+    binding.model = 'gpt-5.6-pro';
+    const args = input();
+    const stuck: InputEntry = {
+      ...args, mode: 'after-turn', requestedMode: 'auto', transportIntent: 'browser',
+      backgroundDelivery: true, controlFingerprint: '0'.repeat(64), state: 'queued', owner: null,
+      createdAt: now, conversationId: binding.conversationId
+    };
+    await writeDurableNow('session-input', [stuck]);
+    resetInputForTests();
+    expect(await pendingBrowserInputs()).toEqual([{ id: stuck.id, conversationId: binding.conversationId, reopenUnclaimed: true }]);
+    expect(await claimBrowserInput(stuck.id, 'page', binding.conversationId, true)).toMatchObject({ id: stuck.id, state: 'browser' });
+  });
   it('uses the durable session current binding after resume and refuses retired callers', async () => {
     const row = await enqueueInput(input());
     binding.conversationId = 'conversation-b';
@@ -1116,6 +1151,16 @@ it('expires an unclaimed ordinary initial browser attempt 60 seconds after its d
   now++;
   expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed', error: expect.stringContaining('60 seconds') });
   expect(await claimBrowserInput(row.id, 'late', null)).toBeNull();
+});
+it('retains an unclaimed controller request until the browser can pick up the same identity', async () => {
+  binding.model = 'gpt-5.6-pro';
+  const row = await enqueueInput(input(), undefined, { backgroundDelivery: true });
+  now += 24 * 60 * 60_000;
+  resetInputForTests();
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', backgroundDelivery: true });
+  expect(await pendingBrowserInputs()).toEqual([
+    { id: row.id, conversationId: binding.conversationId, reopenUnclaimed: true }
+  ]);
 });
 it('never times out an intentional after-turn wait or a finish stage', async () => {
   binding.activeTurnId = 'active';

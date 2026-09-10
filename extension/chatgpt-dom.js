@@ -607,12 +607,12 @@ var CLF_DOM = (() => {
     return safe(() => document.querySelector(STOP), null);
   }
 
-  /** Only a visible, enabled native Stop control may end a proven turn. */
+  /** Only an enabled, non-hidden native Stop control may end a proven turn. */
   function stopGeneration(stillCurrent) {
     if (typeof stillCurrent !== 'function' || !stillCurrent()) return false;
     const button = stopButton();
     if (!button || !button.isConnected || button.disabled || button.getAttribute('aria-disabled') === 'true' ||
-        button.hidden || button.closest('[hidden],[inert]') || button.getClientRects().length === 0) return false;
+        button.hidden || button.closest('[hidden],[inert]')) return false;
     const style = getComputedStyle(button);
     if (style.display === 'none' || style.visibility === 'hidden' || !stillCurrent()) return false;
     button.click();
@@ -1240,7 +1240,53 @@ var CLF_DOM = (() => {
    * announcement is not a banner. Neither is this extension's own surface, which was
    * recording "Chat On Steroids Desktop is now connected" as a ChatGPT failure.
    */
-  const acknowledgedAccessNotices = new WeakSet();
+  const PROVIDER_ACCESS_LIMITS = [
+    {
+      heading: 'Too many requests',
+      body: 'We have temporarily limited access to conversations to protect your data. Please wait a few minutes.',
+      acknowledge: 'Got it'
+    },
+    {
+      heading: '요청이 너무 많습니다',
+      body: '요청을 너무 빠르게 보내고 있습니다. 데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다. 몇 분 후 다시 시도해 주세요.',
+      acknowledge: '알겠습니다'
+    }
+  ];
+  const acknowledgedAccessLimits = new WeakSet();
+  const normalizedNoticeText = value => String(value || '').replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+  function providerAccessLimit(node) {
+    if (!node || node.closest(OWN_SURFACES) || node.closest('[hidden],[inert],[aria-hidden="true"]') || !node.getClientRects().length) return null;
+    const headings = [...node.querySelectorAll('h1,h2,h3,[role="heading"]')]
+      .filter(heading => !heading.closest('[hidden],[inert],[aria-hidden="true"]'));
+    if (headings.length !== 1) return null;
+    const heading = normalizedNoticeText(headings[0].textContent);
+    const known = PROVIDER_ACCESS_LIMITS.find(copy => copy.heading === heading);
+    if (!known) return null;
+    const body = [...node.querySelectorAll('p,div,span')]
+      .some(part => !part.contains(headings[0]) && normalizedNoticeText(part.textContent) === known.body) ||
+      normalizedNoticeText([...node.querySelectorAll('p')].map(part => part.textContent).join(' ')) === known.body;
+    if (!body) return null;
+    return { known, heading, text: `${known.heading} ${known.body}`, node };
+  }
+  /** One exact native access-limit modal is acknowledged once after content.js records it. */
+  function acknowledgeProviderAccessLimit() {
+    return safe(() => {
+      for (const node of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
+        const notice = providerAccessLimit(node);
+        if (!notice || acknowledgedAccessLimits.has(node)) continue;
+        const textButtons = [...node.querySelectorAll('button')]
+          .filter(button => !button.disabled && button.getClientRects().length && !button.closest(`${OWN_SURFACES}, [aria-hidden="true"]`))
+          .map(button => ({ button, label: normalizedNoticeText(button.textContent) }))
+          .filter(candidate => candidate.label);
+        if (textButtons.length !== 1 || textButtons[0].label !== notice.known.acknowledge) continue;
+        acknowledgedAccessLimits.add(node);
+        textButtons[0].button.click();
+        return true;
+      }
+      return false;
+    }, false);
+  }
+
   function errors() {
     return safe(() => {
       const out = [];
@@ -1248,24 +1294,10 @@ var CLF_DOM = (() => {
       // Live provider access throttling is a dialog, not a broken transport. Match
       // its semantic heading and notice together; quoted assistant prose is not it.
       for (const node of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
-        if (node.closest(OWN_SURFACES) || node.closest('[hidden],[inert],[aria-hidden="true"]') || !node.getClientRects().length) continue;
-        const heading = node.querySelector('h1,h2,h3,[role="heading"]');
-        const headingText = (heading?.textContent || '').trim();
-        const value = (node.innerText || node.textContent || '').replace(/\s+/g, ' ').trim();
-        const english = /^too many requests$/i.test(headingText) && /temporarily limited.*access/i.test(value) && /few minutes/i.test(value);
-        const korean = headingText === '요청이 너무 많습니다' && value.includes('데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다.') && value.includes('몇 분 후 다시 시도해 주세요.');
-        if (value.length >= 500 || (!english && !korean)) continue;
-        const notice = value.startsWith(headingText) ? `${headingText} ${value.slice(headingText.length).trim()}` : value;
-        out.push({ text: notice, node, turnId: null, recoverable: false, blocking: true });
-        texts.add(value);
-        // Acknowledge this identified informational notice once. The returned
-        // blocking diagnostic survives the click; it grants no retry authority.
-        const buttons = [...node.querySelectorAll('button')].filter(button =>
-          displayed(button) && !button.disabled && button.getAttribute('aria-disabled') !== 'true' &&
-          (korean ? button.textContent.trim() === '알겠습니다' : /^got it$/i.test(button.textContent.trim())));
-        if (!acknowledgedAccessNotices.has(node) && buttons.length === 1) {
-          acknowledgedAccessNotices.add(node); buttons[0].click();
-        }
+        const notice = providerAccessLimit(node);
+        if (!notice) continue;
+        out.push({ text: notice.text, node, turnId: null, recoverable: false, blocking: true });
+        texts.add(notice.text);
       }
       for (const node of document.querySelectorAll('[role="alert"]')) {
         if (node.closest('[aria-hidden="true"]')) continue;
@@ -2044,6 +2076,7 @@ var CLF_DOM = (() => {
     composerVisible,
     prepareChatModelSurface,
     newChatControl,
+    acknowledgeProviderAccessLimit,
     visibleModelSelection,
     inspectModelSettings,
     uploadImages,

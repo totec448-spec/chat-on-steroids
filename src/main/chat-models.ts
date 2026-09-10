@@ -60,9 +60,9 @@ export function requestChatModels(allowOpen = true): ChatModelCatalog {
   return getChatModels();
 }
 /** An explicit UI request starts only the local browser bridge, never MCP/tunnel exposure. */
-export async function startChatModelDiscovery(allowOpen = true): Promise<ChatModelCatalog> {
+export async function startChatModelDiscovery(allowOpen = true, refresh = false): Promise<ChatModelCatalog> {
   // Showing an existing app window is neither a refresh nor permission to open Chrome.
-  if (!allowOpen && catalog.state !== 'unknown') return getChatModels();
+  if (!allowOpen && !refresh && catalog.state !== 'unknown') return getChatModels();
   requestChatModels(allowOpen);
   const nonce = request!.nonce;
   if (!launch || launch.nonce !== nonce || (request!.allowOpen && !launch.allowOpen)) {

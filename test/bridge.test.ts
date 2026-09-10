@@ -1065,6 +1065,44 @@ describe('activity feed', () => {
     expect(reply.body.generating).toBe(true);
   });
 
+  it('keeps the latest durable user anchor when a reconnect resets a tool-heavy activity tail', async () => {
+    await pair();
+    const conversationId = '99999999-8888-7777-6666-555555555556';
+    const observations: Array<Record<string, unknown>> = [
+      {
+        kind: 'user_message',
+        time: Date.now(),
+        text: 'the already completed prompt',
+        messageId: 'user-before-long-answer'
+      }
+    ];
+    for (let index = 0; index < 1200; index++) {
+      observations.push({
+        kind: 'page_tool',
+        time: Date.now() + index + 1,
+        turnId: 'completed-long-turn',
+        messageId: `long-answer-activity-${index}`,
+        text: `step ${index}`
+      });
+    }
+    for (let offset = 0; offset < observations.length; offset += 200) {
+      const recorded = await request('POST', '/events', {
+        body: { conversationId, events: observations.slice(offset, offset + 200) }
+      });
+      expect(recorded.status).toBe(200);
+    }
+
+    const feed = await request('GET', `/activity?conversationId=${conversationId}&since=0`);
+    expect(feed.status).toBe(200);
+    expect(feed.body.resetActivity).toBe(true);
+    expect(feed.body.stream).toHaveLength(1200);
+    expect(feed.body.userAnchors).toContainEqual(
+      expect.objectContaining({ messageId: 'user-before-long-answer' })
+    );
+    expect(feed.body.userAnchors.find((anchor: { messageId: string }) =>
+      anchor.messageId === 'user-before-long-answer')).not.toHaveProperty('text');
+  });
+
   /**
    * The page folds the chat's first user message away when this says so, and that message
    * is the handoff brief or the worker bootstrap — a screenful of machinery the user did
@@ -5403,13 +5441,16 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('records explicit provider access limits without scheduling a reload or silence retry', async () => {
+  it.each([
+    'Too many requests We have temporarily limited access to conversations to protect your data. Please wait a few minutes.',
+    '요청이 너무 많습니다 요청을 너무 빠르게 보내고 있습니다. 데이터를 보호하기 위해 대화에 대한 액세스가 일시적으로 제한되었습니다. 몇 분 후 다시 시도해 주세요.'
+  ])('records explicit provider access limits without scheduling a reload or silence retry (%s)', async text => {
     vi.useFakeTimers();
     try {
       await pair();
       await events(PRIME, [openTurn('limited-turn')]);
       await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'limited-turn', recoverable: false,
-        text: 'Too many requests We have temporarily limited access to conversations to protect your data. Please wait a few minutes.' }]);
+        text }]);
       expect(await maintenance()).toBeNull();
       await vi.advanceTimersByTimeAsync(180_000);
       expect(await maintenance()).toBeNull();

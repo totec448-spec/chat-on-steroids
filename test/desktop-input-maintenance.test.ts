@@ -173,6 +173,18 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     await restarted.maintain();
     expect(restarted.create).not.toHaveBeenCalled();
   });
+  it.each(['closed', 'navigated'])('reopens the same unclaimed controller request after its elected tab is %s', async reason => {
+    const input = { id: firstId, conversationId: secondId, reopenUnclaimed: true };
+    const h = await worker([input]);
+    h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });
+    await h.maintain();
+    expect(h.create).not.toHaveBeenCalled();
+    if (reason === 'closed') h.tabs.length = 0;
+    else h.tabs[0]!.url = 'https://chatgpt.com/';
+    await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(1);
+    expect(String(h.create.mock.calls[0]?.[0]?.url)).toContain(secondId);
+  });
   it('spends input opening authority before creation and permits a new explicit operation', async () => {
     const inputs = [{ id: firstId, conversationId: null }];
     const h = await worker(inputs);
@@ -309,7 +321,8 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     const h = await worker([]);
     let offered = true;
     h.fetch.mockImplementation(async (input) => ({ ok: true, status: 200, json: async () => {
-      if (new URL(input).pathname === '/hello') return { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true };
+      const route = new URL(input).pathname;
+      if (route === '/hello') return { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true };
       const placement = offered ? { id: firstId, background: true, model: 'gpt-5.6-sol', reasoningEffort: 'medium' } : null;
       offered = false;
       return { ok: true, placement, inputs: [], background: true };

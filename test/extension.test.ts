@@ -475,6 +475,7 @@ interface WorkerHarness {
   scriptingInsertCSS: ReturnType<typeof vi.fn>;
   alarmCreate: ReturnType<typeof vi.fn>;
   alarmClear: ReturnType<typeof vi.fn>;
+  runtimeReload: ReturnType<typeof vi.fn>;
 }
 
 function response(status: number, data: unknown) {
@@ -530,6 +531,7 @@ function loadWorker(options: {
   const alarmCreate = vi.fn(() => undefined);
   const alarmClear = vi.fn(async () => true);
   const windowsUpdate = vi.fn(async () => ({ id: 7 }));
+  const runtimeReload = vi.fn(() => undefined);
   const documentNumbers = new Map<number, number>();
   const currentDocuments = new Map<number, string>();
   const documentFor = (tabId: number): string => {
@@ -545,6 +547,7 @@ function loadWorker(options: {
     storage: { local: options.local, session: options.session },
     runtime: {
       getManifest: () => ({ version: '1.6.0' }),
+      reload: runtimeReload,
       onMessage: {
         addListener(fn: typeof listener) {
           listener = fn;
@@ -623,6 +626,7 @@ function loadWorker(options: {
     scriptingInsertCSS,
     alarmCreate,
     alarmClear,
+    runtimeReload,
     async fireAlarm(name = 'clf-bridge-drain') {
       for (const fn of alarmListeners) fn({ name });
       for (let turn = 0; turn < 12; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
