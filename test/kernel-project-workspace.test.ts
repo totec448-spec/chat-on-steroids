@@ -22,10 +22,10 @@ it('initializes simultaneous Prime cwd from each exact durable session project',
   expect(a?.virtual).toBe('/work/a'); expect(b?.virtual).toBe('/work/b');
   expect((await run('a', () => resolveIn(roots(), 'file.txt'))).real).toBe(path.join(base, 'a', 'file.txt'));
 });
-it('preserves learned cwd while still revalidating the explicit project', async () => {
+it('makes the exact durable session project override learned cwd while still revalidating it', async () => {
   project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
   setWorkspaceFor('chat:chat-a', { virtual: '/work/b', real: path.join(base, 'b') });
-  expect((await run('a', () => resolveIn(roots(), 'file.txt'))).virtual).toBe('/work/b/file.txt');
+  expect((await run('a', () => resolveIn(roots(), 'file.txt'))).virtual).toBe('/work/a/file.txt');
   project.mockRejectedValue(new Error('The session project is unavailable'));
   await expect(run('a', () => resolveIn(roots(), '/work/b/file.txt'))).rejects.toThrow('project is unavailable');
   await expect(run('a', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined))).rejects.toThrow('project is unavailable');

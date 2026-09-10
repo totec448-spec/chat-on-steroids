@@ -556,6 +556,21 @@
   }
   let stallReported = false;
   let userStopped = false;
+  let stopProvenance = null;
+  let stopClickOwner = null;
+  const stoppedOutcome = () => ({
+    outcome: 'stopped',
+    ...(stopProvenance ? { detail: `native Stop provenance: ${stopProvenance}` } : {})
+  });
+  const withStopClickOwner = (owner, click) => {
+    const previous = stopClickOwner;
+    stopClickOwner = owner;
+    try {
+      return click();
+    } finally {
+      stopClickOwner = previous;
+    }
+  };
   /**
    * Final public ChatGPT message that already terminalised the local turn while the page's
    * Stop control was still mounted. A stale Stop must not reopen the same finished turn on
@@ -1369,6 +1384,7 @@
     quietTurn = null;
     quietOutcome = null;
     userStopped = false;
+    stopProvenance = null;
     stallReported = false;
     fiberTerminalMessageId = null;
     bindResumeGoalTurn(open);
@@ -1513,6 +1529,13 @@
     pendingPresentation = null;
     userAnchorByMessage.clear();
     openedUserMessageId = null;
+    // Generation recovery is scoped to a conversation, while this content script can survive
+    // many SPA conversation changes. Keeping the previous chat's count made
+    // claimUnrecordedGeneration() permanently refuse the next chat after any earlier turn had
+    // opened in this document. `epoch` already changes on a concrete conversation switch, so
+    // resetting the per-conversation counter preserves generation-id uniqueness.
+    genCount = 0;
+    unrecordedGeneratingSince = 0;
     entries = [];
     streamEntries = [];
     streamRequestTurnOwners.clear();
@@ -1569,6 +1592,7 @@
     baselineSections = [];
     baselineMarks = [];
     userStopped = false;
+    stopProvenance = null;
     stallReported = false;
     fiberTerminalMessageId = null;
     // The settle window names a turn in the conversation being left behind. Carrying it
@@ -1617,7 +1641,8 @@
     const canStop = () => current() && generating && latestNative()?.role === 'assistant' &&
       latestNative()?.id === nativeId && pageTurnIds.get(expected) === nativeId;
     // Concurrent redemptions may finish after the first click, before ChatGPT removes Stop.
-    const stopped = stoppedAppCommands.has(commandId) || (canStop() && CLF_DOM.stopGeneration(canStop));
+    const stopped = stoppedAppCommands.has(commandId) ||
+      (canStop() && withStopClickOwner('app-stop', () => CLF_DOM.stopGeneration(canStop)));
     if (stopped) {
       stoppedAppCommands.add(commandId);
       if (stoppedAppCommands.size > 100) stoppedAppCommands.delete(stoppedAppCommands.values().next().value);
@@ -1782,7 +1807,7 @@
    * gives no evidence for, so it is never made: an unexplained stop stays unknown.
    */
   function endOutcome(turn) {
-    if (userStopped) return { outcome: 'stopped' };
+    if (userStopped) return stoppedOutcome();
     if (turn && CLF_DOM.interrupted(turn)) {
       return { outcome: 'interrupted', detail: 'ChatGPT marked the turn interrupted' };
     }
@@ -2293,6 +2318,7 @@
       quietTurn = null;
       quietOutcome = null;
       userStopped = false;
+      stopProvenance = null;
       stallReported = false;
       genCount++;
       turnId = `g-${RUN_ID}-${epoch}-${genCount}`;
@@ -2438,7 +2464,7 @@
       // Explicit stop closes now: the user pressed the button, so there is nothing to wait
       // for and a composer that stays disabled for another four seconds is a bug of its own.
       // A user stop also overrides the outcome captured on the first quiet observation.
-      if (userStopped) quietOutcome = { outcome: 'stopped' };
+      if (userStopped) quietOutcome = stoppedOutcome();
       const result = quietOutcome || endOutcome(quietTurn || turn);
       // `unknown` means exactly "nothing proves the turn ended". A real
       // answer/error/interrupt closes after the settle window, and ten minutes of genuine
@@ -5654,7 +5680,7 @@
         if (retirementHandledFor !== forId) {
           retirementHandledFor = forId;
           const stop = CLF_DOM.stopButton();
-          if (stop && typeof stop.click === 'function') stop.click();
+          if (stop && typeof stop.click === 'function') withStopClickOwner('retired-worker', () => stop.click());
           emit({ kind: 'chat_error', text: localError });
         }
         renderControl();
@@ -7974,8 +8000,9 @@
       nativePhase = 'interrupting';
       renderControl();
       const stop = CLF_DOM.stopButton();
-      if (stop) stop.click();
+      if (stop) withStopClickOwner('compaction', () => stop.click());
       userStopped = true;
+      stopProvenance ||= 'compaction';
       const stopped = await waitUntil(() => !current() || !CLF_DOM.generating(), INTERRUPT_WAIT_MS);
       if (!current()) return 'This chat changed while compaction was stopping the turn.';
       if (!stopped) return 'ChatGPT would not stop the current turn. Nothing was compacted.';
@@ -9684,7 +9711,10 @@
 
   const noteStopClick = (event) => {
     const stop = CLF_DOM.stopButton();
-    if (stop && event.target instanceof Node && stop.contains(event.target)) userStopped = true;
+    if (stop && event.target instanceof Node && stop.contains(event.target)) {
+      userStopped = true;
+      stopProvenance = stopClickOwner || 'user-observed/native';
+    }
   };
   listen(document, 'click', noteStopClick, true);
 

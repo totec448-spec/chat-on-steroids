@@ -20,6 +20,12 @@ const notices = [
   'are not bundled with CoS; their package directories retain their own licenses and notices.',
   ''
 ];
+const licenseSupplements = new Map([
+  ['flora-colossus', 'docs/licenses/flora-colossus-LICENSE'],
+  ['@hugeicons/core-free-icons', 'docs/licenses/hugeicons-core-free-icons-LICENSE']
+]);
+const noticeName = /^(licen[sc]e|notice|copying|copyright)([._-].*)?$/i;
+const codeModuleName = /\.(?:[cm]?[jt]sx?)$/i;
 const missing = [];
 let count = 0;
 for (const [relative, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b))) {
@@ -35,11 +41,12 @@ for (const [relative, entry] of Object.entries(lock.packages).sort(([a], [b]) =>
   async function walk(folder, depth = 0) {
     for (const item of await fs.readdir(folder, { withFileTypes: true })) {
       if (item.isDirectory() && !['node_modules', '.git'].includes(item.name) && depth < 4) await walk(path.join(folder, item.name), depth + 1);
-      else if (item.isFile() && /^(licen[sc]e|notice|copying|copyright)([._-].*)?$/i.test(item.name)) files.push(path.join(folder, item.name));
+      else if (item.isFile() && noticeName.test(item.name) && !codeModuleName.test(item.name)) files.push(path.join(folder, item.name));
     }
   }
   await walk(directory);
-  if (manifest.name === 'flora-colossus' && !files.length) files.push(path.join(root, 'docs/licenses/flora-colossus-LICENSE'));
+  const supplement = licenseSupplements.get(manifest.name);
+  if (!files.length && supplement) files.push(path.join(root, supplement));
   if (manifest.name.startsWith('@img/')) {
     // libvips distributions publish their composite attribution in README.md.
     try { await fs.access(path.join(directory, 'README.md')); files.push(path.join(directory, 'README.md')); } catch { /* package has separate licenses */ }

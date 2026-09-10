@@ -4518,6 +4518,29 @@ describe('targeted open', () => {
 // ------------------------------------------------------- worker bootstrap failure
 
 describe('a worker chat that never opens', () => {
+  it('does not turn restored worker debt into surprise tabs when its prime is not present', async () => {
+    const started = spawn(
+      { workers: [{ task: 'restored audit' }], caller: { conversationId: PRIME_CHAT } },
+      { deferDelivery: true }
+    );
+    const snapshot = snapshotSwarm()!;
+
+    // restoreSwarm replays the durable invitation through the already-registered bridge. The
+    // source prime has not reported into this fresh recorder process, so restoring state alone
+    // must not authorize a browser side effect.
+    restoreSwarm(snapshot);
+    await Promise.resolve();
+    expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-1']);
+    expect(pendingCommands()).toEqual([]);
+    expect(opened).toEqual([]);
+
+    // If the prime explicitly repeats/requests that same pending worker in the live process,
+    // that is fresh authority and the ordinary one-attempt bootstrap path is used.
+    expect(requestWorkerBootstraps(['worker-1'], started.runId)).toBe(1);
+    await waitForOpened(1);
+    expect(pendingCommands()).toHaveLength(1);
+  });
+
   it.each([true, false])('places two workers once through the companion with background window=%s', async (backgroundChats) => {
     await pair();
     const config = getConfig();
@@ -7337,7 +7360,7 @@ describe('restarting the bridge', () => {
     expect(pendingCommands()).toEqual([]);
   });
 
-  it('does not queue or open a newly spawned worker through a stale bridge callback while stopped', async () => {
+  it('does not turn a worker spawned while stopped into a delayed tab when the bridge restarts', async () => {
     await stopBridge();
     opened.length = 0;
 
@@ -7345,7 +7368,8 @@ describe('restarting the bridge', () => {
     // server object. Before they had disposers, stopBridge() removed only the swarm-end listener,
     // so a new worker created while the bridge was down still called queueWorkerBootstrap() and
     // could even launch Chrome through the stale opener. Nothing transport-facing may happen
-    // until the next start registers a fresh callback and replays broker-owned work.
+    // while the bridge is down. More importantly, restarting the bridge later is not a fresh
+    // user/model request to create a browser tab; the durable worker remains pending instead.
     spawn({ workers: [{ task: 'must wait for bridge restart' }], caller: { conversationId: PRIME_CHAT } });
     expect(pendingCommands()).toEqual([]);
     expect(opened).toEqual([]);
@@ -7353,6 +7377,13 @@ describe('restarting the bridge', () => {
     const port = await startBridge();
     expect(port).not.toBeNull();
     base = `http://127.0.0.1:${port}`;
+    await Promise.resolve();
+    expect(opened).toEqual([]);
+    expect(pendingCommands()).toEqual([]);
+    expect(pendingWorkerSpawns().map((worker) => worker.id)).toEqual(['worker-1']);
+
+    // An explicit retry/request by the owning prime is fresh browser-opening authority.
+    expect(requestWorkerBootstraps(['worker-1'], currentRunId()!)).toBe(1);
     await waitForOpened(1);
     expect(pendingCommands().map((command) => command.what)).toEqual([`worker:${currentRunId()}:worker-1`]);
   });

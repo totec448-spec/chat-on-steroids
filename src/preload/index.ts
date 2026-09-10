@@ -26,6 +26,9 @@ import type {
   TokenPressure
 } from '../shared/session.js';
 
+export type { SessionControlsView } from '../main/bridge.js';
+export type { InputArgs, InputEntry } from '../main/session/input.js';
+
 type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
 
 const call = <T>(channel: string, payload?: unknown): Promise<Reply<T>> =>
@@ -139,7 +142,9 @@ const api = {
   listSessions: (options?: { cursor?: SessionListCursor; limit?: number }) =>
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
-  addProject: () => call<LocalProject | null>('projects:add'),
+  addProject: (sessionId?: string | null) =>
+    call<LocalProject | null>('projects:add', { sessionId: sessionId ?? null }),
+  removeProject: (id: string) => call<boolean>('projects:remove', { id }),
   getSessionImage: (id: string, assetId: string) => call<string | null>('sessions:image', { id, assetId }),
   getSession: (id: string, options?: { from?: number; before?: number; limit?: number }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),

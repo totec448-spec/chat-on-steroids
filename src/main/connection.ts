@@ -7,7 +7,6 @@
  */
 
 import type { ConnectionStatus, SurfaceStatus, TunnelSettings } from '../shared/types.js';
-import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
 import { prewarmComputerHelper } from './computer/index.js';
 import { effectiveCapabilities, getConfig } from './config.js';
 import { logError, logInfo, logWarn } from './logger.js';
@@ -246,13 +245,6 @@ async function connectImpl(): Promise<void> {
 
   const config = getConfig();
   const caps = effectiveCapabilities(config);
-  // A root is required by the capabilities that actually cross the filesystem boundary,
-  // not by the mere presence or absence of Desktop. Otherwise enabling screen/clipboard
-  // could accidentally waive the root needed by Core's file or command semantics.
-  if (config.roots.length === 0 && requiresApprovedFilesystemRoot(config)) {
-    setStatus({ state: 'disconnected', detail: 'Add a folder before connecting.' });
-    return;
-  }
 
   try {
     setStatus({ state: 'starting-server', detail: 'Starting the local server…', publicUrl: null });

@@ -28,19 +28,21 @@ describe('runtime multi-agent enable regression', () => {
 
 describe('companion extension setup contract', () => {
   it('keeps standalone recovery visible without pointing an installed app at releases/latest', async () => {
-    const [html, renderer, preload, ipc] = await Promise.all([
+    const [html, renderer, browser, preload, ipc] = await Promise.all([
       readFile(path.join(repo, 'src/renderer/index.html'), 'utf8'),
-      readFile(path.join(repo, 'src/renderer/main.ts'), 'utf8'),
+      readFile(path.join(repo, 'src/renderer/main.tsx'), 'utf8'),
+      readFile(path.join(repo, 'src/renderer/components/settings/browser-section.tsx'), 'utf8'),
       readFile(path.join(repo, 'src/preload/index.ts'), 'utf8'),
       readFile(path.join(repo, 'src/main/ipc.ts'), 'utf8')
     ]);
 
-    expect(html).toMatch(/id="bridgeDownload"[\s\S]*?Download extension ZIP/i);
-    expect(html).toMatch(/Required for sub-agents/i);
-    expect(html).toMatch(/Requires the Chrome extension to be loaded and connected/i);
+    expect(html).toContain('<div id="root"></div>');
+    expect(renderer).toContain('<App />');
+    expect(browser).toMatch(/required for sub-agents/i);
+    expect(browser).toContain('Download extension ZIP');
     expect(html).not.toContain('/releases/latest/');
     expect(ipc).not.toContain('/releases/latest/');
-    expect(renderer).toContain('api.downloadExtension()');
+    expect(browser).toContain('api.downloadExtension()');
     expect(preload).toContain("call<boolean>('bridge:downloadExtension')");
     expect(ipc).toContain("handle('bridge:downloadExtension'");
   });

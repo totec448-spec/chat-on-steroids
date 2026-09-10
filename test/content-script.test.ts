@@ -6416,6 +6416,7 @@ describe('a stop button that goes missing while the turn is still running', () =
     const ends = emitted(live.sent, 'turn_end').map((entry) => entry.event);
     expect(ends).toHaveLength(1);
     expect(ends[0]!.outcome).toBe('stopped');
+    expect(ends[0]!.detail).toBe('native Stop provenance: user-observed/native');
     // Visible partial prose is not a completed answer. If this were final:true and the
     // explicit turn_end got lost on reload, recorder recovery would upgrade the stopped
     // turn to completed.
@@ -6600,6 +6601,45 @@ describe('a content script reloaded into a turn already in flight', () => {
     await settle();
     await live.hook.flush();
     expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+  });
+
+  it('claims an unrecorded generation after this document has already visited another chat', async () => {
+    const chatA = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const chatB = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      activity: () => activity({ activeTurnId: null, userAnchors: [] })
+    });
+
+    // Give this document a real earlier generation. Generation numbering is local identity,
+    // not evidence that a later conversation in the same SPA document was already observed.
+    startGenerating(live.document);
+    live.hook.observe();
+    await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+
+    // Move the same content-script document to B after B's send boundary was missed. There is
+    // no composer receipt and the app holds no active turn, so the bounded Stop fallback is the
+    // only owner capable of recovering B's still-running generation.
+    live.document.querySelector('#thread')!.replaceChildren();
+    stopGenerating(live.document);
+    userTurn(live.document, 'unrecorded-b-user', 'continue the investigation');
+    assistantTurn(live.document, 'unrecorded-b-turn', ['Still working']);
+    startGenerating(live.document, { send: false });
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+    live.hook.observe();
+    await settle();
+    await live.hook.pullActivity();
+    live.hook.observe();
+    await settle();
+
+    live.advance(live.hook.TURN_SETTLE_MS);
+    live.hook.observe();
+    await settle();
+    await live.hook.flush();
+
+    const starts = emitted(live.sent, 'turn_start');
+    expect(starts).toHaveLength(2);
+    expect(starts[1]!.conversationId).toBe(chatB);
   });
 
   it('opens nothing when Stop does not outlast the settle window', async () => {
@@ -15274,6 +15314,11 @@ describe('app Stop command uses current native turn proof', () => {
     expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
     expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
     expect(h.clicks()).toBe(1);
+    stopGenerating(live!.document);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end').at(-1)?.event).toMatchObject({
+      outcome: 'stopped', detail: 'native Stop provenance: app-stop'
+    });
   });
 
   it('captures a completed final hydrated later in a hidden tab after the settle window', async () => {

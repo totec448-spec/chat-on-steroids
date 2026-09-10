@@ -318,7 +318,8 @@ const MAX_DORMANT_RUNS = 16;
  */
 let livenessFloor = 0;
 
-let spawnRequest: ((workers: WorkerSpawn[]) => void) | null = null;
+export type WorkerSpawnRequestKind = 'requested' | 'replay';
+let spawnRequest: ((workers: WorkerSpawn[], kind: WorkerSpawnRequestKind) => void) | null = null;
 const listeners = new Set<() => void>();
 const endListeners = new Set<(reason: string, retired: RetiredChat[], runId: string) => void>();
 let persist: (() => void) | null = null;
@@ -529,11 +530,11 @@ export function pendingWorkerSpawns(): WorkerSpawn[] {
  * Registration replays whatever is already owed: startup restores the run before the bridge
  * exists, so the restore itself has nobody to ask for a tab.
  */
-export function onSpawnRequest(handler: (workers: WorkerSpawn[]) => void): () => void {
+export function onSpawnRequest(handler: (workers: WorkerSpawn[], kind: WorkerSpawnRequestKind) => void): () => void {
   spawnRequest = handler;
   const owed = pendingWorkerSpawns();
   if (owed.length > 0) {
-    handler(owed);
+    handler(owed, 'replay');
     logInfo(`multi-agent: ${owed.length} worker chat(s) still owed a tab`);
   }
   return () => {
@@ -1215,7 +1216,7 @@ export function requestWorkerBootstraps(ids: readonly string[], runId?: string):
     )
     .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort }));
   if (owed.length === 0) return 0;
-  if (spawnRequest) spawnRequest(owed);
+  if (spawnRequest) spawnRequest(owed, 'requested');
   else logWarn('multi-agent: no browser extension is paired, so worker chats cannot be opened automatically');
   return owed.length;
 }
@@ -4033,7 +4034,7 @@ export function restoreSwarm(snapshot: SwarmSnapshot | null): void {
   // this is replayed by onSpawnRequest the moment it registers.
   const stranded = pendingWorkerSpawns();
   if (stranded.length > 0 && spawnRequest) {
-    spawnRequest(stranded);
+    spawnRequest(stranded, 'replay');
     logInfo(`multi-agent: re-requested ${stranded.length} worker chat(s) that were unbound at the restart`);
   }
   const activeAgents = [...runs.values()].flatMap(r => [...r.agents.values()]);

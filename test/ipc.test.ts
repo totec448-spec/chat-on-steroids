@@ -215,6 +215,11 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   expect(getConfig().roots).toHaveLength(1);
   const listed = await handlers.get('projects:list')!(null, {}) as any;
   expect(listed.data).toHaveLength(2);
+  currentWindow.webContents.send.mockClear();
+  const removed = await handlers.get('projects:remove')!(null, { id: first.data.id }) as any;
+  expect(removed).toEqual({ ok: true, data: true });
+  expect(((await handlers.get('projects:list')!(null, {})) as any).data.find((row: any) => row.id === first.data.id)?.hidden).toBe(true);
+  expect(currentWindow.webContents.send).toHaveBeenCalledWith('session:changed');
 });
 
 /** The whole settings object the renderer sends, with the parts a test cares about set. */
@@ -660,7 +665,7 @@ describe('settings writes from more than one UI', () => {
     expect(nativeTheme.themeSource).toBe('dark');
     expect(currentWindow.setBackgroundColor).toHaveBeenCalledWith('#0e0e11');
     if (process.platform === 'win32') expect(currentWindow.setTitleBarOverlay).toHaveBeenCalledWith({
-      height: 36, color: '#1a2129', symbolColor: '#b8c0c5'
+      height: 36, color: '#111111', symbolColor: '#ececec'
     });
     expect(getConfig().goal.enabled).toBe(false);
   });
@@ -768,15 +773,23 @@ describe('root namespace invariants', () => {
   });
 });
 
-/** Exercise the real IPC policy for both Settings buttons and authored chat links. */
+/** Exercise the real IPC policy for React-authored links and authored chat links. */
 describe('every link the window offers', () => {
-  it('is one link:open will actually open', async () => {
+  it('allows every literal external link the React renderer sends directly to link:open', async () => {
     const { promises: fs } = await import('node:fs');
     const path = await import('node:path');
-    const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
-
-    const offered = [...html.matchAll(/data-link="([^"]+)"/g)].map((match) => match[1]!);
-    expect(offered.length, 'the markup offers no links at all — has data-link been renamed?').toBeGreaterThan(0);
+    const folder = path.join(process.cwd(), 'src', 'renderer');
+    const sources: string[] = [];
+    const visit = async (directory: string): Promise<void> => {
+      for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+        const target = path.join(directory, entry.name);
+        if (entry.isDirectory()) await visit(target);
+        else if (/\.tsx?$/.test(entry.name)) sources.push(await fs.readFile(target, 'utf8'));
+      }
+    };
+    await visit(folder);
+    const offered = sources.flatMap((source) => [...source.matchAll(/api\.openLink\((['"])(https?:\/\/[^'"]+)\1\)/g)].map((match) => match[2]!));
+    expect(offered.length, 'the React renderer should keep at least one explicit external setup link').toBeGreaterThan(0);
 
     for (const url of offered) expect(await handlers.get('link:open')!(null, { url })).toEqual({ ok: true, data: true });
   });

@@ -1,3 +1,4 @@
+import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -5,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { getLog } from '../src/main/logger.js';
 import { startMcpServer, type McpEndpoint } from '../src/main/mcp/server.js';
 import { initSessionStore, resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
 
@@ -129,4 +131,58 @@ it('does not put a force-close deadline on an ordinary endpoint stop', async () 
   } finally {
     timeout.mockRestore();
   }
+});
+
+it('logs a request id when the caller drops an MCP request before any response can finish', async () => {
+  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clf-mcp-abort-log-'));
+  initConfigPath(dir);
+  initSessionStore(dir);
+  initDurableStore(dir);
+  const cfg = defaultConfig();
+  const rootPath = await validateNewRoot(dir, []);
+  const roots = [{ name: 'probe', path: rootPath }];
+  await saveConfig({ ...cfg, roots });
+  endpoint = await startMcpServer(() => ({
+    roots,
+    caps: cfg.capabilities,
+    readOnly: true,
+    sessionTools: false,
+    agentTools: false
+  }));
+
+  const baseline = getLog().length;
+  const url = new URL(endpoint.url);
+  const requestId = 'wfr_abort_diagnostic_probe';
+  const request = http.request({
+    hostname: url.hostname,
+    port: url.port,
+    path: url.pathname,
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      'content-length': '1024',
+      'x-request-id': requestId
+    }
+  });
+  request.on('error', () => undefined);
+  request.write('{');
+  await new Promise<void>((resolve) => request.on('socket', (socket) => {
+    if (socket.readyState === 'open') return resolve();
+    socket.once('connect', resolve);
+  }));
+  await sleep(20);
+  request.destroy();
+
+  const startedAt = Date.now();
+  let diagnostic = '';
+  while (Date.now() - startedAt < 1_000) {
+    diagnostic = getLog().slice(baseline).map((entry) => entry.message)
+      .find((message) => message.includes(requestId) && message.includes('before response')) ?? '';
+    if (diagnostic) break;
+    await sleep(10);
+  }
+  expect(diagnostic).toContain('request POST mcp/core');
+  expect(diagnostic).toMatch(/(?:aborted|closed) before response/);
+  expect(diagnostic).toContain(`request=${requestId}`);
 });

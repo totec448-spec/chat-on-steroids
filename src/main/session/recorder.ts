@@ -761,7 +761,8 @@ function noteCallEvidence(
   sessionId: string,
   fiberConversationId: string | null | undefined,
   calls: readonly PageCallEvidence[],
-  at: number
+  at: number,
+  turnId?: string
 ): void {
   if (fiberConversationId && fiberConversationId !== conversationId) {
     // Name the discarded ids. Without them this line says a batch was dropped but not
@@ -794,6 +795,7 @@ function noteCallEvidence(
       observedAt
     }))
   );
+  const live = conversations.get(conversationId);
   const refusals = new Set<string>();
   for (const [index, call] of evidencedCalls.entries()) {
     const result = results[index]!;
@@ -812,6 +814,17 @@ function noteCallEvidence(
     } else if (result === 'stored') {
       logInfo(`request attribution: ${call.requestId} -> conversation ${conversationId}`);
       if (unattributedSessionId) scheduleAttributionRepair();
+    }
+    // content.js names only the active local generation on tool_evidence. Once request
+    // ownership has been accepted for that exact conversation/session/turn, retain the
+    // server-turn id with the local turn even if the MCP request itself has not arrived yet.
+    // That is the evidence needed to reject a later false page end without admitting
+    // historical rows (which are deliberately emitted without a local turn id).
+    if (
+      result !== 'refused' && turnId && live?.sessionId === sessionId &&
+      live.turnId === turnId && live.turnStartedAt !== null
+    ) {
+      live.turnRequestIds.add(call.requestId);
     }
   }
 }
@@ -1402,7 +1415,7 @@ async function reopenFalselyEndedTurn(
     source: 'app',
     kind: 'turn_start',
     turnId: ended.turnId,
-    detail: 'the same ChatGPT request kept calling tools after the page reported this turn completed',
+    detail: 'the same ChatGPT request kept calling tools after the page reported this turn ended',
     ...(agent ? { agent } : {})
   });
   live.endedTurn = null;
@@ -1413,7 +1426,7 @@ async function reopenFalselyEndedTurn(
   live.lastTurnOutcome = null;
   live.turnRequestIds = new Set(ended.requestIds);
   logInfo(
-    `session ${sessionId} reopened turn ${ended.turnId} — request ${requestId} kept calling tools after the page reported it completed`
+    `session ${sessionId} reopened turn ${ended.turnId} — request ${requestId} kept calling tools after the page reported it ended`
   );
   return ended.turnId;
 }
@@ -1719,7 +1732,7 @@ async function recordSupersededMessages(
     // window and being refused as nobody's.
     if (item.kind === 'tool_evidence') {
       if (item.calls && item.calls.length > 0) {
-        noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time);
+        noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time, item.turnId);
       }
       continue;
     }
@@ -2019,7 +2032,7 @@ async function recordChatObservationsNow(
       // the chat. The calls themselves are recorded by the connector, once each.
       case 'tool_evidence':
         if (item.calls && item.calls.length > 0) {
-          noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time);
+          noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time, item.turnId);
         }
         continue;
       case 'turn_end':
@@ -2042,11 +2055,12 @@ async function recordChatObservationsNow(
           live.openTurns.delete(item.turnId);
           live.lastTurnOutcome = item.outcome ?? 'unknown';
           live.lastTurnStartedAt = endedStartedAt;
-          // Only a completed end can be proven false by a later call: it is the one verdict
-          // Goal acts on, and the one a reloaded page fabricates. A stop is the user's own
-          // decision and the failure outcomes already belong to recovery.
+          // Completion and Stop are both page-observed terminal claims, not server-side proof.
+          // A later call that actually starts under this exact ChatGPT request id contradicts
+          // either one: even a requested Stop has not ended the turn if its server turn is still
+          // starting new local work. Failure outcomes already belong to recovery.
           live.endedTurn =
-            live.turnId === item.turnId && item.outcome === 'completed'
+            live.turnId === item.turnId && (item.outcome === 'completed' || item.outcome === 'stopped')
               ? { turnId: item.turnId, startedAt: endedStartedAt, endedAt: item.time, requestIds: live.turnRequestIds }
               : null;
           live.turnRequestIds = new Set<string>();

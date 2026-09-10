@@ -865,9 +865,13 @@ async function validatedWorkspace() {
   // Explicit project bindings are durable authority, even after a cwd was learned.
   // Validate first so a revoked or moved project never becomes a first-root fallback.
   const project = sessionId ? await getSessionProject(sessionId) : null;
-  const workspace = currentWorkspace();
-  if (!workspace && project) setCurrentWorkspace(project);
-  return workspace ?? currentWorkspace();
+  if (project) {
+    // A user-selected session project is stronger than cwd learned from an earlier absolute
+    // path. Replace only this request-correlated conversation's cache; never another chat's.
+    setCurrentWorkspace(project);
+    return currentWorkspace();
+  }
+  return currentWorkspace();
 }
 
 export async function resolveIn(

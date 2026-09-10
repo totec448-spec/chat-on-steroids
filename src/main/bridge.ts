@@ -3904,8 +3904,24 @@ async function startBridgeOnce(epoch: number): Promise<number | null> {
       // a still-live lease can sit forever with no timer to end it.
       rearmRetainedCommandDeadlines();
       dropSpawnRequestListener?.();
-      dropSpawnRequestListener = onSpawnRequest((workers) => {
-        for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId);
+      dropSpawnRequestListener = onSpawnRequest((workers, kind) => {
+        const livePrimes = kind === 'replay'
+          ? new Set(liveConversations().map((entry) => entry.conversationId))
+          : null;
+        for (const worker of workers) {
+          // Durable agent history and browser-opening authority are different things. A worker
+          // invitation restored from disk may still be useful if its prime explicitly resumes
+          // that exact spawn, but bridge startup must not turn every old invitation into a new
+          // ChatGPT tab. Only replay an owed bootstrap when its owning prime conversation is
+          // currently present in this process; an explicit agents spawn/retry remains immediate.
+          if (livePrimes && !livePrimes.has(worker.primeConversationId)) {
+            logInfo(
+              `bridge: deferred replayed worker ${worker.runId}:${worker.id} — its prime conversation is not currently present`
+            );
+            continue;
+          }
+          queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId);
+        }
       });
       // The same replay contract for waking a worker that already has a chat. A run restored
       // from disk can hold a worker left in `waking` by a crash mid-revival; registering here

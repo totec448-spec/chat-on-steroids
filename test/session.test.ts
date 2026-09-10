@@ -2014,8 +2014,8 @@ describe('canonical recorder 1.8', () => {
    * request id that starts after the reported end is proof the end was the page's, not
    * ChatGPT's. The recorder reopens the turn durably and lets the real end close it later.
    */
-  it('reopens a turn the page ended while its server turn kept calling tools', async () => {
-    const conversationId = 'conv-false-turn-end';
+  it.each(['completed', 'stopped'] as const)('reopens a %s turn the page ended while its server turn kept calling tools', async (outcome) => {
+    const conversationId = `conv-false-turn-end-${outcome}`;
     const sessionId = await sessionForConversation(conversationId);
     const now = Date.now();
     const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
@@ -2033,7 +2033,7 @@ describe('canonical recorder 1.8', () => {
     expect(active()).toBe('g-false-end');
 
     await recordChatObservations(conversationId, [
-      { kind: 'turn_end', time: now + 20, turnId: 'g-false-end', outcome: 'completed' }
+      { kind: 'turn_end', time: now + 20, turnId: 'g-false-end', outcome }
     ]);
     expect(active()).toBeNull();
 
@@ -2063,6 +2063,32 @@ describe('canonical recorder 1.8', () => {
     expect(active()).toBeNull();
     const ends = await readEvents(sessionId!, { kinds: ['turn_end'] });
     expect(ends.map((event) => event.time)).toEqual([now + 20, now + 60]);
+  });
+
+  it('reopens a stopped turn when its request was page-proven before the first MCP call arrived', async () => {
+    const conversationId = 'conv-false-stop-page-proof';
+    const sessionId = await sessionForConversation(conversationId);
+    const now = Date.now();
+    const requestId = 'wfr_page_proved_before_stop';
+    const active = () => liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ?? null;
+
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: now, turnId: 'g-page-proof' },
+      {
+        kind: 'tool_evidence', time: now + 10, turnId: 'g-page-proof', fiberConversationId: conversationId,
+        calls: [{ messageId: 'page-proof-call', tool: 'read', order: 0, answered: false, requestId }]
+      },
+      { kind: 'turn_end', time: now + 20, turnId: 'g-page-proof', outcome: 'stopped' }
+    ]);
+    expect(active()).toBeNull();
+
+    await tool(requestId, now + 40);
+    expect(active()).toBe('g-page-proof');
+    const starts = await readEvents(sessionId!, { kinds: ['turn_start'] });
+    expect(starts.map((event) => [event.turnId, event.source])).toEqual([
+      ['g-page-proof', 'extension'],
+      ['g-page-proof', 'app']
+    ]);
   });
 
   it('never cross-attributes concurrent same-tool calls from two chats', async () => {

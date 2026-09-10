@@ -343,15 +343,25 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     const prmRoute = routes.find((candidate) => safeEqual(pathOnly, candidate.prmPath)) ?? null;
 
     const startedAt = Date.now();
+    const requestId = requestIdFromHeader(req.headers['x-request-id']);
+    const shape = route
+      ? `mcp/${route.id}`
+      : prmRoute
+        ? `oauth-metadata/${prmRoute.id}`
+        : pathOnly.slice(0, 40);
+    const method = req.method ?? '?';
+    const who = selfTest ? ' (self-test)' : tunnelProbe ? ' (tunnel probe)' : '';
+    const request = requestId ? ` request=${requestId}` : '';
+    let earlyTransportLogged = false;
+    const logEarlyTransport = (kind: 'aborted' | 'closed'): void => {
+      if (earlyTransportLogged || res.writableFinished) return;
+      earlyTransportLogged = true;
+      logWarn(`request ${method} ${shape} ${kind} before response in ${Date.now() - startedAt}ms${who}${request}`);
+    };
+    req.on('aborted', () => logEarlyTransport('aborted'));
+    res.on('close', () => logEarlyTransport('closed'));
     res.on('finish', () => {
-      const shape = route
-        ? `mcp/${route.id}`
-        : prmRoute
-          ? `oauth-metadata/${prmRoute.id}`
-          : pathOnly.slice(0, 40);
-      const method = req.method ?? '?';
-      const who = selfTest ? ' (self-test)' : tunnelProbe ? ' (tunnel probe)' : '';
-      const line = `${method} ${shape} → ${res.statusCode} in ${Date.now() - startedAt}ms${who}`;
+      const line = `${method} ${shape} → ${res.statusCode} in ${Date.now() - startedAt}ms${who}${request}`;
       // Streamable HTTP makes the server-opened SSE stream and session deletion
       // optional, and 405 is the prescribed answer for a server that offers
       // neither. ChatGPT probes for both on every connect, so treating those two
@@ -403,7 +413,6 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
 
     // The tool dispatch reads this back to join the call to the page request that issued
     // it; see inbound.ts for why it cannot be taken from the MCP call context.
-    const requestId = requestIdFromHeader(req.headers['x-request-id']);
     if (req.method === 'POST' && declaredHeader === undefined) {
       void readBoundedJsonBody(req).then((parsed) => {
         if (parsed.error === 'payload_too_large') {

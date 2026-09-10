@@ -3,6 +3,7 @@
     "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "jsx": "react-jsx",
     "lib": ["ES2023", "DOM"],
     "strict": true,
     "noUncheckedIndexedAccess": true,
@@ -19,5 +20,5 @@
     "noEmit": true,
     "types": ["node", "electron-vite/node"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "electron.vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "electron.vite.config.ts"]
 }
