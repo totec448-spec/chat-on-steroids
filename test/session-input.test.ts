@@ -566,6 +566,8 @@ describe('durable user input ownership', () => {
   });
   it('recovers a persisted controller auto request misclassified as after-turn', async () => {
     binding.model = 'gpt-5.6-pro';
+    binding.activeTurnId = 'persisted-completed-turn';
+    configureInputDelivery({ applyAutomation: automate, changed, activity: () => ({ possible: false, exact: false }) });
     const args = input();
     const stuck: InputEntry = {
       ...args, mode: 'after-turn', requestedMode: 'auto', transportIntent: 'browser',

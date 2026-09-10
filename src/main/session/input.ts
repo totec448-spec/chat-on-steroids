@@ -95,7 +95,9 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
   const [end] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
   const terminal = end?.kind === 'turn_end' && !!end.turnId && end.outcome !== 'unknown';
   return { canInject, queueAtFinish: astra && canInject && getConfig().ui.finishTool === true,
-    browserAllowed: !session.activeTurnId && !activity.possible && !activity.exact && (!astra || terminal),
+    // The durable active turn is history after a renderer loss or restart. Live page/tool
+    // evidence owns admission; otherwise a completed turn can strand controller input forever.
+    browserAllowed: !activity.possible && !activity.exact && (!astra || terminal),
     settled: terminal && (session.lastToolCallAt ?? 0) <= end.time };
 }
 async function browserInputAllowed(entry: InputEntry): Promise<boolean> {

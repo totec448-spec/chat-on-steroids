@@ -163,6 +163,13 @@ export async function controlRequestView(deps: ControlDependencies, entry: Input
   if (ended?.kind === 'turn_end' && ended.outcome !== 'completed') {
     return { ...base, state: 'failed', error: ended.detail || `ChatGPT turn ended ${ended.outcome}` };
   }
+  // A later authored message is a durable ownership boundary. Even if a reload or
+  // conversation rebind lost this request's final lifecycle event, that newer message proves
+  // the delivered request no longer owns a live generation. Keep the result fail-closed rather
+  // than presenting an indefinitely running request or borrowing the later answer.
+  if (nextUser >= 0) {
+    return { ...base, state: 'failed', error: 'A later user message superseded this request before its completion was recorded.' };
+  }
   return base;
 }
 

@@ -255,6 +255,20 @@ describe('authenticated external control', () => {
     );
     expect(await controlRequestView(deps, delivered)).toMatchObject({ state: 'failed', error: 'exact turn interrupted' });
   });
+  it('fails a delivered request once a later user message proves it no longer owns the turn', async () => {
+    const session = summary();
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-1', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-lost-on-rebind' },
+      { seq: 3, time: 210, source: 'extension', kind: 'user_message', messageId: 'user-2', message: { text: 'Later', chars: 5, truncated: false } },
+      { seq: 4, time: 211, source: 'extension', kind: 'turn_start', turnId: 'generation-later' }
+    ]);
+    const view = await controlRequestView(deps, row('sent', { sessionId: session.id, conversationId: session.conversationId, deliveredAt: 201 }));
+    expect(view).toMatchObject({ state: 'failed',
+      error: 'A later user message superseded this request before its completion was recorded.' });
+    expect(view.result).toBeUndefined();
+  });
   it('accepts a final from a replacement generation started after the exact user row', async () => {
     const session = summary();
     deps.sessionsById.set(session.id, session);
