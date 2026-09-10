@@ -6483,8 +6483,9 @@ describe('unattributed activity recovery', () => {
     await events(OTHER, [openTurn('stale-page-turn')]);
     const sessionId = (await request('GET', `/activity?conversationId=${OTHER}`)).body.sessionId;
     const summary = (await getSession(sessionId))!;
-    expect(sessionInputActivity(summary).exact).toBe(true);
-    expect(sessionInputActivity({ ...summary, activeTurnId: null }).exact).toBe(false);
+    expect(sessionInputActivity({ ...summary, lastTurnOutcome: null }).exact).toBe(true);
+    expect(sessionInputActivity({ ...summary, activeTurnId: null, lastTurnOutcome: null }).exact).toBe(false);
+    expect(sessionInputActivity({ ...summary, lastTurnOutcome: 'completed' }).exact).toBe(false);
   });
 
   for (const fence of ['stop', 'block']) it(`does not revive Pro activity across an explicit ${fence}`, async () => {
