@@ -12,9 +12,11 @@ import type { LocalProject } from '../shared/projects.js';
 import { getChatModels, startChatModelDiscovery } from './chat-models.js';
 import { connect, getStatus } from './connection.js';
 import { getConfig } from './config.js';
+import { readDurable, writeDurableSoon } from './durable.js';
 import { listProjects } from './projects.js';
 import { cancelDesktopInput, sendDesktopInput } from './session/start-input.js';
 import { inputArgs, listInputs, type InputArgs, type InputEntry } from './session/input.js';
+import { abortContinuationNow, onContinuationSnapshot, snapshotContinuations, type ContinuationSnapshot } from './session/continuation.js';
 import { getSession, listSessionPage, readOverflowText, readRecentEvents, type SessionListCursor } from './session/store.js';
 import { stopSessionTurn } from './bridge.js';
 import { APP_VERSION } from './version.js';
@@ -23,6 +25,9 @@ export const CONTROL_PROTOCOL_VERSION = 1;
 export const CONTROL_VERSION_HEADER = 'x-cos-control-version';
 const MAX_BODY_BYTES = 64 * 1024;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const CONTROL_CONTINUATIONS_STATE = 'control-continuations';
+const CONTROL_RETENTION_MS = 24 * 60 * 60_000;
+const CONTROLLER_CANCELLED = 'Cancelled by the external controller.';
 const SESSION_ID = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
 const REQUEST_ID = z.string().uuid();
 const submitSchema = z.object({
@@ -48,6 +53,18 @@ export interface ControlRequestView {
   result?: { text: string; chars: number; truncated: boolean };
 }
 
+interface ControlContinuation {
+  sourceTurnId: string | null;
+  token: string;
+  sessionId: string;
+  openedAt: number;
+  automatic: boolean;
+  state: 'awaiting-summary' | 'awaiting-chat' | 'claimed' | 'committing' | 'committed' | 'aborted';
+  error: string | null;
+  sourceSend: { state: string; messageId: string | null };
+  destinationSend: { state: string; conversationId: string | null; messageId: string | null };
+}
+
 export interface ControlDependencies {
   send(input: InputArgs): Promise<InputEntry>;
   cancel(id: string): Promise<boolean>;
@@ -58,6 +75,8 @@ export interface ControlDependencies {
   session(id: string): Promise<SessionSummary | null>;
   sessions(options: { limit?: number; cursor?: SessionListCursor }): Promise<{ sessions: SessionSummary[]; total: number; nextCursor: SessionListCursor | null }>;
   events(id: string): Promise<SessionEvent[]>;
+  continuations(): ReadonlyArray<ControlContinuation>;
+  abortContinuation(token: string, reason: string): Promise<boolean>;
   overflow(id: string, assetId: string): Promise<string | null>;
   stop(id: string, turnId: string): Promise<unknown>;
   recording(): boolean;
@@ -65,6 +84,55 @@ export interface ControlDependencies {
   connection(): ConnectionStatus;
   connect(): Promise<void>;
 }
+
+let retainedContinuations: ControlContinuation[] = [];
+
+function retainContinuations(current: ControlContinuation[], now = Date.now()): ControlContinuation[] {
+  const byToken = new Map(retainedContinuations.map(row => [row.token, row]));
+  for (const row of current) if (row.automatic) byToken.set(row.token, row);
+  const next = [...byToken.values()]
+    .filter(row => row.openedAt >= now - CONTROL_RETENTION_MS)
+    .sort((a, b) => a.openedAt - b.openedAt || a.token.localeCompare(b.token))
+    .slice(-128);
+  if (JSON.stringify(next) !== JSON.stringify(retainedContinuations)) {
+    retainedContinuations = next;
+    writeDurableSoon(CONTROL_CONTINUATIONS_STATE, { version: 1, savedAt: now, entries: next });
+  }
+  return retainedContinuations;
+}
+
+async function restoreRetainedContinuations(): Promise<void> {
+  const current = retainedContinuations;
+  const raw = await readDurable<{ version?: unknown; entries?: unknown }>(CONTROL_CONTINUATIONS_STATE);
+  const saved = raw?.version === 1 && Array.isArray(raw.entries) ? raw.entries : [];
+  retainedContinuations = saved.flatMap((value): ControlContinuation[] => {
+    const row = value as Partial<ControlContinuation>;
+    if (!row || typeof row.token !== 'string' || typeof row.sessionId !== 'string' ||
+        typeof row.openedAt !== 'number' || typeof row.automatic !== 'boolean' ||
+        typeof row.state !== 'string' || !row.sourceSend || !row.destinationSend) return [];
+    return [row as ControlContinuation];
+  });
+  retainContinuations(current);
+}
+
+/** Capture stock WAL lineage before stock recovery prunes terminal transport records. */
+export function primeControlContinuations(snapshot: ContinuationSnapshot | null): void {
+  if (!snapshot?.entries) return;
+  retainContinuations(snapshot.entries.map(entry => ({
+    sourceTurnId: entry.sourceTurnId ?? null,
+    token: entry.token,
+    sessionId: entry.sessionId,
+    openedAt: entry.openedAt,
+    automatic: entry.automatic === true,
+    state: entry.state,
+    error: entry.error,
+    sourceSend: entry.sourceSend ? { ...entry.sourceSend } : { state: 'not-attempted', messageId: null },
+    destinationSend: entry.destinationSend ? { ...entry.destinationSend }
+      : { state: 'not-attempted', conversationId: null, messageId: null }
+  })));
+}
+
+onContinuationSnapshot(primeControlContinuations);
 
 const productionDependencies: ControlDependencies = {
   send: sendDesktopInput,
@@ -78,6 +146,22 @@ const productionDependencies: ControlDependencies = {
   session: getSession,
   sessions: listSessionPage,
   events: id => readRecentEvents(id, 512, { kinds: ['user_message', 'assistant_message', 'turn_start', 'turn_end', 'chat_error'] }),
+  continuations: () => retainContinuations(snapshotContinuations().entries.map(entry => ({
+    sourceTurnId: entry.sourceTurnId ?? null,
+    token: entry.token,
+    sessionId: entry.sessionId,
+    openedAt: entry.openedAt,
+    automatic: entry.automatic === true,
+    state: entry.state,
+    error: entry.error,
+    sourceSend: entry.sourceSend
+      ? { ...entry.sourceSend }
+      : { state: 'not-attempted', messageId: null },
+    destinationSend: entry.destinationSend
+      ? { ...entry.destinationSend }
+      : { state: 'not-attempted', conversationId: null, messageId: null }
+  }))),
+  abortContinuation: abortContinuationNow,
   overflow: readOverflowText,
   stop: stopSessionTurn,
   recording: () => getConfig().sessions.record,
@@ -94,6 +178,110 @@ function targetSessionId(entry: InputEntry): string | null {
   return entry.sessionId ?? entry.deliveredSessionId ?? null;
 }
 
+interface RequestLifecycle {
+  span: SessionEvent[];
+  nextUser: number;
+  pendingContinuation: boolean;
+  continuationError: string | null;
+  continuationToken: string | null;
+  continuationState: ControlContinuation['state'] | null;
+  continued: boolean;
+  destinationConversationId: string | null;
+  destinationAt: number | null;
+  destinationSelection: { model: string; reasoningEffort: InputArgs['reasoningEffort']; observedAt: number } | null;
+}
+
+/**
+ * Follow only stock automatic Compact & Resume records sourced from this request's exact turn.
+ * The handoff answer and marked bootstrap message are transport records, not a result or a new
+ * user ownership boundary. All other later user messages still supersede the controller request.
+ */
+function requestLifecycle(
+  deps: ControlDependencies,
+  entry: InputEntry,
+  events: SessionEvent[],
+  authored: number,
+  sessionId: string
+): RequestLifecycle {
+  let start = authored + 1;
+  let continued = false;
+  let destinationConversationId: string | null = null;
+  let destinationAt: number | null = null;
+  let destinationSelection: RequestLifecycle['destinationSelection'] = null;
+  const seen = new Set<string>();
+  const continuations = deps.continuations()
+    .filter(row => row.sessionId === sessionId && row.automatic && row.openedAt >= (entry.deliveredAt ?? entry.createdAt))
+    .sort((a, b) => a.openedAt - b.openedAt || a.token.localeCompare(b.token));
+  for (;;) {
+    const nextUser = events.findIndex((event, index) => index >= start && event.kind === 'user_message');
+    const span = events.slice(start, nextUser < 0 ? undefined : nextUser);
+    const generationIds = new Set(span.flatMap(event => event.kind === 'turn_start' && event.turnId ? [event.turnId] : []));
+    const continuation = continuations.find(row => !seen.has(row.token) && !!row.sourceTurnId && generationIds.has(row.sourceTurnId));
+    if (!continuation) return { span, nextUser, pendingContinuation: false, continuationError: null,
+      continuationToken: null, continuationState: null, continued, destinationConversationId,
+      destinationAt, destinationSelection };
+    seen.add(continuation.token);
+    if (continuation.state === 'aborted') {
+      return { span, nextUser, pendingContinuation: false,
+        continuationError: continuation.error || 'ChatGPT automatic continuation failed',
+        continuationToken: continuation.token, continuationState: continuation.state, continued,
+        destinationConversationId, destinationAt, destinationSelection };
+    }
+    const sourceMessageId = continuation.sourceSend.messageId;
+    if (!sourceMessageId) return nextUser < 0
+      ? { span, nextUser, pendingContinuation: true, continuationError: null,
+          continuationToken: continuation.token, continuationState: continuation.state, continued,
+          destinationConversationId, destinationAt, destinationSelection }
+      : { span, nextUser, pendingContinuation: false,
+          continuationError: 'A later user message superseded this request before automatic continuation.',
+          continuationToken: continuation.token, continuationState: continuation.state, continued,
+          destinationConversationId, destinationAt, destinationSelection };
+    if (nextUser < 0 || events[nextUser]?.kind !== 'user_message' || events[nextUser].messageId !== sourceMessageId) {
+      return { span, nextUser, pendingContinuation: false,
+        continuationError: 'A later user message superseded this request before automatic continuation.',
+        continuationToken: continuation.token, continuationState: continuation.state, continued,
+        destinationConversationId, destinationAt, destinationSelection };
+    }
+    const afterSource = events.findIndex((event, index) => index > nextUser && event.kind === 'user_message');
+    const destinationMessageId = continuation.destinationSend.messageId;
+    if (continuation.state !== 'committed') {
+      if (afterSource >= 0 && (!destinationMessageId || events[afterSource]?.kind !== 'user_message' ||
+          (events[afterSource].kind === 'user_message' && events[afterSource].messageId !== destinationMessageId))) {
+        return { span: events.slice(start, afterSource), nextUser: afterSource, pendingContinuation: false,
+          continuationError: 'A later user message superseded this request during automatic continuation.',
+          continuationToken: continuation.token, continuationState: continuation.state, continued,
+          destinationConversationId, destinationAt, destinationSelection };
+      }
+      return { span: events.slice(start, afterSource < 0 ? undefined : afterSource), nextUser: afterSource,
+        pendingContinuation: true, continuationError: null,
+        continuationToken: continuation.token, continuationState: continuation.state, continued,
+        destinationConversationId, destinationAt, destinationSelection };
+    }
+    if (!destinationMessageId) return { span: events.slice(start, afterSource < 0 ? undefined : afterSource),
+      nextUser: afterSource, pendingContinuation: true, continuationError: null,
+      continuationToken: continuation.token, continuationState: continuation.state, continued,
+      destinationConversationId, destinationAt, destinationSelection };
+    if (afterSource < 0) return { span: events.slice(start), nextUser: -1, pendingContinuation: true,
+      continuationError: null, continuationToken: continuation.token, continuationState: continuation.state,
+      continued, destinationConversationId, destinationAt, destinationSelection };
+    const destination = events[afterSource];
+    if (!destination || destination.kind !== 'user_message' || destination.messageId !== destinationMessageId) {
+      return { span: events.slice(start, afterSource), nextUser: afterSource, pendingContinuation: false,
+        continuationError: 'A later user message superseded this request during automatic continuation.',
+        continuationToken: continuation.token, continuationState: continuation.state, continued,
+        destinationConversationId, destinationAt, destinationSelection };
+    }
+    continued = true;
+    destinationConversationId = continuation.destinationSend.conversationId;
+    destinationAt = destination.time;
+    destinationSelection = destination.model === entry.model &&
+      (destination.reasoningEffort ?? null) === entry.reasoningEffort
+      ? { model: destination.model, reasoningEffort: destination.reasoningEffort ?? null, observedAt: destination.time }
+      : null;
+    start = afterSource + 1;
+  }
+}
+
 /** Return the live generation only when it follows this exact controller input and no later user input. */
 async function exactActiveRequestTurn(
   deps: ControlDependencies,
@@ -104,8 +292,9 @@ async function exactActiveRequestTurn(
   const events = await deps.events(summary.id);
   const authored = events.findIndex(event => event.kind === 'user_message' && event.inputId === entry.id);
   if (authored < 0) return null;
-  const nextUser = events.findIndex((event, index) => index > authored && event.kind === 'user_message');
-  const span = events.slice(authored + 1, nextUser < 0 ? undefined : nextUser);
+  const lifecycle = requestLifecycle(deps, entry, events, authored, summary.id);
+  if (lifecycle.continuationError) return null;
+  const span = lifecycle.span;
   return span.some(event => event.kind === 'turn_start' && event.turnId === summary.activeTurnId)
     ? summary.activeTurnId : null;
 }
@@ -127,7 +316,7 @@ export async function controlRequestView(deps: ControlDependencies, entry: Input
   const authoredEvent = authored >= 0 ? events[authored] : undefined;
   // recordDeliveredInput adds these fields only after the native composer ACK. The
   // canonical user-message merge preserves them across later sparse page echoes.
-  const verifiedSelection = authoredEvent?.kind === 'user_message' && authoredEvent.inputDelivery === 'confirmed' &&
+  let verifiedSelection = authoredEvent?.kind === 'user_message' && authoredEvent.inputDelivery === 'confirmed' &&
     authoredEvent.model === entry.model && (authoredEvent.reasoningEffort ?? null) === entry.reasoningEffort
     ? { model: authoredEvent.model, reasoningEffort: authoredEvent.reasoningEffort ?? null, observedAt: entry.deliveredAt! } : null;
   const base: ControlRequestView = {
@@ -142,8 +331,12 @@ export async function controlRequestView(deps: ControlDependencies, entry: Input
   };
   if (entry.state !== 'sent' || !sessionId) return base;
   if (authored < 0) return base;
-  const nextUser = events.findIndex((event, index) => index > authored && event.kind === 'user_message');
-  const span = events.slice(authored + 1, nextUser < 0 ? undefined : nextUser);
+  const lifecycle = requestLifecycle(deps, entry, events, authored, sessionId);
+  const { span, nextUser } = lifecycle;
+  if (lifecycle.continued) {
+    verifiedSelection = lifecycle.destinationSelection;
+    base.verifiedSelection = verifiedSelection;
+  }
   // The exact outbox row is the request boundary; when the recorder also captured the
   // generation start, use that stronger identity to reject terminal evidence from a stale
   // or overlapping turn in the same browser observation window. User-message ids and
@@ -152,10 +345,17 @@ export async function controlRequestView(deps: ControlDependencies, entry: Input
   const generationIds = new Set(span.flatMap(event => event.kind === 'turn_start' && event.turnId ? [event.turnId] : []));
   const belongsToGeneration = (event: SessionEvent): boolean =>
     generationIds.size === 0 || !event.turnId || generationIds.has(event.turnId);
+  if (lifecycle.continuationError) return lifecycle.continuationError === CONTROLLER_CANCELLED
+    ? { ...base, state: 'cancelled', error: lifecycle.continuationError }
+    : { ...base, state: 'failed', error: lifecycle.continuationError };
+  if (lifecycle.pendingContinuation) return base;
   const final = span.find(event => event.kind === 'assistant_message' && belongsToGeneration(event) &&
     (event.final === true || event.state === 'final'));
   if (final?.kind === 'assistant_message' && verifiedSelection) {
     return { ...base, state: 'completed', result: await exactText(deps, sessionId, final.message) };
+  }
+  if (final?.kind === 'assistant_message' && lifecycle.continued) {
+    return { ...base, state: 'failed', error: 'The resumed ChatGPT model and reasoning selection was not verified.' };
   }
   const ended = span.findLast(event => event.kind === 'turn_end' && belongsToGeneration(event));
   if (ended?.kind === 'turn_end' && ended.outcome === 'stopped') {
@@ -316,6 +516,16 @@ export function createControlHandler(deps: ControlDependencies, token: string): 
             await deps.stop(sessionId, turnId);
             accepted = true;
           }
+          if (sessionId) {
+            const events = await deps.events(sessionId);
+            const authored = events.findIndex(event => event.kind === 'user_message' && event.inputId === entry.id);
+            if (authored >= 0) {
+              const lifecycle = requestLifecycle(deps, entry, events, authored, sessionId);
+              if (lifecycle.pendingContinuation && lifecycle.continuationToken && lifecycle.continuationState !== 'committed') {
+                accepted = await deps.abortContinuation(lifecycle.continuationToken, CONTROLLER_CANCELLED) || accepted;
+              }
+            }
+          }
         }
         const current = (await deps.inputs()).find(row => row.id === entry.id) ?? entry;
         return json(res, 200, { cancelAccepted: accepted, request: await controlRequestView(deps, current) });
@@ -356,6 +566,7 @@ export interface ControlServer {
 
 export async function startControlServer(userDataDir: string, deps: ControlDependencies = productionDependencies): Promise<ControlServer> {
   await fs.mkdir(userDataDir, { recursive: true });
+  if (deps === productionDependencies) await restoreRetainedContinuations();
   const tokenFile = path.join(userDataDir, 'control-token');
   const discoveryFile = path.join(userDataDir, 'control.json');
   const token = await tokenAt(tokenFile);

@@ -75,7 +75,7 @@ import {
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
-import { shutdownExternalControl, startExternalControl } from './control.js';
+import { primeControlContinuations, shutdownExternalControl, startExternalControl } from './control.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -383,6 +383,7 @@ void app.whenReady().then(async () => {
   });
   const savedContinuations = await readDurable<ContinuationSnapshot>(CONTINUATIONS_STATE);
   if (windowActivation.isDisabled()) return;
+  primeControlContinuations(savedContinuations);
   await restoreContinuations(savedContinuations);
   if (windowActivation.isDisabled()) return;
 

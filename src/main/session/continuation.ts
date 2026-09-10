@@ -265,6 +265,20 @@ export interface ContinuationSnapshot {
   entries: ContinuationRecord[];
 }
 
+const snapshotObservers = new Set<(snapshot: ContinuationSnapshot) => void>();
+
+/** Read-only lifecycle observation for thin local adapters. */
+export function onContinuationSnapshot(listener: (snapshot: ContinuationSnapshot) => void): () => void {
+  snapshotObservers.add(listener);
+  return () => snapshotObservers.delete(listener);
+}
+
+function notifySnapshot(snapshot = snapshotContinuations()): void {
+  for (const listener of snapshotObservers) {
+    try { listener(snapshot); } catch { /* observers cannot change stock continuation outcomes */ }
+  }
+}
+
 function durableRecord(entry: Continuation): ContinuationRecord {
   return {
     sourceTurnId: entry.sourceTurnId,
@@ -310,11 +324,15 @@ export function snapshotContinuations(): ContinuationSnapshot {
 }
 
 function changed(): void {
-  writeDurableSoon(CONTINUATIONS_STATE, snapshotContinuations());
+  const snapshot = snapshotContinuations();
+  writeDurableSoon(CONTINUATIONS_STATE, snapshot);
+  notifySnapshot(snapshot);
 }
 
 async function changedNow(): Promise<void> {
-  await writeDurableNow(CONTINUATIONS_STATE, snapshotContinuations());
+  const snapshot = snapshotContinuations();
+  await writeDurableNow(CONTINUATIONS_STATE, snapshot);
+  notifySnapshot(snapshot);
 }
 
 function publishRecord(entry: Continuation, record: ContinuationRecord): void {
@@ -371,6 +389,7 @@ async function transitionNow(
     throw err;
   }
   publishRecord(entry, next);
+  notifySnapshot();
   return next;
 }
 
@@ -742,6 +761,7 @@ export async function openContinuationNow(
       throw err;
     }
     byToken.set(entry.token, entry);
+    notifySnapshot();
     beginPrimeTransfer(fromConversationId);
     logInfo(`continuation ${entry.token.slice(0, 8)} durably opened for session ${sessionId} in chat ${fromConversationId}`);
     return view(entry);

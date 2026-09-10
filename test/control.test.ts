@@ -35,14 +35,15 @@ function row(state: InputEntry['state'], overrides: Partial<InputEntry> = {}): I
     owner: null, createdAt: 100, conversationId: null, ...overrides };
 }
 
-function dependencies(): ControlDependencies & { rows: InputEntry[]; sessionsById: Map<string, SessionSummary>; eventsById: Map<string, SessionEvent[]> } {
+function dependencies(): ControlDependencies & { rows: InputEntry[]; sessionsById: Map<string, SessionSummary>; eventsById: Map<string, SessionEvent[]>; continuationRows: ReturnType<ControlDependencies['continuations']> extends ReadonlyArray<infer T> ? T[] : never } {
   const rows: InputEntry[] = [];
   const sessionsById = new Map<string, SessionSummary>();
   const eventsById = new Map<string, SessionEvent[]>();
+  const continuationRows: Array<ReturnType<ControlDependencies['continuations']>[number]> = [];
   const connection: ConnectionStatus = { state: 'disconnected', detail: '', publicUrl: null, localUrl: null,
     handshakeAt: null, lastRequestAt: null, lastToolCallAt: null, health: null, surfaces: [] };
   return {
-    rows, sessionsById, eventsById,
+    rows, sessionsById, eventsById, continuationRows,
     send: vi.fn(async input => {
       const entry = row('queued', { ...input, createdAt: Date.now() });
       rows.push(entry);
@@ -61,6 +62,8 @@ function dependencies(): ControlDependencies & { rows: InputEntry[]; sessionsByI
     session: async id => sessionsById.get(id) ?? null,
     sessions: async () => ({ sessions: [...sessionsById.values()], total: sessionsById.size, nextCursor: null }),
     events: async id => eventsById.get(id) ?? [],
+    continuations: () => continuationRows,
+    abortContinuation: vi.fn(async () => false),
     overflow: async () => null,
     stop: vi.fn(async () => ({})),
     recording: () => true,
@@ -146,6 +149,63 @@ describe('authenticated external control', () => {
     const response = await call(`/v1/requests/${requestId}/cancel`, { method: 'POST' });
     expect(await response.json()).toMatchObject({ cancelAccepted: true, request: { state: 'running' } });
     expect(deps.stop).toHaveBeenCalledWith(session.id, 'generation-exact');
+  });
+
+  it('durably aborts and stops an automatic handoff owned by the exact controller request', async () => {
+    const session = summary();
+    session.activeTurnId = 'generation-handoff';
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-a', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'A', chars: 1, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-work' },
+      { seq: 3, time: 250, source: 'extension', kind: 'turn_end', turnId: 'generation-work', outcome: 'stopped' },
+      { seq: 4, time: 251, source: 'extension', kind: 'user_message', messageId: 'handoff-user', message: { text: 'Internal handoff request', chars: 24, truncated: false } },
+      { seq: 5, time: 252, source: 'extension', kind: 'turn_start', turnId: 'generation-handoff' }
+    ]);
+    deps.rows.push(row('sent', { sessionId: session.id, deliveredSessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    const continuation = { sourceTurnId: 'generation-work', token: 'continuation-a', sessionId: session.id,
+      openedAt: 240, automatic: true, state: 'awaiting-summary' as const, error: null,
+      sourceSend: { state: 'sent', messageId: 'handoff-user' },
+      destinationSend: { state: 'not-attempted', conversationId: null, messageId: null } };
+    deps.continuationRows.push(continuation);
+    deps.abortContinuation = vi.fn(async (token, reason) => {
+      if (token !== continuation.token) return false;
+      continuation.state = 'aborted' as never;
+      continuation.error = reason;
+      return true;
+    });
+
+    const response = await call(`/v1/requests/${requestId}/cancel`, { method: 'POST' });
+    expect(await response.json()).toMatchObject({ cancelAccepted: true,
+      request: { state: 'cancelled', error: 'Cancelled by the external controller.' } });
+    expect(deps.abortContinuation).toHaveBeenCalledWith('continuation-a', 'Cancelled by the external controller.');
+    expect(deps.stop).toHaveBeenCalledWith(session.id, 'generation-handoff');
+  });
+
+  it('does not abort an automatic continuation when its owned active turn could not be stopped', async () => {
+    const session = summary();
+    session.activeTurnId = 'generation-handoff';
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-a', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'A', chars: 1, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-work' },
+      { seq: 3, time: 250, source: 'extension', kind: 'turn_end', turnId: 'generation-work', outcome: 'stopped' },
+      { seq: 4, time: 251, source: 'extension', kind: 'user_message', messageId: 'handoff-user', message: { text: 'Internal handoff request', chars: 24, truncated: false } },
+      { seq: 5, time: 252, source: 'extension', kind: 'turn_start', turnId: 'generation-handoff' }
+    ]);
+    deps.rows.push(row('sent', { sessionId: session.id, deliveredSessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    deps.continuationRows.push({ sourceTurnId: 'generation-work', token: 'continuation-a', sessionId: session.id,
+      openedAt: 240, automatic: true, state: 'awaiting-summary', error: null,
+      sourceSend: { state: 'sent', messageId: 'handoff-user' },
+      destinationSend: { state: 'not-attempted', conversationId: null, messageId: null } });
+    deps.stop = vi.fn(async () => { throw new Error('native stop unavailable'); });
+
+    const response = await call(`/v1/requests/${requestId}/cancel`, { method: 'POST' });
+    expect(response.status).toBe(500);
+    expect(deps.abortContinuation).not.toHaveBeenCalled();
+    expect(deps.continuationRows[0]).toMatchObject({ state: 'awaiting-summary', error: null });
   });
 
   it('never cancels a newer turn through an older controller request', async () => {
@@ -273,5 +333,172 @@ describe('authenticated external control', () => {
     ]);
     const view = await controlRequestView(deps, row('sent', { sessionId: session.id, conversationId: session.conversationId, deliveredAt: 201 }));
     expect(view).toMatchObject({ state: 'completed', result: { text: 'Recovered final' } });
+  });
+
+  it('keeps an exact request running while stock automatic Compact & Resume owns its stopped turn', async () => {
+    const session = summary();
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-1', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-work' },
+      { seq: 3, time: 260, source: 'extension', kind: 'turn_end', turnId: 'generation-work', outcome: 'stopped' }
+    ]);
+    deps.continuationRows.push({ sourceTurnId: 'generation-work', token: 'continuation-a', sessionId: session.id,
+      openedAt: 250, automatic: true, state: 'awaiting-summary', error: null,
+      sourceSend: { state: 'not-attempted', messageId: null },
+      destinationSend: { state: 'not-attempted', conversationId: null, messageId: null } });
+
+    const view = await controlRequestView(deps, row('sent', { sessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    expect(view).toMatchObject({ state: 'running' });
+    expect(view.error).toBeUndefined();
+  });
+
+  it('does not expose an automatic handoff brief before its continuation is committed', async () => {
+    const session = summary();
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-1', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-work' },
+      { seq: 3, time: 260, source: 'extension', kind: 'turn_end', turnId: 'generation-work', outcome: 'stopped' },
+      { seq: 4, time: 261, source: 'extension', kind: 'user_message', messageId: 'handoff-user', message: { text: 'Internal handoff request', chars: 24, truncated: false } },
+      { seq: 5, time: 262, source: 'extension', kind: 'turn_start', turnId: 'generation-handoff' },
+      { seq: 6, time: 280, source: 'extension', kind: 'assistant_message', messageId: 'handoff-answer', turnId: 'generation-handoff', message: { text: 'Internal handoff brief', chars: 22, truncated: false }, final: true, state: 'final' }
+    ]);
+    deps.continuationRows.push({ sourceTurnId: 'generation-work', token: 'continuation-a', sessionId: session.id,
+      openedAt: 250, automatic: true, state: 'awaiting-chat', error: null,
+      sourceSend: { state: 'sent', messageId: 'handoff-user' },
+      destinationSend: { state: 'not-attempted', conversationId: null, messageId: null } });
+
+    const view = await controlRequestView(deps, row('sent', { sessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    expect(view).toMatchObject({ state: 'running' });
+    expect(view.result).toBeUndefined();
+  });
+
+  it('follows a committed automatic continuation to its real final without returning the handoff brief', async () => {
+    const session = summary();
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-1', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-work' },
+      { seq: 3, time: 260, source: 'extension', kind: 'turn_end', turnId: 'generation-work', outcome: 'stopped' },
+      { seq: 4, time: 261, source: 'extension', kind: 'user_message', messageId: 'handoff-user', message: { text: 'Internal handoff request', chars: 24, truncated: false } },
+      { seq: 5, time: 262, source: 'extension', kind: 'turn_start', turnId: 'generation-handoff' },
+      { seq: 6, time: 280, source: 'extension', kind: 'assistant_message', messageId: 'handoff-answer', turnId: 'generation-handoff', message: { text: 'Internal handoff brief', chars: 22, truncated: false }, final: true, state: 'final' },
+      { seq: 7, time: 290, source: 'extension', kind: 'user_message', messageId: 'resume-user', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Internal resume bootstrap', chars: 25, truncated: false } },
+      { seq: 8, time: 291, source: 'extension', kind: 'turn_start', turnId: 'generation-resumed' },
+      { seq: 9, time: 350, source: 'extension', kind: 'assistant_message', messageId: 'real-answer', turnId: 'generation-resumed', message: { text: 'Real completed result', chars: 21, truncated: false }, final: true, state: 'final' },
+      { seq: 10, time: 351, source: 'extension', kind: 'turn_end', turnId: 'generation-resumed', outcome: 'completed' }
+    ]);
+    deps.continuationRows.push({ sourceTurnId: 'generation-work', token: 'continuation-a', sessionId: session.id,
+      openedAt: 250, automatic: true, state: 'committed', error: null,
+      sourceSend: { state: 'sent', messageId: 'handoff-user' },
+      destinationSend: { state: 'sent', conversationId: 'conversation-resumed', messageId: 'resume-user' } });
+
+    const view = await controlRequestView(deps, row('sent', { sessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    expect(view).toMatchObject({ state: 'completed', result: { text: 'Real completed result' } });
+  });
+
+  it('fails closed when a resumed final lacks exact model and reasoning evidence', async () => {
+    const session = summary();
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-1', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'work' },
+      { seq: 3, time: 220, source: 'extension', kind: 'turn_end', turnId: 'work', outcome: 'stopped' },
+      { seq: 4, time: 221, source: 'extension', kind: 'user_message', messageId: 'handoff-user', message: { text: 'Handoff', chars: 7, truncated: false } },
+      { seq: 5, time: 222, source: 'extension', kind: 'turn_start', turnId: 'handoff' },
+      { seq: 6, time: 230, source: 'extension', kind: 'assistant_message', messageId: 'brief', turnId: 'handoff', message: { text: 'Brief', chars: 5, truncated: false }, final: true, state: 'final' },
+      { seq: 7, time: 231, source: 'extension', kind: 'user_message', messageId: 'resume-user', message: { text: 'Resume', chars: 6, truncated: false } },
+      { seq: 8, time: 232, source: 'extension', kind: 'turn_start', turnId: 'resumed' },
+      { seq: 9, time: 250, source: 'extension', kind: 'assistant_message', messageId: 'answer', turnId: 'resumed', message: { text: 'Unverified answer', chars: 17, truncated: false }, final: true, state: 'final' }
+    ]);
+    deps.continuationRows.push({ sourceTurnId: 'work', token: 'continuation-a', sessionId: session.id,
+      openedAt: 210, automatic: true, state: 'committed', error: null,
+      sourceSend: { state: 'sent', messageId: 'handoff-user' },
+      destinationSend: { state: 'sent', conversationId: 'conversation-resumed', messageId: 'resume-user' } });
+
+    const view = await controlRequestView(deps, row('sent', { sessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    expect(view).toMatchObject({ state: 'failed', verifiedSelection: null,
+      error: 'The resumed ChatGPT model and reasoning selection was not verified.' });
+    expect(view.result).toBeUndefined();
+  });
+
+  it('follows two exact automatic continuations to the final resumed result', async () => {
+    const session = summary();
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-1', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'work-1' },
+      { seq: 3, time: 220, source: 'extension', kind: 'turn_end', turnId: 'work-1', outcome: 'stopped' },
+      { seq: 4, time: 221, source: 'extension', kind: 'user_message', messageId: 'handoff-user-1', message: { text: 'H1', chars: 2, truncated: false } },
+      { seq: 5, time: 222, source: 'extension', kind: 'turn_start', turnId: 'handoff-1' },
+      { seq: 6, time: 230, source: 'extension', kind: 'assistant_message', messageId: 'handoff-answer-1', turnId: 'handoff-1', message: { text: 'Brief 1', chars: 7, truncated: false }, final: true, state: 'final' },
+      { seq: 7, time: 231, source: 'extension', kind: 'user_message', messageId: 'resume-user-1', model: model.id, reasoningEffort: 'xhigh', message: { text: 'R1', chars: 2, truncated: false } },
+      { seq: 8, time: 232, source: 'extension', kind: 'turn_start', turnId: 'work-2' },
+      { seq: 9, time: 250, source: 'extension', kind: 'turn_end', turnId: 'work-2', outcome: 'stopped' },
+      { seq: 10, time: 251, source: 'extension', kind: 'user_message', messageId: 'handoff-user-2', message: { text: 'H2', chars: 2, truncated: false } },
+      { seq: 11, time: 252, source: 'extension', kind: 'turn_start', turnId: 'handoff-2' },
+      { seq: 12, time: 260, source: 'extension', kind: 'assistant_message', messageId: 'handoff-answer-2', turnId: 'handoff-2', message: { text: 'Brief 2', chars: 7, truncated: false }, final: true, state: 'final' },
+      { seq: 13, time: 261, source: 'extension', kind: 'user_message', messageId: 'resume-user-2', model: model.id, reasoningEffort: 'xhigh', message: { text: 'R2', chars: 2, truncated: false } },
+      { seq: 14, time: 262, source: 'extension', kind: 'turn_start', turnId: 'work-3' },
+      { seq: 15, time: 280, source: 'extension', kind: 'assistant_message', messageId: 'real-answer', turnId: 'work-3', message: { text: 'Final after two', chars: 15, truncated: false }, final: true, state: 'final' }
+    ]);
+    deps.continuationRows.push(
+      { sourceTurnId: 'work-1', token: 'continuation-a', sessionId: session.id, openedAt: 210, automatic: true,
+        state: 'committed', error: null, sourceSend: { state: 'sent', messageId: 'handoff-user-1' },
+        destinationSend: { state: 'sent', conversationId: 'conversation-2', messageId: 'resume-user-1' } },
+      { sourceTurnId: 'work-2', token: 'continuation-b', sessionId: session.id, openedAt: 240, automatic: true,
+        state: 'committed', error: null, sourceSend: { state: 'sent', messageId: 'handoff-user-2' },
+        destinationSend: { state: 'sent', conversationId: 'conversation-3', messageId: 'resume-user-2' } }
+    );
+
+    const view = await controlRequestView(deps, row('sent', { sessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    expect(view).toMatchObject({ state: 'completed', result: { text: 'Final after two' } });
+  });
+
+  it('does not cross an intervening user message to claim a later continuation result', async () => {
+    const session = summary();
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-1', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-work' },
+      { seq: 3, time: 260, source: 'extension', kind: 'turn_end', turnId: 'generation-work', outcome: 'stopped' },
+      { seq: 4, time: 261, source: 'extension', kind: 'user_message', messageId: 'handoff-user', message: { text: 'Internal handoff request', chars: 24, truncated: false } },
+      { seq: 5, time: 262, source: 'extension', kind: 'turn_start', turnId: 'generation-handoff' },
+      { seq: 6, time: 280, source: 'extension', kind: 'assistant_message', messageId: 'handoff-answer', turnId: 'generation-handoff', message: { text: 'Internal handoff brief', chars: 22, truncated: false }, final: true, state: 'final' },
+      { seq: 7, time: 285, source: 'extension', kind: 'user_message', messageId: 'manual-user', message: { text: 'Different work', chars: 14, truncated: false } },
+      { seq: 8, time: 290, source: 'extension', kind: 'user_message', messageId: 'resume-user', message: { text: 'Internal resume bootstrap', chars: 25, truncated: false } },
+      { seq: 9, time: 291, source: 'extension', kind: 'turn_start', turnId: 'generation-resumed' },
+      { seq: 10, time: 350, source: 'extension', kind: 'assistant_message', messageId: 'wrong-answer', turnId: 'generation-resumed', message: { text: 'Must not be returned', chars: 20, truncated: false }, final: true, state: 'final' }
+    ]);
+    deps.continuationRows.push({ sourceTurnId: 'generation-work', token: 'continuation-a', sessionId: session.id,
+      openedAt: 250, automatic: true, state: 'committed', error: null,
+      sourceSend: { state: 'sent', messageId: 'handoff-user' },
+      destinationSend: { state: 'sent', conversationId: 'conversation-resumed', messageId: 'resume-user' } });
+
+    const view = await controlRequestView(deps, row('sent', { sessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    expect(view).toMatchObject({ state: 'failed',
+      error: 'A later user message superseded this request during automatic continuation.' });
+    expect(view.result).toBeUndefined();
+  });
+
+  it('still reports a stopped request as cancelled when no automatic continuation owns the exact turn', async () => {
+    const session = summary();
+    deps.sessionsById.set(session.id, session);
+    deps.eventsById.set(session.id, [
+      { seq: 1, time: 200, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-1', inputDelivery: 'confirmed', model: model.id, reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 2, time: 201, source: 'extension', kind: 'turn_start', turnId: 'generation-work' },
+      { seq: 3, time: 260, source: 'extension', kind: 'turn_end', turnId: 'generation-work', outcome: 'stopped', detail: 'user stopped' }
+    ]);
+
+    const view = await controlRequestView(deps, row('sent', { sessionId: session.id,
+      conversationId: session.conversationId, deliveredAt: 200 }));
+    expect(view).toMatchObject({ state: 'cancelled', error: 'user stopped' });
   });
 });
