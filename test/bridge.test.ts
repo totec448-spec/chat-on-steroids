@@ -5445,6 +5445,91 @@ describe('unattributed activity recovery', () => {
     expect((await maintenance())?.reason).toBe('assistant-error');
   });
 
+  /**
+   * The field cadence, measured: a turn broken on ChatGPT's side, reloaded every three minutes
+   * for an hour with no escalation and no stopping condition.
+   *
+   * The assistant-error path spends exactly one reload per turn. Silence has no such budget on
+   * purpose — it asks the chat-level question and is the answer to a stuck turn-scoped repair.
+   * But a reload whose page comes back reporting the same error is a remedy that has been
+   * proven not to work, and the loop has no next step after it fails.
+   */
+  it('stops reloading a chat whose every reload comes back with the same error', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(PRIME, [openTurn('turn-wedged')]);
+
+      const reloads: string[] = [];
+      for (let round = 0; round < 6; round++) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 15_000);
+        const repair = await maintenance();
+        if (repair) {
+          reloads.push(repair.reason);
+          await maintenance(repair.token);
+        }
+        // The reloaded page comes back on the same broken turn, with the same error.
+        await events(PRIME, [{
+          kind: 'chat_error',
+          time: Date.now(),
+          text: 'Connection interrupted. Waiting for the complete answer',
+          turnId: 'turn-wedged',
+          recoverable: true
+        }]);
+      }
+
+      // Three silence reloads, then the assistant-error path's own single per-turn reload, and
+      // then nothing: the remedy this chat has answered the same way three times is not tried a
+      // fourth. Unbounded before this — six rounds produced six silence reloads and would have
+      // gone on for as long as the chat stayed open.
+      expect(reloads).toEqual(['silence', 'silence', 'silence', 'assistant-error']);
+
+      // And the user is told, once, in the chat's own timeline rather than only in the log.
+      const session = await findSessionByConversation(PRIME);
+      const notes = await readEvents(session!.id, { kinds: ['note'] });
+      const stopped = notes.filter(event => event.kind === 'note' && event.message.text.includes('Stopped reloading this chat'));
+      expect(stopped).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The other half of the same rule: only a remedy proven useless is withheld.
+   *
+   * A chat that goes quiet three times for three unrelated reasons has not answered anything
+   * the same way, and muting its liveness check is how a wedged chat went unnoticed before this
+   * watchdog existed. The count is keyed on the failure and the turn, so anything else resets it.
+   */
+  it('keeps reloading a chat whose trouble is different each time', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(PRIME, [openTurn('turn-varied')]);
+
+      const reloads: string[] = [];
+      const failures = [
+        'Connection interrupted. Waiting for the complete answer',
+        'Message delivery timed out. Please try again.',
+        'Network error.',
+        'Something went wrong.'
+      ];
+      for (const text of failures) {
+        await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 15_000);
+        const repair = await maintenance();
+        if (repair) {
+          reloads.push(repair.reason);
+          await maintenance(repair.token);
+        }
+        await events(PRIME, [{ kind: 'chat_error', time: Date.now(), text, turnId: 'turn-varied', recoverable: true }]);
+      }
+
+      expect(reloads.filter(reason => reason === 'silence')).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reloads for recognized transport errors, once per user turn', async () => {
     vi.useFakeTimers();
     try {
