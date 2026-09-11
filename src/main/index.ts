@@ -75,6 +75,7 @@ import {
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
+import { shutdownExternalControl, startExternalControl } from './control.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -426,6 +427,11 @@ void app.whenReady().then(async () => {
 
   logInfo('app started');
 
+  // External controllers publish through the same durable input path as the desktop UI. This
+  // listener owns no browser, model, session or retry lifecycle of its own.
+  try { await startExternalControl(userData); }
+  catch (error) { logError(`external control failed to start: ${error instanceof Error ? error.message : String(error)}`); }
+
   // Historical Unattributed repair may legitimately scan and rewrite a large legacy bucket.
   // It is maintenance, not a prerequisite for showing the app or accepting new exact-id
   // traffic, so never make startup/reload wait behind years of old session history.
@@ -492,7 +498,7 @@ app.on('will-quit', (event) => {
       // The budget has to clear the drains it contains, or it would silently defeat them:
       // the bridge force-closes wedged localhost sockets at 15s and the MCP endpoint forces
       // its own drain at 30s. This is the outer bound on both, not a competing one.
-      { name: 'admission/drain', budgetMs: 40_000, run: () => [shutdownConnection(), shutdownBridge()] },
+      { name: 'admission/drain', budgetMs: 40_000, run: () => [shutdownExternalControl(), shutdownConnection(), shutdownBridge()] },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {
         name: 'process cleanup',
