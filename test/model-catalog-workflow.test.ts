@@ -4,19 +4,23 @@ import { JSDOM } from 'jsdom';
 import { expect, it, vi } from 'vitest';
 
 const source = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
-it.each([false, true])('tab retirement preserves a document whose plugin refresh is active (%s)', async pluginRefreshBusy => {
+it.each([
+  { pluginRefreshBusy: false, pendingTools: 0 },
+  { pluginRefreshBusy: true, pendingTools: 0 },
+  { pluginRefreshBusy: false, pendingTools: 1 }
+])('tab retirement preserves active plugin refresh or local tools (%j)', async ({ pluginRefreshBusy, pendingTools }) => {
   const start = source.indexOf("      if (message.type === 'clf-tab-close-check')");
   const section = source.slice(start, source.indexOf("      if (message.type === 'clf-close-temporary-planner')", start));
   let resolve!: (value: any) => void;
   const response = new Promise<any>(done => { resolve = done; });
   const context = vm.createContext({ message: { type: 'clf-tab-close-check', conversationId: null }, sendResponse: resolve,
     startupCommandId: null, RUN_ID: 'document', OPENED_CONVERSATION: null, conversationId: null, commandsHandled: new Set(),
-    alive: true, epoch: 1, desktopDecision: null, fiberTerminalMessageId: null, generating: false,
+    alive: true, epoch: 1, desktopDecision: null, fiberTerminalMessageId: null, generating: false, pendingTools,
     desktopInputBusy: false, modelCatalogBusy: false, pluginRefreshBusy, commandAttempt: null, commandJournalGate: false,
     queue: [], flushWork: null, CLF_DOM: { conversationId: () => null, generating: () => false, composer: () => ({ textContent: '' }), hasComposerAttachments: () => false }
   });
   vm.runInContext(`(function () { ${section} })()`, context);
-  expect(await response).toMatchObject({ safe: !pluginRefreshBusy });
+  expect(await response).toMatchObject({ safe: !pluginRefreshBusy && pendingTools === 0 });
 });
 it('defers desktop delivery while catalog inspection owns the provider picker', async () => {
   const context = vm.createContext({ desktopInputBusy: false, modelCatalogBusy: true });

@@ -1,16 +1,15 @@
+import { toolDeclaration } from './tool-declarations.js';
+import { registerPlanTool } from './plan-tool.js';
 import { goalWorkerChat } from '../bridge.js';
 import { announceSessionFinish } from '../session/finish.js';
 import { getConfig } from '../config.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
  *
- * Nine tools at the absolute maximum, and usually seven. That number is the design (see
- * `docs/tool-surface.md` §3): a no-query discovery pull against this connector returns
- * every schema here at once, so the surface is sized for the worst case rather than for
- * the case where the harness happens to ask a narrow question.
+ * A no-query discovery returns every exposed schema here at once. Keep the surface
+ * bounded and derive its count from the live declarations in surfaces.ts.
  *
- * What used to be forty-five tools did not become nine by dropping capability. It became
- * eight by separating *primitives* from *procedures*: `exec_command` can run git, so `git`
+ * The surface separates primitives from procedures: `exec_command` can run git, so `git`
  * is a skill rather than a tool; `read` can open a directory, a text file or an image,
  * because those are three shapes of one question. Anything that reads as "and also, for
  * this special case…" belongs in a skill over these primitives, not in a schema every
@@ -86,7 +85,6 @@ import {
   EXEC_COMMAND_WORKDIR_DESCRIPTION,
   EXEC_COMMAND_YIELD_TIME_DESCRIPTION,
   MAX_OUTPUT_TOKENS_DESCRIPTION,
-  MAX_OUTPUT_TOKENS_RETIRED_NOTE,
   WRITE_STDIN_CHARS_DESCRIPTION,
   WRITE_STDIN_DESCRIPTION,
   WRITE_STDIN_SESSION_ID_DESCRIPTION,
@@ -273,7 +271,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   if (exposedCaps.read || exposedCaps.browse || exposedCaps.metadata) {
     reg.register(
       'read',
-      {
+      toolDeclaration('read', () => ({
         title: 'Read files and folders',
         description:
           'Read what is at one or more paths. A folder is listed one level deep, a text file comes back as numbered lines, ' +
@@ -307,7 +305,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           })
           .strict(),
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-      },
+      }), readPathDescription),
       async ({ paths, start_line, end_line, max_bytes }) =>
         guard('read', async () => {
           if (!caps.read && !caps.browse && !caps.metadata) {
@@ -433,14 +431,14 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   if (exposedCaps.read) {
     reg.register(
       'view_image',
-      {
+      toolDeclaration('view_image', () => ({
         description: VIEW_IMAGE_DESCRIPTION,
         inputSchema: z
           .object({
             path: z.string().describe(VIEW_IMAGE_PATH_DESCRIPTION)
           })
           .strict()
-      },
+      })),
       async ({ path }) =>
         guard('view_image', async () => {
           if (!caps.read) {
@@ -477,7 +475,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   if (reg.findExposed) {
     reg.register(
       'find',
-      {
+      toolDeclaration('find', () => ({
         title: 'Find files or text',
         description:
           'Find files by name, or find text inside files, without running a command. ' +
@@ -515,7 +513,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           })
           .strict(),
         annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
-      },
+      })),
       async ({ query, path: p, mode, include, exclude, case_sensitive, regex, max_results }) =>
         reg.guarded('search', 'find', async () => {
           const limit = Math.min(500, Math.max(1, Math.floor(max_results ?? 50)));
@@ -600,14 +598,14 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   if (exposedCaps.create || exposedCaps.edit || exposedCaps.move || exposedCaps.deleteFile) {
     reg.register(
       'apply_patch',
-      {
+      toolDeclaration('apply_patch', () => ({
         description: APPLY_PATCH_DESCRIPTION,
         inputSchema: z
           .object({
             patch: z.string().describe(APPLY_PATCH_ARGUMENT_DESCRIPTION)
           })
           .strict()
-      },
+      })),
       async ({ patch }) =>
         guard('apply_patch', async () => {
           if (!caps.create && !caps.edit && !caps.move && !caps.deleteFile) {
@@ -650,7 +648,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   if (exposedCaps.command) {
     reg.register(
       'exec_command',
-      {
+      toolDeclaration('exec_command', () => ({
         description: EXEC_COMMAND_DESCRIPTION,
         inputSchema: z
           .object({
@@ -675,7 +673,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             }
           }),
         outputSchema: unifiedExecOutputSchema
-      },
+      })),
       async (input) =>
         reg.guarded('command', 'exec_command', async () => {
           const dir = await resolveCwd(ctx, input.workdir);
@@ -740,7 +738,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           // PATH, so a shadowing `rg` is not a harmless customization: it breaks the normalizer's
           // assumptions and makes exit-code attribution unknowable. Bind ordinary bare rg/ripgrep
           // invocations to the shipped executable on PowerShell and POSIX shells.
-          const boundCommand = isBatch ? composeCommandBatch(boundCommands, shell.shellType) : boundCommands[0]!;
+          const batch = isBatch ? composeCommandBatch(boundCommands, shell.shellType) : undefined;
+          const boundCommand = batch?.command ?? boundCommands[0]!;
           const commandDetail = isBatch
             ? `[batch ${rawCommands.length}] ${rawCommands.join(' ; ')}`
             : rawCommands[0]!;
@@ -791,7 +790,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
               const sessionIds = unread.map((session) => session.processId).join(', ');
               return fail(
                   `EXEC_RESULTS_UNREAD: ${unread.length} completed background results are still waiting for this session. ` +
-                  `Drain session IDs ${sessionIds} with write_stdin before starting another command. No child was spawned.`
+                  `Their output follows in tool responses; read it before retrying. Explicit write_stdin is also available for IDs ${sessionIds}. No child was spawned.`
               );
             }
 
@@ -802,6 +801,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             forgetExecOwner(processId);
 
             const output = await unifiedExecManager.execCommand({
+              batchMarker: batch?.marker,
               command,
               shellType: shell.shellType,
               hookCommand: commandDetail,
@@ -833,7 +833,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // "no matches" is exit 1 and reporting the batch as failed is what makes a model run
             // the whole thing again. Require a complete set of sections, so a truncated tail
             // cannot let an unseen real failure pass as benign.
-            const batchSections = isBatch ? parseCommandBatchSections(responseText) : [];
+            const batchSections = batch ? parseCommandBatchSections(output.rawOutput.toString('utf8'), batch.marker) : [];
             const nonZeroSections = batchSections.filter((section) => section.exitCode !== 0);
             const benign = isBatch
               ? batchSections.length === rawCommands.length &&
@@ -871,7 +871,6 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                   ]
                 : [];
             const notes = [
-              ...(input.max_output_tokens === undefined ? [] : [MAX_OUTPUT_TOKENS_RETIRED_NOTE]),
               ...commandNotes,
               ...mixedBatch,
               ...(benign
@@ -914,7 +913,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
 
     reg.register(
       'write_stdin',
-      {
+      toolDeclaration('write_stdin', () => ({
         description: WRITE_STDIN_DESCRIPTION,
         inputSchema: z
           .object({
@@ -925,7 +924,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           })
           .strict(),
         outputSchema: unifiedExecOutputSchema
-      },
+      })),
       async (input) =>
         reg.guarded('command', 'write_stdin', async () => {
           // A session id is a small integer that means nothing outside the chat that was given
@@ -934,7 +933,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           const asking = await execSession('write_stdin');
           if (execOwnershipDenied(input.session_id, asking)) {
             return fail(
-              `write_stdin failed: session ${input.session_id} is not proven to belong to this durable Chat On Steroids session. Start your own with exec_command or retry after the extension reconnects.`
+              `write_stdin failed: session ${input.session_id} is not proven to belong to this durable Chat On Steroids session. A completed process may already have delivered its output and been retired. Check earlier tool results before deciding whether any work remains; an unavailable session id alone is not a reason to rerun the command.`
             );
           }
           // Both sides of the wait. An empty poll blocks for seconds by design, and a caller
@@ -984,7 +983,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   if (exposedCaps.saveArtifact) {
     reg.register(
       'download_artifact',
-      {
+      toolDeclaration('download_artifact', () => ({
         title: 'Save ChatGPT file',
         description:
           'Save one file ChatGPT generated or attached to a path inside an approved folder. ' +
@@ -1011,7 +1010,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           .strict(),
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
         _meta: { 'openai/fileParams': ['file'] }
-      },
+      })),
       async ({ file, path: requestedPath }) =>
         guard('download_artifact', async () => {
           if (!caps.saveArtifact) {
@@ -1050,13 +1049,16 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
 
   // ---------------------------------------------------------------- session
 
-  if (reg.sessionToolsExposed) registerSessionSearchReadTool(reg);
+  if (reg.sessionToolsExposed) {
+    registerSessionSearchReadTool(reg);
+    registerPlanTool(reg);
+  }
   if (reg.ctx.exposedFinishTool ?? getConfig().ui.finishTool === true) {
-    reg.register('session_finish', {
-      description: 'For Astra only. Use this tool only when a user prompt explicitly requests it. Signal that you are approaching task completion; receive queued user instructions before any finish action. While HELD, follow attached instructions and call again before finishing. Each call waits at most 25 seconds.',
+    reg.register('session_finish', toolDeclaration('session_finish', () => ({
+      description: 'For Astra only, when explicitly requested by a user prompt. Call near actual completion, after implementing the requested work. Receives queued instructions; complete and verify them before calling again. Do not use for progress updates or queue collection. While HELD with no work remaining, call to wait. Each call waits at most 25 seconds.',
       inputSchema: z.object({ summary: z.string().min(1).max(1000) }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
-    }, async ({ summary }) => {
+    })), async ({ summary }) => {
       if (!getConfig().ui.finishTool) return { content: [{ type: 'text' as const, text: 'RELEASED: The user disabled finish hold. You may write your final answer.' }] };
       const caller = currentCaller();
       if (!caller.sessionId || !caller.conversationId) return fail('Exact session identity is required');
@@ -1132,10 +1134,10 @@ async function measureSleepingWorkers(caller: Caller): Promise<void> {
 function registerAgentsTool(reg: SurfaceRegistrar): void {
   reg.register(
     'agents',
-    {
+    toolDeclaration('agents', () => ({
       title: 'Multi-agent run',
       description:
-        'Run ChatGPT workers. Reuse a suitable sleeping worker with message before spawn; spawn creates fresh worker chats for new parallel work. Sleeping/terminal workers stay in this prime conversation’s durable history. ' +
+        'Run ChatGPT workers. Omit model and reasoning_effort unless the user explicitly requests an override; app settings supply their defaults automatically. Do not ask the user to choose these settings before spawning. Reuse a suitable sleeping worker with message before spawn; spawn creates fresh worker chats for new parallel work. Sleeping/terminal workers stay in this prime conversation’s durable history. ' +
         'message: prime→worker or worker→prime; messaging a sleeping worker revives that exact existing chat when a slot is free. Replies arrive on later tool results, so never poll. ' +
         'status shows this prime’s full worker history, including sleeping/revivable and terminal/non-revivable workers, even while no run is active. finish reports a worker result and normally puts it to sleep.',
       inputSchema: z.object({
@@ -1163,13 +1165,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 .max(80)
                 .optional()
                 .describe(
-                  'ChatGPT model slug for this worker only, e.g. to keep an expensive model for yourself. Omit for the default set in app settings.'
+                  'Omit unless the user explicitly requests a model override; app settings supply their default. Overrides require an exact account-observed model id or provider alias; never guess spellings. Invalid choices return observed ids before workers open; the browser confirms availability before sending.'
                 ),
               reasoning_effort: z
                 .enum(REASONING_EFFORTS)
                 .optional()
                 .describe(
-                  'How much reasoning this worker uses. Independent of model: it never selects or changes one. Omit for the default set in app settings.'
+                  'Omit unless the user explicitly requests a reasoning override; app settings supply their default automatically. Do not ask for a reasoning level just to spawn a worker. Independent of model: it never selects or changes one.'
                 )
             }).strict()
           )
@@ -1225,7 +1227,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
       })
       .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
-    },
+    })),
     async (input) => {
       // One clock for one MCP call. The dispatcher owns startedAt and the recorder later uses
       // that exact value to consume any page request reserved while proving caller identity.
@@ -1357,18 +1359,15 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               {
                 type: 'text' as const,
                 text:
-                  `Queued for ${sent.map((message) => message.to).join(', ')}. ` +
+                  `Queued for ${[...new Set(sent.map((message) => message.to))].join(', ')}.` +
                   (woken.length > 0
-                    ? `${woken.join(', ')} ${woken.length === 1 ? 'was' : 'were'} asleep and ${woken.length === 1 ? 'is' : 'are'} ` +
-                      'being woken in the same chat, with everything already known there still in it; your message is ' +
-                      'the next thing it reads. '
-                    : '') +
-                  'Carry on with the work — a reply, if there is one, arrives at the end of a later tool result.'
+                    ? ` Waking ${woken.join(', ')} in ${woken.length === 1 ? 'the same chat' : 'their existing chats'}.`
+                    : '')
               }
             ],
             structuredContent: {
               action: 'message',
-              queued: sent.map((message) => ({ id: message.id, to: message.to })),
+              queued: sent.map((message) => ({ to: message.to })),
               waking: woken
             }
           };

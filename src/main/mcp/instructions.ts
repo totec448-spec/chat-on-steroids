@@ -1,9 +1,9 @@
 /**
- * Server instructions shown to the model once, alongside the tool list.
+ * Server instructions advertised during MCP initialization. The client decides which
+ * instructions reach the model; successful transport does not prove full prompt receipt.
  *
- * Kept short on purpose: this text is prepended to context on every conversation that uses
- * the connector, and the tool descriptions already carry the per-tool detail. It states
- * what exists and how to be efficient — it is not where security is enforced.
+ * Core carries adapted upstream Codex collaboration instructions followed by only the
+ * available local tools. Declarations own per-tool details; live guards enforce permissions.
  *
  * Written per surface. Two connectors mean two of these, and each says only what its own
  * tools can do: telling the Core conversation about `computer` would be describing a tool
@@ -11,7 +11,10 @@
  */
 
 import { LAUNCHES_WINDOWS_POWERSHELL_5 } from '../codex/tool-specs.js';
-import { getConfig, MAX_MCP_INSTRUCTIONS_CHARS } from '../config.js';
+import { CODING_INSTRUCTIONS } from './coding-instructions.js';
+import { canAddCodeMode, CODE_MODE_INSTRUCTIONS } from './code-mode-tool.js';
+import { pluginManager } from '../plugins/manager.js';
+import { effectiveCapabilities, getConfig, MAX_MCP_INSTRUCTIONS_CHARS } from '../config.js';
 import { isGitRepository } from '../toolchain.js';
 import type { ToolContext } from './kernel.js';
 import { surfaceDefinition, type SurfaceId } from './surfaces.js';
@@ -21,8 +24,15 @@ export function serverInstructions(
   surface: SurfaceId = 'core',
   platform: NodeJS.Platform = process.platform
 ): string {
-  if (surface === 'plugins') return 'External MCP tools enabled by the user in Chat On Steroids. Each tool retains its upstream schema and annotations. External servers run with their own operating-system or service permissions; CoS approved folders do not sandbox them. Use only for the user\'s requested task. A failed or disconnected call may already have taken effect: never automatically retry a mutation after an ambiguous failure. Disabled tools require the user to re-enable them in Settings. Core and Desktop are separate connectors.';
+  if (surface === 'plugins') return 'External MCP tools enabled by the user in Chat On Steroids. Each tool retains its upstream schema and annotations. External servers run with their own operating-system or service permissions; CoS approved folders do not sandbox them. Use only for the user\'s requested task. A failed or disconnected call may already have taken effect: never automatically retry a mutation after an ambiguous failure. Disabled tools require the user to re-enable them in Settings. Core and Desktop are separate connectors.' + (canAddCodeMode(pluginManager.tools()) ? '\n\n' + CODE_MODE_INSTRUCTIONS : '');
   return surface === 'desktop' ? desktopInstructions(ctx, platform) : coreInstructions(ctx, platform);
+}
+
+/** Same complete source as MCP initialization, evaluated when a user send is prepared. */
+export async function currentCoreInstructions(): Promise<string> {
+  const config = getConfig();
+  return serverInstructions({ roots: config.roots, caps: effectiveCapabilities(config),
+    readOnly: config.readOnly, privacyScreenshots: config.ui.privacyScreenshots }, 'core', process.platform);
 }
 
 /**
@@ -46,158 +56,95 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
   const config = getConfig();
   const sessionTools = ctx.sessionTools ?? config.sessions.record;
   const agentTools = ctx.agentTools ?? config.multiAgent.enabled;
+  const caps = ctx.caps;
   const windows = platform === 'win32';
   const desktop = windows || platform === 'darwin';
-  const hostName = platform === 'darwin' ? 'macOS' : platform === 'linux' ? 'Linux' : windows ? 'Windows' : 'local';
-  // Marked here rather than discovered by the model: `git status` in a folder that is not a
-  // repository was one of the most repeated recoverable failures in the recorded sessions,
-  // and the answer is one stat the model has no way to perform. Only repositories are
-  // labelled, so the line stays short on the common case where every root is one.
-  const roots =
-    ctx.roots.length === 0
-      ? 'None yet — the user must approve a folder in the Chat On Steroids app.'
-      : ctx.roots.map((r) => `/${r.name}${isGitRepository(r.path) ? ' (git)' : ''}`).join('  ');
-  const firstRoot = ctx.roots[0] ? `/${ctx.roots[0].name}` : null;
-
-  const mode = ctx.readOnly
-    ? 'Read only. Nothing here can modify anything.'
-    : 'Read/write for the tools that are listed. Anything not listed is switched off.';
-
+  const host = platform === 'darwin' ? 'macOS' : platform === 'linux' ? 'Linux' : windows ? 'Windows' : 'local';
+  const roots = ctx.roots.length
+    ? ctx.roots.map(root => `/${root.name}${isGitRepository(root.path) ? ' (git)' : ''}`).join('  ')
+    : 'None yet.';
   const lines = [
-    `Local ${hostName} coding bridge: read and change files in folders the user approved, and run commands on this computer.`,
+    CODING_INSTRUCTIONS,
     '',
-    `Roots: ${roots}`,
-    `Mode: ${mode}`,
-    '',
-    // Roots used to be a tool of their own. They are one line of context, they change only
-    // when the user changes them, and a tool call to learn them was a round trip every
-    // conversation paid before it could do anything.
-    firstRoot
-      ? windows
-        ? `Paths are virtual under the live roots above, for example ${firstRoot}/src/main.ts. Native Windows paths inside an approved folder are also accepted and normalized to the equivalent virtual path.`
-        : `Paths are virtual under the live roots above, for example ${firstRoot}/src/main.ts. Absolute native paths inside an approved folder are also accepted and normalized to the equivalent virtual path.`
-      : 'Paths are virtual under an approved root as /<root>/..., but no root is currently approved.',
-    // Taught once here rather than in every tool description: it is one rule that holds
-    // across read, find, exec_command and apply_patch alike, and repeating it per tool would
-    // cost more context than the shorthand saves.
-    'Once you use a full path this chat remembers that project, so later paths may be relative to it; use a full path again to move to another project. If a relative path is refused, this chat has no folder yet — use a full one.',
-    // Reading is three milliseconds of work behind a multi-second round trip, so the expensive
-    // mistake is splitting one file across calls, not asking for too much in one. The default
-    // per-file budget already covers an ordinary source file whole.
-    'read batches paths, lists folders, expands globs and returns images — use one call, and read a file whole rather than in windows. A start_line/end_line range applies to every file the call reads; use it only for a known region.',
-    ...(windows
-      ? [
-          // The gap that produced the most repeated shell failures: a POSIX shell expands globs
-          // before the program runs and PowerShell does not, so the program receives the asterisk.
-          'PowerShell does not expand * or ? for native programs. Pass ripgrep filename patterns as -g \'*.go\', and expand other globs with Get-ChildItem before use.',
-          'Bare rg/ripgrep in PowerShell is bound to this app’s bundled ripgrep; name an explicit path for a different one.',
-          // A bash habit Windows PowerShell answers with a failure the output does not explain.
-          // Nothing repairs it for the model: stripping the redirect changes what the command
-          // returns, so it is said once, up front.
-          'In Windows PowerShell do not append 2>&1 to a native program: stderr is already captured, and redirecting it leaves $? false even after exit 0.',
-          // Only true of 5.1, and `defaultUserShell()` prefers pwsh 7 — where the operators work
-          // and this would be a lie. Same resolution the exec schema uses, so the two cannot
-          // disagree about the shell the model is actually talking to.
-          ...(LAUNCHES_WINDOWS_POWERSHELL_5
-            ? ['This shell is Windows PowerShell 5.1, which has no && or ||: use cmds, or A; if ($?) { B }.']
-            : [])
-        ]
-      : [
-          'exec_command uses the host’s normal POSIX shell (zsh/bash/sh unless you request another one), so ordinary shell quoting, pipes and glob expansion work normally.',
-          'The bundled ripgrep directory is placed first on PATH; name an explicit executable path when you intentionally want another rg.'
-        ]),
-    'Never send read’s line-number prefixes to apply_patch; they are display metadata, not file content.',
-    'apply_patch is the only way to change files: it adds, updates, moves and deletes, and it is atomic across files.',
-    'exec_command runs git, npm, builds, tests and anything else; a long-running one gives you a session_id to continue with write_stdin.',
-    ...(config.multiAgent.allowUnattributedCalls && ctx.caps.command && !ctx.readOnly
-      ? ['Allow unattributed calls is enabled: self-contained commands, including a user-requested computer shutdown, may run without a ChatGPT conversation identity. Supply an explicit approved workdir; do not borrow another chat’s workspace or terminal session.']
-      : []),
-    // The recorded sessions show this done by hand — several checks glued together with
-    // Write-Output banners inside one cmd — whenever the model happened to think of it, and
-    // split across separate calls whenever it did not. `cmds` is that habit made explicit, and
-    // it earns its space here because the saving is a round trip per command, not shell time.
-    'Batch related checks with exec_command cmds: [...]: they share one shell session, keep per-command labels/exit codes, and continue after non-zero results.',
-    // The one exception to the virtual-path rule above, and the model has to be told: cmd
-    // is a program, not a path, so it reaches the shell exactly as written.
-    'exec_command’s workdir is virtual, but its cmd is not translated — set workdir and write paths inside the command relative to it.',
-    'Output is capped. When a result says it was truncated, narrow the request instead of repeating it.',
-    ...(ctx.caps.saveArtifact
-      ? [
-          'When the user supplies or ChatGPT generates a file that is not on this computer, save it with download_artifact using its native file value and a destination path inside an approved folder. The tool refuses to overwrite and returns the saved path. Never recreate such files with apply_patch or exec_command, and never place signed URLs, file objects or base64 content in shell commands or logs.'
-        ]
-      : [])
+    '# Local tools',
+    `Use the connected tools as needed: ${surfaceDefinition('core').connectorName} for files, terminal, plans, sessions and workers` +
+    (desktop ? `; ${surfaceDefinition('desktop').connectorName} for screen, input and clipboard` : '') +
+    `; ${surfaceDefinition('plugins').connectorName} for enabled external apps and services.`,
+    `Host: ${host}. Roots: ${roots}`,
+    ctx.readOnly ? 'The local tools are read-only.' : 'Use the tools listed in this conversation.',
+    'An approved root may be the parent of the project. Use the exact project path and keep every intermediate folder; do not guess a missing project level.',
+    'Paths may be virtual under the roots above or absolute native paths inside them. Once this chat has a project, later paths may be relative to it. Use a full path to select another project.',
   ];
 
-  if (desktop && (ctx.caps.screen || ctx.caps.control || ctx.caps.clipboardRead || ctx.caps.clipboardWrite)) {
-    lines.push(
-      '',
-      // Named rather than hinted at: the model can see this connector but not the other, and
-      // "I cannot do that" is the wrong answer when the user only has to connect it.
-      `Seeing and controlling the native desktop lives in a separate connector, "${surfaceDefinition('desktop').connectorName}".`,
-      'If a task needs screenshots, windows, mouse/keyboard control or the clipboard and that connector is not available here, say so and ask the user to connect it.'
-    );
-  }
-
-  lines.push(
-    '',
-    // This connector often runs long local tasks where silence looks like a stalled MCP.
-    // Keep progress unusually visible, but do it in compact phase-level updates rather than
-    // narrating every cheap read and wasting the context the connector is meant to save.
-    'Keep the user visibly informed more than usual while you work. Before a meaningful tool run,',
-    'say in one short line what you are doing. On longer work, send another short progress update',
-    'after a few meaningful calls or when the phase changes; do not stay silent until the end.',
-    'Report findings, changes, failures and plan changes immediately, and name the paths you modified.',
-    'Do not narrate every trivial call.'
+  if (caps.read || caps.browse || caps.metadata) lines.push(
+    'read batches paths, lists folders, expands globs and returns numbered text. Read related files together. Read whole files for orientation; use a known region when that is enough. A start_line/end_line range applies to every file the call reads.',
   );
-
-  if (sessionTools) {
+  if (caps.read) lines.push('view_image inspects a local image. Use it when visual evidence matters.');
+  if (caps.command) {
     lines.push(
-      '',
-      // A chat continuing compacted work is *opened* with the brief already in it, so there
-      // is nothing to fetch and nothing to call first. What it may not know is that the
-      // detail behind the brief is still on disk and can be asked for.
-      'This app records chats locally. When the user refers to previous or concurrent work, call session action=search',
-      'to find its recording, then session action=read with the explicit session_id instead of reconstructing it from files.',
-      'Keep the returned update_cursor when following concurrent work and pass it on the next read so already-read context',
-      'is not inserted twice. Use the short session-local T… reference to expand one exact tool call.'
+      'Use rg or rg --files for repository searches; if unavailable, use the next best tool.',
+      'exec_command runs git, builds, tests and shell commands. Batch related checks with exec_command cmds: [...]; they run sequentially in one shell with per-command output and exit codes.',
+      'Set workdir to the project. workdir accepts virtual paths; paths inside cmd are not translated, so use paths relative to workdir or native filesystem paths.',
+      'A running command returns a session_id. Continue that same process with write_stdin; inspect its terminal result before reporting completion. After a transient wait failure, keep the same session instead of starting replacement work.',
+      'Output is capped. When truncated, narrow the command or read the relevant region rather than repeating the same request.'
     );
-  }
-
-  if (agentTools) {
-    lines.push(
-      '',
-      'Multi-agent mode is on. As the prime agent you may use agents action=spawn, then keep working; worker',
-      'messages are appended to your tool results as they arrive. A worker sees only what you send it, never this',
-      'conversation, so spawn carries both halves: put the standing instructions every worker needs — repository',
-      'and folder, conventions file, what not to touch, how to validate, what to report — in "context" once, and',
-      'give each worker the objective, files and constraints that are its own in its "task". Do not repeat the',
-      'context inside the tasks, and do not preface a task with boilerplate like “you have zero prior context”.',
-      'Workers write code as readily as they investigate, so say which files each one may change. Steer an active',
-      'worker with action=message, and send several at once with "messages" rather than one call per worker. Reuse',
-      'a sleeping worker for related follow-up work before spawning a replacement; message wakes its exact chat.',
-      'Only terminal workers whose context is full need replacing. As a worker, message the prime with',
-      'findings/decisions/blockers, keep working while replies are pending, and call action=finish only when done,',
-      'under RESULT / CHANGES / VALIDATION / BLOCKERS. Workers talk only to the prime agent, never to each other.'
+    if (windows) lines.push(
+      'PowerShell does not expand * or ? for native programs: pass ripgrep filename patterns as -g \'*.go\', and expand other globs with Get-ChildItem.',
+      'Bare rg/ripgrep is bound to the app’s bundled ripgrep. In Windows PowerShell, omit 2>&1 on native programs: stderr is already captured and that redirect can leave $? false after exit 0.',
+      ...(LAUNCHES_WINDOWS_POWERSHELL_5 ? ['This is Windows PowerShell 5.1, without && or ||. Use cmds or A; if ($?) { B }.'] : [])
     );
+    else lines.push('exec_command uses the host’s normal POSIX shell (zsh/bash/sh unless requested otherwise). The bundled ripgrep directory is first on PATH.');
+  } else if (ctx.exposedFind ?? caps.search) {
+    lines.push('find searches filenames or file contents without a shell. Narrow path and include patterns to the relevant area.');
   }
-
-  lines.push(...userInstructions());
-
+  if (caps.create || caps.edit || caps.move || caps.deleteFile) lines.push(
+    'Use apply_patch for manual file changes. It adds, updates, moves and deletes files atomically. Never copy read’s line-number prefixes into a patch.'
+  );
+  if (caps.saveArtifact) lines.push(
+    'download_artifact saves a user-supplied or ChatGPT-generated file using its native file value and an approved destination path. It refuses to overwrite. Do not recreate the file or put signed URLs, file objects or base64 into shell commands.'
+  );
+  if (sessionTools) lines.push(
+    '',
+    '# Task plan and recorded history',
+    'Use update_plan for tasks with several meaningful steps; skip it for simple tasks. Give each step a short user-facing headline and concrete details about the approach, constraints or checks. Send the complete plan on every update, preserving useful details. Keep at most one step in_progress.',
+    'Update the plan when a step is completed or the approach changes. Mark steps completed only when their work is done. Do not repeat the full plan in chat: the app shows the headlines with expandable details above queued messages.',
+    'The plan does not execute steps or mark queued instructions done. New user instructions extend the work; update the plan accordingly.',
+    'When the user refers to previous or concurrent work, use session action=search to find its recording, then action=read with the explicit session_id. Keep update_cursor for subsequent reads and use a short T… reference to expand an exact tool call.'
+  );
+  if (agentTools) lines.push(
+    '',
+    '# Workers',
+    'Use agents for independent subtasks while continuing useful work yourself. Reuse a sleeping worker for related follow-up work before spawning a replacement. Only terminal workers whose context is full need replacing.',
+    'When spawning workers, omit model and reasoning_effort unless the user explicitly requests an override for that setting. The app applies the user\'s saved worker defaults automatically; you do not need their concrete values and must not ask the user to choose or confirm them before spawning.',
+    'A worker sees only what you send it. In spawn, put shared repository/folder instructions, constraints and validation requirements in context once; put the objective and assigned files in each task. Explicitly say what each worker may change. Do not repeat the shared context in every task.',
+    'Use action=message to steer a worker; batch messages when sending several. Worker reports arrive with tool results. Check their findings and changes before relying on them.',
+    'Workers communicate with the prime, keep working while replies are pending, and use action=finish when done with RESULT / CHANGES / VALIDATION / BLOCKERS. A finished reusable worker sleeps and can be messaged again.'
+  );
+  if (ctx.exposedFinishTool ?? config.ui.finishTool) lines.push(
+    '',
+    'session_finish is for Astra only when the user prompt explicitly requests it. Follow that prompt’s finish timing after implementation; complete newly delivered work. It is not a plan/progress update or a way to collect queued tasks. Workers use agents action=finish instead.'
+  );
+  if (desktop && (caps.screen || caps.control || caps.clipboardRead || caps.clipboardWrite)) lines.push(
+    '',
+    `Native screen, window, mouse, keyboard and clipboard tools live in the separate "${surfaceDefinition('desktop').connectorName}" connector. If the task needs them and they are unavailable, tell the user which connector is needed.`
+  );
+  lines.push('', CODE_MODE_INSTRUCTIONS, ...userInstructions());
   return lines.join('\n');
 }
 
 function desktopInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
+  if (platform === 'win32') return windowsDesktopInstructions();
   const host = platform === 'darwin' ? 'Mac' : 'Windows PC';
   const paste = platform === 'darwin' ? 'command+v' : 'ctrl+v';
   const lines = [
     `Local desktop control: look at this ${host}’s screen and windows, and drive its mouse and keyboard.`,
     '',
-    'observe first, then computer. A bare observe() returns the foreground window, a screenshot and its',
-    'controls with refs; refs beat pixel coordinates because they resolve the real control again when acted on.',
-    'observe never needs a window to be in front and never fails for lack of focus. Only computer does, and',
-    'only for its focus action — so when something steals focus, look first and act on what you see.',
+    'observe first, then computer. Choose the task-specific window from observe what=windows, then inspect it with what=window.',
+    'A bare observe() returns the foreground window, its screenshot and accessibility controls. Observation does not activate the window.',
+    'Use click_ref/set_value for exposed controls; refs resolve the same control again when acted on.',
+    'Physical input requires the target window in front. Use computer focus to activate it; when something steals focus, observe first.',
     'Coordinates are pixels of a screenshot frame. Coordinate actions require frameId so a click cannot land on a screen',
-    'that has since changed. Batch the actions that belong together and use captureAfter to verify the result.',
+    'whose owner or geometry has since changed. Batch related actions and use captureAfter to inspect the result; input acceptance alone does not prove the task succeeded.',
     // Waiting was the single most repeated desktop pattern in the recorded sessions: a batch of
     // nothing but a fixed sleep plus a screenshot, over and over, because the model had no way to
     // say what it was waiting *for*. verify is that way, and it waits inside the one call.
@@ -213,7 +160,7 @@ function desktopInstructions(ctx: ToolContext, platform: NodeJS.Platform): strin
     // of its own, and the tool refuses the chords that would move between tabs or windows.
     'A browser window here may be holding the ChatGPT chats this app runs. Open the page you are testing in a',
     'browser window of its own, keep that window in front and act only there. Keyboard chords that close, open',
-    'or switch tabs or windows, or take the address bar, are refused in every browser window.',
+    'or switch tabs or windows are refused. Address-bar focus chords are allowed for authorized navigation in the selected window.',
 
     'Act only on what the user asked for and leave the rest of their desktop alone.'
   ];
@@ -231,7 +178,33 @@ function desktopInstructions(ctx: ToolContext, platform: NodeJS.Platform): strin
     'This one cannot read or change files. If a task needs that and it is not available here, say so.'
   );
 
-  lines.push(...userInstructions());
+  lines.push('', CODE_MODE_INSTRUCTIONS, ...userInstructions());
 
   return lines.join('\n');
+}
+
+function windowsDesktopInstructions(): string {
+  return [
+    'Windows Computer Use uses the Window2 app/window interface. Use its named tools directly or call the same methods on sky inside this connector’s exec JavaScript. sky is supplied automatically; no package import or setup is needed. Mac uses a separate contract.',
+    '',
+    'Start with list_apps: each app has an id and its exact windows. list_windows lists currently open targetable windows; get_window rehydrates a returned id and optional app. Choose exactly one returned Window {app,id,title?}; never invent an app/window identity from a title or guessed process name.',
+    'launch_app accepts an observed app id or a concrete .exe path/name. It requests launch without command arguments. Refresh list_apps/list_windows and choose the matching returned window to verify startup; launch acceptance is not a window receipt.',
+    '',
+    'get_window_state({window}) captures the selected window without activating it, including when covered. include_screenshot defaults true and include_text defaults false. include_text adds a formatted accessibility tree with numeric element indexes, supported secondary-action labels, focused/selected elements and bounded document/selected text. Use include_screenshot:false for text-only observation.',
+    'The result has {window,focused,screenshots,accessibility}. focused reports the observed window focus, not a promise that it stays focused. Screenshot metadata has an id, image-pixel width/height, physical screen origin and relative zIndex. Pixels are separate native image blocks, not data URLs in the returned object. Images appear directly for named tool calls and automatically for sky.get_window_state; text(state) safely prints only metadata. Owned menus/popups are bounded additional screenshots; a window in the same process is not automatically related.',
+    'Chromium accessibility comes from its current browser UI, including the address bar and displayed document. accessibility.truncated says when the bounded tree is incomplete (null means unreported); offscreen and disabled controls are marked. A missing control in a truncated tree is not proof it is absent: use the fresh screenshot instead of repeatedly requesting the same tree. accessibility_error explains a text-provider failure while useful screenshots remain available. Never use a tree that contradicts the visible page to choose an element.',
+    '',
+    'Use a two-step loop: observe and stop to inspect the result, then perform one state-derived action and refresh immediately. Input consumes the preceding observation; interleaving or failure requires a new observation. A failed refresh does not undo the input, so do not repeat an action just because its result image failed.',
+    'click accepts element_index or x/y with optional screenshotId, mouse_button and click_count. set_value uses element_index and value; perform_secondary_action uses element_index and a case-insensitive advertised label such as Raise, Toggle, Expand or Scroll Down. Indexes belong only to the latest accessibility observation for this conversation and window.',
+    'Coordinate x/y values are pixels within the selected returned screenshot, starting at its top-left. Use screenshotId from the inspected state, especially for popup images; omit it for the main image. Do not apply DPI, monitor-origin or window-size scaling: the native frame owner converts image pixels to the actual screen. scroll uses scrollX/scrollY wheel deltas (120 per detent, positive Y down); drag uses from_x/from_y/to_x/to_y. All physical input activates and checks the exact target, app identity, frame geometry and related owner before input.',
+    'press_key accepts keysym names and + chords such as Control_L+a or Control_L+Shift_L+period. Punctuation follows the target keyboard layout. type_text sends literal text; multiline input uses clipboard paste and requires the existing clipboard-write permission. set_value is preferable for an editable accessibility control. Observe the focused control before typing.',
+    'Input methods already activate their target. activate_window consumes the current observation too: if used explicitly, get_window_state again before clicking an index or coordinate. Browser tab/window switching and closing chords remain refused; address-bar focus (Control_L+l, Alt_L+d) is allowed for authorized navigation. Use a separate browser window for testing so navigation does not replace a running ChatGPT page. read_clipboard/write_clipboard remain available under their existing permissions.',
+    '',
+    'JavaScript example: const apps = await sky.list_apps(); nodeRepl.write(apps.map(app => ({id:app.id,name:app.displayName,windows:app.windows})));',
+    'Use nodeRepl.write(value) or text(value) for concise text. sky methods return their native arrays/objects or undefined, and throw tool failures. tools.<name> returns the normal MCP envelope with structuredContent.value. Only sky.get_window_state automatically displays images.',
+    'This app reuses its bounded exec runtime: variables do not persist across calls, so carry returned Window objects or rehydrate with get_window. No Node, imports, filesystem, network or extra Codex permission system is installed. Each method still uses this app’s live capability checks, exact caller and local recording. Keep independent reads parallel only when their observations do not conflict; await actions before refreshing.',
+    '',
+    `Files, patches and shell commands live in the separate "${surfaceDefinition('core').connectorName}" connector. Act only within the user’s requested task.`,
+    ...userInstructions()
+  ].join('\n');
 }

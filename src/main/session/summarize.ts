@@ -143,7 +143,8 @@ const UNDONE: Record<string, string> = {
   Replaced: 'replace',
   Loaded: 'load',
   Messaged: 'message',
-  Reported: 'report'
+  Reported: 'report',
+  Requested: 'request'
 };
 
 /** Whole titles that do not begin with a verb. */
@@ -359,6 +360,38 @@ function build(
         ...(evidence.count !== null ? { detail: plural(evidence.count, 'control') } : {})
       };
     }
+    // Window2 inputs deliberately omit text, app paths, window titles and action labels.
+    // A launch acknowledgement proves a request, not a running or ready application.
+    case 'list_windows':
+      return { kind: 'screen', tone: 'neutral', title: 'Listed open windows' };
+    case 'get_window':
+      return { kind: 'screen', tone: 'neutral', title: 'Inspected a window' };
+    case 'list_apps':
+      return { kind: 'screen', tone: 'neutral', title: 'Listed installed apps' };
+    case 'get_window_state':
+      return { kind: 'screen', tone: 'neutral', title: 'Inspected window state' };
+    case 'launch_app':
+      return { kind: 'input', tone: 'neutral', title: 'Requested an app launch' };
+    case 'click':
+      return { kind: 'input', tone: 'neutral', title: 'Clicked in a window' };
+    case 'press_key':
+      return { kind: 'input', tone: 'neutral', title: 'Pressed keys in a window' };
+    case 'type_text':
+      return { kind: 'input', tone: 'neutral', title: 'Typed in a window' };
+    case 'scroll':
+      return { kind: 'input', tone: 'neutral', title: 'Scrolled in a window' };
+    case 'set_value':
+      return { kind: 'input', tone: 'neutral', title: 'Replaced a field value' };
+    case 'drag':
+      return { kind: 'input', tone: 'neutral', title: 'Dragged in a window' };
+    case 'perform_secondary_action':
+      return { kind: 'input', tone: 'neutral', title: 'Acted on a window control' };
+    case 'activate_window':
+      return { kind: 'input', tone: 'neutral', title: 'Focused a window' };
+    case 'read_clipboard':
+      return { kind: 'clipboard', tone: 'neutral', title: 'Read the clipboard' };
+    case 'write_clipboard':
+      return { kind: 'clipboard', tone: 'neutral', title: 'Replaced the clipboard text' };
     case 'computer': {
       const actions = arr(args['actions']).map((a) => str(record(a)['type']) ?? '?');
       const kinds = [...new Set(actions)];
@@ -391,6 +424,12 @@ function build(
     }
 
     // ----------------------------------------------------------- session
+    case 'update_plan': {
+      const steps = arr(args['plan']);
+      const completed = steps.filter(step => record(step)['status'] === 'completed').length;
+      return { kind: 'session', tone: 'neutral', title: steps.length ? 'Updated the task plan' : 'Cleared the task plan',
+        ...(steps.length ? { detail: `${completed} / ${steps.length} completed` } : {}) };
+    }
     case 'session': {
       const action = str(args['action']) ?? 'search';
       const query = str(args['query']);

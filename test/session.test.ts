@@ -442,6 +442,17 @@ describe('session store', () => {
     expect(await readEvents(summary.id, { limit: 2 })).toHaveLength(2);
   });
 
+  it('preserves app-staged attachment identity and preview when native metadata observes the same user send', async () => {
+    const summary = await createSession({ title: 'attachment custody' });
+    const original = { id: 'app-staged-id', name: 'example.png', size: 123, mimeType: 'image/png', preview: 'data:image/webp;base64,YQ==' };
+    const base = { kind: 'user_message' as const, source: 'extension' as const, time: 100, messageId: 'native-user',
+      message: { text: '', chars: 0, truncated: false } };
+    await upsertMessageEvent(summary.id, { ...base, inputId: 'app-input', attachments: [original] });
+    await upsertMessageEvent(summary.id, { ...base, attachments: [{ ...original, id: 'provider-file-id', preview: undefined }] });
+    const [recorded] = await readEvents(summary.id, { kinds: ['user_message'] });
+    expect(recorded).toMatchObject({ inputId: 'app-input', attachments: [original] });
+  });
+
   it('keeps the original anchor when provider creation time changes on reload, without merging sibling messages', async () => {
     const summary = await createSession({ title: 'provider timestamp revision' });
     const row = (messageId: string, providerMessageId: string) => ({
@@ -560,7 +571,7 @@ describe('session store', () => {
   it('keeps rich HTML when the same canonical prose is reobserved without rendered HTML', async () => {
     const summary = await createSession({ title: 'sparse rich final' });
     const messageId = 'msg-sparse-rich';
-    const providerMessageId = 'bdc7b4c3-5f89-4e1d-a9ca-6c0f6a5ffb4a';
+    const providerMessageId = 'f0f00016-1111-4111-8111-111111111111';
     const message = { text: 'Bold answer', truncated: false, chars: 11 };
     await upsertMessageEvent(summary.id, {
       time: 200,
@@ -1872,6 +1883,53 @@ describe('canonical recorder 1.8', () => {
     expect((await readEvents(sessionId!, { kinds: ['tool_call'] }))).toHaveLength(25);
   });
 
+  it('records one provider-limit notice for concurrent tab reports and journal replay after restart', async () => {
+    const conversationId = 'conv-error-burst';
+    const error = { kind: 'chat_error' as const, time: 100_000,
+      text: 'Too many requests. Please wait a few minutes.', blocking: true, recoverable: false };
+    const reports = await Promise.all(Array.from({ length: 10 }, (_, index) =>
+      recordChatObservations(conversationId, [{ ...error, time: error.time + index * 50, turnId: `tab-${index}` }])));
+    expect(reports.reduce((count, report) => count + report.stored, 0)).toBe(1);
+    expect(reports.slice(1).every(report => !report.activity.meaningful)).toBe(true);
+    const sessionId = reports[0]!.sessionId!;
+    await flushSessions();
+    resetRecorderForTests();
+    resetSessionStoreForTests();
+    await recordChatObservations(conversationId, [{ ...error, time: error.time + 1_000 }]);
+    expect(await readEvents(sessionId, { kinds: ['chat_error'] })).toHaveLength(1);
+
+    await recordChatObservations(conversationId, [{ ...error, time: error.time + 30_001 }]);
+    expect(await readEvents(sessionId, { kinds: ['chat_error'] })).toHaveLength(2);
+    const other = await recordChatObservations('conv-error-burst-other', [error]);
+    expect(other.stored).toBe(1);
+  });
+
+  it('coalesces same-turn error bursts but preserves different errors and genuine turn failures', async () => {
+    const error = { kind: 'chat_error' as const, time: 100_000, text: 'Message delivery timed out.', turnId: 'first' };
+    const first = await recordChatObservations('conv-error-turns', [error,
+      { ...error, time: 100_100, text: 'Message  delivery\n timed out.' },
+      { ...error, time: 100_200, text: 'Something went wrong.' },
+      { ...error, time: 100_300, turnId: 'second' }]);
+    const errors = await readEvents(first.sessionId!, { kinds: ['chat_error'] });
+    expect(errors).toHaveLength(3);
+    expect(errors.map(event => event.turnId)).toEqual(['first', 'first', 'second']);
+  });
+
+  it('keeps a failed error append eligible for retry', async () => {
+    const conversationId = 'conv-error-append-retry';
+    await sessionForConversation(conversationId);
+    const error = { kind: 'chat_error' as const, time: 100, text: 'Something went wrong.' };
+    const append = vi.spyOn(fs, 'appendFile').mockRejectedValueOnce(new Error('disk full'));
+    try {
+      await expect(recordChatObservations(conversationId, [error])).rejects.toThrow('disk full');
+    } finally {
+      append.mockRestore();
+    }
+    const retry = await recordChatObservations(conversationId, [error]);
+    expect(retry.stored).toBe(1);
+    expect(await readEvents(retry.sessionId!, { kinds: ['chat_error'] })).toHaveLength(1);
+  });
+
   it('deduplicates replayed turn lifecycle boundaries from the at-least-once browser journal', async () => {
     const conversationId = 'conv-lifecycle-replay';
     const batch = [
@@ -2405,6 +2463,72 @@ describe('naming the chats this app opened', () => {
       { kind: 'conversation_title', time: Date.now(), text: 'A Later ChatGPT Rename' }
     ]);
     expect((await getSession(opened.sessionId!))?.title).toBe('My manual title');
+  });
+
+  it('keeps rendered instruction frames out of titles and repairs only their exact recorded fallback', async () => {
+    const conversationId = 'conv-rendered-prompt-title';
+    const rendered = '[[COS_CONTEXT:100]]\nGuidance whose Markdown whitespace changed.\n[[/COS_CONTEXT]]\n\nReal request';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: Date.now(), text: rendered, messageId: 'framed-title-user' }
+    ]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('ChatGPT session');
+    await upsertMessageEvent(opened.sessionId!, {
+      time: Date.now(), source: 'app', kind: 'user_message', messageId: 'framed-title-user',
+      authoredText: 'Real request', message: { text: rendered, chars: rendered.length, truncated: false }
+    });
+    expect((await getSession(opened.sessionId!))?.title).toBe('Real request');
+    await recordChatObservations(conversationId, [
+      { kind: 'conversation_title', time: Date.now(), text: 'Readable generated title' }
+    ]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Readable generated title');
+    await renameSession(opened.sessionId!, 'My title');
+    await recordChatObservations(conversationId, [
+      { kind: 'conversation_title', time: Date.now(), text: 'Later generated title' }
+    ]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('My title');
+  });
+
+  it.each([80, 120])('promotes a legacy %i-character preview even when title precedes its first message', async length => {
+    const text = '  A long authored request '.repeat(12);
+    const conversationId = `legacy-preview-${length}`;
+    const session = await createSession({ conversationId, title: text.slice(0, length) });
+    await recordChatObservations(conversationId, [
+      { kind: 'conversation_title', time: Date.now(), text: 'Generated title' },
+      { kind: 'user_message', time: Date.now(), text, messageId: 'legacy-opening' }
+    ]);
+    expect((await getSession(session.id))?.title).toBe('Generated title');
+  });
+
+  it('keeps provider naming authority across receipts, later provider renames and restart', async () => {
+    const conversationId = 'provider-title-restart';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'conversation_title', time: Date.now(), text: 'Initial provider title' }
+    ]);
+    await upsertMessageEvent(opened.sessionId!, { kind: 'user_message', source: 'app', time: Date.now(),
+      messageId: 'provider-opening', authoredText: 'Actual request', message: { text: 'wire', chars: 4, truncated: false } });
+    expect((await getSession(opened.sessionId!))?.title).toBe('Initial provider title');
+    await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+    await recordChatObservations(conversationId, [{ kind: 'conversation_title', time: Date.now(), text: 'Updated provider title' }]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Updated provider title');
+    // Even a manual name identical to the preview must stay manual.
+    await renameSession(opened.sessionId!, 'Actual request');
+    await recordChatObservations(conversationId, [{ kind: 'conversation_title', time: Date.now(), text: 'Must not win' }]);
+    expect((await getSession(opened.sessionId!))?.title).toBe('Actual request');
+  });
+
+  it('repairs a legacy context preview on cold read using durable authored text', async () => {
+    const raw = '[[COS_CONTEXT:19268]]\nInternal instructions and AGENTS.md '.repeat(3);
+    const session = await createSession({ conversationId: 'legacy-context-preview', title: 'Temporary' });
+    await upsertMessageEvent(session.id, { kind: 'user_message', source: 'app', time: Date.now(),
+      messageId: 'context-opening', authoredText: 'Only my request', message: { text: raw, chars: raw.length, truncated: false } });
+    await flushSessions(); resetSessionStoreForTests();
+    const metaPath = path.join(sessionsRoot(), session.id, 'meta.json');
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    meta.title = raw.slice(0, 80).trim(); delete meta.titleSource;
+    await fs.writeFile(metaPath, JSON.stringify(meta));
+    expect((await listSessions()).find(row => row.id === session.id)?.title).toBe('Only my request');
+    expect((await getSession(session.id))?.title).toBe('Only my request');
+    expect(JSON.parse(await fs.readFile(metaPath, 'utf8')).titleSource).toBe('fallback');
   });
 
   it('does not persist native file credentials in recorded artifact arguments', async () => {

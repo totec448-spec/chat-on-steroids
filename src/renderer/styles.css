@@ -247,10 +247,24 @@ body {
 body {
   background: var(--page);
   color: var(--ink);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif;
   letter-spacing: -0.004em;
   -webkit-font-smoothing: antialiased;
 }
+
+/* CJK uses natural character wrapping and full-height glyphs. Keep native controls
+   flexible at narrow window widths and when the renderer is zoomed. */
+html:lang(zh-CN) body { letter-spacing: 0; line-break: strict; }
+.language-select { min-width: 8em; max-width: 100%; }
+.setup-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; margin-bottom: 20px; }
+.setup-heading .settings-heading { margin-bottom: 0; padding: 0; }
+.setup-heading .settings-heading p { margin-bottom: 0; }
+.language-tabs { display: inline-flex; flex: none; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
+.language-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
+.language-tabs button:hover { background: var(--hover); color: var(--ink); }
+.language-tabs button[aria-pressed='true'] { background: var(--hover); border-color: var(--line); color: var(--ink); }
+.language-tabs button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.language-flag { width: 24px; height: 16px; border-radius: 2px; overflow: hidden; flex: none; }
 
 /* Keep authored content, chat history and settings selectable; chrome is not text content. */
 :is(input, textarea, [contenteditable='true'], .msg, #timeline,
@@ -285,12 +299,8 @@ code {
   font-size: 0.92em;
 }
 
-/* The whole window: header, an optional notice, one scrolling middle, nav. Nothing else
-   grows. A column rather than fixed grid rows, because the notice between the header and
-   `main` appears and disappears: with a three-row template its row was the one that had to
-   stretch, so a visible notice pushed `main` into an auto row sized to its whole content -
-   the banner clipped to a sliver and the panels overflowing the window under it. In a column
-   only `main` flexes, and the count of siblings above it stops mattering. */
+/* Explicit tracks for the titlebar, header, stacked notices and scrolling workspace.
+   Only the workspace grows; showing a notice must not create an implicit content row. */
 .app {
   height: 100%; display: grid;
   grid-template-columns: min(var(--sidebar-width, var(--sidebar-default, 248px)), 50vw) minmax(0, 1fr);
@@ -298,11 +308,14 @@ code {
   background: var(--page);
 }
 .app > header { grid-column: 2; grid-row: 2; }
-.app > .notice { grid-column: 2; grid-row: 3; }
+.app > .notices { grid-column: 2; grid-row: 3; min-width: 0; }
+.app[data-screen='settings'] #pluginRefreshReminder { display: none; }
 .app > main { grid-column: 2; grid-row: 4; min-width: 0; }
-/* One static wash behind the chat: only a few RGB steps brighter on the left. */
+/* One static wash behind the chat, reduced to 20% of its previous contrast. */
 :root[data-theme='dark'] .app[data-screen='chat'] {
-  background: radial-gradient(ellipse at 12% 38%, #1c1d1e 0%, #1a1b1c 32%, var(--page) 78%);
+  background: radial-gradient(ellipse at 12% 38%,
+    color-mix(in srgb, #1c1d1e 20%, var(--page)) 0%,
+    color-mix(in srgb, #1a1b1c 20%, var(--page)) 32%, var(--page) 78%);
 }
 :root[data-theme='dark'] .app[data-screen='chat'] .card.is-session { background: transparent; }
 .app-topbar { grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 6px; height: env(titlebar-area-height, 28px); padding: 0 10px; padding-right: max(10px, calc(100vw - env(titlebar-area-width, 100vw))); background: var(--page); -webkit-app-region: drag; }
@@ -339,7 +352,8 @@ code {
 .sidebar .new-chat { padding: 10px 12px; justify-content: flex-start; background: transparent; border: 0; border-radius: 8px; margin-bottom: 10px; font-size: 13px; }
 .sidebar .new-chat:hover { background: var(--hover); }
 .sidebar-sessions { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 4px; }
-.sidebar-sessions > .scroll { flex: 1; }
+/* Let the scrollbar reach the divider; keep a small gap on the row side of its track. */
+.sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; }
 .sidebar-sessions h2 { font-size: 10px; padding: 10px 8px; }
 .sidebar-sessions .foot { border: 0; padding: 12px 8px; font-size: 10px; }
 .sidebar-bottom { border-top: 1px solid var(--line); padding-top: 12px; display: flex; align-items: center; justify-content: space-between; }
@@ -383,8 +397,10 @@ header {
 .state {
   margin-left: auto;
   display: flex;
+  flex: none;
   align-items: center;
   gap: 14px;
+  white-space: nowrap;
 }
 
 /* The honest status line: a colour, a word, and how old the proof is. */
@@ -757,6 +773,8 @@ main {
   flex: 1;
   min-width: 0;
 }
+
+#dismissPluginRefreshReminder { flex: none; }
 
 /* ------------------------------------------------------------- permissions */
 
@@ -1698,7 +1716,9 @@ input[readonly] {
 .composer { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto 36px; align-items: center; gap: 8px; width: calc(100% - 48px); max-width: 860px; margin: 14px auto 24px; border: 1px solid var(--edge); border-radius: 22px; background: var(--card); padding: 14px 12px 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 10%); }
 .composer:focus-within { border-color: color-mix(in srgb, var(--ink) 22%, transparent); }
 .composer textarea:focus { box-shadow: none; }
-.composer textarea { grid-column: 1 / -1; grid-row: 1; width: 100%; min-height: 24px; max-height: 220px; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; line-height: 24px; padding: 0 2px 14px; }
+/* Chromium owns content height, including padding, hidden-to-visible layout and
+   wrapping after width changes. Measuring scrollHeight while hidden yields zero. */
+.composer textarea { grid-column: 1 / -1; grid-row: 1; width: 100%; field-sizing: content; min-height: 24px; max-height: 220px; resize: none; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 15px; line-height: 24px; padding: 0 2px 14px; }
 .composer-toolbar { display: contents; }
 .composer #attachmentMenu { grid-column: 1; grid-row: 2; }
 .composer .composer-options { grid-column: 3; grid-row: 2; }
@@ -1875,6 +1895,12 @@ input[readonly] {
   line-height: 1.5;
 }
 
+/* Plain messages keep independent bidi paragraphs, including mixed-language pastes.
+   Direction stays on text surfaces; the app shell and action rows do not mirror. */
+.msg:not(.rich), .pending-message-text { unicode-bidi: plaintext; text-align: start; }
+.msg.rich, textarea[dir='auto'], .queue-label[dir='auto'] { text-align: start; }
+.msg.rich :is(pre, code, kbd) { unicode-bidi: isolate; }
+
 .msg.rich > :first-child {
   margin-top: 0;
 }
@@ -1900,13 +1926,13 @@ input[readonly] {
 
 .msg.rich ul,
 .msg.rich ol {
-  padding-left: 1.6em;
+  padding-inline-start: 1.6em;
 }
 
 .msg.rich blockquote {
-  margin-left: 0;
-  padding-left: 0.8em;
-  border-left: 2px solid var(--line);
+  margin-inline-start: 0;
+  padding-inline-start: 0.8em;
+  border-inline-start: 2px solid var(--line);
   color: var(--soft);
 }
 
@@ -2080,12 +2106,6 @@ input[readonly] {
   color: var(--red);
 }
 
-.compaction .raw .rich,
-.compaction .raw .msg {
-  max-height: 60vh;
-  overflow: auto;
-}
-
 .raw {
   border-top: 1px solid var(--line);
   padding: 9px 11px 11px;
@@ -2144,6 +2164,15 @@ input[readonly] {
 
 .pre.is-quiet {
   color: var(--faint);
+}
+
+/* Expanded transcript details share the chat's vertical scrolling. Separate
+   result/request scrollers trap the wheel and reset on streamed revisions.
+   Text is already bounded by the session renderer; code keeps horizontal scroll. */
+.tool > .raw .pre {
+  max-height: none;
+  overflow: visible;
+  overscroll-behavior-y: auto;
 }
 
 .chip {
@@ -2587,7 +2616,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .usage-limit > div { display: grid; gap: 6px; }
 .usage-limit > div:last-child { text-align: right; }
 .usage-limit progress { width: 180px; height: 5px; accent-color: var(--blue); justify-self: end; }
-.usage-heatmap { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 10px); grid-template-columns: repeat(52, minmax(4px, 1fr)); gap: 4px; }
+.usage-heatmap { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 10px); grid-template-columns: repeat(52, minmax(0, 1fr)); gap: 4px; }
 .heat-cell { border-radius: 3px; background: var(--card); }
 .heat-cell[data-level='1'] { background: #203449; }
 .heat-cell[data-level='2'] { background: #2b4b73; }
@@ -2634,6 +2663,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 #chatFoot { border: 0; padding: 0 24px 8px; text-align: center; font-size: 10px; }
 @media (max-width: 850px) {
   .app { --sidebar-default: 205px; }
+  .app > header .live em { display: none; }
   [data-panel='home'] { grid-template-rows: none; }
   .composer { width: calc(100% - 32px); padding: 14px 12px 10px; }
   #chatBody { padding: 20px 22px; }
@@ -2771,13 +2801,14 @@ select option { background: var(--card); color: var(--ink); }
 .queue-label[draggable='true']:active { cursor: grabbing; }
 .queue-label[draggable='true']:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 3px; }
 
-.project-add { min-width: 26px; padding: 2px 6px; font-size: 20px; line-height: 1; }
 .project-group { margin: 8px 0; }
 .project-heading { display: flex; align-items: center; gap: 9px; cursor: pointer; padding: 6px 8px; list-style: none; }
 .project-heading::-webkit-details-marker { display: none; }
 .project-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .project-new { display: grid; place-items: center; width: 26px; height: 26px; padding: 4px; opacity: 0; }
 .project-heading:hover .project-new, .project-heading:focus-within .project-new { opacity: 1; }
+.project-remove { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; padding: 4px; color: var(--faint); opacity: 0; }
+.project-heading:hover .project-remove, .project-heading:focus-within .project-remove { opacity: 1; }
 .project-group > .sess, .project-group > .worker-group, .project-show-more { margin-left: 20px; }
 .project-show-more { color: var(--faint); font-size: 12px; padding: 6px 8px; }
 
@@ -2801,6 +2832,26 @@ select option { background: var(--card); color: var(--ink); }
 
 .app[data-screen='settings'] [data-panel='chat'].has-agent-panel { grid-template-columns: minmax(0, 1fr); }
 .app[data-screen='settings'] .agent-panel { display: none; }
+
+.agent-plan { min-width: 0; border-bottom: 1px solid var(--edge); color: var(--soft); font-size: 13px; overflow: hidden; }
+.agent-plan[hidden], .app[data-screen='settings'] .agent-plan { display: none; }
+.agent-plan summary { display: flex; align-items: center; gap: 9px; list-style: none; cursor: pointer; }
+.agent-plan summary::-webkit-details-marker { display: none; }
+.agent-plan summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -3px; border-radius: 7px; }
+.agent-plan-heading { min-height: 38px; padding: 8px 12px; }
+.agent-plan-heading .ico { width: 15px; height: 15px; }
+.agent-plan-title { flex: 1; font-weight: 550; }
+.agent-plan-count { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.agent-plan-body { max-height: min(300px, 34vh); overflow-y: auto; overscroll-behavior: contain; padding: 0 7px 7px; border-top: 1px solid var(--edge); }
+.agent-plan-explanation { margin: 9px 8px; color: var(--faint); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-plan-step-heading { padding: 7px 5px; border-radius: 7px; min-height: 34px; }
+.agent-plan-step-heading:hover { background: var(--hover); }
+.agent-plan-marker { display: grid; place-items: center; width: 18px; height: 18px; flex-shrink: 0; border: 1px solid var(--edge); border-radius: 50%; font-size: 10px; color: var(--faint); }
+.agent-plan-step-title { flex: 1; min-width: 0; line-height: 1.4; overflow-wrap: anywhere; }
+.agent-plan-step[data-status='in_progress'] > summary { color: var(--ink); }
+.agent-plan-step[data-status='in_progress'] .agent-plan-marker { border-color: var(--ink); color: var(--ink); }
+.agent-plan-step[data-status='completed'] .agent-plan-marker { color: var(--soft); border-color: transparent; }
+.agent-plan-details { padding: 0 14px 10px 32px; color: var(--faint); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .composer-dock { width: min(836px, calc(100% - 72px)); margin: 10px auto -15px; border: 1px solid var(--edge); border-bottom: 0; border-radius: 16px 16px 0 0; background: var(--card); overflow: hidden; }
 .composer-dock[hidden], .app[data-screen='settings'] .composer-dock, .composer-dock:not(:has(> :not([hidden]))) { display: none; }

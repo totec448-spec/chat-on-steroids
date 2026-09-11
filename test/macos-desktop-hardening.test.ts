@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 const swift = readFileSync(path.join(process.cwd(), 'native/macos-desktop-helper/main.swift'), 'utf8');
 const preparation = readFileSync(path.join(process.cwd(), 'scripts/prepare-macos-desktop-helper.mjs'), 'utf8');
 const computer = readFileSync(path.join(process.cwd(), 'src/main/computer/index.ts'), 'utf8');
-const desktopTools = readFileSync(path.join(process.cwd(), 'src/main/mcp/tools-desktop.ts'), 'utf8');
+const desktopTools = readFileSync(path.join(process.cwd(), 'src/main/mcp/tools-desktop-macos.ts'), 'utf8');
 
 describe('macOS desktop safety hardening', () => {
   it('requires exact Workspace, WindowServer and AX agreement for physical input', () => {

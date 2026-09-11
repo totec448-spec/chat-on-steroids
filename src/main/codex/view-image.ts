@@ -135,6 +135,16 @@ async function decodesToPixels(data: Buffer): Promise<boolean> {
   }
 }
 
+/** Shared transport boundary for filesystem images and explicitly emitted code-mode images. */
+export async function validateImageBytes(data: Buffer): Promise<SupportedImageMime> {
+  if (data.length > MAX_VIEW_IMAGE_BYTES) throw new ViewImageError(VIEW_IMAGE_INVALID_MESSAGE);
+  const mime = imageMime(data);
+  if (!mime) throw new ViewImageError(VIEW_IMAGE_INVALID_MESSAGE);
+  try { validateImageStructure(data, mime); } catch { throw new ViewImageError(VIEW_IMAGE_INVALID_MESSAGE); }
+  if (!(await decodesToPixels(data))) throw new ViewImageError(VIEW_IMAGE_INVALID_MESSAGE);
+  return mime;
+}
+
 /**
  * `ViewImageHandler::handle_call`, minus the parts that belong to systems out of scope: the
  * input-modality gate, environment resolution, the sandbox context and the turn-item events.
@@ -178,14 +188,7 @@ export async function viewImage(
   }
 
   // Reject non-images before their bytes can reach the model.
-  const mimeType = imageMime(fileBytes);
-  if (mimeType === null) throw new ViewImageError(VIEW_IMAGE_INVALID_MESSAGE);
-  try {
-    validateImageStructure(fileBytes, mimeType);
-  } catch {
-    throw new ViewImageError(VIEW_IMAGE_INVALID_MESSAGE);
-  }
-  if (!(await decodesToPixels(fileBytes))) throw new ViewImageError(VIEW_IMAGE_INVALID_MESSAGE);
+  const mimeType = await validateImageBytes(fileBytes);
 
   const useOriginalDetail = options.canRequestOriginalImageDetail && detail === 'original';
   const imageDetail: ImageDetail = useOriginalDetail ? 'original' : DEFAULT_IMAGE_DETAIL;

@@ -11,8 +11,9 @@
 import { randomUUID } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
-import { getSession, saveHandoff } from './store.js';
+import { getSession, readSessionPlan, saveHandoff } from './store.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
+import { userPromptText } from '../../shared/user-prompt.js';
 
 export interface PrepareHandoffInput {
   sessionId: string;
@@ -22,6 +23,10 @@ export interface PrepareHandoffInput {
   /** How the recording looked when the brief was written. Defaults to the session's own counts. */
   sourceEvents?: number;
   sourceTokens?: number;
+}
+
+export function handoffPlanNotice(sessionId: string): string {
+  return `\n\nA task plan exists. Check the latest update_plan call with session(action="read", session_id="${sessionId}", include=["tools"]); expand its tool_call reference for the steps and statuses before continuing.`;
 }
 
 /**
@@ -54,7 +59,8 @@ export function resumeBootstrapText(summary: string, token = ''): string {
 export function resumeBootstrapMatches(recorded: string, summary: string): boolean {
   const canonical = (value: string): string =>
     value.replace(/\u00c2\u00a0/g, ' ').replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n');
-  const withoutMarker = canonical(recorded).replace(/^\[\[CLF-RESUME:[A-Za-z0-9_-]{16,64}\]\]\n\n/, '');
+  const normalized = canonical(recorded);
+  const withoutMarker = (userPromptText(normalized) ?? normalized).replace(/^\[\[CLF-RESUME:[A-Za-z0-9_-]{16,64}\]\]\n\n/, '');
   return withoutMarker === canonical(resumeBootstrapText(summary));
 }
 
@@ -123,11 +129,14 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
   // store is indistinguishable from a real brief for the rest of its life.
   const shortfall = briefShortfall(text, input.sourceTokens ?? summary.estimatedTokens);
   if (shortfall) throw new Error(shortfall);
+  const plan = await readSessionPlan(input.sessionId);
+  // Persist the notice with the brief so delivery and exact bootstrap matching agree.
+  const planNotice = plan?.plan.length ? handoffPlanNotice(input.sessionId) : '';
   const handoff: Handoff = {
     id: newHandoffId(),
     sessionId: input.sessionId,
     createdAt: Date.now(),
-    text,
+    text: text + planNotice,
     sourceEvents: input.sourceEvents ?? summary.events,
     sourceTokens: input.sourceTokens ?? summary.estimatedTokens,
     // The working folder is deliberately not here. It belongs to the durable local session

@@ -22,11 +22,25 @@ it('initializes simultaneous Prime cwd from each exact durable session project',
   expect(a?.virtual).toBe('/work/a'); expect(b?.virtual).toBe('/work/b');
   expect((await run('a', () => resolveIn(roots(), 'file.txt'))).real).toBe(path.join(base, 'a', 'file.txt'));
 });
-it('preserves learned cwd while still revalidating the explicit project', async () => {
+it('keeps the explicit project authoritative over learned cwd and revalidates it', async () => {
   project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
   setWorkspaceFor('chat:chat-a', { virtual: '/work/b', real: path.join(base, 'b') });
-  expect((await run('a', () => resolveIn(roots(), 'file.txt'))).virtual).toBe('/work/b/file.txt');
+  expect((await run('a', () => resolveIn(roots(), 'file.txt'))).virtual).toBe('/work/a/file.txt');
   project.mockRejectedValue(new Error('The session project is unavailable'));
   await expect(run('a', () => resolveIn(roots(), '/work/b/file.txt'))).rejects.toThrow('project is unavailable');
   await expect(run('a', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined))).rejects.toThrow('project is unavailable');
+});
+it('retains the selected project after an absolute path learns a different directory', async () => {
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  await run('a', () => resolveIn(roots(), '/work/b/file.txt'));
+  expect((await run('a', () => resolveIn(roots(), 'file.txt'))).real).toBe(path.join(base, 'a', 'file.txt'));
+  expect((await run('a', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined))).virtual).toBe('/work/a');
+});
+it('keeps learned cwd for unfiled chats and permits an explicit per-command workdir', async () => {
+  project.mockResolvedValue(null);
+  await run('a', () => resolveIn(roots(), '/work/b/file.txt'));
+  expect((await run('a', () => resolveIn(roots(), 'file.txt'))).virtual).toBe('/work/b/file.txt');
+  project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
+  expect((await run('a', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, '/work/b'))).virtual).toBe('/work/b');
+  expect((await run('a', () => resolveIn(roots(), 'file.txt'))).virtual).toBe('/work/a/file.txt');
 });

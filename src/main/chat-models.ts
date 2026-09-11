@@ -51,6 +51,7 @@ export function requestChatModels(allowOpen = true): ChatModelCatalog {
     logInfo(`model discovery requested id=${request.nonce}`);
     catalog = { ...catalog, state: 'pending', requestedAt: now, error: undefined };
     scheduleDeadline(request.expiresAt);
+    changed();
     wakeBrowserWork();
   } else if (allowOpen && !request.allowOpen) {
     // Explicit refresh promotes the existing nonce; it cannot create a competing request.

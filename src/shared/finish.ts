@@ -1,9 +1,4 @@
-/** Added to every normal Astra user-message delivery; authored text stays unchanged. */
+/** One completion policy for browser and tool delivery; authored user text stays unchanged. */
 export function finishInstruction(leadMinutes?: number): string {
-  return `Use the session_finish tool ${leadMinutes === 3 ? 3 : 5} minutes before you finish the task.`;
-}
-
-/** Transport-only reminder; the stored native message remains the user's own text. */
-export function finishInputInstruction(leadMinutes?: number): string {
-  return `The user just sent this instruction. Work on it and verify the whole request is complete. ${finishInstruction(leadMinutes)} Repeat this check and early finish call for every new user instruction.`;
+  return `Work through the whole requested task, including corrections. Use session_finish only when the requested implementation is complete and about ${leadMinutes === 3 ? 3 : 5} minutes of final verification remain. New instructions extend the work; they do not require another finish call. Do not use this tool for progress updates or to collect queued tasks.`;
 }

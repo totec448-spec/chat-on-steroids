@@ -7,7 +7,7 @@ import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, r
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, assignSessionProject, getSessionProject, inheritSessionProject, listProjects } from '../src/main/projects.js';
+import { addProject, assignSessionProject, getSessionProject, inheritSessionProject, listProjects, removeProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 let directory: string, approved: string;
@@ -48,6 +48,27 @@ it('resolves a native picker alias to the approved identity without granting out
   const outsideAlias = path.join(approved, 'outside-alias');
   await fs.symlink(outside, outsideAlias, process.platform === 'win32' ? 'junction' : 'dir');
   await expect(addProject(outsideAlias)).rejects.toThrow(/escapes|not inside/);
+});
+
+it('removes a grouping durably while preserving files, conversations and pending browser claims', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const other = await addProject(path.join(approved, 'second'));
+  const session = await createSession({ title: 'Keep this chat', conversationId: 'retained-conversation' });
+  await assignSessionProject(session.id, project.id);
+  const file = path.join(project.path, 'keep.txt');
+  await fs.writeFile(file, 'keep');
+  const input = await enqueueInput({ id: randomUUID(), projectId: project.id, sessionId: null, text: 'Queued work', dueAt: 0, mode: 'auto', model: null, reasoningEffort: null });
+  await Promise.all([removeProject(project.id), removeProject(project.id)]);
+  resetDurableForTests(); initDurableStore(directory); resetInputForTests(); resetSessionStoreForTests();
+  expect(await listProjects()).toEqual([{ ...project, ungrouped: true }, other]);
+  expect((await getSession(session.id))?.title).toBe('Keep this chat');
+  expect(await getSessionProject(session.id)).toMatchObject({ virtual: '/work/first' });
+  expect(await fs.readFile(file, 'utf8')).toBe('keep');
+  expect(await claimBrowserInput(input.id, 'document', null)).toMatchObject({ id: input.id });
+  expect(await bindBrowserInputProject(input.id, 'document', 'queued-conversation')).toBe(true);
+  await expect(removeProject(randomUUID())).rejects.toThrow('Project not found');
+  expect(await addProject(project.path)).toEqual(project);
+  expect(await listProjects()).toEqual([project, other]);
 });
 
 it('binds a claimed fresh input before evidence without acknowledging delivery or accepting another document', async () => {

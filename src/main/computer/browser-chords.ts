@@ -13,15 +13,40 @@ const MODIFIERS = new Set(['ctrl', 'shift', 'alt', 'cmd']);
 
 const KEY_ALIASES: Record<string, string> = {
   control: 'ctrl',
+  control_l: 'ctrl',
+  control_r: 'ctrl',
+  ctrl_l: 'ctrl',
+  ctrl_r: 'ctrl',
+  shift_l: 'shift',
+  shift_r: 'shift',
+  alt_l: 'alt',
+  alt_r: 'alt',
+  super_l: 'cmd',
+  super_r: 'cmd',
+  meta_l: 'cmd',
+  meta_r: 'cmd',
   option: 'alt',
   command: 'cmd',
   meta: 'cmd',
   super: 'cmd',
   win: 'cmd',
+  windows: 'cmd',
   pgup: 'pageup',
   page_up: 'pageup',
+  prior: 'pageup',
+  kp_prior: 'pageup',
+  numpad_prior: 'pageup',
   pgdn: 'pagedown',
   page_down: 'pagedown',
+  next: 'pagedown',
+  kp_next: 'pagedown',
+  numpad_next: 'pagedown',
+  kp_left: 'left',
+  numpad_left: 'left',
+  kp_right: 'right',
+  numpad_right: 'right',
+  kp_home: 'home',
+  numpad_home: 'home',
   arrowleft: 'left',
   arrowright: 'right',
   bracketleft: '[',
@@ -43,13 +68,11 @@ const BROWSER_TAB_CHORDS = new Set([
   'ctrl+pageup',
   'ctrl+pagedown',
   'ctrl+shift+q',
-  'ctrl+l',
-  'alt+d',
   'alt+left',
   'alt+right',
   'alt+home',
   ...Array.from({ length: 9 }, (_, index) => `ctrl+${index + 1}`),
-  // macOS — close/quit/hide, new tab/window, switch tab, history, address bar
+  // macOS — close/quit/hide, new tab/window, switch tab, history
   'cmd+w',
   'cmd+shift+w',
   'cmd+q',
@@ -65,8 +88,6 @@ const BROWSER_TAB_CHORDS = new Set([
   'cmd+alt+right',
   'cmd+[',
   'cmd+]',
-  'cmd+l',
-  'cmd+alt+f',
   ...Array.from({ length: 9 }, (_, index) => `cmd+${index + 1}`)
 ]);
 
@@ -74,7 +95,7 @@ const BROWSER_TAB_CHORDS = new Set([
  * Process names as Windows reports them (image name, `.exe` stripped) and as macOS reports them
  * (the window owner's application name: "Google Chrome", "Brave Browser", "Safari").
  */
-const BROWSER_PROCESS_PATTERN =
+export const BROWSER_PROCESS_PATTERN =
   /(^|[\s_-])(chrome|chromium|msedge|edge|firefox|brave|opera|vivaldi|arc|safari)([\s_-]|$)/;
 
 /** The normalized chord when it is one a browser takes for tab or window management, else null. */

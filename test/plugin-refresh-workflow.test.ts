@@ -113,11 +113,11 @@ it.each([{ deny: true }, { navigateDuringClaim: true }])('never clicks after den
   expect(h.click).not.toHaveBeenCalled();
   expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'fail']);
 });
-it('reuses one owned management tab and preserves unreachable helpers and user chats', async () => {
+it.each(['unpinned', 'pinned', 'pinned-during-proof'])('reuses management tabs and respects pinning (%s)', async mode => {
   const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
   const code = background.slice(background.indexOf('let pluginRefreshFlight = null;'), background.indexOf('async function catalogProbe('));
   let requests: object[] = [{ id }];
-  const tabs = [{ id: 7, url: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins` }, { id: 8, url: 'https://chatgpt.com/c/user-conversation' }];
+  const tabs = [{ id: 7, url: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins`, pinned: false }, { id: 8, url: 'https://chatgpt.com/c/user-conversation', pinned: false }];
   const create = vi.fn(async () => ({ id: 9 }));
   const remove = vi.fn();
   const sendMessage = vi.fn(async (): Promise<object> => ({ ok: true }));
@@ -136,7 +136,12 @@ it('reuses one owned management tab and preserves unreachable helpers and user c
   expect(create).not.toHaveBeenCalled();
   expect(remove).not.toHaveBeenCalled();
   requests = [];
-  sendMessage.mockResolvedValue({ safe: true });
+  tabs[0]!.pinned = mode === 'pinned';
+  sendMessage.mockImplementation(async () => {
+    if (mode === 'pinned-during-proof') tabs[0]!.pinned = true;
+    return { safe: true };
+  });
   await run();
-  expect(remove).toHaveBeenCalledExactlyOnceWith(7);
+  if (mode === 'unpinned') expect(remove).toHaveBeenCalledExactlyOnceWith(7);
+  else expect(remove).not.toHaveBeenCalled();
 });

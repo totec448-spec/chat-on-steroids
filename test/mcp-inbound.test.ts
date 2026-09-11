@@ -3,8 +3,8 @@ import { inboundRequestId, requestIdFromHeader, withInboundRequestId } from '../
 
 describe('MCP inbound request id boundary', () => {
   it('normalizes the raw x-request-id to the page join key once at ingress', () => {
-    expect(requestIdFromHeader('wfr_01a014bdd7cd7a15b6b533d3ce2b42f2/yqy1')).toBe(
-      'wfr_01a014bdd7cd7a15b6b533d3ce2b42f2'
+    expect(requestIdFromHeader('wfr_00000000000000000000000000000001/yqy1')).toBe(
+      'wfr_00000000000000000000000000000001'
     );
     expect(requestIdFromHeader('  wfr_abc_123/relay-hop')).toBe('wfr_abc_123');
     expect(requestIdFromHeader(['wfr_only/a'])).toBe('wfr_only');

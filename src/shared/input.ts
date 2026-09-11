@@ -2,7 +2,8 @@ import type { ReasoningEffort } from './session.js';
 
 /** Normalized image bytes only. No local filesystem path crosses into the renderer. */
 export interface InputImage { name: string; dataUrl: string; }
-/** Immutable staged upload. Neither renderer nor browser receives a local path. */
+/** Upload metadata without a local path. Outbox ids require immutable staging;
+ * recorded native-message ids are presentation metadata and grant no file access. */
 export interface InputAttachment { id: string; name: string; size: number; mimeType: string; preview?: string; }
 export type InputAutomation = 'off' | 'goal' | 'loop';
 

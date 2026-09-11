@@ -5,7 +5,7 @@
  * has resolved, so it is appended late — but it is stamped with `startedAt`, because that is
  * when it happened. Everything the page observed in the meantime already has a lower `seq`.
  * Reading the log by `seq` therefore shows a call after the commentary it ran underneath, and
- * a slow call after the `turn_end` of the turn that made it: `2026-08-17-d1354db2` seq 390,
+ * a slow call after the `turn_end` of the turn that made it: `2026-01-01-00000017` seq 390,
  * `time` 1786982781914, sits after a `turn_start` stamped 1786982783350 — a second and a half
  * in the future of the row above it.
  *
@@ -40,7 +40,7 @@ export interface Chronological {
 }
 
 /** Where an entry sits in the log: its first appearance if it has revisions, else its seq. */
-function positionOf(entry: Chronological): number {
+export function positionOf(entry: Chronological): number {
   return typeof entry.origin === 'number' && Number.isFinite(entry.origin) ? entry.origin : entry.seq;
 }
 
@@ -49,7 +49,7 @@ function positionOf(entry: Chronological): number {
  *
  * A message carries the `create_time` ChatGPT stamped when it *opened* that message, and
  * ChatGPT can open the final answer and still run another connector call before the prose is
- * written. Session `2026-08-21-ce135bff` is the live case: the answer of turn `…-1-9` is
+ * written. Session `2026-01-01-00000019` is the live case: the answer of turn `…-1-9` is
  * stamped 08:40:34, with `write_stdin` at 08:40:37 and `git show` at 08:40:42 after it. Order
  * that group by time alone and two tool rows are drawn *underneath* the finished answer —
  * which is neither what ChatGPT itself shows nor a thing that can have happened.

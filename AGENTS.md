@@ -1,3190 +1,1581 @@
-# Chat On Steroids — the agent map
+# Chat On Steroids — product logic and agent map
 
-**QUALITY >> QUANTITY. Delete before adding.** Improve the underlying decision/ownership structure
-and replace obsolete logic; never stack a fallback, watcher, state machine or special case around a
-bad invariant. Prefer one deterministic source of truth, fewer branches and reuse of existing
-mechanisms. Every change should make the affected system smaller, simpler and easier to reason about
-where practical. Fix problems from the ground up; do not grow the codebase to hide them.
+Read this file before changing the app. It explains the product, feature logic, owners and
+working rules without requiring old worklogs. If the host injected only a prefix, read the
+remaining file from disk. Then open the relevant implementation.
 
-**No build-up: rewrite the affected subsystem with the new feature/invariant in mind.** Do not keep
-the old architecture and bolt a new path beside it merely because that is the smallest diff. When a
-new implementation supersedes an old assumption, recode that specific area around the new source of
-truth, delete the obsolete branches/state/fallbacks it replaces, and converge callers/tests on that
-one design. This is not permission for broad rewrites: change only the affected subsystem, but leave
-it architecturally cleaner and preferably smaller than before.
+**QUALITY >> QUANTITY. Delete before adding.** Repair the earliest wrong identity, decision or
+ownership boundary. Rewrite the affected area around its intended invariant and remove the
+obsolete branches it replaces. Do not bolt on another fallback, watcher, timer, state machine
+or mirrored authority. This permits a focused subsystem rewrite, not an unrelated redesign.
 
-**Rule: no build up; rewrite with the new feature in mind.**
+**The tree is shared and usually dirty.** Never reset, checkout, clean, broadly reformat or
+overwrite somebody else's work. Read the current diff of every file you will edit. Re-read
+changed lines before applying an older patch. Document the work and its actual validation.
 
-**Browser efficiency rules.** Opening the app, a suspended MV3 wake socket and a maintenance
-alarm are not permission to open a tab. Reuse a suitable existing document. One operation owns
-one elected tab across provider navigation and MV3 suspension; a missing receipt or a user-closed
-tab must not create a new opening attempt. Transfer opening authority at handout, not after page
-hydration. Keep waiting chats and reusable sleeping workers open for follow-ups. Only terminal,
-blocked or superseded conversations and proven duplicates grant tab-close authority,
-subject to the existing draft/generation/document checks.
-Read bounded account-evaluated model metadata and installed tool declarations through the existing
-MAIN-world bridge. Do not infer availability from English labels or fixed release names, sweep every
-effort to discover a catalog, or add polling/fallback openers around an uncertain observation.
+**Reading order:** §§1–3 product/identities/evidence; §4 owners; §§5–18 feature contracts;
+§19 debugging/tests; §§20–22 shipping, known gaps and completion.
 
-Native attachments have one staging owner in `session/input-attachments.ts`: immutable originals,
-bounded thumbnails, serialized quota/pruning/admission and opaque IDs. The outbox owns membership;
-the bridge serves bounded chunks only to that exact pre-send browser claim. Never expose source
-paths or inject a file reference as though its bytes reached ChatGPT. Final Send must recheck the
-same text, attachment nodes and navigation epoch after every asynchronous authorization step.
-Pending plan stages are projected from the first durable input until its receipt materializes the
-queue. Temporary planner tabs retire after capture/cancellation only with exact idle/draft proof.
+**Meaning of the text.** “Intent” and “must” describe the behavior to preserve or achieve.
+“Current” describes the checked implementation. A bug does not become product policy because
+the code currently does it. Known implementation gaps are collected in §21 instead of being
+mixed into the happy path as features.
 
-**This tree is usually dirty and shared with the user and other agents — never `reset`,
-`checkout`, `clean`, reformat, or overwrite work you did not do.**
+Source alignment: **2026-09-10**, including current working-tree changes. App/extension **2.0.9**,
+bridge protocol **13** in the checked declarations (`package.json`, `src/main/version.ts`,
+`extension/manifest.json`). This does not prove release, installation or live Chrome behavior.
 
-The single orientation document for this repository. Read it before changing anything.
+## 1. What the whole app is meant to do
 
-**How to use it.** §1–§3 is the mental model; read those once, in order. §4 is "where is the
-thing" plus the mechanism ledger: every durable fact, owner, lifetime and publication boundary
-that matters across subsystems. §5–§17 is one section per subsystem, each with the same shape —
-what it owns, its files, its flow, **what must hold**, how it fails, which tests cover it. §18 is
-the fastest entry point when you have a symptom and no theory. §19–§22 is how to work here.
+Chat On Steroids is a Windows/macOS/Linux Electron workspace around ChatGPT. The user can work
+from the desktop app while ChatGPT generates answers in its own browser conversation. The app
+sends instructions, records the conversation, supplies local tools over MCP, and coordinates
+long-running work. The companion extension connects that browser conversation to the local
+session. ChatGPT still owns model execution and its native account/model availability.
 
-**One file, complete.** This replaces the old `AGENTS.md` + `agent.md` split, which
-duplicated roughly 60% of its content and had already drifted between copies. It is sized
-for completeness rather than for any tool's default project-document budget; if your
-harness truncates long project docs, raise its limit rather than cutting this down.
+The product should feel like one continuous workspace: choose a project, send a task, watch
+real progress, correct it while it runs, inspect what actually happened, and continue without
+losing the project, history, workers or queued instructions when a chat grows too long.
 
----
+### The user's normal path
 
-## 1. The app in sixty seconds
+1. **Set up access.** Approve folders and capabilities, configure a tunnel, connect Core in
+   ChatGPT, and load/pair the companion extension. Desktop and Plugins are optional connectors.
+   Connection, browser pairing and account model availability have separate status.
+2. **Choose where work belongs.** Add a local project folder or use an unfiled chat. A project
+   gives the session its working folder and root `AGENTS.md`; permission still comes from the
+   approved roots. Removing a project grouping keeps its chats and folder association.
+3. **Write a message.** Select an account-observed model and reasoning level, optionally attach
+   files, choose ordinary/Goal/Loop behavior, and Send. The app freezes an input in its durable
+   outbox before delivery. “Queued”, “put into the composer” and “ChatGPT accepted it” are
+   different facts and should be presented that way.
+4. **Work and steer.** The timeline combines native user/assistant messages with exact local
+   tool results. An immediate correction can join an eligible tool response. An after-turn
+   message waits for a verified completion. Native file uploads always use the browser send
+   path. The queue remains editable until its exact entry has been claimed.
+5. **Plan or automate deliberately.** A generated workflow gives the executor the whole job
+   immediately and queues later verification checkpoints. Goal continues unfinished requested
+   work and may stop. Loop keeps asking for deeper work within the same brief until switched
+   off. Astra uses its finish-tool boundary for automatic continuation.
+6. **Continue across time.** Workers sleep for reuse. Compact & Resume moves the same local
+   session from old ChatGPT chat A to new chat B. History remains readable; queued work and
+   project identity remain attached to the session. Recovery helps only work the app can still
+   prove it owes, not arbitrary old chats.
 
-A **Windows/macOS/Linux Electron app** that hands ChatGPT a deliberately small set of local
-computer capabilities over MCP. It is a desktop chat workspace, bridge and permission layer. ChatGPT still hosts model execution; the extension transports desktop input and observes the provider UI. It also ships a Chrome extension that watches ChatGPT itself, so the app can
-record conversations, prove which conversation issued which tool call, replace generic tool
-rows with what actually happened, compact a long chat into a fresh one, and run worker chats.
-Core is portable; the Desktop/computer-use surface has native Windows and macOS backends behind
-one protocol and must be absent from live Linux capability/discovery state.
+### Feature vocabulary — keep these distinctions
 
-Four runtime planes, only two of which are servers:
-
-```text
-              ── PUBLIC / CHATGPT SIDE ──────────────────────────────
-
- ChatGPT model                                    ChatGPT web page
-   │  MCP over HTTPS                                │
-   ▼                                                ├─ chatgpt-dom.js  selectors only
- ┌──────────────┐  ┌──────────────┐                 ├─ content.js      isolated-world
- │ Core         │  │ Desktop      │                 │                  recorder + UI
- │ files/term/  │  │ screen/input/│                 └─ fiber.js        MAIN-world React
- │ session/     │  │ clipboard    │                                    evidence
- │ agents       │  │              │                        │
- └──────┬───────┘  └──────┬───────┘                        ▼
-        └────────┬────────┘                        background.js  MV3 worker, journal,
-                 │ tunnel                                         tab↔conversation registry
-                 ▼                                                │ HTTP 8765-8769
-   127.0.0.1  MCP server                                          ▼
-   secret tokenized path per surface                        bridge.ts
-                 │                                                │
-   server.ts → tools.ts → kernel.ts                               ├→ recorder / correlation
-                 │                                                ├→ Compact & Resume
-        ┌────────┴────────┐                                       └→ agent bootstrap
-   Core tools        Desktop tools
-        │                 │                        ── ELECTRON RENDERER ──
-   sandbox +        computer/*                      renderer → preload (fixed API)
-   codex/* ports                                             → ipc.ts → main services
-        │
-   files + processes
-```
-
-**The MCP server and the browser bridge are two different servers with two different
-threat models.** MCP is the model's capability endpoint. The bridge exists only for the
-Chrome extension and has no arbitrary filesystem, command or permission authority. Its attachment
-route serves only immutable user-selected staging bytes belonging to an exact claimed input.
-Never merge their lifecycles or their auth.
-
-The extension never executes a tool. It observes ChatGPT and reports evidence. **The app is
-the only authority on what a local tool actually did.** The renderer has no Node, no
-filesystem, no command, no network authority; it crosses preload through named IPC.
-
-## 2. Where the bugs actually are
-
-Almost nothing hard here is a local algorithm bug. The hard ones live on six boundaries:
-
-| Boundary | The two things people confuse |
+| Concept | Meaning and intended effect |
 | --- | --- |
-| Discovery vs. enforcement | a schema ChatGPT cached vs. a permission that is live *now* |
-| Path spelling | `/project/src/a.ts` vs. a native `C:\work\...` or `/home/...` path — same decision required |
-| Request vs. conversation | HTTP `x-request-id` vs. the ChatGPT conversation that owns it |
-| Process lifetime | content script (document) vs. service worker (suspends) vs. app (restarts) |
-| Durable vs. frontend identity | local session id vs. the ChatGPT conversation attached to it |
-| Async vs. selection | a load started for A vs. the B the user has since selected |
+| Local session | Durable identity for the work, its history, project and current ChatGPT binding. |
+| ChatGPT conversation | Replaceable provider frontend; its id is not the durable session id. |
+| Turn | One authored user-message generation and its exact response/work. Interim prose is not a final boundary. |
+| Approved root | Filesystem access the user granted; may be a parent containing several projects. |
+| Local project | Explicit folder association and sidebar grouping; grants no new permission. |
+| Native ChatGPT project | Provider `/g/.../c/...` context; separate from the app's local folder catalog. |
+| Goal objective | The requested finish line for one chat. It persists independently of a provider attempt. |
+| Goal / Loop | Mutually exclusive modes of one driver. Goal can decide no further message is needed; Loop continues within scope. |
+| Generated workflow / checkpoints | User instructions owned by the outbox; delivered at real finish/completion boundaries. |
+| `update_plan` | The agent's displayed progress plan. It does not execute or consume queue entries. |
+| `session_finish` | Astra's explicit near-finish hold/notice boundary; does not mean the whole task is already verified. |
+| Prime / worker | One owning conversation and its reusable subordinate chats. Several prime families may run independently. |
+| Decision helper / planner | A role-specific chat that produces a continuation decision or workflow; it must not execute the reference task. |
+| Code-mode `exec` | Bounded JavaScript composition of one MCP surface's tools. `exec_command` runs an OS process. |
+| Stop / End turn / Block | Stop requests native generation cancellation; End turn releases a finish hold; Block revokes exact-chat local tool access. |
 
-If a bug looks like four subsystems failing at once, it is one of these, once. Find the
-**earliest wrong identity or state transition** — not the last UI that displayed it.
+### Product-wide invariants
 
-### Name the identity, then find where it is lost
+- One meaningful fact has one owner. Other modules may project it, never independently decide it.
+- User corrections extend the original task. Plans and automation must not quietly narrow it to
+  whatever the last assistant answer happened to describe.
+- Visible progress is truthful: no invented completion, lost attachment disguised as a file
+  reference, sent claim based on insertion, or success based on a button click alone.
+- Browser use is economical. Reuse an eligible document; one operation owns one elected tab
+  across navigation and MV3 suspension. Startup, a wake socket and a maintenance alarm are not
+  independent permission to open a tab. Missing receipts and user-closed elected tabs do not
+  create another opening attempt. Transfer opening authority when it is handed out.
+- Waiting chats and sleeping workers retain their durable history and identity, not an
+  indefinite browser tab. Settled app-owned pages become eligible for New Chat reuse after
+  two minutes without work and automatic closure after five. Fresh document/draft/generation
+  checks remain mandatory; selected Chrome tabs veto idle closure, and pins veto closure and
+  New Chat reuse. Terminal, blocked, cancelled, superseded and duplicate cleanup retains its
+  separate authority. Unknown/personal ownership, live work and pending delivery are not idle.
+- Unknown identity fails closed where a wrong choice could mutate, attribute or message the
+  wrong owner. Presentation can degrade visibly; execution must not guess.
+- Every async result proves its original owner and epoch still apply. A → B → A navigation
+  defeats a check of the selected id alone.
+- Bound compressed bytes, decoded pixels, base64, text, structured results and queue growth at
+  their respective owners. A small rendered preview is not a memory bound.
 
-Every boundary above is a place where one specific identity is supposed to survive. Before
-reading any code, say which one this bug is about. If you cannot state it, you have not
-found the real boundary yet.
+## 2. Runtime model and identities
 
-| Plane | The identity that must survive |
+There are four cooperating planes. Core, Desktop and Plugins are three logical MCP surfaces on
+the local MCP listener; the browser bridge is a separate loopback service with separate auth.
+
+```text
+ChatGPT model                         ChatGPT browser page
+  | MCP via public tunnel               | native UI and conversation state
+  v                                     | MAIN: fiber.js + usage.js
+Core / Desktop / Plugins                | isolated: chatgpt-dom.js + content.js
+  | secret path per surface             v
+server -> registrar -> kernel       background.js (suspending MV3 worker)
+  | live permission + caller proof      | journal, tabs, claims, ACKs
+  v                                     | paired HTTP + wake-only socket
+local files / processes / desktop       v
+or external plugin manager           bridge.ts
+  |                                     |
+  +--------- recorder / sessions / input / continuation / agents / Goal
+                                        |
+                                ipc.ts -> fixed preload API
+                                        |
+                                Electron renderer workspace
+```
+
+The extension observes ChatGPT and performs authorized browser orchestration. It never executes
+the model's local tool. The main process is authoritative about what a local tool actually did.
+The renderer has no direct filesystem, command, secret or generic main-process authority.
+
+### Identify the boundary before debugging
+
+| Boundary | Identity that must survive |
 | --- | --- |
-| filesystem | approved root + canonical real path |
-| MCP call | normalized request id |
-| tool ownership | request id -> conversation id |
-| browser observation | conversation id + navigation epoch + message/turn identity |
-| agent | conversation id -> prime or worker slot |
-| workspace | conversation/agent key -> cwd |
-| terminal | proven owner -> exec session id |
-| session | local session id + conversation lineage |
-| compaction | continuation token + from/to conversation |
-| renderer load | selected session id + load generation |
-| connection | tunnel/endpoint generation |
-| desktop coordinates | screenshot frame id |
+| Filesystem | Approved root plus canonical real path, regardless of native/virtual spelling. |
+| MCP ingress | Normalized HTTP request id. |
+| Tool attribution | Request id → exact conversation id → local session epoch. |
+| Browser observation/action | Conversation + Chrome document id + navigation epoch + message/turn id. |
+| Session continuation | Local session id + continuation token + A/B lineage + send checkpoints. |
+| Input | Outbox UUID + local session + elected browser owner or exact tool recipient. |
+| Agent routing | Exact prime family/run incarnation + worker conversation; `worker-1` alone is ambiguous. |
+| Workspace | Proven session/project or caller/agent key + cwd. |
+| Terminal | Durable local session principal → process session id. |
+| Renderer | Selected session/draft key + load generation. |
+| Connection | Endpoint/tunnel generation. |
+| Desktop input | Capture frame/accessibility ref + target geometry + helper generation. |
 
-Then classify which plane produced the **first** wrong fact — MCP transport/discovery,
-permission/sandbox/tool runtime, browser observation/identity, bridge/session/agent
-orchestration, renderer presentation, or tunnel/packaging. Do not start in the file where
-the symptom is displayed.
+When four features break together, follow one concrete identity through these boundaries. Find
+the first wrong fact, not the last UI that displayed it. Discovery vs enforcement, page vs
+service-worker lifetime, and local session vs frontend id are recurring sources of mistakes.
 
-Three policies apply everywhere and are not repeated per section:
+### Lifetimes are part of the design
 
-- **Fail closed** when a guess could cause cross-root access, cross-chat attribution,
-  cross-agent terminal control, wrong workspace mutation, wrong compaction target, unsafe
-  rendered HTML, or invalid image content reaching the model. For presentation-only
-  degradation, keep the UI usable and label the uncertainty instead.
-- **Scope every async result to the epoch that requested it** — navigation epoch, load
-  generation, connection generation, endpoint lifetime. Id equality alone is not enough:
-  an A → B → A navigation defeats it.
-- **Bound every representation of large output** — bytes, tokens, decoded pixels, base64,
-  structured fields. Not just the visible text, and not just the compressed input.
-
-## 3. What is authoritative
-
-Sources disagree here because the architecture moved fast. Precedence:
-
-1. current implementation **plus a reproducible test or live repro**;
-2. current declarations: `mcp/surfaces.ts`, `mcp/tools-core.ts`, `mcp/tools-desktop.ts`,
-   `shared/types.ts`, `package.json`, `main/version.ts`, `extension/manifest.json`;
-3. `README.md`;
-4. public design references such as `docs/tool-surface.md`. Internal working notes and
-   security reproductions are maintainer-only; a public clone should treat §5–§18 of this
-   file as the architecture and design record.
-
-**Code comments in this project are unusually load-bearing.** Many name the exact live
-failure that motivated a guard. Read the comment before deleting the guard or "simplifying"
-the state machine. Code and current tests still win when a comment has drifted.
-
-### Baseline
-
-Release numbers are authoritative in `package.json`, `src/main/version.ts` and
-`extension/manifest.json`; the bridge protocol is `version.ts::BRIDGE_PROTOCOL`. Tests assert
-the app/extension versions stay in sync, so this architecture guide deliberately does not
-copy a release number that can drift. Core is cross-platform; main process is TypeScript;
-extension is plain MV3 JavaScript with no build step; Vitest; `node-pty` is the main native
-terminal dependency. Desktop automation is available through native Windows and macOS backends.
-
-Fresh-install defaults from `config.ts` — **Core tool permissions on except opt-in ChatGPT file saving**, **read-only off**,
-**recording on**, session advisory/limit **400k/533k** estimated tokens, **auto-compaction on
-at 400k and level-based with live-work gating**, **multi-agent on** with `maxWorkers` 2 (hard max 8).
-Fresh multi-agent also starts with `allowUnattributedCalls=true`; `recoverAgentTabs` starts **off**
-everywhere, because Goal/Loop chats are recovered regardless of it (see §11).
-That `true` is `FIRST_LAUNCH_MULTI_AGENT` only; `DEFAULT_MULTI_AGENT` — the schema/migration
-baseline that fills the field in when an older config never wrote it — stays `false`.
-Fresh installs also start with **zero approved roots**: enabled permissions are not usable
-filesystem/command authority until the user approves a root, and `connection.ts` refuses to
-publish a root-requiring Core surface until one exists. The limit is
-derived, never typed: the Chat panel offers one threshold and writes `limit = threshold × 4/3`,
-so the defaults have to satisfy that relation or the first save in that panel moves the red
-line. Existing
-configs keep explicit user choices; conservative migration defaults do not widen omitted legacy
-permissions merely because the fresh-install defaults are broader. Windows also enables the
-Desktop capability group. macOS has the native backend but a fresh install starts that group **off**
-(`config.ts::firstLaunchCapabilities`): the user switches it on and grants Screen Recording and
-Accessibility. Linux masks the group off at runtime while preserving stored choices so a config
-moved to a supported host does not lose them.
-
-### Stale-doc traps
-
-Do not "restore" these from an older document:
-
-- `view_image` is its own Core tool, not a mode of `read`.
-- Live tool counts derive from `mcp/surfaces.ts` and current exposure: `find` and the exec pair are mutually exclusive, `session_finish` is conditional, and Desktop is a separate surface. Never restore a hardcoded count from older releases.
-- `session` has exactly two actions, `search` and `read`. Search discovers recordings; read
-  requires an explicit local session id and returns cursor-paged history **without silently
-  truncating authored user/assistant rows**. Tool rows are intentionally compact headlines with
-  exact args/results behind separately cursor-paged `T…` detail reads, and any pre-existing
-  recorder overflow loss is surfaced explicitly. Compact & Resume is app/browser orchestration —
-  there is no model-visible `save_handoff`.
-- Extension pairing is silent loopback `/pair` bearer provisioning. The six-digit flow is gone.
-- Canonical messages live in `messages/*.json`, one replaceable shard per logical id; legacy
-  `messages.json` is read during lazy migration. They are not appended forever to `events.jsonl`.
-- `computer` carries **13** action variants, not 11.
-- Fresh-install multi-agent is **enabled** by `defaultConfig()` through
-  `FIRST_LAUNCH_MULTI_AGENT`; the older prose comment in `shared/types.ts` that says the feature is
-  disabled by default is simply stale against fresh-install behavior. `config.ts::DEFAULT_MULTI_AGENT`
-  remains the conservative schema/migration baseline; `defaultConfig()` is the fresh-install authority.
-- Reusable workers normally **sleep after `finish` and are meant to be messaged again**. Server
-  instructions and `agents` results must tell primes to reuse a suitable sleeping worker with
-  `action=message` before spawning a replacement. Only terminal workers whose own context reached
-  the 400k ceiling need replacing.
-- `mcp/instructions.ts::coreInstructions()` also still carries a root example shaped like
-  `${firstRoot}/src/main.ts`. That silently assumes the approved root *is* the project. Live Core
-  tool contracts in `tools-core.ts` are the authority: an approved root is often the **parent** of
-  the project, so every intermediate folder remains explicit (`/me/projects/app/...`,
-  not `/me/src/...`). There is no model-visible `list_roots` fallback that makes the old example
-  safe; fix the instruction text/tests rather than teaching tools to guess a missing project level.
-- Ordinary Goal continues **completed final answers only**; Astra is finish-tool-only (see §17). Older README/working-note wording that
-  says an `interrupted` turn is automatically continued is stale against `content.js::GOAL_CONTINUABLE`.
-- The older prose comment near `config.ts` auto-compaction defaults still calls the trigger
-  edge-based. Live authority is `store.ts::autoCompactionReady()` + `bridge.ts::chatIsWorking()`:
-  **level above threshold + live work**, with no durable one-shot edge. Likewise, a background.js
-  comment that implies browser recovery closes duplicate tabs is stale: recovery deterministically
-  elects/reloads one exact tab but does not own duplicate-tab cleanup.
-- A separate `background.js` maintenance comment still says an unattributed repair is armed after
-  twenty seconds. That mixes two different clocks. Live authority is conditional: a call carrying an
-  unresolved request id may wait up to the recorder's **20-second request-id grace**; a call with no
-  request id has no ownership proof to await and lands Unattributed immediately. Either resulting
-  **Unattributed verdict** then starts `bridge.ts::UNATTRIBUTED_REPAIR_MS`, a separate **60-second
-  incident** before repair candidates are queued. The extension's 30-second alarm is only the MV3
-  wake-up floor for collecting already-decided work; it is not either recovery deadline. Several
-  `content.js` comments still carry old recorder timings: the Fiber request-id note says **15s**,
-  `streamTurnGroups()` says **5s**, and the compaction `TOOL_SETTLE_MS` rationale says **15s**. Live
-  authority is `recorder.ts::REQUEST_ID_GRACE_MS = evidenceWindow(20_000)`. That last comment also
-  predates the running-vs-settling split: Compact & Resume waits app-reported **running local tools**,
-  not the recorder's attribution tail. Treat all three as comment drift, not alternate timers.
-- `multiAgent.recoverAgentTabs` is one switch with one meaning, read through
-  `bridge.ts::tabRecoveryWanted()`: whether **silence** and **no-tab** recovery may bring back a chat
-  that the Goal/Loop switch is *not* driving — workers, primes, plain chats with recorded tool calls.
-  A Goal/Loop chat (`goalActiveFor()`) is always brought back. Unattributed, assistant-error, Goal
-  watch and compaction pickups are reloads of a broken page and are not gated by it.
-- `bridge.ts` still has two misleading comments near the live recovery/command structures. The
-  `lastBrowserRecoveryAt` comment says one cooldown covers errors, silence and missing tabs, but
-  `queueBrowserRecovery()` explicitly gives `silence` and `goal` no cooldown and applies the 3m floor
-  only to `unattributed` / `assistant-error` / `no-tab`. `Command.owner` also says a restored command
-  has no waiting page and is memory-only; live `DurableCommandRecord` serializes/restores exact
-  `owner` + `claimedAt` for valid leases. Trust the record/restore code and tests, not those comments.
-- Goal source comments have two current semantic drifts too. `goal.ts` still says a per-chat Off row
-  can never be revived by any later app-wide change, but deliberate app-wide master-Off clears those
-  rows. `bridge.ts::inspectOwedGoals()` still says a pending Goal reply “travels to the replacement”
-  during Compact & Resume; production moves objective + chat switch only and currently leaves the
-  reply row on A. Treat both comments as stale against the mechanisms documented below.
-- `test/update.test.ts` still contains prose that the next retry schedule is only “the next time the
-  app opens”. Production `update.ts::startUpdateChecks()` now runs an immediate pass plus an
-  unreferenced six-hour schedule. Current update tests cover the immediate/unreferenced timer lifetime and staging; do not regress production to satisfy the old comment.
-- Exec custody is keyed by the durable local `sessionId` carried in `RequestCorrelation`, not the
-  replaceable ChatGPT conversation id. Compact & Resume therefore needs no process-owner move: B
-  resolves to the same principal and may continue A's live `write_stdin(session_id=...)`, while a
-  different session and the anonymous non-adoptable bucket remain fenced. Do not restore the retired
-  `moveExecConversationOwners(A,B)` representation or add a resume-only adoption path.
-
-## 4. Repository map
-
-```text
-── shell / config ─────────────────────────────────────────────────────────
-src/main/index.ts             Electron startup, window/tray, shutdown, security shell
-src/main/shutdown.ts          ordered teardown phases, each bounded, ending in the exit
-src/main/config.ts            validated settings, migrations, defaults, read-only caps
-src/main/platform.ts          host capability projection; Desktop exists only on Windows and macOS (ScreenCaptureKit floor 12.3, below the 13.0 app floor)
-src/main/connection.ts        MCP + tunnel lifecycle, per-surface publication & status
-src/main/ipc.ts               every renderer→main operation and main→renderer push
-src/preload/index.ts          the complete renderer-facing API allowlist
-src/main/secrets.ts           Electron safeStorage-backed secret storage
-src/main/logger.ts            redacted operational log: 500-entry ring + userData/app.log mirror (not the session store)
-src/main/durable.ts           small named JSON state files under userData/state
-src/main/diagnostics.ts       the UI self-test chain, hop by hop
-src/main/update.ts            process-lifetime updater: startup + 6h checks, one in-flight pass; apply only on ordinary quit
-src/main/browser.ts           Chrome/Chromium discovery + preferred-browser opener for orchestration/session chat URLs
-src/main/window-lifecycle.ts  single-instance/bootstrap/activation lifetime gates
-src/main/window-layout.ts     work-area-bounded BrowserWindow geometry
-src/main/window-icon.ts       packaged Linux native window icon decision
-src/main/tray-image.ts        platform-aware tray/menu-bar image + stable macOS tray identity
-src/main/extension-path.ts    transactional stable materialization of the unpacked extension
-
-── MCP ────────────────────────────────────────────────────────────────────
-src/main/mcp/server.ts        HTTP transport, secret paths, body bounds, exposure cache
-src/main/mcp/tools.ts         builds exactly one surface's server; refuses foreign names
-src/main/mcp/surfaces.ts      Core/Desktop discovery boundaries + declared tool names
-src/main/mcp/kernel.ts        dispatch, live guards, caller/workspace identity, agent inbox
-src/main/mcp/tools-core.ts    Core registration + connector wrappers
-src/main/mcp/tools-desktop.ts Desktop registration + wrappers
-src/main/mcp/inbound.ts       x-request-id extraction and normalization
-src/main/mcp/call-context.ts  AsyncLocalStorage per call + in-flight accounting
-src/main/mcp/instructions.ts  model-facing server instructions
-
-── filesystem / execution ─────────────────────────────────────────────────
-src/main/sandbox.ts           approved-root authority; virtual↔native containment
-src/main/workspace.ts         per-chat/agent learned project cwd (convenience, not auth)
-src/main/rawfs.ts             raw Node fs, bypassing Electron's asar interception
-src/main/fsops.ts             shared bounded file/image/text helpers
-src/main/search.ts            connector search implementation
-src/main/ripgrep.ts           bundled-first rg locator, then host PATH fallback
-src/main/env.ts               one OS-correct environment model for every spawned child
-src/main/toolchain.ts         conservative Windows JAVA_HOME/GOROOT discovery
-src/main/exec-hints.ts        narrow shell rewrites + recovery hints; abstains on ambiguity
-src/main/diffstat.ts          bounded exact/approximate line-delta accounting for activity rows
-src/main/text-match.ts        shared newline/Unicode-aware unique text matching
-src/main/codex/tool-specs.ts  model-visible Codex contract text
-src/main/codex/unified-exec.ts        exec_command / write_stdin runtime
-src/main/codex/unified-exec-constants.ts  yield deadlines, buffer and token policy
-src/main/codex/exec-output.ts model-facing exec serialization
-src/main/codex/shell.ts       host shell selection, quoting, launch
-src/main/codex/ownership.ts   exec-session caller ownership + background obligation/attendance projection
-src/main/codex/manager.ts     the one process-manager lifetime shared by exec/write_stdin
-src/main/codex/command-batch.ts sequential same-shell `cmds` framing + per-command exit parsing
-src/main/codex/head-tail-buffer.ts bounded output head+tail retention, omission accounting
-src/main/codex/truncate.ts    Codex-compatible UTF-8 byte/token output truncation
-src/main/codex/filesystem.ts  ported low-level Codex fs primitives (no policy)
-src/main/codex/read-backend.ts  connector read semantics over those primitives
-src/main/codex/view-image.ts  image load/validate + MCP content adaptation
-src/main/codex/apply-patch/*  V4A parser / matcher / runtime / shell interception
-
-── sessions ───────────────────────────────────────────────────────────────
-src/main/session/store.ts     durable sessions, messages, assets, handoffs
-src/main/session/input.ts     durable user input, browser claims and tool/finish delivery
-src/main/session/finish.ts    exact-turn Astra finish notices and Loop-based injected continuation
-src/main/session/recorder.ts  merges MCP truth with browser observations
-src/main/session/correlation.ts  requestId → conversationId proof registry
-src/main/session/blocked-chats.ts  user-blocked conversations; the app's only stop for a rogue turn
-src/main/session/continuation.ts transactional Compact & Resume rebind
-src/main/session/resume-gate.ts tiny pre-commit gate preventing resume shadow sessions
-src/main/session/handoff.ts   validates/prepares the brief; continuation publishes it
-src/main/session/handoff-prompt.ts  the brief injected into the old chat
-src/main/session/retention.ts startup + six-hour coarse pruning maintenance
-src/main/session/summarize.ts human-readable activity summaries
-src/main/mcp/session-tool.ts  model-facing search/read projection over recorded sessions
-src/shared/chronology.ts      timeline ordering and folding
-src/shared/session.ts         session/activity/swarm wire types
-src/shared/goal.ts            Goal prompts (continuation + specific goal) and their bounds
-src/shared/capabilities.ts    root-required vs rootless capability classification
-src/shared/types.ts           config/app/IPC types and Capabilities
-
-── browser ────────────────────────────────────────────────────────────────
-src/main/bridge.ts            extension HTTP bridge + compaction/worker orchestration
-src/main/goal.ts              Goal/Loop LLM driver (OpenRouter default, custom endpoint optional), durable obligations, one draft per turn
-src/main/agents.ts            the one global star-topology multi-agent broker
-extension/manifest.json       MV3 composition root: service worker, isolated scripts/CSS, MAIN-world Fiber, popup, host/extension permissions
-extension/chatgpt-dom.js      EVERY ChatGPT selector and DOM-shape assumption
-extension/content.js          page recorder, turn lifecycle, Overwrite, compact UI
-extension/fiber.js            MAIN-world React/Fiber evidence reader (least trusted)
-extension/background.js       service worker: token, journal, tab↔conversation registry
-extension/overlay.css         every CLF-owned surface injected into the ChatGPT page
-extension/popup.html/.css/.js extension status/reconnect UI only; no tool/session authority
-
-── other ──────────────────────────────────────────────────────────────────
-src/renderer/main.ts          setup/settings/connection/activity UI
-src/renderer/chat.ts          session timeline, handoff, swarm UI
-src/renderer/dom.ts           shared text-only renderer DOM/icon/toast/IPC-result helpers; no app state or innerHTML
-src/main/computer/index.ts    Desktop action policy, frame/ref lifetimes, batching and postconditions
-src/main/computer/helper.ts   Windows PowerShell/Win32/UIA helper protocol; no model text in argv
-src/main/computer/browser-chords.ts  pure: which chords manage browser tabs/windows, which processes are browsers
-native/macos-desktop-helper/* shared ScreenCaptureKit, AXUIElement and CGEvent Swift source
-native/macos-desktop-addon/* N-API bridge that runs that Swift backend in the Electron process
-src/main/tunnel/*             index.ts lifecycle · health.ts metrics · locate.ts binaries
-test/*.test.ts                77 tracked Vitest suites, named for the subsystem/boundary they cover
-vitest.config.ts              test runtime/safety boundary: Node, 30s limits, isolated bridge ports + short in-process evidence wait
-electron.vite.config.ts       exact main/preload/renderer bundle entrypoints; extension is not bundled here
-scripts/*                     build-time icon / tunnel-client / ripgrep fetchers
-electron-builder.yml          Windows/macOS/Linux package contents and target policy
-```
-
-`exec.ts` remains as the shared low-level process/environment primitive used by unified exec,
-the Windows desktop helper, macOS in-process worker and tunnels. The retired connector-native managed-process and patch
-stacks were removed after production moved to `codex/unified-exec.ts` and `codex/apply-patch/*`;
-do not recreate parallel runtimes beside those live owners.
-
-### 4.1 Mechanism ledger — one fact, one owner, one lifetime
-
-Use this table before inventing state. If the fact you need already has an owner here, extend that
-owner or derive from it; do not mirror it in another module. “Durable” means it survives an app
-restart. Browser `storage.session` survives MV3 service-worker suspension but **not** a browser
-restart; `storage.local` survives the browser restart. A memory-only field is allowed only when a
-durable or externally re-observable fact can reconstruct it.
-
-| Fact / mechanism | Authoritative owner | Lifetime / durable form | Consumers / invariant |
-| --- | --- | --- | --- |
-| approved roots + permissions + feature toggles | `config.ts` | `userData/config.json`, atomic temp→rename; validated/migrated on every load | `effectiveCapabilities()` is the live permission projection; malformed existing config recovers conservatively, never as fresh-install consent |
-| host capability availability | `platform.ts` + `shared/capabilities.ts` | derived, not stored | Desktop capabilities are impossible off Windows/macOS; every newly added capability is root-required until explicitly classified rootless |
-| secrets | `secrets.ts` | OS `safeStorage`; never config/log/renderer | OpenAI, bridge and OpenRouter credentials never cross into untrusted renderer/page state |
-| small cross-restart control state | `durable.ts` | named `userData/state/*.json`; temp→rename; debounced generations + explicit `writeDurableNow` barriers | swarm, continuations, correlations, bridge commands, Goal ledgers; a failed file must not poison later files or publish a rejected generation |
-| MCP surface shape | `mcp/surfaces.ts` + `server.ts` exposure cache | endpoint lifetime | discovery is a cached schema promise; live permission enforcement is separate and current |
-| one MCP request identity | `mcp/inbound.ts` | request lifetime in AsyncLocalStorage | normalize `x-request-id` before any higher-level routing |
-| one in-flight call's mutable evidence | `mcp/call-context.ts` | request lifetime | tool outcome/changes/assets/caller travel with the call; wider “settling” lifetime includes attribution + recording after the handler returned |
-| request→conversation proof | `session/correlation.ts` | durable named state | only exact request-id evidence is authoritative for modern attribution; every other placement is explicitly weaker/legacy and never a substitute for identity-sensitive routing |
-| user-blocked conversations | `session/blocked-chats.ts` | durable named state, released only by the user | the only stop this app can make on a rogue ChatGPT turn. Stored per **conversation**, matched through the existing exact request-id proof, and enforced on nothing else: a call with no proven owner is never blocked |
-| local session identity | `session/store.ts` | `sessions/<id>/meta.json` + `events.jsonl` + canonical shards/assets/handoffs | ChatGPT conversation id is a frontend binding; Compact & Resume moves it, never copies the local session |
-| canonical authored message identity | `store.ts` + `shared/session.ts` | one replaceable `messages/*.json` shard per logical id | streaming revisions replace the same logical message; event chronology keeps the original anchor/seq |
-| mutable timeline progress/activity identity | `shared/session.ts::foldProgress` + recorder/store origins | append snapshots from page/native **or app-owned** progress, folded on read by namespaced `progressId` / page-tool `messageId` | newest content stays at the earliest logical position; unknown identity is never guessed into a fold; app recovery status uses this same mechanism rather than a parallel status store |
-| session retention | `session/retention.ts` | process timer, current config read each sweep | startup prune + one coarse six-hour sweep; retention applies to existing history even with recording off |
-| model-facing session cursor | `mcp/session-tool.ts` | opaque cursor carried by the caller | cursors pin snapshot/filter/range/open-message checkpoints; stale boundaries fail explicitly rather than silently skipping/repeating history |
-| browser pairing / presence | `extension/background.js` + `bridge.ts` | token/intent in extension `storage.local` and app secret store; presence memory-only/re-observed | pairing token never reaches content/page; “browser absent” and “one chat absent” are different facts |
-| shared broken-page recovery | `bridge.ts` `activeUntil` + `repairsInFlight` + `unattributedIncident` + `goalWatch` | **process memory**, not a recovery WAL; handout tokens/cooldowns/episode ids are ephemeral and re-earned from live evidence | restart must not resurrect an old browser action merely because it was once queued. A durable Goal reply obligation is separate truth and may cause a new Goal watch after this run observes/accepts eligible work; the old repair token itself never survives as authority |
-| browser observation custody | `extension/background.js` journal | `storage.session` until app `/events` accepts it | content-script success means “journal owns it”, not “app stored it”; an acknowledged observation must never vanish on worker suspension |
-| real conversation lifetime in a tab | `extension/background.js` tab registry | `storage.session` | document reload/pagehide is not conversation close; tab removal/navigation away decides closure |
-| active agent tab discard policy | `agents.ts` live state projected by `bridge.ts`; applied by `extension/background.js` | exact conversation ids derived per `/status`; extension-owned tab ids in `storage.session` | active Prime and active/waking/detached Worker tabs are non-auto-discardable; sleeping/terminal chats restore only policy this extension changed |
-| browser document + navigation identity | `background.js` document/epoch registry + `content.js` epoch | browser-session state + per-document memory | stale documents/epochs may observe but may not mutate current conversation state |
-| browser command intent | `bridge.ts` `CommandSpec` | durable `bridge-commands` snapshot | exactly three semantic intents: fresh worker, exact-chat revive, fresh resume; the spec owns identity, not a URL/tab/document |
-| browser command lease | `bridge.ts` command record | durable queued/leased phase including `claimedAt` + exact `owner`; restore preserves a valid leased owner | `/commands/redeem` is the arbitration cut; worker/revive are exclusive to that page owner. Resume alone may transfer a pre-dispatch lease to another destination document while its durable send checkpoint still proves nothing was dispatched |
-| irreversible browser command result | `background.js` command ACK outbox → `bridge.ts` command/receipt semantics | ACK outbox is mirrored to `storage.local` for browser-restart durability; app command/receipt state survives app restart | fresh worker/resume terminal ACK retires into a receipt. A revive `sent` ACK proves the user message crossed ChatGPT, but the command intentionally stays leased until exact worker liveness or the 30s revival deadline resolves broker state |
-| deferred worker revival | `background.js::deferredRevivals` | `storage.local` marker only | survives browser restart; actual prime text stays app-side; bridge redeem remains the authority, so stale markers are harmless |
-| worker lifecycle + ownership | `agents.ts` | swarm snapshot + retained/dormant prime-owned history | conversation binding is identity; `invited/active/detached/waking/sleeping/finished/failed` describe broker state, not page decoration |
-| worker slot accounting | `agents.ts::occupiesSlot` | derived from broker state | sleeping workers free slots; waking reserves one before the browser acts; terminal rows never revive |
-| agent message delivery | `agents.ts` | durable broker queue | at-least-once until authenticated acknowledgement; `offered` is not `delivered`; revival-delivered user messages are never re-offered in tool results |
-| per-chat workspace | `workspace.ts` | memory derived/learned from proven identity + roots, moved with ownership | convenience state only; never authorization; missing trustworthy workspace fails instead of choosing the first root |
-| exec session custody | `codex/ownership.ts` + singleton manager | process lifetime | running or exited-unread process id belongs to the proven durable local session principal; A→B keeps custody without adoption, while another session/worker cannot poll or write it |
-| background exec obligations | `codex/ownership.ts::backgroundExecObligations` + `UnifiedExecProcessManager::backgroundState` | retained process rows until the owner reads/releases them | completed unread output is data owed to that durable session, never GC fodder; four unread completed results block that session from spawning another child before any process is started |
-| Compact & Resume transaction | `session/continuation.ts` | durable continuation WAL + session metadata commit | one local session, one open continuation per session, one claimant/commit; source keeps ownership until durable rebind lands |
-| source/destination send ambiguity | continuation send checkpoints | durable `not-attempted` / `attempted-unresolved` / `dispatched-unresolved` / resolved message identity | pre-dispatch ambiguity is replayable; post-dispatch ambiguity is **not** permission to click again; ChatGPT's marked message resolves it |
-| resume shadow suppression | `session/resume-gate.ts` | short memory claim bounded to 60s | recorder waits briefly for the already-authoritative continuation instead of inventing a second local session for the replacement chat |
-| resumed first-answer Goal provenance | `content.js` `resumeGoalPending` / `maybeRecoverResumeGoalTurn()` | tab-local `sessionStorage` (`clf-resume-goal-v1`) + live memory only | armed only by this document's real resume bootstrap plus acknowledged A→B continuation; waits for B's post-commit Goal policy, can recover exactly that one completed first answer, then is consumed. It is provenance for the page trigger, never continuation/session/Goal authority |
-| Goal objective | `goal.ts` objective ledger | durable per-conversation named state | chat-local finish line; moved by Compact & Resume; restore alone never starts work |
-| Goal / Loop chat switch | `goal.ts` `goal-switches` ledger | durable per-conversation `{enabled, mode, at}`, bounded to 400 decisions; absence inherits app-wide config | exact-chat stop/mode choice survives reload/restart and moves with Compact & Resume; an existing row outranks ordinary app-wide changes. Deliberate app-wide **On→Off** is the master stop and clears all rows, so a later global On again reaches chats whose overrides were intentionally discarded |
-| Goal terminal reply obligation | `goal.ts` reply ledger | durable, one row per conversation, TTL + cap | the recorder freezes whether a stable final reply still requires one Goal decision before page races/reloads can lose it |
-| Goal draft | `goal.ts` draft map | memory; tied to durable obligation | at most one draft per conversation/turn; browser client owns acknowledgement; only `ready` text may be typed and `no-reply` is a real terminal decision |
-| renderer authority | `ipc.ts` + preload allowlist | process lifetime | renderer never receives generic Node/invoke authority; async reads paint only when their selection/generation still matches |
-| connection/tunnel generation | `connection.ts` + `tunnel/*` | process lifetime, re-observed from process/metrics | stale callbacks from replaced tunnels are ignored; `/readyz` + readable poll metrics establish runtime readiness, while a completed/fresh poll timestamp separately verifies external-link age and detects later loss |
-| child process environment | `env.ts` | rebuilt per child | Windows env names are case-insensitive; never write `PATH` by raw object indexing; preserve the inherited environment unless a narrow repair is proven |
-| Windows build-tool discovery | `toolchain.ts` | process memoization | fill missing/unreachable JAVA_HOME/GOROOT only; never override an explicit or already-reachable toolchain |
-| shell compatibility repair | `exec-hints.ts` | per command | rewrite only when intent is provable; unsupported/ambiguous shell syntax passes through untouched; hints are preferred to semantic guessing |
-| command output budget | `head-tail-buffer.ts` + `truncate.ts` + `exec-output.ts` | per process/result | collection cap and model-visible truncation are different bounds; preserve head+tail and explicitly count omitted middle bytes/tokens |
-| Desktop frame/ref identity | `computer/index.ts` | bounded process caches | physical coordinates are meaningful only against the captured frame/window geometry; semantic refs are meaningful only against their UIA snapshot |
-| extension install path | `extension-path.ts` | stable `userData/extension` for packaged builds | stage/fingerprint/rename/rollback; Chrome never points at an AppImage's temporary mount or a half-copied update |
-| app update | `update.ts` | startup + unreferenced six-hour checks, one in-flight pass; versioned verified artifacts under `userData/updates` | Restart adopts an existing file only after a fresh published-digest check. Changed release selection retires old staged authority. Quit rechecks bytes before handoff; explicit Install requests relaunch. |
-| tunnel-client run ownership | `tunnel/index.ts::ClientRun` + `current` | one process-generation object at a time; old child may exist only while `retirement` joins its teardown | every callback checks `current === run`; `restart()` is the CAS-like ownership cut, clears current before retirement, and only the retirement owner may schedule the successor |
-| app-window lifetime | `window-lifecycle.ts` | process lifetime | only the single-instance lock owner touches shared userData; activation is gated until bootstrap/security/IPC are ready and permanently disabled once quit begins |
-
-If two rows appear to own the same semantic decision, treat that as an architecture bug until
-proved otherwise. Mirrored **presentation** is fine; mirrored **authority** is not.
-
-**What “durable” means here.** `durable.ts` is the app's process/crash/restart transaction layer,
-not a claim of database-grade fsync/power-loss durability. Named state writes are serialized,
-generation-fenced and published by temp-file→rename; `writeDurableNow()` is the barrier used when a
-later side effect must not happen until the control intent is on disk. A failed background write
-stays pending/retryable and cannot poison the serialization chain for other names. But
-`readDurable()` deliberately turns a missing, unreadable or unparsable control file into `null`
-after logging it: corrupt auxiliary state may cost pending orchestration work, **never the app's
-ability to start**. If a mechanism needs stronger recovery than that, its independently durable
-source (for example session metadata/history) must be able to reconstruct the projection.
-
-### 4.2 Runtime jump points — open the owner, not the symptom
-
-This is the shortest path from a production symptom to the state machine that owns it. The
-subsystem sections below explain the invariants; this table answers **which function do I open
-first?**
-
-| Mechanism | Start here | Then follow |
+| Storage/lifetime | What survives | What it cannot prove |
 | --- | --- | --- |
-| app bootstrap / restart order | `index.ts` `app.whenReady().then(...)` | Goal/correlation restore → retired workers/swarm → continuations → IPC/window → bridge/retention/connection/update; quit starts at the `will-quit` handler and enters `shutdown.ts` |
-| MCP request identity | ingress: `mcp/inbound.ts::requestIdFromHeader()` → `kernel.ts::callerConversation()` / `recorder.ts::awaitFreshCallOrigin()`; browser proof publication: `recorder.ts::noteCallEvidence()` | `correlation.ts::observeRequestCorrelations()` writes exact URL/Fiber-agreed ownership; `requestCorrelation()` is then read by caller/workspace guards → `recordToolCall()`. The MCP request never creates its own ownership proof |
-| live browser request-id ownership handshake | `content.js::confirmLiveRequestOwners()` | background `correlate()` → bridge POST `/correlations` → recorder exact call evidence → correlation registry read-back/`confirmed[]` |
-| broken ChatGPT page auto-recovery | all evidence converges on `bridge.ts::queueBrowserRecovery()` | silence: `armSilenceSweep()` → `inspectSilentChats()`; assistant-error: `noteRecoveryObservations()`; unattributed: `noteCallAttribution(null)` → `repairUnattributedChat()`; no-tab: `queueMissingTab()`; Goal: `inspectOwedGoals()` → current `takePendingRepair()` → `background.js::maintain()` → `confirmRepair()` / `failRepairAttempt()` |
-| Goal / Loop after a final answer | bridge POST `/events` durable `acceptGoalReplyNow()` + `content.js::noteGoalTurn()` | `watchGoalTurn()` → `/goal/draft` → `goal.ts::startGoalDraft(...deferStart:true)` → `beginGoalDraft()` / `requestDrivingDecision()` → `content.js::maybeSendGoalReply()` |
-| automatic compaction | bridge `considerAutomaticCompaction()` (from `grantActivity()`): `store.ts::autoCompactionReady()` + `chatIsWorking()` + worker/blocked fence → `continuation.ts::openContinuationNow(automatic)` | page reads the ticket as `job` → `content.js::maybeResumePendingCompaction()` (raises its tab) → `startCompact()` → `stopAndSettle()` → bridge `/compact`; pickups by phase in `inspectOwedCompactions()`: asking 2 min × 5 then abort, writing 5 min × 3, opening 15 min × 3, each in front |
-| Compact & Resume restart recovery | `continuation.ts::restoreContinuations()` | session metadata ownership → `commitContinuationResult()`/projection repair; browser send ambiguity is resolved by the continuation's durable source/destination send checkpoints |
-| resumed first answer missed by Goal | `content.js::rememberResumeGoalPending()` / `bindResumeGoalTurn()` | `maybeRecoverResumeGoalTurn()` → exact single resume-user-turn + final/Fiber proof → ordinary `noteGoalTurn()`; synthetic `g-resume-<commandId>` is only a stable local turn id when no observed generation id exists |
-| worker lifecycle | `tools-core.ts` `agents` action dispatch | `agents.ts::stageSpawn()` / `stageMessages()` / `stageFinishAgent()` → `persistCriticalSwarmNow()` → staged commit/rollback → bridge worker/revive commands → `background.js::recoverDeferredRevivals()` → exact page liveness back into `agents.ts` |
-| browser command delivery | worker producers `bridge.ts::queueWorkerBootstrap()` / `queueWorkerRevival()`; **resume production** is bridge POST `/compact` after `continuation.ts::attachSummary()` → private `queueResumeCommand()` | durable command owner/lease → `/commands/redeem` / `/commands/ack` → `background.js::redeemCommand()` / `ackCommand()` → content send → receipt/recovery in `restoreCommands()`; exported `queueResume()` is a test/older-caller convenience wrapper, and private generic `queue()` is storage plumbing — neither is the semantic resume entrypoint |
-| which browser opens a fresh chat | `bridge.ts::offerPlacement()` / `pendingBrowserPlacement()` → `background.js::placeSuccessorChat()` | the `/compact` reply that produced the command carries `placement`, and chat A's own browser creates chat B in chat A's window; `pendingBrowserPlacement()` spends opening authority on handout, before hydration; no timer may issue a second OS open. `openFreshChatInBrowser()` handles a resume with no waiting browser collector |
-| extension document/conversation identity | `background.js::authorizeDocument()` / `registerDocument()` / `ownsDocument()` | `noteTabConversation()` + `chatgpt-dom.js::conversationFromPath()` / `conversationId()`; React-only evidence begins at `fiber.js::scan()` |
-| page observation commit | bridge POST `/events` | exact lost-worker-ACK recovery + `noteAgentAlive()` → `recorder.ts::recordChatObservations()` → durable Goal reply obligation → browser-recovery activity → context ceiling → staged/durable worker final → HTTP 200 lets extension journal retire the batch |
-| Overwrite / native ChatGPT presentation | `content.js::renderStreams()` | `websiteRenderForTurn()` + `completeReplacementForTurn()` + `hasUnrepresentedFiberCall()` → `chatgpt-dom.js::replaceActivity()` / `hideProgress()`; exact Fiber/page identities decide whether local activity is complete enough to replace native activity, while ChatGPT always keeps answer/code/actions |
-| session evidence / mutable website messages | `store.ts::appendEvent()` / `upsertMessageEvent()` | `recorder.ts` attribution/repair → canonical message shards + rebuildable `meta.json` projection |
-| background terminal result custody | `codex/ownership.ts::backgroundExecObligations()` / exec-session owner map | `tools-core.ts::execSession()` resolves the durable local principal for admission → `UnifiedExecProcessManager::backgroundState()` → owner drains/releases via `write_stdin` |
-| connector connect/disconnect/settings | `connection.ts::enqueueLifecycle()` | `connectImpl()` → Core MCP/tunnel → `startDesktopTunnel()`; settings enter `applySettingsImpl()`, ordinary stop enters `disconnectImpl()`, final stop enters `shutdownConnection()` |
-| tunnel health / restart | `tunnel/index.ts::startOpenAiTunnel()` | `ClientRun` → `routeObservation()` → single-owner `restart()`; `connection.ts` and `diagnostics.ts` consume this report rather than supervising the child |
-| app update | `update.ts::startUpdateChecks()` → `checkForUpdates()` | `runPass()` → `stagedArtifact()` (packaged installs only) → `download()` + SHA-256 publication → `applyStagedUpdate()` at ordered shutdown |
-| Chats “Open Chat” | IPC `sessions:openChat` | re-read session truth → `browser.ts::openInPreferredBrowser(chatUrl(id))`; preload `openSessionChat()` is the narrow renderer boundary and `renderer/chat.ts::sessionRow()` is presentation only |
+| App `sessions/` and named `state/` files | App restart; committed history and control intent. | That an old page is currently running. |
+| Extension `storage.local` | Browser restart; pairing/disconnect intent, deferred revival metadata, command ACK custody. | A surviving tab/document or current account entitlement. |
+| Extension `storage.session` | MV3 worker suspension; journal, tab/document registry, elections and live policy ownership. | A whole browser restart. |
+| Content/Fiber memory | One document and its navigation epochs. | Anything after reload unless re-observed or restored from its actual owner. |
+| Process manager | Running app's live/unread process sessions. | Process survival across a full app restart. |
+| UI/local preferences | Drafts, expansion, theme/language/width as implemented. | Send receipts, task completion or tool permission. |
 
-When a row crosses files, keep following the **same identity** through the arrows. Do not jump to a
-later fallback/UI symptom merely because its function name contains the error the user saw.
+`durable.ts` provides queued temp-file→rename publication, not a database-grade power-loss/fsync
+guarantee. `writeDurableNow()` is the required barrier before an acknowledged control transition
+or browser side effect. Per-file queues allow independent writes; cross-file semantic ordering
+must be explicit in the caller. Missing/corrupt auxiliary state logs and reads as null so the app
+can start; restore may only reconstruct facts from independent durable proof.
 
----
+## 3. Intent, current source and evidence
 
-## 5. Startup and shutdown — `index.ts`
+For **what should happen**, use the current user request, these product contracts and the
+load-bearing reasons in implementation comments. For **what happens now**, use current code with
+a reproducible test or live observation. A test that encodes an obsolete invariant is evidence
+of the old behavior, not permission to restore it.
 
-```text
-single-instance lock
-  → only the lock owner may touch userData/bootstrap state
-  → init config/secrets/session/durable paths → load + validate config
-  → restore Goal objective → per-chat switch → reply-obligation ledgers
-  → restore request correlations BEFORE bridge traffic can race in
-  → wire recorder↔agent identity callbacks + preferred-browser opener
-  → wire swarm persistence sinks even if multi-agent currently off
-  → restore retired-worker fences → restore active+dormant swarm history
-  → if feature is off: pause live execution, preserve history, persist the safe projection
-  → restore continuations AFTER swarm, because recovery may need to repair prime ownership
-  → install renderer CSP + deny browser permissions
-  → register fixed IPC → enable the native window activation gate → create/show window + tray
-  → queue legacy attribution repair asynchronously
-  → start bridge if recording OR multi-agent
-  → start session-retention maintenance independently of recording admission
-  → auto-connect MCP/tunnel if configured
-  → start non-blocking updater lifetime: immediate pass + unreferenced six-hour recheck schedule
-```
+Current declarations (`mcp/surfaces.ts`, `mcp/tools-*.ts`, `shared/*.ts`, package/version/manifest)
+define the tool/config/wire contract. README and worklogs are secondary and can describe old code.
 
-`ui.chatBrowser` owns the Chrome/Edge choice for OS-originated ChatGPT launches. `browser.ts`
-reads it at launch time and tries only that family's installations; failures propagate to the
-request owner instead of opening the system default browser. The setting does not select a
-profile or override connected-extension delivery/source-tab placement. Legacy configs use Chrome.
+### Checked baseline
 
-The **window activation gate** is a real lifetime boundary, not UI polish. Electron may deliver
-`second-instance` after its own `ready` event while this app is still restoring durable state and
-before CSP/permission/IPC setup is complete. `window-lifecycle.ts` therefore drops/folds early
-focus requests until bootstrap enables the gate. Once `before-quit` disables it, that disable is
-terminal: an old async startup continuation must never re-enable window creation during teardown.
-
-The losing single-instance process also sets `quitting` immediately. `app.quit()` does not stop
-module evaluation, so **every** shared-userData bootstrap path must be guarded by
-`shouldBeginAppBootstrap()` rather than assuming a secondary process disappeared synchronously.
-
-**Must hold.** The window keeps context isolation on, Node integration off, renderer
-sandbox on, navigation and window creation constrained, permission requests denied unless
-explicitly supported. Never weaken that to solve a renderer convenience problem. Every new
-long-lived process, timer, listener, queue or durable writer names its shutdown owner —
-teardown covers tunnels, both listeners, process sessions, then flushes session and durable state.
-
-`will-quit` calls `preventDefault()` and owns the decision to quit from then on, and it
-destroys the tray before teardown starts. So teardown is not merely ordered, it is **bounded**:
-`shutdown.ts` gives each phase its own budget and always ends the process. A task that never
-settles would otherwise strand an invisible main process holding the single-instance lock, and
-every later launch of the app would silently do nothing. Per-task bounds are not a substitute
-for that — "each piece is bounded" is a different claim from "the sequence ends".
-
-Ending it is `app.exit(0)`, never `app.quit()`, and that is not interchangeable. Electron drops
-a quit raised from the promise continuation that finishes teardown: on Windows the call returns
-without even emitting `before-quit`, while the same call one macrotask later quits normally.
-`shutdown.ts` therefore owns the exit itself rather than trusting its caller to remember.
-
-The shutdown phases are also semantic ordering, not just cleanup aesthetics:
-
-1. **admission/drain** — stop MCP + bridge from accepting work and let already accepted requests
-   reach their own bounded drains;
-2. **process cleanup** — only after request handlers stop may PTYs and the Windows helper be killed;
-3. **recorder flush** — recorder work may enqueue session and named durable writes;
-4. **durable flush** — session store and named-state store are independent writers and both get a
-   last attempt even if one fails;
-5. **update handoff** — a verified staged update is the final effect, after every stateful owner has
-   finished, because the next process start is meant to be the new version.
-
-### App update is deliberately boring — `update.ts`
-
-There is no `electron-updater`, renderer-owned download state or forced restart. One deduplicated
-`checkForUpdates()` pass runs after startup and nobody awaits it; `startUpdateChecks()` repeats it
-on an unreferenced six-hour timer, because this app lives in the tray and "once per start" is in
-practice "never" for an installation nobody restarts. A pass asks GitHub only for the newest tag,
-decides whether this exact installation can self-apply an artifact, downloads at most that one
-file, verifies it against the release's `SHA256SUMS.txt`, publishes it from `.part` by rename, and
-waits for the user's ordinary quit. A repeat pass over an already staged release stops at the
-release call.
-
-The state machine is intentionally one record: `UpdateStatus {current, latest, stage, error,
-checkedAt}` with `stage = idle|checking|downloading|ready|failed`. `checkedAt` is set the moment
-the release API answers and is the *only* thing separating "checked, nothing to install" from "has
-not asked yet" — both are `{latest: null, stage: 'idle'}` otherwise, and the UI may not claim the
-first without it. `checkForUpdates()` owns one in-flight `pass` promise, so duplicate callers join
-the same check/download. `stagedArtifact()` is the platform policy function and refuses an
-unpackaged run outright — a dev tree is permanently "behind" and quitting `electron-vite dev` must
-never run an installer over the maintainer's real install. `download()` is the checksum/publication
-boundary; `applyStagedUpdate()` is the only installer/swap boundary. `onUpdateChange()` notifies
-`ipc.ts`, which republishes the ordinary application state; `renderer/main.ts::updateSummary()`
-turns that record plus the bridge's extension version into one sentence and one tone, which
-`paintUpdate()` renders in three places and nowhere else: the header notice bar (only for what the
-user can act on), the Activity panel's `#updateLine` (every state, green when current, red when a
-check or download failed), and exactly one toast per window. The renderer never checks GitHub,
-chooses assets, hashes bytes or decides install eligibility.
-
-- Windows x64/ARM64 stages the matching NSIS installer and launches it detached with `/S` during
-  shutdown; installer is per-user and needs no elevation.
-- Linux **AppImage** can stage the matching AppImage; shutdown copies to `<running>.new`, chmods and
-  renames over the path so the mounted old inode can finish running safely.
-- Linux **DEB** is package-manager-owned; macOS has ad-hoc signing, not Developer ID notarization.
-  Both may show a newer-version notice but do not silently self-replace.
-- An unpackaged run (`npm run dev`, a working tree) is told what is published and stages nothing.
-- A failed check/download leaves the running version fully usable and the next six-hour pass (or
-  restart) checks again. Apply happens only inside ordinary shutdown: `applyStagedUpdate()` consumes
-  the in-memory staged row before handoff, so an apply failure has no same-run retry and the next app
-  start performs a fresh check. There is no retry state machine around either path.
-- Update network waits are bounded at the owner: latest-release/checksum HTTP uses a 15-second
-  ceiling, while the artifact download may take up to 10 minutes. Expiry is just a failed one-pass
-  check/stage; it does not start a same-run retry daemon or force an app restart.
-- Staged authority is process memory; the versioned artifact survives restart. The next pass asks
-  for the release and its published checksum, then `adopt()` reuses a matching file without another
-  download. A changed/withdrawn release retires the previous authority. Quit hashes the artifact
-  again before execution; a directory containing an executable alone never grants install authority.
-- Explicit Install uses the ordinary drained shutdown and requests relaunch (`--force-run` on
-  Windows, `app.relaunch` for AppImage); an ordinary quit does not reopen the app. Recheck UI stays
-  in Checking, never briefly claims a manual update. A release must be strictly newer than the
-  installed version; replacing bytes under the same tag cannot trigger an upgrade.
-
-The update module does **not** own extension-version truth. `bridgeStatus()` learns that from the
-authenticated extension header; duplicating it in the updater would create two authorities.
-
-## 6. MCP surfaces and discovery — `surfaces.ts`, `tools.ts`, `server.ts`
-
-ChatGPT discovers **one server's entire tool list as a unit**: a no-query
-`list_resources` returns every schema that server advertises. Splitting into separate
-servers is therefore the only mechanism that actually bounds the worst case. Core and Desktop
-retain their existing contracts. The optional Plugins surface publishes external MCP tools.
-
-**Core** (`chat-on-steroids-core`, required):
-
-| Tool | Live when | Implementation |
+| Setting | Fresh installation | Migration / runtime rule |
 | --- | --- | --- |
-| `read` | `read` \| `browse` \| `metadata` | `tools-core.ts` → `codex/read-backend.ts` |
-| `view_image` | `read` | `tools-core.ts` → `codex/view-image.ts` |
-| `find` | `search` **and not** `command` | `tools-core.ts` → `search.ts` |
-| `apply_patch` | any of `create`/`edit`/`move`/`deleteFile` | `codex/apply-patch/*` |
-| `exec_command`, `write_stdin` | `command` | `codex/unified-exec.ts` |
-| `download_artifact` | `saveArtifact` | `tools-core.ts` → `artifact-fetch.ts` + `artifact-target.ts` |
-| `session` | recording enabled | session subsystem |
-| `agents` | multi-agent enabled | `agents.ts` |
+| Roots | None. | Root-requiring capabilities cannot be published usefully until a root is approved. |
+| Tool capabilities | Current `defaultConfig()` starts all Core capability flags on, including `saveArtifact`; read-only off. | Omitted legacy flags use conservative `DEFAULT_CAPABILITIES`. Malformed existing config is conservative recovery, not fresh consent. |
+| Recording | On, 30-day retention. | Explicit Off stays Off; retention still applies to old history. |
+| Context / compaction | Advisory 400,000; limit rounded from advisory × 4/3; auto-compaction on at advisory. | Estimated local units. Automatic execution additionally requires live work, current ownership and eligible model/role. |
+| Multi-agent | On, 2 simultaneous slot-holding workers **per family**, configured hard max 8. | Legacy absent enabled/allow-unattributed fields remain false. Existing choices stay exact. |
+| Unattributed allowance | True on first launch. | Relaxes ambiguity fences only; known blocked/retired/superseded ownership stays enforced. |
+| Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
+| Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-5.6-sol` High. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
+| Desktop | Windows on; macOS off until enabled and OS consent granted; Linux unavailable. | Unsupported platforms mask live capabilities without erasing stored choices. |
+| Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
+| Plugin auto-refresh | Off. | Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
+| Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
 
-**Desktop** (`chat-on-steroids-desktop`, optional, **Windows/macOS**): `observe` needs `screen`;
-`computer` registers on `control` **or** either clipboard permission, then re-checks each
-of its 13 actions at runtime. The surface is offered at all only when one of those four
-permissions exists on a supported host — an empty or impossible connector is worse than no connector.
+Keep evidence levels separate in all reports: **source → tests → build → package → installed
+payload → live browser/device/provider behavior**. Passing one level does not prove the next.
+For a shipped-version question inspect the immutable tag and installed bytes; a dirty tree with
+the same package version is not equivalent.
 
-**Plugins** (`chat-on-steroids-plugins`, optional): `plugins/manager.ts` owns installed external
-stdio/Streamable HTTP servers and enabled tools. `mcp/tools-plugins.ts` preserves upstream JSON
-schemas/results through the SDK and existing attribution/recording dispatcher. Installation and
-credentials stay in the main process; external processes do not inherit the CoS folder sandbox.
-Discovery is bounded to 64 tools / 250 KB. Stale calls check live plugin policy. See `docs/plugins.md`.
-Only installed and enabled plugins own a running connection; no catalog recipe is preinstalled.
-Enabled connections restore in the background on app startup and remain alive until disabled,
-uninstalled, failed, restarted or app shutdown. Tool inactivity does not retire their process state.
-OAuth remotes use `plugins/oauth.ts` with the MCP SDK for discovery, DCR, PKCE and refresh.
-Credentials are encrypted per installation and exact endpoint. Startup/reconnect may refresh saved
-credentials but never open a browser or register a new client; explicit **Sign in** owns the bounded
-loopback callback. Cancellation, replacement and shutdown revoke that flow. Unauthenticated cached
-tools remain unpublished. Blender also requires the open editor and its running MCP addon.
+## 4. Ownership map
 
-**Core/Desktop exposure is monotonic per endpoint lifetime.** ChatGPT caches schemas, and yanking one
-from under a cached snapshot surfaces as a transport-level UNKNOWN failure. So
-`server.ts` remembers what this endpoint has ever exposed. A permission revoked after
-exposure leaves the schema registered and its handler returns `TOOL_DISABLED`. The
-`find`-vs-exec choice is frozen the same way, at first discovery.
+Paths in this section are repository-relative. Most mechanisms have `main`, `shared` and
+`renderer` halves; follow the authoritative main/shared owner before changing presentation.
 
-**Must hold.** Two separate concepts, never collapsed: *exposed* (a schema may exist
-because it was visible earlier) and *live* (the operation is allowed now).
-**Schema visibility is never the security boundary** — `config.ts::effectiveCapabilities()`
-and the live guards are. A server registers only tools its surface declares and answers
-anything else with a protocol-level unknown-tool error; there is no merged list and no
-hidden acceptance. A deliberate reconnect is the clean boundary for changing the shape.
-
-**Tests.** `mcp.test.ts`, `config.test.ts`, `mcp-shutdown.test.ts`.
-
-## 7. One MCP call, end to end
-
-```text
-tunnel request
- → server.ts    loopback Host/Origin, secret tokenized path, bounded body,
-                x-request-id read + normalized (split before '/')
- → tools.ts     build only the requested surface
- → kernel.ts    AsyncLocalStorage call context
-                resolve exact caller from correlation evidence
-                resolve agent identity if a swarm is active
-                wait for identity when the operation genuinely needs it
-                enforce the live capability / read-only guard
- → tool handler sandbox any model path, execute, attach structured evidence
-                (changes, counts, exit code, session id, assets)
- → recorder.ts  exact args/result/outcome; attach ONLY on proven ownership
- → kernel       agent inbox offer/ack bookkeeping
- → response
-```
-
-`server.ts` manually reads and bounds chunked / no-`Content-Length` POST bodies before
-handing parsed JSON to the MCP adapter. **Do not regress that to a `Content-Length`-only
-guard.** `inbound.ts` captures the raw header because the MCP library's higher-level
-context has not reliably exposed it.
-
-`call-context.ts` deliberately exposes **three lifetimes**, because "not completely accounted
-for" is not the same as "can still mutate the machine":
-
-- `runningToolCalls()` — dispatch has not returned; this is the **Compact & Resume safety
-  barrier**, because commands/edits may still be changing the machine.
-- `settlingToolCalls()` / `inFlightToolCalls()` — handler result is already released, but an
-  unattributed durable record may still be waiting for late request-id evidence. Useful for
-  diagnostics/shutdown/orphan accounting, **not** a reason to stall compaction for the recorder's
-  grace window.
-- `inFlightMcpRequests()` — widest request lifetime, including identity wait and durable recording;
-  orphan cleanup uses it so post-handler bookkeeping never looks like global idleness.
-
-An unresolved call is conservatively visible to every conversation until ownership lands; a
-proven worker call does not block an unrelated prime.
-
-Tool failure reporting has four semantic outcomes in `shared/session.ts::ToolOutcome`, and the
-distinction feeds both UI tone and reliability metrics:
-
-| Outcome | Meaning | Reliability defect? |
-| --- | --- | --- |
-| `ok` | tool completed normally | no |
-| `process_exit_nonzero` | the spawned program returned a real non-zero exit; the tool transport/runtime itself worked | no |
-| `tool_rejected` | the app intentionally refused the operation (permission, validation, ownership, policy, etc.) | no |
-| `tool_internal_error` | connector/tool implementation/runtime failed to perform its own contract | **yes** |
-
-`call-context.ts::noteOutcome()` keeps the strongest/more-specific outcome so a generic wrapper
-cannot overwrite a timeout/internal failure with a weaker classification. `noteExec()` classifies
-ordinary non-zero child exits separately from tool timeouts, and `store.ts` increments the session
-reliability numerator only for `tool_internal_error`. `normalizedToolOutcome()` preserves the
-self-proving legacy rows without guessing ambiguous old `error` records. Do not collapse these back
-to success/error: a broken build is not proof the connector is unreliable, and a policy rejection
-is not a tool crash.
-
-## 8. Filesystem containment — `sandbox.ts`
-
-The authority for every model-supplied path. Approved folders get virtual roots such as
-`/project`; native absolute paths are also accepted when they resolve inside an approved root.
-
-The **root name does not mean “this is the repository”**. Users commonly approve a parent folder
-that contains several projects, so a live root like `/workspace` says only which folder was
-approved. The model-visible `read` description deliberately gives the live root names but invents
-no suffix such as `/workspace/src/main.ts`; it tells the caller to name every real folder between
-the approved root and the file, using the same project-relative shape it would pass as
-`exec_command.workdir`. Reading the root itself is the discovery primitive: it lists one level
-deep. Do not reintroduce worked paths that silently promise the approved root is the project.
-
-**Must hold.**
-
-- Every model filesystem path converges on `Sandbox.resolve()` or an already-validated
-  wrapper. "It is only a read" is not an exemption — reads are confidentiality-sensitive.
-- **Virtual and native spellings receive identical authorization.** Test both the virtual
-  spelling and the host spelling (`C:\approved\project\src\a.ts` on Windows,
-  `/home/me/project/src/a.ts` or `/Users/me/project/src/a.ts` on POSIX). Never "improve" native
-  normalization by letting it collapse traversal the virtual spelling rejects.
-- Containment covers root selection, host-invalid/path-trick rejection, canonical checks on
-  existing targets, deepest-existing-ancestor validation for missing targets, reserved virtual
-  root names, and symlink/reparse/junction handling as applicable to that OS.
-- Authorization must remain valid at the point of filesystem use; avoid designs that rely
-  only on an earlier pathname check when the underlying target can change.
-- Native filesystem error text must not leak hidden physical root paths back to the model.
-
-**Not contained: shell commands.** `exec_command` is arbitrary code execution as the
-logged-in user. Its *starting cwd* is restricted to an approved folder; the command is not.
-That is why `command` is the strongest permission and why read-only mode disables it
-outright. Never claim approved roots contain arbitrary commands — they contain the app's
-filesystem tools. Read-only derives from the complete write-capability list, so a new write
-capability must become read-only-blocked automatically.
-
-**Tests.** `sandbox.test.ts`, plus retained bughunt repros.
-
-## 9. Workspaces — `workspace.ts`
-
-Two ideas that are easy to confuse: **approved roots** are the security boundary the user
-configured; a **workspace** is convenience state saying which project *this exact chat or
-agent* is working in.
-
-Keyed by exact chat/agent identity, learned from proven absolute paths and project markers,
-inherited by spawned workers, moved by Compact & Resume.
-
-**Must hold.** A relative path or omitted `workdir` with no trustworthy workspace **fails**
-rather than mutating a guessed project. When caller identity is unresolved during a swarm,
-never silently fall back to the first approved root — that turns an attribution failure
-into a wrong-target mutation. Moving a workspace is state continuity, never a new
-permission; the target still has to be legal.
-
-**Tests.** `workspace.test.ts`, `swarm.test.ts`.
-
-## 10. The Codex-derived tools — `src/main/codex/*`
-
-Selected public Codex behavior ported into TypeScript. **It does not launch a Codex model
-or require a Codex installation.**
-
-**`exec_command` / `write_stdin`.** `unified-exec.ts` ports session ids, output draining,
-head/tail buffering, yield deadlines, output token policy, interactive stdin, and sessions
-that outlive the call that created them. Windows adaptations (quoting, interrupt) live
-beside the port and stay explicit and tested against model-facing behavior. There is a
-known Ctrl+C vs. natural-exit race worth keeping a regression for. The local MCP adaptation
-also accepts `cmds` to run related commands sequentially in one labeled shell session, and an
-empty `write_stdin` poll returns on first output instead of holding Codex's full collection
-window. Start at `tools-core.ts`
-→ `unified-exec.ts` → `shell.ts` → `ownership.ts` → `exec-output.ts`.
-
-The local execution wrapper adds several mechanisms around that port. They are not generic
-"helpfulness" and must stay fail-safe:
-
-- **One process manager, app lifetime.** `codex/manager.ts` is the singleton that makes an exec
-  session id meaningful across later `write_stdin` calls. Never create a second manager per tool
-  registration or conversation; caller isolation is enforced by `ownership.ts`, not by separate
-  process pools.
-- **One OS-correct child environment.** Every spawned process converges on `env.ts`. Windows
-  environment keys are case-insensitive even though JavaScript object keys are not, so raw
-  `env.PATH = ...` beside an inherited `Path` can erase the user's real PATH when CreateProcess
-  folds the two spellings together. Read/write through `envValue`/`setEnvValue`, normalize before
-  spawn, and only append the minimal Windows system directories when the inherited path is truly
-  unusable.
-- **Toolchain repair fills; it never chooses for the user.** `toolchain.ts` looks for a Windows JDK
-  or Go installation only when `JAVA_HOME`/`GOROOT` is absent **and** the corresponding executable
-  is unreachable. Java proves `javac.exe`, not merely `java.exe`, so a JRE cannot become a fake
-  build JDK. Discovery is process-memoized because it sits on every command path.
-- **Shell compatibility is abstention-first.** `exec-hints.ts` may repair a narrowly proven
-  PowerShell quoting/glob mismatch, classify a documented search exit-1 as "no matches", or add an
-  actionable recovery hint. If tokenization/flag arity/control flow is ambiguous, the original
-  command runs untouched. A guessed rewrite that succeeds at the wrong command is worse than a
-  visible failure.
-  - PowerShell native-program glob expansion is deliberately bounded by the **actual command-line
-    constraint**, not by what makes a readable note. One proven relative directory may expand to at
-    most 128 names; the command receives every name, while `listExpandedNames()` shows only the
-    first 12 plus a count. Above the bound the command is left untouched — silently searching a
-    shortened list would be a wrong answer. Globs after a prior statement are not expanded because
-    that statement may have changed cwd; textual brace expansion has no such cwd dependency.
-  - Exit 1 is classified benign only for a search whose status semantics are proved. Bare ripgrep
-    still needs the existing executable/path proof; `git grep` is separately understood because
-    this runtime launches PowerShell with `-NoProfile` and can safely identify `git` plus the exact
-    `grep` subcommand. Predicate flags such as `--quiet`/`--exit-code`, ambiguous global git options
-    (`git -C …`), a status-deciding later pipeline stage, or `fatal:`/`error:` output withhold the
-    exemption. `git diff`/`apply`/`push` exit 1 remains a real non-zero process result. This is
-    classification, never permission to rewrite a failing git command into success.
-- **`cmds` is one shell, not N processes.** `command-batch.ts` composes sequential commands in the
-  same shell so cwd/environment changes survive between them. It keeps running after ordinary
-  non-zero exits, frames each section with a random marker that command output cannot spoof by
-  accident, and returns the first non-zero exit after all sections ran. Recovery hints consume
-  only completed nonzero sections and name that command: a later parse failure must not imply
-  earlier commands did not run or invite repeating their successful mutations.
-- **Collection and model output are different budgets.** `head-tail-buffer.ts` bounds what a
-  process can accumulate while keeping a stable head, rolling tail and exact omitted-byte count.
-  `truncate.ts`/`exec-output.ts` separately bound what is serialized to the model in UTF-8 byte /
-  approximate-token space. Do not collapse the collection ceiling into the default response
-  budget: an explicit larger `max_output_tokens` is supposed to work up to the collection cap.
-- **A finished background command still owns an unread result.** `UnifiedExecProcessManager` no
-  longer evicts exited sessions to make room. `backgroundState()` projects the caller-owned
-  `running` and `exitedUnread` rows, and `ownership.ts::backgroundExecObligations()` is the one
-  caller-scoped view used by notices and admission. Before `exec_command` allocates or spawns
-  anything, `tools-core.ts::execConversation()` resolves the exact conversation once and refuses a
-  fifth unread completed result with `EXEC_RESULTS_UNREAD`; the user/model must drain those exact
-  session ids through `write_stdin`. Capacity is therefore **admission, not garbage collection**:
-  never recover room by deleting output the owning conversation has not observed.
-- **A still-running background command gets one caller-scoped attendance reminder, not a watchdog.**
-  `ownership.ts::noteExecOwner()` starts its attendance clock and `noteExecAttended()` refreshes it
-  around `write_stdin`; after `UNATTENDED_EXEC_NOTICE_MS = 120s`,
-  `backgroundExecRecoveryNotices()` may append one "running unpolled" reminder for that exact owned
-  session to the next MCP result delivered to the same conversation. `kernel.ts::
-  withBackgroundExecRecovery()` is the single consuming path — merely inspecting runtime state must
-  not spend the notice. A live dev server/tail does **not** consume the four-result unread admission
-  budget and is never killed or auto-polled by this mechanism. Once the live-session reminder was
-  delivered it does not nag again; if the process later exits, the separate `exitedUnread` reminder
-  repeats on later calls until the owning chat actually drains the terminal output.
-
-**`apply_patch`.** Model syntax is Codex V4A. MCP cannot expose a true freeform tool, so
-the raw patch rides inside the `patch` string while the grammar lives in the description.
-Engine under `apply-patch/`; the wrapper adds capability checks (per hunk kind — add needs
-`create`, delete needs `deleteFile`, content change needs `edit`, rename needs `move`),
-sandbox resolution, workspace behavior, recorder evidence. **Shell interception** also
-exists so a model emitting `apply_patch` as a shell command still reaches the port — if the
-failure involves `cd`, quoting, `&&` or other control flow, the bug is above the parser.
-
-Multi-file patch failure has a concurrency fence: the wrapper snapshots bounded pre-edit state,
-and rollback restores only paths that still match the state **this patch itself produced**. If an
-external editor changed a path after the partial patch, rollback refuses to clobber that newer
-work. The rollback budget is intentionally bounded; this is a recovery guarantee, not permission
-to snapshot arbitrarily large repositories into memory.
-
-Inside `codex/apply-patch/`, keep the layers distinct:
-
-| File | Mechanism it owns |
+| Area | Files and responsibility |
 | --- | --- |
-| `parser.ts` | whole-input boundaries and the intentionally lenient heredoc wrapper; normalizes Rust `lines()` CRLF/trailing-newline behavior before handing text to the grammar engine |
-| `streaming-parser.ts` | the actual V4A grammar state machine: begin/end markers, optional environment id, add/delete/update/move hunks, change-context/chunk construction, line-numbered parse failures |
-| `hunk.ts` | immutable semantic hunk/chunk shapes and marker constants; path spelling is preserved for summaries while source resolution is a separate operation |
-| `seek-sequence.ts` | ordered context search: exact → trailing-whitespace-insensitive → trim-insensitive → limited Unicode punctuation/space normalization; EOF hunks prefer the actual file end |
-| `file-update.ts` | turns ordered chunks into non-overlapping replacements, including repeated updates to one file; replacements apply from the end so earlier edits cannot shift later indices |
-| `text-file.ts` | line-ending-preserving source representation: untouched lines keep their exact CR/LF/CRLF, inserted lines use the file's first/preferred ending |
-| `mode.ts` | explicit reconstruction policy (`normalize_to_lf` vs `preserve_line_endings`); upstream-compatible default is still normalization unless the caller opts into preservation |
-| `errors.ts` | typed parse/I/O/replacement/path/implicit-invocation failures whose model-visible strings intentionally match upstream Codex behavior |
+| App shell | `src/main/index.ts`, `window-lifecycle.ts`, `window-layout.ts`, `window-icon.ts`, `tray-image.ts`, `shutdown.ts`: bootstrap, activation, geometry, tray and bounded exit. |
+| Config/security | `src/main/config.ts`, `platform.ts`, `secrets.ts`, `sandbox.ts`, `redaction.ts`; `src/shared/types.ts`, `capabilities.ts`: permission and host projection, secrets, approved paths. |
+| Publication | `src/main/connection.ts`, `mcp/server.ts`, `mcp/surfaces.ts`, `tunnel/{index,health,locate}.ts`, `diagnostics.ts`: endpoint/tunnel generation and truthful status. |
+| Tool dispatch | `src/main/mcp/{tools,kernel,inbound,call-context,tool-declarations}.ts`, `tools-core.ts`, `tools-desktop.ts`, `tools-plugins.ts`: declarations, exact caller, live guards and evidence. |
+| Code composition | `src/main/mcp/code-mode-{tool,runtime,worker}.ts`: surface-scoped `exec`, QuickJS admission, limits and explicit emissions. |
+| Instructions/plan | `src/main/mcp/{instructions,coding-instructions,plan-tool}.ts`, `src/shared/agent-plan.ts`, `src/renderer/agent-plan.ts`: executor contract and displayed progress plan. |
+| Local files/processes | `src/main/{rawfs,fsops,search,ripgrep,env,toolchain,exec,exec-hints,text-match,diffstat}.ts`, `src/main/codex/*`: bounded filesystem/shell implementation. |
+| Terminal custody | `src/main/codex/{manager,ownership,unified-exec,unified-exec-constants,shell,command-batch,head-tail-buffer,truncate,exec-output}.ts`. |
+| Patching/images | `src/main/codex/apply-patch/*`, `codex/{filesystem,read-backend,view-image}.ts`. |
+| ChatGPT downloads | `src/main/mcp/artifact-{download,fetch,target}.ts`: validate native file reference, bounded fetch, exclusive destination publication. |
+| Projects/cwd | `src/main/projects.ts`, `workspace.ts`, `src/shared/projects.ts`: explicit local folder catalog, session binding, inherited/learned workspaces. |
+| Durable history | `src/main/session/{store,recorder,correlation,retention,summarize,progress}.ts`, `src/shared/{session,chronology}.ts`: canonical messages, tool truth, chronology and indexes. |
+| Model history reads | `src/main/mcp/session-tool.ts`: explicit-session search/read and snapshot/update/detail cursors. |
+| Input | `src/main/session/{input,start-input,input-history,input-attachments,input-images,prompt}.ts`, `src/shared/{input,user-prompt}.ts`: outbox, native files, prompt frame and receipts. |
+| Finish/planning | `src/main/session/finish.ts`, `task-request.ts`, `goal.ts`, `src/shared/{finish,task-progress}.ts`: held turn, decision/plan invocation and cancellation. |
+| Continuation | `src/main/session/{continuation,resume-gate,handoff,handoff-prompt}.ts`: A→B transaction, send ambiguity and exact brief. |
+| Automation | `src/main/goal.ts`, `src/shared/{goal,goal-templates}.ts`: objectives, switches, obligations, provider/helper decisions. |
+| Agents | `src/main/agents.ts`, `src/renderer/{agent-panel,agent-communication}.ts`: independent prime families, staged mutations and addressed messages. |
+| Browser orchestration | `src/main/bridge.ts`, `browser.ts`, `browser-startup.ts`, `browser-wake.ts`, `browser-window-layout.ts`, `browser-preferences.ts`; `src/shared/browser-preferences.ts`. |
+| Extension | `extension/{manifest.json,chatgpt-dom.js,content.js,fiber.js,background.js,usage.js,overlay.css,popup.html,popup.css,popup.js}`: injection worlds, native observations/actions, journal and UI. |
+| Models/usage | `src/main/chat-models.ts`, `session/usage.ts`; `src/shared/{chat-models,usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
+| External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
+| Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,i18n}.ts`, `locales/zh-CN.json`, `index.html`, `styles.css`. |
+| Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
+| Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
 
-The fuzzy seek ladder is **matching policy, not authorization**. Paths are still sandboxed before
-mutation, and a successful fuzzy content match never relaxes filesystem ownership or capability
-checks.
+### One durable fact, one authoritative owner
 
-**`read`.** Deliberately four layers: `tools-core.ts` owns the model contract and
-multi-path behavior; `read-backend.ts` owns decoding/listing semantics; `filesystem.ts` is
-primitives only; `sandbox.ts` is policy. **Do not push authorization down into
-`filesystem.ts` and assume the public tool became safe.**
-
-**`view_image`.** 8 MiB transport ceiling. PNG gets a real decode check; JPEG/GIF/WebP
-validation has documented limits and does not yet match upstream's full-decoder guarantee.
-Synchronous validation of an adversarial compressed payload is a main-process resource
-risk. An invalid `image` content block can break an entire model turn — **prefer rejection
-over optimistic decoding.**
-
-**Tests.** `codex-runtime-parity`, `codex-apply-patch-parity`,
-`codex-apply-patch-invocation-parity`, `codex-view-image-parity`, `mcp`.
-
-## 11. Identity — the spine of the whole project
-
-An MCP payload contains **no trustworthy ChatGPT conversation id**. There is exactly one
-accepted proof chain:
-
-```text
-HTTP x-request-id                       (inbound.ts, normalized before '/')
-  ≡ page message.metadata.request_id
-  → fiber.js      emits allowlisted request evidence from the MAIN world
-  → content.js    pins the concrete route + exact live page/Fiber owner
-                 confirmLiveRequestOwners(requestIds, conversationId)
-  → background.js correlate() re-checks current document/epoch + tab conversation
-  → POST /correlations
-  → bridge.ts     ensures/reuses that conversation session, files only unresolved exact ids,
-                 then READS THE MAPPING BACK before ACK
-  → correlation.ts  proves requestId → conversationId
-  → consumed by: kernel · recorder · agents · workspace · terminal ownership
-```
-
-This acknowledged `/correlations` operation is deliberately **separate from transcript `/events`**.
-A fresh ChatGPT chat can expose `metadata.request_id` while its newest React/Fiber turn still carries
-a provisional client thread id, then converge on the real `/c/<conversation-id>` route shortly
-after. For the one page turn this document locally owns, `content.js` may retain that provisional
-Fiber descriptor long enough to send the pair `{concrete route conversationId, requestId}` through
-`confirmLiveRequestOwners()`. Historical/mismatched Fiber objects get no such exception. The app
-refuses any id already owned by another conversation, stores unresolved exact pairs through the
-existing recorder/correlation path, and returns `confirmed[]`; the page marks an id app-confirmed
-**only if that exact id comes back mapped to that exact conversation**. Batch `complete=false` does
-not erase other individually confirmed ids. No tool name, current tab, clock or nearest-turn guess
-is part of this handshake.
-
-**Never substitute** active tab, timing, tool name, most-recent chat, only-generating chat,
-worker payload, or arrival order. If proof is missing the safe state is **Unattributed**,
-no workspace, or refusal for identity-sensitive work. Guessing is worse than losing
-attribution: it routes commands, files, messages and history into the *wrong* chat.
-
-`multiAgent.allowUnattributedCalls` relaxes only the **ambiguity fences**, not exact ownership.
-Set to `false` — the migration baseline, and any install where the user turned it off —
-`mcp/kernel.ts` refuses an unidentified call when a retired-worker lease
-could own it, a dormant-worker lease could own it, or an active swarm needs exact workspace/terminal
-identity. `needsWorkspaceIdentity()` makes relative `read`/`find`, every `apply_patch`, and
-swarm/defaulted/relative `exec_command` identity-sensitive. Turning the setting on permits those
-otherwise-unidentified calls to proceed, but an exact known `dormantWorker`, `retiredWorker` or
-`endedWorker` is **still refused**. Do not document this as “disable attribution checks” or “all
-unattributed calls run”: it changes what happens when identity is absent, never who owns a chat that
-the app positively knows is a worker/fence.
-
-This one chain explains symptoms that look unrelated — worker `WORKER_IDENTITY_LOST`, calls
-piling into Unattributed, false worker stalls, wrong or absent project cwd, terminal
-polling crossing chats, agent messages stopping, Overwrite having no local activity to
-render. When several appear together, **debug the chain, not the symptoms**, in this order:
-
-```text
-server.ts/inbound.ts  did x-request-id arrive and normalize?
-fiber.js              did the page model expose a matching metadata.request_id?
-content.js            did refreshFiber accept the exact current descriptor and call
-                      confirmLiveRequestOwners for the concrete route?
-background.js         did correlate() still own that document/epoch and POST /correlations?
-bridge.ts             did /correlations return this request id in confirmed[] for that chat?
-correlation.ts        was requestId→conversationId stored, and restored after restart?
-kernel.ts/recorder.ts did the call wait for, find and use the exact proof?
-```
-
-Agent routing is *downstream* of this. Do not start there.
-
-`correlation.ts` is stricter than a cache and more bounded than a permanent database:
-
-- the first exact proof for a request id wins; a later conversation claiming that id is refused
-  without modifying or waking the original owner;
-- the stored `sessionId` is the **local session epoch at first proof**, not merely the current
-  conversation. A stale old page cannot drag an in-flight request into a newer local session epoch
-  after Compact & Resume;
-- proven owners have **no time TTL** and are reconciled from already-recorded request-id tool calls
-  on startup, but the in-memory/durable registry is bounded to the **50,000 most recently observed
-  request ids**. Do not describe it as literally unbounded/permanent storage;
-- the durable snapshot is a fast index, not stronger than session history. Because its writes are
-  debounced independently from attributed JSONL, startup reconciles recorded proof even when a
-  non-empty snapshot already exists.
-
-### 11.1 Block Chat — the one stop this app can make
-
-A wedged ChatGPT page can leave a turn running with no working Stop control: the model keeps
-issuing connector calls, the user cannot see the turn's messages and cannot cancel it, and every
-one of those calls arrives here correctly attributed. **The app does not try to end that turn** —
-nothing it can reach owns it. It owns whether the turn touches this machine, and refusing every
-tool is enough: `kernel.ts` returns `BLOCKED_CHAT_REFUSAL` (`CHAT_BLOCKED: …`), which tells the
-model to abandon the task, make no further tool calls and answer, so the turn ends itself.
-
-`session/blocked-chats.ts` is a durable set of **conversation ids**, released only by the user.
-Conversation, not request id, because `correlation.ts` already proves `requestId →
-conversationId` and one ChatGPT turn issues all of its connector calls under one request id: a
-list of request ids would ban the turn the user was looking at and nothing the same chat did a
-second later.
-
-- The refusal is the **first** branch of the dispatch chain in `kernel.ts::dispatchTracked`, above
-  every worker-lifecycle verdict, and applies to every tool on every surface — `agents` finish
-  included. A blocked chat has nothing left to finish.
-- A blocked chat's **worker slot is released from the block itself.** `bridge.ts::sweepStaleSwarm()`
-  sleeps every slot-holding worker (`occupiesSlot()`) whose conversation `isChatBlocked()`, on every
-  30-second pass and once more immediately from `sessions:block`. It reads only the durable block:
-  the silence grant it used to wait for is process memory, and a restart after the block left the
-  restored worker `active` with no grant to expire, holding the swarm's one slot for an hour and
-  refusing the next prime with `AGENTS_BUSY` (2026-09-02, worker-3). No browser recovery is ever
-  attempted for a blocked chat; its recorded open turn stays open until real evidence ends it.
-- It is **exact-identity only**, and never waits for evidence. It refuses a call whose *proven*
-  owner is blocked and never one whose owner is merely unknown. That costs nothing: the user
-  blocks a chat they can already watch making attributed calls, so its request id is proven and
-  every later call in that turn resolves from the registry immediately. Do not "strengthen" this
-  into blocking unattributed calls — that refuses an innocent chat's read to punish a different
-  chat's turn.
-- It survives restart, because the turn can. It is released by the user's own press, or by
-  deleting the session whose row carries that button (`ipc.ts::sessions:delete`) — otherwise a
-  block could outlive the only UI able to lift it.
-
-Renderer: `chat.ts::sessionRow()` draws the toggle beside Open Chat, and `sessionBadges()` marks
-the row `blocked`. The blocked set rides `sessions:list` as live policy — it is keyed by
-conversation and must never be written into a session's `meta.json`. Preload exposes only
-`setSessionBlocked(id, blocked)`; `ipc.ts` re-reads and validates that session's stored
-conversation id, exactly as `sessions:openChat` does, so the renderer can never name a
-conversation of its own.
-
-**Tests.** `correlation.test.ts`, `mcp-inbound.test.ts`, `fiber.test.ts`,
-`content-script.test.ts`, `swarm.test.ts`, `blocked-chats.test.ts`, `mcp.test.ts`
-("blocked chats"), `ipc.test.ts`.
-
-## 12. Session recording — `recorder.ts`, `store.ts`
-
-Two independent producers, one durable timeline, neither replaceable by the other:
-
-1. **MCP/app truth** — exact tool, arguments, result, outcome, file changes, duration, assets.
-2. **Browser observation** — authored messages, turn lifecycle, native progress, visible
-   errors, conversation identity, page request evidence.
-
-The app knows *what the tool did*. The browser knows *which conversation and turn showed it*.
-
-```text
-userData/sessions/<id>/
-  events.jsonl        append-oriented tool/turn/error/activity events
-  messages/*.json     canonical user/assistant messages, one shard per logical id
-  messages.json       legacy canonical map, read during lazy migration
-  meta.json           atomically rewritten projection
-  assets/<id>         screenshots and large/binary material
-  handoffs/<id>.json  saved compaction briefs
-```
-
-**Must hold.** Streaming website messages are mutable snapshots of one logical message, so
-Canonical message shards **replace by stable identity** — never turn that back into blind appends.
-Structured activity stays append-oriented. Large values bound inline and spill to assets;
-never fix a display-size problem by discarding the durable source. Durable state is the
-authority across restart, and `meta.json` must never claim events that `events.jsonl` does
-not contain. Unattributed is a **first-class state**, not a bug to paper over.
-
-Distinct from `logger.ts`, which is small, redacted, RAM-only and operational.
-
-### The store has three write models, because the data has three different semantics
-
-`store.ts` is not “JSON files on disk” in the abstract. It deliberately uses a different commit
-mechanism for evidence, mutable website messages and derived metadata:
-
-1. **Structured evidence — serialized append.** Each open session has one operation queue.
-   Sequence assignment, complete JSONL append and in-memory projection update happen in that
-   order on the queue; memory does not advance before the line exists. A crash-torn final line is
-   detected/sealed before a later append so two JSON objects can never be concatenated into one
-   apparently valid record. `events.jsonl` is therefore the history authority for structured
-   activity, not `meta.json`.
-2. **Canonical ChatGPT messages — atomic replacement by stable website identity.** Streaming and
-   final revisions use one shard under `messages/`; the shard is temp→rename and a terminal final
-   revision cannot later regress to streaming. Legacy append-only message snapshots remain readable
-   but are suppressed when a canonical shard for that identity exists. Lazy migration overlays new
-   shards on the old `messages.json` map rather than rewriting all history up front.
-3. **`meta.json` — rebuildable projection.** Ordinary event ticks mark metadata dirty and coalesce
-   rewrites; ownership/transaction boundaries that need a durable decision write it immediately.
-   A validated `meta.backup.json` protects the last good checkpoint. On load, if metadata lags or is
-   unusable, the store rebuilds history-derived counts/tokens/turn state from the journal + canonical
-   messages while preserving metadata-only facts it can still trust. It refuses to turn an
-   unrecoverable session into an invented empty one.
-
-That distinction also explains why **per-session serialization** is enough for many reads/writes:
-`flushSession(id)` joins only that session's queue rather than flushing every open session. A poll
-of one chat must not force metadata rewrites for dozens of unrelated generating chats.
-
-Large data has bounds at every representation. Inline tool args/results are 8k chars; ordinary
-assistant-message inline text is 12k, user messages may be much larger, and overflow text can spill
-to a content-addressed asset up to the explicit overflow ceiling. Individual session assets are
-limited to 8 MiB, with 192 MiB per-session and 2 GiB global asset quotas. Recent/tail readers have
-their own row/byte ceilings. **A bound is part of the mechanism that owns that representation** —
-raising a UI budget is not permission to remove the durable-store or transport bound underneath it.
-
-### Attribution has one wait, then a first-class Unattributed landing
-
-For a tool call that **has a request id** whose owner is not yet in the registry, `recorder.ts` waits
-the current **20-second `REQUEST_ID_GRACE_MS`** for the browser's exact evidence. A headerless/no-id
-call has no exact ownership proof to wait for and proceeds directly to the Unattributed verdict. The
-grace does not delay every later write behind one global timer: calls with unresolved ids start their
-attribution waits independently, but each call
-synchronously reserves its eventual position on `recordChain`, so invocation order is preserved
-when the waits resolve at different times. Already-proven calls skip the wait but not the ordered
-write/quit-flush discipline.
-
-If the exact proof still has not arrived, the call lands in the Unattributed session. That is a
-durable truthful state, not a final guess. A later exact proof queues deterministic repair:
-
-```text
-scan bounded Unattributed source snapshot
- → group only calls whose own requestId now has exact proof
- → copy referenced assets first
- → append the same callId/evidence into the proved destination session epoch
- → rewrite only the scanned source prefix, preserving concurrent later appends
-```
-
-Mixed buckets are split call-by-call; timing, tool name, current tab and "only chat generating"
-never participate. When correlation names an older `sessionId`, recorder searches that exact
-conversation lineage historically and **refuses to downgrade into a newer owner** just because it
-is easier to find.
-
-One proven outcome is deliberately terminal in that stream: `superseded` means the request id
-proved a conversation whose durable session attachment has already moved elsewhere. The proof is
-kept on the call, but repair must leave it isolated; exact historical identity is not current
-execution authority.
-
-Browser observations serialize **per conversation**, not globally. Closing a browser conversation
-also does not invent a turn ending: if durable metadata says a turn is still open, closure drops
-the live page mapping and leaves turn recovery to the mechanism that can actually prove its
-outcome. Reload recovery may synthesize a missing `turn_end` only against that durable open-turn
-ledger, never merely because a content document disappeared.
-
-The recovery proof is intentionally **state-based, not page-turn-id-based**. A reloaded page can
-replay old final messages carrying historical turn ids, so `recorder.ts` scans for the newest final
-assistant observation whose exact `turnId` is still present in the durable `openTurns` set and has
-no explicit end in the same batch. Only that `recoveredFinal` may append a synthetic
-`turn_end(completed)`. Other historical finals remain transcript backfill.
-
-**A completed end the page reported is withdrawn by the server turn calling on.** ChatGPT's
-request id is minted per server turn and outlives the page — reload, lost stream, Stop click. The
-recorder remembers the request ids an open turn called under and, when the page reports that turn
-`completed`, keeps them with the end. A call under one of those ids that *starts* after the
-reported end (`reopenFalselyEndedTurn`) proves the end was the page's, not ChatGPT's: the recorder
-appends an app-authored `turn_start` for the same id (with `detail`), takes the id out of
-`knownTurnEnds` so the real end is accepted later, publishes it as `activeTurnId` again, and the
-bridge retires whatever Goal was drafting for it (`retireGoalDraftsFor` + `forgetGoalWatch`). A call
-that started before the end is an in-flight call finishing late and proves nothing; a different
-request id is a different turn; only `completed` ends are reopened — a stop is the user's, the
-failure outcomes belong to recovery. The proof is process memory: an app restart inside such a turn
-leaves it closed as reported. Live 2026-09-02: a reload mid-turn closed the adopted turn after four
-seconds, the same request id called tools for twenty-four more minutes, and Goal typed the next
-message against an answer never given.
-
-For Goal, a newer stable
-final may also strengthen an earlier uncertain (`unknown|failed|interrupted|stalled`) turn boundary
-when its authored time is at/after that turn's durable start; that marks the canonical assistant
-message `goalEligible` **without fabricating another turn end**. Canonical message upsert keeps
-`goalEligible=true` monotonic so a later sparse replay/503 cannot retract the durable Goal
-obligation.
-
-**Tests.** `session.test.ts`, `chronology.test.ts`, `resume.test.ts`.
-
-### The model-facing `session` tool is a projection, not the store
-
-`mcp/session-tool.ts` intentionally accepts an explicit `session_id`; it does **not** infer the
-caller's current chat. Cross-chat recovery and observing a concurrently running worker are core
-uses. The cursor is part of the data model:
-
-- an initial read pins the maximum sequence observed as a snapshot;
-- `older` and timeline continuation cursors keep that snapshot fixed, so later appends cannot
-  reshuffle pages the model is already consuming;
-- an `update_cursor` advances from `after` and carries up to four unfinished assistant
-  `{id, chars, hash}` checkpoints. If the same message only grows, the next page returns the
-  suffix; if its prefix changed, it says **ASSISTANT REPLACED** so the caller knows to discard
-  the unfinished version it already read;
-- `T…` tool-detail cursors pin sequence, offset and hash, so a changed detail fails as stale
-  instead of splicing two different versions together;
-- calls to `session` are still recorded for audit, but the session tool hides those self-reads
-  from its own projection/search. Otherwise polling an update cursor would create an endless
-  transcript of previous polls.
-
-Result budgets reserve footer/cursor room **before** exact recorded text is appended. The final
-bound check throws rather than cutting a cursor or silently shortening a user/assistant message.
-
-**Retention is independent of recording admission.** `session/retention.ts` runs one prune at
-startup and then a coarse six-hour sweep using the current `retainDays`. Turning recording off
-does not exempt history already on disk from its retention policy.
-
-## 13. The Chrome extension — `extension/*`
-
-`manifest.json` is the composition root. It installs `background.js` as the MV3 **module service
-worker**; injects `chatgpt-dom.js` then `content.js` plus `overlay.css` in the isolated world at
-`document_idle`; injects `fiber.js` separately in the **MAIN** world; and points the toolbar action
-at `popup.html`. Its only extension permissions are `storage`, `scripting` and `alarms`; host access
-is ChatGPT plus the loopback bridge ports 8765–8769. When debugging “which context even loaded this
-code?”, start here before reading runtime logic.
-
-Three execution contexts with **three different lifetimes**:
-
-| File | World / lifetime | Owns |
+| Fact | Owner / storage | Publication rule |
 | --- | --- | --- |
-| `chatgpt-dom.js` | isolated, document | every selector and DOM-shape assumption |
-| `content.js` | isolated, document | observation, turn lifecycle, Overwrite, compact UI |
-| `fiber.js` | **MAIN**, document | React/Fiber evidence the DOM does not reveal |
-| `background.js` | MV3 worker, **suspends freely** | bridge token, journal, tab↔conversation registry |
-
-Plus `chrome.storage.session` — survives worker sleep, dies with the browser session — and
-tab↔conversation binding, which follows tab lifetime and explicit navigation.
-
-The service worker has several intentionally different durability classes; do not collapse them
-into one "extension storage" bucket:
-
-- **`storage.local`:** pairing port/token + explicit disconnect intent, `deferredRevivals`, and
-  restart-surviving command-ACK recovery material. These are facts that may still matter after the
-  whole browser restarts.
-- **`storage.session`:** observation journal, close outbox, live tab/conversation/document state,
-  and the command-ACK outbox used for MV3 worker suspension. These belong to the current browser
-  session but must outlive a sleeping service worker.
-- **content-script memory:** one document only — epoch, observers, seen identities, paint state,
-  command attempt state. Reload destroys it by design.
-
-`background.js::load()` is itself serialized by one `loading` promise. Cold-start races are normal
-for MV3: two tabs must never independently restore an old storage snapshot and let the later load
-overwrite an event the first caller already acknowledged.
-
-The observation journal is **bounded but loss-accounting**, not infinitely durable. Current caps are
-4,000 rows and roughly 4 MiB inside the extension's `storage.session` budget. Under pressure the
-service worker first discards replaceable/nonessential progress, and if it must drop stronger
-evidence it inserts an explicit same-route gap record. If Chrome refuses the journal write even
-after compaction, the caller gets `durable:false` and a durability-gap `chat_error` is retained as
-far as storage allows. Likewise, a batch leaves the journal only after the app returns success; an
-irreducible malformed/oversize client batch becomes explicit gap evidence instead of a silent
-splice in history. "Accepted by the extension" therefore means **either the observation or an
-honest record of the gap remains under extension custody** — not that storage has infinite room.
-
-Irreversible command ACKs outrank ordinary transcript draining for the same conversation. While a
-send ACK is waiting in `commandAckOutbox`, `nextJournalBatch` will not let later observations from
-that route overtake it. Otherwise the app could record the post-send assistant turn before it knew
-the worker/resume user message had actually crossed its semantic boundary.
-
-`commandAckOutbox` is also deliberately **browser-restart durable**. `persistLive()` mirrors the
-bounded outbox to both `storage.session` and `storage.local`; `loadOnce()` prefers the local copy and
-uses the session copy only as a migration fallback. `ackCommand()` inserts/replaces the command-id
-row and awaits that persistence **before** trying the bridge network call. Therefore “ChatGPT
-accepted this irreversible send” survives content-script death, MV3 suspension and a whole browser
-restart; the retryable thing is only delivering the receipt to the app. Do not weaken this back to
-session-only storage just because most other live tab state belongs to the browser session.
-
-**`chatgpt-dom.js`** groups logical turns, extracts authored text, finds buttons/errors/tool
-rows, and strips CLF-owned surfaces before reading so rendered replacements do not feed back
-into recording. When ChatGPT changes markup, fix it here. **Never scatter emergency
-selectors into `content.js`.**
-
-**`content.js`** owns per-document memory: conversation epoch, seen-message identities, live
-turn state, Fiber cache, rendered replacement state, pre-service-worker queue.
-
-Conversation routing is not limited to `/c/<id>`. `chatgpt-dom.js::conversationFromPath()` /
-`conversationId()` and `background.js::conversationFromUrl()` deliberately recognize the one
-supported Project shape `/g/<project>/c/<id>` as the **same conversation id**. Every place that
-asks "which chat is this?" must use those shared route rules; teaching only the recorder about a
-Project URL while the service worker/recovery path still sees no conversation splits ownership.
-
-Fiber conversation ownership includes the mounted `props.conversation.id` shape, alongside
-the older direct conversation/client-thread fields. All observed IDs must agree. Helper
-completion still requires its exact acknowledged user, current scan, terminal assistant ID
-and bounded canonical raw text; missing identity is never replaced with rendered JSON.
-
-Queued desktop inputs follow the durable local session across Compact & Resume. The outbox
-publishes a superseded source ID only for still-queued input whose current session has moved.
-The service worker may transfer that election to an existing successor tab once, persisting its
-target conversation; it may not open a missing successor or replace a user-closed elected target.
-Tab retirement protects that current queued-input owner. Already handed-out browser claims
-continue protecting their exact original document until the send outcome is known.
-
-**A turn opens from authored-user evidence, not from the Stop button.** A newly observed stable
-ChatGPT **user** message opens one local generation and emits `turn_start`. On reload the content
-script may adopt the durable `activeTurnId` the app already knows, but must not emit a second
-start. Stop-button presence is downstream liveness evidence only: hydration/flicker/phase changes
-must never manufacture a user turn.
-
-Turn closing is deliberately asymmetric:
-
-- manual Stop is `stopped` and is never upgraded into success;
-- a visible error/interruption/stall keeps its exact non-success outcome;
-- when Fiber is healthy, the current response's model-backed terminal/end-turn evidence is the
-  strongest completion authority;
-- Stop disappearing merely opens a settle window. If Stop returns, text/native activity changes,
-  unanswered connector work remains, or the terminal message does not belong to this exact turn,
-  completion is withdrawn;
-- the degraded no-Fiber rule — visible prose after the settle window means `completed` — applies
-  only to a generation this document has seen running (`unwitnessedGeneration`). A turn adopted
-  from the app on reload has no document-side evidence until the Stop control has been seen for
-  it; until then only the page model, an error, a user stop, a new send or the stall budget may
-  close it. Live 2026-09-02: the committed interim prose of a running turn closed the adopted turn
-  four seconds after the reload;
-- a genuinely newer authored user message is a hard boundary for the previous turn, while page
-  unload/`closeConversation` alone never invents its outcome.
-
-The concrete page clocks matter because they define what the recovery layer is allowed to infer.
-`TURN_SETTLE_MS = 4000`: Stop first disappearing starts that quiet window, Stop returning cancels
-it with the same local generation intact, and `unknown` **never** becomes terminal merely because
-four seconds elapsed. Manual Stop closes immediately. Independently, a Fiber descriptor whose exact
-active turn exposes `endMessageId`/`end_turn:true` is stronger than a stale Stop control and may
-close that exact local generation immediately; if the page outcome was otherwise still `unknown`,
-that model-backed terminal proof supplies `completed`. The visible `data-interrupted` marker alone is
-only an outcome candidate, not a terminal boundary, because ChatGPT transiently uses it between
-tool/reasoning phases.
-
-`STALL_MS = 10m` is likewise observation, not browser action. While ChatGPT still reports the turn
-as generating, ten minutes without visible progress emits one app-visible `chat_error` and lets
-`endOutcome()` classify a proven terminal boundary as `stalled`; that synthetic stall notice is not
-marked recoverable and `content.js` does **not** reload the page. Reload/open authority stays in the
-shared bridge→service-worker recovery machine. After any turn ends, `FIBER_SETTLE_MS = 90s` is only
-a ceiling for late request-id/owner evidence: the content script keeps scanning the just-settled turn
-while exact call ownership is incomplete and stops early as soon as the required Fiber evidence is
-complete. It is not a 90-second delay before turn completion and not another recovery timer.
-
-This is the conceptual reason **partial vs final** bugs are identity bugs. Commentary/progress,
-native tool rails and final assistant answer are different semantic objects even when the DOM
-renders them close together. Stable message/turn identity comes from ChatGPT's model/Fiber evidence
-where available; DOM shape is presentation/action fallback, not permission to merge those roles.
-
-**`fiber.js` is intentionally least trusted.** It emits a strict **allowlist** (not copied
-props minus a denylist), never tool argument values, validates the exact CLF connector
-names, and fails closed on unfamiliar React shapes. Its `postMessage` output is
-page-controlled evidence useful for joining page to local truth — **never a credential**.
-Its protocol version and the content-side expectations move together.
-
-**Overwrite owns activity ordering, not the assistant answer.** `content.js::renderStreams()` no
-longer rebuilds ChatGPT's answer subtree from captured HTML. ChatGPT remains the sole renderer for
-assistant prose, code/document blocks and response actions; the companion mounts one sibling stream
-containing only app-owned activity rows and hides only the native progress/tool rows that stream
-proves it fully replaces. `websiteRenderForTurn()` joins a visible Fiber turn to durable activity by
-exact ChatGPT message/thought/request identities — never by time, DOM position or a tail guess — and
-`completeReplacementForTurn()` requires every page-authored object the Fiber descriptor names to be
-represented before native activity is hidden. A connector call without request identity, a missing
-assistant/thought row, contradictory explicit turn ownership, or no usable Fiber descriptor leaves
-that turn native rather than showing a partial local reconstruction.
-
-Presentation identity is deliberately stricter than a remembered DOM attribute. React may reuse an
-assistant section for the next response, so `priorStreamRootCompatible()` keeps an old sibling root
-only when current stable **message/activity** ids overlap the root's stored strong ids; request ids
-are excluded because ChatGPT can reuse them across retries/turns. `hasUnrepresentedFiberCall()` also
-breaks the short replacement grace immediately when Fiber already exposes a new call the app stream
-cannot show. Otherwise a recently complete root may survive one brief feed/Fiber race to prevent
-visible native↔synthetic flicker. During active user scrolling the repaint is frozen, and the next
-pass restores a visible turn's viewport anchor after layout changes. These are presentation guards,
-not alternate identity or recorder fallbacks; durable session data is never rewritten to make the
-render fit.
-
-The `/activity` reader is also a small liveness scheduler, not a fixed poll. `content.js::
-activityPullDelay()` chooses 750 ms for visible generation/Goal drafting/final-presentation debt,
-2 s for other active work (and hidden generation), 10 s for visible idle and 30 s for hidden idle.
-`pendingPresentation` is one exact final assistant revision that already crossed the extension
-journal but has not yet returned through the app-owned activity projection; setting it calls
-`expediteActivityPull()`, and only the same final message id + exact text coming back clears it.
-This is why a hidden/background tab cannot drop to the slow cadence while Goal is drafting or while
-Overwrite still owes the user the final revision. Reuse `armNextActivityPull()` rather than adding
-another hidden-tab timer/watch loop.
-
-The service worker's document model is also **current implementation, not an aspirational one**.
-Today `background.js` still carries separate `tabDocuments`, `tabEpochs`, bounded
-`retiredDocuments` (last 8 per tab) and speculative `terminalDocuments`, all in `storage.session`.
-Authority begins with Chrome's `MessageSender.documentId`, never a body field. A retired sender is
-`stale_document`; the exact current document may advance `tabEpochs` but a lower epoch is
-`stale_navigation`; `ownsDocument()` additionally refuses retired/terminal senders. A different
-non-retired sender can be adopted by `authorizeDocument()` itself — `register_document` is **not**
-the sole replacement path in today's code — while `registerDocument()` is the one bypass-authorized
-bootstrap that can adopt fresh-reload provisional journal evidence before retiring the old current
-document. `onUpdated(status='loading')` marks the current document terminal speculatively and keeps
-the conversation binding only across a reload of the chat's **own** URL; a full load of any other
-ChatGPT URL (the root, another chat, a project page), a leave to another site, or tab removal
-releases the chat there and then (2026-09-03: typing chatgpt.com into a Prime's tab left it bound
-until some later chat was given an id there, so the app never heard the page was gone). An SPA move
-fires no `loading` status and stays the content script's to prove. A current terminal sender gets `tab_closed` unless `terminalPredictionWrong()` positively
-re-reads the same Chrome tab as ChatGPT, no longer loading, with no `pendingUrl`, and the sender still
-current; only then is the false terminal stamp cleared. Do not document or implement against a
-hypothetical collapsed owner record until code/tests move together. Irreversible browser actions
-always re-check this current document+epoch authority.
-
-**Extension reload recovery is health-based, not install-event-based.** An unpacked extension reload
-can leave the old isolated-world JavaScript globals alive while invalidating its `chrome.runtime`,
-so a boolean “content script already ran” marker is not liveness. `content.js` publishes a versioned
-`__CLF_CONTENT_RECORDER__` handle with `healthy()` + `stop()`: a healthy current-version incumbent
-wins, while a dead/stale predecessor is stopped and replaced. `background.js::restoreChatgptTab()`
-pings that handle; a healthy recorder still causes Fiber to be re-injected independently, while a
-missing/stale recorder gets `chatgpt-dom.js` → MAIN-world `fiber.js` → `content.js` → CSS rebuilt in
-that exact tab. `restoreOpenChatgptTabs()` runs both from install/update hooks **and unconditionally
-when the service worker module starts**, because `chrome://extensions` Reload is not guaranteed to
-deliver the install event. Service-worker wake alone therefore does one cheap health ping per open
-ChatGPT tab and injects only when health/version proves repair is needed.
-
-**Must hold.** ChatGPT is an SPA: every async result proves it still belongs to its
-navigation epoch before mutating state. `pagehide` is **not** proof a conversation ended —
-reload and bfcache fire it too; real closure is decided at the service-worker layer from tab
-removal and navigation away. **Reload is not conversation close.** Content-script acceptance
-means *handed to the journal*, not *stored by the app*, and the journal must never silently
-lose something it already acknowledged as durable. Recovery must validate **every** context
-whose health it needs — proving the isolated recorder is alive says nothing about a dead
-MAIN-world Fiber helper. Recorder takeover is total ownership transfer: the predecessor must
-disconnect MutationObservers and DOM/window handlers **and** unregister extension-level
-`chrome.runtime.onMessage` / `chrome.storage.onChanged` listeners. An `alive=false` predecessor
-must never answer a health check, compete for a worker-revival command, or repaint Overwrite
-after the successor owns the document. **No wait in `content.js` may depend on the tab being in
-front:** Chrome runs a hidden tab's chained timers once a minute after five minutes hidden, so every
-periodic loop and every `sleep()` goes through `later()`, whose MessageChannel hop keeps the timer
-chain at level one; a new `setTimeout`/`setInterval` loop in the recorder is a regression.
-
-**Tests.** `content-script.test.ts`, `fiber.test.ts`, `extension.test.ts`.
-
-## 14. The browser bridge — `bridge.ts`
-
-Worker/resume markers have independent durable claims and receipts. A leased resume cannot
-block an unrelated worker invitation. Only never-handed commands enter the opener; expiry never
-turns a spent lease back into opening authority. Shared command-ledger snapshots commit serially,
-including claim renewal and final receipts. A bound worker's leased transport remains until its
-receipt or deadline settles it; sibling maintenance cannot retire it during ACK persistence.
-
-A second loopback HTTP service on the first free port of **8765–8769**. The extension finds
-it with `/hello`, silently provisions a bearer token with `/pair`, then uses authenticated
-routes: `/status`, `/correlations`, `/events`, `/closed`, `/activity`, `/compact`,
-`/goal/draft`, `/goal/ack`, `/goal/objective`, `/goal/open`, `/settings` (GET and POST),
-`/commands/redeem`, `/commands/ack`. `/settings` is the one deliberately tiny config-write
-surface available to the page: its POST accepts the flat boolean `autoCompact`, optionally one flat
-`goal` **or** `loop` boolean (never both), plus optional `conversationId` for chat scoping.
-`goal.ts::applyGoalSwitch()` is the pure pair reducer, not a
-bridge-owned policy function. With a concrete `conversationId`, the bridge persists the result via
-`goal.ts::setGoalSwitchNow()` into that chat's `goal-switches` row; only a New Chat with no concrete
-id changes the app-wide `config.goal` default. Goal and Loop are therefore mutually exclusive by
-construction, not two independent feature flags, and a page-local stop does not silently rewrite
-every other chat. `/goal/objective` and `/goal/open` accept the same two words as an optional
-`mode`, which is the *other* way that per-chat switch is written — see "A chat's own goal". None grants filesystem/process/Desktop reach. GET exists for the one composer
-with no conversation to read `/activity` for: a New Chat.
-
-**Must hold.** The token never enters the ChatGPT page — the service worker holds it in
-extension-owned state and the app keeps its counterpart out of config and log surfaces. The
-bridge exposes **no** filesystem, command, permission-widening or arbitrary-config route. Do not
-turn `/settings` into a generic config escape hatch merely because two non-capability toggles are
-already there. Protocol mismatch
-against `BRIDGE_PROTOCOL` warns once rather than spamming. Concurrent startup must not race
-on listener ownership.
-
-Because this is where browser-observed lifecycle meets recorder, agents, continuation and
-workspace state, a `bridge.ts` bug presents as a session, extension, or agent bug depending
-on which end you inspect.
-
-POST **`/events` is the cross-subsystem commit coordinator**, not merely “write these page rows”.
-The extension journal treats HTTP 200 as permission to retire that batch, so every consequence that
-would be unrecoverable after the row disappears must cross its own durable boundary first. Current
-order is load-bearing:
-
-```text
-exact (agent, commandId) lost-worker-ACK recovery if present
- → exact page / turn_start liveness back into agents.ts
- → reconstruct worker origin from durable broker ownership when needed
- → recorder.ts::recordChatObservations()  (per-conversation serialized journal/message writes)
- → acceptGoalReplyNow() for every stable goalEligible final   ← durable before 200
- → noteRecoveryObservations() + activity/terminal deadlines
- → update worker context-token ceiling from the durable session
- → if a worker final is now proven across journal batches:
-      stageWorkerConversationFinish()
-      → persistCriticalSwarmNow()                              ← durable before 200
-      → commit report / wake queued sleeper / release run
- → 200; only now may background.js drop the observation batch
-```
-
-A storage/broker failure at either Goal or worker-final barrier returns retryable 503, preserving
-the browser-owned journal row for replay. This is why worker completion, Goal exactly-once and
-broken-page recovery can all consume the same observation without inventing three independent
-receipt systems.
-
-Browser recovery now has **one per-conversation queue** in `bridge.ts::queueBrowserRecovery()`;
-silence, recoverable assistant transport errors, missing mid-turn tabs and broken request-id joins
-converge there instead of each owning a reload/open loop. The queued record is fenced by a stable
-episode + receipt token and moves `queued -> handed -> done`; only a confirmed browser action is
-"done", and meaningful new activity or turn completion retires only the repair kinds for which that
-fact is actually authoritative.
-
-**An adopted turn is bound only to a section below its question.** `seedResumeBaseline()` treats
-the newest assistant section as the resumed turn's own only when it follows the newest user
-message; a section above the question is a previous, finished answer, and binding the adopted
-turn to it let that answer's end-turn bit close the live turn nine seconds after every reload of
-the 2026-09-03 prime. With no section after the question the turn has no page evidence yet and
-stays open. The `unwitnessedGeneration` flag likewise clears only when Stop is seen over a
-section `generationTurn()` can bind, not on hydration's one-second Stop over an empty transcript.
-
-**The page's word that a turn ended is not enough to write the next Goal message on.** A reloaded
-page reads the transcript's last `end_turn` bit as a finished answer while the same request is
-still calling tools, and a "Message delivery timed out" error closes the local turn the same way
-(2026-09-03: the loop drafted twenty seconds after such an end and the chat ran two requests at
-once). `/goal/draft` therefore files the obligation but refuses the draft with `chat_still_working`
-while the recorder still has the chat's turn open (`chatIsWorking()` — a reopened turn stays open
-until the page reports a real end, and the 2026-09-03 banner reported none), while
-`runningToolCalls()` is non-zero, or while the chat's last attributed call is under `GOAL_QUIET_MS`
-(one minute) old. The page keeps its claim and asks again every `GOAL_RETRY_MS` on the plain wait,
-with no backoff, until the app says the chat has finished. Only the silence ticket (`g-silence-*`)
-is drafted over an open turn: it is the app's own finding that the answer is over. A call that proves
-the ended turn is still running (`recorder.ts::reopenFalselyEndedTurn`) withdraws the obligation
-outright via `retireGoalDraftsFor()`. The silence path is the other half: a Goal/Loop chat gets its
-silence reload, then `GOAL_SILENCE_LISTEN_MS` (one minute) of listening, and only a minute with no
-tool call, no interim row, no message files the `g-silence-*` ticket; any of those re-arms the
-two-minute clock so a chat that stops again later gets the same reload and minute again.
-
-**A reload the page has not come back from is not answered with another.** A 300k-token chat
-takes minutes to load — three, for the 2026-09-03 prime — and `inspectSilentChats()` used to
-reload it again 23 seconds after an unattributed reload had, restarting the load. A chat in
-`awaitingReturn` (set by `confirmRepair()`, cleared by the next `grantActivity()`) keeps its
-silence deadline pushed to `lastBrowserRecoveryAt + BROWSER_RECOVERY_COOLDOWN_MS`; only a page
-that never returns is reloaded when that runs out.
-
-**The DOM layer reads each transcript section once.** `chatgpt-dom.js` keeps a per-section memo
-(`sectionCache`: rows, markdown parts, tool blocks, progress boxes, `interrupted`) that its own
-MutationObserver drops on any subtree, text or relevant attribute change, draining pending records
-synchronously (`takeRecords()`) before every read. Before it, the one-second tick walked the whole
-transcript six to eight times and took every message's text each time — most of a second of main
-thread per second on a 300-turn chat, and the freeze behind the 2026-09-03 prime. Never read
-message text or tool rows around the cache; add a field to the memo instead.
-
-An ordinary open semantic turn grants its **conversation** a two-minute silence deadline in `activeUntil`.
-Known Pro models instead use ten minutes from meaningful work/tool-start evidence. A late exact
-picker or MCP identity promotes an unknown grant without resetting its evidence timestamp. A real
-turn-end removes activity immediately; a genuinely newer exact MCP call can revive it. Pro never
-receives an inactivity-generated Goal or automatic compaction. Picker presence alone is not work.
-`grantActivity()` arms/pushes it from accepted current-turn evidence and attributed calls;
-`endActivity()` removes it only on a real terminal. `armSilenceSweep()` owns one timer for the
-earliest deadline across all chats, so a 30-second maintenance tick cannot silently add another
-half-minute to the contract. Expiry queues one receipt-tracked browser recovery for an ordinary
-chat, Prime or Worker alike; a confirmed one-shot repair is not repeated for the same episode.
-**A resumed chat is armed at the commit** (`armResumedChat()`, called from both commit sites —
-the `/compact` destination-marker route and the `/commands/ack` resume receipt): the moment S
-names B, B gets the same grant an accepted turn would have earned. The 2026-09-02 automatic
-handover showed why. B never reported its turn or bound its first request id, so its calls went
-Unattributed and B, with no grant and no known turn, was not a repair candidate — the incident
-had nothing to reload and B stayed stuck at its first tool call. With the grant, the silence and
-unattributed sweeps cover B from the first second, exactly as they would a chat that had proved
-itself.
-
-Unattributed recovery is separate evidence feeding the same queue. One recorder verdict that a call
-is **Unattributed** opens a 60-second
-`unattributedIncident`; later attributed calls add their exact conversations to the incident's
-`proven` set. At expiry, `repairUnattributedChat()` looks only at chats this app can still prove are
-mid-turn (`repairCandidates()`), excludes those that proved their join, and queues one recovery for
-each remaining broken chat. It does not choose "the one likely chat", and agent role is not an
-eligibility gate. The incident carries the **request ids** of the unattributed calls that opened
-and fed it; once it has reloaded anybody those ids go into `unattributedReloadedRequests`, and a
-later unattributed call under one of them opens nothing — the reload is tried once per server turn,
-however the reloaded page re-labels its local turn, and a *different* request id (the user's next
-message from the phone, say) is a different turn with its own reload. Any `chat_error` the page
-shows queues an `assistant-error` repair — whatever the DOM classifier said about it and whether or
-not the page could name its turn — even while attributed MCP calls continue server-side. A final-tab close
-may queue `no-tab` when `tabRecoveryWanted()` holds (Goal/Loop chat, or `recoverAgentTabs` on) and
-this app is owed a running turn in that chat. "Owed" is the app's own fact, read in `/closed`
-before the close forgets it: the page's open turn **or** a live `activeUntil` grant (an attributed
-call or current-turn observation inside the silence window), or a Worker slot the close itself
-detached — a document being torn down has no Stop control and reports "completed" whatever the
-server is doing (2026-09-03: worker-1 said so one second before its `/closed` while its request id
-went on calling tools). A Prime or plain chat needs the working fact; a plain chat also needs durable
-`toolCalls>0`; a sleeping worker's tab closing is not an event. `queueMissingTab()` logs every
-verdict, reopen or not, with its reason. Silence reads the same `tabRecoveryWanted()` predicate; a
-silent chat it refuses is spent, not reloaded. The extension owns the final **reload
-existing exact tab vs open exact conversation** choice at action time, so stale app-side tab guesses
-cannot create a duplicate.
-
-`assistant-error` starts even earlier at the selector boundary: `chatgpt-dom.js::errors()` records
-visible ChatGPT errors, but only a **whole normalized notice** matching `transportFailure()` receives
-`recoverable:true`; ordinary assistant prose that merely quotes those words is not an error. Hidden
-live-region noise and CLF-owned surfaces are ignored, while a generic visible alert may still enter
-the transcript as evidence without granting browser-repair authority. A visible failure card may
-carry no alert role or assistant markdown; the exact Retry button is then the semantic anchor, and
-the DOM reader climbs only to the nearest ancestor whose **whole** normalized text matches that same
-transport-failure vocabulary. It never searches arbitrary page prose for those words. When a
-transport notice lives inside an assistant turn, `content.js` may put it in recorder chronology only after exact section-node
-ownership proves which **local generation id** owns it; a reused ChatGPT page turn id is never enough.
-A top-level banner,
-which has no page-turn identity of its own, uses the local generation in which its node first appeared.
-If an in-turn occurrence cannot prove that mapping, it is recorded **unscoped**: ChatGPT's raw page
-turn id never enters `SessionEvent.turnId`. Neither `recoverable` nor the turn id gates the reload
-any more: `bridge.ts::noteRecoveryObservations()` queues `assistant-error` for every `chat_error`
-observation (the page's own de-duplication in `unreportedError()` is what keeps a banner still on
-screen from re-queueing), and what rations it is the **once-per-user-turn budget** below.
-
-The five recovery reasons are intentionally different **evidence**, but not different action
-machines:
-
-| Reason | Who is allowed to create it | What proves the episode over |
-| --- | --- | --- |
-| `silence` | `inspectSilentChats()` after the semantic-turn `activeUntil` deadline expires — the only qualification is two minutes with no tool call and no page change on a chat that had activity | meaningful new current-turn activity before handoff cancels it; a confirmed reload re-grants the chat `CHAT_SILENCE_MS` (the reload is its chance; a model writing a long answer makes no durable progress until it lands) or, for a Goal/Loop chat, `GOAL_SILENCE_LISTEN_MS` (one minute), and only a second silent window after that spends the one-shot: the stale sweep sleeps a worker, and `fileSilenceGoalTickets()` files a **Goal ticket** for a Goal/Loop chat — the same durable `goal-replies` obligation a finished answer files, under a `g-silence-<time>` turn, which the page collects on its next pull like any restored pending reply, drafts and sends. A turn that ends **failed** re-grants the watch instead of ending it: the page gave up, the model usually did not. A user Stop ends activity and never reaches any of this |
-| `unattributed` | `repairUnattributedChat()` after the recorder opened one 60s post-grace incident and this exact mid-turn chat never joined the incident's `proven` set; refused when the call's request id is already in `unattributedReloadedRequests` | an attributed call proves the request-id join works, or a **later turn ends** and advances outcome-agnostic `endedTurns`; the rationing is per **request id**, not per turn |
-| `assistant-error` | `noteRecoveryObservations()` from any `chat_error`, turn id or not, recoverable or not | the browser carries the repair out, or a **later turn ends** and advances outcome-agnostic `endedTurns`; the broken turn's own end is deliberately pre-counted and does not cancel the repair. The once-per-user-turn budget (`turnRepairSpent`) is charged at **confirm** to the turn the chat is on then — `turnKeyFor()`: the running generation, or `ended:<count>` when none is running — and released the moment the chat is on a different one (read lazily in `queueBrowserRecovery()` as well as on the browser's pass), so a failed turn whose end preceded the reload cannot leave its charge on the turn that starts later. Ordinary server-side attributed calls do not cancel it because they prove attribution, not page-stream health |
-| `no-tab` | `queueMissingTab()` for a final tab that closed on a chat this app is owed a turn in: a Worker the close detached, or a Prime/plain chat with the page's open turn or a live activity grant (a plain chat also needs a recorded tool call) — under `recoverAgentTabs`, or always for a Goal/Loop chat | page/turn activity after reopening, or the normal agent lifecycle decision |
-| `goal` | `inspectOwedGoals()` when a `goal-replies` obligation this run accepted is still `pending` and its chat has been quiet for the current backoff step | the obligation is discharged, expired or superseded by a newer reply — or the five-step schedule runs out |
-
-`silence` and `goal` are **chat**-scoped; `unattributed` and `assistant-error` are **turn**-scoped
-(`bridge.ts::TURN_SCOPED_REPAIRS`), and that distinction is load-bearing. The three paths are
-otherwise **independent of one another**: none waits on, or is refused because, another one has
-or has not fired. Silence has no budget beyond its own two minutes; the error reload is rationed per
-user turn; the unattributed reload per request id. A turn-scoped repair is
-retired only by a *later* turn ending, so a page that dies on the broken turn keeps one forever —
-and `inspectSilentChats()` used to read any held repair as "a recovery is already running", which is
-how a chat that had been dead for eighteen minutes was never reloaded. `silence` therefore both
-ignores a held turn-scoped repair and **supersedes** it in `queueBrowserRecovery()`: its reload does
-everything the stuck one would have done. `no-tab` supersedes a held turn-scoped repair for the same
-reason — the tab that repair would reload is gone, and the reopen is everything it would have done.
-Nothing supersedes `no-tab` itself: it is chat-scoped, ordinary activity clears it, so it cannot be
-the stuck kind.
-
-There is one **current manual-Stop hole** in that turn-scoped rule. An `assistant-error` queued while
-the broken turn is still open snapshots `endedTurns + 1`, `noteRecoveryActivity()` refuses to clear
-assistant-error, and `retireSpentRepairs()` knows only whether the counter later became `>` that
-snapshot. If the user explicitly Stops that same broken turn before Chrome acts, its own end merely
-reaches equality, so the already-queued repair can still reload afterward. There is no terminal
-outcome in the repair-retirement decision today. The same hole exists **inside one accepted batch**:
-recorder state applies the matching `turn_end(stopped)` first, then `noteRecoveryObservations()` scans
-that batch's recoverable `chat_error` and can queue a brand-new repair after terminal cleanup already
-ran. The repair must retain the assistant-error's exact **source turn id** as cancellation evidence
-(while keeping `endedTurns` as the post-reload spending mechanism), and a matching
-`turn_end(stopped)` must veto it whether it arrived before or in the same batch as the error.
-Failed/interrupted completion remains repairable. That veto remains meaningful until the browser
-crosses the pre-action claim described below; after an action is atomically claimed, Stop cannot
-retroactively un-send a reload already authorized. Do not add a content-side anti-reload flag.
-
-The shared `lastBrowserRecoveryAt` floor is three minutes for error/unattributed actions,
-but **`silence`, `goal`, `compaction` and `no-tab` bypass it**: the first three already paid their own
-complete inactivity contract, so `queueBrowserRecovery()` sets `notBefore = now` instead of stacking
-another unrelated wait on top, and `no-tab` has nothing the floor could protect — the floor keeps a
-second reload off a page that is still loading, and a closed tab has no page (2026-09-03: a worker
-the user closed waited two and a half minutes under the floor because a silence reopen had landed
-moments earlier). This distinction is part of the timing contract, not an optimization.
-
-`no-tab` therefore queues **immediately from the close**: no two-minute silence threshold, no
-three-minute floor. One close is one reopen. A closed tab is first-hand proof the page is gone *now*. An ordinary chat
-qualifies on the one fact that makes it this app's business — its session has recorded a tool call,
-so the turn still running server-side is running against this connector. A chat that has never called
-a tool is the user's own browsing and stays closed. The episode is stamped with
-the moment the page went (`detachedAt`, else the session's `endedAt`), never with the moving
-`activeUntil` deadline: a detached chat goes on calling tools, and an activity-tracking stamp would
-mint a fresh episode — and a second tab — out of the very work the repair exists to keep alive.
-
-`multiAgent.recoverAgentTabs` is **not** a master “broken-site recovery” switch. Turning it off
-blocks the agent-specific `no-tab` path for a conversation that is **still owned** as a detached
-Prime/Worker when `queueMissingTab()` runs. `/closed` first lets `primeConversationGone()` /
-`workerConversationGone()` update broker ownership and only then classifies no-tab recovery; if a
-Prime with no reusable workers/reports is removed from the run at that point, the same conversation
-falls through the ordinary-chat branch and may qualify from durable `toolCalls>0` even with
-`recoverAgentTabs=false`. It does **not** suppress
-`silence`, `unattributed`, or `assistant-error` for any chat, and it does not suppress `no-tab` for a
-non-agent chat whose durable session already proves this connector participated via at least one
-tool call. Pending repairs and `activeUntil` keep `recoveryMonitoring` alive independently of that
-preference; the setting controls agent-tab resurrection, not the shared broken-page engine.
-
-There is also a **current premature-custody bug** in repair cancellation. `/status` changes one repair
-to `handed` **before** the service worker has even scanned current tabs, but
-`noteRecoveryActivity()` can then delete handed `silence` / `no-tab` / `goal` repairs and the
-attributed-call path can delete a handed `unattributed` repair. Nothing tells the browser that its
-already-issued token disappeared, so it may still reload/open and return a receipt the app now treats
-as stale. Manual Stop has the same physical race. The root is that discovery and action custody are
-currently the same read.
-
-`takePendingRepair()` is the current handoff protocol. A `handed` repair with no matching confirmation is
-put back at the **end** of the queue on the next maintenance pass so one impossible action cannot
-starve other broken chats. Each handout mints a fresh token; `/status?repaired=<token>` is the only
-fact that moves that exact handout to `done`. Conversation id alone is not a receipt because a late
-receipt from an older broken turn must not close a newer repair for the same chat.
-
-The recovery text visible in the local timeline is **projection of that same repair**, not another
-watcher. Each queued episode owns one stable `progressId`; `updateRepairProgress()` first records
-"Trying to reload…" through `recorder.ts::recordProgress()` and then replaces that same logical
-progress row, preserving its original
-position, with either the confirmed Reload/Reopen result or the retryable action failure. The repair
-token still owns correctness. A progress row is observability only and can be absent when no unique
-session can be proven; it never authorizes, confirms or suppresses a browser action.
-
-The same row is painted into the ChatGPT page by `content.js::renderRepairNotices()`. It arrives on
-`/activity` like every other row (`progressId` `browser-repair:*`, no `turnId`), is deliberately
-never folded into a turn group, and is placed between turns by the app's durable user anchors: before
-the first user message recorded after it, or after the last turn. It shows whenever the page is
-paired, independent of Overwrite, and follows the app's in-place rewrite because `progress` is an
-upsert kind on the page's stream store.
-
-The browser half is `background.js::maintain()`. It runs on every 30-second alarm and on browser
-startup **whenever the worker is paired**, tabs or no tabs — a worker holding nothing after a browser
-restart is exactly the one that has to open the chat the app is owed. It calls `/status`, scans **actual current ChatGPT
-tabs immediately before acting**, and `conversationForTab()` resolves identity in one strict order:
-concrete current `/c/<id>` or Project `/g/<project>/c/<id>` wins, then a concrete `pendingUrl`; only
-while all exposed URLs are still ChatGPT-origin but temporarily root/id-less may the durable
-`tabConversations[tabId]` binding stand in. A concrete non-ChatGPT URL returns null and a concrete
-different chat always beats stale registry state. If at least one exact tab exists it reloads one deterministically,
-preferring the tab already bound in `tabConversations` and otherwise the lowest tab id; if none
-exists it opens exactly `https://chatgpt.com/c/<id>`. A **tab-query** failure produces no receipt,
-leaving the handed token unconfirmed so the next maintenance pass requeues it; a
-`chrome.tabs.reload()` / `chrome.tabs.create()` exception sends the explicit negative receipt
-`repairFailed=<token>&repairAction=reloaded|reopened`, which `failRepairAttempt()` records and
-requeues immediately. Only a completed browser action sends `repaired=<token>`. The MV3 worker's
-single 30-second alarm is broader than recovery state: `retryWanted()` keeps it armed for journal,
-close-outbox, command-ACK, deferred-revival, **any registered ChatGPT tab**, extension-owned discard
-protection, or `recoveryMonitoring`. Open tabs matter because this alarm is the only periodic wake
-that can ask the app whether a new silence/assistant-error repair appeared while the worker slept;
-the alarm is a browser-wakeup floor, **not a second repair policy**. Final-tab close is faster:
-`releaseTab()` drains `/closed` custody and, when that delivery succeeds, calls `maintain()`
-immediately so a newly queued `no-tab` repair can be collected in the same lifecycle path rather
-than waiting for the alarm. Never move tab election into `bridge.ts` or add a parallel reload timer
-in the page — the service worker is the only place with action-time tab truth.
-
-That action path also has a **current double-handout race**. `maintain()` has no in-flight lock, both
-the periodic alarm and `releaseTab()` can enter it, and each `/status` call requeues any prior
-`handed` repair before minting a fresh token. Two overlapping passes can therefore receive the same
-episode under T1/T2 and both act. Do not fix these three races independently. Replace the premature
-take-on-`/status` boundary with one **peek → atomic pre-action claim** inside the existing repair state
-machine: status may expose the queued candidate so the service worker can inspect real tabs, but
-`queued → handed` and the action token are granted only by a compare-and-set claim of the **exact
-peeked `(conversationId, episode)`** immediately before `chrome.tabs.reload/create`, and only if that
-same episode is still queued/live. The token is minted by the successful claim, not by the peek.
-Stop/activity/attribution may
-cancel while queued; only one concurrent maintainer can win the claim. **The whole `maintain()` owner
-must also be single-flight/coalesced.** A success or explicit negative receipt resolves the claimed
-attempt immediately; if the service-worker lifetime dies and no receipt arrives, only the *next
-serialized maintenance pass* may put that still-unconfirmed claim back in the queue. Serializing the
-owner is what prevents that lost-receipt recovery from requeueing another pass while the first is
-still between claim and browser action. This removes the need for a parallel cancellation channel,
-browser-side action dedupe or a second recovery owner. Regress same-batch Stop+error,
-Stop/activity between peek and claim, concurrent alarm+close entry, and a claimed action whose receipt
-is lost across the MV3 lifetime.
-
-One current bridge regression encodes the pre-fix assumption and must move with this invariant:
-`bridge.test.ts` **“does not let a receipt from a spent repair close the repair of a later broken
-turn”** retires a token already handed by `/status` before its receipt arrives. Keep the valuable
-late-receipt fence, but split two facts the current test conflates: page/turn activity may not replace
-a **claimed** episode with a different episode, while a later serialized maintenance pass may
-explicitly requeue that **same still-unconfirmed episode** to recover a lost receipt. Only that retry
-transition may stale the old token before a receipt; a different broken turn does not get to do so.
-Nearby turn-repair tests happen to illustrate retirement with a later **completed** turn; their prose
-is not the contract. Production `endedTurns` counts every accepted named `turn_end` regardless of
-`completed|stopped|failed|interrupted|stalled`, as the table above states.
-
-**Tests.** `bridge.test.ts`, `extension.test.ts`.
-
-### Browser commands: intent → durable lease → page → durable receipt
-
-Do not describe worker/resume delivery as "open a URL and type"; the URL is only how a page gets
-near the command. The authority path is:
-
-```text
-broker / continuation accepts semantic intent
-  → bridge.ts persists CommandSpec in bridge-commands
-  → fresh worker/resume: app opens preferred Chrome/Chromium (browser.ts), URL carries only marker
-    exact-chat revive: extension service worker elects/reuses/opens the bound worker chat instead
-  → eligible/current content document asks service worker to redeem marker
-  → POST /commands/redeem atomically establishes queued→leased owner
-  → bridge returns exact text + target fence for that still-live command
-  → content verifies fresh-vs-exact-chat precondition, types and waits for ChatGPT acceptance
-  → page ACK is first accepted into background.js commandAckOutbox
-  → service worker retries POST /commands/ack until app accepts it
-  → worker/resume terminal ACK: bridge records receipt + retires command
-    revive `sent`: command stays leased until exact worker liveness or revival deadline settles it
-```
-
-A resume is committed twice over, and whichever arrives first wins: from the `[[CLF-RESUME:…]]`
-marker the destination page finds in Fiber (`reconcileContinuationMarker()` → `/compact` with
-`destinationMessageId`), and from the page's `sent` ACK carrying the conversation id ChatGPT gave
-the fresh chat (`/commands/ack` → `commitContinuationResult()`). The second exists because on
-2026-09-02 a 34k-character brief was sent, the prime in chat B read its predecessor session and went
-to work, and the marker was never redeemed: the session stayed on chat A, chat B was refused
-`AGENTS_BUSY` as a stranger, and the loop was dead until the user noticed. The page's journal gate
-(`continuationJournalPending`) is released when `/activity` reports the chat as a `resume`
-destination with a session, not from the ACK's reply, which is the outbox's and not the app's.
-
-There are exactly three semantic `CommandSpec` variants: `worker` (fresh chat), `resume` (fresh
-chat tied to one continuation token/session), and `revive` (the already-bound exact worker
-conversation + run incarnation + unique wake identity). The deadlines differ because the semantic
-risks differ:
-
-- **Fresh worker before any page owns it:** the chat this app opened has **`WORKER_REDEEM_MS`
-  (20s)** to redeem its marker (plus the browser launch window when the app had to start the
-  browser). A page silent past that is dead, not slow: the same single-owner command is opened
-  **once more**, and a second silence fails the slot at once so the workers queued behind it open
-  (2026-09-02, worker-4 held its siblings for ninety seconds). A command still in line has no
-  clock of its own; the worker invitation has an absolute **120s bootstrap lifetime from
-  creation**, so a late handout cannot keep a slot forever.
-- **Fresh worker after redeem:** the page-owned attempt is one-shot. Its lease is bounded by the
-  smaller of **90s from claim** and the remaining absolute worker-bootstrap lifetime. A page-reported
-  bootstrap failure is terminal rather than a prompt to open another worker chat.
-- **Resume:** the same claimant may redeem idempotently, and another document may take over only
-  while the durable destination send checkpoint still proves **pre-dispatch**. Once dispatch is
-  ambiguous/possible, no second click is authorized. Its outer authority is the continuation's
-  existing **10-minute TTL**, not an invitation clock.
-- **Revive:** browser send/ACK is one wake attempt. The broker's `waking` reservation is capped at
-  **`REVIVAL_DEADLINE_MS` (90s) from the wake** until the browser proves delivery, and at
-  **`REVIVAL_ACTIVITY_MS` (90s + `DETACHED_SILENCE_MS`)** once it has — the same silence budget a
-  working worker gets before it is judged asleep. A `sent` ACK moves the deadline exactly once;
-  exact worker liveness must still arrive. The old flat 30 s ran out while woken workers were still
-  reading, reported them unwakeable to the prime, and parked runs whose workers were working.
-- **Restored stale transport rows:** the broad command TTL bounds forgotten control records, but it
-  never extends a semantic worker/continuation/revival lifetime.
-
-`/commands/redeem` is the arbitration cut. The page owner/lease means duplicate tab, reload or
-reopen cannot make a second document type the same payload, except for the explicitly replay-safe
-resume takeover while the continuation still proves no dispatch. After an irreversible browser result,
-the service-worker ACK outbox is custody: the page may disappear and the app still eventually
-learns the outcome. App receipts make a repeated ACK idempotent across app restart.
-
-Fresh worker/resume delivery and exact-chat revival deliberately have different **draft ownership**.
-A fresh command first proves the app-marked page is still a New Chat, then
-`chatgpt-dom.js::insertPrompt(text, true)` may replace ChatGPT-restored/autosaved stale New-Chat draft
-state; after insertion content re-reads the entire whitespace-normalized composer and aborts if the
-user changed it before Send. Revival never gets that overwrite privilege: before redeem,
-`revivalSubmitReady()` requires the exact worker conversation plus `composerSubmitReady()`, whose
-native-page half includes an **empty** connected/editable composer and no Stop/generation control.
-Thus “replace stale draft” is fresh-chat bootstrap ownership, not a generic convenience for commands
-to overwrite whatever is in an existing chat.
-
-Revive redeem has one deliberate **ordered cross-file** exception to the generic “lease is atomic”
-shorthand above: broker wake custody is persisted first (`claimWorkerRevival` + critical swarm
-snapshot), then the exact bridge command page-owner lease is persisted, and only after **both**
-succeed may the text escape. A crash between those writes therefore leaves a durable `waking`
-broker claim but no delivered payload; the same page can retry the lease safely. Never reverse that
-order — a page-owned text lease with no durable worker-slot/wake claim would make browser side
-effects outrun broker authority.
-
-Bridge startup has an equally important **restore-before-publication** boundary. `startBridgeOnce()`
-may have a loopback socket bound while `restoreCommands()` is still reconciling disk with the
-broker/continuation authorities; during that window every request gets retryable
-`503 bridge_recovering`. `restoredCommandSpec()` accepts worker/bootstrap rows only for the exact
-current run and broker state, revive rows only for the exact current run + waking/active worker,
-and resume rows only while the matching continuation WAL still authorizes them. An expired 30s
-revival moves the exact broker worker back to sleeping **and fsyncs that swarm state before** the old
-command may be pruned. `planCommandRestore()` builds only local arrays; the reconciled command set,
-receipts, continuation tokens and deadline timers become live together at the single publication
-cut near the end of `restoreCommands()`. If that recovery barrier fails, bridge startup closes the
-socket and retries from durable authority later rather than exposing half-restored command state.
-
-`browser.ts` prefers installed Chrome channels/Chromium because orchestration markers are useful
-only in a browser that can host the extension. It tries the next compatible executable if launch
-of an earlier candidate fails; `index.ts` uses the system default only as a last-resort warning
-path, not as proof the command can be redeemed.
-
-That default-browser fallback is **orchestration-only**. `bridge.ts::setBrowserOpener()` is the
-injection point; `index.ts` wires it to preferred Chromium first and Electron `shell.openExternal()`
-as the warning fallback for worker/resume URLs so the user at least sees the generated ChatGPT
-target when no compatible Chromium can be launched, with an explicit warning that command
-redemption requires the extension. Chats **Open Chat** does not use that fallback: IPC calls
-`openInPreferredBrowser()` directly and returns “Chrome or Chromium was not found” rather than
-opening an arbitrary default browser that cannot host the companion extension. Do not merge these
-policies merely because both currently call the same preferred-browser helper first.
-
-## 15. Compact & Resume — `session/continuation.ts`
-
-**The local session id is the durable identity.** ChatGPT conversations A and B are
-frontends attached to that one session in sequence.
-
-```text
-chat A owns session S
-  → open continuation token for S
-  → claim source prompt (nothing typed) → arm the click → A sends [[CLF-HANDOFF:token]]
-  → bind ChatGPT's stable user id → exact terminal assistant id supplies the brief
-  → store brief verbatim; open one marked fresh chat
-  → claim bootstrap (nothing typed) → arm the click → B sends [[CLF-RESUME:token]]
-  → bind B + ChatGPT's stable user id before ordinary page journaling
-  → preflight   freeze prime/swarm transfers that must move atomically
-  → DURABLE OWNERSHIP COMMIT   rebind S from A to B on disk   ← semantic point of no return
-  → publish/complete     recorder mapping, workspace/Goal/swarm projections + WAL completion
-  → B continues session S
-```
-
-**The continuation is the only clock over the swarm handover.** `openContinuationNow` begins the
-prime transfer, and only the continuation's commit or abort ends it; `agents.ts` keeps no deadline
-of its own for it. The independent ten-minute `TRANSFER_TTL_MS` that used to run beside the
-transaction expired under a live automatic continuation whose handoff turn took eleven minutes
-(2026-09-01), the commit was refused, and the session was stranded between A and B. Do not
-reintroduce a second clock; if a handover must end, end the continuation.
-
-**Chat A gets no tool while its handoff is being asked for.** From the moment the marked source
-prompt is submitted (`sourceSend` dispatched or sent) until the commit makes A `superseded`,
-`kernel.ts::dispatchTracked` refuses every call from A with `COMPACTION_IN_PROGRESS_REFUSAL`
-(`continuation.ts::compactingConversation()`), which tells the model to write the brief now. The
-page's stop-and-settle barrier is not a guarantee: ChatGPT's Stop control can vanish while the
-server-side turn goes on calling tools under the same request id, and a zero in-flight count read
-between two calls is not an ended turn. The refusal is what makes a lingering turn harmless and
-what gets the brief written in seconds instead of after the turn's remaining task.
-
-**An asked-for automatic handover has a deadline; an intended one has none.** An automatic ticket
-waits on the WAL without a clock while the chat is working, because the chat may be mid-turn for
-hours before it is safe to ask. From the moment the brief request is on its way (`askedAt`, stamped
-at the first `sourceSend` dispatch or state change past `awaiting-summary`), chat A is refused every
-tool, so a handover the model never finishes would fence A for good; `AUTOMATIC_HANDOVER_TTL_MS`
-(six hours from `askedAt`) aborts it instead and the chat's next working turn opens a fresh
-ticket. A record from before the field existed starts that clock at the restart that loads it.
-Manual continuations keep their ten-minute clock from opening. A `committed` record whose session
-has since moved on again (a later handover out of B) stays committed on restore: the first move
-was real, and aborting it would un-supersede A.
-
-**Must hold.** If preflight or the durable session rebind fails, **A keeps the session**. Once
-session metadata durably says B owns S, the semantic move has happened even if the process crashes
-before projection publication or the final continuation-WAL completion write. Recovery then repairs
-the recorder/workspace/Goal/swarm projections and marks the transaction committed; it does **not**
-roll session ownership back to A or reinterpret post-rebind cleanup failure as a failed move. Never implement
-compaction by creating a second session or copying history — the whole feature is continuity
-of one durable id. Automatic compaction is a live level plus liveness decision **made by the
-app**: `bridge.ts::considerAutomaticCompaction()` files the ticket from `grantActivity()` — an
-attributed call or current-turn observation — when the session is over the line and
-`chatIsWorking()`, so a page that has frozen mid-turn (2026-09-03) is still compacted. An idle
-old chat never fires merely because it sits above the threshold; the page's only part is to
-resume the ticket it reads back as `job` (raising its tab first for an automatic one), a
-transient pre-send barrier failure is retried by the app's pickups, and the continuation
-transaction is the sole durable authority once either prompt crosses its semantic send
-boundary. Pickups are phased on the ticket's durable position (`inspectOwedCompactions()`):
-while the prompt is unsent, a raised reload every two minutes, five times, then the ticket is
-abandoned (`handoff_never_sent`) and the next working turn opens a fresh one; while the brief
-is being written, every five minutes, three times; once it has landed, the resume every
-quarter-hour, three times. Browser documents, `sessionStorage`, local generation ids and
-command leases are never semantic ownership.
-
-The rebind also retires A's **execution** authority. Exact request-id proof from A remains useful
-for forensics, but it cannot run a new local tool after S names B: `kernel.ts` refuses it before the
-handler, and `recorder.ts` files the refused row under Unattributed activity with terminal
-`superseded` attribution so deterministic repair can never place it back in B. Such a refusal is
-historical evidence, not liveness: it may not revive a worker, acknowledge its inbox or refresh B's
-activity clock. A's **late page observations** are filed the same way (`recorder.ts::supersededLineage`):
-prose from a superseded conversation with no live mapping and no current session is stored into the
-lineage session S without any activity, turn or Goal effect, and `initializeSessionForConversation`
-refuses to mint a session for it. Before this, A's re-render of the brief seconds after the commit
-minted a shadow session holding nothing but the brief's HTML (2026-09-02). B's programmatic Resume send mints the same exact composer receipt as a manual send,
-so its zero-anchor user row opens the local turn before the first connector request races in.
-ChatGPT currently represents that marked prompt and its assistant reply as adjacent Fiber turns;
-`answerTurnFor()` is the one relationship used both for handoff capture and for binding B's
-partials/calls/final to the opened local turn. Session `contextTokens` reset at the durable rebind and
-drive UI pressure; lifetime `estimatedTokens` remains a separate historical total.
-
-One projection seam is still duplicated in current source. Normal commit funnels through
-`publishCommittedProjection()`, but `restoreContinuations()`'s “session already durably belongs to B”
-branch manually repeats recorder/workspace/Goal/swarm projection instead of calling that routine.
-Quality-first repair is to make **one committed-projection owner** serve normal commit and durable-B
-restore for facts that genuinely are continuation projections. Exec ownership is **not** one of
-those: proven processes are already keyed to the durable local session principal, remain stable
-across A→B, and have no move helper. Do not patch `write_stdin` to adopt B after denial or add a
-resume-only exec recovery path.
-
-Before that transaction is even opened, `content.js::startCompact()` re-fetches `/activity` and
-requires the app to positively confirm this exact chat is not a worker. That check happens **before
-the destructive Stop-button barrier** because a reloaded worker document can temporarily lack its
-local role projection. If the app cannot answer, nothing is interrupted. `stopAndSettle()` then
-waits up to 15s for ChatGPT generation to stop and up to 30s for app-reported running local tools to
-reach zero; three consecutive unknown tool-count polls fail closed as “could not verify zero”.
-Manual and automatic compaction use this same barrier. Do not add a cheaper auto-only path: the
-machine-state handoff is trustworthy only if both ChatGPT and the local tools are standing still.
-
-The continuation itself has a six-state durable state machine:
-
-| State | Durable meaning | Safe next decisions |
-| --- | --- | --- |
-| `awaiting-summary` | source chat owns S; handoff turn is in progress / its exact terminal answer has not yet become a stored brief | source send may still be claimed according to its send checkpoint; no destination may commit |
-| `awaiting-chat` | brief file + continuation state say this exact handoff is published/claimable; S still belongs to A | open/claim one replacement chat; source remains authoritative |
-| `claimed` | one replacement claimant durably owns the brief/opening attempt | same claimant may retry idempotently; a second claimant is refused |
-| `committing` | preflight succeeded and durable session rebind may be in flight | **do not sweep/abort on a timer**; reconcile from session metadata because either side of the write may have landed |
-| `committed` | session metadata says B owns S and projections have been/will be repaired | idempotent recovery/publication only |
-| `aborted` | transaction will not move S | A keeps ownership; no browser/document state may resurrect it |
-
-`transitionNow()` embodies the WAL rule: the proposed semantic state is written immediately
-**before** it becomes the live published state. If that write fails, continuation code queues the
-old authoritative snapshot again so `durable.ts` cannot later retry the rejected generation and
-make an operation the caller saw fail reappear after restart.
-
-Each prompt has **two** durable writes around its click, because a document can die on either
-side of it and the two sides have opposite answers. `attempted-unresolved` is written before the
-composer is submitted at all, so it *proves* nothing reached ChatGPT: a reload, tab close,
-browser restart or app restart replays it, and it is equally the state a second live document
-may claim. `dispatched-unresolved` is written immediately before the click, so it proves
-nothing — `CLF_DOM.send()` clicks first and watches for acceptance seconds later, and neither
-the page nor the app can tell a click that never happened from one whose request outlived its
-document. That state is never replayed by anything: it ends at ChatGPT's own marked message, or
-at an explicit cancel, or at the transaction's TTL. A surfaced ambiguity is the correct outcome
-there; a second Send is not. Exactly one caller can move `attempted-unresolved ->
-dispatched-unresolved`, which is what makes the click at-most-once without any clock, tab
-identity or claim token. Manual and automatic compaction call this exact same path.
-
-Handoff capture has another publication boundary. `handoff.ts::prepareHandoff()` writes the brief
-file first; that file alone is **not** a published continuation. The continuation WAL transition is
-the semantic acceptance, and only after it lands is the session `handoff` event published. If the
-process dies in the tiny opposite window, restart repairs the presentation event. This avoids
-`lastHandoffId` advertising a brief belonging to a rejected transaction.
-
-The safety floor is deliberately much lower than the prompt's quality target: any brief under 200
-characters is refused, and a session of at least 20k estimated tokens requires at least 1,000
-characters. Those are "cannot possibly be a usable whole handoff" guards; the 10k–30k-token prompt
-target is guidance to ChatGPT, not a validator. `resumeBootstrapMatches()` canonicalizes only the
-known NBSP/mojibake + line-ending presentation artifacts before provenance comparison — arbitrary
-Unicode/whitespace normalization would turn provenance into fuzzy matching.
-
-**Restore decides from durable ownership, never from the remembered phase.** For a restored
-`committing` continuation, if session metadata already points to B, the durable move landed and
-recovery repairs provenance/recorder/workspace/Goal/swarm projection. If it still points to A,
-startup does **not** perform `rebindSession(A→B)` itself: if the original ten-minute lifetime has
-expired it aborts, otherwise it thaws/re-arms Prime transfer, rolls the continuation back to
-`claimed` (when a claimant still exists) or `awaiting-chat`, clears `to`, and lets the later
-claim/command retry cross `commitContinuationResult()` and the durable rebind barrier again. If a
-third conversation owns the session, recovery aborts rather than stealing it. Open/claimed
-continuations retain their original ten-minute lifetime across restart; restart does not grant a
-fresh TTL.
-
-`resume-gate.ts` is deliberately tiny and temporary. It is armed **before** opening B and again
-when a claimed continuation is restored, for at most 60 seconds, so recorder events already sitting
-in the extension journal cannot win the race by inventing a brand-new local session for B. The
-gate is suppression of a known race, never ownership: the continuation/session metadata remain the
-authority, and expiry favors visible recoverable shadow state over blocking unrelated recording
-forever.
-
-One **legacy compatibility repair is still live and must not be mistaken for the normal design**:
-`continuation.ts::repairPrimeFromResumeShadow()`. There are currently two compatibility callers:
-bridge `/activity` invokes it for a non-worker chat that lacks a Goal objective, and
-`tools-core.ts::callerNow()` invokes it after exact `agents` caller identity is proved but before
-broker membership is evaluated. Older installed builds could create replacement B as a small
-`origin.kind='resume'` recorder session *before* the real continuation transferred A's
-workspace/Goal/prime projections, so either reopening B or making an exact agents call from B can
-heal that historical split. The repair is positive-proof-only: B must durably name source session
-S, S must still own A, the target may not be worker-owned, and B's authored history must contain the
-exact resume bootstrap derived from S's matching collision WAL or newest still-uncommitted handoff.
-It re-reads broker ownership after all filesystem awaits, then moves only the missing
-workspace/Goal/broker projections. **It does not rebind or delete B's shadow recorder session.**
-These hot-path calls are legacy damage repair, not the current continuation design; new Compact &
-Resume logic must use the continuation transaction + resume gate instead of adding callers or
-broadening this compatibility path.
-
-There is a separate **current** bridge from Resume into Goal that solves a page-observation race
-without becoming durable chat authority. After this document genuinely sends a `resume` bootstrap
-and the app ACKs the continuation into concrete B, `content.js::rememberResumeGoalPending()` stores
-`{conversationId, commandId, optional turnId}` in tab `sessionStorage` under
-`clf-resume-goal-v1`; `bindResumeGoalTurn()` attaches the real local generation when one was
-observed. This covers hidden/throttled B completing its entire first answer before the isolated
-world ever saw a live generation, and the smaller race where the generation ended before B's moved
-Goal config arrived. `maybeRecoverResumeGoalTurn()` waits for **post-commit `/activity` policy**,
-requires exactly the single resume user turn, refuses busy/unusable/nonterminal state, and accepts
-only a genuinely completed answer (ordinary terminal outcome or exact Fiber `endMessageId` with
-answered calls). It then enters the normal `noteGoalTurn()` path, using the bound local turn id or
-stable `g-resume-<commandId>` only when no live generation id ever existed. A manual second user
-turn, navigation away, an already-owned Goal draft/turn, unusable Goal policy, or successful claim
-consumes the hint. Reopening old resumed history therefore cannot synthesize fresh Goal work. The
-sessionStorage row is same-tab provenance across content-script reload, nothing more; continuation,
-session metadata and the durable Goal reply ledger remain the authorities.
-
-**Tests.** `continuation.test.ts`, `resume.test.ts`. Current integration coverage repeatedly proves
-objective A→B projection/recovery, while per-chat switch movement is only unit-covered by Goal tests;
-there is no dedicated continuation/restart regression for `moveGoalSwitch()` yet. Add that contract
-when touching this projection rather than assuming the parallel objective tests cover it.
-
-## 16. Multi-agent — `agents.ts`
-
-Experimental, enabled on fresh installs while existing configs preserve their stored choice,
-**one global active execution run at a time**, star topology:
-`worker ← prime → worker`. Workers never message each other.
-
-**Identity.** The prime is the conversation that successfully called `agents action=spawn`
-with proven caller identity. Worker slots are opened by the app through browser bootstrap;
-once the page has a real conversation id the extension reports it and the broker binds that
-exact conversation before normal worker work proceeds. **Conversation identity is the
-routing credential** — established from the same evidence as recorder attribution — so no
-secret token rides in model arguments and **sender identity never comes from a model
-argument**. There is no credential and no recovery action: a worker whose binding was lost
-is rebound by the extension reporting its chat, never by something a model can present.
-
-**Messaging is at-least-once until acknowledged**: queued durably → offered on a tool result
-→ acknowledged by the next authenticated tool call. Offering on a result is **not** proof
-the model received it. Never delete a message merely because it was offered.
-
-**The broker state machine is semantic, not cosmetic.** `AgentState` currently has seven values:
-
-| State | Meaning | Slot? | How it leaves |
-| --- | --- | --- | --- |
-| `invited` | worker row accepted/durable; fresh worker bootstrap has not yet bound a real ChatGPT conversation | yes | extension binds exact conversation → `active`; bootstrap failure → `failed` |
-| `active` | worker conversation is bound and may be running/receiving MCP work | yes | browser view disappears → `detached`; natural/explicit stop → `sleeping` or ceiling-driven `finished`; hard failure → `failed` |
-| `detached` | browser view is gone but the server-side ChatGPT turn may still be alive | yes | **page/new-turn** evidence may prove the browser side exists again → `active`; an exact MCP call only refreshes server-side liveness and deliberately stays `detached`; durable quiescence after detach → `sleeping`/`finished` |
-| `waking` | prime message to a sleeper crossed broker durability and reserved a slot; browser revival is in flight | yes | **before browser custody**, exact call/genuinely newer turn may prove the wake unnecessary; **after redeem/send custody**, a subsequent exact authenticated MCP call or a turn that begins after the sleep, with delivered-revival evidence, proves `active`; between claim and send nothing does; no stop observed from outside (browser final, late finish call, quiet sweep) applies while waking; revival failure/timeout → `sleeping` |
-| `sleeping` | worker stopped normally, exact conversation/history retained, revivable below ceiling | **no** | prime message reserves a slot → `waking`; late exact new-turn evidence may reactivate |
-| `finished` | terminal context-ceiling retirement | no | never |
-| `failed` | terminal failure/fence | no | never as ordinary reuse; recovery code may canonicalize only from positive authority |
-
-`occupiesSlot()` is the single slot rule: `invited|active|detached|waking`. Do not equate "tab is
-open" with active, or "tab is closed" with sleeping. A ChatGPT turn executes remotely and can keep
-issuing correlated MCP calls after its page disappeared.
-
-High-value transition symbols inside `agents.ts`:
-
-| Transition / projection | Owner symbol |
+| Permissions and settings | `config.ts` / `config.json` | Validate every load/save; enforce effective current capabilities at use. |
+| Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
+| Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
+| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; reconcile from history on startup. |
+| Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
+| Agent progress plan | `store.ts::updateSessionPlan` / `sessions/<id>/plan.json` | Exact caller/session and invocation ordering; atomically replace the whole plan. |
+| Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
+| Native upload originals | `input-attachments.ts` / `input-attachments/` | Immutable bytes, opaque ids; outbox owns membership and retention. |
+| Project catalog | `projects.ts` / `state/projects.json` | Serialized catalog mutation; session metadata owns association. |
+| Browser commands/results | `bridge.ts` / `state/bridge-commands.json`; extension ACK outbox | Intent and exact lease before text; receipt durable before ACK custody is retired. |
+| Workers and inboxes | `agents.ts` / swarm snapshot and retired-worker fences | Stage → critical durable snapshot → publish/open/report. |
+| Compaction | `continuation.ts` / continuation WAL + session metadata | Disk ownership decides restart outcome; transport phase alone does not. |
+| Goal control | `goal.ts` / `goal-objectives`, `goal-switches`, `goal-replies` | Objective, mode and reply debt are separate concepts; draft memory is disposable. See §21 for remaining atomicity gaps. |
+| Stop/block/finish | Stop command; `blocked-chats.ts` durable set; finish facts in recorded progress/session projection | Each names exact chat/turn; no false terminal event. |
+| Browser repair | `bridge.ts` process-memory episodes | Re-earn from live evidence; never restore an old reload token as action authority. |
+| Catalog/usage | Saved successful `chat-models`; derived `usage-cache`; live usage snapshot | Catalog is observation, not a send receipt; estimates are not provider billing. |
+| Connector refresh | `plugin-refresh.ts` / `state/plugin-refresh.json` | Exact installed app id + schema fingerprint, claimed before Refresh, verified after. |
+
+## 5. Startup, configuration and shutdown
+
+**Intent:** open a usable local workspace, restore accepted work consistently, and exit without
+leaving an invisible process, tool, writer or installer competing with the next launch.
+
+The single-instance lock must be won before touching shared userData. The losing process marks
+itself quitting immediately; `app.quit()` alone does not stop module evaluation. Activation from
+second-instance/tray/Dock is gated until restore, CSP, permissions and IPC are ready. Once quit
+begins, no delayed startup callback may re-enable window creation.
+
+Startup initializes config/secrets/session/durable paths, restores the saved model catalog and
+plugin manager, loads Goal ledgers, exact correlations and blocked chats, then retired workers
+and every active/dormant prime family. Persistence hooks exist even when multi-agent is Off.
+Continuation restore follows swarm restore because it may repair prime ownership. IPC/input
+hooks precede browser traffic. Then the secure window/tray, bridge for recording or agents,
+independent retention maintenance, optional connector auto-connect and updater lifetime begin.
+The current first-window model-discovery exception is noted in §21.
+
+Settings use validated current config and `effectiveCapabilities()`. Fresh-install defaults,
+legacy omitted fields and malformed-file recovery are three different cases. User choices must
+not be widened because a newer version added a field. Read-only derives from the write-capability
+set; adding a new mutating capability must make it read-only-blocked automatically.
+
+Renderer settings save `{base, patch}`. Main performs a field-wise three-way merge so an unchanged
+form field cannot undo a newer browser-side setting. Renderer saves also serialize snapshots
+from the latest requested state, preserving fast successive edits. Disable side effects are
+ordered: revoke/park worker execution and durably retain history, cancel its commands while the
+bridge is available, then stop unnecessary bridge/publication resources.
+
+The BrowserWindow keeps context isolation, sandbox and web security on; Node integration and
+webviews off. CSP, permission denial, navigation/window restrictions and fixed preload methods
+remain intact. OS consent for Desktop is independent from the app's settings.
+
+`durable.ts` serializes per filename, atomically replaces JSON and retries failed generations;
+lazy snapshots materialize at the write boundary. Independent files may flush concurrently.
+Cross-file semantic transactions require the owner's explicit awaits, not a global disk queue.
+
+Shutdown owns an ordered, bounded sequence: stop admission and drain accepted HTTP work; stop
+process/native/plugin/tunnel resources; flush recorder work; flush sessions and named state;
+flush operational logs; hand off an eligible verified update; finally `app.exit(0)`. Every
+long-lived timer, process, socket, subscription and writer needs a shutdown owner. Per-task
+timeouts do not replace a bound on the whole teardown. Ordinary reconnect/disconnect must not
+drop an accepted mutation just to finish quickly; final shutdown has its explicit drain budget.
+
+## 6. MCP surfaces, instructions and code mode
+
+**Intent:** ChatGPT discovers capabilities in three comprehensible groups and every invocation
+still checks live policy. Schema visibility is never the security boundary.
+
+| Surface | Advertised operations under current eligibility |
 | --- | --- |
-| fresh exact worker chat binds `invited → active` | `bindConversation()` → private `activateWorker()` |
-| browser view disappears `active → detached` | `workerConversationGone()` |
-| exact authenticated evidence proves worker live again | `noteAgentAlive()` is source-sensitive: page/newer-turn evidence can clear `detached`; an exact call from a detached worker proves only server-side liveness and leaves it detached. After delivery, the woken chat's first exact call or a turn that starts after the sleep completes `waking → active`; the page alone never does |
-| stopped worker becomes reusable/terminal | only from `active`/`detached` (`canStop()`): a stop landing on a `waking` row is the old turn's and is ignored. browser final: bridge `/events` → `stageWorkerConversationFinish()`; maintenance paths that already know the id use `sleepWorker()` or `sleepSilentDetachedWorkers()` → private `sleepAgent()`; context ceiling turns the same stop into `finished`. Exported `sleepWorkerConversation()` currently has no production caller and is not a jump-point |
-| detached worker ages out | `sleepSilentDetachedWorkers()`; the four-minute detached silence belongs here, not to browser tab code |
-| pending wake projection | `pendingWorkerRevivals()` |
-| browser takes wake custody before text escapes | `claimWorkerRevival()`; flips the waking row from broker-revivable to browser-owned wake custody |
-| ChatGPT accepted the revived user message | `noteWorkerRevived()`; records delivered message ids but deliberately leaves state `waking` |
-| wake fails/deadline expires | `failWorkerRevival()` → `sleeping` with the queued prime message still owed; the **second** failed wake with no sign of life from that chat in between (`WAKE_FAILURES_BEFORE_GIVING_UP`, counted per worker conversation, reset by `noteAgentAlive()`) → `failAgent(revivable)`: the prime is told to spawn a replacement and not to retry, the inbox is kept, and the chat calling in again brings the worker back |
-| parked prime history becomes live again | `reactivateDormantRunForConversation()` (kernel ingress, parked sleeping worker's proven call only) → private `reactivateDormantRun()`; identity lookup alone never reactivates it |
+| Core — `chat-on-steroids-core` | `read`, `view_image`, `find` when command execution is off, `apply_patch`, `exec_command`/`write_stdin`, `download_artifact`, recorded `session`, `update_plan`, `agents`, `session_finish`, code-mode `exec`. |
+| Desktop — `chat-on-steroids-desktop` | Windows: 13 Window2 operations, separately permissioned `read_clipboard`/`write_clipboard`, and `exec` with `sky`. macOS: `observe`, `computer`, `exec`. Relevant live capabilities are required. |
+| Plugins — `chat-on-steroids-plugins` | Enabled external tools with their upstream names and schemas, plus code-mode `exec` when that composition name is available. |
 
-These functions are downstream of the staged production mutations in `tools-core.ts`; do not call
-the convenience broker wrappers and assume their browser/durability ordering is the MCP contract.
+`read` needs read/browse/metadata as appropriate; images need read; patch checks each hunk's
+create/edit/move/delete permission; command controls both terminal tools; downloads need
+`saveArtifact`. Recording controls `session` and `update_plan`; multi-agent controls `agents`;
+the finish setting controls `session_finish`. Windows publishes four observation methods under
+screen access, nine input/launch methods under control, and clipboard methods under their own
+permissions. Multiline `type_text` additionally requires clipboard write. macOS `computer`
+registration can exist for control or clipboard access; each action rechecks its own permission.
 
-**Broker durability precedes browser side effects.** Spawn, message-to-sleeper and finish use
-staged unpublished state and an immediate critical swarm snapshot before the browser is asked to
-open/type or before a report is published. If that durable write fails, the semantic mutation is
-rolled back and a newer safe snapshot supersedes the rejected generation; `durable.ts` must never
-later resurrect an operation the caller was told failed.
+ChatGPT may cache one surface's complete tool list. Core/Desktop exposure is monotonic for an
+endpoint lifetime: a previously exposed schema can remain while a revoked handler returns
+`TOOL_DISABLED`. The `find` vs terminal choice freezes at discovery. Reconnect establishes a
+new clean shape; current config still governs every call. Each registrar refuses foreign names;
+there is no merged hidden dispatch. Plugin exposure follows its separate dynamic manager.
 
-**Normal successful worker stops sleep instead of ending the worker.** `finish` normally reports a
-result and puts a below-ceiling worker to *sleep*: it keeps its conversation, history and reusable
-identity. Sleeping frees its worker slot, so `maxWorkers` counts **slot-occupying** workers
-(`invited|active|detached|waking`), not every historical worker and not merely those visibly
-"working" — a prime can create a new worker
-while an older one sleeps and still wake that older worker afterwards. The same sleep happens without the tool call, from
-durable evidence that the worker stopped, but never on the first quiet sample: the bridge's
-attached/observable quiescence path waits `STALE_SWARM_MS` (**2 minutes**) before sleeping it.
-A detached worker has its own longer `DETACHED_SILENCE_MS` (**4 minutes**) measured from the newest
-of detach time, exact last-seen evidence and the process's liveness floor. App restart resets that
-floor to "now", so an old persisted timestamp cannot instantly retire a worker before this process
-has had a chance to re-observe it. Hard bootstrap/transport/broker failure may instead make the row
-terminally `failed`; sleep is the normal-success path, not a guarantee for every ending.
+`tool-declarations.ts` caches immutable declarations/JSON conversion. SDK servers and handler
+closures remain request-local, and child calls obtain a fresh live context. Avoid caching the
+permission decision alongside a cached schema.
 
-**Ownership outlives the active run.** When no worker occupies a slot, the active incarnation is
-parked immediately and the one global execution claim is released. Its complete agent map becomes
-a durable history keyed by the prime conversation: sleeping workers, terminal/non-revivable rows,
-their exact ChatGPT conversation bindings, queued prime reports and monotonically allocated
-`worker-N` history all remain. Another prime may now start its own active incarnation, including
-its own same-named `worker-1`, without seeing or mutating the first prime's history. Caller-scoped
-`status` always returns the history owned by that prime, even while somebody else owns the active
-execution slot. A dormant prime may spawn a fresh worker without reviving a sleeper; waking an old
-worker reactivates that owner's history only when the global execution slot is free. So does a
-proven tool call from a parked *sleeping, revivable* worker: `kernel.ts::dispatchTracked` calls
-`reactivateDormantRunForConversation()` before `noteAgentAlive()`, which then revives the worker
-exactly as it would inside a live run ("it never actually stopped"). Parking happens the moment
-the last worker is thought asleep, so without this the last worker of every run was refused
-`WORKER_SLEEPING` mid-turn for the very calls that revive any of its siblings (six workers on
-2026-09-01). A finished/failed worker, a prime's own calls, a family mid-handover, and a family
-whose slot another prime owns never reactivate; those keep the `WORKER_SLEEPING`/`WORKER_ENDED`
-fences. Parked history is bounded: `pruneDormantRuns()` (on every park and on restore) drops
-families older than `DORMANT_RUN_TTL_MS` (seven days) or beyond the newest `MAX_DORMANT_RUNS`
-(sixteen), never one with an open transfer, and turns their worker chats into ordinary
-retired-worker leases — every family is scanned per unattributed call and makes it wait the
-identity-evidence window, and three days of runs had left twenty-nine on disk. Explicit
-swarm clear is different from parking: it retires the worker conversation fences and discards the
-retained histories. Turning Multi-agent **off is not Clear**: it stops/withdraws live execution,
-parks the owner history, and keeps that history durable through disabled app restarts so re-enable
-can still show and revive the exact old worker conversations.
+### Instructions must actually reach the executor
 
-**Chrome auto-discard protection is a derived browser policy, never agent liveness.**
-`bridge.ts::nonDiscardableAgentConversations()` projects only the active Prime plus Workers in
-`active|waking|detached` through `/status`. `background.js::maintain()` applies
-`chrome.tabs.update({autoDiscardable:false})` to exact matching tabs and records a tab id in
-`discardProtectedTabs` **only when this extension changed Chrome's policy itself**. That ownership
-marker lives in `storage.session`; when the conversation stops qualifying or the tab closes, the
-service worker restores `autoDiscardable:true` only for markers it owns. A tab already protected by
-the user/browser is never claimed and therefore never “restored” behind their back. Sleeping and
-terminal workers are not protected.
+MCP initialize advertises `instructions`; successful initialize does not prove the host showed
+all of them to the model. Only the first normal message of a new chat and the first bootstrap
+of a newly spawned worker use `session/prompt.ts` to freeze the complete current Core instructions
+plus the explicitly linked project's root `AGENTS.md` inside the existing `COS_CONTEXT` frame.
+The opening outbox input / new-worker command owns this eligibility; no history scan or extra
+sent flag decides it. Existing-chat messages, Goal/Loop continuations, plan checkpoints, worker
+revivals, compaction requests and resumed-chat bootstraps receive no appended setup block.
+Decision/planner helpers keep their separate role-specific contract. Selecting Goal/Loop for
+a normal new executor chat does not turn it into a helper. Direct user sends in Chrome are
+not intercepted.
 
-**Tab closing requires terminal authority.** `bridge.ts::browserTabPolicy()` retains waiting
-ordinary chats and reusable sleeping workers, regardless of worker-slot capacity or idle time.
-Two minutes of inactivity permits retirement only for terminal non-revivable workers, blocked
-chats and cancelled dedicated work. A late-confirmed cancelled desktop new-chat send may retire,
-but a later delivered follow-up supersedes that cancellation. Superseded sources and redundant
-document copies remain separately eligible. Fresh document, journal, draft and generation checks
-still gate every close. New owned windows use at most 45% of the work area, capped at 800×600,
-then minimize without a geometry update. Existing background windows are reused without changing
-their state or geometry; a temporary planner stays until its replacement is established.
-Model discovery retains its elected empty helper and transfers that exact tab to the first
-authored input after fresh empty-document proof. The old discovery owner records that handout,
-so a user-closed or navigated helper cannot regain opening authority. Browser process count is
-not the window-ownership invariant.
-This keeps live agent pages resident; it does not prove a turn
-active, revive a worker or authorize a browser repair.
+`mcp/coding-instructions.ts` contains adapted upstream collaboration prose with provenance;
+`mcp/instructions.ts` adds currently available local-tool guidance and the user's bounded
+standing additions. There is no extra instructions tool or per-chat “already sent prompt” flag.
 
-**Waking is messaging.** `agents action=message` to a sleeping worker reserves a free slot
-inside the same durable barrier that queues the message, and only after that commit does the
-browser get asked for anything. The bridge then creates a durable `revive` command naming the
-worker's exact `conversationId`, but **the app does not elect or open the worker tab itself**.
-That decision belongs to the extension service worker, because only its tab/conversation registry
-can prove whether the exact worker chat is already open.
+The whole message has a **96,000 UTF-16-character ceiling**, plus the input transport's UTF-8
+byte envelope. For eligible openings, authored work and complete Core instructions are mandatory;
+only AGENTS content spends remaining room. Read it as a bounded UTF-8 prefix, validate the same project/root/read
+permission after the await, and cut with an in-context instruction to read the remainder.
+Only strict framing is hidden in the local/native display. Original bytes, receipt comparison,
+recording and token accounting keep the complete delivered text. `userMessageSource()` supplies
+native source text; rendered Markdown whitespace alone cannot prove a send. Local and native prompt
+presentation, including worker messages without outbox receipts, ignores provider-added whitespace before the frame, then validates its exact
+internal length and closing boundary; authored whitespace after the frame remains intact.
 
-The wake path is:
+### `exec({code})` composes tools; it is not a shell
+
+Code mode offers top-level await, `tools.<name>(args)`, `Promise.all`, `text(...)` and `image(...)`
+within one surface. Exact request/conversation/durable-session proof is required before evaluation.
+QuickJS runs in a disposable Node Worker with no ambient Node, filesystem or network API.
+Children reuse the same registrar, validation, handler and dispatcher, inherit exact caller proof
+and recheck live permissions/roots. Each child records fresh evidence; only the outer response
+owns input, agent inbox and automatic terminal-result delivery. Finish signals remain direct.
+
+Only explicitly emitted text/images enter the result, except Windows Desktop's `sky.get_window_state`
+adapter automatically forwards its native MCP image blocks. Its returned value contains only
+screenshot metadata, so `text(state)` cannot duplicate pixels into the text budget. `sky` calls the same registered tools,
+unwraps `structuredContent.value` and throws tool failures; `nodeRepl.write` aliases `text`.
+It adds no persistent Node runtime or independent execution authority. Image emissions are decoded/validated by
+the same authority as `view_image`. Plugin output keeps manager redaction. Runtime limits are
+centralized in `CODE_MODE_LIMITS` (code, CPU, wall time, memory, calls, concurrency and all result
+representations). There is no yield/resume pragma or persistent JavaScript session. Termination
+stops new admission, but cannot undo accepted external actions; those keep their normal
+execution/recording lifetime. Never add another executor or delivery queue to compensate.
+Failure responses report the number of dispatched child calls so a later script/refresh error
+does not invite replaying successful input. Unemitted values and arbitrary exception text stay
+private. Timers such as `setTimeout` are unavailable, including through the Windows `sky` adapter.
+
+## 7. One tool call: identity, execution and delivery
+
+**Intent:** run exactly the requested operation under current policy, record its true outcome,
+and deliver pending information only to the conversation that owns it.
 
 ```text
-prime message → broker sleeping→waking + queued inbox row → immediate durable swarm barrier
-  → bridge creates durable revive command
-  → `/activity` exposes only the revival marker; actual prime text remains app-side
-  → background.js persists/replays `deferredRevivals` and queries Chrome's current ChatGPT tabs
-  → sort every exact-conversation tab by tab id and try `restoreChatgptTab()` deterministically
-       → first repairable exact tab gets the marker
-       → an exact tab still loading blocks replacement and is retried later
-       → only positive proof that no exact tab is usable/starting authorizes ONE replacement `/c/<id>?clf=<command>#clf=<command>`
-  → content waits for a submit-ready current document and recorder-flush fence
-  → content redeems the bridge command, receives the exact text, types a genuine user message
-  → irreversible send ACK enters service-worker custody
-  → broker keeps the worker `waking` until the woken chat proves it is running: its first exact authenticated MCP call, or a turn beginning after the sleep
+HTTP request -> bounded body / host-origin / secret-path checks
+ -> normalize x-request-id in inbound.ts
+ -> surface registrar and AsyncLocalStorage call context
+ -> exact correlation -> current local session / family / workspace
+ -> blocked, superseded, compaction, worker and live capability guards
+ -> validated tool handler -> structured outcome/evidence
+ -> outer input/inbox/background-result delivery and recording
+ -> local response completion -> later exact-owner receipt where required
 ```
 
-No free slot means the send-to-sleeper is refused outright — no inbox row is accepted and nothing
-is typed. A failed browser send or the revival deadline (`REVIVAL_DEADLINE_MS` undelivered,
-`REVIVAL_ACTIVITY_MS` after a proven delivery) puts the worker back to
-`sleeping`, returns the slot and leaves the prime's row queued for a later explicit wake — once. The
-second failed wake in a row, with nothing heard from that chat between them, is the verdict on the
-chat: `failWorkerRevival()` fails the worker revivably and tells the prime to spawn a replacement
-rather than try again (2026-09-03: worker-7's conversation answered every load with "This content is
-unavailable"; four wakes each waited out their deadline and each told the prime to retry, thirty
-minutes before it spawned the replacement). Any first-hand word from the chat resets the count. A
-successful browser `sent` ACK is stronger than an ordinary offer because ChatGPT accepted the user
-message, but it is **not** proof the worker reacted: the revive command remains leased and the
-broker remains `waking` until exact worker activity — the first call, or the turn that begins after the sleep — resolves that second boundary. The page re-reporting the settled answer that put the worker to sleep is not a stop: `canStop()` refuses every stop on a `waking` row (2026-09-02: that replay slept two just-woken workers and retired their wake commands while the typed message ran unowned).
+The MCP payload has no trustworthy conversation id. Accepted ownership joins the normalized
+HTTP `x-request-id` to native page `metadata.request_id`. `fiber.js` emits bounded allowlisted
+evidence; `content.js` confirms the current route and descriptor; `background.js` validates the
+Chrome sender document/epoch; bridge `/correlations` files exact pairs through recorder and
+reads them back before returning `confirmed[]`. `/events` may publish the same exact evidence.
+Ownership acknowledgement is separate from slow transcript/image writes.
 
-Duplicate exact worker tabs are therefore **not** resolved by guessing one current page and they
-are not an automatic hard refusal either. `background.js::recoverDeferredRevivals()` owns the
-deterministic election; `restoreChatgptTab()` first health-pings the existing content script and
-repairs its Fiber helper, otherwise re-injects DOM/Fiber/content/CSS into that exact tab. Only an
-unrecoverable/no-usable exact-tab result permits the one authorized replacement branch; a merely
-loading exact tab means “wait”, not
-“open another”. `/commands/redeem` remains the final one-page lease authority even if Chrome still
-contains duplicate views of the same conversation.
+For a newly created chat, an exact locally owned provisional Fiber turn can acquire the durable
+native conversation id as the route/server identity materializes. A `WEB:` local id, unmatched
+historical Fiber object, conflicting durable ids, active tab, timing, tool name, arrival order
+or “only generating chat” is never a replacement proof.
 
-There is one **current fail-open hole in that election**. `recoverDeferredRevivals()` catches a
-`chrome.tabs.query()` failure by assigning `tabs=[]`; the loop then interprets “browser truth was
-unavailable” as “no exact tab exists” and may create the one replacement, duplicating a worker that
-was actually open. `maintain()` already gets this boundary right for recovery and simply returns on
-query failure. Revival must do the same: leave the durable deferred marker pending/retryable and open
-nothing until a real tab scan proves absence. Do not add duplicate cleanup after the fact. The old
-comments in `extension.test.ts` that say “the app opens the marked chat” are stale too — production
-tab election/opening is service-worker-owned as described above.
+`correlation.ts` keeps the first exact request owner and its **local session epoch**. Conflicting
+claims do not overwrite it. Proof has no time TTL but the index is bounded to 50,000 recently
+observed request ids; recorded exact calls reconcile the index on startup even when a snapshot
+already exists. Late proof can repair Unattributed history only to the proved historical owner.
 
-Once `/commands/redeem` gives the browser custody of a wake, a late call from the worker is no
-longer allowed to reinterpret that exact wake as unnecessary. Conversely, before redeem, exact
-worker liveness may prove the old turn never stopped and cancel the inferred sleep. **Positive
-identity/liveness outranks inferred lifecycle.** A mere open sleeping page is not enough; an exact
-authenticated call or a genuinely newer turn is enough only in that pre-custody arbitration window.
-After browser custody, a page heartbeat still cannot complete the wake; once the send is ACKed, either
-an exact authenticated MCP call or a turn beginning after the sleep moves `waking → active`, because the
-turn is the earlier proof and the only one that survives a late request-id join. In the claimed-but-unsent
-window neither does, so the page cannot be raced into typing the same words twice.
+Unresolved requests with an id get the recorder's 20-second production evidence grace. A
+headerless call has no exact proof to await and lands Unattributed immediately. Evidence waits
+open at admission; calls sharing a request serialize in admission order and each resolved
+session serializes its writes. Different chats must not wait behind one global grace timer.
+Already-proven calls await their own recording; unresolved recordings may settle after response.
 
-**The context ceiling is what makes an otherwise normal stop permanently `finished`.** A worker becomes terminally `finished` when its chat
-reaches `WORKER_CONTEXT_CEILING_TOKENS` (400k), measured from the app's own durable session
-summary — never from a model-carried counter. Crossing it does **not** interrupt work in
-flight; it makes the *next* stop permanent. Workers **never Compact & Resume themselves**,
-automatically or manually: the worker conversation is the agent identity, so no threshold may
-open a replacement worker chat. Because workers outlive their tabs and their
-prime's tab, closing the prime chat pauses the run instead of ending it: the user comes back,
-the prime resumes, and the same workers are still there.
+`allowUnattributedCalls` relaxes only selected ambiguity fences. Identity-sensitive routing,
+code mode, plan updates, agent operations and terminal custody still need their own proof.
+A positively known blocked, retired, ended or superseded caller is refused regardless of that
+preference. Refused historical calls must not revive workers, acknowledge inboxes or grant
+activity to a successor chat.
 
-That ceiling is revalidated on the **model-facing agents entrypoint**, not only by browser
-telemetry. `tools-core.ts::measureSleepingWorkers()` runs before `agents message` may wake a sleeper
-**and before `agents status` returns state**. It re-reads each sleeping worker's exact durable
-session `contextTokens`, feeds that into `agents.ts::noteAgentContextTokens()`, then requires
-`persistCriticalSwarmNow()` to cross disk before the result is published. A worker whose chat grew
-past 400k while the app was down can therefore become `finished` during what looks like a status
-read. `status` is not semantically read-only at this boundary: it is the production remeasurement
-that makes revocation of revival authority survive restart. If that critical swarm write fails, the
-agents call fails rather than reporting the worker revivable after failing to durably revoke it.
+### Three lifetimes and four outcomes
 
-This does not make `finished` the only terminal state: `failed` is the separate hard-failure fence
-for a bootstrap/transport/broker failure that cannot safely remain revivable. Both are terminal to
-ordinary model routing; only their reason differs.
+`runningToolCalls()` covers a handler that can still mutate; it is the compaction safety barrier.
+`settlingToolCalls()`/`inFlightToolCalls()` additionally cover attribution/recording debt.
+`inFlightMcpRequests()` is the wider request lifetime used by shutdown/orphan accounting.
+Unresolved running ownership is conservatively visible; a proven worker call cannot make an
+unrelated prime busy. Do not treat recorder grace as machine mutation still running.
 
-**Finish and cleanup.** `finish` is idempotent; final worker output routes to the exact prime
-conversation even if parking happens on that same finish. Once no worker holds a slot, the active
-incarnation releases immediately; pending reports remain in the dormant prime's inbox and retain
-the same at-least-once offer/ack semantics. Dormant worker conversations remain authority fences,
-including terminal rows, so stale tabs cannot fall through as ordinary unidentified chats while a
-different prime is active. Orphan cleanup uses durable quiescence plus the wider in-flight
-MCP/observation counters — not a heartbeat guess. Compact & Resume moves active **or dormant**
-prime ownership together with session/workspace state; normal commit and recovery repair transfer
-the same complete worker history to the child conversation or move nothing.
+| Tool outcome | Interpretation |
+| --- | --- |
+| `ok` | Operation completed normally. |
+| `process_exit_nonzero` | The program failed; command transport worked. A failing build is not a connector failure. |
+| `tool_rejected` | Intentional validation, permission, identity or lifecycle refusal. |
+| `tool_internal_error` | The tool/runtime failed its own contract; counts as a reliability defect. |
 
-**Tests.** `agents.test.ts`, `swarm.test.ts`; the revival's browser half is in
-`bridge.test.ts`, `extension.test.ts` and `content-script.test.ts`.
+The call context retains the strongest applicable outcome. Model-visible results and recorded
+evidence must agree. Local HTTP success is not proof of remote model comprehension. Offers of
+inbox/input/output data retain custody until their defined receipt; invocation start ordering
+prevents an already-running concurrent call from acknowledging information it could not see.
 
-## 17. Renderer, IPC, connection and desktop
-### Astra finish continuation and durable input
+MCP timing logs separate ingress, admission/identity, handler, delivery, recording and local
+response completion; unresolved recording settles separately. `scripts/benchmark-mcp-latency.mjs`
+compares explicit local/tunnel discovery routes without invoking tools. It does not measure
+remote model receipt.
 
-`session/finish.ts` owns the exact active conversation/turn finish boundary. `session_finish` is
-for Astra when explicitly requested by the user prompt; worker completion still uses
-`agents action=finish`. Planning helpers receive only task content. Finish reminders are attached
-at delivery, independently of plan text, and hidden from the app's authored prompt display.
+## 8. Filesystem permissions and path resolution
 
-Plans deliver one stage directly in a successful finish-tool return, or after a verified completed
-turn for ordinary chats. Ordinary tool injections may stack and share the next tool response;
-normal browser sends retain one exclusive delivery claim. `session/input.ts` owns those distinctions,
-receipts and cancellation. Tool-intent input has no claim-age timeout; actual turn/settings changes
-can cancel generated instructions. Legacy periodic generated rows are retired and cannot revive.
+**Intent:** a model can read or edit only paths approved for the relevant filesystem tool.
+Native and virtual spellings must reach the same decision.
 
-For Astra, both Goal and Loop use the Loop prompt and tool injection: an actual completed answer
-never starts another automatic browser message. `goal.ts::astraFinishOnly()` guards ordinary Goal
-acceptance/generation and bridge routes. Pending user/plan instructions take priority. The shared
-`automaticFinishEnabled()` authority decides both production and queued-input validity: an armed
-chat Goal/Loop suppresses Notify even when global finish action is Notify. A resulting instruction
-arrives on a later tool call, with the normal generating animation while it is being drafted.
-The empty-queue notification/manual action remains scoped to the exact held turn.
+`sandbox.ts` owns root selection, virtual/native normalization, reserved names, traversal and
+invalid host-path rejection, symlink/junction/reparse checks, canonical existing targets and
+the deepest existing ancestor for a missing target. Every model-supplied filesystem path reaches
+that authority or an already-validated wrapper. Revalidate at actual use when the target can
+change during an await. Error text must not leak hidden physical root paths.
 
-`automaticCompactionAllowed()` excludes exact selected Pro models independently of the saved
-auto-compaction setting. The composer context meter shows estimated current-chat tokens, not a
-provider-reported count; Pro has a static ring, while other models show configured utilization.
+An approved `/workspace` may contain `projects/app`; it does not promise `/workspace/src`.
+Read the root for one-level discovery, preserve every real intermediate folder, and never
+repair a wrong path by guessing a missing project segment. Relative paths need a trustworthy
+workspace; an unresolved swarm caller must not fall back to the first approved root.
 
+**Shell permission is broader.** `exec_command` runs arbitrary code as the logged-in user.
+Its initial cwd is approved, but the shell program is not confined to those roots. Read-only
+therefore disables command execution. External plugin servers likewise retain their own OS or
+service authority; the local file sandbox does not contain them. User-selected native upload
+staging is a separate explicit-input boundary, not general model filesystem permission.
 
-**Goal + Loop.** `goal.ts` is one LLM engine with two standing modes and one optional
-per-chat objective: OpenRouter by default, or a custom OpenAI-compatible endpoint
-(`goal.provider`). It sends only authored user messages and final assistant answers to the
-provider; tool rows, native progress and hidden reasoning stay out of that transcript. That provider
-view comes from the **local canonical recording**, not the live page. `goal.ts::
-conversationMessages()` keeps final assistant revisions only, coalesces duplicate legacy final
-snapshots by stable message id, clips each row to 12k chars and bounds the final context to 120
-messages / 120k chars. A saturated tail is not allowed to forget what the conversation is for:
-before filling newest history backwards it reserves the actual first user request and the newest
-**committed** Compact & Resume bootstrap reconstructed from durable handoff provenance. Uncommitted
-or stale handoffs never become a model-context anchor merely because matching text is visible. The
-fresh baseline is **off**, mode **`goal`**, model **`z-ai/glm-5.3`**, reasoning `default`; existing
-user selections remain verbatim. Goal and Loop default to the ChatGPT backend with GPT-5.6 Sol High; the API model above applies only when API is selected. `shared/types.ts::GoalSettings` is the contract and
-`config.ts::DEFAULT_GOAL` is the fresh/repair default.
+Negative cases matter: accepted virtual/native in-root paths, rejected traversal and symlink
+escapes, live revocation during an await, and preserving an unrelated user's newer file edit.
 
-The standing switches are **one setting**, not two booleans: `goal.enabled` says whether the
-OpenRouter driver is armed and `goal.mode` is `'goal' | 'loop'`. `goal.ts::applyGoalSwitch()` is
-the pure mode transition used by both bridge-scoped and app-wide writes: turning one on enables that
-exact mode; turning the currently running one off disables the driver but leaves the preferred
-`mode` remembered. The bridge owns whether that reducer is applied to a concrete chat override or
-the New Chat/global default; the reducer does not own routing. A worker chat is
-always excluded by `goalWorkerChat()` because its user turns already belong to the prime — in
-**any** state: `agents.ts::isWorkerConversation()` sees active, parked, finished and failed workers,
-and `retiredWorkerForConversation()` keeps the fence after the run. The owner lookup
-(`agentForOwnedConversation()`) deliberately forgets a worker that is over and must not be used as
-this fence: on 2026-09-03 two ceiling-finished workers passed it, auto-compaction filed tickets a
-worker page can never discharge, and reloaded each page five times before giving up. The same
-`goalFencedChat()` guards `considerAutomaticCompaction()`. A chat
-with a stored objective is active even when the standing switch is off, but then
-`goal.ts::goalDrivingMode()` deliberately falls back to **Goal**, never inherits Loop: a mode that
-cannot stop must be an explicit choice. "Explicit" means the switch **or** the mode the goal was
-written under — the sheet's two links post `mode` with the goal and the bridge pins it as that
-chat's own switch in the same request. That second door exists because the first one cost a run:
-a goal saved from the New Chat sheet starts the chat immediately, the standing switch there is the
-app-wide default rather than anything about this chat, and an unattended run started from "add
-specific goal" ended two turns in on one "looks done" from the gate. Never widen the fallback to
-inherit Loop instead; the fix is that the choice travels with the goal, not that a missing choice
-guesses.
+## 9. Projects, workspaces and project instructions
 
-There are **three** editable persisted instructions, all bounded at config/IPC:
+**Intent:** a chat consistently works in its selected local folder, and workers/resumed chats
+retain that choice. Sidebar organization must not destroy work or grant access.
 
-- `goal.prompt` — the ordinary **gate**, used when no explicit chat objective exists. It decides
-  whether the finished answer left concrete requested work unfinished.
-- `goal.objectivePrompt` — the **driver** once that chat carries a specific goal/finish line.
-- `goal.loopPrompt` — the **Loop** instruction, used instead of both while the standing mode is
-  `loop`; if the chat also has an objective, that objective is supplied alongside the Loop prompt.
+`projects.ts` owns a bounded catalog of canonical absolute local folders with stable UUIDs.
+Adding uses the native folder selection/approved-root flow, resolves the real directory and
+deduplicates it. Session metadata owns `projectId`. Before send/use, `projectWorkspace()` and
+`getSessionProject()` re-resolve it under current roots and reject moved/unavailable folders.
+Null means no project; a broken explicit binding is an error, not a reason to infer a new cwd.
 
-The shipped prompts are meta-prompter instructions: the model is sitting in the user's seat and
-produces the next genuine user message. Goal has two semantic outcomes — continue with a message,
-or stop / `NO_REPLY`; Loop has only one. `goal.ts::LOOP_RESPONSE_FORMAT` removes `stop` from the
-provider schema itself (`action` can only be `continue`), and `requestDrivingDecision()` asks again
-up to the fixed `LOOP_ATTEMPTS` bound if a provider response still tries to stop. Exhausting that
-bound is a retryable draft failure, not permission to send an empty/fabricated message. The app-
-owned output protocol and trailer sit after the editable prompt/transcript so a long conversation
-cannot push the operative instruction entirely out of recency. Local validation remains final:
-wrapped control tokens, malformed schema/reasoning payloads or an empty cleaned reply fail closed
-before `humanReply()` or the browser sees sendable text.
+Removing a project marks the catalog row `ungrouped`. Existing and unloaded sessions, pending
+inputs and workers keep their durable project association; their chats return to the ordinary
+sidebar list. Adding that same folder again restores grouping. It does not delete files,
+sessions or the approved root. A local project is distinct from a ChatGPT project route.
 
-All three read the requirements out of the user's own words and never out of ChatGPT's account of
-them: in a long transcript that account is the nearer text and always the narrower one, because it
-describes what got built rather than what was asked for. The driver and the Loop instruction say so
-outright, tell the model to re-read the whole goal before every message, and explicitly license a
-long, concrete message — the user's register governs how it writes, never how much of the
-requirement it carries, and a bare "keep going" is named as a wasted turn. Loop alone may escalate,
-since it is the only mode still talking after the job is done: each pass asks for more depth on the
-same requirements. That licence is also the only way it can leave the job entirely, so the
-direction is pinned in the wording — deeper into the user's brief, never sideways into a second
-project. Keep both properties if you rewrite these; a loop that drifts off the brief burns the
-whole night it was left running for.
+`workspace.ts` is convenient learned/inherited cwd, keyed to proven chat/family/agent identity.
+Explicit session project binding takes precedence at kernel entry. Workers inherit only their
+exact prime's project/workspace. Different primes may each own `worker-1` in different folders.
+Compaction keeps local session/project identity and moves frontend workspace projection. A
+relative path without trusted ownership fails; a workspace never grants permission by itself.
 
-The Goal **model picker** has its own narrow secret/network boundary. Renderer code never receives
-the provider key and never fetches the catalogue directly: IPC `goal:models` accepts only a bounded
-offset, fixes the page size at 20, and calls `goal.ts::listGoalModels()`. The main-process catalogue
-loader uses a 30-second request ceiling, 8 MiB response bound and 5,000-model parse cap, sorts newest
-releases first, and caches for five minutes **scoped to a SHA-256 fingerprint of the current API
-key** (or the public/no-key bucket) **plus the endpoint URL**. A key or endpoint change therefore cannot reuse a restricted catalogue from
-the previous credential. A custom endpoint that answers no usable catalogue yields an empty
-list and the model stays a hand-typed field. `renderer/chat.ts::loadGoalModels()` / `paintGoalModels()` /
-`maybePageGoalModels()` own scroll-paged presentation only; load failure leaves the user's current
-model selection untouched.
+Project instruction injection reads **only the selected folder's `AGENTS.md`**, not a recursive
+scan, guessed cwd, parent tree or cached copy. Existing-session scope comes from its durable
+binding; an opening input may name its explicit project; workers inherit through the exact
+prime. Resume retains the same project binding without reinjecting its instructions. Unfiled
+chats receive no project file. Missing AGENTS is fine; an unsafe/unreadable/binary file fails
+preparation visibly. Full prompt budgeting and
+hidden framing are described in §6.
 
-An untouched persisted copy of any superseded shipped Goal default migrates to the current
-default; customized text stays exact. That holds for all three, each with its own list in
-`shared/goal.ts` and all three walked by `config.ts::adoptCurrentGoalPrompt()` — for a while only
-the gate had one, which would have stranded every existing install on a superseded driver or Loop
-instruction the moment those constants moved. Ship a prompt change and its list entry together. Changing a prompt/mode retires incompatible drafts so one in-flight
-decision never mixes old and new policy. Terminal Goal/Loop cards persist only as presentation for
-the exact finished turn; dismissal and navigation are conversation-scoped and async paint stays
-navigation-epoch fenced.
+## 10. Files, terminal, patches, images and downloads
 
-**A chat's own switch.** Goal/Loop `enabled`+`mode` is stored per exact conversation in the durable
-`goal-switches` ledger (`goal.ts::goalSwitchFor/setGoalSwitchNow`), and the app-wide `config.goal`
-pair is the **default a chat inherits when it has no row of its own**. A composer always knows its
-conversation, so `/settings` with a `conversationId` writes that chat's override and never the
-app-wide setting; only a New Chat (no id yet) moves the global default. This is what makes a runaway
-loop stoppable without stopping every other chat: while its override exists, ordinary global config
-changes do not rewrite it. The app's own settings switch making an explicit **enabled→disabled**
-transition is different: it is the master “stop everything” action and `ipc.ts` calls
-`clearAllGoalSwitches()`, intentionally putting every chat back under the now-off global default.
-Turning the app-wide setting on does not itself delete/overwrite rows that still exist, but after a
-master-Off has cleared them a later On naturally applies to those chats again. Compact & Resume moves
-an existing override A→B beside the objective, so a running loop keeps its exact per-chat choice in
-the replacement chat.
+**Intent:** provide a predictable coding loop without requiring a Codex installation or launching
+a Codex model. The TypeScript ports reuse selected upstream behavior; the app adds permissions,
+identity, evidence and host-specific integration around them.
 
-There is one **current durability asymmetry** here; do not document it away or add a recovery layer
-around it. A composer-scoped switch crosses `goal.ts::setGoalSwitchNow()` and awaits
-`writeDurableNow(goal-switches)` before the page is told success. The renderer's app-wide master-Off
-first durably saves `config.json`, then calls synchronous `clearAllGoalSwitches()`, whose persistence
-is only the 300 ms debounced `writeDurableSoon()` path. Clean shutdown drains that debounce via
-`flushDurable()`, but an abrupt process loss in the gap can restart with global Goal Off **and old
-per-chat enabled overrides restored**; `goalSwitchFor()` currently prefers an own row even while the
-global default is off. This is one logical policy mutation split across two durable owners. The root
-fix is to put the standing-switch authority — **global default plus per-chat overrides** — behind one
-Goal-owned durable mutation/acceptance owner so master-Off is one committed state transition, not two
-files that must be guessed back together. Neither half may become restart-authoritative by itself.
-Do not paper over a torn transition with startup cleanup, another stop flag or a watchdog.
+### Reading, searching and patching
 
-Draft retirement has the same **acceptance-boundary problem plus a scope bug**, and it is not limited
-to renderer settings. Renderer `settings:save` durably commits `config.json` before synchronous
-`retireGoalDrafts()`; replacing the OpenRouter credential durably writes the new encrypted secret
-before the same retirement. Browser-scoped `/goal/objective` and `/settings` do the equivalent thing
-for one chat: `setGoalObjectiveNow()` / `setGoalSwitchNow()` first make the new chat policy durable,
-then `retireGoalDraftsFor()` changes its reply ledger only through the debounced writer. A hard loss
-in any of those gaps can therefore restore a **new policy/key with an old pending obligation**.
-Separately, renderer global-default enabled/mode changes **and** unscoped New-Chat `/settings` changes
-call `retireGoalDrafts()` for **every** chat,
-even a conversation whose own `goal-switches` row leaves its effective mode unchanged. The unaffected
-set is broader than overrides: an objective-driven chat whose standing switch is off deliberately
-drives in Goal mode, so changing only the remembered global mode also leaves its effective draft
-policy unchanged. Raw `config.goal` before/after is therefore not a retirement scope.
+`read` batches paths, lists directories, handles globs and returns numbered bounded text.
+`tools-core.ts` owns its contract; `codex/read-backend.ts` owns listing/decoding semantics;
+`codex/filesystem.ts` is primitives; `sandbox.ts` is authorization. Do not push policy into
+low-level primitives and assume every public caller became safe. Search uses bundled-first
+ripgrep when commands are allowed, or `find` with `search.ts` when they are not.
 
-The deeper bug is that `retireGoalDrafts*()` currently conflates two different decisions:
-**invalidate this in-memory provider attempt** and **semantically discharge/supersede this durable
-reply obligation**. Split those concepts at the Goal owner. A draft is frozen to one conversation's
-effective mode/objective/model/prompt/reasoning/credential and must be aborted when that effective
-instruction changes; an unrelated global default must not touch an overriding chat. But aborting an
-attempt does **not** by itself mean the final assistant reply was answered: repairing a key/model or
-other provider setting must be able to leave the same obligation pending for a fresh attempt. Only a
-policy operation that explicitly means “this existing reply is no longer owed a Goal decision” may
-mark it handled/superseded, and then that ledger transition must cross the **same durable acceptance
-boundary** as the policy change that decided it. App-wide enabled→off is the deliberate master-stop
-case. Do not repair torn stores with replay daemons, startup cleanup or blanket tombstone rewrites.
+`apply_patch` accepts Codex V4A in the MCP `patch` string. Its parser, grammar, hunk matching,
+text/line-ending representation and replacement application live in `codex/apply-patch/*`.
+The wrapper separately checks each hunk's create/edit/move/delete permission, paths and workspace,
+then records changes. Ordered exact/whitespace/limited-Unicode content matching never relaxes
+path authority. Shell-style `apply_patch` interception lives above the parser; quoting, `cd`
+and shell control flow are invocation problems, not grammar fixes.
 
-There is a separate **current runtime-gate hole when recording is off**. `config.ts` forces the
-app-wide `config.goal.enabled=false` when `sessions.record=false`, but durable per-chat switches and
-objectives remain independent. `bridge.ts::goalEnabledFor()` / `goalActiveFor()` do not check
-recording; when the bridge remains alive for another owner such as Multi-agent, `/activity` can
-therefore still project an actionable objective/override, and
-`content.js::goalUsable()` can request `/goal/draft` against an already-recorded session. Inside
-`acceptGoalReplyNow()` the same call is simultaneously classified `handled` because
-`sessions.record=false`, yet `beginGoalDraft()` still starts provider work. The privacy/runtime
-invariant is simpler: **Goal may not act at all while recording is off**, whatever per-chat policy is
-stored. Put that condition in the one effective Goal-runtime gate used by projection, draft routes and
-watchdog; keep the stored objective/switch as dormant user state rather than clearing it or adding
-page-side special cases.
+Partial multi-file failure uses bounded rollback snapshots. Restore only a path still matching
+what **this patch produced**; a concurrent external edit must never be overwritten. Preserve
+the port's explicit line-ending mode and readable parse/match failures.
 
-**The sheet repaints only when it changes.** `content.js::renderMenu()` builds the whole sheet from
-`settingsView()`, so it serialises that view plus the three page-local pieces it does not carry
-(`menuBusy`, `objectiveBusy`, `objectiveError`) and returns without touching the DOM when the result
-matches what is on screen; only the sheet's position is re-decided. The draft text is deliberately
-outside that signature — the textarea already holds it and the input listener keeps Save in step —
-so typing a goal repaints nothing. This is not an optimisation: the activity tick calls
-`renderControl()` once a second, and an unconditional rebuild replaced the node the pointer was
-resting on, so the hover explainer on "add specific goal" blinked out and returned on its 350 ms
-delay for ever, and no text anywhere in the sheet could be selected for longer than a tick. A
-genuine change still rebuilds, which is why the caret, focus and scroll position of an open goal
-editor are carried across by hand.
+### Terminal execution and custody
 
-**No cap on a goal's length.** A specific goal is a brief somebody writes; it is stored whole and
-was never truncated visibly, so a 4,000-character cut was silent data loss. `/goal/objective` and
-`/goal/open` are bounded only by `MAX_BODY_BYTES`, the same transport rule as every other route.
+One app-lifetime `codex/manager.ts` owns `UnifiedExecProcessManager`. `exec_command` runs a shell,
+returns output or a process `session_id`; `write_stdin` continues that same process, sends input
+or drains output. Caller isolation is in `ownership.ts`, not separate managers per request.
 
-**A chat's own goal.** The composer control exists in a New Chat too (`content.js::injectControl`),
-because a goal written there may become that chat's first user message; compaction remains
-unavailable until a real conversation exists. The sheet offers the goal as **two** links — "add
-specific goal" and "add specific loop" — and which one opened the editor is the mode posted with
-the text. Above a New Chat those links are the whole control: `content.js::settingsView()` drops
-the Goal and Loop switch rows there (`scope: 'new'`, taken from `composerChat()`, i.e. the route
-and never the id this tab is still holding), because a switch with no chat to belong to moves the
-app-wide default while the goal beside it starts a chat — two scopes reading as one decision. In a
-real chat both switches stay: they are the only way to drive a chat carrying no goal, and the only
-way to switch a running loop off. `/goal/objective` stores one objective per exact conversation in
-the durable `goal-objectives` ledger, separate from global config, and when the page named a mode
-it writes that chat's `goal-switches` row **first**, so no poll ever sees a goal whose mode the
-standing switch could still answer for. Clearing the goal with a mode switches that chat off again:
-writing the goal is what armed it. Production POST
-acceptance goes through `goal.ts::setGoalObjectiveNow()`, which crosses the immediate durable write
-before the bridge reports success. The similarly named synchronous `setGoalObjective()` is a
-convenience/test path with only debounced persistence; do not use it as the browser acceptance
-boundary. Reopening a chat restores the text but never creates a new draft from an old finished
-turn. `bridge.ts::goalActiveFor()`
-arms that chat from either the standing switch or the objective; the worker fence overrides both.
-With an objective, Goal uses the explicit finish line instead of the generic continuation gate.
-Loop keeps looping but is given the same objective as context — **Loop does not declare success and
-stop when the objective is reached**; ending it remains the human's switch decision. A Goal-mode
-decision that the objective is reached stops the current run while leaving the objective stored
-until the user clears/replaces it. Compact & Resume moves that objective A→B as part of the same
-projection repair as session/workspace/swarm state.
+The owner is the **durable local session principal** established by correlation. A→B compaction
+keeps that principal, so B can continue A's live terminal without an adoption/move fallback.
+Another session/worker cannot poll or write it. Anonymous process custody is non-adoptable.
 
-`/goal/open` covers the one moment with no conversation id yet. It does not persist an anonymous
-objective or stream a draft into nowhere: the page awaits the opening message, sends it through the
-real composer, then binds the objective once ChatGPT creates the concrete conversation.
-Transient provider/opening failures carry the same Goal-owned `retryable` classification as an
-ordinary draft; the page retries the opening on the same unbounded `GOAL_RETRY_MS` clock as an
-in-chat turn, only while it still proves the same empty New Chat holding the same goal — a rate
-limit outlives any short courtesy pause, and there is no later turn to retry from. Settled
-key/account/model failures and a model refusing to write the opening remain
-terminal, and no app-side retry continues after the page navigates away.
-This is the one extension→app request allowed to outlive the ordinary 10-second bridge request
-deadline: `background.js` gives it `MODEL_REQUEST_TIMEOUT_MS = 190s`, deliberately just beyond
-`goal.ts`'s own 180-second OpenRouter request ceiling. A local request timeout returns a retryable
-error **without forgetting the paired bridge port** — the port answered and only the model work was
-slow. Every ordinary transport failure still invalidates the discovered port. Keep those two facts
-separate or a slow model completion turns into pointless bridge rediscovery while the paid provider
-request continues with nobody left to receive it.
+`env.ts` is the shared child-environment authority: Windows key names are case-insensitive,
+so use its accessors rather than creating both `Path` and `PATH`. Preserve inherited values.
+`toolchain.ts` fills missing/unreachable Windows JDK/Go configuration conservatively; never
+override an explicit reachable toolchain. `exec-hints.ts` repairs only provable narrow shell
+mismatches and otherwise abstains. Ambiguous globs/control flow keep original command semantics.
+Search exit 1 can mean no matches; git/build/mutation failure must not be relabeled success.
 
-**Turn outcomes Goal/Loop may answer.** The current page contract is deliberately narrow:
-`GOAL_CONTINUABLE = {'completed'}`. `stopped` is the user's own decision; `interrupted`, `failed`,
-`stalled` and `unknown` are recovery/turn-integrity states with no trusted final answer to feed the
-meta-prompter. Do not widen this set because partial prose looks useful — a Goal message typed into
-or after an unfinished response becomes a real user correction. If product policy later chooses to
-continue an interrupted answer, that requires a new explicit terminal-answer proof and regression
-on both `content.js` and the recorder/Goal durable obligation, not just adding a string to the set.
+`cmds` runs sequential sections in **one shell**, preserving cwd/environment. Continue after
+ordinary nonzero exits and report section exits plus the first nonzero aggregate status. Random
+framing markers stay internal, including across chunk/poll boundaries. A later failure must not
+invite repeating earlier successful mutations. PowerShell/Bash behavior is explicit and tested.
 
-The page then applies an **eight-second four-signal settle** before it asks the app: final answer
-text stable, native/tool activity stable, ChatGPT generating control absent, and app-reported
-`runningToolCalls()` zero. The five-minute watch ceiling gives up visibly rather than converting
-ambiguity into a send. Retryable OpenRouter failures wait 15 seconds **outside** the Goal busy lock;
-holding the lock while sleeping would make a different turn that ends during the wait miss its
-only trigger edge.
+Collection and response budgets differ. Head/tail buffering retains a bounded stable head and
+rolling tail with omission counts; UTF-8/token serialization separately bounds returned output.
+The connector accepts legacy `max_output_tokens` but enforces its fixed response ceiling.
+Never solve a display overflow by silently discarding durable/owed data.
 
-The exact Goal/Loop ownership chain is worth following once:
+Completed background output is still owned data. The manager does not evict exited unread
+sessions to free capacity. Four unread completed results block another spawn for that owner
+with `EXEC_RESULTS_UNREAD` before a process starts. Running servers/tails do not consume that
+completed-result limit and are not auto-killed or polled.
+
+Completed results can follow automatically in later exact-owner **outer** tool responses,
+one bounded UTF-8-safe page within remaining response space. An offer does not drain bytes.
+Successful local publication followed by a later exact-owner invocation acknowledges the page,
+even if both calls share a generation request id; older concurrent calls cannot. Failed
+publication reoffers it. Explicit `write_stdin` can drain the remaining unacknowledged suffix.
+After 120 seconds without attendance, a running process can contribute one owner-scoped
+reminder; reading diagnostic state does not consume it. Blocked/compacting/superseded sources
+and nested code-mode calls do not receive or acknowledge these automatic pages.
+
+### Images and ChatGPT artifacts
+
+`view_image` accepts PNG/JPEG/GIF/WebP under an 8 MiB raw bound and explicit decoded-pixel/memory
+limits. Structural checks plus actual Sharp/libvips pixel decoding precede an MCP image block.
+Metadata parsing alone is insufficient. Return one native image copy, not duplicate base64 in
+structured output. Its validator also owns code-mode emitted-image admission.
+
+`download_artifact` saves a native ChatGPT/user-supplied file reference into an approved
+destination. `artifact-fetch.ts` validates the allowed HTTPS source and every redirect;
+`artifact-download.ts` bounds streaming, timeout and cleanup; `artifact-target.ts` owns the
+exclusive partial file, file identity and no-overwrite publication. Recheck bytes/target at
+publication. Do not put signed URLs/file objects/base64 into shell text or regenerate a user's
+file as a substitute. The default file cap comes from `config.ts::DEFAULT_ARTIFACTS` (20 MiB).
+
+## 11. Composer, input queue, generated plans and Astra finish
+
+**Intent:** the user can send, correct, schedule and inspect work without losing authored text
+or duplicating a message after an ambiguous browser outcome. One outbox owns all delivery.
+
+### Input from composition to receipt
+
+The desktop composer uses native CSS content sizing, bounded at 220px. Layout owns its
+height across draft changes, hidden panels and width changes; do not persist a measured
+`scrollHeight` as an inline height. Empty and fitting input must not overflow; longer text
+remains scrollable at the cap. `scripts/verify-composer-layout.cjs` checks real Electron layout.
+
+`session/start-input.ts` brings up the existing connection/bridge owners for an explicit send,
+waits for actual connector readiness, then calls `input.ts`. Pre-publication cancellation owns
+an AbortController; after enqueue, durable outbox state owns it. Browser startup failure leaves
+a clearly queued input and an explicit retry action, not a fake unsent/sent result.
+
+An input contains stable UUID, session/project, authored text, automation/objective, requested
+model/effort, due time, optional stages and attachments. `input.ts` serializes mutation and
+publishes a new ledger only after its write. Reusing an id with different content is rejected.
+The frozen `deliveryText` includes executor setup only for a new-chat opening at claim time; displayed authored
+text remains separate. A failed write cannot later become a successful hidden enqueue.
+
+| Delivery choice | Eligibility and behavior |
+| --- | --- |
+| Immediate / `auto` | In an exact active non-Pro turn before its first MCP call, show **Send directly**: claim that original turn, stop its native generation, then use normal browser Send. After the first MCP call, show **Inject now** and deliver in an eligible outer MCP result. Pro (including Astra) keeps injection throughout. A new turn resets eligibility; old tool history does not count. For a proven idle chat/New Chat, elect the normal browser send. Unknown model/turn identity grants no interruption. |
+| After turn | Existing-session FIFO spends one distinct verified completed `turn_end` per browser claim. Replays/restart cannot drain the next entry. Does not block an otherwise eligible immediate tool injection. |
+| Finish checkpoint | Waits for a successful finish-tool boundary; ordinary eligible chats can deliver after verified completion. Astra's separate after-turn opt-in remains explicit. Checkpoints inherit the current chat model. |
+| Native attachment | Browser upload/send only. A file-bearing active-chat input waits for the browser-safe boundary; it never becomes a tool-result file reference. |
+| Decision/planner | Role-specific request through the same claim/receipt infrastructure, with its own result consumer and cancellation. |
+
+Browser delivery elects one exact tab/document/epoch and checks the right existing conversation
+or fresh-chat ownership. New-chat reuse requires a visible composer before election and after
+native preparation; unavailable surfaces are skipped so the first send can open one clean chat.
+A failed native preparation can grant the existing pre-send fallback, before marking readiness.
+Before claiming an input it waits for a visible composer; a mounted
+editor hidden behind a dialog leaves the input queued in its elected tab. It confirms
+model/effort, inserts the full text, uploads native files,
+rechecks composer and attachment nodes, crosses app authorization, then **rechecks again after
+every await before Send**. Native stable user-message and conversation identity establish
+acceptance. Composer insertion, button disappearance and a local “sent” variable do not.
+
+Direct active-turn corrections freeze `directTurn` in the same outbox entry. The existing
+turn-start and last-tool evidence plus in-flight MCP custody decide eligibility; no separate
+tool-seen flag owns it. Recheck the exact claim before native interruption and before Send.
+Navigation, a newer question, an occupied draft or a first MCP call during preparation can
+revoke delivery. A claimed browser correction never also enters a tool result. After-turn
+entries retain their verified-completion policy and never acquire interruption authority.
+
+Prepared text enters the native editor in one native `execCommand('insertHTML')` operation,
+with inline text nodes and BR line breaks, without an extra outer paragraph. Select the replacement/append range and
+recheck editor, focus and selection ownership before insertion. Synthetic clipboard events can
+be consumed without inserting into a cold editor; per-line `insertText` freezes large project
+frames and plain-text paste can turn them into file attachments. Verify the same editor's
+normalized text after insertion; do not add a second bootstrap insertion attempt.
+Provider paragraph normalization alone does not revoke the draft lease; trusted edits, changed
+editor/route identity and attachment changes still do.
+
+The witnessed Send receipt captures the pre-send assistant baseline. If app identity or native
+message source arrives after a fast reply has rendered, that question still owns its reply and
+exact final marker. A later observation must not classify its own answer as old history.
+
+Page-reply waits are bounded: reuse/close observations get three seconds; New Chat preparation
+gets fifteen seconds. Missing preparation replies retain the elected tab and grant no fallback.
+Only fresh same-document/epoch idle proof allows preparing that elected tab again. Final input
+offers do not block maintenance; the content busy slot and durable app claim/authorization own
+delivery. A due repair defers that same conversation's input to the next status pass.
+
+A claimed/authorized ambiguous browser send is never automatically resent. Pre-send preparation
+failure and post-click uncertainty have different error text and retry authority. Late exact
+receipts may settle a cancelled wait; that does not authorize a second message. Receipt custody
+and history publication are independent: a recorder failure retries canonical history, not
+transport. Queued unclaimed input follows its durable session to the successor; already handed
+claims keep their original exact document until their outcome resolves.
+
+Tool input is offered in queue order within one bounded response. Emit one user-instruction
+heading, each authored message followed by its normalized images, then one batch reminder.
+UUIDs remain internal receipts, not decorative text for the model. A later exact-owner
+invocation that started after publication acknowledges it. Immediate inputs may batch;
+after-turn and finish entries each retain their own boundary policy. Tool intent has no
+arbitrary claim-age expiry. Only positively settled, never-offered eligible input may change
+transport; receipt loss cannot justify switching to browser Send.
+
+### Attachments have one staging owner
+
+`input-attachments.ts` stages immutable originals selected by file picker, drop or clipboard.
+Renderer/browser receive opaque ids, names, sizes, MIME and bounded previews, never source paths.
+Up to 20 files and 512 MiB total per message are locally admitted; provider limits can still
+reject an upload. Staging has a 2 GiB quota, serialized pruning/admission, and preserves outbox-
+retained bytes. Thumbnails do not modify originals or prove provider upload success.
+
+Bridge chunks are bounded to 512 KiB and require the exact pre-send claimed input and attachment
+membership. Native upload completion and final provider submission are separate checks. Legacy
+normalized tool images live in `input-images.ts`; do not confuse them with arbitrary native
+files. Never send a path/reference while implying its bytes reached ChatGPT.
+
+### Generated workflow vs the agent's displayed plan
+
+“Create plan” uses `goal.ts::draftTaskPlan()` via `task-request.ts` and the selected ChatGPT/API
+backend. It returns 2–12 substantial stages under the aggregate bound. Stage one must state the
+complete objective, requirements, constraints and implementation approach; later stages are
+verification/improvement checkpoints, not withheld parts of the specification. Planner helpers
+receive reference task content and a JSON output contract, not executor instructions or finish
+reminders. Invalid stages never enter the queue.
+
+Planning belongs to the originating draft key. Navigation does not cancel it or redirect its
+result. Editing a pending task cancels that exact request; object identity rejects late results.
+Progress/error/retry belongs to the same invocation. `runTaskRequest()` coalesces a repeated id
+with the same fingerprint and retries only classified pre-delivery failures within its bounds.
+
+- **New chat:** the completed plan stays editable until explicit Send/cancel/New chat reset.
+  Clearing the composer keeps its captured objective. Send freezes the original objective and
+  **every** stage in the first durable payload. Later checkpoints are materialized once after
+  the first receipt creates the concrete local session. Until then, the dock projects them
+  from that same input. Retry must retain objective + all stages, never restore only stage one.
+- **Existing session:** completion atomically admits all finish checkpoints into the durable
+  outbox immediately. Composer text/attachments are not sent by that admission, and clearing
+  the composer cannot delete the checkpoints. Edit/delete/reorder uses the ordinary queue.
+  Failed admission keeps the editable result for retry in its originating session.
+- **Displayed `update_plan`:** `plan-tool.ts` writes one whole `plan.json` under the exact
+  caller's local session. Short headlines, bounded details and statuses appear above the queue;
+  at most one step is in progress. Older calls/retired frontends cannot overwrite newer state.
+  Completion animates then dismisses the card; completed reloads stay hidden while the document
+  and history remain. Prepared handoffs include an exact-session notice to inspect the saved
+  plan. This card neither delivers instructions nor completes/deletes queued checkpoints.
+
+Finish checkpoints use `shared/input.ts::browserInputModel()` to inherit current selection,
+including legacy rows containing an old model. A receipt for an inherited checkpoint must not
+republish an old enqueue-time model as a fresh observed switch.
+
+### Astra's finish boundary
+
+`shared/chat-models.ts` recognizes exact Astra/Pro identities; substring guesses are forbidden.
+`session_finish` is exposed by the finish setting and requested in executor prompts only under
+the applicable Astra policy. Workers still use `agents action=finish`.
+
+`shared/finish.ts::finishInstruction()` is the single prompt for browser and tool delivery:
+complete implementation first, call when roughly the configured 3/5 minutes of final checking
+remain, and complete newly delivered work. It is not a progress tool or a way to collect all
+checkpoints in a loop. Hidden reminder framing never removes original recorded bytes.
+
+`session/finish.ts` validates exact active session/conversation/turn and invocation start.
+The turn's recorded finish authority owns held/released/notified/decision state. Pending user
+instructions and checkpoints take priority. A successful finish response can deliver one
+checkpoint; empty holds can wait without inventing new work. “End turn” durably releases the
+hold so ChatGPT may finish; it does not pretend native generation has stopped.
+
+For Astra, **both Goal and Loop use the Loop decision path at the finish boundary** and inject
+the resulting instruction through tools. A completed final answer does not automatically send
+another browser message. `automaticFinishEnabled()` is shared by generation and queued-input
+validity: armed Goal/Loop suppresses Notify even if the global finish action is Notify.
+
+Finish decision generation deduplicates by actual recorded work/input revision, not a new
+request timestamp or repeated hold call. User input, changed settings, turn release, block or
+replacement invalidates the old attempt. Progress uses the existing mutable timeline row;
+notifications are scoped to that exact turn and may be suppressed when the app is open.
+No periodic generated-input daemon is part of this design; old periodic rows are retired.
+
+## 12. Recording, history, context and usage
+
+**Intent:** preserve what the user and model actually said and what local tools actually did,
+then show it in stable chronological order at a bounded rendering cost.
+
+Two producers are necessary: MCP/app evidence supplies exact tool args/results/outcome/files,
+while browser observations supply native messages, progress, terminal state and page identity.
+Neither can substitute for the other. Recording is local; explicit Goal/API/plugin/model tool
+use can transmit the data described by those features. Do not call all product traffic local.
+
+The recorder coalesces identical `chat_error` notices within 30 seconds against a bounded
+committed error tail, including concurrent tab reports and replay after restart. Page-wide
+access limits ignore document-local turn ids; other errors retain their turn scope. Different
+text, another session or a later occurrence remains visible. This controls transcript noise,
+not the bridge's independent recovery/blocking evidence.
 
 ```text
-content.js::finishGeneration
-  → noteGoalTurn(completed, exact local turn id)
-  → watchGoalTurn() holds the 8s four-signal settle
-  → /goal/draft
-  → bridge validates exact chat/client + durable pending reply
-  → goal.ts::startGoalDraft() freezes mode/model/prompts/objective for this turn
-  → beginGoalDraft() → requestDrivingDecision() → requestGoalDecision()
-       → OpenRouter non-streaming strict JSON-schema completion (`stream:false`)
-       → response-healing + `provider.require_parameters` → bounded `readGoalCompletion()`
-  → /activity returns sending/answering/ready|no-reply|failed
-  → content.js::maybeSendGoalReply()
-       ready: reserve composer → send genuine user message → remember spent token → /goal/ack
-       no-reply: send nothing → /goal/ack
-       retryable failure: /goal/ack old attempt → 15s page-side retry of the same durable turn
-  → goal.ts marks the reply obligation handled only for ready/no-reply
+userData/sessions/<local-id>/
+  events.jsonl          append-oriented tool/turn/error/progress evidence
+  messages/*.json       one atomically replaceable shard per logical native message
+  messages.json         legacy map, read during lazy migration
+  meta.json             recoverable projection plus durable ownership/project facts
+  meta.backup.json      last validated metadata checkpoint
+  plan.json             current agent-maintained plan
+  assets/               bounded binary and overflow material
+  handoffs/             exact captured briefs and provenance
 ```
 
-This split is deliberate. `goal.ts` owns provider work and durable idempotency; the **page owns
-whether acting is still safe** because only it can see navigation, a newer generation, the user's
-typed composer text and current ChatGPT liveness. Provider retries therefore do not live in a
-background retry daemon. `requestDrivingDecision()` internally retries only Loop's invalid attempt
-to stop, up to `LOOP_ATTEMPTS = 3`; ordinary transient provider failures return to the page as
-`retryable` and are retried only while the same exact turn is still current. The current provider
-contract is deliberately **non-streaming** because OpenRouter response healing requires a complete
-structured response. The retained SSE parser/`answering` publication path is compatibility for
-legacy streaming-shaped responses, not the production request mode and not a reason to reintroduce
-streaming Goal decisions.
+The store has three write semantics. Structured events serialize sequence assignment → complete
+append → memory projection, sealing torn final JSONL lines before later append. Canonical messages
+replace stable identities by temp→rename, never regress final to streaming, and retain original
+chronological anchors across revisions. Metadata coalesces ordinary updates but writes immediately
+at ownership boundaries; it can rebuild history-derived fields without inventing an empty session
+when recovery lacks proof. Legacy files overlay lazily rather than triggering a whole-history rewrite.
 
-Goal/Loop share three durable ledgers and one memory draft map:
+Native image-only user messages keep their exact message identity, empty authored text and
+bounded attachment metadata. They participate in the same turn/receipt chronology as text and
+render an attachment placeholder immediately. Native metadata grants no local file custody;
+later browser observations must preserve an app outbox's staged attachment ids and previews.
 
-- `goal-objectives`: per-chat objective text. Restore shows it; restore never starts a draft.
-- `goal-switches`: per-chat `{enabled, mode, at}` override of the app-wide switch, bounded to 400
-  conversations (oldest decision evicted). Absent means "follow `config.goal`"; a row never expires,
-  because an override is a decision rather than an observation.
-- `goal-replies`: one stable assistant reply obligation per conversation, `{replyId, turnId,
-  eventSeq, acceptedAt, pending|handled}`. The recorder persists this decision before HTTP success,
-  so page reload/app restart cannot lose a terminal answer that was owed one Goal decision. The
-  ledger is bounded to 200 conversations and 12 hours from `acceptedAt`; that prevents restoration
-  from turning an old finished chat into a standing invitation to type tomorrow.
+Reads join only the relevant session's committed queue. `readActivityEvents()` does not flush
+every dirty metadata row. A reopened session hydrates a bounded journal tail; append tail and
+canonical map serve revisions/cursors. `tailFrom` states proven coverage and cannot be lowered
+by an older canonical message across a missing journal range.
 
-The Goal ledgers have a separate **current semantic-mutation serialization hole**. `durable.ts`
-serializes file publication, but `setGoalObjectiveNow()`, `setGoalSwitchNow()` and especially
-`acceptGoalReplyNow()` mutate shared in-memory maps, capture whole-ledger snapshots, await
-`writeDurableNow()`, then roll back on failure **without a Goal-side mutation queue**. Two different
-chats can therefore overlap: B can capture A's staged-but-not-yet-accepted value in its successful
-snapshot, while A later fails and queues a rollback snapshot; a crash between those publications can
-resurrect an operation A was told failed. `acceptGoalReplyNow()` is stronger still because its
-failure rollback clears/rebuilds the whole reply map. File-write serialization is not semantic
-transaction serialization. The root fix is one **serialized copy-on-write mutation owner per Goal
-ledger**: derive `next` from the latest committed live ledger, write `next` first for an immediate
-acceptance boundary, and publish it to readers only after that write succeeds. Failure then leaves the
-old live state untouched — no rollback path exists to race. Debounced moves/clears must enter the same
-ordering so an older snapshot cannot overtake a newer accepted one. Regress “A write fails while B
-succeeds” and prove neither rejected state becomes temporarily actionable nor either caller's final
-state overwrites the other.
+`shared/chronology.ts` orders by canonical origin before revision sequence. `foldProgress`
+updates one namespaced progress/message identity in its original place. A HTML refresh of an
+old worker final must not put a revived worker to sleep. Unknown identity is never folded by
+similar text, time or display position. Recovery messages use this same projection mechanism.
 
-There is a **current provisional-row restore bug** inside that ledger. `/goal/draft` may have to
-freeze the semantic obligation before Fiber/recorder exposes the stable assistant id, so it durably
-writes `replyId='turn:<localTurnId>'` with `eventSeq=0`. A later stable candidate upgrades that same
-row while preserving its original `acceptedAt` and `pending|handled` state. But
-`restoreGoalReplies()` currently rejects every snapshot row with `eventSeq < 1`. A restart before the
-stable-id upgrade therefore drops either a **pending** obligation or an already-**handled**
-provisional tombstone; in the handled case a later replayed stable final can be accepted as fresh and
-potentially trigger duplicate Goal continuation. The invariant is that provisional identity is a
-real durable phase until strengthened. Restore must accept `eventSeq===0` **only** for the exact
-provisional shape `replyId === 'turn:' + turnId`, preserve its original `acceptedAt` + state, and let
-the existing stable-id upgrade strengthen that same row. Regression-test both pending and handled
-restart cases; never recover by scanning rendered history for "the latest answer".
-The Goal loop has exactly one trigger and it lives in the page: a content script sees a turn end and
-asks for a draft. `bridge.ts::inspectOwedGoals()` is the app-side half of that; it consumes
-`goal.ts::pendingGoalReplies()` and uses `goalDraftBusy()` only to distinguish an in-flight pickup
-from a stalled one. The reason it
-exists is that page liveness *is* loop liveness — a document that dies between the final answer and
-the request leaves an obligation correctly `pending` with nobody alive to redeem it, which is exactly
-what the live prime trace showed (reply at 21:56:46, the app first heard a Goal was owed at 22:00:33
-when a human reloaded by hand). It reloads the chat on `GOAL_WATCH_BACKOFF_MS` — two minutes of
-quiet, then 2/5/10/15 — and then stops for good. Load-bearing details:
+Unattributed is a first-class recorded state. Late exact proof repairs only matching call ids
+to the proved session epoch, copying assets first and rewriting only the scanned source prefix
+while retaining concurrent appends. Restore/repair uses the uncapped catalog and a bounded
+derived bucket cache. A superseded-source refusal remains terminally isolated from live B.
 
-- Attempts are **spent, never refunded**. Activity pushes the next attempt out (while tool calls
-  arrive the chat is working, not stalled) but buys no further attempts, which is what makes the
-  watchdog terminate whatever the page does with the reload — a schedule that reset on the page
-  events a reload produces would be a chat reloading itself for ever.
-- `goalWatchFloor` is set when the bridge starts serving, and an obligation accepted before it is
-  never acted on. `goal-replies` is durable for twelve hours, which is right for a replacement
-  content script asking what it still owes and quite wrong as a licence to reload yesterday's chats.
-- A `sending`/`answering` draft counts as the pickup happening; a `ready` draft nobody types does
-  not. An open continuation for the obligation's session suppresses the watchdog entirely, because
-  Compact & Resume currently owns that session while the transaction is in flight. **Do not infer a
-  Goal-reply migration from that suppression.** `continuation.ts::publishCommittedProjection()`
-  explicitly moves the Goal objective and per-chat switch A→B, but there is currently no
-  reply-ledger projection: `goal-replies` remains keyed by A. That is not neutral after commit.
-  `continuationForSession()` stops suppressing a committed transaction; if A now inherits app-wide
-  Goal On, `inspectOwedGoals()` can spend its bounded reload schedule reopening historical A even
-  though the session has durably moved to B and `/goal/draft` can no longer resolve A as its current
-  conversation. The semantic fix is **supersession, not migration**: by the time the continuation
-  commits, the resume bootstrap is already the genuine next user message that made the old A reply
-  no longer the turn awaiting a user decision, while B's first assistant answer has its own exact
-  `resumeGoalPending` provenance. Make source-A reply supersession an idempotent part of the same
-  committed projection used by normal commit and durable-B recovery. Do not teach the Goal watchdog
-  or browser opener to special-case historical A. Regress that commit leaves no A Goal repair and
-  that B's first answer still gets exactly its ordinary/recovered Goal edge.
-- A failed draft leaves the obligation `pending` by design (`ackGoalDraft` discharges only on
-  `ready`/`no-reply`), but **not every failure is immediately retryable**. For transient/provider
-  failures outside `SETTLED_FAILURE`, the page ACKs that failed attempt and a same-turn
-  `startGoalDraft()` may create a fresh attempt; this is the path the page retries after 15 seconds
-  while the exact turn is still safe to act on. Settled account/settings failures
-  (`auth_rejected`, `out_of_credit`, `unknown_model`, `no_api_key`, `no_conversation`,
-  `no_objective`) return `retryable:false` and the acknowledged same-turn request keeps returning
-  that failed draft instead of paying the provider again. The durable reply obligation remains
-  pending in both cases. After the draft payload's 10-minute TTL, `expireDraftPayload()` clears the
-  payload/error but preserves the idempotency tombstone; a later request may then become a fresh
-  attempt, still against the same undischarged obligation.
+Native tab closure does not synthesize a completed turn. Reload recovery can close a durable
+open turn only from an exact final for that turn, using the canonical message's stored owner
+even when the reloaded page loses or replaces its turn id. The store-owned `finalContentSeq`
+advances only for final text/state changes; HTML, timestamps and other metadata cannot turn an
+old final into a new completion. Legacy rows retain their first anchor until fresh final content.
+That content revision must follow the latest recorded work boundary, with no running local tool
+or newer user/turn overriding it, independently of observation order within a browser batch.
+Replay lifecycle boundaries in publication sequence; display chronology must not erase an
+app-authored reopen after an earlier completed end. A same-request call that **starts after** a
+reported completed end can prove the page ended it falsely; recorder reopens that turn and
+retires the corresponding Goal attempt. A call started before the end, a new request or a
+manual Stop cannot be used as that proof. This reopen evidence is process-local.
 
-- `drafts`: current OpenRouter work, one per conversation, frozen with its selected mode/prompt at
-  creation; stage `sending|answering|ready|no-reply|failed`. In Goal mode `ready` and `no-reply` are
-  the two semantic decisions. Loop may only finish as `ready`; a would-be stop becomes a bounded
-  retry and then retryable failure. A settled draft payload is offered for 10 minutes, but that TTL
-  expires the **payload**, not the durable reply obligation; only a real `ready` send or `no-reply`
-  decision discharges the obligation.
+Large text has distinct inline/overflow/asset/read/render limits. Do not silently shorten
+authored history to fix the UI. Asset quotas and explicit overflow ceilings remain enforced;
+if earlier recording already lost content, expose that loss. Retention runs once on startup
+and every six hours using current settings, even when new recording is Off.
 
-**Renderer/IPC.** `renderer/main.ts` is setup/permissions/connection/activity;
-`renderer/chat.ts` is session timeline, handoff, swarm. To add a capability: narrow
-main-process action → validate in `ipc.ts` → expose exactly that method in
-`preload/index.ts` → call it. **Never add a generic `invoke(method, args)` escape hatch.**
-Async loads use generation counters so a slow load for session A cannot paint over the B the
-user selected, and unsolicited state pushes must not clobber a focused unsaved form field.
-Captured ChatGPT HTML is untrusted: `chat.ts::renderedMessage()` allowlists semantic tags,
-strips attributes, drops executable/form/embed content and non-safe link schemes.
-Tests: `ipc.test.ts`, `renderer-html.test.ts`, `renderer-layout.test.ts`, `renderer-state.test.ts`, `renderer-timeline.test.ts` (compaction card, stable rows).
+### Two history consumers
 
-Chats **Open Chat** is another example of the same narrow boundary. `renderer/chat.ts::sessionRow()`
-draws the action only when the current session summary carries a `conversationId`, but the renderer
-does not construct or trust a ChatGPT URL. Preload exposes only `openSessionChat(id)`; IPC
-`sessions:openChat` re-reads that session from the store, validates the stored conversation id, then
-calls `browser.ts::openInPreferredBrowser(chatUrl(id))`. An Unattributed/no-conversation session is
-therefore not openable, and a renderer-supplied session id can never smuggle an arbitrary URL into
-the browser opener.
+The model's `session` tool has exactly `search` and `read`, with explicit local `session_id`.
+Cross-chat and concurrent-worker reads are supported. Snapshot cursors pin sequence boundaries;
+update cursors carry unfinished assistant-prefix checkpoints and report replacement when the
+prefix changed; `T…` detail cursors page exact tool args/results with a pinned hash. Budget
+cursor/footer space first and never truncate a cursor or silently skip authored text. Self-reads
+are recorded for audit but omitted from this tool's own history/search projection.
 
-`renderer/dom.ts` is the shared **presentation-only** helper boundary: `el()` always uses
-`textContent`, `icon()` references the controlled SVG sprite, `run()` unwraps the fixed preload IPC
-result and toasts main-process errors, and the remaining helpers format trusted timestamps/counts.
-It owns no application state and deliberately contains no `innerHTML`; do not turn it into a second
-renderer store or generic HTML rendering escape hatch.
+Desktop session lists use stable `(updatedAt,id)` pagination. Timeline first loads a recent
+tail, pages older/newer on deliberate scrolling, keeps a bounded 160-row window and viewport
+anchor, and offers Back to latest. Historical browsing does not silently evict the user's
+place on live updates; controls remain live. Selection generation fences every async page.
+Expanded tool arguments/results and Compact & Resume content use the chat pane's vertical
+scrolling, without nested vertical text scrollers. Streaming compaction revisions retain the
+disclosure and unchanged sections; the timeline owner preserves the visible row or follows
+the bottom only when the reader was already there. Collapsed bodies leave layout entirely.
 
-Settings are a **multi-writer transaction**, not a blind renderer snapshot. The renderer sends
-`{base, patch}` and `ipc.ts::mergeSettings()` performs a field-wise three-way merge against the
-latest main-process config: a value unchanged from `base` was not edited by this form and keeps the
-newer live value; only a field the renderer actually changed wins. This exists because the browser
-extension can change Goal/Auto Compact while the app's settings sheet is open. A full-snapshot save
-without the base would silently undo that newer browser-side choice.
+### Context pressure and Usage are different measurements
 
-The renderer separately protects **draft UI state** that is not config yet. A focused dirty input,
-root-rename draft/caret, selected session and async load generation survive unsolicited whole-state
-pushes/repaints. "Main process is authoritative" does not mean "throw away text the user has not
-submitted." Every push path must distinguish persisted state from local draft state.
+Session `contextTokens` estimates current frontend pressure and resets at durable A→B rebind.
+Lifetime `estimatedTokens` retains historical work. These are app estimates, not ChatGPT's
+private context meter; the composer ring must say so. Exact Pro has a static pressure display
+and is excluded from automatic compaction; manual compaction remains a separate action.
 
-Renderer saves are serialized too. `renderer/main.ts` captures each full requested settings
-snapshot from the latest **requested** state before queuing its IPC call; a slow response from save
-N therefore cannot become the baseline that erases edits already captured for N+1. The renderer
-queue and main-process three-way merge solve different races and both are required.
+`extension/usage.js` observes bounded allowed account-usage responses in MAIN world, including
+already available state; it does not retain raw account payloads. App `session/usage.ts` accepts
+one fresh validated snapshot, replaces rather than merges accounts/tabs, and distinguishes
+model, shared and feature pools. Missing/expired values mean unreported, never zero/full.
 
-The desktop session UI has its **own** bounded read protocol; do not reuse the model-facing
-`session` cursor design by assumption. `ipc.ts` session lists page by stable `(updatedAt,id)`
-cursor, first detail load reads a recent tail, and incremental detail reads advance by monotonic
-sequence. Deliberate upward scrolling near the top requests `before` pages in 80-row chunks;
-downward navigation near the bottom requests `from` pages to recover evicted newer rows.
-The retained window stays bounded at 160 rows, preserves its visible anchor in both directions
-without bottom-following during pagination, and offers Back to latest. Reaching the forward tail
-restores live delta reads.
-Initial/layout scroll events do not drain history. The boundary comes from visible rows so a large final cannot hide earlier
-history permanently; filtered-empty pages use the raw page boundary. Historical pages resist live
-delta eviction while controls remain live, and async navigation is fenced by selection/load epoch.
-`readRecentEvents` scans older pages in fixed chunks and retains only the requested rows.
-`renderer/chat.ts` then caps one paint to 160 rows, about 2 MiB of text and 256 KiB of
-captured rendered HTML. Those are presentation/read budgets only — the durable session store may
-contain much more, and the model-facing session tool independently uses snapshot/update/detail
-cursors for a different consumer.
+Daily work/cost charts use a **local estimate**, currently final frontend-context size / 2 per
+unique recorded tool call, with editable divisor, multiplier and per-model comparison rates.
+Model changes affect attribution; compaction starts another frontend segment. Duplicate call
+ids do not count twice. Historical rows without model proof carry an explicitly assumed legacy
+model. Canonical revision/timezone-keyed `usage-cache` avoids rereading unchanged transcripts;
+formula changes only project cached totals. These charts are not a provider invoice, exact
+token consumption or proof of current prices/entitlements.
 
-Feature-toggle side effects have an order. Turning multi-agent off first parks/preserves broker
-history, cancels worker browser commands while the bridge can still reach them, and crosses an
-immediate durable authority barrier; only then may the bridge be stopped if recording is off too.
-The settings write still applies connection/Desktop publication changes through the serialized
-connection owner. A UI save must never report "off" while the durable worker authority it was
-supposed to preserve failed to land.
+## 13. Extension, account models and browser preferences
 
-**Connection and tunnel.** `connection.ts` owns local MCP server → Core publication →
-optional Desktop publication → UI status, across the `openai`, `cloudflared` and `manual`
-transports. On OpenAI tunnels **Core and Desktop need separate tunnel ids**, because the
-connector UI addresses one tunnel id as one endpoint; on whole-origin transports both
-tokenized paths share the origin. Lifecycle operations are serialized and generation ids
-invalidate callbacks from replaced tunnels — reuse that for any new async status producer.
-`tunnel/index.ts` supervises the child; `tunnel/health.ts` parses its `/metrics` and
-`/api/status`. Runtime **startup readiness** and **verified external-link age** are deliberately
-different facts. `/readyz` plus a **readable poll metric** is enough to call the freshly launched
-client ready while its first long poll is still open; the first completed poll timestamp is the
-stronger proof that OpenAI was actually reached. Once a timestamp exists, its freshness detects a
-lost route. `/readyz` alone is never external-route proof because it stays green through an
-internet outage, and one failed long poll is only a retry — an outage is complaints that outlive a
-poll cycle without a newer verified timestamp. `diagnostics.ts` must preserve this distinction and
-its bounded startup grace instead of forcing runtime readiness to wait for the first long poll.
-Tests: `tunnel.test.ts`.
+**Intent:** make native ChatGPT observable and controllable for an exact authorized operation,
+while leaving ChatGPT's messages, model execution and account permissions with the provider.
 
-Tunnel restart ownership is generation-fenced inside `startOpenAiTunnel()`. The live child and all
-of its mutable health/error state are one `ClientRun`; `current` names the only run whose callbacks
-may publish. Every async health read/log/close/error path checks `current === run`. `restart(run,
-...)` is the CAS-like cut: the first caller for that run clears current, serializes child-tree
-retirement through the one `retirement` promise, and only after retirement may schedule `launch()`
-for a successor. A late close/error from the old child therefore cannot race a health timeout into
-two replacements or overwrite the new run's UI state. `routeObservation()` also returns
-`unknown` only when the poll metric itself is unreadable; a readable metric with no handshake
-timestamp is now `connected` for startup readiness, while `handshakeAt:null` still says the external
-link has not yet been timestamp-verified. Do not add a second restart owner in diagnostics/connection code — they consume
-the tunnel's report, they do not supervise its process.
+| Component | Responsibility |
+| --- | --- |
+| `chatgpt-dom.js` | All provider selectors and DOM-shape assumptions, composer/upload/model/turn primitives. |
+| `fiber.js` | Bounded MAIN-world React evidence: messages, request ids, generation/model state and installed connector declarations. |
+| `usage.js` | Bounded allowlisted account-usage observation. |
+| `content.js` | Isolated-world recording, exact turn/navigation ownership, input/command execution, native-page companion UI. |
+| `background.js` | MV3 journal and HTTP transport, tab/document registry, command elections and durable ACK custody. |
+| `popup.*`, `overlay.css` | Pair/reconnect status and extension-owned presentation; no local tool authority. |
 
-Connection startup derives prerequisites from the **live capability projection**, not from the
-mere existence of a connector. A root is required only when some enabled capability actually
-crosses the filesystem boundary; screen/clipboard-only Desktop access must not accidentally waive
-a Core root requirement or demand one it never uses. The Core endpoint starts first and its
-handler closure re-reads current config for every call, so a permission save affects enforcement
-without rebuilding the HTTP listener.
+Content↔MAIN messages need the expected source, type, nonce and navigation epoch. MAIN evidence
+is untrusted data, not instructions or filesystem permission. Prefer bounded observations of
+the current document over repeated full Fiber/DOM scans. Shared selectors belong in the DOM
+adapter; do not make each feature guess a different composer or terminal message.
 
-The optional Desktop publication is failure-contained. A missing/mistyped second OpenAI tunnel id
-may put the Desktop card in `off/error`, but it does **not** tear down a healthy Core connector.
-`applySettings()` reconnects Core only when the transport-defining tuple really changed; a
-Desktop-only permission/tunnel change rebuilds/publishes that surface in place. This is why
-renderer settings must call the connection owner rather than mutating status cards directly.
+The service worker journals observations before acknowledgement, batches/replays them after
+suspension, and preserves event identity so retransmission does not create duplicate turns or
+messages. Two transport slots, one batch per conversation and fair batch election prevent one
+hot/stalled chat blocking another. Command ACK custody precedes later observations from that
+route. Reconnection restores eligible documents before creating new work; browser restart is
+a different lifetime from MV3 suspension (§2).
 
-Disconnect and final shutdown deliberately differ. An ordinary disconnect/settings reconnect has
-no outer force deadline because the app keeps running and must not drop an accepted response that
-ChatGPT could retry. Final `shutdownConnection()` invalidates the generation synchronously and then
-allows the MCP endpoint a bounded **30-second** drain inside the app-wide shutdown budget. Stale
-tunnel callbacks after that generation change are ignored even if the child process emits them
-while being stopped.
+An idle composer or missing Stop button alone does not prove a completed answer. Turn state
+combines native message/terminal evidence with exact user/assistant identities and live tools.
+Interim prose, tool progress, refusal/error presentation, interrupted generation and final
+completion remain distinct. Navigation first retires the old epoch; no late callback may record
+or send for it. A settings overlay must not count as a usable hidden composer.
+An exact terminal Fiber descriptor on the latest assistant turn also vetoes recovery of an
+unrecorded generation from a persistent Stop control. An older terminal before a newer user
+question grants no such veto; a presentation artifact must not mint another active turn.
 
-**Desktop automation (Windows/macOS).** `tools-desktop.ts` + `computer/*` own the shared model
-contract, frame/ref lifetime, batching and helper protocol. Windows implements that protocol with
-PowerShell, Win32 UI Automation and SendInput; macOS loads a thin Swift library through an N-API
-addon on a Node Worker thread inside the Electron main process. That in-process boundary is
-load-bearing: tccd authorises the responsible Electron app, while a raw spawned child can be
-reduced to a different path-based subject even when the parent is allowed. Registration-time permission is not enough: each action
-re-checks, and macOS Screen Recording/Accessibility consent remains an independent OS boundary.
-The helper is prewarmed only when native Desktop capabilities are published; window observation is
-background-first and never focuses. Recent immutable frames bind coordinates to screenshot and
-window geometry; semantic refs bind cached elements to bounded native accessibility snapshots. Both also
-retain the producing helper generation, stamped on the transport reply before asynchronous image
-I/O. Frame/ref-based requests recheck that identity at native dispatch, including after local work
-in a batch; helper replacement never transfers an old snapshot to the new instance.
-Visible-pixel crops and window-capture fallbacks are always screen-bound even when their request or
-coordinates named a window; otherwise an occluding app's pixels could be relabelled as the covered
-window. Screen captures compare the exact active-display rectangles with ScreenCaptureKit's snapshot
-and re-check them through and after capture. Physical input revalidates the target, and a semantic or
-explicit focus step carries its proven window into later keyboard actions in the same batch instead
-of degrading to global HID input. Batches report partial completion and route evidence.
-Image coordinates clamp to the frame's inclusive integer interior, and final text plus base64 image
-share one measured MCP result budget. The in-process Swift path sets a native AX messaging timeout and
-one aggregate bounded traversal deadline because a Node Worker timeout cannot pre-empt a synchronous
-accessibility call. Compact local postconditions avoid model-driven wait/observe loops. The browser on this desktop may be holding
-this app's own ChatGPT chats and a keyboard chord cannot see which tab it lands on, so
-`browser-chords.ts` names the tab/window/address-bar chords and `tools-desktop.ts` refuses them
-whenever the keys would reach a browser process. Tests: `computer*.test.ts` and
-the opt-in `macos-computer-live.test.ts` packaged-host probe.
+Native Send/Stop controls belong to the current composer's form and must be rendered outside
+transcript/extension surfaces. Hidden, inert or quoted controls grant no action; multiple Send
+buttons are ambiguous. The existing transcript observer also follows composer-side relabel/hide
+mutations so hidden tabs notice Stop transitions without waiting for a throttled timer.
+Submission observes native Send readiness and acceptance within one 30-second deadline, freezes
+the editor/text/document, and clicks once. It never substitutes synthetic Enter. Goal-token and
+desktop-input authorization run when Send becomes ready, followed by a fresh local owner check.
+Goal preparation/rollback reuses the existing exact composer draft lease; identical text in a
+replacement editor or a user's intervening edit never grants cleanup authority.
 
-**Secrets are one encrypted blob with serialized mutation, not three loose files.** `secrets.ts`
-stores `openaiApiKey`, the extension `bridgeToken`, and `openRouterApiKey` in `secrets.bin` through
-Electron's async `safeStorage`. The renderer gets only booleans/status; plaintext never crosses IPC,
-config or logs. Cache miss is single-flight and every mutation is a queued read-modify-write,
-because concurrent async decrypt + save can otherwise republish stale plaintext or erase another
-key. The encrypted file is temp→rename and the cache updates only after durable publication.
+### Account-evaluated model selection
 
-On Linux, "Electron says encryption is available" is not enough: Chromium can fall back to its
-legacy `v10` hard-coded-key provider. `secureStorageStatus()` encrypts a non-secret probe and checks
-the ciphertext bytes; that insecure fallback is treated as **unavailable**, not as encrypted
-credential storage. A decrypt of an unknown/malformed future blob may degrade reads to no secret,
-but a mutation must not compose from an invented empty map and overwrite ciphertext it did not
-understand. Unknown string fields are preserved for forward compatibility.
+`chat-models.ts` owns the app catalog and selection validation. The existing MAIN bridge reads
+bounded account-evaluated metadata, then the native picker confirms the actual model/effort for
+Send. A visible option, an English label, a remembered release name or “Upgrade required” is not
+entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
+uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 
-**Diagnostics report unknown as unknown.** `diagnostics.ts` tests the connector chain hop-by-hop:
-secure storage/config → local MCP initialize/tools-list → tunnel local readiness/metrics/client
-status → external-route evidence → whether ChatGPT has contacted the connector / actually called a
-tool. A check can be `pass`, `fail`, `skipped` or `not-run`; do not turn missing evidence into a
-green boolean. Developer Mode inference specifically compares "ChatGPT reached the connector" with
-"a tool ever followed" — transport health and model tool permission are separate diagnoses.
+Direct Chrome selection is observed even with the picker closed. The existing MAIN scan joins
+the current composer's exact model identity to the native trigger's visible effort, then stamps
+that same document/route for the isolated reader. It does not open the picker or discover new
+entitlements. Unknown labels, conflicting model identities and ambiguous triggers remain unknown.
 
-`logger.ts` is deliberately not durable telemetry. It keeps only 500 redacted entries in RAM,
-inherits current agent attribution from call AsyncLocalStorage, and exports the already-redacted
-projection. If a fact is needed for restart recovery, it does not belong in this log; give it a
-real durable owner instead. Since 2.0.3 the same redacted lines are also mirrored to
-`userData/app.log` (`initLogFile()` in `index.ts`; 4 MB, one `.1` rotation, self-disabling on write
-failure) so a failed overnight run can still be read the next morning — the 2026-09-02 run left no
-log at all. Nothing reads that file back; it is for humans.
+Successful catalogs retain their observation time and persist across restart. Discovery is a
+bounded nonce-scoped operation (120 seconds, at most 20 accepted models); failed refresh leaves
+the last successful catalog visibly distinguishable from a fresh observation. Cached metadata
+is useful selection UI, not fresh send authorization. Model and reasoning selection must both
+be confirmed after relevant native changes; navigation invalidates that confirmation.
 
-**On-disk state to inspect.** Electron `userData` — `%APPDATA%\chat-on-steroids\` on Windows,
-`~/Library/Application Support/chat-on-steroids/` on macOS, `${XDG_CONFIG_HOME:-~/.config}/chat-on-steroids/`
-on Linux — contains `config.json` (non-secret validated settings), `sessions/` (durable history),
-`state/` (small durable indexes, e.g. `request-correlations`, swarm), and the stable packaged
-extension mirror used by Chrome. Credentials live through `secrets.ts`/OS safeStorage. Extension
-state is separate: `chrome.storage.local` for preferences/pairing, `chrome.storage.session`
-for the journal and live tab/document state. Two command-control facts intentionally join the
-browser-restart lifetime in `storage.local`: `deferredRevivals` (marker only, never the prime's
-text) and `commandAckOutbox` (irreversible ChatGPT send outcomes; also mirrored into session state
-for the live-worker/migration path). When a restart bug appears, **first name which process
-restarted** — app, service worker, content script, Fiber helper, document, tab, or browser.
-Each has a different persistence boundary.
+Discovery elects an existing visible composer. An explicitly authorized helper may transfer
+its still-empty document and opening authority to the first user input, rather than opening a
+second tab. Startup's remaining unknown-catalog opening exception is a current gap in §21,
+not permission to add more startup openers.
 
----
+### Browser choice and opening discipline
 
-## 18. Symptom → open these → tests
+`browser.ts`, `browser-preferences.ts` and `browser-startup.ts` keep the selected supported
+Chromium browser/profile separate from ChatGPT account state. Use the selected browser's
+process evidence; a disconnected bridge or sleeping MV3 socket does not prove it is closed.
+OS wake launches require positive process absence and coalesce within one absence episode.
+The socket is a heartbeat/wake path; HTTP remains command/evidence authority.
 
-| Symptom | Open, in order | Tests |
+External navigation may hide its destination URL under ChatGPT-only host permissions.
+A completed tab absent from a successful ChatGPT URL query can release the departed
+conversation only while its original document, epoch and terminal lease still agree.
+Loading alone and failed queries are not departure proof; replacement registration wins.
+Each real active-chat departure remains independently eligible for existing recovery.
+
+Browser-only preferences suppress automatic opening as defined by their owner. Background
+operations reuse a suitable existing window unchanged. If a new background window is actually
+authorized, its shared layout policy bounds it to 45% of the work area and 800×600, then
+minimizes it. User-selected foreground actions retain their own intent. Window geometry,
+process absence, tab election and provider hydration are different decisions.
+
+### Overwrite and recovery presentation
+
+Overwrite preserves native ChatGPT answer DOM, Markdown, code, citations and action controls.
+The app inserts companion activity beside it. Hide a native tool/progress row only with complete
+exact proof that the replacement covers it. Missing attribution must leave usable native UI.
+Recovery status is one mutable chronological row even with Overwrite disabled, not a second
+toast/history stream. Reused React nodes need strong message identity; request id, text and
+position alone can span revisions. Update scoped sections instead of repainting the transcript
+or scanning every historical message on each tool delta.
+
+## 14. Bridge, durable browser commands and recovery
+
+**Intent:** deliver one authorized operation to one exact document, survive transport loss,
+and revive only work that remains owed. The bridge never grants arbitrary local tools.
+
+`bridge.ts` owns the paired loopback HTTP boundary on 8765–8769; tests use isolated ports.
+Silent `/pair` provisioning replaces the retired six-digit flow. Validate allowed extension
+origin, bearer, payload bounds and operation identity. The wake socket only prompts maintenance.
+Status, event upload, activity, claims, receipts and bounded attachment chunks have distinct
+contracts; a successful status read is not proof that a browser action happened.
+
+### Commands and receipts
+
+The four command kinds are **worker, resume, revive and stop**. A command progresses from
+durable intent to an exact tab/document lease, page execution, durable receipt and retirement.
+`DurableCommandRecord` restores valid owner + `claimedAt`; it is not merely an unowned queue.
+Command token, document id, navigation epoch, lease and underlying operation must all agree.
+
+Opening authority is spent at handout, before asynchronous tab creation/hydration. An elected
+tab that is loading, temporarily unreachable or user-closed does not authorize another opening.
+Extension elections/opening checkpoints survive suspension; deferred command ACK custody also
+survives browser restart. Persist receipt intent before removing the queue entry, and clear it
+only after the app acknowledges it. A lost receipt must not repeat a potentially sent message.
+
+Revival first queries/elects exact existing tabs. Query failure is unknown state, not an empty
+tab list. An existing but not yet usable exact tab blocks replacement. Resume destination
+election additionally obeys the continuation WAL (§15). `browserTabPolicy()` derives idle
+eligibility from existing app ownership, settled turns or sleeping workers, work timestamps
+and pending input/automation/continuation protection. Page presence never resets that clock.
+After two quiet minutes an eligible ordinary/prime/sleeping-worker page can be used by the
+existing New Chat input election; personal and dedicated decision chats are not candidates.
+After five quiet minutes an unused app-owned page can close. Its durable history, worker
+report and revival identity survive. The extension keeps the selected page during idle
+cleanup, rechecks pins/selection/navigation after the page proof and refuses unread journals,
+drafts, attachments or generation. Explicit terminal cleanup retains its two-minute grace;
+superseded sources and duplicate documents keep their existing retirement rules.
+
+### Recovery policy
+
+`tabRecoveryWanted()` means **active Goal/Loop OR the user's recoverAgentTabs switch**. It gates
+silence/no-tab recovery for workers, primes and ordinary chats. Reload repair for exact errors,
+Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
+permission to reopen the session list. A plain historical chat with no current work is unprotected.
+
+| Trigger | Required meaning |
+| --- | --- |
+| Missing tab | Current non-retired binding plus still-owed/live work and recovery policy; ordinary chats need recorded tool work, workers use broker attachment state. |
+| Page silence | Known live activity with model-specific deadline; a live local process and browser liveness are different facts. |
+| Assistant error | Exact turn/error, per-turn retry budget and cooldown; repair the broken page without fabricating a new task. |
+| Unattributed | A separate unresolved incident after attribution has landed; re-observe suspects, never assign ownership by proximity. |
+| Goal watch | One qualified waiting episode for an eligible exact non-Pro source turn and still-active obligation. |
+| Compaction pickup | A durable continuation ticket whose current transport phase allows that pickup. |
+
+Unattributed recovery uses staged 0/30/60-second incident deadlines according to live suspects;
+these are separate from the recorder's 20-second request-id grace. Proven correlation dismisses
+the matching incident. No request id means there is no attribution proof to wait for first.
+Current repair cooldown is three minutes for Unattributed/assistant-error; silence, Goal,
+compaction and no-tab are independently gated rather than sharing that cooldown.
+
+Silence handling gives ordinary positively known non-Pro work a two-minute policy and Pro a
+longer ten-minute evidence budget; unknown-model work remains conservative. A synthesized
+continuation additionally needs exact durable non-Pro source-turn proof. Reloading Pro does
+not authorize a new Pro turn. Goal's shorter watch is not a generic one-minute keepalive.
+Publishing a repair wakes the extension over the existing authenticated socket; due repairs run
+before window layout, input preparation and idle-tab pruning. The MV3 30-second maintenance
+alarm remains a recovery cadence, not the normal pickup path.
+
+The app keeps queued/handed/done repair evidence; `/status` returns all due eligible repairs.
+Handout rechecks current binding, supersession, block and pending Stop. Extension maintenance
+is single-flight with coalesced reruns, so wake/alarm/tab-close paths do not independently elect
+the same work. The remaining handout-to-browser-action cancellation gap is called out in §21.
+Trying → failed → later confirmed updates the same progress identity in the transcript.
+
+### Stop and Block must retire the relevant authority
+
+Stop turns automation off for that chat, cancels compaction/recovery intent, releases finish
+holds and queues a bounded exact-turn native Stop command. Native confirmation is required;
+the app does not manufacture a final answer. End turn only releases an Astra finish hold.
+Stop elects an existing exact tab, including a loading document, or opens the missing chat
+once under the same durable command. Its absolute two-minute deadline covers browser loading
+without renewing on retries. Browser election is saved before opening; lost receipts, navigation
+and user closure do not grant another opening for that command. A reopened page adopts the
+pending Stop only after matching its original native question, and rechecks that identity before
+clicking Stop. Newer questions never inherit the old Stop's authority.
+Block persists the exact conversation's local-tool refusal across all MCP surfaces; only a
+user release/deletion removes it. It does not remotely terminate ChatGPT or erase history.
+Neither action may spill into another local session merely because labels or timing match.
+
+## 15. Compact & Resume: same session, new frontend
+
+**Intent:** preserve one local session S, its project, history, input queue, prime/worker family
+and terminal custody while changing the provider binding **S: A → B**. Compaction is not a new
+task and must not turn source A into an independently recoverable chat.
+
+`session/continuation.ts` owns the transaction; `handoff.ts` validates the brief; `bridge.ts`
+and the extension transport it. `resume-gate.ts` is a short pre-commit admission gate, not a
+second continuation owner. The ledger phases are:
+
+```text
+awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
+       \------------------- pre-commit cancellation ------------> aborted
+```
+
+1. **Reserve A.** Persist an exact continuation token and source/session identity. Automatic
+   compaction is level-based: current estimated context exceeds the threshold **and** the
+   chat has live work. Idle old history does not start it. Workers and exact Pro are excluded
+   from automatic compaction; workers do not self-compact, and Pro may compact manually.
+2. **Ask for a brief safely.** Wait for running local tools, not the recorder's attribution
+   tail. The source-tool fence prevents work continuing on A after handoff. Mark send attempt
+   before clicking; attempted/dispatched/sent checkpoints are not interchangeable. Retry a
+   known pre-dispatch failure, but never click again merely because the receipt is missing.
+3. **Capture exact provenance.** Match the authored handoff request and assistant brief by
+   token/message/turn identity. Enforce minimum and bounded brief content; do not capture the
+   latest convenient assistant text. Preparing a brief does not yet publish a rebind.
+4. **Elect B and commit.** Destination creation/claim has one opening owner. B must present
+   the exact continuation context; early B observations are gated to prevent a shadow local
+   session. Persist the committing decision, rebind S's metadata, then publish projections.
+   **Durable metadata rebind is the point of no return.** Before it, failure leaves A current;
+   after it, repair B's projections idempotently, never roll S back to A.
+5. **Publish the same work.** Preserve project/cwd, broker role/family, history and queued
+   input. Terminal custody already uses S, so no process-owner migration or adoption is
+   needed. Move the objective and chat switch, retire A's execution authority, then retire
+   its browser document only with fresh safe-close proof. B's first answer belongs to the
+   exact resumed input, not to an old final from A.
+
+Restart restoration must converge on that same committed projection. A persisted send attempt
+can outlive a transport command; expiration releases transport, not permission for another
+blind Send. Automatic tickets can wait indefinitely before the request was sent and retain a
+six-hour sent-request window; manual transport is shorter (ten minutes). Pickup budgets depend
+on phase: unsent 2m×5, writing 5m×3, opening 15m×3. These are bounded recovery of one obligation,
+not fresh compaction attempts. Re-observe the exact page before advancing its state.
+
+Before a pickup can Stop the original answer, refresh the ticket's source-send checkpoint.
+An already dispatched or sent summary request can only be observed, never stopped by another
+pickup. Keep the original user-message/turn identity across that await; repeated presses
+must not revoke the operation already in flight.
+
+The timeline keeps one Compact & Resume card for the marked token across late or refused
+source calls. Later activity is not evidence that summary writing, saving or destination
+opening failed. The exact summary turn's stopped/failed outcome interrupts its writing status;
+recorded abandonment reports transaction failure. A saved handoff or matching resume supersedes
+the earlier summary interruption. Commentary with another turn identity stays outside the summary.
+The browser says writing only with current generation proof for the marked summary question;
+a sent checkpoint alone means waiting. Bootstrap folds require the app's exact recorded opening
+message id plus current route/epoch. Retired folds unwrap all native children and controls.
+
+Native ChatGPT Project destinations enter through the source chat's exact native Project link.
+The header alone is not readiness: `chatgpt-dom.js::enterProject` waits for the source editor
+to be mounted, empty, idle and attachment-free before its one click. Source readiness and
+replacement-editor navigation each have a bounded 12-second phase using the same observer/timer.
+Destination proof requires the exact Project home, a different connected editor and no source
+turns. User interaction, cancellation or a foreign route revokes the attempt; no extra tab or
+second click compensates for a missing result.
+
+The brief includes the original task, accepted steering, current result, remaining checks and
+relevant durable ids. Linked project instructions and current executor settings still apply.
+Goal context can use a committed handoff as a provenance anchor; aborted/stale/legacy text is
+not one. A source reply obligation must be superseded when its work has moved, rather than
+mistaken for B's completed turn (§21 records the remaining ledger gap).
+
+Legacy shadow repair requires exact old continuation proof. It may repair missing projections;
+it must not guess a new rebind, delete history or become the path for new continuations.
+
+## 16. Multiple prime families and reusable workers
+
+**Intent:** each prime can delegate bounded work to its own reusable workers while several
+independent user tasks run at once. Inside a family the topology is a star: workers report to
+their prime and cannot create worker descendants.
+
+`agents.ts` is the one broker. Its run map and v6 `activeRuns` snapshot hold independent families;
+`maxWorkers` applies **per family**, not to one global active run. Display names such as
+`worker-1` are scoped by run incarnation/prime. Resolve a proven caller first, then its family;
+never select the newest run globally. Workspace, inbox, activity and finish routing follow
+that identity. Old single-active-run documentation is obsolete.
+
+Worker model and reasoning belong to the user's saved app settings by default. Model-visible
+instructions and the agents schema require omitting each override unless the user explicitly
+requests it; do not ask for those settings merely to spawn. `agents.ts` resolves omitted fields
+from current config at admission, so the executor need not know or repeat their concrete values.
+
+Spawn validates capacity, objective/context, account-observed model/effort, workspace and role,
+then durably reserves the worker before handing out browser work. Model checks precede every
+batch mutation; unknown ids fail with observed choices. With no retained catalog, native
+selection still must confirm the exact request. Shared context carries common project/instructions;
+each worker gets its bounded assignment. Invitations, active workers,
+detached workers and waking workers retain their reservation; sleeping workers do not occupy
+an active slot. User/prime cancellation retires the exact incarnation, not a reused slot name.
+
+`finish` normally stores a report and **sleeps** the worker for follow-up. Reuse a suitable
+sleeping worker with `agents action=message` before spawning a replacement. Messaging, inbox
+delivery and report receipts are at-least-once transports with durable message identities;
+acknowledgement belongs to the exact recipient/run, not a UI read. Pending reports remain
+available when the last worker sleeps and the family parks.
+
+After a worker reaches its own 400k estimated-context ceiling, its next stop becomes terminal
+and it is no longer reusable. Do not interrupt its current useful work merely for that ceiling.
+Status/message remeasure sleepers before revival. A terminal worker can be replaced deliberately;
+raising the user's worker cap is not a substitute for lifecycle correctness.
+
+Detached means browser attachment is missing, not necessarily that tool execution died. An
+exact call can prove the worker server-side alive; a new page can reattach it. During waking,
+an already-alive proof may cancel an unclaimed reopen, but after handout the existing operation
+owns delivery. A new accepted call/turn proves post-delivery activation. A replayed old final
+must not put the revived worker back to sleep.
+
+Broker mutations stage and durably publish the exact run object; async rollback must not
+restore another family's state. Disable parks families; Clear deliberately discards the
+broker's retained history/fences. Dormant families are bounded (16 / seven days). Retirement
+and browser close are separate: a sleeping worker becomes eligible for page reuse after two
+quiet minutes and page closure after five (§14), while remaining available for revival by its
+exact conversation id. Compact & Resume rebinds a prime within its
+family; it does not merge families or move a terminal process to another principal.
+
+The app's configurable worker capacity is distinct from the coding agent's delegation policy
+in §19. Do not infer permission to launch development subagents from a product feature toggle.
+
+## 17. Goal and Loop: durable intent, replaceable decisions
+
+**Intent:** preserve the original user task and accepted corrections, notice a legitimate
+completion boundary, and decide whether another useful instruction is owed. Goal can stop
+when its finish line is met. Loop continues improving/checking within that task until Off;
+it must not invent an unrelated project just to keep generating.
+
+`goal.ts` owns objectives, chat switches, reply obligations, helper roles and decision attempts.
+`shared/goal.ts` owns bounded prompt/contracts; `goal.ts` projects applicability and the outbox
+owns actual delivery. An objective, an enabled mode, an unfinished reply obligation,
+a provider attempt and a browser send are five different facts.
+
+### Modes, controls and boundaries
+
+Per-chat explicit Off defeats an existing objective. Without an explicit override, effective
+policy derives from the configured master/default and objective. Deliberate On rearms the
+latest eligible stable reply with a new acceptance identity; Off retires that obligation and
+its pending attempt. Objective text survives Off/completion for later reuse. Repeated On → Off
+→ On → Off must operate on current durable authority, not an old callback's enabled snapshot.
+Master Off clears ordinary chat overrides while keeping internal helper-role records.
+
+Ordinary non-Astra Goal/Loop considers verified **completed final answers**, not interrupted
+turns or generic composer idleness. Exact Pro is excluded from synthetic automatic next turns.
+Astra instead uses `session_finish`: both selected modes invoke the Loop decision policy and
+inject through the eligible tool response (§11), never browser-auto-send after its final.
+Decision helpers/planners and workers cannot recursively start their own Goal/Loop driver.
+
+Stop, block, replacement, a newer turn, mode/settings changes and input revision invalidate
+stale decision attempts. User messages/checkpoints take precedence over generated continuation.
+Validate the exact source turn, acceptance and current policy again at publication/delivery.
+The completion of an HTTP/helper request alone never grants send authority.
+Browser draft refusals retain their pickup claim. Read machine errors from the HTTP `data`
+envelope or the transport's top-level failure, then use the existing delayed retry/backoff.
+`chat_still_working` stays on Answer settling; rate limits and transport failures cannot
+release the claim for every activity update to collect again. Off or a new pickup invalidates
+the old delayed retry, and a settled refusal waits for a new authorized episode.
+
+### Three backends, two different helper roles
+
+| Backend/role | Behavior |
+| --- | --- |
+| ChatGPT decision helper | Default driver backend. One reusable helper per source session/role; receives reference history and outputs a decision, never executes that history. |
+| API driver | OpenRouter-compatible default or explicit compatible endpoint/model/key. Supports bounded streamed progress and validated final decision. |
+| Goal templates | Offline explicit terminal-marker policy; only Goal supports this backend. Missing/ambiguous expected markers pause rather than infer completion from prose. |
+| Temporary planner | Captures a new workflow for the user, then retires with exact idle/draft proof; distinct from the persistent decision helper. |
+
+Goal gate, objective and Loop prompts are separately configurable. Default helper selection is
+Sol/high in the checked config, but live account metadata governs whether it can be used.
+API model discovery is bounded and cached by endpoint/key; a list entry does not prove an
+execution succeeded. Secrets remain in the main process's encrypted store. Custom endpoints
+receive the explicitly assembled reference context; local recording is not a promise that
+Goal API requests stay on the device.
+
+The driver context includes canonical authored user messages, stable assistant interim/progress
+and final text. Tool rows are opt-in (`includeToolCalls`, default Off); finish-control calls do
+not recursively dominate the reference. Preserve original task/steering and committed handoff
+provenance under the message budget. Helper prefix digests prove whether a bounded delta is
+valid; changed history/instructions replace context in the same helper instead of spawning
+another helper automatically. Clear temporary-planner answer content before durable state
+publication; it is not a normal recorded executor task.
+
+Provider progress updates one existing timeline row and is never sendable text. Validate the
+final bounded decision schema before publication. Goal may return stop/no reply. Loop requires
+a continuation and has a bounded three-retry invalid-stop policy. API SSE is used when publishing
+progress; legacy plain streaming is compatibility handling, not another driver authority.
+Cancellation/timeout must release only that exact attempt and leave an honest error/retry state.
+
+Reply obligations are durable and bounded (12 hours / 200 rows) with handled tombstones so old
+browser observations do not rearm discharged work. A provisional exact `turn:<id>` observation
+can later gain durable event-sequence evidence. “Invalidating an attempt” must not silently mean
+“the user's continuation is handled.” Current persistence/publication exceptions are in §21.
+
+## 18. Desktop workspace, plugins, connection and native control
+
+### Renderer and IPC
+
+`renderer/main.ts` owns the shell/setup/settings; `chat.ts` owns sessions, composer and timeline.
+Projects, workers, plans, model choice, usage and plugins have focused modules (§4). The renderer
+calls a fixed `preload/index.ts` allowlist into validated `ipc.ts`/`plugins-ipc.ts` handlers.
+No arbitrary IPC invocation, Node access, filesystem path opening or renderer-side secret store.
+Pushes and async loads are scoped to selection/draft generation; a late load must not overwrite
+focused edits or a newer A → B → A view.
+
+The sidebar groups local projects/sessions, exposes worker state and retains deliberate width
+and expansion preferences. The chat keeps the current input queue/plan visible alongside a
+paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
+receipt. Native edit context menus respect the focused editable control and selection.
+
+Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
+the first authored user message, at one 80-character bound; injected instructions/AGENTS frames
+never become preview text. `session/title.ts` supplies presentation and legacy recognition;
+store serialization protects manual/origin names and current-conversation title observations.
+Apply provider titles after the batch's messages, so a late receipt or title-first batch cannot
+strand a preview. Cold reads repair legacy context previews from canonical authored history.
+
+Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text. Provider
+citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
+names render as plain chips; unresolved file citations do not gain invented local links.
+Tool result rendering preserves structured text/image/resource distinctions within bounds.
+App-owned external/local links cross their validated main-process route.
+
+English and Simplified Chinese are explicit UI translations (`i18n.ts`, `locales/zh-CN.json`),
+with the selected locale in `cos.ui.language`. Changing language repaints owned labels while
+retaining drafts/selections; never translate authored messages, provider text or file paths.
+Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
+Theme and layout preferences do not change backend authority.
+
+`renderer/plugin-refresh-reminder.ts` owns the chat-header reminder to refresh plugins
+in ChatGPT. Its X stores only the acknowledged running `state.update.current` version in
+`cos.plugins.refreshReminder.dismissedVersion`; downloading a newer version does not rearm
+it. No acknowledgement shows the reminder, including the first version with this feature.
+It survives restart until dismissed, returns for a different running version and is hidden
+in Settings. It stacks with update/extension notices and never marks an actual connector
+refresh complete or starts a browser action.
+
+### Plugins: installation, execution and connector refresh
+
+The optional Plugins connector proxies installed enabled MCP servers. `catalog.ts` describes
+reviewed entries; `installer.ts` owns installation/package materialization; `manager.ts` owns
+stdio/remote clients; `exposure.ts` owns accepted live tools; `oauth.ts` owns authorization.
+Local npm/Python/MCPB packages and remote endpoints have different setup needs. Editor plugins
+such as Blender also need the editor-side addon and a successful readiness probe.
+
+Enabled installations restore/connect in the background and remain available while idle; there
+is no idle-eviction/restart loop. Disable/uninstall revokes exposure synchronously before slow
+shutdown. Accept bounded validated schemas (up to 64 tools, bounded schema bytes), preserve
+upstream names, and fail closed on collisions, including retained disabled-name claims. A
+cached unauthorized schema is not live exposure. External servers retain their own OS/account
+permissions; the app's approved-path wrapper is not an OS sandbox around a third-party process.
+
+Remote OAuth uses endpoint-scoped encrypted credentials and SDK registration/PKCE/refresh.
+Only explicit sign-in opens the browser/loopback authorization flow; ordinary reconnect does
+not auto-register or open login pages. Local status/probe, installed, enabled, authenticated,
+editor-ready and published are distinct states. Do not repeat an ambiguous mutating tool call
+just because a remote connection dropped. Sanitize returned/logged credentials at the boundary
+without silently changing authored tool arguments or corrupting opaque image bytes.
+Official npm Playwright defaults to upstream `PLAYWRIGHT_MCP_CODEGEN=none`; explicit launch
+configuration takes precedence. Redaction covers recognizable credentials in results, recorded
+arguments and overflow assets; manager and dispatcher must not repeatedly sanitize the same body.
+
+The Plugins UI keeps an unconfigured setup card prominent and projects a compact setup row
+once saved tunnel identity or a live endpoint exists, including offline restarts. It persistently
+explains that ChatGPT must refresh its connector after installation/tool changes. Checking local
+status cannot refresh ChatGPT's cached declarations.
+
+`plugin-refresh.ts` applies to Core, Desktop and Plugins. Its fingerprint includes names,
+descriptions and input schemas, not app-version/instruction churn. Changes debounce for 20s.
+Refresh targets the exact account-observed installed app id, durably claims before clicking,
+and completes only after observed declarations fully match. Automatic refresh is opt-in;
+unsupported/manual-required stays visible instead of opening more helper tabs.
+
+### Connections, tunnels and diagnostics
+
+`connection.ts` serializes endpoint/tunnel generations and publishes only live eligible surfaces.
+Approved-root requirements are surface/capability decisions, not whether the extension paired.
+Separate local listener health, public tunnel reachability, ChatGPT connector configuration and
+browser attachment in both status and diagnosis. Stale connect/disconnect results cannot replace
+a newer endpoint. Secret paths/tokens are not public diagnostics.
+
+`tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
+`diagnostics.ts` tests the chain hop by hop. Transient health evidence must not produce repeated
+replacement tunnels or claim a broken provider was repaired. Update checks (§20), browser wake
+and MCP connection have separate lifecycles.
+
+### Native Desktop
+
+Desktop is available only on Windows and supported macOS. Linux removes it from live discovery
+and enforcement while preserving stored preferences. Windows uses the bounded PowerShell/Win32/
+UIA helper; macOS uses Swift ScreenCaptureKit/AX/CGEvent through an architecture-matched N-API
+addon on an Electron worker. The packaged Electron app is the macOS permission subject; a
+standalone CLI probe does not prove Screen Recording/Accessibility permission for the app.
+
+`computer/index.ts` owns native actions, capture frames/accessibility refs, batching and
+postconditions. Registrars own live capability checks. Windows `windows-api.ts` implements the
+13 Window2 methods: `list_windows`, `get_window`, `list_apps`, `launch_app`, `get_window_state`,
+`click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`,
+`activate_window`. The old `observe`/`computer` wrapper is macOS-only. Windows observation state
+is bounded per exact caller, contains no pixels/text, and input consumes its indexes/geometry.
+Explicit activation consumes observation state too; ordinary input already activates its target.
+Late observations and replaced principals cannot lend another call their state.
+Observe → act uses exact frame/ref, target geometry and
+helper generation. Recheck those after asynchronous image work and before every local action
+in a batch. A replaced helper/window/display invalidates old coordinates and refs. Bound
+decoded images, report actual visible crops, and never label a visible screen crop as a hidden
+window capture. Coordinate clamping and physical input respect the current display/button map.
+
+Windows uses source-owned Windows.Graphics.Capture for exact HWND compositor pixels, including
+covered GPU windows, without activation or a visible-screen fallback. Minimized/unavailable
+capture fails explicitly. DWM image bounds and outer window geometry have distinct roles.
+Before starting a window capture, the optional `IGraphicsCaptureSession3` interface disables
+the capture border so individual screenshots do not flash a yellow outline. Older Windows
+without that interface retains its system indicator; permissions and capture failures remain
+Windows-owned. `scripts/verify-windows-capture-border.mjs` compares visible control/production
+borders and the missing-interface case using an owned fixture on an unlocked Windows 11 desktop.
+Screenshot observations default to optional UIA off; `include_text` adds indexed accessibility,
+advertised semantic actions, bounded document/selection text and focused control. Up to three provably owned popup
+windows have separate images/frames; same process alone is insufficient ownership evidence.
+Public state retains observed window focus, accessibility truncation and provider failures;
+frame ids/dimensions precede long accessibility text. Pixels appear once in native MCP image
+blocks, never duplicated as data URLs in `structuredContent.value`. A text-provider failure
+preserves a usable screenshot and its explicit diagnostic. Offscreen/disabled controls are marked.
+
+For Chromium browser windows, `BrowserRootView` owns the current accessibility tree, including
+the address bar and displayed document. Legacy renderer HWNDs can expose old tabs with plausible
+bounds and `IsOffscreen=false`; they are not alternative observation roots. Missing/ambiguous
+browser roots fail text observation explicitly. Before semantic input, the cached element must
+still descend from the same current UI root; liveness of an old tab's provider alone is insufficient.
+Document text selects one provider within the existing bounded traversal, preferring a Document
+over native editors. Browser toolbar editors never supply page text; an unobserved page leaves
+document text absent. Native apps retain editor text when no Document provider is observed.
+Read document/selection text once under their shared 8,000-character budget.
+
+Windows physical input requires a returned Window `{app,id,title?}` and activates/checks it before
+each action. App identity, pixel frames and refs must match that target; popup input rechecks its
+original native owner. Public coordinates are pixels within the selected returned screenshot;
+its declared dimensions match its PNG. The existing native frame owner converts through the
+capture origin/scale without a second facade DPI conversion. Named punctuation follows the target
+thread's keyboard layout, clicks support counts 1–3, and drags interpolate over a bounded duration.
+Multiline text uses the existing Electron clipboard owner and targeted paste, with clipboard-write
+permission checked before the batch. Native Unicode typing refuses multiline text before input.
+Paste verifies target activation before replacing the clipboard and checks focus again at
+physical injection. Activation uses bounded actual foreground observation after one attempt;
+an immediate Windows return value alone cannot establish the result.
+UIA actions resolve exact snapshot refs without a physical fallback for unsupported patterns.
+App enumeration joins installed and running apps only by exact native AUMID or executable path,
+including their windows and observed running status. Launch accepts a Shell app ID or explicit
+`.exe` path/PATH application name without arguments. Launch acknowledgement requires later
+observation to prove a window opened. Wheel input preserves raw deltas (120 per detent).
+
+The Windows helper owns a unique temporary UTF-8 script file for its process lifetime, starts
+with a process-scoped execution policy, and removes it on retirement. Native source stays out
+of inherited environment blocks; streamed UTF-8 replies preserve split multibyte characters.
+
+Focus/clipboard/input are real native effects. Validate target and action permission, retain
+partial-batch outcomes, and report postcondition failure rather than invent success. The
+browser-chord policy prevents tab/window management through forbidden input chords; address-bar
+focus chords support authorized navigation, like clicking or setting that same native control;
+it is not a general browser automation fallback. Capture/privacy settings and platform permission
+failures remain explicit, with no Linux/helper fallback that bypasses the capability model.
+
+## 19. Debugging, tests and working here
+
+Before editing, inspect `git status --short` and `git diff -- <intended files>`. Reproduce one
+concrete identity through the relevant owners. State the intended behavior and the first wrong
+transition, then repair that owner. For a race, pause A before publication, complete B, resume A
+and prove it cannot overwrite/resurrect B. Prefer exact epochs/receipts and serialized semantic
+mutations over sleeps. Add a meaningful regression for production behavior, including the
+neighboring negative case; documentation-only changes need documentation checks instead.
+
+Browser-facing fixes require hands-on work in the real signed-in ChatGPT page. Inspect the
+current native DOM, editor and turn evidence before designing a fix; do not infer provider
+behavior from mocks or old selectors. Reproduce briefly, repair the earliest wrong boundary,
+then reload the changed extension/install the changed app and repeat the real user flow.
+During broad acceptance, rotate through compaction, workers, Desktop input, native images and
+transcript/turn start-and-finish behavior. Pass concrete failures to bounded fix workers while
+continuing other checks. Reduce a repeated failure to a short reproduction instead of spending
+the whole run replaying one long workflow; avoid optimizing speculative edge cases.
+
+| Symptom / boundary | Open first | Nearest `test/*.test.ts` families |
 | --- | --- | --- |
-| tool missing/extra in ChatGPT | `surfaces.ts`, `tools-core.ts`, `tools-desktop.ts`, `server.ts` | `mcp` |
-| tool still visible after permission off | `server.ts` exposure cache, `kernel.ts` guard | `mcp`, `config` |
-| permission / read-only mismatch | `config.ts`, `kernel.ts`, the tool wrapper | `config`, `mcp` |
-| native vs virtual path disagreement | `sandbox.ts`, `kernel.ts`, `tools-core.ts` | `sandbox`, `mcp` |
-| symlink/junction escape or race | `sandbox.ts`, then the real I/O call site, `rawfs.ts` | `sandbox`, bughunt repros |
-| `read` wrong content/list/glob/budget | `tools-core.ts`, `read-backend.ts`, `filesystem.ts`, `fsops.ts` | `mcp`, `fsops` |
-| `view_image` validation/transport | `view-image.ts`, `tools-core.ts`, `fsops.ts` | `codex-view-image-parity` |
-| patch parse/match/write | `apply-patch/*`, `tools-core.ts` | both `codex-apply-patch-*` |
-| shell-intercepted patch behavior | `tools-core.ts`, `apply-patch/invocation.ts` | invocation parity, `mcp` |
-| exec / PTY / stdin / output / session | `unified-exec.ts`, `shell.ts`, `ownership.ts`, `exec-output.ts` | `codex-runtime-parity`, `mcp` |
-| one chat touches another's terminal | `ownership.ts`, `kernel.ts`, then §11 chain | `mcp`, `workspace` |
-| **calls land in Unattributed** | **§11 chain in order** — `inbound`→`fiber`→`content`→`background`→`bridge`→`correlation`→`recorder` | `correlation`, `mcp-inbound`, `fiber`, `content-script` |
-| worker identity / inbox / liveness | §11 chain **first**, then `agents.ts`, stale sweep in `bridge.ts` | `agents`, `swarm` |
-| wrong worker/project cwd | `workspace.ts`, `kernel.ts`, §11 chain | `workspace`, `swarm` |
-| transcript duplicates / reorders / jumps | `chatgpt-dom.js`, `fiber.js`, `content.js`, `background.js`, `recorder.ts`, `chronology.ts` | `content-script`, `extension`, `session` |
-| turn ends early / false stall | `content.js` lifecycle + Fiber terminal evidence | `content-script`, `fiber` |
-| Overwrite vanishes / sticks / stale rows | `content.js` paint streams, `fiber.js`, `/activity` in `bridge.ts` | `content-script`, `bridge` |
-| extension dies after reload/update | `background.js::restoreOpenChatgptTabs`, content↔Fiber handshake | `extension`, `fiber` |
-| navigation resurrects wrong chat | `background.js` tab registry, `content.js` epoch | `extension`, `content-script` |
-| bridge pairing / connect / stop | `bridge.ts`, `background.js`, `popup.*` | `bridge`, `extension` |
-| Compact & Resume split or lost | `continuation.ts`, `bridge.ts`, `store.ts`, `workspace.ts`, `agents.ts` | `continuation`, `resume` |
-| auto-compaction repeats or never fires | `store.ts` live level, `bridge.ts::considerAutomaticCompaction` / `inspectOwedCompactions`, `content.js::maybeResumePendingCompaction`, `continuation.ts` | `bridge`, `content-script`, `continuation`, `resume` |
-| agents spawn/message/finish | `agents.ts`, `tools-core.ts`, `bridge.ts` | `agents`, `swarm`, `bridge` |
-| session UI or main process freezes | `store.ts`, `chronology.ts`, `ipc.ts` read path, `chat.ts` | `session`, retained stress probe |
-| stale render / typed input clobbered | `renderer/main.ts`, `chat.ts` generation guards, `ipc.ts` push order | `ipc`, `renderer-state` |
-| screenshot / input / clipboard / stale coords | `tools-desktop.ts`, `computer/*` frame-id checks | `computer` |
-| connector offline / tunnel / self-test | `connection.ts`, `tunnel/*`, `diagnostics.ts`, `server.ts` | `tunnel`, `mcp` |
-| renderer has too much authority | `preload/index.ts`, `ipc.ts`, `index.ts` window config | `ipc` |
-| installed build missing extension/tunnel/rg/node-pty | `electron-builder.yml`, `extension-path.ts`, `scripts/*` | package smoke check |
+| Wrong chat, Unattributed, false tool failure | kernel → correlation → recorder | `mcp`, `correlation`, `attribution-repair`, `call-context`, `mcp-inflight` |
+| Wrong path/project or cross-worker terminal | sandbox/workspace/projects → kernel/ownership | `sandbox`, `projects`, `kernel-project-workspace`, `workspace`, `swarm`, `codex-runtime-parity` |
+| Missing/duplicate input, attachments or checkpoints | input → bridge → DOM/receipts | `session-input*`, `input-delivery-integration`, `finish-input-integration`, `task-request`, `chatgpt-dom-input` |
+| Worker family/slot/inbox/revival | agents → bridge → background | `agents`, `kernel-run-inbox`, `agent-communication`, `swarm`, `extension` |
+| Unexpected tab/reload/model/refresh | operation owner → browser election → native observation | `bridge*`, `browser*`, `extension`, `content-script`, `model-*`, `plugin-refresh*` |
+| Lost compaction or Goal debt | continuation/goal → store → bridge | `continuation`, `resume`, `goal*`, `session-finish` |
+| Transcript order, UI clobber, usage | store/chronology → IPC → renderer | `session`, `chronology`, `renderer-*`, `timeline-scroll`, `session-usage`, `usage-observer` |
+| Files/patch/output/code-mode | concrete tool owner → kernel serialization | `codex-*`, `exec-*`, `code-mode-*`, `mcp-tool-declarations`, `artifact-download` |
+| Plugins/auth/native Desktop | manager/exposure/OAuth or computer frame owner | `plugins-*`, `computer*`, `tools-desktop-*`, `macos-*` |
+| Startup/connection/shipping | lifecycle/config/connection or packaging script | `config`, `window-*`, `shutdown`, `tunnel*`, `packaging`, `update`, `third-party-notices` |
 
-## 19. Working in this repository
-
-### The tree is dirty and shared
-
-Several agents and the user may be editing at once. Before touching anything:
-
-```powershell
-git status --short
-git diff -- <files you plan to touch>
-```
-
-Assume unrelated changes belong to someone else. **Never** `reset`, `checkout`, `clean`,
-broad-format, or overwrite unrelated work to simplify your patch. If the exact lines you
-planned to edit changed underneath you, reread and integrate — do not replay an old patch.
-
-### The fix loop
-
-1. Reproduce the real bug, or add a regression that **fails under the old input/ordering**.
-2. Fix the earliest root cause — not the last place the wrongness became visible.
-3. Run the nearest test file.
-4. Run adjacent boundary tests when a protocol crosses modules.
-5. `npm run verify` before calling production code done.
-6. `npm run build` / package checks when bundling, native modules, resources, extension
-   shipping or installer behavior could differ.
-
-A good fix here has three parts: the root-cause change, a targeted regression, and a comment
-naming the non-obvious invariant when a future "simplification" could reopen it.
-
-**Green unit tests do not prove** a browser race, a Windows reparse race, an Electron
-ordering race, a live ChatGPT Fiber shape, a process race, or resource-scale behavior. Model
-the missing adversarial ordering, and use a live repro when feasible. For races prefer
-epochs, generation ids, serialized mutation queues, idempotency keys, exact identity or
-ownership locks — **not sleeps**, unless time really is the protocol. The reusable pattern:
-
-```text
-start A → pause A before its durable/publish step → run B to completion
-        → resume A → assert B was not overwritten, resurrected or misattributed
-```
-
-Every security or identity fix needs its **negative case**: in-root native path works /
-escaping native path fails; exact correlation routes / conflicting correlation does not
-guess; owner polls the terminal / another worker cannot; current epoch accepts the Fiber
-answer / stale epoch discards it.
-
-**Both sides of a protocol.** A compiling one-sided edit is still broken. The multi-hop
-protocols are: app↔extension bridge, content↔Fiber `postMessage`, main↔preload↔renderer
-IPC, MCP schema↔handler↔recorder summary, durable store↔restart restoration.
-
-### Commands
+Discover current suites with `rg --files test`; do not maintain a stale suite count. Validate
+both ends of every changed protocol: app↔extension, content↔MAIN, main↔preload↔renderer,
+schema↔handler↔recorder and durable write↔restore. Run the nearest suites, adjacent boundary
+tests and `npm run verify` for production edits. Build/package when that layer can differ.
 
 ```sh
-npm ci                                   # clean/reproducible install from package-lock.json
-npm run dev                              # electron-vite dev
+npm run dev
 npm run typecheck
 npm test -- --run test/<target>.test.ts
-npm run verify:privacy                   # public Git identity/session/path gate
-npm run verify                           # the exact CI gate: rg fetch, privacy, typecheck, full Vitest
-npm run build                            # electron-vite bundles
-npm run dist                             # this host OS, x64 + arm64 artifacts → release/
-npm run dist:mac / dist:linux            # explicit platform families on matching hosts
-npm run dist:dir:<platform>:<arch>        # one unpacked package for smoke/debug
+npm run verify:privacy
+npm run verify:notices
+npm run verify
+npm run build
+npm run dist                       # current OS, x64 + arm64
+npm run dist:dir:mac:x64            # example unpacked target on a matching host
 ```
 
-Use `npm install` instead of `npm ci` only when dependency metadata is intentionally being changed.
-`npm run verify` is not shorthand for one `vitest run`: `verify:ci` first ensures bundled ripgrep,
-runs the public-history privacy gate, typechecks, runs the ordinary Vitest set **excluding**
-`mcp-shutdown`, then runs `mcp-shutdown` separately so its real socket/process-drain timing is not
-distorted by the rest of the suite.
+Use `npm ci` for an intentionally needed reproducible dependency install, not as routine
+cleanup of this shared tree. `verify:ci` fetches rg, checks privacy/notices/native-source metadata,
+typechecks, verifies Electron resolves, runs Vitest excluding `mcp-shutdown`, then runs that
+socket-drain suite alone. `vitest.config.ts` forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
+and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
+Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
 
-`vitest.config.ts` is part of the safety boundary, not generic test boilerplate. Vitest runs the
-tracked `test/**/*.test.ts` set in Node with 30-second test/hook limits because many suites use real
-filesystem, child processes and HTTP. It also forces `CLF_BRIDGE_PORTS=0`, so a test can never bind
-or fall through to the production 8765–8769 bridge range and accidentally talk to the developer's
-installed app. `CLF_EVIDENCE_MS=1500` is **test-only acceleration** for in-process evidence that is
-microseconds-or-never; never copy that value into production browser attribution timing.
+When delegation is authorized, reuse a suitable worker. Give each assignment the project,
+concrete task, evidence, allowed files, ownership boundaries, checks and expected handoff.
+Use at most two direct development subagents concurrently and explicitly prohibit nested
+delegation. Audit-only means no source/test/config/AppData writes beyond the named report.
+The prime independently verifies important claims; parallel reports are hypotheses, not votes.
 
-### Where a regression belongs
+Record changes and actual checks in a focused worklog. Keep security reproductions/private
+session material out of public docs and fixtures; follow `SECURITY.md`. Do not package, install,
+commit or publish merely because a source/documentation task was requested.
 
-77 tracked `*.test.ts` suites in the current tree, named for the subsystem or boundary they cover.
-Vitest uses real filesystem, real processes and real HTTP in many of them. **Do not maintain this
-count by memory**: derive it from `git ls-files 'test/*.test.ts'` when updating this section.
+Runtime data is under Electron userData: `%APPDATA%/chat-on-steroids` on Windows,
+`~/Library/Application Support/chat-on-steroids` on macOS and the XDG config location on Linux.
+Inspect exact session/state files (§4), never edit live ledgers as a repair shortcut. `logger.ts`
+keeps a redacted 500-entry ring and bounded async `app.log` batches with rotation, explicit
+overload omissions, a two-second final flush and separate `.crash` snapshot. Logs are human
+diagnostics, not restart authority; secrets must never be printed to investigate a connection.
 
-| Suite | Covers |
+## 20. Build, installation, updater and release
+
+Source, bundle, package, installed bytes and live behavior are separate gates (§3). The app id
+is `com.chatonsteroids.app`. Native release targets are Windows x64/arm64 NSIS, macOS x64/arm64
+DMG+ZIP and Linux x64/arm64 AppImage+DEB. Windows is per-user-capable and `asInvoker`; replacing
+the package preserves userData. Synchronize package/main/extension versions deliberately.
+
+`electron-vite` builds main/preload/renderer into `out/`; extension files ship directly without
+a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and required native
+payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
+stable `userData/extension`, never an ephemeral AppImage mount.
+
+| Build owner | Contract |
 | --- | --- |
-| `agents` | broker rules, prime/worker identity, at-least-once messaging |
-| `blocked-chats` | user block/release, durability across restart, and the refusal's stop wording |
-| `bridge` | extension<->app HTTP bridge, routes, auth, orchestration |
-| `browser` | Chrome/Chromium candidate ordering and launch fallback for orchestration URLs |
-| `call-context` | running vs settling vs widest MCP-request lifetime accounting |
-| `chronology` | the order a recorded turn is read in |
-| `codex-apply-patch-parity` | V4A parser / matcher / runtime parity |
-| `codex-apply-patch-invocation-parity` | shell-intercepted `apply_patch` invocation |
-| `codex-apply-patch-move-rollback` | move/rename rollback under partial patch failure |
-| `codex-runtime-parity` | `exec_command` / `write_stdin` runtime parity |
-| `codex-view-image-parity` | image validation, limits, transport adaptation |
-| `computer*` | desktop automation: helper protocol/retirement, local actions, stale refs, frame bounds, partial batches and permission/runtime fences |
-| `config` | validation, migrations, read-only capability collapse |
-| `connection` | serialized connector/tunnel lifecycle and stale-generation suppression |
-| `content-script` | isolated-world recorder, turn lifecycle, Overwrite render |
-| `continuation` | Compact & Resume transaction and its failure paths |
-| `correlation` | requestId->conversationId persistence, restore, conflicts |
-| `durable` | named-state generation ordering, retry and shutdown flush semantics |
-| `env` | the child environment handed to spawned processes |
-| `exec-hints` | narrow Windows shell repair/abstention and recovery hints |
-| `exec-output-budget*` | collection vs model-visible output budgets and MCP adaptation |
-| `exec` | `runCommand` and process-tree termination primitives |
-| `extension-path` | stable packaged extension materialization/rollback |
-| `extension` | service worker, journal, tab registry, reload recovery |
-| `feature-parity` | public capability/tool surface stays synchronized across declarations |
-| `fiber` | MAIN-world React extraction and its allowlist |
-| `fsops` | bounded text/image/file helpers |
-| `goal-resume-handoff` | Goal provider-context continuity from **committed resume handoff provenance**; aborted/stale/legacy provenance must not become a false context anchor |
-| `goal` | the goal loop's prompt, privacy boundary, one-draft rule, OpenRouter failures |
-| `ipc` | main<->renderer boundary and payload validation |
-| `macos-desktop-hardening` | source-level invariants of the Swift backend, its build script and the in-process boundary; runs on every host |
-| `macos-computer-live` | opt-in (`COS_LIVE_MACOS_DESKTOP=1`) probe of the real macOS backend on a packaged Mac host |
-| `mcp` | surfaces, handlers, integration — the widest suite |
-| `mcp-inbound` | `x-request-id` extraction and normalization |
-| `mcp-inflight` | request/tool lifetime counters and post-handler settling |
-| `mcp-shutdown` | draining an accepted mutation before closing its socket |
-| `packaging` | package target/resource/native-runtime composition contracts |
-| `platform` | Windows/macOS Desktop capability projection and the macOS off-by-default start |
-| `public-history-privacy` | public Git history/session/path privacy gate |
-| `read-backend` | connector read/list/decode semantics below the public wrapper |
-| `renderer-html` | sanitization of captured ChatGPT HTML |
-| `renderer-layout` | session card / timeline layout contracts |
-| `renderer-state` | unsolicited pushes must not clobber a focused dirty field |
-| `resume` | resume and handoff paths |
-| `runtime-enable-and-extension` | feature toggles start/stop bridge/extension dependencies correctly |
-| `sandbox` | path, root and containment policy — the security suite |
-| `shutdown` | bounded teardown phases that always reach the exit; terminal sessions really dying |
-| `search` | glob translation and `find` behavior |
-| `secrets` | safeStorage-backed secret store |
-| `session-list-refresh` | session-list projections refresh without stale async selection |
-| `session-retention` | startup/coarse history pruning independent of recording admission |
-| `session` | recorder merge and durable store behavior |
-| `swarm` | multi-agent integration across identity and workspace |
-| `text-match` | edit matching across line endings |
-| `tools-desktop-*` | Desktop registration and per-action live capability enforcement |
-| `tray-image`, `window-*` | platform-native shell geometry/icon/tray/lifecycle invariants |
-| `tunnel`, `tunnel-lifecycle`, `tunnel-locate` | error classification, process lifecycle, binary discovery, poll metrics, outage confirmation and route self-test |
-| `unified-exec-mutex` | process-manager serialization / terminal concurrency invariants |
-| `update` | per-pass update eligibility/checksum staging + process-lifetime startup/6h scheduling and quit-time handoff |
-| `workspace` | per-chat/agent workspace learning and keying |
+| `scripts/package.mjs` | Icons → bundle → explicit target resources/native staging → builder with publishing disabled. |
+| `packaging-targets.mjs`, `packaging-versions.mjs` | Supported OS/arch vocabulary and pinned target checksums; fetchers share these authorities. |
+| `prepare-packaging-native.mjs` | Exact target node-pty/Sharp/tree-sitter from verified package material; host leftovers cannot win. |
+| `prepare-macos-desktop-helper.mjs` | Thin target Swift dylib + matching N-API addon; packaged in-process permission identity. |
+| `smoke-packaged-runtime.mjs`, `smoke-macos-{bundle,gui}.mjs` | In-place resource/native-stack checks, Mac bundle/seal and real GUI startup evidence. |
+| `generate-third-party-notices.mjs`, `package-native-sources.mjs` | Production notices and corresponding native source inventory/archive; exact lockfile/catalog provenance. |
+| `verify-public-history.mjs`, `check-release-absent.mjs` | Public-history/privacy gate and positive proof that publishing will not overwrite a release. |
 
-### Delegating to workers
+Generated resources are outputs; change their pin/source/script and regenerate instead of
+hand-editing staged binaries. Native and editor dependencies need actual runtime proof. For
+“install newest”, rebuild the current authorized tree, compare installed payload hashes to the
+package, and verify that runtime's relevant flow. An installer exit code or version label is
+insufficient. A dirty-tree snapshot request does not authorize exposing all local Git history.
 
-The prompt is part of the engineering work — a worker receives its task, not this
-conversation. Each assignment states: project path, concrete objective, relevant subsystem
-and likely files, evidence or reproduced symptoms it should inherit, constraints and
-ownership boundaries, what it may edit, validation to run, and the expected handoff.
+`update.ts` checks immediately and every six hours with one in-flight pass. Download to a
+partial file, verify SHA-256 before staging/adoption, and rehash at ordinary quit before handing
+off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
+path, development does not stage. Explicit install may relaunch; ordinary quit does not force
+relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
 
-Start with the actual task. **Do not** open with canned text like "you have zero prior
-context" — prefer `Fix the renderer state-clobber bug in C:\…; the confirmed symptom is …`.
-Workers are already bound to their slot when launched, so nothing is asked of them about
-identity. Put what every worker in the batch needs — project path, conventions file,
-ownership boundaries, validation to run — in `spawn`'s `context` once; each `task` then
-carries only that worker's own objective and files.
+CI verifies supported OS families; native `release.yml` builds/smokes all six targets, then
+assembles installers, extension ZIP, native-sources archive and `SHA256SUMS.txt`. `publish.yml`
+is dispatched **at the reviewed version tag**, calls that reusable build in the same run,
+requires `docs/release-notes/vX.Y.Z.md`, rechecks versions/privacy/hashes and refuses an existing
+release. A tag alone does not build/publish. An unpublished candidate can be built separately,
+but do not mix artifacts from another ref/run into a release.
 
-For audit-only roles make the write boundary explicit: source, tests, AppData and config
-stay read-only, and each worker may create only its named report. The prime then reads the
-source itself, reproduces release-blocking claims, records what it accepted or rejected, and
-owns every production edit. **Parallel reports are independent hypotheses — not votes, not
-proof.**
+`verify:notices` checks installed production dependencies against the lockfile and rejects
+missing license material or mismatched reviewed catalog hashes. Custom package updates cannot
+inherit an older license review. Notice completeness and native source/replacement obligations
+are separate checks; inspect the actual assembled artifacts. Hooks installed with
+`npm run hooks:install` help keep personal identities/session provenance out of public history.
+Release completion requires every target, assembly/hash check, Publish and public artifact
+inspection to pass, preserving the user's exact requested title/changelog.
 
-When a recurring symptom is not yet a clean issue, use the available local transcripts and
-durable session metadata to follow **one** concrete request id, conversation id, worker slot
-or event sequence end to end. Keep any security-sensitive reproduction material private.
+## 21. Known implementation gaps — not intended behavior
 
-## 20. Packaging and release — `electron-builder.yml`
+These are source-level discrepancies checked for this map, not new live reproductions or
+permission for an unsolicited rewrite. Recheck current code/tests before acting; another
+shared-tree change may already have addressed them.
 
-App id `com.chatonsteroids.app`, product `Chat On Steroids`. Releases build six native
-platform/architecture jobs: Windows x64/ARM64 NSIS, macOS x64/ARM64 DMG+ZIP, and Linux
-x64/ARM64 AppImage+DEB. Windows stays per-user-capable, `asInvoker`, no forced elevation.
+- **Startup opening:** `index.ts` still calls `startChatModelDiscovery(true)` on window show
+  when the catalog is unknown. Desired policy requires a concrete operation to own any new
+  browser document; app opening alone must not become a fallback opener.
+- **Repair handout vs action:** `/status` marks eligible repairs handed before extension tab
+  query/action. The extension now has single-flight maintenance and the app checks current
+  binding/block/Stop at handout, but no final atomic action claim closes cancellation after
+  handout. Intent requires the browser action to retain current authority through that boundary.
+- **Goal publication:** explicit switch writes serialize, but mutate shared memory before
+  the awaited durable write; synchronous clear/move paths and objective/reply mutations do not
+  all share the same semantic transaction. Intent is durable commit before visible state, with
+  rollback unable to overwrite a newer accepted change.
+- **Goal retirement scope:** master/config/secret changes cross separate ledgers, and
+  `retireGoalDrafts()` marks reply debt handled while cancelling attempts. Recording Off also
+  lacks a uniform runtime gate for retained per-chat overrides. Invalidating a provider attempt
+  must preserve any still-owed eligible continuation and respect effective current settings.
+- **Provisional Goal restart:** live exact `turn:<id>` debt can begin with `eventSeq=0`, while
+  reply restore rejects sequences below 1. The accepted identity should survive until durable
+  turn evidence strengthens it, without losing or duplicating the obligation on restart.
+- **Resume projections and Goal debt:** normal commit and restored committed-B projection
+  still duplicate parts of the repair path. Objective/switch move, but source reply-ledger
+  disposition is absent. Current watchdog checks already fence superseded A; do not claim the
+  old historical-A reopening bug is unconditionally present. Intent is one idempotent committed
+  projection and explicit supersession of A's debt, never treating it as B's completed turn.
 
-- Only `out/**` + `package.json` go into app files.
-- Target-specific tunnel and ripgrep resources ship outside asar — they must execute as real files.
-- `extension/` ships outside asar — Chrome's "Load unpacked" needs a real folder.
-- In packaged runtime `extension-path.ts` mirrors that bundled extension to stable `userData/extension`;
-  do not point Chrome directly at an AppImage's temporary mount.
-- `node-pty`, Sharp/libvips and tree-sitter native payloads are staged for the exact target
-  platform/arch; host-native build/prebuild leftovers must never override them.
-- macOS packages compile and stage one thin Swift dylib plus an architecture-matched N-API addon;
-  both remain outside asar and are loaded on a Node Worker thread in the Electron main process.
-  The standalone CLI build is a development protocol probe only and must never become the packaged
-  TCC subject again. Test through the installed app because TCC attribution cannot be proved by
-  invoking the source-tree binary.
-- Uninstall/package replacement deliberately preserves per-user app data.
+Do not restore obsolete claims while investigating: two MCP surfaces, one global prime run,
+fresh `saveArtifact=false`, three browser command kinds, fixed 60s Unattributed repair, tab-query
+failure as “no tabs”, missing all-repair handout, or no maintenance single-flight. The checked
+tree has changed those contracts. Comments/worklogs can lag even when nearby code is current.
 
-Before cutting a version, synchronize `package.json`, `src/main/version.ts` and
-`extension/manifest.json`, and run the full suite. After installing a local build, verify
-the **packaged** app really contains the target extension/tunnel/ripgrep/native runtime and can
-execute its PTY/parser/image stack — a successful installer/archive build does not prove it.
+## 22. Completion and maintaining this map
 
-The build layers are distinct and a green earlier layer does not imply a later one:
+A production change is complete when its root failure and neighboring negative case are
+covered, all protocol participants agree, relevant checks pass, and the claimed evidence level
+is actually demonstrated. Preserve unrelated dirty work. Update model-visible contracts,
+user-facing behavior and this map together; do not call source success a live hotfix.
 
-```text
-TypeScript source + plain MV3 extension
-  → electron-vite: main / preload / renderer bundles in out/
-  → packaging prepare: target-specific tunnel + rg + native node modules
-  → electron-builder: platform artifact, extension/resources outside asar as required
-  → packaged-runtime smoke: start the built app and exercise resources/native stacks in place
-  → release assemble: collect all six target jobs + extension ZIP + SHA256SUMS.txt
-  → publish: only from a reviewed version tag, without rebuilding from another ref/run
-```
-
-The extension has **no separate bundling step**: `manifest.json`, `background.js`,
-`chatgpt-dom.js`, `content.js`, `fiber.js`, popup assets and CSS ship as source files. Any change to
-extension JavaScript is therefore both runtime code and package input; tests that import/evaluate
-those scripts do not prove electron-builder actually included the intended bytes.
-
-### Packaging/release script ownership
-
-The `scripts/` directory is build/release code, not an unstructured bag of helpers:
-
-| Script | Owns |
-| --- | --- |
-| `package.mjs` | one packaging invocation: regenerate icons → electron-vite build → for each target arch fetch tunnel + rg → stage native modules → run electron-builder with publishing disabled |
-| `packaging-targets.mjs` | the only supported package OS/arch vocabulary (`win32|darwin|linux` × `x64|arm64`), aliases and target-specific builder/archive/native-path naming |
-| `packaging-versions.mjs` | pinned tunnel-client/ripgrep version + target SHA-256 manifest; fetchers and smoke tests consume this rather than carrying their own versions |
-| `fetch-tunnel-client.mjs` | download/checksum/extract the pinned OpenAI tunnel bundle for one explicit target; host-target runs also refresh the development mirror |
-| `fetch-ripgrep.mjs` | same pattern for pinned rg; Linux deliberately uses portable musl upstream builds |
-| `prepare-packaging-native.mjs` | materialize target Sharp packages from **package-lock URL+integrity**, then stage verified target node-pty/tree-sitter/Sharp trees without allowing host leftovers to win |
-| `smoke-packaged-runtime.mjs` | prove an unpacked artifact contains the exact extension, licenses, tunnel, rg and target native modules and that the packaged executable/runtime can actually load/use them |
-| `smoke-macos-bundle.mjs` + `macos-audit-utils.mjs` | native macOS bundle audit: Info.plist contract, thin Mach-O arch, deployment floors, executable bits and current unsigned/no-trust-bearing-signature policy; helper safely handles parenthesized Electron helper names with classic `otool` |
-| `smoke-macos-gui.mjs` | launch the packaged macOS GUI, require app/window/renderer-ready evidence plus a minimum survival window, then terminate it cleanly; package existence alone is not a GUI startup proof |
-| `make-icon.mjs` | reproducibly derive app/runtime/extension icon sizes from the one controlled artwork PNG without introducing an image-build dependency |
-| `verify-public-history.mjs` | release-line privacy/provenance gate over reachable HEAD history/tags plus staged/current identity; PR synthetic merge identity is excluded because it can never enter public history, and commits already reachable from `origin/main` are exempt because they have already entered it — a forge-written merge commit no local hook ever saw must not strand every later push, and unpublishing one is a deliberate public rewrite rather than a hook's call |
-| `check-release-absent.mjs` | fail closed unless GitHub positively says the tag has no existing release; unexpected API failures never mean “safe to overwrite” |
-| `install-git-hooks.mjs` | opt the checkout into versioned `.githooks/` through `core.hooksPath` |
-| `kill-stray-vitest.mjs` | explicit recovery command for test worker trees orphaned by an interrupted run; matches Vitest command lines rather than killing arbitrary Node processes |
-
-Generated/staged build resources are **outputs of these mechanisms**, not second source trees to
-hand-edit. Change the pin/source/script and regenerate; otherwise the next verified package run is
-entitled to replace the manual edit.
-
-Native payload selection is target-owned, never host-leftover-owned. Packaging deliberately
-excludes host `node-pty`/Sharp/tree-sitter build/prebuild directories from the generic file set and
-adds the prepared target tree back for exactly the requested OS/arch. Cross-arch packages that
-accidentally prefer a host `build/Release` directory can build successfully and then fail only on
-the user's machine; that is why package smoke is a release gate, not optional polish.
-
-`release.yml` is reusable and its matrix builds/smokes every target on a native runner, then one
-`assemble` job downloads all package artifacts, creates the standalone extension ZIP and
-`SHA256SUMS.txt`, and uploads one release candidate. Publishing runs through
-`.github/workflows/publish.yml`, dispatched at the tag itself
-(`gh workflow run publish.yml --ref vX.Y.Z`). It calls `release.yml` as a reusable workflow,
-so the installers a release carries are built from the tag being published inside the run
-that publishes them, and never travel between runs. A tag alone no longer builds anything.
-`publish.yml` refuses a non-tag ref, refuses a tag with no reviewed
-`docs/release-notes/vX.Y.Z.md`, re-checks the packaging runner's SHA-256 sums before
-attaching the files, runs the public-history privacy gate again, and refuses to overwrite an
-existing release. Maintainers and agents install the versioned Git hooks with
-`npm run hooks:install`; those hooks reject personal maintainer identities and Claude session
-provenance before it can be committed or pushed. `release.yml` on
-`workflow_dispatch` still produces an unpublished candidate from any ref.
-
-CI and release answer different questions. `.github/workflows/ci.yml` runs verification on the
-supported OS families so TypeScript/tests do not silently become Windows-only; `release.yml` is the
-native packaging matrix that proves each concrete artifact. `publish.yml` then re-checks version
-agreement, release-note presence, privacy/history and hashes at the **tag being published**. Never
-replace that chain with "CI passed on main, so upload local installers" — it breaks provenance
-between reviewed source and shipped bytes.
-
-## 21. Security-sensitive areas
-
-Some subsystems sit directly on trust boundaries and need extra review: browser/session identity,
-MCP request lifecycle, approved-path enforcement, process execution, desktop control, secrets,
-and resource limits. Keep public documentation focused on contracts and invariants rather than
-publishing exploit recipes or detailed reproductions for unresolved weaknesses.
-
-Before changing one of these areas, reproduce the behavior against the current tree, preserve
-fail-closed behavior, add a deterministic regression where practical, and verify neighboring
-negative/security cases. Suspected security issues and reproduction details belong through the
-private process in `SECURITY.md`, not in public issues, comments, or fixtures.
-
-**Do not scatter fixes across symptoms before proving the shared root.**
-
-## 22. Definition of done
-
-- The reproduced failure is gone **for the root reason** — not hidden in the UI, not retried
-  until lucky.
-- The neighboring negative / security case still holds.
-- A targeted regression captures the old failure ordering or input.
-- Every producer and consumer of any changed protocol agrees.
-- Model-visible schema and user-visible surface still match the implementation.
-- Unrelated dirty work is untouched.
-- Targeted tests pass and `npm run verify` passes.
-- Build/packaging checked when the changed layer can differ after bundling.
-- Comments and this file updated only where behavior genuinely changed.
-
-> **The rule.** Name the identity crossing the failing boundary, follow one concrete item
-> end to end, and fix the earliest place where reality diverges from that identity or
-> invariant.
-
-Intentional `after-turn` inputs for an existing ordinary chat share the durable staged-task FIFO and composer queue dock. Multiple waits are admitted, but each browser claim spends one distinct verified completed `turn_end`; repeated observations or restart cannot drain the next item. An after-turn wait does not block later Inject now messages from an eligible tool response. Initial and immediate browser sends retain single-send admission. Edits and reordering apply only before claim; the durable edit receipt ends the renderer's editing state without waiting for another queue read.
-Immediate inputs are batched into one eligible MCP response in queue order within the existing payload bounds; after-turn and finish stages retain their separate one-boundary-at-a-time policy. Model catalog election requires a visible composer, so an editor hidden behind Settings cannot claim the refresh. Captured provider citation ranges use Unicode code points; the renderer maps them to UTF-16 and emits exact uploaded-file chip names as plain text, omitting unresolved file citations.
-
-Finish checkpoints inherit the current chat model. `shared/input.ts::browserInputModel`
-projects null picker settings for finish entries, including legacy rows whose authored fields
-still contain the initial model. Browser handout, finish appendix and delivery-history model
-evidence use that same projection. Newly materialized plan stages store no model override;
-explicit direct/after-turn sends retain their requested model. An inherited checkpoint receipt
-must never republish the stale enqueue-time picker as an observed model switch.
-
-Plugins presents unconfigured connection setup as a red-outlined card; saved plugin tunnel
-identity or a live endpoint projects the compact setup row, including offline restarts with
-saved configuration. A persistent reminder asks users to refresh
-the ChatGPT Plugins connector after installation or enabled-tool changes. Local status checks
-do not refresh ChatGPT's tool catalog. The notice generator rejects missing production license
-material and mismatched catalog notice hashes, and includes native LGPL/GPL/MPL supplements.
-CI runs `verify:notices` against each host's installed production dependencies and checks
-their versions against the lockfile. Packaging regenerates the host-specific inventory.
-Reviewed plugin license labels require an exact package kind, name and version; custom updates
-cannot inherit a previous catalog review. Native binary source/replacement obligations remain
-separate from notice validation; see `docs/plugin-notice-audit.md`.
-Complete notice text is not proof of corresponding-source compliance for binary distribution;
-verify exact native dependency source/build provenance and actual release artifacts separately.
+Keep this file self-contained: explain purpose → user behavior → owner/flow → invariants →
+failure/test entry points. Integrate changed logic into its owning section instead of appending
+an unrelated rule at the end. Remove obsolete descriptions and resolved gap entries. Prefer
+owners and bounded contracts over volatile counts, copied worklogs and duplicated implementation
+detail. A new durable fact must have one named owner, lifetime and publication boundary.

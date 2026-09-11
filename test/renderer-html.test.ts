@@ -241,6 +241,26 @@ describe('a capture that could not be carried whole', () => {
     expect(renderedMarkdown('مرحبا بالعالم').getAttribute('dir')).toBe('auto');
   });
 
+  it('resolves separate Markdown prose blocks without letting an English introduction or code set their direction', () => {
+    const rendered = renderedMarkdown('English introduction.\n\nمرحبا بالعالم 123.\n\nשלום עולם!\n\n- خطوة أولى\n- خطوة ثانية\n\n> اقتباس عربي\n\n```js\nconst name = "مرحبا";\n```');
+    expect([...rendered.querySelectorAll(':scope > p, ul, blockquote')].map(node => node.getAttribute('dir')))
+      .toEqual(['auto', 'auto', 'auto', 'auto', 'auto']);
+    // The list/quote owns its subtree; nested auto scopes would remove its text from
+    // the browser's first-strong scan and put the marker/border on the wrong side.
+    expect(rendered.querySelector('blockquote p')?.hasAttribute('dir')).toBe(false);
+    expect(rendered.querySelector('pre')?.getAttribute('dir')).toBe('ltr');
+    expect(rendered.querySelector('code')?.getAttribute('dir')).toBe('ltr');
+    const table = renderedMarkdown('| English | العربية |\n| --- | --- |\n| Hello | مرحبا |');
+    expect([...table.querySelectorAll('th, td')].every(node => node.getAttribute('dir') === 'auto')).toBe(true);
+  });
+
+  it('respects an explicit ancestor direction while isolating code from RTL prose', () => {
+    const rendered = renderedMessage(whole('<div dir="rtl"><p>English inside an explicitly RTL block.</p><pre><code>const x = 1;</code></pre></div>'), '');
+    expect(rendered.querySelector('div')?.getAttribute('dir')).toBe('rtl');
+    expect(rendered.querySelector('p')?.hasAttribute('dir')).toBe(false);
+    expect(rendered.querySelector('pre')?.getAttribute('dir')).toBe('ltr');
+  });
+
   it('keeps the direction ChatGPT marked on a mixed-language answer', () => {
     // One first strong character cannot describe two paragraphs that run opposite ways, so
     // where the capture carried the answer, sanitisation has to leave it there.
@@ -252,6 +272,6 @@ describe('a capture that could not be carried whole', () => {
   it('drops a direction value that is not one of the three', () => {
     const rendered = renderedMessage(whole('<p dir="javascript:alert(1)">text</p>'), 'fallback');
 
-    expect(rendered.querySelector('p')!.hasAttribute('dir')).toBe(false);
+    expect(rendered.querySelector('p')!.getAttribute('dir')).toBe('auto');
   });
 });

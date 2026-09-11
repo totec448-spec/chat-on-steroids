@@ -3,6 +3,7 @@ import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
+import { prependUserPrompt } from '../src/shared/user-prompt.js';
 import type { SessionEvent, SessionSummary } from '../src/shared/session.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import type { LocalProject } from '../src/shared/projects.js';
@@ -214,6 +215,11 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
       sendInput: (input: InputArgs) => {
         live.sent.push(input);
         const row: InputEntry = { ...input, state: 'queued', owner: null, createdAt: Date.now(), conversationId: null };
+        if (input.mode === 'finish' && input.stages) {
+          row.stagesApplied = true;
+          live.inputs.push(row, ...input.stages.map((text, index) => ({ ...row, id: `${input.id}-${index}`, text, stages: undefined })));
+          return ok(row);
+        }
         live.inputs.push(row);
         return ok(row);
       },
@@ -258,6 +264,60 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     }
   };
 }
+
+it.each(['compaction', 'blocked', 'worker'])('retires %s control status when leaving its session, including late IPC and locale refresh', async kind => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const controls = { sessionId: summary([]).id, automation: 'off', objective: '',
+    blocked: kind === 'compaction' ? '' : kind, job: kind === 'compaction' ? { busy: true } : null };
+  api.getSessionControls = async () => ({ ok: true, data: controls });
+  await append([]);
+  const status = w.document.getElementById('sessionControlStatus')!;
+  expect(status.textContent).not.toBe('');
+  let release!: (value: unknown) => void;
+  api.getSessionControls = () => new Promise(resolve => { release = resolve; });
+  await append([]);
+  // An ordinary refresh of the same selected owner retains its last known status.
+  expect(status.textContent).not.toBe('');
+  w.document.getElementById('newChat')!.click();
+  expect(status.textContent).toBe('');
+  expect(w.document.getElementById('compactSession')!.hidden).toBe(true);
+  expect(w.document.getElementById('cancelCompaction')!.hidden).toBe(true);
+  release({ ok: true, data: controls }); await settle();
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('zh-CN');
+  expect(status.textContent).toBe('');
+  setLanguage('en');
+  // Returning to A is a new selection epoch; only its new read may restore status.
+  (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();
+  expect(status.textContent).toBe('');
+  release({ ok: true, data: controls }); await settle();
+  expect(status.textContent).not.toBe('');
+});
+
+it('clears control projections on an existing-session switch and fences A to B to A responses', async () => {
+  const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
+  const { w, append } = await boot([], true, [], [], { sessions: [first, second] });
+  const api = (w as any).api;
+  const busy = { automation: 'off', objective: '', blocked: '', job: { busy: true } };
+  api.getSessionControls = async () => ({ ok: true, data: busy });
+  await append([]);
+  const status = w.document.getElementById('sessionControlStatus')!;
+  expect(status.textContent).toContain('Compaction');
+  const pending: Array<(value: unknown) => void> = [];
+  api.getSessionControls = () => new Promise(resolve => pending.push(resolve));
+  await append([]); // old A refresh
+  (w.document.querySelector(`#sessionList [data-id="${second.id}"]`) as HTMLElement).click();
+  expect(status.textContent).toBe('');
+  expect(w.document.getElementById('cancelCompaction')!.hidden).toBe(true);
+  (w.document.querySelector(`#sessionList [data-id="${first.id}"]`) as HTMLElement).click();
+  expect(pending).toHaveLength(3);
+  pending[2]!({ ok: true, data: { ...busy, job: null } }); await settle();
+  pending[1]!({ ok: true, data: busy });
+  pending[0]!({ ok: true, data: busy }); await settle();
+  expect(status.textContent).toBe('');
+  expect(w.document.getElementById('cancelCompaction')!.hidden).toBe(true);
+});
 
 it('reorders queued tasks by drag and keyboard through the durable IPC operation', async () => {
   const { w, live, append } = await boot([]);
@@ -360,6 +420,16 @@ it('keeps canonical image attachments above the user text bubble for the selecte
   expect(attachments.querySelector('img')?.getAttribute('src')).toBe('data:image/webp;base64,YQ==');
 });
 
+it('shows a native image-only message immediately as a card without a guessed caption or image fetch', async () => {
+  const app = await boot([]);
+  await app.append([{ seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'native-image-only',
+    message: text(''), attachments: [{ id: 'native-provider-file', name: 'example.png', size: 123, mimeType: 'image/png' }] }]);
+  const row = app.w.document.querySelector('.said.is-user')!;
+  expect(row.querySelector('.attachment-card')?.textContent).toContain('example.png');
+  expect(row.querySelector('.user-message-text')).toBeNull();
+  expect(row.querySelector('img')).toBeNull();
+});
+
 it('uses the same separate image row for pending and recorded native attachments', async () => {
   const app = await boot([]);
   const attachment = { id: 'a'.repeat(32), name: 'meme.png', mimeType: 'image/png', size: 42, preview: 'data:image/webp;base64,YQ==' };
@@ -427,6 +497,12 @@ it('shows original user text while retaining transport instructions outside the 
   expect(w.document.querySelector('.said.is-user .msg')?.textContent).toBe('hello');
   expect(w.document.body.textContent).toContain('hello');
 });
+it.each(['', '\n', '\n\n'])('hides complete worker instructions without an app receipt, including native prefix %j', async prefix => {
+  const sent = prefix + prependUserPrompt('Visible authored message', 'Invisible complete guidance');
+  const { w } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'echo', message: text(sent) }]);
+  expect(w.document.querySelector('.said.is-user .msg')?.textContent).toBe('Visible authored message');
+  expect(w.document.body.textContent).not.toContain('Invisible complete guidance');
+});
 
 it('appends dropped files to the originating composer draft and caps attachments', async () => {
   const { w } = await boot([], false);
@@ -448,6 +524,50 @@ it('appends dropped files to the originating composer draft and caps attachments
   await settle();
   expect(api.dropFiles).toHaveBeenCalledTimes(1);
   expect(w.document.querySelectorAll('#composerImages .attachment-card')).toHaveLength(1);
+});
+
+it('removes a project group in one click, keeps its chats and draft, and rejects an older refresh', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Removed', path: '/removed', createdAt: 1 };
+  const other = { id: 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', name: 'Other', path: '/other', createdAt: 2 };
+  const parent = { ...summary([]), projectId: project.id };
+  const child = { ...summary([]), id: 'child-session', conversationId: 'child-chat', projectId: project.id,
+    origin: { kind: 'worker' as const, fromSessionId: parent.id, agentId: 'worker-1', task: 'Keep working' } };
+  const { w, live } = await boot([], false, [], [project, other], { sessions: [parent, child] });
+  const api = (w as any).api;
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  (w.document.querySelector('.worker-toggle') as HTMLButtonElement).click();
+  (w.document.querySelector(`[data-new-project="${project.id}"]`) as HTMLButtonElement).click();
+  input.value = 'Keep my draft';
+  let finishList!: (value: unknown) => void;
+  api.listSessions = () => new Promise(resolve => { finishList = resolve; });
+  (w.document.getElementById('chatRefresh') as HTMLButtonElement).click();
+  await settle();
+  api.removeProject = vi.fn(async () => ({ ok: true, data: { ...project, ungrouped: true } }));
+  (w.document.querySelector('.project-remove') as HTMLButtonElement).click();
+  await settle();
+  expect(api.removeProject).toHaveBeenCalledExactlyOnceWith(project.id);
+  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)).toBeNull();
+  expect(w.document.querySelector(`[data-project-id="${other.id}"]`)).not.toBeNull();
+  expect(w.document.querySelector(`#sessionList > [data-id="${parent.id}"]`)).not.toBeNull();
+  expect(w.document.querySelector('#sessionList > .worker-group [data-id="child-session"]')).not.toBeNull();
+  expect(input.value).toBe('Keep my draft');
+  expect(input.placeholder).toBe('Ask anything…');
+  finishList({ ok: true, data: { sessions: [parent, child], activeId: null, pressure: [], blocked: [] } });
+  await settle();
+  expect(w.document.querySelector(`[data-project-id="${project.id}"]`)).toBeNull();
+  (w.document.getElementById('chatSend') as HTMLButtonElement).click();
+  await settle();
+  expect(live.sent[0]).toMatchObject({ sessionId: null, projectId: null, text: 'Keep my draft' });
+});
+
+it('keeps the project visible when its removal fails', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Keep', path: '/keep', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  (w as any).api.removeProject = async () => ({ ok: false, error: 'Could not save' });
+  (w.document.querySelector('.project-remove') as HTMLButtonElement).click();
+  await settle();
+  expect(w.document.querySelector('.project-group')).not.toBeNull();
+  expect((w.document.querySelector('.project-remove') as HTMLButtonElement).disabled).toBe(false);
 });
 
 it('Share a folder creates a sidebar project and keeps it when an older list refresh finishes', async () => {
@@ -650,6 +770,7 @@ it('does not steal a newer New Chat draft when an older queued send is acknowled
   input.value = 'First request';
   w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
   await settle();
+  w.document.getElementById('newChat')!.click();
   input.value = 'Newer unsent draft';
   live.inputs[0] = { ...live.inputs[0]!, state: 'sent', conversationId: 'chat-b', deliveredSessionId: summary([]).id };
   await app.append([]);
@@ -661,7 +782,43 @@ it('does not steal a newer New Chat draft when an older queued send is acknowled
   expect(w.document.querySelector('#sessionList .is-sel')).toBeNull();
 });
 
-it('shows a compaction that never made it into a new chat as failed once the chat moved on', async () => {
+it.each(['stopped', 'failed'] as const)('shows the exact summary turn %s instead of writing, then updates the same card on recovery', async outcome => {
+  const [request, start, brief, end, handoff, resume] = compaction(2);
+  const app = await boot([request!, start!, { ...brief!, final: false, state: 'streaming' } as SessionEvent]);
+  const card = app.w.document.querySelector<HTMLDetailsElement>('details.compaction')!;
+  const state = () => card.querySelector('summary .state')!.textContent;
+  expect(state()).toBe('ChatGPT is writing the summary…');
+  await app.append([{ ...end!, outcome, detail: outcome === 'failed' ? 'Provider request limit' : undefined } as SessionEvent]);
+  expect(state()).toBe(outcome === 'stopped' ? 'Summary generation stopped' : 'Summary generation failed — Provider request limit');
+  expect(card.className).toContain('tone-bad');
+  await app.append([{ ...handoff!, seq: 9, time: T0 + 9000 }]);
+  expect(state()).toContain('Summary saved');
+  expect(card.className).toContain('tone-wait');
+  await app.append([{ ...resume!, seq: 10, time: T0 + 10000 }]);
+  expect(app.w.document.querySelector('details.compaction')).toBe(card);
+  expect(state()).toContain('New chat opened');
+  expect(card.className).toContain('tone-good');
+});
+
+it('keeps a stopped empty summary truthful without adopting another turn or its completed outcome', async () => {
+  const [request, start, , end] = compaction(2);
+  const app = await boot([request!, start!, { ...end!, outcome: 'stopped' } as SessionEvent]);
+  await app.append([
+    { seq: 10, time: T0 + 10000, source: 'extension', kind: 'turn_start', turnId: 'other' },
+    { seq: 11, time: T0 + 11000, source: 'extension', kind: 'turn_end', turnId: 'other', outcome: 'completed' }
+  ]);
+  expect(app.w.document.querySelector('details.compaction summary .state')!.textContent).toBe('Summary generation stopped');
+});
+
+it('a committed resume supersedes an older abandonment on the same compaction', async () => {
+  const [request, start, , end, , resume] = compaction(2);
+  const app = await boot([request!, start!, { ...end!, outcome: 'failed' } as SessionEvent,
+    { seq: 8, time: T0 + 8000, source: 'app', kind: 'note', continuation: TOKEN, message: text('Compact & Resume abandoned — earlier failure') }]);
+  await app.append([{ ...resume!, seq: 9, time: T0 + 9000 }]);
+  expect(app.w.document.querySelector('details.compaction summary .state')!.textContent).toContain('New chat opened');
+});
+
+it('does not infer compaction failure from a later tool call while the handoff is being saved', async () => {
   const [request, start, brief, end] = compaction(2);
   const { w, append } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
@@ -676,10 +833,35 @@ it('shows a compaction that never made it into a new chat as failed once the cha
   expect(state()).toBe('Summary written — saving the handoff…');
   expect(timeline.querySelector('details.compaction')!.className).toContain('tone-wait');
 
-  // The old chat carried on instead — the handoff never became a new chat.
+  // A late call does not settle the continuation transaction.
   await append([toolCall(9, 'call-late')]);
-  expect(state()).toBe('Summary written, but the app never saved it — the chat carried on here');
-  expect(timeline.querySelector('details.compaction')!.className).toContain('tone-bad');
+  expect(state()).toBe('Summary written — saving the handoff…');
+  expect(timeline.querySelector('details.compaction')!.className).toContain('tone-wait');
+});
+
+it('keeps one live compaction across refused source calls and unrelated old-turn commentary', async () => {
+  const [request, start, brief, end, handoff, resume] = compaction(2);
+  const app = await boot([request!, start!]);
+  const card = app.w.document.querySelector<HTMLDetailsElement>('details.compaction')!;
+  const state = () => card.querySelector('summary .state')!.textContent;
+  const late = toolCall(4, 'late-source-call') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  late.call.outcome = 'tool_rejected';
+  late.call.result = text('COMPACTION_IN_PROGRESS: no local tool was run.');
+  await app.append([late, { seq: 5, time: T0 + 5000, source: 'extension', kind: 'assistant_message',
+    messageId: 'old-commentary', turnId: 'old-turn', final: false, message: text('Still reading the old task.') }]);
+  expect(state()).toBe('Summary requested — waiting for ChatGPT…');
+  expect(card.className).toContain('tone-wait');
+  expect(card.textContent).not.toContain('Still reading the old task.');
+  expect(app.w.document.querySelector('.ev-assistant_message')!.textContent).toContain('Still reading the old task.');
+  await app.append([{ ...brief!, seq: 6, time: T0 + 6000 }, { ...end!, seq: 7, time: T0 + 7000 }]);
+  expect(state()).toBe('Summary written — saving the handoff…');
+  expect(card.textContent).toContain('Goal: keep the loop running.');
+  await app.append([{ ...handoff!, seq: 8, time: T0 + 8000 }, toolCall(9, 'late-recording')]);
+  expect(state()).toContain('opening the new chat');
+  await app.append([{ ...resume!, seq: 10, time: T0 + 10000 }]);
+  expect(app.w.document.querySelector('details.compaction')).toBe(card);
+  expect(app.w.document.querySelectorAll('details.compaction')).toHaveLength(1);
+  expect(card.className).toContain('tone-good');
 });
 
 /**
@@ -735,6 +917,49 @@ it('says why a compaction died when the app abandoned it', async () => {
   expect(timeline.querySelectorAll('.ev-note')).toHaveLength(0);
   card.toggleAttribute('open', true);
   expect(card.textContent).toContain('abandoned');
+});
+
+it('retains the open compaction disclosure and brief request while the summary streams and completes', async () => {
+  const [request, start, original, , handoff, resume] = compaction(2);
+  const brief = { ...original, origin: original!.seq, state: 'streaming', final: false } as Extract<SessionEvent, { kind: 'assistant_message' }>;
+  const { w, append } = await boot([request!, start!, brief]);
+  const card = w.document.querySelector<HTMLDetailsElement>('details.compaction')!;
+  card.open = true;
+  card.dispatchEvent(new w.Event('toggle'));
+  const requestText = card.querySelector('.pre')!;
+  const head = card.querySelector('summary')!;
+  head.focus();
+  for (let i = 0; i < 3; i++) {
+    await append([{ ...brief, seq: 20 + i, message: text('# Brief\n\n' + 'More summary text. '.repeat(i + 2)), final: i === 2, state: i === 2 ? 'final' : 'streaming' }]);
+    expect(w.document.querySelector('details.compaction')).toBe(card);
+    expect(card.open).toBe(true);
+    expect(card.querySelector('.pre')).toBe(requestText);
+    expect(w.document.activeElement).toBe(head);
+    expect(card.querySelector('.rich')!.textContent).toContain('More summary text.');
+  }
+  expect(card.querySelector('summary .state')!.textContent).toBe('Summary written — saving the handoff…');
+  await append([{ ...handoff!, seq: 23 }, { ...resume!, seq: 24 }]);
+  expect(w.document.querySelector('details.compaction')).toBe(card);
+  expect(card.className).toContain('tone-good');
+  card.open = false;
+  card.dispatchEvent(new w.Event('toggle'));
+  await append([toolCall(25, 'after-resume')]);
+  expect(card.open).toBe(false);
+});
+
+it('keeps a streaming message anchor and its following tool group across canonical revisions', async () => {
+  const message: Extract<SessionEvent, { kind: 'assistant_message' }> = { seq: 1, origin: 1, time: T0, source: 'extension',
+    kind: 'assistant_message', messageId: 'live-message', message: text('Working'), state: 'streaming', final: false };
+  const { w, append } = await boot([message, toolCall(2, 'live-tool'), toolCall(3, 'next-tool')]);
+  const timeline = w.document.getElementById('timeline')!;
+  const anchor = timeline.querySelector<HTMLElement>('.ev-assistant_message')!.dataset.timelineKey;
+  const group = timeline.querySelector<HTMLDetailsElement>('.tool-group')!;
+  group.open = true;
+  group.dispatchEvent(new w.Event('toggle'));
+  await append([{ ...message, seq: 4, message: text('Working on the next step') }]);
+  expect(timeline.querySelector<HTMLElement>('.ev-assistant_message')!.dataset.timelineKey).toBe(anchor);
+  expect(timeline.querySelector('.tool-group')).toBe(group);
+  expect(group.open).toBe(true);
 });
 
 it('keeps an unfolded tool row as the same open node while the chat keeps appending', async () => {
@@ -877,6 +1102,26 @@ it('shows injection only for an exact active turn, never merely recent chat acti
   expect((w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('auto');
 });
 
+it('shows Send directly before MCP, keeps After this turn selected, and changes the visible menu after MCP', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  let tools = false;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data,
+    activeTurnId: 'plain-turn', canInject: tools, canSendDirectly: !tools, queueAtFinish: false } });
+  await append([]);
+  const options = w.document.getElementById('sendOptions')!;
+  expect(options.hidden).toBe(false);
+  expect(options.querySelector('[data-delivery="auto"]')!.textContent).toBe('Send directly');
+  (options.querySelector('[data-delivery="after-turn"]') as HTMLButtonElement).click();
+  await append([]);
+  expect((w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('after-turn');
+  tools = true;
+  await append([toolCall(1, 'first-mcp-call')]);
+  expect(options.querySelector('[data-delivery="auto"]')!.textContent).toBe('Inject now');
+  expect((w.document.getElementById('sendMode') as HTMLSelectElement).value).toBe('after-turn');
+});
+
 it('shows elapsed work for the exact recorded turn without exposing lifecycle rows', async () => {
   const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
   expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);
@@ -931,6 +1176,23 @@ it('shows Stop immediately for a queued first send, switches to Send for a new d
   expect(send.dataset.action).toBe('send');
 });
 
+it('opens the saved task editor from the Goal dock and still closes it on outside clicks', async () => {
+  const { w } = await boot([]);
+  (w.document.querySelector('#automationSwitch [data-mode="goal"]') as HTMLButtonElement).click();
+  await settle();
+  const menu = w.document.getElementById('composerSettings') as HTMLDetailsElement;
+  const objective = w.document.getElementById('sessionObjective') as HTMLTextAreaElement;
+  const edit = w.document.querySelector('#activeGoalRow button[aria-label="Edit task"]') as HTMLButtonElement;
+  expect(edit).not.toBeNull();
+  menu.open = false;
+  edit.click();
+  expect(menu.open).toBe(true);
+  expect(w.document.activeElement).toBe(objective);
+  w.document.body.click();
+  expect(menu.open).toBe(false);
+  await settle();
+});
+
 it('retains the New Chat objective through Goal, Off and Goal toggles', async () => {
   const { w } = await boot([], false);
   const objective = w.document.getElementById('sessionObjective') as HTMLTextAreaElement;
@@ -977,7 +1239,7 @@ it('keeps editable stages and sends the original request with the full workflow 
 });
 
 it.each([true, false])('hands plan presentation to queued stages while sending and restores a rejected draft (accepted=%s)', async accepted => {
-  const { w, live, append } = await boot([]);
+  const { w, live, append } = await boot([], false);
   const api = (w as any).api;
   const stages = ['Define the build', 'Assign first worker', 'Assign second worker', 'Integrate', 'Verify', 'Acceptance'];
   api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: stages }));
@@ -993,10 +1255,9 @@ it.each([true, false])('hands plan presentation to queued stages while sending a
   api.sendInput = vi.fn((args: InputArgs) => {
     live.sent.push(args);
     first = { ...args, state: 'queued', owner: null, createdAt: Date.now(), conversationId: 'chat-b' };
-    // A queue observation can arrive before the original send IPC response. It must
-    // not coexist with the editable six-stage draft (the screenshot's 6 + 5 rows).
-    // The real outbox commits the source's stagesApplied receipt and child rows together.
-    live.inputs = [{ ...first, state: 'sent', stagesApplied: true }, ...stages.slice(1).map((text, index) => ({ ...first, id: `stage-${index}`, text, mode: 'finish' as const, stages: undefined }))];
+    // An outbox observation can arrive before the original send IPC response. Its
+    // checkpoint projection must not coexist with the editable six-stage draft.
+    live.inputs = [first];
     return new Promise(resolve => { finish = resolve; });
   });
   w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
@@ -1012,6 +1273,40 @@ it.each([true, false])('hands plan presentation to queued stages while sending a
   expect(preview.hidden).toBe(accepted);
   expect(preview.querySelectorAll('.plan-stage')).toHaveLength(accepted ? 0 : 6);
   if (!accepted) expect(input.value).toBe('Build the whole task');
+});
+
+it.each(['delivery', 'model', 'refresh-failed', 'enqueue-failed'])('retries the durable full plan without pasting stage one (%s)', async failure => {
+  const { w, live, append } = await boot([], false);
+  const api = (w as any).api;
+  const original: InputEntry = { id: 'failed-plan', sessionId: null, projectId: null, text: 'Implement everything',
+    objective: 'Original complete request', stages: ['Verify gameplay', 'Verify voice', 'Final review'], automation: 'off',
+    model: 'gpt-5.6-sol', reasoningEffort: 'high', mode: 'auto', dueAt: 1, createdAt: 1, state: 'failed',
+    owner: 'old-page', conversationId: null, error: failure === 'model' || failure === 'refresh-failed'
+      ? 'Requested model or reasoning could not be confirmed' : 'Delivery failed' };
+  live.inputs = [original]; await append([]);
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'An independent draft'; input.dispatchEvent(new w.Event('input'));
+  api.requestChatModels = vi.fn(async () => ({ ok: true, data: failure === 'refresh-failed'
+    ? { state: 'unavailable', models: [], error: 'Unavailable' }
+    : { state: 'ready', models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high'] }] } }));
+  if (failure === 'enqueue-failed') api.sendInput = vi.fn(async () => ({ ok: false, error: 'Connection failed' }));
+  const retry = w.document.querySelector<HTMLButtonElement>('[aria-label="Retry delivery"]')!;
+  retry.click(); retry.click(); await settle(); await append([]);
+  expect(input.value).toBe('An independent draft');
+  if (failure === 'refresh-failed' || failure === 'enqueue-failed') {
+    expect(live.sent).toHaveLength(0);
+    expect(w.document.querySelector('[aria-label="Retry delivery"]')).not.toBeNull();
+    expect(live.inputs[0]!.stages).toEqual(original.stages);
+    expect(w.localStorage.getItem('dismissed-input-notices') ?? '').not.toContain(original.id);
+  } else {
+    expect(live.sent).toHaveLength(1);
+    expect(live.sent[0]).toMatchObject({ text: original.text, objective: original.objective, stages: original.stages,
+      automation: 'off', model: original.model, reasoningEffort: 'high', mode: 'auto' });
+    expect(live.sent[0]!.id).not.toBe(original.id);
+    expect(live.sent[0]).not.toHaveProperty('owner');
+    expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(3);
+  }
+  expect(api.requestChatModels).toHaveBeenCalledTimes(failure === 'model' || failure === 'refresh-failed' ? 1 : 0);
 });
 
 it('disables empty task actions and confirms saving without the old helper sentence', async () => {
@@ -1158,6 +1453,91 @@ it('cancels pending planning without replacing the draft with a late result', as
   expect(live.sent).toHaveLength(0);
 });
 
+it('keeps completed stages after clearing or replacing the composer until explicitly deleted', async () => {
+  const { w, live } = await boot([], false);
+  const api = (w as any).api;
+  api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Build the whole task'; input.dispatchEvent(new w.Event('input'));
+  w.document.getElementById('createPlan')!.click(); await settle();
+  for (const replacement of ['', 'Unrelated next message', '']) {
+    input.value = replacement; input.dispatchEvent(new w.Event('input'));
+    expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(2);
+    expect(w.document.getElementById('taskPlanPreview')!.textContent).toContain('Verify it');
+  }
+  expect(live.sent).toHaveLength(0);
+  w.document.querySelector<HTMLButtonElement>('[aria-label="Delete stage 1"]')!.click();
+  expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(1);
+  w.document.querySelector<HTMLButtonElement>('[aria-label="Delete stage 1"]')!.click();
+  expect(w.document.getElementById('taskPlanPreview')!.hidden).toBe(true);
+});
+
+it('queues every generated stage in an existing session without Send and preserves them after clearing the composer', async () => {
+  const { w, live } = await boot([]);
+  const api = (w as any).api;
+  api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Build the whole task'; input.dispatchEvent(new w.Event('input'));
+  w.document.getElementById('createPlan')!.click(); await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ sessionId: summary([]).id, text: 'Build foundation', stages: ['Verify it'], mode: 'finish', model: null, reasoningEffort: null });
+  expect(input.value).toBe('Build the whole task');
+  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(2);
+  expect(w.document.querySelectorAll('[aria-label="Remove queued task"]')).toHaveLength(2);
+  expect(w.document.getElementById('taskPlanPreview')!.hidden).toBe(true);
+  api.cancelInput = vi.fn(async (id: string) => { live.inputs = live.inputs.filter(row => row.id !== id); return { ok: true, data: true }; });
+  w.document.querySelector<HTMLButtonElement>('[aria-label="Remove queued task"]')!.click(); await settle();
+  expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(1);
+  expect(w.document.getElementById('finishQueue')!.textContent).toContain('Verify it');
+  expect(live.sent).toHaveLength(1);
+});
+
+it('retries a materialized finish checkpoint without recreating its already independent siblings', async () => {
+  const { w, live, append } = await boot([]);
+  live.inputs = [{ id: 'failed-first-checkpoint', sessionId: summary([]).id, text: 'Retry just this checkpoint', stages: ['Deleted sibling'],
+    stagesApplied: true, mode: 'finish', dueAt: 0, model: null, reasoningEffort: null, state: 'failed', owner: null,
+    createdAt: 0, conversationId: 'chat-b', error: 'Provider rejected opted-in after-turn delivery' }];
+  await append([]);
+  w.document.querySelector<HTMLButtonElement>('[aria-label="Retry delivery"]')!.click(); await settle();
+  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).value).toBe('Retry just this checkpoint');
+  expect(live.sent).toHaveLength(0);
+  expect(w.document.getElementById('finishQueue')!.hidden).toBe(true);
+});
+
+it('retains a rejected queue admission independently of composer edits and retries as finish only', async () => {
+  const { w, live } = await boot([]);
+  const api = (w as any).api, send = api.sendInput;
+  let reject!: (value: unknown) => void;
+  api.sendInput = vi.fn(() => new Promise(resolve => { reject = resolve; }));
+  api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['First checkpoint', 'Last checkpoint'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Plan the remaining checks';
+  w.document.getElementById('createPlan')!.click(); await settle();
+  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  reject({ ok: false, error: 'Queue full' }); await settle();
+  expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(2);
+  expect(w.document.getElementById('chatSend')!.getAttribute('aria-label')).toBe('Queue plan at Session finish');
+  api.sendInput = send;
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ mode: 'finish', text: 'First checkpoint', stages: ['Last checkpoint'] });
+  expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(2);
+  expect(input.value).toBe('');
+});
+
+it('sends a retained new-chat plan with its captured request after the composer is cleared', async () => {
+  const { w, live } = await boot([], false);
+  (w as any).api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Build foundation', 'Verify it'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Original objective';
+  w.document.getElementById('createPlan')!.click(); await settle();
+  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ objective: 'Original objective', text: 'Build foundation', stages: ['Verify it'] });
+});
+
 it('clearing the complete planner task cancels generation and restores Create plan', async () => {
   const { w, live } = await boot([], false);
   const api = (w as any).api;
@@ -1237,7 +1617,9 @@ it('keeps actual-turn Stop through two authored sends and stops only the capture
 it('does not retarget an awaiting Stop after leaving and reselecting the same chat', async () => {
   const { w } = await boot([]);
   const api = (w as any).api;
-  const original = api.getSessionControls;
+  const baseControls = api.getSessionControls;
+  const original = async (id: string) => ({ ok: true, data: { ...(await baseControls(id)).data,
+    plan: { updatedAt: 2, plan: [{ step: 'Current plan', status: 'in_progress', details: 'Current selection' }] } } });
   const stop = vi.fn(async () => ({ ok: true, data: {} }));
   api.stopSessionTurn = stop;
   let resolve!: (value: any) => void;
@@ -1247,10 +1629,14 @@ it('does not retarget an awaiting Stop after leaving and reselecting the same ch
   w.document.getElementById('newChat')!.click();
   (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();
   await settle();
-  resolve(await original('2026-09-02-test0001'));
+  expect(w.document.getElementById('agentPlan')!.textContent).toContain('Current plan');
+  resolve({ ok: true, data: { ...(await original('2026-09-02-test0001')).data,
+    plan: { updatedAt: 1, plan: [{ step: 'Stale plan', status: 'pending' }] } } });
   await settle();
   expect(stop).not.toHaveBeenCalled();
   expect(w.document.getElementById('chatSend')!.dataset.action).toBe('stop');
+  expect(w.document.getElementById('agentPlan')!.textContent).toContain('Current plan');
+  expect(w.document.getElementById('agentPlan')!.textContent).not.toContain('Stale plan');
 });
 
 it('streams a new Goal opening, queues it once, and displays authoritative delivery failure', async () => {
@@ -1334,10 +1720,27 @@ it.each(['navigate', 'objective edit', 'mode change', 'automation change'] as co
   expect(live.sent).toHaveLength(0);
 });
 
+it('follows the accepted New Chat receipt while preserving a typed follow-up', async () => {
+  const { w, live, append } = await boot([], false);
+  const composer = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  composer.value = 'Opening message';
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await settle();
+  expect(live.sent).toHaveLength(1);
+  composer.value = 'Follow-up while delivery is pending';
+  composer.dispatchEvent(new w.Event('input'));
+  live.inputs = live.inputs.map(row => ({ ...row, state: 'sent', deliveredSessionId: summary([]).id }));
+  await append([]);
+  expect(w.document.querySelector('#sessionList [data-id].is-sel')).not.toBeNull();
+  expect(composer.value).toBe('Follow-up while delivery is pending');
+});
+
 it('applies Off to the exact accepted New Chat opening while preserving an unrelated composer draft', async () => {
   const { w, live, append } = await boot([], false);
   const api = (w as any).api;
   api.draftGoalOpening = vi.fn(async () => ({ ok: true, data: { reply: 'Say hello once', model: 'fixture' } }));
+  const controls = api.getSessionControls;
+  api.getSessionControls = async (id: string) => { const result = await controls(id); result.data.objective = 'Greeting goal'; return result; };
   api.setInputAutomation = vi.fn(async (id: string, mode: 'off' | 'goal' | 'loop') => {
     live.inputs = live.inputs.map(row => row.id === id ? { ...row, automation: mode } : row);
     return { ok: true, data: true };
@@ -1358,7 +1761,7 @@ it('applies Off to the exact accepted New Chat opening while preserving an unrel
   expect(live.sent).toHaveLength(1);
 });
 
-it.each(['navigate', 'draft edit'] as const)('cancels pending plan generation on %s', async (action) => {
+it('cancels pending plan generation when its own draft changes', async () => {
   const { w, live, progress } = await boot([], false);
   const api = (w as any).api;
   (await api.getState()).data.config.ui.finishTool = true;
@@ -1369,16 +1772,100 @@ it.each(['navigate', 'draft edit'] as const)('cancels pending plan generation on
   input.value = 'Original plan';
   w.document.getElementById('createPlan')!.click(); await settle();
   const requestId = api.draftTaskPlan.mock.calls[0][2];
-  if (action === 'navigate') {
-    (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click(); await settle();
-  } else {
-    input.value = 'Replacement plan'; input.dispatchEvent(new w.Event('input'));
-  }
+  input.value = 'Replacement plan'; input.dispatchEvent(new w.Event('input'));
   expect(api.cancelTaskRequest).toHaveBeenCalledWith(requestId);
   progress({ requestId, phase: 'generating', text: 'Old plan text' });
   expect(w.document.getElementById('taskPlanPreview')!.textContent).not.toContain('Old plan text');
   finish({ ok: true, data: ['Old first stage', 'Old second stage'] }); await settle();
   expect(live.sent).toHaveLength(0);
+});
+
+it('preserves composer drafts across chat and settings navigation without forcing a fixed height', async () => {
+  const first = summary([]), second = { ...first, id: 'second-chat', title: 'Second chat' };
+  const { w } = await boot([], true, [], [], { sessions: [first, second] });
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Long draft\n'.repeat(60); input.dispatchEvent(new w.Event('input'));
+  const draft = input.value;
+  expect(input.style.height).toBe('');
+  (w.document.querySelector('#sessionList [data-id="second-chat"]') as HTMLElement).click(); await settle();
+  expect(input.value).toBe('');
+  expect(input.style.height).toBe('');
+  (w.document.querySelector(`#sessionList [data-id="${first.id}"]`) as HTMLElement).click(); await settle();
+  expect(input.value).toBe(draft);
+  expect(input.style.height).toBe('');
+  const chat = await import('../src/renderer/chat.js');
+  chat.openChatView('settings');
+  (w.document.querySelector('#sessionList [data-id="second-chat"]') as HTMLElement).click(); await settle();
+  (w.document.querySelector(`#sessionList [data-id="${first.id}"]`) as HTMLElement).click(); await settle();
+  chat.openChatView('timeline');
+  expect(input.value).toBe(draft);
+  expect(input.style.height).toBe('');
+});
+
+it('retains an existing running chat planner across navigation and accepts its result only in that draft', async () => {
+  const first = summary([]), second = { ...first, id: 'second-chat', title: 'Second chat' };
+  const { w, live, progress } = await boot([], true, [], [], { sessions: [first, second] });
+  const api = (w as any).api;
+  api.cancelTaskRequest = vi.fn(async () => ({ ok: true, data: true }));
+  let finish!: (value: any) => void;
+  api.draftTaskPlan = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Plan for this running chat'; input.dispatchEvent(new w.Event('input'));
+  w.document.getElementById('createPlan')!.click(); await settle();
+  const requestId = api.draftTaskPlan.mock.calls[0][2];
+  (w.document.querySelector('#sessionList [data-id="second-chat"]') as HTMLElement).click(); await settle();
+  input.value = 'Unrelated draft'; input.dispatchEvent(new w.Event('input'));
+  expect(api.cancelTaskRequest).not.toHaveBeenCalled();
+  progress({ requestId, phase: 'generating', text: 'Original chat progress' });
+  expect(w.document.getElementById('taskPlanPreview')!.textContent).not.toContain('Original chat progress');
+  (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click(); await settle();
+  expect(input.value).toBe('Plan for this running chat');
+  expect(w.document.getElementById('taskPlanPreview')!.textContent).toContain('Original chat progress');
+  expect(w.document.getElementById('createPlan')!.getAttribute('aria-busy')).toBe('true');
+  (w.document.querySelector('#sessionList [data-id="second-chat"]') as HTMLElement).click(); await settle();
+  finish({ ok: true, data: ['Original first stage', 'Original checkpoint'] }); await settle();
+  expect(input.value).toBe('Unrelated draft');
+  expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(0);
+  (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click(); await settle();
+  expect(w.document.querySelectorAll('#finishQueue .queued-input')).toHaveLength(2);
+  expect(w.document.getElementById('taskPlanPreview')!.hidden).toBe(true);
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ sessionId: summary([]).id, mode: 'finish', text: 'Original first stage', stages: ['Original checkpoint'] });
+});
+
+it('keeps two planner owners independent and ignores a cancelled result after returning to its chat', async () => {
+  const first = summary([]), second = { ...first, id: 'second-chat', title: 'Second chat' };
+  const { w, live } = await boot([], true, [], [], { sessions: [first, second] });
+  const api = (w as any).api;
+  const pending = new Map<string, (value: any) => void>();
+  api.draftTaskPlan = vi.fn((text: string) => new Promise(resolve => { pending.set(text, resolve); }));
+  api.cancelTaskRequest = vi.fn(async () => ({ ok: true, data: true }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  const generate = () => w.document.getElementById('createPlan')!.click();
+  const select = async (id: string) => { (w.document.querySelector(`#sessionList [data-id="${id}"]`) as HTMLElement).click(); await settle(); };
+  input.value = 'Plan A'; generate(); await settle();
+  const requestA = api.draftTaskPlan.mock.calls[0][2];
+  await select(second.id);
+  input.value = 'Plan B'; generate(); await settle();
+  pending.get('Plan A')!({ ok: true, data: ['A first', 'A check'] }); await settle();
+  expect(w.document.querySelectorAll('.plan-stage')).toHaveLength(0);
+  expect(w.document.getElementById('createPlan')!.getAttribute('aria-busy')).toBe('true');
+  await select(first.id);
+  expect(w.document.getElementById('finishQueue')!.textContent).toContain('A first');
+  await select(second.id);
+  const requestB = api.draftTaskPlan.mock.calls[1][2];
+  generate(); // Explicitly cancel B; A and navigation did not cancel it.
+  expect(api.cancelTaskRequest.mock.calls).toEqual([[requestB]]);
+  expect(api.cancelTaskRequest).not.toHaveBeenCalledWith(requestA);
+  input.value = 'B replacement'; generate(); await settle();
+  pending.get('Plan B')!({ ok: true, data: ['Stale B result'] }); await settle();
+  expect(w.document.getElementById('taskPlanPreview')!.textContent).not.toContain('Stale B');
+  pending.get('B replacement')!({ ok: false, error: 'Planner unavailable' }); await settle();
+  await select(first.id); await select(second.id);
+  expect(w.document.getElementById('taskPlanPreview')!.textContent).toContain('Planner unavailable');
+  expect(input.value).toBe('B replacement');
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ sessionId: first.id, text: 'A first', mode: 'finish' });
 });
 
 it('renders existing-chat Goal draft stages from main controls without starting another request', async () => {

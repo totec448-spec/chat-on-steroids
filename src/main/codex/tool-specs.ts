@@ -39,8 +39,8 @@ export const BROWSER_LAUNCH_GUIDANCE =
   'Browsers: do not spawn a new browser, profile or debug port per attempt — each stays resident and heats the CPU. Keep to one or two windows you actually use and reuse the one already open.';
 
 export const EXEC_COMMAND_DESCRIPTION = IS_WINDOWS
-  ? `Runs a command in a PTY, returning output or a session ID for ongoing interaction. Every returned session ID must be polled with write_stdin until its terminal result is returned.\n\n${WINDOWS_SHELL_GUIDANCE}\n\n${BROWSER_LAUNCH_GUIDANCE}`
-  : `Runs a command in a PTY, returning output or a session ID for ongoing interaction. Every returned session ID must be polled with write_stdin until its terminal result is returned.\n\n${BROWSER_LAUNCH_GUIDANCE}`;
+  ? `Runs a command in a PTY, returning output or a session ID for ongoing interaction. Completed background output follows automatically on this chat's later tool responses. Use write_stdin with the returned ID for input, progress or an intentional wait while it runs.\n\n${WINDOWS_SHELL_GUIDANCE}\n\n${BROWSER_LAUNCH_GUIDANCE}`
+  : `Runs a command in a PTY, returning output or a session ID for ongoing interaction. Completed background output follows automatically on this chat's later tool responses. Use write_stdin with the returned ID for input, progress or an intentional wait while it runs.\n\n${BROWSER_LAUNCH_GUIDANCE}`;
 
 /**
  * Codex's text is 'Shell command to execute.'; two measured additions.
@@ -76,14 +76,11 @@ export const EXEC_COMMAND_YIELD_TIME_DESCRIPTION = IS_WINDOWS
  *
  * It is still *accepted* because these schemas are `.strict()` and ChatGPT caches tool definitions:
  * dropping the key turned older chats' calls into `Unrecognized key`, refusing the whole command.
- * So take the key, ignore it, and say so once in the notes.
+ * Accept it silently; the declaration already explains that it is ignored. Repeating the
+ * migration advice on every result only amplified stale-schema calls into transcript noise.
  */
 export const MAX_OUTPUT_TOKENS_DESCRIPTION =
   'Ignored; still accepted so older cached schemas keep working. Omit it.';
-
-/** The note a call that still sends the retired budget gets back, once, alongside its output. */
-export const MAX_OUTPUT_TOKENS_RETIRED_NOTE =
-  'max_output_tokens is retired and was ignored; output uses the fixed 10000-token budget. Omit the parameter.';
 
 export const EXEC_COMMAND_SHELL_DESCRIPTION = "Shell binary to launch. Defaults to the user's default shell.";
 
@@ -93,7 +90,7 @@ export const EXEC_COMMAND_LOGIN_DESCRIPTION =
     : 'True runs the shell with -l/-i semantics; false disables them. Defaults to true.';
 
 export const WRITE_STDIN_DESCRIPTION =
-  'Writes characters to an existing unified exec session and returns recent output. Keep polling a returned session ID until its terminal result; after a transient wait failure, retry this same session ID rather than starting replacement work.';
+  'Writes characters to an existing unified exec session and returns recent output. Use the exact returned session ID for input, progress or waiting. Completed background output also follows automatically on later tool responses; after a transient wait failure, retry the same session ID rather than starting replacement work.';
 
 export const WRITE_STDIN_SESSION_ID_DESCRIPTION = 'Identifier of the running unified exec session.';
 

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -44,11 +44,12 @@ function tag(repository: string, name: string, message: string, email: string): 
   });
 }
 
-function verify(repository: string) {
-  return spawnSync(process.execPath, [script], {
+function verify(repository: string, args: string[] = []) {
+  return spawnSync(process.execPath, [script, ...args], {
     cwd: repository,
     encoding: 'utf8',
     windowsHide: true,
+    env: { ...process.env, GIT_AUTHOR_NAME: 'totec448-spec', GIT_AUTHOR_EMAIL: safeEmail },
   });
 }
 
@@ -59,6 +60,50 @@ afterEach(() => {
 });
 
 describe('public-history privacy gate', () => {
+  it.each(['\\', '\\\\', '/'])('rejects private roots using %s in staged and committed content without echoing them', separator => {
+    const repository = makeRepository();
+    const privateRoot = ['C:', 'Users', 'totec'].join(separator);
+    writeFileSync(path.join(repository, 'README.md'), `Local root: ${privateRoot}`);
+    execFileSync('git', ['add', 'README.md'], { cwd: repository });
+    const staged = verify(repository, ['--staged']);
+    expect(staged.status).toBe(1);
+    expect(staged.stderr).toContain('private Windows user path');
+    expect(staged.stderr).not.toContain(privateRoot);
+    commit(repository, 'Private fixture', safeEmail);
+    expect(verify(repository).status).toBe(1);
+  });
+
+  it.each(['outputs/clean.txt', '.codex-remote-attachments/clean.txt', 'docs/audit-user-requests-20260905-06.md'])
+    ('rejects tracked evidence %s despite ignore rules and preserves the immutable HEAD check after index-only cleanup', file => {
+      const repository = makeRepository();
+      mkdirSync(path.dirname(path.join(repository, file)), { recursive: true });
+      writeFileSync(path.join(repository, file), 'Local evidence retained');
+      writeFileSync(path.join(repository, '.gitignore'), `/${file}\n`);
+      execFileSync('git', ['add', '-f', '--', file], { cwd: repository });
+      expect(verify(repository, ['--staged']).stderr).toContain('tracks private evidence');
+      commit(repository, 'Tracked evidence fixture', safeEmail);
+      expect(verify(repository).stderr).toContain('tracks private evidence');
+      execFileSync('git', ['rm', '--cached', '--', file], { cwd: repository });
+      expect(readFileSync(path.join(repository, file), 'utf8')).toBe('Local evidence retained');
+      expect(verify(repository, ['--staged']).status).toBe(0);
+      expect(verify(repository).status).toBe(1);
+    });
+
+  it('excludes local evidence from Git source archives even if forcibly tracked', () => {
+    const repository = makeRepository();
+    writeFileSync(path.join(repository, '.gitattributes'), readFileSync(path.join(process.cwd(), '.gitattributes')));
+    for (const file of ['outputs/evidence.txt', '.codex-remote-attachments/image.txt', 'docs/audit-user-requests-20260905-06.md']) {
+      mkdirSync(path.dirname(path.join(repository, file)), { recursive: true });
+      writeFileSync(path.join(repository, file), 'LOCAL_PRIVATE_EVIDENCE');
+      execFileSync('git', ['add', '-f', '--', file], { cwd: repository });
+    }
+    execFileSync('git', ['add', '.gitattributes'], { cwd: repository });
+    commit(repository, 'Archive fixture', safeEmail);
+    const archive = execFileSync('git', ['archive', '--format=tar', 'HEAD'], { cwd: repository });
+    expect(archive.includes(Buffer.from('LOCAL_PRIVATE_EVIDENCE'))).toBe(false);
+    expect(archive.includes(Buffer.from('README.md'))).toBe(true);
+  });
+
   it('accepts the numeric GitHub noreply identity', () => {
     const repository = makeRepository();
     const result = verify(repository);

@@ -24,8 +24,8 @@
  * landed in Unattributed activity. First proof wins, and it keeps winning.
  */
 
-import { readDurable, writeDurableSoon } from '../durable.js';
-import { readEverySummary, readRecentEvents } from './store.js';
+import { readDurable, writeDurableSnapshotSoon } from '../durable.js';
+import { indexedSessions, readRecentEvents } from './store.js';
 
 export interface RequestCorrelation {
   requestId: string;
@@ -93,7 +93,7 @@ function snapshot(): PersistedCorrelations {
 }
 
 function persist(): void {
-  writeDurableSoon(CORRELATIONS_STATE, snapshot());
+  writeDurableSnapshotSoon(CORRELATIONS_STATE, snapshot);
 }
 
 /**
@@ -217,12 +217,7 @@ async function restoreRequestCorrelationsOnce(): Promise<void> {
   // is idempotent for the same conversation and still makes contradictions sticky.
   let sessions;
   try {
-    // Every retained session, not the bounded list. This decides which conversation owns a
-    // request id, and `readAllSummaries()` behind `listAllSessions()` stops at
-    // MAX_SCANNED_SESSIONS and says so in its own doc comment: do not use it for identity.
-    // Past that cap it answers "no such session" for a session that exists, and the request
-    // is then reconciled against whatever else claims it.
-    sessions = await readEverySummary();
+    sessions = await indexedSessions();
   } catch (error) {
     // A valid direct snapshot can be restored before the session store is initialized (some
     // tests and narrowly scoped consumers do exactly that). In the real app the store is ready

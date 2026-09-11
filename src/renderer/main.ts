@@ -1,3 +1,5 @@
+import { ui, uiText, t, initLanguage } from './i18n.js';
+import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initUsage, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
@@ -25,7 +27,7 @@ import {
   RELEASES_PAGE,
   CAPABILITY_DETAILS,
   CAPABILITY_LABELS,
-  CAPABILITY_TOOLS,
+  capabilityTools,
   DESKTOP_CAPABILITIES,
   WRITE_CAPABILITIES
 } from '../shared/types.js';
@@ -40,6 +42,7 @@ declare global {
 }
 
 const api = window.api;
+initLanguage();
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
 const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;
@@ -56,30 +59,30 @@ interface Group {
 const GROUPS: Group[] = [
   {
     id: 'read',
-    title: 'Look at files',
+    title: "Look at files",
     icon: 'i-eye',
-    blurb: 'Read and search inside the folders you approved.',
+    blurb: "Read and search inside the folders you approved.",
     caps: ['browse', 'search', 'read', 'metadata']
   },
   {
     id: 'write',
-    title: 'Change files',
+    title: "Change files",
     icon: 'i-pencil',
-    blurb: 'Create, edit, move, delete and save ChatGPT files, inside those folders only.',
+    blurb: "Create, edit, move, delete and save ChatGPT files, inside those folders only.",
     caps: ['create', 'edit', 'move', 'deleteFile', 'saveArtifact']
   },
   {
     id: 'desktop',
-    title: 'See and use the desktop',
+    title: "See and use the desktop",
     icon: 'i-monitor',
-    blurb: 'Screenshots, the list of open windows, and the mouse and keyboard.',
+    blurb: "Screenshots, the list of open windows, and the mouse and keyboard.",
     caps: ['screen', 'control', 'clipboardRead', 'clipboardWrite']
   },
   {
     id: 'run',
-    title: 'Run programs',
+    title: "Run programs",
     icon: 'i-terminal',
-    blurb: 'Start commands as you. The most powerful setting here.',
+    blurb: "Start commands as you. The most powerful setting here.",
     caps: ['command']
   }
 ];
@@ -186,7 +189,7 @@ function groupShell(id: string, title: string, iconId: string, box: HTMLInputEle
   main.className = 'perm-main';
   main.type = 'button';
   const text = el('span');
-  text.append(el('b', '', title), el('em', 'group-count'));
+  text.append(el('b', '', () => t(title)), el('em', 'group-count'));
   main.append(icon('i-chev', 'ico chev'), icon(iconId), text);
   main.addEventListener('click', () => {
     openGroup = openGroup === id ? null : id;
@@ -209,7 +212,7 @@ function groupShell(id: string, title: string, iconId: string, box: HTMLInputEle
  * The permission copy used to carry the tool names inside its prose, which is where they
  * went stale: the surface was consolidated to `read` / `apply_patch` / `exec_command` and
  * a sentence in a different file kept describing the old one. Here the names come from
- * CAPABILITY_TOOLS, so a renamed tool is renamed once.
+ * capabilityTools, including the host's shared Desktop method lists.
  */
 function toolNames(names: readonly string[]): HTMLElement {
   const row = el('div', 'tool-names');
@@ -222,7 +225,7 @@ function buildGroups(): void {
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.className = 'group-box';
-    box.title = `Turn everything in "${group.title}" on or off`;
+    ui(box, 'title', () => t("Turn everything in \"{0}\" on or off", [t(group.title)]));
     box.addEventListener('change', () => {
       for (const cap of group.caps) {
         const input = capInput(cap);
@@ -240,11 +243,11 @@ function buildGroups(): void {
       input.dataset.cap = cap;
       input.addEventListener('change', () => void save());
       const body = el('span');
-      body.append(el('strong', '', CAPABILITY_LABELS[cap]), el('em', '', CAPABILITY_DETAILS[cap]));
+      body.append(el('strong', '', () => t(CAPABILITY_LABELS[cap])), el('em', '', () => t(CAPABILITY_DETAILS[cap])));
       label.append(input, body);
       tools.append(label);
     }
-    tools.append(toolNames([...new Set(group.caps.flatMap((cap) => CAPABILITY_TOOLS[cap]))]));
+    tools.append(toolNames([]));
 
     root.append(tools);
     return root;
@@ -258,7 +261,7 @@ function buildGroups(): void {
   const record = document.createElement('input');
   record.type = 'checkbox';
   record.id = 'sessRecord';
-  record.title = 'Record this chat locally, and expose the session tool in ChatGPT';
+  ui(record, 'title', () => t("Record this chat locally, and expose the session tool in ChatGPT"));
   record.addEventListener('change', () => void save());
   const recording = groupShell('recording', 'Session recording', 'i-steps', record);
   const recordTools = el('div', 'tools');
@@ -268,7 +271,7 @@ function buildGroups(): void {
   ] as Array<[string, string]>) {
     const row = el('div', 'tool is-static');
     const body = el('span');
-    body.append(el('strong', '', name), el('em', '', detail));
+    body.append(el('strong', '', name), el('em', '', () => t(detail)));
     row.append(body);
     recordTools.append(row);
   }
@@ -278,7 +281,7 @@ function buildGroups(): void {
   const enabled = document.createElement('input');
   enabled.type = 'checkbox';
   enabled.id = 'homeMaEnabled';
-  enabled.title = 'Expose or hide the sub-agent tools in ChatGPT';
+  ui(enabled, 'title', () => t("Expose or hide the sub-agent tools in ChatGPT"));
   // The only multi-agent exposure control there is. Chat settings used to carry a second
   // checkbox for the same flag, which this one had to mirror by hand.
   enabled.addEventListener('change', () => void save());
@@ -294,7 +297,7 @@ function buildGroups(): void {
   for (const [name, detail] of agentTools) {
     const row = el('div', 'tool is-static');
     const body = el('span');
-    body.append(el('strong', '', name), el('em', '', detail));
+    body.append(el('strong', '', name), el('em', '', () => t(detail)));
     row.append(body);
     tools.append(row);
   }
@@ -324,6 +327,13 @@ function paintGroups(): void {
     }
     root.classList.toggle('is-open', openGroup === group.id);
 
+    const names = [...new Set(group.caps.flatMap((cap) => capabilityTools(cap, state!.platform?.family)))];
+    if (group.id === 'desktop' && names.length > 0) names.push('exec');
+    const namesRow = root.querySelector<HTMLElement>('.tool-names')!;
+    if (Array.from(namesRow.children, child => child.textContent).join('\n') !== names.join('\n')) {
+      namesRow.replaceChildren(...names.map(name => el('code', '', name)));
+    }
+
     const usable = group.caps.filter((cap) => !(readOnly && WRITE_CAPABILITIES.includes(cap)));
     const on = group.caps.filter((cap) => capInput(cap).checked);
 
@@ -332,14 +342,13 @@ function paintGroups(): void {
     box.indeterminate = !box.checked && on.length > 0;
     box.disabled = usable.length === 0;
 
-    root.querySelector<HTMLElement>('.group-count')!.textContent =
-      usable.length === 0
-        ? 'off in read-only mode'
+    ui(root.querySelector<HTMLElement>('.group-count')!, 'textContent', () => usable.length === 0
+        ? t("off in read-only mode")
         : on.length === 0
           ? 'off'
           : on.length === group.caps.length
-            ? `${on.length} permission${on.length === 1 ? '' : 's'}`
-            : `${on.length} of ${group.caps.length} permissions`;
+            ? t(on.length === 1 ? '{0} permission' : '{0} permissions', [on.length])
+            : t("{0} of {1} permissions", [on.length, group.caps.length]));
 
     root.classList.toggle('is-on', on.length > 0);
     root.classList.toggle('is-locked', usable.length === 0);
@@ -360,7 +369,7 @@ function paintGroups(): void {
     const box = root.querySelector<HTMLInputElement>('.sw input')!;
     root.classList.toggle('is-open', openGroup === id);
     root.classList.toggle('is-on', box.checked);
-    root.querySelector<HTMLElement>('.group-count')!.textContent = box.checked ? onText : 'off';
+    ui(root.querySelector<HTMLElement>('.group-count')!, 'textContent', () => t(box.checked ? onText : 'off'));
   }
 }
 
@@ -375,17 +384,16 @@ function paintDesktopAccess(next: AppState): void {
   }
 
   const missing: string[] = [];
-  if (needsScreen && access.screen !== 'granted') missing.push(`Screen Recording: ${access.screen}`);
+  if (needsScreen && access.screen !== 'granted') missing.push(t("Screen Recording: {0}", [access.screen]));
   if (needsAccessibility && access.accessibility !== 'granted') {
-    missing.push(`Accessibility: ${access.accessibility}`);
+    missing.push(t("Accessibility: {0}", [access.accessibility]));
   }
   box.hidden = missing.length === 0;
   if (box.hidden) return;
 
-  $('desktopAccessTitle').textContent = 'Desktop access needs attention';
-  $('desktopAccessDetail').textContent =
-    `${missing.join(' · ')}. These are live verdicts from the native backend executing inside Chat On Steroids. ` +
-    'Grant the missing macOS permission, then fully quit and reopen the app.';
+  ui($('desktopAccessTitle'), 'textContent', () => t("Desktop access needs attention"));
+  ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat On Steroids. ", [missing.join(' · ')]) +
+    t("Grant the missing macOS permission, then fully quit and reopen the app."));
   $<HTMLButtonElement>('openDesktopScreen').hidden =
     !needsScreen || access.screen === 'granted';
   $<HTMLButtonElement>('openDesktopAccessibility').hidden =
@@ -505,9 +513,9 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (previous.multiAgent.enabled && !patch.multiAgent.enabled) {
       // A cached snapshot keeps offering the `agents` tool until the connector is
       // reloaded. Say so plainly rather than letting it look sticky.
-      toast('Multi-agent off. Reconnect the connector in ChatGPT (then start a new chat) to drop the agents tool.');
+      toast(t("Multi-agent off. Reconnect the connector in ChatGPT (then start a new chat) to drop the agents tool."));
     } else if (toolSurfaceChanged) {
-      toast('Tools changed. Start a new ChatGPT conversation to guarantee the new tool list is loaded.');
+      toast(t("Tools changed. Start a new ChatGPT conversation to guarantee the new tool list is loaded."));
     }
   } else await refresh();
   // Do not erase the desired state of a newer queued save when an older one completes.
@@ -517,21 +525,21 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
 // ---------------------------------------------------------------- helpers
 
 const STATUS_TEXT: Record<AppState['status']['state'], string> = {
-  disconnected: 'Not connected',
-  'starting-server': 'Starting',
-  'connecting-tunnel': 'Connecting',
-  connected: 'Connected',
-  offline: 'No internet',
-  'auth-failed': 'Sign-in failed',
-  'tunnel-unavailable': 'Tunnel unavailable'
+  disconnected: "Not connected",
+  'starting-server': "Starting",
+  'connecting-tunnel': "Connecting",
+  connected: "Connected",
+  offline: "No internet",
+  'auth-failed': "Sign-in failed",
+  'tunnel-unavailable': "Tunnel unavailable"
 };
 
 const METHOD_HINT: Record<string, string> = {
   openai:
-    'ChatGPT reaches this computer through an OpenAI tunnel. Nothing is exposed to the open internet.',
+    "ChatGPT reaches this computer through an OpenAI tunnel. Nothing is exposed to the open internet.",
   cloudflared:
-    'Creates a temporary public https address with Cloudflare. The address changes on every restart.',
-  manual: 'This app only listens on localhost. You are responsible for exposing it.'
+    "Creates a temporary public https address with Cloudflare. The address changes on every restart.",
+  manual: "This app only listens on localhost. You are responsible for exposing it."
 };
 
 function duration(seconds: number | null): string {
@@ -561,20 +569,20 @@ function missingStep(next: AppState): { step: string; text: string } | null {
   // clipboard may legitimately be rootless; enabling one must not hide a root still needed
   // by an effective file/patch/command capability on Core.
   if (config.roots.length === 0 && requiresApprovedFilesystemRoot(config)) {
-    return { step: 'folder', text: 'Choose a folder to share — step 1.' };
+    return { step: 'folder', text: t("Choose a folder to share — step 1.") };
   }
   if (config.tunnel.kind === 'openai') {
     if (!TUNNEL_ID_PATTERN.test(config.tunnel.tunnelId)) {
-      return { step: 'tunnel', text: 'Create a tunnel and paste its ID — step 2.' };
+      return { step: 'tunnel', text: t("Create a tunnel and paste its ID — step 2.") };
     }
     if (!(next.secureStorage?.available ?? true) && !next.hasApiKey) {
-      return { step: 'key', text: next.secureStorage?.detail ?? 'Secure credential storage is unavailable.' };
+      return { step: 'key', text: next.secureStorage?.detail ?? t("Secure credential storage is unavailable.") };
     }
     if (!next.hasApiKey) {
-      return { step: 'key', text: 'Add a restricted API key — step 3.' };
+      return { step: 'key', text: t("Add a restricted API key — step 3.") };
     }
   } else if (!next.resolvedBinary && config.tunnel.kind === 'cloudflared') {
-    return { step: 'connect', text: 'cloudflared was not found on this computer.' };
+    return { step: 'connect', text: t("cloudflared was not found on this computer.") };
   }
   return null;
 }
@@ -653,7 +661,7 @@ function rootRow(root: AppState['config']['roots'][number]): HTMLElement {
     input.value = renameState.draft;
     input.maxLength = 32;
     input.disabled = renameState.committing;
-    input.setAttribute('aria-label', `Rename /${root.name}`);
+    ui(input, 'aria-label', () => t("Rename /{0}", [root.name]));
     input.addEventListener('input', () => captureRootRenameInput(input, renameState));
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Enter') {
@@ -678,7 +686,7 @@ function rootRow(root: AppState['config']['roots'][number]): HTMLElement {
   const rename = document.createElement('button');
   rename.className = 'btn';
   rename.type = 'button';
-  rename.title = `Rename /${root.name}`;
+  ui(rename, 'title', () => t("Rename /{0}", [root.name]));
   rename.append(icon('i-pencil'));
   rename.addEventListener('click', () => {
     rootRename = {
@@ -697,7 +705,7 @@ function rootRow(root: AppState['config']['roots'][number]): HTMLElement {
   const remove = document.createElement('button');
   remove.className = 'btn';
   remove.type = 'button';
-  remove.title = `Stop sharing /${root.name}`;
+  ui(remove, 'title', () => t("Stop sharing /{0}", [root.name]));
   remove.append(icon('i-trash'));
   remove.addEventListener('click', async () => {
     const result = await run(api.removeRoot(root.name));
@@ -785,35 +793,35 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     // is not one the app can update by itself. That is when the button matters.
     lines.push(
       update.stage === 'checking'
-        ? 'Checking for the latest update…'
+        ? t("Checking for the latest update…")
         : update.stage === 'ready'
-        ? `Chat On Steroids ${update.latest} is downloaded and ready. Install it now, or it installs the next time you quit.`
+        ? t("Chat On Steroids {0} is downloaded and ready. Install it now, or it installs the next time you quit.", [update.latest])
         : update.stage === 'downloading'
-          ? `Chat On Steroids ${update.latest} is downloading. Keep working; you can install it when it lands.`
+          ? t("Chat On Steroids {0} is downloading. Keep working; you can install it when it lands.", [update.latest])
           : update.stage === 'failed'
-            ? `Chat On Steroids ${update.latest} could not be downloaded: ${update.error ?? 'the download stopped'}.`
-            : `Chat On Steroids ${update.latest} is out. This installation has to be updated by hand.`
+            ? t("Chat On Steroids {0} could not be downloaded: {1}.", [update.latest, update.error ?? t("the download stopped")])
+            : t("Chat On Steroids {0} is out. This installation has to be updated by hand.", [update.latest])
     );
     if (update.stage === 'failed') tone = 'bad';
   } else if (update.stage === 'failed') {
-    lines.push(`Could not check for a newer version: ${update.error ?? 'the check stopped'}.`);
+    lines.push(t("Could not check for a newer version: {0}.", [update.error ?? t("the check stopped")]));
     tone = 'bad';
   } else if (update.stage === 'checking') {
-    lines.push('Checking for a newer version…');
+    lines.push(t("Checking for a newer version…"));
   } else if (!stale && !missing) {
-    const extension = bridge.present && bridge.extensionVersion ? ` · extension ${bridge.extensionVersion}` : '';
-    lines.push(`Up to date! Chat On Steroids ${update.current}${extension}`);
+    const extension = bridge.present && bridge.extensionVersion ? t(" · extension {0}", [bridge.extensionVersion]) : '';
+    lines.push(t("Up to date! Chat On Steroids {0}{1}", [update.current, extension]));
     tone = 'ok';
   }
   if (stale) {
     lines.push(
-      `Update your browser extension: ${stale} → ${update.current}. ` +
-        'Reload the extension from this app’s folder, then refresh ChatGPT.'
+      t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
+        t("Reload the extension from this app’s folder, then refresh ChatGPT.")
     );
     tone = 'bad';
   }
-  if (missing) { lines.push('Browser extension not connected. Open ChatGPT and check the companion in Setup to load models and send messages.'); tone = 'bad'; }
-  return { text: lines.join(' '), tone, notice: Boolean(update.latest || stale || missing), extensionAction: stale ? 'Update extension' : missing ? 'Check extension' : null };
+  if (missing) { lines.push(t("Browser extension not connected. Open ChatGPT and check the companion in Setup to load models and send messages.")); tone = 'bad'; }
+  return { text: lines.join(' '), tone, notice: Boolean(update.latest || stale || missing), extensionAction: stale ? t("Update extension") : missing ? t("Check extension") : null };
 }
 
 /** The header bar, the Activity line and the one notification, from that single sentence. */
@@ -828,9 +836,9 @@ function paintUpdate(next: AppState): void {
     return;
   }
   const { update } = next;
-  $('updateText').textContent = summary.text;
+  ui($('updateText'), 'textContent', () => updateSummary(next)?.text ?? '');
   $('updateExtension').hidden = !summary.extensionAction;
-  $('updateExtension').textContent = summary.extensionAction ?? 'Update extension';
+  ui($('updateExtension'), 'textContent', () => updateSummary(next)?.extensionAction ?? t("Update extension"));
   $<HTMLButtonElement>('updateGet').hidden = !update.latest || update.stage === 'checking' || update.stage === 'downloading' || update.stage === 'ready';
   // `ready` is the only state with a verified artifact on disk, and therefore the only one in
   // which pressing Install can do anything. Both buttons ask the same question of the same fact.
@@ -838,7 +846,7 @@ function paintUpdate(next: AppState): void {
   $<HTMLButtonElement>('updateInstall').hidden = !installable;
   $<HTMLButtonElement>('installUpdate').hidden = !installable;
   notice.hidden = !summary.notice;
-  line.textContent = summary.text;
+  ui(line, 'textContent', () => updateSummary(next)?.text ?? '');
   line.className = `upline${summary.tone === 'ok' ? ' is-ok' : summary.tone === 'bad' ? ' is-bad' : ''}`;
   line.hidden = false;
   // One notification per window, on the first answer that is an outcome rather than progress.
@@ -868,31 +876,31 @@ function apply(next: AppState): void {
   const dark = config.ui.theme === 'dark';
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   $('themeIcon').setAttribute('href', dark ? '#i-sun' : '#i-moon');
-  $('themeBtn').title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  ui($('themeBtn'), 'title', () => dark ? t("Switch to light mode") : t("Switch to dark mode"));
 
   // ---- header
   const live = $('live');
   live.className = `live${
     connected ? ' is-connected' : offline ? ' is-offline' : busy ? ' is-busy' : failed ? ' is-error' : ''
   }`;
-  $('liveState').textContent = STATUS_TEXT[status.state];
+  ui($('liveState'), 'textContent', () => t(STATUS_TEXT[status.state]));
 
   const id = config.tunnel.tunnelId;
-  $('headerSub').textContent =
-    config.tunnel.kind === 'openai'
+  ui($('headerSub'), 'textContent', () => config.tunnel.kind === 'openai'
       ? TUNNEL_ID_PATTERN.test(id)
         ? `${id.slice(0, 11)}…${id.slice(-4)}`
-        : 'No tunnel yet'
-      : (status.publicUrl ?? status.localUrl ?? config.tunnel.kind);
+        : t("No tunnel yet")
+      : (status.publicUrl ?? status.localUrl ?? config.tunnel.kind));
 
   const connectBtn = $<HTMLButtonElement>('connectBtn');
   connectBtn.classList.toggle('is-running', running);
-  $('connectLabel').textContent = running ? 'Disconnect' : 'Connect';
+  ui($('connectLabel'), 'textContent', () => running ? t("Disconnect") : t("Connect"));
   connectBtn.disabled = !running && missing !== null;
   connectBtn.title = !running && missing ? missing.text : '';
 
   // ---- out of date, app or extension
   paintUpdate(next);
+  paintPluginRefreshReminder(next.update.current);
 
   // ---- health numbers and facts
   paintClock();
@@ -933,7 +941,7 @@ function apply(next: AppState): void {
     config.tunnel.kind,
     previousState?.config.tunnel.kind
   );
-  $('methodHint').textContent = METHOD_HINT[config.tunnel.kind] ?? '';
+  ui($('methodHint'), 'textContent', () => t(METHOD_HINT[config.tunnel.kind] ?? ''));
   applyValue($<HTMLInputElement>('tunnelId'), config.tunnel.tunnelId, previousState?.config.tunnel.tunnelId);
   applyValue(
     $<HTMLInputElement>('desktopTunnelId'),
@@ -966,13 +974,11 @@ function apply(next: AppState): void {
   );
   $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true);
   if (next.platform?.family === 'macos') {
-    $('backgroundRunningCopy').textContent =
-      'Leave it running while you use the connector. It stays available from the menu bar and Dock when you close the window.';
-    $('minimizeToTrayCopy').textContent = 'Hide the window to the menu bar when closed';
+    ui($('backgroundRunningCopy'), 'textContent', () => t("Leave it running while you use the connector. It stays available from the menu bar and Dock when you close the window."));
+    ui($('minimizeToTrayCopy'), 'textContent', () => t("Hide the window to the menu bar when closed"));
   } else {
-    $('backgroundRunningCopy').textContent =
-      'Leave it running while you use the connector. It stays in the tray when you close the window.';
-    $('minimizeToTrayCopy').textContent = 'Keep running in the tray when closed';
+    ui($('backgroundRunningCopy'), 'textContent', () => t("Leave it running while you use the connector. It stays in the tray when you close the window."));
+    ui($('minimizeToTrayCopy'), 'textContent', () => t("Keep running in the tray when closed"));
   }
 
   const openai = config.tunnel.kind === 'openai';
@@ -985,29 +991,28 @@ function apply(next: AppState): void {
   const desktopSurface = status.surfaces.find((surface) => surface.id === 'desktop');
   $('desktopTunnelField').hidden = !openai || !desktopSurface?.available;
 
-  $('wizFolders').textContent =
-    config.roots.length === 0 ? 'None yet' : config.roots.map((r) => `/${r.name}`).join('  ');
+  ui($('wizFolders'), 'textContent', () => config.roots.length === 0 ? t("None yet") : config.roots.map((r) => `/${r.name}`).join('  '));
   const secureStorageAvailable = next.secureStorage?.available ?? true;
   const apiKey = $<HTMLInputElement>('apiKey');
-  apiKey.placeholder = next.hasApiKey ? '•••••••• stored' : 'sk-…';
+  ui(apiKey, 'placeholder', () => next.hasApiKey ? t("•••••••• stored") : 'sk-…');
   apiKey.disabled = !secureStorageAvailable;
-  $('apiKeyState').textContent = !secureStorageAvailable
-    ? (next.secureStorage?.detail ?? 'Secure credential storage is unavailable.')
+  ui($('apiKeyState'), 'textContent', () => !secureStorageAvailable
+    ? (next.secureStorage?.detail ?? t("Secure credential storage is unavailable."))
     : next.hasApiKey
-      ? 'A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.'
-      : 'Stored with secure OS credential storage. It is never shown again and never leaves this app.';
+      ? t("A key is stored with secure OS credential storage. Type a new one to replace it, or use Remove stored API key.")
+      : t("Stored with secure OS credential storage. It is never shown again and never leaves this app."));
   $('apiKeyState').classList.toggle('is-warn', !secureStorageAvailable);
   $<HTMLButtonElement>('removeApiKey').disabled = !next.hasApiKey || !secureStorageAvailable;
 
   const wizConnect = $<HTMLButtonElement>('wizConnect');
-  wizConnect.textContent = running ? 'Disconnect' : 'Connect';
+  ui(wizConnect, 'textContent', () => running ? t("Disconnect") : t("Connect"));
   wizConnect.disabled = connectBtn.disabled;
-  $('wizStatus').textContent = running || failed ? status.detail || STATUS_TEXT[status.state] : '';
+  ui($('wizStatus'), 'textContent', () => running || failed ? status.detail || t(STATUS_TEXT[status.state]) : '');
 
   $('chatgptConn').replaceChildren(
     openai
-      ? frag('For the connection, choose ', 'Tunnel', ' and pick the tunnel you made in step 2.')
-      : frag('For the connection, paste the URL below into ', 'MCP server URL', '.')
+      ? frag("For the connection, choose ", "Tunnel", " and pick the tunnel you made in step 2.")
+      : frag("For the connection, paste the URL below into ", "MCP server URL", '.')
   );
 
   // Says plainly whether the connector has ever reached this app, because a
@@ -1023,18 +1028,17 @@ function apply(next: AppState): void {
     'is-warn',
     status.lastRequestAt !== null && (status.lastToolCallAt === null || unverified.length > 0)
   );
-  chatgptNote.textContent =
-    status.lastRequestAt === null
-      ? 'ChatGPT has not called this app yet.'
+  ui(chatgptNote, 'textContent', () => status.lastRequestAt === null
+      ? t("ChatGPT has not called this app yet.")
       : status.lastToolCallAt === null
-        ? `ChatGPT connected ${ago(status.lastRequestAt)} but has never run a tool. If it says “does not support developer MCPs”, switch Developer mode back on in ChatGPT → Settings → Apps & Connectors → Advanced.`
+        ? t("ChatGPT connected {0} but has never run a tool. If it says “does not support developer MCPs”, switch Developer mode back on in ChatGPT → Settings → Apps & Connectors → Advanced.", [ago(status.lastRequestAt)])
         : unverified.length > 0
           ? // One connector working is not the whole setup. Naming the missing one is the
             // difference between "something is off" and knowing what to go and create.
-            `ChatGPT ran a tool ${ago(status.lastToolCallAt)}, but ${unverified
+            t("ChatGPT ran a tool {0}, but {1} has never been called — create it in ChatGPT to use it.", [ago(status.lastToolCallAt), unverified
               .map((surface) => `“${surface.connectorName}”`)
-              .join(' and ')} has never been called — create it in ChatGPT to use it.`
-          : `ChatGPT ran a tool ${ago(status.lastToolCallAt)} — the whole chain works.`;
+              .join(' and ')])
+          : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(status.lastToolCallAt)]));
 
   const cards = $('connectorCards');
   // A connector the user has switched on but never created in ChatGPT is unfinished setup,
@@ -1077,17 +1081,17 @@ function apply(next: AppState): void {
   $('wizard').classList.toggle('is-tidy', allDone && !showAllSteps);
   const expand = $<HTMLButtonElement>('wizExpand');
   expand.hidden = !allDone;
-  expand.textContent = showAllSteps ? 'Hide finished steps' : 'Show all steps';
+  ui(expand, 'textContent', () => showAllSteps ? t("Hide finished steps") : t("Show all steps"));
 
   const needsBinary = config.tunnel.kind !== 'manual';
-  $('binaryState').textContent = !needsBinary
-    ? 'Not needed for this method.'
+  ui($('binaryState'), 'textContent', () => !needsBinary
+    ? t("Not needed for this method.")
     : next.resolvedBinary
-      ? `Using ${next.resolvedBinary}`
-      : 'Not found. Install it, or choose the file with Browse.';
-  $('versionLine').textContent = next.bundledTunnelVersion
-    ? `Recent activity only — no file contents, no credentials. Bundled tunnel-client ${next.bundledTunnelVersion}.`
-    : 'Recent activity only. File contents and credentials are never recorded.';
+      ? t("Using {0}", [next.resolvedBinary])
+      : t("Not found. Install it, or choose the file with Browse."));
+  ui($('versionLine'), 'textContent', () => next.bundledTunnelVersion
+    ? t("Recent activity only — no file contents, no credentials. Bundled tunnel-client {0}.", [next.bundledTunnelVersion])
+    : t("Recent activity only. File contents and credentials are never recorded."));
 
   chatApply(next, previousState?.config);
 
@@ -1095,14 +1099,14 @@ function apply(next: AppState): void {
 }
 
 const SURFACE_STATE_TEXT: Record<SurfaceStatus['state'], string> = {
-  off: 'Not published',
-  starting: 'Connecting…',
-  live: 'Published',
-  error: 'Problem'
+  off: "Not published",
+  starting: "Connecting…",
+  live: "Published",
+  error: "Problem"
 };
 
 /** One copyable value with its own button, so nothing has to be retyped by hand. */
-function copyRow(label: string, value: string, what: string): HTMLElement {
+function copyRow(label: string | (() => string), value: string, what: string): HTMLElement {
   const field = el('div', 'field');
   const input = document.createElement('input');
   input.type = 'text';
@@ -1111,10 +1115,10 @@ function copyRow(label: string, value: string, what: string): HTMLElement {
   input.value = value;
   const button = el('button', 'btn btn-solid');
   (button as HTMLButtonElement).type = 'button';
-  button.append(icon('i-copy'), document.createTextNode('Copy'));
+  button.append(icon('i-copy'), uiText(() => t("Copy")));
   button.addEventListener('click', async () => {
     const copied = await run(api.writeClipboard(value));
-    if (copied) toast(`${what} copied`);
+    if (copied) toast(t('{0} copied', [t(what)]));
   });
   const row = el('div', 'row-inline');
   row.append(input, button);
@@ -1141,36 +1145,36 @@ function connectorCards(next: AppState): HTMLElement[] {
     const head = el('div', 'connector-head');
     head.append(
       el('h4', '', surface.connectorName),
-      el('span', 'tag', surface.optional ? 'optional' : 'required'),
-      el('span', `pill is-${surface.state}`, SURFACE_STATE_TEXT[surface.state])
+      el('span', 'tag', () => t(surface.optional ? 'optional' : 'required')),
+      el('span', `pill is-${surface.state}`, () => t(SURFACE_STATE_TEXT[surface.state]))
     );
-    card.append(head, el('p', 'hint', surface.cardSummary));
+    card.append(head, el('p', 'hint', () => t(surface.cardSummary)));
 
     if (!surface.available) {
       card.append(el('p', 'hint', surface.detail));
       return card;
     }
 
-    card.append(copyRow('Name', surface.connectorName, 'Name'));
-    card.append(copyRow('Description', surface.description, 'Description'));
+    card.append(copyRow(() => t("Name"), surface.connectorName, 'Name'));
+    card.append(copyRow(() => t("Description"), surface.description, 'Description'));
 
     // On the OpenAI method the connector is picked from a list of tunnels instead of
     // pasted as a URL, so showing a loopback address there would only mislead.
     const url =
       surface.publicUrl ?? (config.tunnel.kind === 'manual' ? surface.localUrl : null);
     if (url) {
-      card.append(copyRow('MCP server URL', url, 'URL'));
+      card.append(copyRow(() => t("MCP server URL"), url, 'URL'));
       card.append(
-        el('p', 'hint', 'Anyone with this URL can use your enabled tools. Do not share it.')
+        el('p', 'hint', () => t("Anyone with this URL can use your enabled tools. Do not share it."))
       );
     } else if (config.tunnel.kind === 'openai') {
       card.append(
         el(
           'p',
           'hint',
-          (surface.id === 'desktop' && !config.tunnel.desktopTunnelId) || (surface.id === 'plugins' && !config.tunnel.pluginsTunnelId)
-            ? 'Pick this connector’s own tunnel — paste its ID in step 2 first.'
-            : 'Choose Tunnel, then pick this connector’s tunnel.'
+          () => (surface.id === 'desktop' && !config.tunnel.desktopTunnelId) || (surface.id === 'plugins' && !config.tunnel.pluginsTunnelId)
+            ? t("Pick this connector’s own tunnel — paste its ID in step 2 first.")
+            : t("Choose Tunnel, then pick this connector’s tunnel.")
         )
       );
     }
@@ -1183,19 +1187,19 @@ function connectorCards(next: AppState): HTMLElement[] {
     if (surface.state === 'live') {
       card.append(
         surface.lastRequestAt === null
-          ? el('p', 'hint is-warn', 'Not created in ChatGPT yet — ChatGPT has never called this connector.')
+          ? el('p', 'hint is-warn', () => t("Not created in ChatGPT yet — ChatGPT has never called this connector."))
           : el(
               'p',
               'hint',
-              surface.lastToolCallAt === null
-                ? `ChatGPT connected ${ago(surface.lastRequestAt)} but has not run one of its tools yet.`
-                : `ChatGPT ran one of its tools ${ago(surface.lastToolCallAt)}.`
+              () => surface.lastToolCallAt === null
+                ? t("ChatGPT connected {0} but has not run one of its tools yet.", [ago(surface.lastRequestAt)])
+                : t("ChatGPT ran one of its tools {0}.", [ago(surface.lastToolCallAt)])
             )
       );
     }
 
     if (surface.tools.length > 0) {
-      card.append(el('p', 'hint', `Tools: ${surface.tools.join(', ')}`));
+      card.append(el('p', 'hint', () => t("Tools: {0}", [surface.tools.join(', ')])));
     }
     return card;
     });
@@ -1208,14 +1212,14 @@ function connectorCards(next: AppState): HTMLElement[] {
  */
 function facts(next: AppState): HTMLElement[] {
   const { status, config } = next;
-  const rows: [string, string, boolean?][] = [];
+  const rows: [string, () => string, boolean?][] = [];
   const health = status.health;
 
   if (isRunning(status.state)) {
-    rows.push(['Route to OpenAI', health?.route ?? 'starting…']);
+    rows.push(['Route to OpenAI', () => health?.route ?? t('Starting…')]);
     rows.push([
       'Poll errors',
-      health?.pollErrors === null || health?.pollErrors === undefined
+      () => health?.pollErrors === null || health?.pollErrors === undefined
         ? '—'
         : String(health.pollErrors),
       (health?.pollErrors ?? 0) > 0
@@ -1223,36 +1227,36 @@ function facts(next: AppState): HTMLElement[] {
     const probe = health?.probe ?? null;
     rows.push([
       'Tunnel → this app',
-      probe ?? 'checking…',
+      () => probe ?? t('Checking…'),
       probe !== null && probe !== 'ok' && probe !== 'success' && probe !== 'healthy'
     ]);
-    rows.push(['Tunnel uptime', duration(health?.uptimeSeconds ?? null)]);
+    rows.push(['Tunnel uptime', () => duration(health?.uptimeSeconds ?? null)]);
     // Requests but no tool call is what an account with Developer mode switched off
     // looks like from here, and it is invisible in every other number on this card.
     if (status.lastRequestAt !== null) {
       rows.push([
         'ChatGPT ran a tool',
-        status.lastToolCallAt === null ? 'never — check Developer mode' : ago(status.lastToolCallAt),
+        () => status.lastToolCallAt === null ? t("never — check Developer mode") : ago(status.lastToolCallAt),
         status.lastToolCallAt === null
       ]);
     }
-    if (health?.clientVersion) rows.push(['Tunnel client', health.clientVersion]);
-    if (status.localUrl) rows.push(['Local server', status.localUrl.replace(/^https?:\/\//, '')]);
+    if (health?.clientVersion) rows.push(['Tunnel client', () => health.clientVersion!]);
+    if (status.localUrl) rows.push(['Local server', () => status.localUrl!.replace(/^https?:\/\//, '')]);
   } else {
-    rows.push(['Route to OpenAI', 'not running']);
+    rows.push(['Route to OpenAI', () => t('not running')]);
   }
 
   rows.push([
     'Tools across Core + Desktop',
-    `${toolsOn(next)} total · ${config.roots.length} folder${config.roots.length === 1 ? '' : 's'}`
+    () => t(config.roots.length === 1 ? '{0} total · {1} folder' : '{0} total · {1} folders', [toolsOn(next), config.roots.length])
   ]);
 
   return rows.map(([label, value, bad]) => {
     const row = el('div', 'fact');
     const code = el('code', bad ? 'is-bad' : '', value);
     // The row is cut to fit, so the full value has to stay reachable somehow.
-    code.title = value;
-    row.append(el('span', '', label), code);
+    ui(code, 'title', value);
+    row.append(el('span', '', () => t(label)), code);
     return row;
   });
 }
@@ -1275,11 +1279,11 @@ function paintClock(): void {
   request.textContent = shortAgo(status.lastRequestAt);
   request.className = status.lastRequestAt === null ? 'is-cold' : '';
 
-  $('liveNote').textContent = running
+  ui($('liveNote'), 'textContent', () => running
     ? status.handshakeAt === null
-      ? 'no handshake yet'
-      : `verified ${ago(status.handshakeAt)}`
-    : '';
+      ? t("no handshake yet")
+      : t("verified {0}", [ago(status.handshakeAt)])
+    : '');
 }
 
 window.setInterval(paintClock, 1000);
@@ -1291,7 +1295,7 @@ function step(name: string): HTMLElement {
 /** Builds "text <strong>bold</strong> text" without touching innerHTML. */
 function frag(before: string, bold: string, after: string): DocumentFragment {
   const f = document.createDocumentFragment();
-  f.append(before, el('strong', '', bold), after);
+  f.append(uiText(() => t(before)), el('strong', '', () => t(bold)), uiText(() => t(after)));
   return f;
 }
 
@@ -1310,7 +1314,7 @@ function paintProblems(): void {
   for (const id of ['homeProblems', 'logProblems']) {
     const badge = $(id);
     badge.hidden = problems === 0;
-    badge.textContent = `${problems} problem${problems === 1 ? '' : 's'}`;
+    ui(badge, 'textContent', () => t(problems === 1 ? '{0} problem' : '{0} problems', [problems]));
   }
 }
 
@@ -1431,7 +1435,7 @@ function paintAgentFilter(swarm: SwarmState): void {
     return;
   }
   // Prime first, then workers in creation order — the order the broker reports them.
-  const choices: Array<{ id: string | null; label: string }> = [{ id: null, label: 'All' }];
+  const choices: Array<{ id: string | null; label: string }> = [{ id: null, label: t("All") }];
   for (const agent of swarm.agents) choices.push({ id: agent.id, label: agent.label || agent.id });
   if (agentFilter !== null && !swarm.agents.some((agent) => agent.id === agentFilter)) {
     agentFilter = null;
@@ -1486,7 +1490,7 @@ async function toggleConnection(): Promise<void> {
 async function runChecks(): Promise<void> {
   const button = $<HTMLButtonElement>('runChecks');
   button.disabled = true;
-  $('runChecksLabel').textContent = 'Checking…';
+  ui($('runChecksLabel'), 'textContent', () => t("Checking…"));
   try {
     const result = await run(api.runDiagnostics());
     if (!result) return;
@@ -1516,7 +1520,7 @@ async function runChecks(): Promise<void> {
     $('checksBox').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   } finally {
     button.disabled = false;
-    $('runChecksLabel').textContent = 'Run checks';
+    ui($('runChecksLabel'), 'textContent', () => t("Run checks"));
   }
 }
 
@@ -1597,7 +1601,7 @@ $('updateGet').addEventListener('click', () => void run(api.openLink(RELEASES_PA
  * click looking like a crash. Both buttons are the same action; either can be the one pressed.
  */
 function installUpdate(): void {
-  toast('Installing the update. Chat On Steroids closes and starts again as the new version.');
+  toast(t("Installing the update. Chat On Steroids closes and starts again as the new version."));
   void run(api.installUpdate());
 }
 

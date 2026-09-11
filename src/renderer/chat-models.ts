@@ -1,3 +1,4 @@
+import { ui, t } from './i18n.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
 import { chatModelDisplayLabel } from '../shared/chat-models.js';
 import type { Config } from '../shared/types.js';
@@ -13,8 +14,9 @@ let catalogSubscribed = false;
 type ObservedSelection = { model: string; reasoningEffort?: ReasoningEffort; observedAt: number };
 let composerContext: { scope: string | null; observation: ObservedSelection | null; edited: boolean } | null = null;
 const pairs = [['composerModel', 'composerReasoning'], ['workerModel', 'workerReasoning'], ['helperModel', 'helperReasoning']] as const;
-const effortNames: Record<string, string> = { none: 'Instant', minimal: 'Minimal', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra', pro: 'Pro' } satisfies Record<ReasoningEffort, string>;
+const effortNames: Record<string, string> = { none: "Instant", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", pro: 'Pro' } satisfies Record<ReasoningEffort, string>;
 const composerEfforts = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'pro'] as const;
+const effortLabel = (effort: string): string => effortNames[effort] ? t(effortNames[effort]) : effort;
 function observedModel(value: string) {
   const normalize = (text: string) => text.toLowerCase().replace(/[^a-z0-9.]/g, '');
   const matches = catalog.models.filter(choice => choice.id === value || choice.aliases?.includes(value) || normalize(choice.label) === normalize(value));
@@ -50,16 +52,16 @@ function composerModels() {
     .filter(model => model.efforts.length > 0);
 }
 
-function options(select: HTMLSelectElement, choices: Array<{ id: string; label: string }>, value: string): void {
-  const option = (label: string, id: string) => {
-    const node = document.createElement('option'); node.textContent = label; node.value = id; return node;
+function options(select: HTMLSelectElement, choices: Array<{ id: string; label: string | (() => string) }>, value: string): void {
+  const option = (label: string | (() => string), id: string) => {
+    const node = el('option', '', label) as HTMLOptionElement; node.value = id; return node;
   };
   const desired = choices.map(choice => option(choice.label, choice.id));
   if (!desired.length && !value) {
-    const unavailable = option('No observed choices', ''); unavailable.disabled = true; desired.push(unavailable);
+    const unavailable = option(() => t("No observed choices"), ''); unavailable.disabled = true; desired.push(unavailable);
   }
   if (value && !choices.some(choice => choice.id === value)) {
-    const unverified = option(`${value} · not verified`, value);
+    const unverified = option(() => t("{0} · not verified", [value]), value);
     unverified.disabled = true;
     desired.push(unverified);
   }
@@ -90,7 +92,7 @@ function paintPair(modelId: string, effortId: string, modelValue?: string, effor
     nextEffort = supported.includes('high') ? 'high' : supported[0] ?? '';
   }
   options(model, models, nextModel);
-  options(effort, (models.find(item => item.id === model.value)?.efforts ?? []).map(id => ({ id, label: effortNames[id] ?? id })), nextEffort);
+  options(effort, (models.find(item => item.id === model.value)?.efforts ?? []).map(id => ({ id, label: () => effortLabel(id) })), nextEffort);
 }
 
 function paintComposerChoices(): void {
@@ -107,13 +109,13 @@ function paintComposerChoices(): void {
   powers.replaceChildren();
   // Order supported levels from Low upwards; never manufacture an unobserved step.
   const steps = choices.flatMap(choice => choice.efforts.map(power => ({
-    model: choice.id, modelLabel: choice.label, effort: power, label: chatModelDisplayLabel(choice.label, power, effortNames[power]!)
+    model: choice.id, modelLabel: choice.label, effort: power, label: () => chatModelDisplayLabel(choice.label, power, effortLabel(power))
   })));
   const title = document.getElementById('composerPowerTitle');
   const subtitle = document.getElementById('composerPowerModel');
   if (!steps.length) {
-    if (title) title.textContent = catalog.state === 'pending' ? 'Loading models…' : 'Models unavailable';
-    if (subtitle) subtitle.textContent = catalog.state === 'pending' ? 'Reading your ChatGPT account' : 'Reload models';
+    if (title) ui(title, 'textContent', () => catalog.state === 'pending' ? t("Loading models…") : t("Models unavailable"));
+    if (subtitle) ui(subtitle, 'textContent', () => catalog.state === 'pending' ? t("Reading your ChatGPT account") : t("Reload models"));
     return;
   }
   const current = steps.findIndex(step => step.model === selected.value && step.effort === effort.value);
@@ -122,20 +124,20 @@ function paintComposerChoices(): void {
   dots.append(...steps.map(() => el('span', 'power-dot')));
   const slider = document.createElement('input'); slider.type = 'range'; slider.min = '0'; slider.max = String(steps.length - 1); slider.step = '1';
   slider.value = String(Math.max(0, current));
-  slider.setAttribute('aria-label', 'Model and thinking effort');
+  ui(slider, 'aria-label', () => t("Model and thinking effort"));
   const show = () => {
     const step = steps[Number(slider.value)]!;
-    if (title) title.textContent = effortNames[step.effort] ?? step.effort;
+    if (title) ui(title, 'textContent', () => effortLabel(step.effort));
     if (subtitle) subtitle.textContent = step.modelLabel;
-    slider.setAttribute('aria-valuetext', step.label);
+    ui(slider, 'aria-valuetext', step.label);
     track.style.setProperty('--power-position', `${steps.length > 1 ? Number(slider.value) / (steps.length - 1) * 100 : 100}%`);
     return step;
   };
   if (current >= 0) show();
   else {
-    if (title) title.textContent = 'Choose a level';
-    if (subtitle) subtitle.textContent = 'Previous selection unavailable';
-    slider.setAttribute('aria-valuetext', 'Choose an available model and effort');
+    if (title) ui(title, 'textContent', () => t("Choose a level"));
+    if (subtitle) ui(subtitle, 'textContent', () => t("Previous selection unavailable"));
+    ui(slider, 'aria-valuetext', () => t('Choose an available model and effort'));
   }
   const choose = () => {
     if (composerContext) composerContext.edited = true;
@@ -163,24 +165,25 @@ export function confirmedComposerModel(): { model: string; reasoningEffort: Reas
 function paintComposerLabel(): void {
   // Display the same admission decision as Send, including discovery and removed efforts.
   const confirmed = confirmedComposerModel();
-  const label = confirmed
-    ? chatModelDisplayLabel(catalog.models.find(model => model.id === confirmed.model)!.label, confirmed.reasoningEffort, effortNames[confirmed.reasoningEffort]!)
-    : catalog.state === 'pending' ? 'Loading models…' : 'Select model';
+  const modelLabel = confirmed ? catalog.models.find(model => model.id === confirmed.model)!.label : '';
+  const label = () => confirmed
+    ? chatModelDisplayLabel(modelLabel, confirmed.reasoningEffort, effortLabel(confirmed.reasoningEffort))
+    : catalog.state === 'pending' ? t("Loading models…") : t("Select model");
   const node = $('composerModelLabel');
-  node.textContent = label;
-  node.title = label;
+  ui(node, 'textContent', label);
+  ui(node, 'title', label);
   onComposerPaint?.();
 }
 
 function paintStatus(): void {
   paintComposerChoices();
-  const message = catalog.state === 'pending' ? 'Reading your account’s model choices…'
-    : catalog.state === 'ready' ? `Available in your ChatGPT account · checked ${new Date(catalog.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-    : catalog.error ?? 'Connect to ChatGPT to load your models.';
+  const message = () => catalog.state === 'pending' ? t("Reading your account’s model choices…")
+    : catalog.state === 'ready' ? t("Available in your ChatGPT account · checked {0}", [new Date(catalog.observedAt!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })])
+    : catalog.error ?? t("Connect to ChatGPT to load your models.");
   for (const id of ['chatModelStatus', 'composerModelStatus']) {
     const node = document.getElementById(id);
     if (node) {
-      node.textContent = id === 'composerModelStatus' ? (catalog.state === 'pending' ? 'Loading models…' : catalog.error ?? 'Models unavailable · retry discovery') : message;
+      ui(node, 'textContent', () => id === 'composerModelStatus' ? (catalog.state === 'pending' ? t("Loading models…") : catalog.error ?? t("Models unavailable · retry discovery")) : message());
       if (id === 'composerModelStatus') node.hidden = catalog.state === 'ready';
     }
   }
@@ -191,8 +194,8 @@ function paintStatus(): void {
       button.disabled = false;
       if (id === 'refreshComposerModels') {
         button.hidden = false;
-        button.title = catalog.state === 'pending' ? 'Reading ChatGPT models' : 'Reload ChatGPT models';
-        button.setAttribute('aria-label', button.title);
+        ui(button, 'title', () => catalog.state === 'pending' ? t("Reading ChatGPT models") : t("Reload ChatGPT models"));
+        ui(button, 'aria-label', () => catalog.state === 'pending' ? t('Reading ChatGPT models') : t('Reload ChatGPT models'));
       }
     }
   }
@@ -209,7 +212,7 @@ function discoverModels(): Promise<void> {
   const work = (async () => {
     const result = await run(window.api.requestChatModels()).catch(() => null);
     if (requested !== generation) return;
-    catalog = result ?? { ...catalog, state: 'unavailable', error: 'Model discovery could not start.' };
+    catalog = result ?? { ...catalog, state: 'unavailable', error: t("Model discovery could not start.") };
     for (const [modelId, effortId] of pairs) paintPair(modelId, effortId);
     paintComposerContext(); paintStatus();
   })();
@@ -217,8 +220,8 @@ function discoverModels(): Promise<void> {
   return discovery;
 }
 
-export async function ensureComposerModel(): Promise<ReturnType<typeof confirmedComposerModel>> {
-  if (catalog.models.length) return confirmedComposerModel();
+export async function ensureComposerModel(refresh = false): Promise<ReturnType<typeof confirmedComposerModel>> {
+  if (!refresh && catalog.models.length && catalog.state !== 'pending') return confirmedComposerModel();
   const ready = new Promise<void>(resolve => {
     const finish = () => { clearTimeout(timer); catalogWaiters.delete(check); resolve(); };
     const check = () => { if (catalog.state === 'ready' || catalog.state === 'unavailable') finish(); };
@@ -227,7 +230,7 @@ export async function ensureComposerModel(): Promise<ReturnType<typeof confirmed
   });
   await discoverModels();
   await ready;
-  return confirmedComposerModel();
+  return catalog.state === 'ready' && !catalog.error ? confirmedComposerModel() : null;
 }
 
 export function applyChatModels(config: Config, previous?: Config): void {

@@ -24,12 +24,15 @@ let root = '';
 interface PendingWrite {
   generation: number;
   value: unknown;
+  snapshot?: () => unknown;
+  background?: boolean;
+  work?: Promise<void>;
 }
 
 const pending = new Map<string, PendingWrite>();
 const timers = new Map<string, NodeJS.Timeout>();
 const retryAttempts = new Map<string, number>();
-let inFlight: Promise<void> = Promise.resolve();
+const inFlight = new Map<string, Promise<void>>();
 let nextGeneration = 1;
 
 export function initDurableStore(userDataDir: string): void {
@@ -63,12 +66,24 @@ function nextWrite(value: unknown): PendingWrite {
   return { generation: nextGeneration++, value };
 }
 
-function enqueue(write: () => Promise<void>): Promise<void> {
-  const queued = inFlight.then(write);
-  // One failed state file must not poison the serialization chain for every later write.
-  // The caller still receives `queued` and therefore sees the real failure.
-  inFlight = queued.catch(() => undefined);
+function enqueue(name: string, write: () => Promise<void>): Promise<void> {
+  const queued = (inFlight.get(name) ?? Promise.resolve()).then(write);
+  // Only generations of the same file share a temp path and require serialization.
+  // Cross-file transaction boundaries belong to the caller's explicit await.
+  const tracked = queued.catch(() => undefined).then(() => {
+    if (inFlight.get(name) === tracked) inFlight.delete(name);
+  });
+  inFlight.set(name, tracked);
   return queued;
+}
+
+function enqueueSlot(name: string, slot: PendingWrite): Promise<void> {
+  if (slot.work) return slot.work;
+  const work = enqueue(name, () => flushOne(name, slot));
+  slot.work = work;
+  const settled = (): void => { delete slot.work; };
+  void work.then(settled, settled);
+  return work;
 }
 
 function schedule(name: string, delay: number): void {
@@ -77,7 +92,7 @@ function schedule(name: string, delay: number): void {
     timers.delete(name);
     const slot = pending.get(name);
     if (!slot) return;
-    void enqueue(() => flushOne(name, slot)).catch(() => scheduleRetry(name));
+    void enqueueSlot(name, slot).catch(() => scheduleRetry(name));
   }, delay);
   timer.unref?.();
   timers.set(name, timer);
@@ -92,9 +107,16 @@ function scheduleRetry(name: string): void {
 }
 
 async function flushOne(name: string, slot: PendingWrite): Promise<void> {
+  if (slot.background && pending.get(name) !== slot) return;
   const target = fileFor(name);
   const tmp = `${target}.tmp`;
   try {
+    // Capture once, synchronously at the write boundary. A failed disk write retries this
+    // exact value; later live mutations must not silently alter its generation.
+    if (slot.snapshot) {
+      slot.value = slot.snapshot();
+      delete slot.snapshot;
+    }
     await fs.mkdir(root, { recursive: true });
     if (slot.value === null) {
       await fs.rm(target, { force: true });
@@ -118,8 +140,15 @@ async function flushOne(name: string, slot: PendingWrite): Promise<void> {
 /** Queues a write. Repeated calls before the timer fires collapse into one. */
 export function writeDurableSoon(name: string, value: unknown): void {
   if (!root) return;
-  pending.set(name, nextWrite(value));
+  pending.set(name, { ...nextWrite(value), background: true });
   if (timers.has(name)) return;
+  schedule(name, WRITE_DELAY_MS);
+}
+
+/** Coalesces background projections before allocating a snapshot. Never use for a commit barrier. */
+export function writeDurableSnapshotSoon(name: string, snapshot: () => unknown): void {
+  if (!root) return;
+  pending.set(name, { ...nextWrite(undefined), snapshot, background: true });
   schedule(name, WRITE_DELAY_MS);
 }
 
@@ -143,7 +172,7 @@ export async function writeDurableNow(name: string, value: unknown): Promise<voi
     // Flush this exact generation even if a newer debounced value arrives while it waits in
     // the serialization queue. Transactional callers need proof that *their* boundary landed,
     // not merely that some later state happened to be written instead.
-    await enqueue(() => flushOne(name, slot));
+    await enqueueSlot(name, slot);
   } catch (err) {
     // Keep the newest pending generation recoverable. Callers which deliberately roll a
     // failed staged transition back can supersede it by queueing their safe snapshot.
@@ -161,22 +190,15 @@ export async function flushDurable(): Promise<void> {
   // A failed background write deliberately survives without a timer until retry scheduling,
   // so shutdown must look at pending state itself rather than treating `timers` as authority.
   for (;;) {
-    await inFlight;
     const entries = [...pending.entries()];
-    if (entries.length === 0) return;
-    let firstError: unknown = null;
-    for (const [name, slot] of entries) {
-      try {
-        await enqueue(() => flushOne(name, slot));
-      } catch (error) {
-        // Shutdown is the last chance for every independent state file. One broken target
-        // must not prevent a continuation, correlation or retired-worker snapshot queued
-        // behind it from even being attempted. Keep the failed generation pending for the
-        // ordinary retry path, but finish this pass before surfacing the first real error.
-        firstError ??= error;
-      }
-    }
-    if (firstError) throw firstError;
+    const active = [...inFlight.values()];
+    if (entries.length === 0 && active.length === 0) return;
+    // Start pending independent files before waiting for a busy file. Reuse an admitted
+    // generation's promise so shutdown cannot write an immediate commit twice.
+    const results = await Promise.allSettled([...active, ...entries.map(([name, slot]) => enqueueSlot(name, slot))]);
+    // Every independent file gets its shutdown attempt, even when another fails.
+    const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+    if (failed) throw failed.reason;
   }
 }
 
@@ -188,5 +210,5 @@ export function resetDurableForTests(): void {
   retryAttempts.clear();
   root = '';
   nextGeneration = 1;
-  inFlight = Promise.resolve();
+  inFlight.clear();
 }

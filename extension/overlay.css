@@ -1301,6 +1301,7 @@
 
 .clf-menu-goal-input {
   box-sizing: border-box;
+  text-align: start;
   width: 100%;
   padding: 7px 9px;
   border: 1px solid var(--clf-menu-line);
@@ -1418,3 +1419,6 @@
 .clf-stage[data-clf-stage-kind='goal-done'] .clf-stage-title {
   color: color-mix(in srgb, currentColor 35%, #10a37f);
 }
+/* Presentation only: native message bytes remain available to recorder and send receipts. */
+[data-clf-prompt-hidden] { display: none !important; }
+[data-clf-user-text] { white-space: pre-wrap; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: start; }

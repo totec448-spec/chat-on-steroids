@@ -1,6 +1,6 @@
 {
   "name": "chat-on-steroids",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "Local coding bridge for ChatGPT over MCP, with native desktop control and approved-folder capability limits.",
   "license": "MIT",
   "author": "Chat On Steroids",
@@ -48,12 +48,14 @@
   },
   "dependencies": {
     "@anthropic-ai/mcpb": "^2.1.2",
+    "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "fflate": "^0.8.3",
     "marked": "18.0.11",
     "node-pty": "1.2.0-beta.15",
+    "quickjs-emscripten-core": "0.32.0",
     "sharp": "0.35.3",
     "tree-sitter": "0.25.1",
     "tree-sitter-bash": "0.25.1",

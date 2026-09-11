@@ -3,3 +3,10 @@
 # Preserve upstream legal text verbatim, including whitespace that its authors supplied.
 docs/licenses/** -text -whitespace
 THIRD-PARTY-NOTICES.txt -text -whitespace
+
+# Defense in depth for Git source archives; privacy admission also rejects tracked evidence.
+/outputs export-ignore
+/outputs/** export-ignore
+/.codex-remote-attachments export-ignore
+/.codex-remote-attachments/** export-ignore
+/docs/audit-user-requests-20260905-06.md export-ignore

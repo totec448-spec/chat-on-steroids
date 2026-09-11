@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { getLog } from '../src/main/logger.js';
 import {
   inFlightToolCalls,
   runningToolCalls,
@@ -12,6 +13,8 @@ import {
 } from '../src/main/mcp/call-context.js';
 import { startMcpServer, type McpEndpoint } from '../src/main/mcp/server.js';
 import { initSessionStore, resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
+// @ts-ignore Diagnostic scripts are intentionally plain ESM JavaScript.
+import { benchmarkMcpLatency } from '../scripts/benchmark-mcp-latency.mjs';
 
 /** What the counter said while the call was being recorded, i.e. after its handler returned. */
 let duringRecord: number | null = null;
@@ -88,6 +91,16 @@ const readNote = (url: string): Promise<Response> =>
     })
   });
 
+it('the benchmark speaks the real SDK discovery protocol over ephemeral loopback HTTP', async () => {
+  endpoint = await serve();
+  // These are two aliases of the same local fixture, never a claim of live tunnel proof.
+  const report = await benchmarkMcpLatency({ localUrl: endpoint.url, tunnelUrl: endpoint.url + '?fixture=second-route', rounds: 2 });
+  expect(report.routes.local.statuses).toEqual({ 200: 2 });
+  expect(report.routes.tunnel.statuses).toEqual({ 200: 2 });
+  expect(report.routes.local.responseBodyBytes.p50).toBeGreaterThan(0);
+  expect(duringRecord).toBeNull(); // tools/list never invokes or records a local tool.
+});
+
 it('counts a call as running until its whole request is done, not just its handler', async () => {
   // The compaction barrier waits for this to reach zero before it writes a handoff. The
   // handler returning is not the end of the request: identity is still being resolved, the
@@ -97,6 +110,7 @@ it('counts a call as running until its whole request is done, not just its handl
   const response = await readNote(endpoint.url);
   expect(response.status).toBe(200);
   expect(await response.text()).toContain('hello');
+  expect(getLog().some((entry) => /request POST mcp\/core.*calls=1 ingress_ms=\d+ identity_ms=\d+ handler_ms=\d+ delivery_ms=\d+ recorder_ms=\d+ response_tail_ms=\d+/.test(entry.message))).toBe(true);
 
   expect(duringRecord).toBe(1);
   // And released once it has: this call was never attributed, so it is held through its own

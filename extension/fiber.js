@@ -9,7 +9,8 @@
  * no amount of DOM reading from the isolated world can recover the ones it folded away.
  * The same bounded bridge also reads account-evaluated model choices and the installed
  * connector's public tool declarations. Neither path exports account/session objects or
- * invokes React callbacks; the isolated world owns UI actions and operation claims.
+ * invokes React action callbacks; the named serverId$ signal is read only for durable
+ * conversation identity. The isolated world owns UI actions and operation claims.
  *
  * Everything here is written on the assumption that it is the least trusted code in the
  * extension:
@@ -218,18 +219,30 @@
    */
   function conversationEvidenceOf(fiber) {
     let found = null;
+    const conversations = new Map();
     let at = fiber;
     for (let up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
       const props = at.memoizedProps;
       if (!props || typeof props !== 'object') continue;
       const turn = props.turn && typeof props.turn === 'object' ? props.turn : null;
-      // Mounted helper turns now carry the owner in conversation.id. Read it here,
-      // alongside older shapes, so terminal consumers keep their exact-chat fence.
+      // The mounted conversation.id can be a local WEB identity, not the /c id.
+      // Its serverId$ signal is the read-only durable identity used by that same
+      // conversation object. Read it once per object; never equate the local id
+      // with the page route or infer ownership from the URL itself.
       const conversation = props.conversation && typeof props.conversation === 'object' ? props.conversation : null;
-      const values = [props.clientThreadId, props.conversationId, conversation && conversation.id, turn && turn.clientThreadId, turn && turn.conversationId];
+      if (conversation && !conversations.has(conversation)) {
+        let serverId = null;
+        try {
+          const value = typeof conversation.serverId$ === 'function' ? conversation.serverId$() : null;
+          if (typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value)) serverId = value;
+        } catch { /* Unresolved signal carries no durable identity. */ }
+        conversations.set(conversation, serverId);
+      }
+      const values = [props.clientThreadId, props.conversationId, conversation && conversation.id,
+        conversations.get(conversation), turn && turn.clientThreadId, turn && turn.conversationId];
       for (let index = 0; index < values.length; index++) {
         const value = str(values[index]);
-        if (!value) continue;
+        if (!value || value.startsWith('WEB:')) continue;
         if (found && found !== value) return { conversationId: null, conflict: true };
         found = value;
       }
@@ -532,8 +545,17 @@
       const author = message.author;
       if (!author || author.role !== 'user') continue;
       const id = str(message.id);
-      const rawText = budgetedText(authoredText(message), budget, MAX_RENDERED_TEXT);
-      if (!id || !rawText) continue;
+      const content = message.content;
+      const multimodal = content?.content_type === 'multimodal_text' && Array.isArray(content.parts);
+      const imageCount = multimodal ? content.parts.filter(part => part?.content_type === 'image_asset_pointer').length : 0;
+      const attachments = imageCount > 0 && Array.isArray(message.metadata?.attachments)
+        ? message.metadata.attachments.filter(file => file && typeof file.id === 'string' && file.id.length > 0 && file.id.length <= 100 &&
+          typeof file.name === 'string' && file.name.length > 0 && file.name.length <= 200 &&
+          /^image\/[a-z0-9.+-]{1,80}$/i.test(file.mime_type) && Number.isSafeInteger(file.size) && file.size >= 0 && file.size <= 512 * 1024 * 1024)
+          .slice(0, Math.min(4, imageCount)).map(file => ({ id: file.id, name: file.name, size: file.size, mimeType: file.mime_type })) : [];
+      const authored = multimodal ? content.parts.filter(part => typeof part === 'string').join('\n') : authoredText(message);
+      const rawText = budgetedText(authored, budget, MAX_RENDERED_TEXT) || '';
+      if (!id || (!rawText && !attachments.length)) continue;
       if (seen.has(id)) continue;
       seen.add(id);
       out.push({
@@ -542,6 +564,7 @@
         role: 'user',
         stable: true,
         rawText,
+        ...(attachments.length ? { attachments } : {}),
         order: index,
         createTime: authoredTime(message)
       });
@@ -731,6 +754,7 @@
         order: userCandidates[c].order,
         createTime: userCandidates[c].createTime,
         rawText: userCandidates[c].rawText,
+        ...(userCandidates[c].attachments ? { attachments: userCandidates[c].attachments } : {}),
         renderedHtml: ''
       });
     }
@@ -1311,15 +1335,38 @@
   /** Picker data is account-evaluated state, never a scraped English announcement.
    * Copy only selection metadata; no conversation, account object or callbacks cross worlds. */
   function pickerSnapshot() {
-    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]');
+    // The closed native trigger retains the same picker owner. Passive recording
+    // must not depend on discovery opening its portal first.
+    const form = document.querySelector('#prompt-textarea')?.closest('form');
+    const triggers = [...(form?.querySelectorAll('button[aria-haspopup="menu"]') || [])]
+      .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 &&
+        node.id !== 'composer-plus-btn' && node.getAttribute('data-testid') !== 'composer-plus-btn');
+    const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]') || (triggers.length === 1 ? triggers[0] : null);
     let state = null;
     try { state = readPickerSnapshot(node); } catch { /* Unknown state invalidates prior proof. */ }
-    const selected = state?.choices.find(choice => choice.bucket === state.currentBucket && choice.available);
-    for (const [attribute, value] of [['data-clf-selected-model', selected?.id], ['data-clf-selected-effort', selected?.effort]]) {
+    const selected = state?.choices.find(choice => choice.bucket === state.currentBucket && choice.available) ||
+      (triggers.length === 1 && node === triggers[0] ? closedPickerSelection(node) : null);
+    for (const [attribute, value] of [['data-clf-selected-model', selected?.id], ['data-clf-selected-effort', selected?.effort], ['data-clf-selected-route', selected && location.pathname]]) {
       if (!value) node?.removeAttribute(attribute);
       else if (node.getAttribute(attribute) !== value) node.setAttribute(attribute, value);
     }
     return state;
+  }
+  // The native closed picker does not mount composerIntelligencePickerState.
+  // Its own ancestor carries the current execution model; its visible label
+  // carries the selected effort. These are observation, never catalog discovery.
+  function closedPickerSelection(node) {
+    const effort = ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
+      'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
+    if (!effort) return null;
+    let model = null;
+    for (let fiber = fiberOf(node), up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
+      const current = fiber.memoizedProps?.currentModelId;
+      if (current === undefined) continue;
+      if (typeof current !== 'string' || !/^[a-zA-Z0-9._-]{1,80}$/.test(current) || (model && model !== current)) return null;
+      model = current;
+    }
+    return model ? { id: model, effort } : null;
   }
   function readPickerSnapshot(node) {
     let fiber = node && fiberOf(node);

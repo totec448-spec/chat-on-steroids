@@ -504,6 +504,25 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('chrome');
 });
 
+it('shows the current host Desktop tools without rebuilding permission controls on state pushes', async () => {
+  const mounted = await mountChat({
+    platform: { family: 'windows', name: 'Windows', desktopAutomation: true }
+  });
+  const doc = mounted.window.document;
+  const names = () => Array.from(doc.querySelectorAll('[data-group="desktop"] .tool-names code'), node => node.textContent);
+  const control = doc.querySelector<HTMLInputElement>('[data-cap="control"]')!;
+  const windowsNames = ['list_windows', 'get_window', 'list_apps', 'get_window_state',
+    'launch_app', 'click', 'press_key', 'type_text', 'scroll', 'set_value', 'drag',
+    'perform_secondary_action', 'activate_window', 'read_clipboard', 'write_clipboard', 'exec'];
+  expect(names()).toEqual(windowsNames);
+  mounted.push({ ...mounted.state, platform: { family: 'macos', name: 'macOS', desktopAutomation: true } });
+  expect(names()).toEqual(['observe', 'computer', 'exec']);
+  expect(doc.querySelector('[data-cap="control"]')).toBe(control);
+  mounted.push(mounted.state);
+  expect(names()).toEqual(windowsNames);
+  expect(mounted.calls).toHaveLength(0);
+});
+
 it('preserves native Desktop permissions when saving unrelated settings on Linux', async () => {
   const mounted = await mountChat({
     platform: { family: 'linux', name: 'Linux', desktopAutomation: false }

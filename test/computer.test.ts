@@ -250,11 +250,11 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
       checked++;
       // Recompute the mapping from the screenshot that came back with these elements.
       // Any other frame's region or scale gives different numbers.
-      expect(element.imageBounds.x).toBe(Math.round((element.bounds.x - shot.region.x) * shot.scale));
-      expect(element.imageBounds.y).toBe(Math.round((element.bounds.y - shot.region.y) * shot.scale));
-      expect(element.imageBounds.width).toBe(Math.round(element.bounds.width * shot.scale));
+      expect(element.imageBounds.x).toBe(Math.round((element.bounds.x - shot.region.x) * shot.width / shot.region.width));
+      expect(element.imageBounds.y).toBe(Math.round((element.bounds.y - shot.region.y) * shot.height / shot.region.height));
+      expect(element.imageBounds.x + element.imageBounds.width).toBe(Math.round((element.bounds.x + element.bounds.width - shot.region.x) * shot.width / shot.region.width));
       expect(element.imageCenter.x).toBe(
-        Math.round(element.imageBounds.x + element.imageBounds.width / 2)
+        Math.min(element.imageBounds.x + element.imageBounds.width - 1, Math.round(element.imageBounds.x + element.imageBounds.width / 2))
       );
       expect(element.imageBounds.x + element.imageBounds.width).toBeLessThanOrEqual(shot.width);
       expect(element.imageBounds.y + element.imageBounds.height).toBeLessThanOrEqual(shot.height);

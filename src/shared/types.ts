@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from './session.js';
+import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
 /** Types shared between the main process and the renderer. No runtime logic here. */
 
 /**
@@ -611,7 +612,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
  * One short line per capability, shown under its checkbox when the group is expanded.
  *
  * A clause, not a paragraph. Which MCP tools a permission actually turns on is a separate
- * fact and is listed separately — see CAPABILITY_TOOLS — because that list is the part
+ * fact and is listed separately — see capabilityTools — because that list is the part
  * that goes stale when the tool surface is consolidated, and a sentence with the tool name
  * buried in it is a sentence nobody rewrites when the tool is renamed.
  */
@@ -640,7 +641,7 @@ export const CAPABILITY_DETAILS: Record<Capability, string> = {
  * `read`; `find` exists only where running commands is switched off, which is why it is
  * marked rather than listed flatly (see SurfaceRegistrar.findExposed).
  */
-export const CAPABILITY_TOOLS: Record<Capability, readonly string[]> = {
+const CAPABILITY_TOOLS: Record<Capability, readonly string[]> = {
   browse: ['read'],
   search: ['read', 'find'],
   read: ['read', 'view_image'],
@@ -656,3 +657,17 @@ export const CAPABILITY_TOOLS: Record<Capability, readonly string[]> = {
   clipboardRead: ['computer'],
   clipboardWrite: ['computer']
 };
+
+/** Settings use the same Windows method lists as registration, with explicit host identity. */
+export function capabilityTools(capability: Capability, platform?: PlatformFamily): readonly string[] {
+  if (!DESKTOP_CAPABILITIES.includes(capability)) return CAPABILITY_TOOLS[capability];
+  if (platform === 'macos') return CAPABILITY_TOOLS[capability];
+  if (platform !== 'windows') return [];
+  switch (capability) {
+    case 'screen': return WINDOWS_COMPUTER_READ_METHODS;
+    case 'control': return WINDOWS_COMPUTER_INPUT_METHODS;
+    case 'clipboardRead': return ['read_clipboard'];
+    case 'clipboardWrite': return ['write_clipboard'];
+    default: return [];
+  }
+}

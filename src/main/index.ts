@@ -9,7 +9,7 @@ import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { connect, disconnect, getStatus, onStatusChange, shutdownConnection } from './connection.js';
 import { registerIpc } from './ipc.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
-import { initLogFile, logError, logInfo, logWarn } from './logger.js';
+import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, snapshotLogOnCrash } from './logger.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { initSecretsPath } from './secrets.js';
 import { pluginManager } from './plugins/manager.js';
@@ -293,6 +293,9 @@ void app.whenReady().then(async () => {
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
   const userData = app.getPath('userData');
   initLogFile(path.join(userData, 'app.log'));
+  process.on('uncaughtExceptionMonitor', (error, origin) => {
+    snapshotLogOnCrash(`${origin}: ${error.stack ?? error.message}`);
+  });
   initConfigPath(userData);
   initSecretsPath(userData);
   initSessionStore(userData);
@@ -517,8 +520,11 @@ app.on('will-quit', (event) => {
       // continuation that ends this sequence is dropped by Electron, and the app is left
       // running with nothing to click and the single-instance lock still held.
       exit: () => {
-        shutdownComplete = true;
-        app.exit(0);
+        // The sequence has just logged its completion; a phase inside it would flush too early.
+        void flushLogBeforeExit().finally(() => {
+          shutdownComplete = true;
+          app.exit(0);
+        });
       }
     }
   );

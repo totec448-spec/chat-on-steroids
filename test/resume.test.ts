@@ -17,6 +17,9 @@ import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
+import { MAX_CHATGPT_MESSAGE_CHARS } from '../src/shared/user-prompt.js';
+import { nativeHandoffPrompt } from '../src/main/session/handoff-prompt.js';
+import { handoffPlanNotice, resumeBootstrapText } from '../src/main/session/handoff.js';
 
 vi.mock('electron', () => ({
   safeStorage: {
@@ -46,8 +49,8 @@ const { makeTempDir, removeTempDir, SAMPLE_BRIEF } = await import('./helpers.js'
 const { BRIDGE_PROTOCOL } = await import('../src/main/version.js');
 
 const EXTENSION_ORIGIN = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
-const CHAT_A = '6a805197-b090-83eb-bbd8-a32b482941da';
-const CHAT_B = '7b916208-c1a1-94fc-cce9-b43c593a52eb';
+const CHAT_A = 'f0f00003-1111-4111-8111-111111111111';
+const CHAT_B = 'f0f00015-1111-4111-8111-111111111111';
 const BRIEF = SAMPLE_BRIEF;
 
 let dir: string;
@@ -330,6 +333,9 @@ describe('one press, one transaction', () => {
     expect(again.body.token).toBe(first.token);
     expect(again.body.started).toBe(false);
     expect(again.body.prompt).toContain(`[[CLF-HANDOFF:${first.token}]]`);
+    expect(first.prompt).toBe(nativeHandoffPrompt(first.token, false));
+    expect(again.body.prompt).toBe(first.prompt);
+    expect(first.prompt).not.toContain('[[COS_CONTEXT:');
 
     const claimed = await request('POST', '/compact', {
       body: { conversationId: CHAT_A, token: first.token, sourceAttempt: true }
@@ -459,22 +465,28 @@ describe('a brief longer than the app can type', () => {
     // And the cut is in the brief where the model reading it will see it, not silent.
     expect(text).toMatch(/left out/);
     expect(text.length).toBeLessThan(huge.length);
+    expect(text.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
   });
 
   it('carries a large near-budget handoff without a hidden character-budget truncation', async () => {
     await connect();
     await record();
     const { token: continuation } = await press();
-    const brief = `TASK — keep all of this.\n${'dense operational detail '.repeat(6500)}\nNEXT — continue exactly here.`;
-    expect(brief.length).toBeGreaterThan(150_000);
-    expect(brief.length).toBeLessThan(256_000);
+    const head = 'TASK — keep all of this.\n', tail = '\nNEXT — continue exactly here.';
+    const noticeBudget = handoffPlanNotice('x'.repeat(64)).length;
+    const overhead = resumeBootstrapText('', continuation).length + noticeBudget;
+    const brief = head + 'dense operational detail '.repeat(6500).slice(0,
+      MAX_CHATGPT_MESSAGE_CHARS - overhead - head.length - tail.length - 8) + tail;
 
     const stored = await capture(continuation, brief);
     const commandId = stored.body.commandId as string;
     const text = (await redeem(commandId, 'page-long')).body.command.text as string;
 
     expect(text).toContain(brief);
+    expect(text).not.toContain('[[COS_CONTEXT:');
     expect(text).not.toMatch(/middle of this brief.*left out/);
+    expect(text.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
+    expect(text.length).toBeGreaterThan(MAX_CHATGPT_MESSAGE_CHARS - noticeBudget - 100);
   });
 });
 
