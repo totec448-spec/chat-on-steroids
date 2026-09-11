@@ -1,12 +1,22 @@
-/** Passive, bounded usage projection. Never reads request headers, cookies or credentials. */
+/**
+ * Passive, bounded page-response projection.
+ *
+ * Never reads request headers, cookies, credentials or request bodies. Besides
+ * quota metadata, it observes the two opaque identifiers ChatGPT itself puts in the live
+ * conversation event stream: `conversation_id` and `metadata.request_id`. The latter can
+ * reach the stream tens of seconds before React publishes it, which is the difference between
+ * an exact Core caller and CALLER_IDENTITY_REQUIRED. Only that pair crosses worlds.
+ */
 (() => {
   'use strict';
   if (window.__cosUsageObserver) return;
   window.__cosUsageObserver = true;
-  const originalFetch = window.fetch;
   const post = window.postMessage.bind(window);
   let latest = null;
   let requestOrder = 0, latestOrder = 0;
+  const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const REQUEST = /^wfr_[a-zA-Z0-9_-]{1,96}$/;
+  const CONVERSATION_FIELD = /(?:^|[,{\s])\"conversation_id\"\s*:\s*\"([0-9a-f-]{36})\"/gi;
   const project = (data, observedAt, order) => {
     if (!data || typeof data !== 'object') return;
     const rows = [];
@@ -60,13 +70,105 @@
     } catch { /* Unsupported metadata is unavailable, never guessed. */ }
     finally { clearTimeout(timer); void reader.cancel().catch(() => {}); }
   }
-  window.fetch = function (...args) {
-    // Request order fences late responses, not accounts. No account identity is inferred.
-    const observedAt = Date.now(), order = ++requestOrder;
-    const result = originalFetch.apply(this, args);
-    void result.then((response) => inspect(response, observedAt, order)).catch(() => {});
-    return result;
+  /**
+   * Reads bounded complete SSE events from a clone without changing the page's response.
+   * Only a conversation id and server request metadata from the same event are projected.
+   */
+  async function inspectRequestOrigins(response, observedAt) {
+    let url;
+    try { url = new URL(response.url); } catch { return; }
+    if (url.origin !== location.origin || !/^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname)) return;
+    if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) return;
+    const copy = response.clone(), reader = copy.body?.getReader();
+    if (!reader) return;
+    const timer = setTimeout(() => void reader.cancel().catch(() => {}), 90_000);
+    const decoder = new TextDecoder();
+    const emitted = new Set();
+    let bytes = 0, buffer = '';
+    const scan = (frame) => {
+      if (!frame || frame.length > 512 * 1024) return;
+      const conversations = new Set();
+      CONVERSATION_FIELD.lastIndex = 0;
+      for (let match; (match = CONVERSATION_FIELD.exec(frame));) {
+        if (CONVERSATION.test(match[1])) conversations.add(match[1]);
+      }
+      // One complete server event must carry both sides of the join. Retaining an id from a
+      // prior frame would turn response order into authority; a contradictory frame abstains.
+      if (conversations.size !== 1) return;
+      const conversationId = conversations.values().next().value;
+      // Only server metadata in a complete JSON event owns a request id. A key in
+      // quoted model text, tool arguments or an unrelated nested object is not proof.
+      let event;
+      try {
+        const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:'))
+          .map(line => line.slice(5).trimStart()).join('\n');
+        event = JSON.parse(data);
+      } catch { return; }
+      if (event?.conversation_id !== conversationId) return;
+      const requestIds = new Set([event.metadata?.request_id, event.message?.metadata?.request_id]
+        .filter(id => typeof id === 'string' && REQUEST.test(id)));
+      const fresh = [...requestIds].filter((id) => !emitted.has(id)).slice(0, 16 - emitted.size);
+      if (fresh.length === 0) return;
+      for (const id of fresh) emitted.add(id);
+      post({ type: 'cos-request-origin', conversationId, requestIds: fresh, observedAt }, location.origin);
+    };
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        if (bytes > 4 * 1024 * 1024) return;
+        buffer += decoder.decode(value, { stream: true });
+        for (;;) {
+          const lf = buffer.indexOf('\n\n');
+          const crlf = buffer.indexOf('\r\n\r\n');
+          const split = lf < 0 ? crlf : crlf < 0 ? lf : Math.min(lf, crlf);
+          if (split < 0) break;
+          const width = buffer.startsWith('\r\n\r\n', split) ? 4 : 2;
+          scan(buffer.slice(0, split));
+          buffer = buffer.slice(split + width);
+        }
+        if (buffer.length > 512 * 1024) return;
+      }
+      buffer += decoder.decode();
+      scan(buffer);
+    } catch { /* A missing stream observation leaves the existing Fiber path in charge. */ }
+    finally { clearTimeout(timer); void reader.cancel().catch(() => {}); }
+  }
+  let observedFetch = null;
+  const inspectedResponses = new WeakSet();
+  const installFetchObserver = () => {
+    if (window.fetch === observedFetch || typeof window.fetch !== 'function') return;
+    // A page wrapper may still call our earlier wrapper. Capture its downstream
+    // function per installation; changing a shared pointer would create a cycle.
+    const downstreamFetch = window.fetch;
+    observedFetch = function (...args) {
+      // Request order fences late responses, not accounts. No account identity is inferred.
+      const observedAt = Date.now(), order = ++requestOrder;
+      const result = downstreamFetch.apply(this, args);
+      void result.then((response) => {
+        if (inspectedResponses.has(response)) return;
+        inspectedResponses.add(response);
+        void inspect(response, observedAt, order).catch(() => {});
+        let method = 'GET';
+        try {
+          const explicit = args[1] && typeof args[1].method === 'string' ? args[1].method : null;
+          const inherited = args[0] && typeof args[0] === 'object' && typeof args[0].method === 'string' ? args[0].method : null;
+          method = String(explicit || inherited || 'GET').toUpperCase();
+        } catch { return; }
+        if (method === 'POST') void inspectRequestOrigins(response, observedAt).catch(() => {});
+      }).catch(() => {});
+      return result;
+    };
+    // ChatGPT installs its own fetch instrumentation after document_start. Keep that owner in
+    // the chain and reattach once at the page-ready boundary; otherwise our flag remains set
+    // while the live response observer has silently been replaced.
+    window.fetch = observedFetch;
   };
+  installFetchObserver();
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', installFetchObserver, { once: true });
+  }
   window.addEventListener('message', (event) => {
     if (event.source === window && event.origin === location.origin && event.data?.type === 'cos-usage-request' && latest) post(latest, location.origin);
   });
