@@ -13,13 +13,15 @@ import { REASONING_EFFORTS, type SessionEvent, type SessionSummary, type StoredT
 import { getConfig } from './config.js';
 import { cancelDesktopInput, sendDesktopInput } from './session/start-input.js';
 import { listInputs, type InputArgs, type InputEntry } from './session/input.js';
-import { getSession, readEvents, readOverflowText } from './session/store.js';
+import { getSession, readEvents, readEverySummary, readOverflowText } from './session/store.js';
 import { APP_VERSION } from './version.js';
 
 export const CONTROL_PROTOCOL_VERSION = 1;
 export const CONTROL_VERSION_HEADER = 'x-cos-control-version';
 const MAX_BODY_BYTES = 64 * 1024;
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const AMBIGUOUS_DELIVERY_ERROR = 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.';
+const LATE_DELIVERY_WINDOW_MS = 120_000;
 
 const submitSchema = z.object({
   requestId: z.string().uuid(),
@@ -47,6 +49,7 @@ export interface ControlDependencies {
   send(input: InputArgs): Promise<InputEntry>;
   cancel(id: string): Promise<boolean>;
   inputs(): Promise<InputEntry[]>;
+  sessions(): Promise<SessionSummary[]>;
   session(id: string): Promise<SessionSummary | null>;
   events(id: string): Promise<SessionEvent[]>;
   overflow(id: string, assetId: string): Promise<string | null>;
@@ -57,6 +60,7 @@ const productionDependencies: ControlDependencies = {
   send: sendDesktopInput,
   cancel: cancelDesktopInput,
   inputs: listInputs,
+  sessions: readEverySummary,
   session: getSession,
   events: id => readEvents(id, { kinds: ['user_message', 'assistant_message', 'turn_start', 'turn_end'] }),
   overflow: readOverflowText,
@@ -85,6 +89,55 @@ function targetSessionId(entry: InputEntry): string | null {
   return entry.sessionId ?? entry.deliveredSessionId ?? null;
 }
 
+function comparableInputText(text: string): string {
+  // ChatGPT's recorded plain-text user row omits Markdown code delimiters that were present in
+  // the submitted composer text. Keep every other character exact so late matching cannot drift
+  // into a merely similar user message.
+  return text.replace(/\r\n/g, '\n').replaceAll('`', '').trim();
+}
+
+interface RecordedInputBoundary {
+  sessionId: string;
+  events: SessionEvent[];
+  authored: number;
+  deliveredAt: number;
+  late: boolean;
+}
+
+async function recordedInputBoundary(deps: ControlDependencies, entry: InputEntry): Promise<RecordedInputBoundary | null> {
+  const sessionId = targetSessionId(entry);
+  if (entry.state === 'sent' && sessionId) {
+    const events = (await deps.events(sessionId)).sort((left, right) => left.seq - right.seq);
+    const authored = events.findIndex(event => event.kind === 'user_message' && event.inputId === entry.id &&
+      event.inputDelivery === 'confirmed');
+    if (authored >= 0) return { sessionId, events, authored, deliveredAt: entry.deliveredAt ?? events[authored]!.time, late: false };
+    return null;
+  }
+
+  // A new-chat navigation can destroy the sending document after ChatGPT accepted the message
+  // but before its /input/ack reaches the app. The stock outbox correctly refuses to resend and
+  // eventually records delivery ambiguity. Recover only from one unique recorder-owned user row
+  // inside the exact authorized-send window; duplicates or merely similar text fail closed.
+  if (entry.state !== 'cancelled' || entry.deliveredAt !== undefined || sessionId || !entry.owner ||
+      entry.error !== AMBIGUOUS_DELIVERY_ERROR || entry.sendAuthorizedAt === undefined) return null;
+  const expected = comparableInputText(entry.deliveryText ?? entry.text);
+  const from = entry.sendAuthorizedAt;
+  const until = from + LATE_DELIVERY_WINDOW_MS;
+  const matches: RecordedInputBoundary[] = [];
+  const summaries = (await deps.sessions()).filter(summary => summary.updatedAt >= from && summary.startedAt <= until);
+  for (const summary of summaries) {
+    const events = (await deps.events(summary.id)).sort((left, right) => left.seq - right.seq);
+    for (let index = 0; index < events.length; index += 1) {
+      const event = events[index]!;
+      if (event.kind !== 'user_message' || event.source !== 'extension' || event.time < from || event.time > until ||
+          (event.inputId !== undefined && event.inputId !== entry.id) || comparableInputText(event.message.text) !== expected) continue;
+      matches.push({ sessionId: summary.id, events, authored: index, deliveredAt: event.time, late: true });
+      if (matches.length > 1) return null;
+    }
+  }
+  return matches[0] ?? null;
+}
+
 async function resultText(deps: ControlDependencies, sessionId: string, stored: StoredText): Promise<ControlRequestView['result']> {
   if (!stored.truncated || !stored.assetId) return { text: stored.text, chars: stored.chars, truncated: stored.truncated };
   const full = await deps.overflow(sessionId, stored.assetId);
@@ -94,8 +147,9 @@ async function resultText(deps: ControlDependencies, sessionId: string, stored: 
 }
 
 export async function controlRequestView(deps: ControlDependencies, entry: InputEntry): Promise<ControlRequestView> {
-  const sessionId = targetSessionId(entry);
-  const base: ControlRequestView = {
+  const boundary = await recordedInputBoundary(deps, entry);
+  const sessionId = boundary?.sessionId ?? targetSessionId(entry);
+  let base: ControlRequestView = {
     requestId: entry.id,
     sessionId,
     state: entry.state === 'queued' ? 'queued' : ['browser', 'tool'].includes(entry.state) ? 'delivering' :
@@ -106,17 +160,19 @@ export async function controlRequestView(deps: ControlDependencies, entry: Input
     observedSelection: null,
     ...(entry.error ? { error: entry.error } : {})
   };
-  if (entry.state !== 'sent' || !sessionId) return base;
+  if (!boundary) return base;
+  const ownedSessionId = boundary.sessionId;
+  if (boundary.late) {
+    const { error: _error, ...recovered } = base;
+    base = { ...recovered, state: 'running', deliveredAt: boundary.deliveredAt };
+  }
 
   // Request/result ownership follows the recorder's durable sequence, never provider clocks.
   // A freshly opened ChatGPT page can report its final DOM snapshot with an earlier provider
   // timestamp than the delivery acknowledgement even though the recorder assigned it the next
   // sequence. Presentation chronology is useful in the UI, but would strand that exact answer
   // before its owning user message here.
-  const events = (await deps.events(sessionId)).sort((left, right) => left.seq - right.seq);
-  const authored = events.findIndex(event => event.kind === 'user_message' && event.inputId === entry.id &&
-    event.inputDelivery === 'confirmed');
-  if (authored < 0) return base;
+  const { events, authored } = boundary;
   const user = events[authored]!;
   const observedSelection = user.model
     ? { model: user.model, reasoningEffort: user.reasoningEffort ?? null }
@@ -128,14 +184,14 @@ export async function controlRequestView(deps: ControlDependencies, entry: Input
   const final = span.findLast(event => event.kind === 'assistant_message' && belongs(event) &&
     (event.final === true || event.state === 'final'));
   if (final?.kind === 'assistant_message') {
-    return { ...base, state: 'completed', observedSelection, result: await resultText(deps, sessionId, final.message) };
+    return { ...base, state: 'completed', observedSelection, result: await resultText(deps, ownedSessionId, final.message) };
   }
   const ended = span.findLast(event => event.kind === 'turn_end' && belongs(event));
   if (ended?.kind === 'turn_end' && ended.outcome === 'stopped') return { ...base, state: 'cancelled', observedSelection };
   if (ended?.kind === 'turn_end' && ended.outcome !== 'completed') {
     return { ...base, state: 'failed', observedSelection, error: ended.detail || `ChatGPT turn ended ${ended.outcome}` };
   }
-  const summary = await deps.session(sessionId);
+  const summary = await deps.session(ownedSessionId);
   if (summary?.endedAt !== null && summary?.endedAt !== undefined) {
     return { ...base, state: 'failed', observedSelection, error: 'ChatGPT session ended without an exact recorded final answer' };
   }

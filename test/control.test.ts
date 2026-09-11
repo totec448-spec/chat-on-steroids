@@ -31,14 +31,14 @@ function row(state: InputEntry['state'], overrides: Partial<InputEntry> = {}): I
 
 function dependencies(): ControlDependencies & {
   rows: InputEntry[];
-  sessions: Map<string, SessionSummary>;
+  summaries: Map<string, SessionSummary>;
   recorded: Map<string, SessionEvent[]>;
 } {
   const rows: InputEntry[] = [];
-  const sessions = new Map<string, SessionSummary>();
+  const summaries = new Map<string, SessionSummary>();
   const recorded = new Map<string, SessionEvent[]>();
   return {
-    rows, sessions, recorded,
+    rows, summaries, recorded,
     send: vi.fn(async input => {
       const entry = row('queued', { ...input, createdAt: Date.now() });
       rows.push(entry);
@@ -51,7 +51,8 @@ function dependencies(): ControlDependencies & {
       return true;
     }),
     inputs: async () => rows.map(entry => ({ ...entry })),
-    session: async id => sessions.get(id) ?? null,
+    sessions: async () => [...summaries.values()],
+    session: async id => summaries.get(id) ?? null,
     events: async id => recorded.get(id) ?? [],
     overflow: async () => null,
     recording: () => true
@@ -124,7 +125,7 @@ describe('thin external control', () => {
 
   it('returns only the final answer inside the exact confirmed input boundary', async () => {
     const stored = session();
-    deps.sessions.set(stored.id, stored);
+    deps.summaries.set(stored.id, stored);
     deps.recorded.set(stored.id, [
       { seq: 1, time: 1, source: 'app', kind: 'user_message', inputId: requestId, messageId: 'user-a',
         inputDelivery: 'confirmed', model: 'gpt-5.6-sol', reasoningEffort: 'xhigh', message: { text: 'Run', chars: 3, truncated: false } },
@@ -146,7 +147,7 @@ describe('thin external control', () => {
 
   it('uses durable sequence when provider timestamps put the exact final before its input', async () => {
     const stored = session();
-    deps.sessions.set(stored.id, stored);
+    deps.summaries.set(stored.id, stored);
     deps.recorded.set(stored.id, [
       { seq: 3, time: 300, source: 'extension', kind: 'user_message', inputId: requestId, messageId: 'user-a',
         inputDelivery: 'confirmed', model: 'gpt-5.6-sol', reasoningEffort: 'xhigh',
@@ -159,9 +160,48 @@ describe('thin external control', () => {
     expect(view).toMatchObject({ state: 'completed', result: { text: 'Exact answer', truncated: false } });
   });
 
+  it('recovers one uniquely recorded user send after a new-chat acknowledgement is lost', async () => {
+    const stored = session();
+    stored.startedAt = 1_010;
+    stored.updatedAt = 1_080;
+    deps.summaries.set(stored.id, stored);
+    deps.recorded.set(stored.id, [
+      { seq: 1, time: 1_020, source: 'extension', kind: 'user_message', messageId: 'late-user',
+        message: { text: 'Run (Get-Location).Path', chars: 22, truncated: false } },
+      { seq: 2, time: 1_070, source: 'extension', kind: 'assistant_message', messageId: 'late-answer',
+        message: { text: 'Exact late answer', chars: 17, truncated: false }, final: true, state: 'final' }
+    ]);
+
+    const view = await controlRequestView(deps, row('cancelled', {
+      text: 'Run `(Get-Location).Path`', deliveryText: 'Run `(Get-Location).Path`', owner: 'browser-owner',
+      sendAuthorizedAt: 1_000, error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.'
+    }));
+
+    expect(view).toMatchObject({
+      state: 'completed', sessionId: stored.id, deliveredAt: 1_020,
+      result: { text: 'Exact late answer', truncated: false }
+    });
+    expect(view).not.toHaveProperty('error');
+  });
+
+  it('does not late-attribute duplicate recorder rows or ordinary cancellation', async () => {
+    for (const id of ['session-one', 'session-two']) {
+      const stored = session(id);
+      stored.startedAt = 1_010;
+      stored.updatedAt = 1_080;
+      deps.summaries.set(id, stored);
+      deps.recorded.set(id, [{ seq: 1, time: 1_020, source: 'extension', kind: 'user_message', messageId: `${id}-user`,
+        message: { text: 'Run the task', chars: 12, truncated: false } }]);
+    }
+    const ambiguous = row('cancelled', { owner: 'browser-owner', sendAuthorizedAt: 1_000,
+      error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.' });
+    expect((await controlRequestView(deps, ambiguous)).state).toBe('cancelled');
+    expect((await controlRequestView(deps, { ...ambiguous, error: 'Input cancelled' })).state).toBe('cancelled');
+  });
+
   it('does not guess completion from an unconfirmed handout or another turn', async () => {
     const stored = session();
-    deps.sessions.set(stored.id, stored);
+    deps.summaries.set(stored.id, stored);
     deps.recorded.set(stored.id, [
       { seq: 1, time: 1, source: 'app', kind: 'user_message', inputId: requestId, messageId: `input:${requestId}`,
         inputDelivery: 'offered', message: { text: 'Run', chars: 3, truncated: false } },
