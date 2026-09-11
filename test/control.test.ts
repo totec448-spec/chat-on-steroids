@@ -184,6 +184,31 @@ describe('thin external control', () => {
     expect(view).not.toHaveProperty('error');
   });
 
+  it('recovers the exact known session when its delivery acknowledgement is lost', async () => {
+    const stored = session();
+    stored.startedAt = 100;
+    stored.updatedAt = 1_080;
+    deps.summaries.set(stored.id, stored);
+    deps.recorded.set(stored.id, [
+      { seq: 1, time: 1_020, source: 'extension', kind: 'user_message', messageId: 'known-late-user',
+        message: { text: 'Run (Get-Location).Path', chars: 22, truncated: false } },
+      { seq: 2, time: 1_070, source: 'extension', kind: 'assistant_message', messageId: 'known-late-answer',
+        message: { text: 'Known late answer', chars: 17, truncated: false }, final: true, state: 'final' }
+    ]);
+
+    const view = await controlRequestView(deps, row('cancelled', {
+      sessionId: stored.id, text: 'Run `(Get-Location).Path`', deliveryText: 'Run `(Get-Location).Path`',
+      owner: 'browser-owner', sendAuthorizedAt: 1_000,
+      error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.'
+    }));
+
+    expect(view).toMatchObject({
+      state: 'completed', sessionId: stored.id, deliveredAt: 1_020,
+      result: { text: 'Known late answer', truncated: false }
+    });
+    expect(view).not.toHaveProperty('error');
+  });
+
   it('does not late-attribute duplicate recorder rows or ordinary cancellation', async () => {
     for (const id of ['session-one', 'session-two']) {
       const stored = session(id);

@@ -118,13 +118,14 @@ async function recordedInputBoundary(deps: ControlDependencies, entry: InputEntr
   // but before its /input/ack reaches the app. The stock outbox correctly refuses to resend and
   // eventually records delivery ambiguity. Recover only from one unique recorder-owned user row
   // inside the exact authorized-send window; duplicates or merely similar text fail closed.
-  if (entry.state !== 'cancelled' || entry.deliveredAt !== undefined || sessionId || !entry.owner ||
+  if (entry.state !== 'cancelled' || entry.deliveredAt !== undefined || !entry.owner ||
       entry.error !== AMBIGUOUS_DELIVERY_ERROR || entry.sendAuthorizedAt === undefined) return null;
   const expected = comparableInputText(entry.deliveryText ?? entry.text);
   const from = entry.sendAuthorizedAt;
   const until = from + LATE_DELIVERY_WINDOW_MS;
   const matches: RecordedInputBoundary[] = [];
-  const summaries = (await deps.sessions()).filter(summary => summary.updatedAt >= from && summary.startedAt <= until);
+  const summaries = (await deps.sessions()).filter(summary =>
+    (!sessionId || summary.id === sessionId) && summary.updatedAt >= from && summary.startedAt <= until);
   for (const summary of summaries) {
     const events = (await deps.events(summary.id)).sort((left, right) => left.seq - right.seq);
     for (let index = 0; index < events.length; index += 1) {
