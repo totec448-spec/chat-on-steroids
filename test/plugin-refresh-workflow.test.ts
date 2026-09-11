@@ -145,3 +145,24 @@ it.each(['unpinned', 'pinned', 'pinned-during-proof'])('reuses management tabs a
   if (mode === 'unpinned') expect(remove).toHaveBeenCalledExactlyOnceWith(7);
   else expect(remove).not.toHaveBeenCalled();
 });
+
+/**
+ * A page this document owns, whose card it cannot read.
+ *
+ * Measured on 2026-09-11: ChatGPT had replaced the connector settings card, `pluginSnapshot()`
+ * refused, and this path returned false without telling anyone. The app's durable row carried
+ * no `error` after thirty hours — the one field that would have said what was wrong. Reporting
+ * is not terminal (`failPluginRefresh` only records the reason; maintenance may reobserve), so
+ * the cost of saying so is nothing and the cost of staying quiet was the whole investigation.
+ */
+it('reports why a page it owns produced no readable view, instead of returning in silence', async () => {
+  const ask = vi.fn(async (_message: { action: string; error?: string }) => ({ data: { ok: true } }));
+  const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask,
+    location: { pathname: '/', href: `https://chatgpt.com/?cos-plugin-refresh=${id}#settings/Plugins/plugin_asdk_app_synthetic` },
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginRefreshView: () => null }
+  });
+  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(false);
+  expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['fail']);
+  expect(String(ask.mock.calls[0]?.[0].error)).toMatch(/card|settings/i);
+});
