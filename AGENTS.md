@@ -655,6 +655,10 @@ editor/route identity and attachment changes still do.
 The witnessed Send receipt captures the pre-send assistant baseline. If app identity or native
 message source arrives after a fast reply has rendered, that question still owns its reply and
 exact final marker. A later observation must not classify its own answer as old history.
+While an exact send receipt still has a bounded evidence reader, the existing observation also
+requests canonical MAIN-world text even after native generation stops. Rendered Markdown can
+remove submitted bytes; recognizing the generation must not be a prerequisite for reading the
+source needed to recognize its Send. Route, epoch and stable message identity still decide acceptance.
 
 Page-reply waits are bounded: reuse/close observations get three seconds; New Chat preparation
 gets fifteen seconds. Missing preparation replies retain the elected tab and grant no fallback.

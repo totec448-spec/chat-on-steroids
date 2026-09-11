@@ -2413,9 +2413,14 @@
       void bindConversation(conversationId);
     }
 
-    if (continuationJournalPending) {
-      void refreshFiber();
-    } else if (generating) {
+    // A fast answer can finish before the first observation, while native Markdown has
+    // already removed bytes from the submitted bubble. The existing receipt wait still
+    // needs canonical MAIN-world text; requiring a recognized generation here would make
+    // recognizing that generation depend on a scan we never admit. This only reads evidence
+    // while an exact send receipt is pending; the usual route/message checks still decide it.
+    const pendingSendEvidence = pageViewChecks.size > 0 && userSendReceipt &&
+      Date.now() - userSendReceipt.at < USER_SEND_RECEIPT_MS;
+    if (continuationJournalPending || generating || pendingSendEvidence) {
       void refreshFiber();
     } else if (fiberTerminalMessageId && nowGenerating) {
       const terminalTurn = currentAssistantTurn(observedTurns);
