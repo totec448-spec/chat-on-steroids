@@ -405,6 +405,13 @@ Chrome sender document/epoch; bridge `/correlations` files exact pairs through r
 reads them back before returning `confirmed[]`. `/events` may publish the same exact evidence.
 Ownership acknowledgement is separate from slow transcript/image writes.
 
+`usage.js` can also project an exact conversation/request pair from a complete live POST
+conversation SSE event before Fiber exposes it. Reads are bounded to 4 MiB / 90 seconds and
+16 request ids; only server metadata is accepted. Content requires the matching route and
+document epoch, using the existing observer for brief fresh-route convergence. Missing stream
+metadata retains the Fiber path. Fetch reattachment at DOM readiness captures each downstream
+wrapper separately and deduplicates responses to avoid recursion through page instrumentation.
+
 For a newly created chat, an exact locally owned provisional Fiber turn can acquire the durable
 native conversation id as the route/server identity materializes. A `WEB:` local id, unmatched
 historical Fiber object, conflicting durable ids, active tab, timing, tool name, arrival order
@@ -865,7 +872,7 @@ while leaving ChatGPT's messages, model execution and account permissions with t
 | --- | --- |
 | `chatgpt-dom.js` | All provider selectors and DOM-shape assumptions, composer/upload/model/turn primitives. |
 | `fiber.js` | Bounded MAIN-world React evidence: messages, request ids, generation/model state and installed connector declarations. |
-| `usage.js` | Bounded allowlisted account-usage observation. |
+| `usage.js` | Bounded account-usage and exact live stream request-origin observation. |
 | `content.js` | Isolated-world recording, exact turn/navigation ownership, input/command execution, native-page companion UI. |
 | `background.js` | MV3 journal and HTTP transport, tab/document registry, command elections and durable ACK custody. |
 | `popup.*`, `overlay.css` | Pair/reconnect status and extension-owned presentation; no local tool authority. |
