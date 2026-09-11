@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/readme-hero.svg" width="960" alt="Chat On Steroids — Turn ChatGPT into your coding team. Your files. Your terminal. Your ChatGPT plan. No Codex quota." /></p>
+<p align="center"><img src="docs/images/readme-hero.svg?v=2" width="960" alt="Turn ChatGPT into Codex without touching Codex limits. Chat On Steroids: Your files. Your terminal. Your ChatGPT plan." /></p>
 
 <p align="center">
   <a href="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Setup-x64.exe"><img src="docs/images/download-windows.svg" width="208" height="56" alt="Download for Windows x64" /></a>&nbsp;
