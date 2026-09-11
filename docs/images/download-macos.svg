@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="64" viewBox="0 0 240 64" role="img" aria-label="Download macOS: Apple silicon · DMG">
+  <rect x=".5" y=".5" width="239" height="63" rx="10" fill="#173453" stroke="#52779b"/>
+  <g fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M29 18v18m-7-7 7 7 7-7M19 40v5h20v-5"/>
+  </g>
+  <g font-family="Arial, Helvetica, sans-serif" fill="#ffffff">
+    <text x="53" y="28" font-size="18" font-weight="700">macOS</text>
+    <text x="53" y="47" font-size="13">Apple silicon · DMG</text>
+  </g>
+</svg>
