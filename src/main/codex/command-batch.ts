@@ -78,18 +78,54 @@ function cmdBatch(commands: readonly string[], marker: string): string {
   return lines.join('\r\n');
 }
 
-export function composeCommandBatch(commands: readonly string[], shellType: ShellType): string {
+export function composeCommandBatch(commands: readonly string[], shellType: ShellType): { command: string; marker: string } {
   if (commands.length === 0) throw new Error('a command batch must contain at least one command');
   const marker = batchMarker();
   switch (shellType) {
     case 'powershell':
-      return powershellBatch(commands, marker);
+      return { command: powershellBatch(commands, marker), marker };
     case 'cmd':
-      return cmdBatch(commands, marker);
+      return { command: cmdBatch(commands, marker), marker };
     case 'bash':
     case 'zsh':
     case 'sh':
-      return posixBatch(commands, marker);
+      return { command: posixBatch(commands, marker), marker };
+  }
+}
+
+/** Remove only this invocation's private delimiter, before either retention or token limits.
+ * At most one delimiter's prefix waits for the next chunk; arbitrary stdout is never buffered.
+ * The raw stream remains available to the authenticated section parser below.
+ */
+export class CommandBatchDisplay {
+  private readonly delimiter: Buffer;
+  private pending = Buffer.alloc(0);
+
+  constructor(marker: string) {
+    if (!/^[0-9a-f]{24}$/.test(marker)) throw new Error('invalid command batch marker');
+    this.delimiter = Buffer.from(` [clf-batch:${marker}]`);
+  }
+
+  push(chunk: Buffer, final = false): Buffer {
+    const input = this.pending.length ? Buffer.concat([this.pending, chunk]) : chunk;
+    const parts: Buffer[] = [];
+    let start = 0;
+    for (let at = input.indexOf(this.delimiter); at >= 0; at = input.indexOf(this.delimiter, start)) {
+      parts.push(input.subarray(start, at));
+      start = at + this.delimiter.length;
+    }
+    let end = input.length;
+    if (!final) {
+      for (let length = Math.min(this.delimiter.length - 1, end - start); length > 0; length--) {
+        if (input.subarray(end - length).equals(this.delimiter.subarray(0, length))) {
+          end -= length;
+          break;
+        }
+      }
+    }
+    this.pending = Buffer.from(input.subarray(end));
+    parts.push(input.subarray(start, end));
+    return Buffer.concat(parts);
   }
 }
 
@@ -115,16 +151,16 @@ export interface CommandBatchSection {
  * Sections are returned only when a banner and its exit-code marker were both seen, so a
  * truncated tail yields fewer sections rather than a section with an invented status.
  */
-export function parseCommandBatchSections(output: string): CommandBatchSection[] {
+export function parseCommandBatchSections(output: string, marker: string): CommandBatchSection[] {
   const sections: CommandBatchSection[] = [];
   const lines = output.split('\n').map((line) => line.replace(/\r$/, ''));
-  const firstPattern = /^--- command 1\/(\d+) --- \[clf-batch:([0-9a-f]{24})\]$/;
+  if (!/^[0-9a-f]{24}$/.test(marker)) return sections;
+  const firstPattern = new RegExp(`^--- command 1\\/(\\d+) --- \\[clf-batch:${marker}\\]$`);
   const firstIndex = lines.findIndex((line) => firstPattern.test(line));
   if (firstIndex < 0) return sections;
   const first = firstPattern.exec(lines[firstIndex]!);
   if (!first) return sections;
   const count = Number(first[1]);
-  const marker = first[2]!;
   const pattern = new RegExp(`^--- command (\\d+)\\/${count} --- \\[clf-batch:${marker}\\]$`);
   const exitPattern = new RegExp(`^--- exit code (-?\\d+) --- \\[clf-batch:${marker}\\]$`);
   let open: { index: number; body: string[] } | null = null;

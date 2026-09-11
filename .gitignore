@@ -42,3 +42,8 @@ docs/open-issues-*.md
 one-cycle.ps1
 .one-cycle-*
 proof-*.txt
+
+# Private local evidence and extracted conversation attachments are never release inputs.
+/outputs/
+/.codex-remote-attachments/
+/docs/audit-user-requests-20260905-06.md

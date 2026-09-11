@@ -23,6 +23,7 @@
 
 import type { Capabilities } from '../../shared/types.js';
 import { desktopAutomationSupported } from '../platform.js';
+import { WINDOWS_COMPUTER_METHODS, WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from '../../shared/windows-computer.js';
 
 export const SURFACE_IDS = ['core', 'desktop', 'plugins'] as const;
 export type SurfaceId = (typeof SURFACE_IDS)[number];
@@ -91,9 +92,9 @@ export interface SurfaceDefinition {
  *    it here. A dedicated connector for one conditional schema is pure setup overhead with
  *    no discovery benefit.
  *
- * Core declares 10 possible tool names below, but at most 9 schemas are live at once.
+ * Each surface also exposes JavaScript exec, restricted to that surface's own tools.
  * `find` and the exec pair are mutually exclusive — `find` exists only when command
- * execution is off — so no runtime tools/list reaches all 10 declarations.
+ * execution is off — so not all declarations are exposed together.
  */
 const CORE: SurfaceDefinition = {
   id: 'core',
@@ -108,15 +109,15 @@ const CORE: SurfaceDefinition = {
     'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations.',
   cardSummary: 'Files, patches and the terminal. Required — this is the coding connector.',
   required: true,
-  tools: ['read', 'view_image', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'download_artifact', 'session', 'agents', 'session_finish']
+  tools: ['read', 'view_image', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'download_artifact', 'session', 'update_plan', 'agents', 'session_finish', 'exec']
 };
 
 /**
  * Desktop — seeing and driving the native desktop.
  *
  * This one earns its boundary twice over. It is gated on permissions the user grants
- * separately and can switch off independently; its two schemas are the largest we publish, since
- * `computer` alone carries thirteen action variants; and the majority of coding sessions
+ * separately and can switch off independently; Windows has the Window2 app/window API,
+ * while macOS retains observe/computer. The majority of coding sessions
  * never touch the desktop at all. Folding it into Core would put its weight into every
  * no-query discovery of the coding surface, for a capability most conversations do not
  * want.
@@ -127,13 +128,13 @@ const DESKTOP: SurfaceDefinition = {
   connectorName: `${CONNECTOR_BRAND} Desktop`,
   description:
     'See and control this computer desktop, including its clipboard. ' +
-    'Use for: taking a screenshot, reading what is on screen, listing and finding windows, inspecting buttons, fields and other UI controls, ' +
+    'Use for: listing and launching apps, taking background window screenshots, reading what is on screen, listing and finding windows, inspecting buttons, fields and other UI controls, ' +
     'clicking, typing, pressing keys, scrolling and dragging in native applications, ' +
     'and reading the clipboard or copying and pasting text between programs.',
   cardSummary:
-    'Screenshots, windows, mouse/keyboard control and the clipboard. Optional — connect it only if you want desktop automation.',
+    'Apps, background window screenshots, mouse/keyboard control and the clipboard. Optional — connect it only if you want desktop automation.',
   required: false,
-  tools: ['observe', 'computer']
+  tools: [...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'observe', 'computer', 'exec']
 };
 
 const PLUGINS: SurfaceDefinition = {
@@ -143,7 +144,7 @@ const PLUGINS: SurfaceDefinition = {
   cardSummary: 'One shared connector for your enabled external MCP plugins.',
   required: false,
   // Dynamic declarations are owned and bounded by the plugin manager.
-  tools: []
+  tools: ['exec']
 };
 
 export const SURFACES: Record<SurfaceId, SurfaceDefinition> = { core: CORE, desktop: DESKTOP, plugins: PLUGINS };
@@ -152,6 +153,17 @@ export const SURFACE_LIST: readonly SurfaceDefinition[] = [CORE, DESKTOP, PLUGIN
 
 export function surfaceDefinition(id: SurfaceId): SurfaceDefinition {
   return SURFACES[id];
+}
+
+/** Platform/capability projection used by setup; each registrar enforces the same split. */
+export function desktopToolNames(caps: Capabilities, platform: NodeJS.Platform = process.platform): string[] {
+  if (platform !== 'win32') return [...(caps.screen ? ['observe'] : []), ...(caps.control || caps.clipboardRead || caps.clipboardWrite ? ['computer'] : [])];
+  return [
+    ...(caps.screen ? WINDOWS_COMPUTER_READ_METHODS : []),
+    ...(caps.control ? WINDOWS_COMPUTER_INPUT_METHODS : []),
+    ...(caps.clipboardRead ? ['read_clipboard'] : []),
+    ...(caps.clipboardWrite ? ['write_clipboard'] : [])
+  ];
 }
 
 /**

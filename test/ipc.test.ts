@@ -140,7 +140,7 @@ it('round-trips Goal controls and cannot revive old periodic input when Off canc
     const session = await createSession({ title: 'Periodic ownership', conversationId: 'periodic-settings-chat' });
     await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'periodic-turn', time: Date.now() });
     await store.observeSessionModel(session.id, 'periodic-settings-chat', 'gpt-6-astra', Date.now());
-    const row = await outbox.enqueueInput({ id: '949091a5-e895-4b57-b090-925ef3d14f7a', sessionId: session.id,
+    const row = await outbox.enqueueInput({ id: 'f0f00014-1111-4111-8111-111111111111', sessionId: session.id,
       text: 'Pending automatic instruction', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null },
       { turnId: 'periodic-turn', periodic: false, userRequested: true });
     // Seed an old-version row; current code deliberately refuses new periodic input.
@@ -156,7 +156,7 @@ it('round-trips Goal controls and cannot revive old periodic input when Off canc
     expect(await save(config(1))).toMatchObject({ ok: true });
     outbox.resetInputForTests();
     expect((await outbox.listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
-    expect(await outbox.offerToolInput(session.id, 'periodic-settings-chat', 'later-request', Date.now())).toEqual([]);
+    expect(await outbox.offerToolInput(session.id, 'periodic-settings-chat', 'later-request', Date.now())).toEqual({ messages: [], reminder: '' });
   } finally {
     write?.mockRestore();
     await writeDurableNow('session-input', original); outbox.resetInputForTests();
@@ -215,6 +215,11 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   expect(getConfig().roots).toHaveLength(1);
   const listed = await handlers.get('projects:list')!(null, {}) as any;
   expect(listed.data).toHaveLength(2);
+  const removed = await handlers.get('projects:remove')!(null, { id: first.data.id }) as any;
+  expect(removed).toMatchObject({ ok: true, data: { id: first.data.id, ungrouped: true } });
+  expect(getConfig().roots).toHaveLength(1);
+  expect((await fs.stat(folder)).isDirectory()).toBe(true);
+  expect(await handlers.get('projects:remove')!(null, { id: folder })).toMatchObject({ ok: false });
 });
 
 /** The whole settings object the renderer sends, with the parts a test cares about set. */

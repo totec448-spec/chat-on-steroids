@@ -4,17 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 interface DomApi {
+  insertPrompt(text: string, mode?: boolean | 'append', failure?: (reason: string) => void): boolean;
+  enterProject(entry: { id: string; sourceConversationId: string }, current?: () => boolean): Promise<boolean>;
   composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
   generating(): boolean;
   sendButton(): HTMLButtonElement | null;
   temporaryChatReady(): boolean;
   errors(): Array<{ text: string; recoverable: boolean; blocking?: boolean }>;
-  captureComposerDraft(text: string, current?: () => boolean): { clear(): Promise<boolean>; dispose(): void; attachments(nodes: Element[]): void };
+  captureComposerDraft(text: string, current?: () => boolean): { current(): boolean; clear(): Promise<boolean>; dispose(): void; attachments(nodes: Element[]): void };
   visibleModelSelection(): { model: string; reasoningEffort?: string } | null;
   hasComposerAttachments(): boolean;
   stopGeneration(current: () => boolean): boolean;
   inspectModelSettings(current?: () => boolean, failure?: (reason: string) => void): Promise<Array<{id: string; label: string; efforts: string[]}> | null>;
-  send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean }): Promise<boolean>;
+  send(options?: { acceptanceTimeoutMs?: number; stillCurrent?: () => boolean; beforeSend?: () => Promise<boolean> }): Promise<boolean>;
   selectModelSettings(model: string | null, effort: string | null, current?: () => boolean): Promise<boolean>;
   uploadImages(images: Array<{ name: string; dataUrl: string }>, current?: () => boolean, draft?: ReturnType<DomApi['captureComposerDraft']>, files?: File[]): Promise<boolean>;
 }
@@ -45,6 +47,171 @@ function user(text: string) {
   message.textContent = text;
   section.append(message); document.body.append(section);
 }
+
+describe('one native HTML edit for prepared text', () => {
+  beforeEach(() => {
+    document.execCommand = (command, _ui, value) => {
+      const selection = document.getSelection();
+      if (command !== 'insertHTML' || document.activeElement !== box || !selection?.rangeCount) return false;
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const template = document.createElement('template');
+      template.innerHTML = value || '';
+      range.insertNode(template.content);
+      return true;
+    };
+  });
+  it('hands a 96000-character multiline frame to the editor once without native per-line editing', () => {
+    const value = ('Literal <abc> & "quoted" instructions.\n\n').repeat(2600).slice(0, 96000);
+    const nativeEdit = vi.spyOn(document, 'execCommand');
+    const events = vi.spyOn(document, 'dispatchEvent');
+    const pasted = vi.fn(); box.addEventListener('paste', pasted);
+    expect(api.insertPrompt(value, true)).toBe(true);
+    expect(nativeEdit).toHaveBeenCalledOnce();
+    expect(nativeEdit).toHaveBeenCalledWith('insertHTML', false, expect.any(String));
+    expect(events).not.toHaveBeenCalled();
+    expect(pasted).not.toHaveBeenCalled();
+    expect(box.querySelectorAll('p')).toHaveLength(0);
+    expect(box.querySelector('abc')).toBeNull();
+    expect(box.innerHTML.replaceAll('<br>', '\n')).toContain('&lt;abc&gt;');
+    expect(box.textContent!.replace(/\s/g, '')).toBe(value.replace(/\s/g, ''));
+  });
+  it('preserves an existing draft when native editing refuses it without falling back', () => {
+    const nativeEdit = vi.fn(() => false); document.execCommand = nativeEdit;
+    expect(api.insertPrompt('replacement', true)).toBe(false);
+    expect(box.textContent).toBe('Exact app prompt');
+    expect(nativeEdit).toHaveBeenCalledOnce();
+  });
+  it.each(['replace', 'append', 'empty'] as const)('uses the browser range for one %s edit even when a cold custom paste handler drops text', mode => {
+    const original = mode === 'empty' ? '' : 'Original draft';
+    box.textContent = original;
+    const pasted = vi.fn((event: Event) => event.preventDefault());
+    box.addEventListener('paste', pasted);
+    const nativeEdit = vi.spyOn(document, 'execCommand');
+    expect(api.insertPrompt('Replacement', mode === 'append' ? 'append' : true)).toBe(true);
+    expect(nativeEdit).toHaveBeenCalledOnce();
+    expect(pasted).not.toHaveBeenCalled();
+    expect(box.textContent).toBe(mode === 'append' ? original + 'Replacement' : 'Replacement');
+  });
+  it('does not edit a host replaced while it takes focus', () => {
+    const nativeEdit = vi.spyOn(document, 'execCommand');
+    box.focus = () => box.replaceWith(box.cloneNode(true));
+    expect(api.insertPrompt('Replacement', true)).toBe(false);
+    expect(nativeEdit).not.toHaveBeenCalled();
+    expect(document.getElementById('prompt-textarea')!.textContent).toBe('Exact app prompt');
+  });
+  it.each(['refused', 'modified', 'replaced', 'exception'])('reports only bounded predicate metadata for %s insertion', kind => {
+    const secret = 'PRIVATE authored prompt';
+    document.execCommand = () => {
+      if (kind === 'refused') return false;
+      if (kind === 'modified') box.textContent = 'Other text';
+      if (kind === 'replaced') box.replaceWith(box.cloneNode(true));
+      if (kind === 'exception') throw new Error(secret);
+      return true;
+    };
+    const failure = vi.fn();
+    expect(api.insertPrompt(secret, true, failure)).toBe(false);
+    expect(failure).toHaveBeenCalledOnce();
+    const reason = failure.mock.calls[0]![0];
+    expect(reason).toBe({ refused: 'native_edit_rejected', modified: 'text_mismatch', replaced: 'editor_replaced', exception: 'insertion_exception' }[kind]);
+    expect(reason).not.toContain(secret);
+    expect(reason).not.toContain('Other text');
+  });
+  it('restores an originally empty draft through one native inline edit', () => {
+    const nativeEdit = vi.spyOn(document, 'execCommand');
+    expect(api.insertPrompt('', true)).toBe(true);
+    expect(box.textContent).toBe('');
+    expect(nativeEdit).toHaveBeenCalledOnce();
+    expect(nativeEdit).toHaveBeenCalledWith('insertHTML', false, '<br>');
+  });
+  it('refuses another draft before native editing', () => {
+    const nativeEdit = vi.spyOn(document, 'execCommand');
+    expect(api.insertPrompt('replacement')).toBe(false);
+    expect(nativeEdit).not.toHaveBeenCalled();
+  });
+  it('retains the exact editor lease through paragraph normalization but rejects changed content and remounts', () => {
+    box.textContent = 'First line\nSecond line';
+    const draft = api.captureComposerDraft(box.textContent);
+    box.innerHTML = '<p>First line</p><p>Second line</p>';
+    expect(draft.current()).toBe(true);
+    box.lastElementChild!.textContent = 'Different line';
+    expect(draft.current()).toBe(false);
+    box.innerHTML = '<p>First line</p><p>Second line</p>';
+    box.replaceWith(box.cloneNode(true));
+    expect(draft.current()).toBe(false);
+    draft.dispose();
+  });
+});
+
+describe('native Project entry readiness', () => {
+  const entry = { id: 'g-p-11111111222233334444555555555555', sourceConversationId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' };
+  const projectUrl = `https://chatgpt.com/g/${entry.id}-example/project`;
+  function sourceLink() {
+    dom.reconfigure({ url: `https://chatgpt.com/c/${entry.sourceConversationId}` });
+    const header = document.createElement('header');
+    header.innerHTML = `<a href="${projectUrl}"><span data-testid="project-folder-icon"></span>Project</a>`;
+    document.body.prepend(header);
+    return header.querySelector('a')!;
+  }
+
+  it('waits for the mounted source editor before spending its one native click', async () => {
+    const link = sourceLink();
+    box.textContent = '';
+    box.remove();
+    const clicks = vi.fn((event: Event) => event.preventDefault());
+    link.addEventListener('click', clicks);
+    const entered = api.enterProject(entry);
+    // The native header can mount before its source chat. A premature click can be
+    // swallowed while the provider is hydrating, leaving the one-click attempt spent.
+    await Promise.resolve();
+    expect(clicks).not.toHaveBeenCalled();
+    link.addEventListener('click', () => {
+      dom.reconfigure({ url: projectUrl });
+      box.replaceWith(box.cloneNode(true));
+    });
+    document.querySelector('form')!.prepend(box);
+    expect(await entered).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives the native transition its own deadline after source loading', async () => {
+    const link = sourceLink();
+    box.textContent = '';
+    box.remove();
+    let clicks = 0;
+    link.addEventListener('click', event => {
+      event.preventDefault(); clicks++;
+      dom.window.setTimeout(() => {
+        dom.reconfigure({ url: projectUrl });
+        box.replaceWith(box.cloneNode(true));
+      }, 2_000);
+    });
+    const entered = api.enterProject(entry);
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(clicks).toBe(0);
+    document.querySelector('form')!.prepend(box);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(await entered).toBe(true);
+    expect(clicks).toBe(1);
+  });
+
+  it.each(['missing', 'draft', 'cancelled', 'foreign-route'])('never clicks an unready or retired source: %s', async reason => {
+    const link = sourceLink();
+    box.textContent = reason === 'draft' ? 'Keep my draft' : '';
+    box.remove();
+    let current = true;
+    const clicks = vi.fn((event: Event) => event.preventDefault());
+    link.addEventListener('click', clicks);
+    const entered = api.enterProject(entry, () => current);
+    if (reason === 'cancelled') current = false;
+    if (reason === 'foreign-route') dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-1111-4222-8333-444444444444' });
+    if (reason !== 'missing') document.querySelector('form')!.prepend(box);
+    await vi.advanceTimersByTimeAsync(12_000);
+    expect(await entered).toBe(false);
+    expect(clicks).not.toHaveBeenCalled();
+    if (reason === 'draft') expect(box.textContent).toBe('Keep my draft');
+  });
+});
 
 describe('one native Send and bounded acceptance observation', () => {
   it.each([false, true])('retires only the unchanged accepted composer text (new draft: %s)', async edited => {
@@ -103,14 +270,16 @@ describe('one native Send and bounded acceptance observation', () => {
     expect(clicks).toHaveBeenCalledTimes(1);
   });
 
-  it('times out once after 30 seconds and refuses an already disabled Send', async () => {
+  it('times out once after 30 seconds and never clicks a Send that stays disabled', async () => {
     const clicks = vi.fn(); button.addEventListener('click', clicks);
     const result = api.send({ acceptanceTimeoutMs: Infinity });
     await vi.advanceTimersByTimeAsync(30000);
     expect(await result).toBe(false);
     expect(clicks).toHaveBeenCalledTimes(1);
     button.disabled = true;
-    expect(await api.send()).toBe(false);
+    const disabled = api.send();
+    await vi.advanceTimersByTimeAsync(30000);
+    expect(await disabled).toBe(false);
     expect(clicks).toHaveBeenCalledTimes(1);
   });
 
@@ -174,6 +343,114 @@ describe('one native Send and bounded acceptance observation', () => {
     const result = api.send({ acceptanceTimeoutMs: 100 });
     await vi.advanceTimersByTimeAsync(100);
     expect(await result).toBe(false);
+  });
+});
+
+describe('composer-owned controls and Send readiness', () => {
+  it.each(['allowed', 'revoked', 'replaced', 'deadline'])('authorizes only a ready Send and rechecks after authorization (%s)', async state => {
+    button.disabled = true;
+    let release!: (allowed: boolean) => void;
+    const authorize = vi.fn(() => new Promise<boolean>(resolve => { release = resolve; }));
+    const clicks = vi.fn(() => { box.textContent = ''; });
+    button.addEventListener('click', clicks);
+    const sending = api.send({ beforeSend: authorize, acceptanceTimeoutMs: 2000 });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(authorize).not.toHaveBeenCalled();
+    button.disabled = false;
+    await vi.advanceTimersByTimeAsync(1);
+    expect(authorize).toHaveBeenCalledTimes(1);
+    button.setAttribute('aria-label', 'Send prompt');
+    if (state === 'replaced') button.replaceWith(button.cloneNode(true));
+    if (state === 'deadline') await vi.advanceTimersByTimeAsync(2000);
+    release(state !== 'revoked');
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await sending).toBe(state === 'allowed');
+    expect(authorize).toHaveBeenCalledTimes(1);
+    expect(clicks).toHaveBeenCalledTimes(state === 'allowed' ? 1 : 0);
+  });
+
+  it.each(['disabled', 'aria-disabled', 'unmounted'])('waits for the same draft and its %s Send control without synthetic Enter', async state => {
+    const trailing = button.parentElement!;
+    if (state === 'disabled') button.disabled = true;
+    if (state === 'aria-disabled') button.setAttribute('aria-disabled', 'true');
+    if (state === 'unmounted') button.remove();
+    const clicks = vi.fn(() => { box.textContent = ''; });
+    const keys = vi.fn();
+    button.addEventListener('click', clicks); box.addEventListener('keydown', keys);
+    const result = api.send({ acceptanceTimeoutMs: 2000 });
+    let settled = false; void result.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(900);
+    expect(settled).toBe(false);
+    expect(clicks).not.toHaveBeenCalled();
+    expect(keys).not.toHaveBeenCalled();
+    button.disabled = false; button.removeAttribute('aria-disabled'); trailing.append(button);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await result).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(keys).not.toHaveBeenCalled();
+  });
+
+  it.each(['draft', 'editor', 'route', 'authority', 'other-generation'])('revokes a waiting Send when its %s changes', async reason => {
+    button.remove();
+    const keys = vi.fn(); box.addEventListener('keydown', keys);
+    const clicks = vi.fn(); button.addEventListener('click', clicks);
+    let current = true;
+    const result = api.send({ acceptanceTimeoutMs: 2000, stillCurrent: () => current });
+    await vi.advanceTimersByTimeAsync(50);
+    if (reason === 'draft') box.textContent = 'A newer user draft';
+    if (reason === 'editor') box.replaceWith(box.cloneNode(true));
+    if (reason === 'route') dom.reconfigure({ url: 'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    if (reason === 'authority') current = false;
+    if (reason === 'other-generation') {
+      const stop = document.createElement('button'); stop.dataset.testid = 'stop-button';
+      document.querySelector('form')!.append(stop);
+    }
+    document.querySelector('form')!.append(button);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await result).toBe(false);
+    expect(clicks).not.toHaveBeenCalled();
+    expect(keys).not.toHaveBeenCalled();
+  });
+
+  it.each(['hidden', 'inert', 'transcript', 'other-form'])('does not let a %s Stop control block this composer', async place => {
+    const stale = document.createElement('button'); stale.dataset.testid = 'stop-button';
+    const host = document.createElement(place === 'other-form' ? 'form' : 'section');
+    if (place === 'hidden') host.hidden = true;
+    if (place === 'inert') host.setAttribute('inert', '');
+    if (place === 'transcript') host.dataset.testid = 'conversation-turn-100';
+    host.append(stale);
+    if (place === 'hidden' || place === 'inert') document.querySelector('form')!.prepend(host);
+    else document.body.prepend(host);
+    expect(api.generating()).toBe(false);
+    button.addEventListener('click', () => { box.textContent = ''; });
+    expect(await api.send()).toBe(true);
+  });
+
+  it('uses only the visible Send in the current form and never a quoted or hidden control', async () => {
+    const stale = button.cloneNode(true) as HTMLButtonElement;
+    stale.hidden = true; button.parentElement!.prepend(stale);
+    const quote = document.createElement('section'); quote.dataset.testid = 'conversation-turn-100';
+    const quotedSend = button.cloneNode(true); quote.append(quotedSend); document.body.prepend(quote);
+    const wrong = vi.fn(); stale.addEventListener('click', wrong); quotedSend.addEventListener('click', wrong);
+    const clicks = vi.fn(() => { box.textContent = ''; }); button.addEventListener('click', clicks);
+    expect(api.sendButton()).toBe(button);
+    expect(await api.send()).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(wrong).not.toHaveBeenCalled();
+  });
+
+  it('does not guess between two visible Send controls while the composer is remounting', async () => {
+    const duplicate = button.cloneNode(true) as HTMLButtonElement;
+    button.parentElement!.append(duplicate);
+    const wrong = vi.fn(); duplicate.addEventListener('click', wrong);
+    const clicks = vi.fn(() => { box.textContent = ''; }); button.addEventListener('click', clicks);
+    expect(api.sendButton()).toBeNull();
+    const result = api.send({ acceptanceTimeoutMs: 2000 });
+    expect(clicks).not.toHaveBeenCalled();
+    duplicate.remove(); await vi.advanceTimersByTimeAsync(0);
+    expect(await result).toBe(true);
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(wrong).not.toHaveBeenCalled();
   });
 });
 

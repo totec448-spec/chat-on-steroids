@@ -107,7 +107,7 @@
             <h2>
               Conversations
               <span class="acts">
-                <button class="btn project-add" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder">+</button>
+                <button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></button>
                 <button class="btn" id="chatRefresh" type="button">
                   <svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh
                 </button>
@@ -158,12 +158,19 @@
       <!-- Everything this app knows about being out of date, in one line. Painted from
            state.update plus the extension version the bridge already reports; see
            src/main/update.ts. Hidden whenever there is nothing to say. -->
+      <div class="notices">
       <div class="notice" id="updateNotice" hidden>
         <svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>
         <span id="updateText"></span>
         <button class="btn btn-quiet" id="updateGet" type="button" hidden>Get it</button>
         <button class="btn btn-quiet" id="updateInstall" type="button" hidden>Install now</button>
         <button class="btn btn-quiet" id="updateExtension" type="button" hidden>Update extension</button>
+      </div>
+      <div class="notice" id="pluginRefreshReminder" role="status" hidden>
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-pulse" /></svg>
+        <span>Please remember to refresh the plugins in ChatGPT.</span>
+        <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg></button>
+      </div>
       </div>
 
       <main>
@@ -300,7 +307,13 @@
         <!-- =========================================================== Setup -->
         <section class="panel scroll" data-panel="setup">
           <div class="sheet">
-            <div class="settings-heading"><h1>Setup</h1><p>Connect your workspace to ChatGPT.</p></div>
+            <div class="setup-heading">
+              <div class="settings-heading"><h1>Setup</h1><p>Connect your workspace to ChatGPT.</p></div>
+              <div class="language-tabs" role="group" aria-label="Language">
+                <button type="button" data-language="en" lang="en" translate="no" aria-pressed="true"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#012169" d="M0 0h60v40H0z"/><path stroke="#fff" stroke-width="8" d="m0 0 60 40M60 0 0 40"/><path stroke="#c8102e" stroke-width="3" d="m0 0 60 40M60 0 0 40"/><path stroke="#fff" stroke-width="13" d="M30 0v40M0 20h60"/><path stroke="#c8102e" stroke-width="7" d="M30 0v40M0 20h60"/></svg>English</button>
+                <button type="button" data-language="zh-CN" lang="zh-CN" translate="no" aria-pressed="false"><svg class="language-flag" viewBox="0 0 60 40" aria-hidden="true"><path fill="#de2910" d="M0 0h60v40H0z"/><g fill="#ffde00"><path d="m10 5 1.8 5.5h5.7l-4.6 3.4 1.8 5.4-4.7-3.4-4.7 3.4 1.8-5.4-4.6-3.4h5.7z"/><path id="language-star" d="m20 3 .7 2.1h2.2l-1.8 1.3.7 2.1L20 7.2l-1.8 1.3.7-2.1-1.8-1.3h2.2z"/><use href="#language-star" transform="translate(5 5)"/><use href="#language-star" transform="translate(5 12)"/><use href="#language-star" transform="translate(0 17)"/></g></svg>简体中文</button>
+              </div>
+            </div>
             <div class="lede">
               <p>
                 Six steps, once. Custom MCP apps need ChatGPT <strong>Developer mode</strong> on the
@@ -607,9 +620,13 @@
               <div class="view" data-view="settings" hidden>
                 <div class="settings-heading"><h1>Agents &amp; automation</h1><p>Fine-tune your workspace and the way your agents work.</p><label class="sr-only" for="settingsSearch">Search settings</label><input id="settingsSearch" type="search" placeholder="Search settings…" /></div>
                 <p id="settingsSearchEmpty" class="muted" role="status" hidden>No settings match your search.</p>
+                <h2 class="settings-section-title">Appearance</h2>
+                <div class="pane">
+                  <label class="setting" for="uiLanguage"><span class="setting-text"><b>Language</b><em>Changes the app interface immediately. Your messages stay as written.</em></span><select id="uiLanguage" class="language-select" translate="no"><option value="en" lang="en">English</option><option value="zh-CN" lang="zh-CN">简体中文</option></select></label>
+                </div>
                 <h2 class="settings-section-title">Continuation sources</h2>
                 <div class="pane">
-                  <div class="setting"><span class="setting-text"><b>Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option><option value="templates">Offline · No API cost</option></select></div>
+                  <div class="setting"><span class="setting-text"><b>Goal response source</b><em>API is the most reliable. Offline uses completion markers and 200 prepared messages.</em></span><select id="goalBackend"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
@@ -626,7 +643,7 @@
                 <div class="pane">
                   <div class="field">
                     <label for="mcpInstructions">Your own instructions</label>
-                    <textarea id="mcpInstructions" rows="6" maxlength="4000" spellcheck="false" placeholder="e.g. Always run the test suite before saying a change works."></textarea>
+                    <textarea dir="auto" id="mcpInstructions" rows="6" maxlength="4000" spellcheck="false" placeholder="e.g. Always run the test suite before saying a change works."></textarea>
                     <p class="hint">Added to the end of what each connector tells ChatGPT about itself, marked as yours. Kept across app updates. Leave empty for none.</p>
                   </div>
                   <p class="muted">ChatGPT reads connector instructions once, when it loads the tools, so a change reaches an existing conversation only after the connector is loaded again.</p>
@@ -751,7 +768,7 @@
 
                   <div class="field goal-prompt" id="goalPromptPanel" hidden>
                     <label for="goalPrompt">Goal prompt, no task</label>
-                    <textarea id="goalPrompt" rows="14" spellcheck="false"></textarea>
+                    <textarea dir="auto" id="goalPrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
                     <div class="step-actions">
                       <button class="btn" id="goalPromptReset" type="button">Restore default</button>
@@ -768,7 +785,7 @@
 
                   <div class="field goal-prompt" id="goalObjectivePromptPanel" hidden>
                     <label for="goalObjectivePrompt">Goal prompt, with a task</label>
-                    <textarea id="goalObjectivePrompt" rows="14" spellcheck="false"></textarea>
+                    <textarea dir="auto" id="goalObjectivePrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. Keep <code>NO_REPLY</code> as the exact stop response.</p>
                     <div class="step-actions">
                       <button class="btn" id="goalObjectivePromptReset" type="button">Restore default</button>
@@ -785,7 +802,7 @@
 
                   <div class="field goal-prompt" id="goalLoopPromptPanel" hidden>
                     <label for="goalLoopPrompt">Loop prompt</label>
-                    <textarea id="goalLoopPrompt" rows="14" spellcheck="false"></textarea>
+                    <textarea dir="auto" id="goalLoopPrompt" rows="14" spellcheck="false"></textarea>
                     <p class="hint">Saved when you leave the editor. There is no stop response here - the app refuses one and asks again.</p>
                     <div class="step-actions">
                       <button class="btn" id="goalLoopPromptReset" type="button">Restore default</button>
@@ -827,10 +844,10 @@
                 </div>
               </div>
             </div>
-            <div class="composer-dock" id="composerDock"><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
+            <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
             <form class="composer" id="composer">
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
-              <div id="composerImages" class="composer-images" hidden></div><textarea id="chatInput" rows="1" maxlength="16000" placeholder="Ask anything…"></textarea>
+              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" maxlength="16000" placeholder="Ask anything…"></textarea>
               <div class="composer-toolbar">
                 <details class="composer-menu" id="attachmentMenu">
                   <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
@@ -851,7 +868,7 @@
               <div id="sessionControls" hidden>
                 <div class="session-controls-menu">
                   <label for="sessionObjective">This chat's goal</label>
-                  <textarea id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
+                  <textarea dir="auto" id="sessionObjective" rows="3" maxlength="16000" placeholder="What should this chat achieve?"></textarea>
                   <button id="saveSessionObjective" data-keep-menu="true" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check" /></svg><span>Save task</span></button>
                   <select hidden id="sessionObjectiveMode" aria-label="Goal behavior"><option value="goal">Goal · stop when complete</option><option value="loop">Loop · keep going</option></select>
                   <button id="createPlan" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-chat" /></svg><span>Create plan</span></button>
@@ -883,7 +900,7 @@
                 <div class="send-control">
                   <div class="send-options" id="sendOptions" hidden>
                     <div class="delivery-choices" role="radiogroup" aria-label="Message delivery">
-                      <button type="button" role="radio" aria-checked="true" data-delivery="auto">Inject now<svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
+                      <button type="button" role="radio" aria-checked="true" data-delivery="auto"><span id="immediateDeliveryLabel">Send</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
                       <button type="button" role="radio" aria-checked="false" data-delivery="after-turn"><span id="afterTurnLabel">After this turn</span><svg class="ico" aria-hidden="true"><use href="#i-check" /></svg></button>
                     </div>
                     <select id="sendMode" aria-label="Message delivery" hidden><option value="auto">Send</option><option value="after-turn">After this turn</option></select>

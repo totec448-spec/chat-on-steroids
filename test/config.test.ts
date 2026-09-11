@@ -25,6 +25,17 @@ afterAll(async () => {
 });
 
 describe('settings migration', () => {
+  it('defaults background chats on for fresh and omitted settings while preserving saved choices', async () => {
+    expect(defaultConfig().ui.backgroundChats).toBe(true);
+    expect((await loadConfig()).ui.backgroundChats).toBe(true);
+    const legacy = defaultConfig(); delete legacy.ui.backgroundChats;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.backgroundChats).toBe(true);
+    for (const backgroundChats of [false, true]) {
+      await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, backgroundChats } });
+      expect((await loadConfig()).ui.backgroundChats).toBe(backgroundChats);
+    }
+  });
   it('defaults login startup off for fresh and legacy settings independently of auto-connect', async () => {
     expect(defaultConfig().ui.startAtLogin).toBe(false);
     const legacy = defaultConfig();

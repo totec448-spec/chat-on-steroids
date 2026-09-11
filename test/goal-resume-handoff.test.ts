@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { prependUserPrompt } from '../src/shared/user-prompt.js';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 
 vi.mock('electron', () => ({
@@ -319,6 +320,10 @@ it('recovers a pre-provenance resumed session only from its exact durable bootst
 it('treats only known resume-bootstrap formatting artifacts as provenance-equivalent', () => {
   const handoff = 'Keep the exact task wording and continue the same work.';
   const bootstrap = resumeBootstrapText(handoff);
+  const framed = prependUserPrompt(resumeBootstrapText(handoff, 'token_0123456789abcdef'), 'Full guidance\nsecond line');
+  expect(resumeBootstrapMatches(framed, handoff)).toBe(true);
+  expect(resumeBootstrapMatches(framed.replace(/\n/g, '\r\n'), handoff)).toBe(true);
+  expect(resumeBootstrapMatches(framed.replace('same work', 'different work'), handoff)).toBe(false);
   expect(resumeBootstrapMatches(bootstrap.replace('exact task', `exact\u00a0task`), handoff)).toBe(true);
   expect(resumeBootstrapMatches(bootstrap.replace('exact task', `exact\u00c2\u00a0task`), handoff)).toBe(true);
   expect(resumeBootstrapMatches(bootstrap.replace(/\n/g, '\r\n'), handoff)).toBe(true);

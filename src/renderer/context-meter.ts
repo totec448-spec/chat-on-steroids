@@ -1,3 +1,4 @@
+import { ui, t } from './i18n.js';
 import type { Config } from '../shared/types.js';
 import type { SessionSummary } from '../shared/session.js';
 import type { ReasoningEffort } from '../shared/session.js';
@@ -19,10 +20,14 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
   const percent = limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0;
   arc.setAttribute('stroke-dasharray', `${pro ? 0 : percent * 0.377} 37.7`);
   const tokens = new Intl.NumberFormat().format(used);
-  panel.textContent = pro
-    ? `Session context · estimated\n${tokens} tokens used\nAuto-compaction off for Pro`
-    : `Session context · estimated\n${tokens} / ${new Intl.NumberFormat().format(limit)} tokens · ${percent}% of configured limit\n${config.compaction.auto ? `Auto-compaction at ${new Intl.NumberFormat().format(config.compaction.autoTokens)} tokens` : 'Auto-compaction off'}`;
-  button.setAttribute('aria-label', panel.textContent.replaceAll('\n', '. '));
+  const description = () => [t('Session context · estimated'), pro
+    ? t('{0} tokens used', [tokens])
+    : t('{0} / {1} tokens · {2}% of configured limit', [tokens, new Intl.NumberFormat().format(limit), percent]),
+    pro ? t('Auto-compaction off for Pro') : config.compaction.auto
+      ? t('Auto-compaction at {0} tokens', [new Intl.NumberFormat().format(config.compaction.autoTokens)])
+      : t('Auto-compaction off')].join('\n');
+  ui(panel, 'textContent', description);
+  ui(button, 'aria-label', () => description().replaceAll('\n', '. '));
 }
 
 export function initContextMeter(): void {

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { OutputPublication } from '../codex/unified-exec.js';
 
 /**
  * The id ChatGPT puts on the HTTP request that carries a tool call.
@@ -14,16 +15,60 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * plainly there on the socket. So the surface's request handler runs inside this store and
  * the tool dispatch reads it back.
  */
-const store = new AsyncLocalStorage<string | null>();
+export type InboundPhase = 'identity' | 'handler' | 'delivery' | 'recorder';
+export interface InboundTiming {
+  startedAt: number;
+  dispatchedAt: number | null;
+  completedAt: number | null;
+  calls: number;
+  phases: Record<InboundPhase, number>;
+}
+const store = new AsyncLocalStorage<{ requestId: string | null; timing?: InboundTiming; publication?: OutputPublication }>();
+
+/** Fixed-size, process-local numbers only: no payload, credential, path or chat identity. */
+export function createInboundTiming(): InboundTiming {
+  return { startedAt: performance.now(), dispatchedAt: null, completedAt: null, calls: 0,
+    phases: { identity: 0, handler: 0, delivery: 0, recorder: 0 } };
+}
+
+/** Each dispatch has its own cursor even if an adapter executes several calls concurrently. */
+export function beginToolTiming(): (phase: InboundPhase, complete?: boolean) => void {
+  const timing = store.getStore()?.timing;
+  let previous = performance.now();
+  if (timing) { timing.calls++; timing.dispatchedAt ??= previous; }
+  return (phase, complete = false) => {
+    const now = performance.now();
+    if (timing) {
+      timing.phases[phase] += Math.max(0, now - previous);
+      if (complete) timing.completedAt = now;
+    }
+    previous = now;
+  };
+}
+
+/** Aggregated call time may exceed HTTP wall time for concurrent calls; response_tail is
+ * local SDK serialization/socket completion, never evidence of remote model receipt. */
+export function formatInboundTiming(timing: InboundTiming): string {
+  if (!timing.calls) return '';
+  const ms = (value: number) => Math.max(0, Math.round(value));
+  return ` calls=${timing.calls} ingress_ms=${ms((timing.dispatchedAt ?? timing.startedAt) - timing.startedAt)}` +
+    Object.entries(timing.phases).map(([phase, value]) => ` ${phase}_ms=${ms(value)}`).join('') +
+    ` response_tail_ms=${timing.completedAt === null ? 'pending' : ms(performance.now() - timing.completedAt)}`;
+}
 
 /** Runs `body` with the request id of the HTTP request currently being served. */
-export function withInboundRequestId<T>(requestId: string | null, body: () => T): T {
-  return store.run(requestId, body);
+export function withInboundRequestId<T>(requestId: string | null, body: () => T, timing?: InboundTiming, publication?: OutputPublication): T {
+  return store.run({ requestId, timing, publication }, body);
+}
+
+/** Shared by calls in one HTTP response; socket completion alone is not a remote receipt. */
+export function inboundPublication(): OutputPublication | undefined {
+  return store.getStore()?.publication;
 }
 
 /** The request id of the HTTP request this call is being served on, if it had one. */
 export function inboundRequestId(): string | null {
-  return store.getStore() ?? null;
+  return store.getStore()?.requestId ?? null;
 }
 
 /**

@@ -18,7 +18,7 @@
  */
 
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { requestIdFromHeader, withInboundRequestId } from './inbound.js';
+import { createInboundTiming, formatInboundTiming, requestIdFromHeader, withInboundRequestId } from './inbound.js';
 import http from 'node:http';
 import { createMcpHandler } from '@modelcontextprotocol/server';
 import { localhostHostValidation, localhostOriginValidation, toNodeHandler } from '@modelcontextprotocol/node';
@@ -323,7 +323,7 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     prmPath: `${PRM_PREFIX}${surface.basePath}`,
     url: '',
     handler: toNodeHandler(
-      createMcpHandler(() => buildServer(stableContext(surface.id), surface.id)),
+      createMcpHandler(() => buildServer(stableContext(surface.id), surface.id, undefined, () => stableContext(surface.id))),
       { onerror: (error) => logError(`MCP handler error (${surface.id}): ${error.message}`) }
     )
   }));
@@ -331,6 +331,7 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
   const checkOrigin = localhostOriginValidation();
 
   const server = http.createServer((req, res) => {
+    const timing = createInboundTiming();
     const url = req.url ?? '';
     const pathOnly = url.split('?')[0] ?? '';
     const selfTest = req.headers[SELF_TEST_HEADER] === selfTestToken;
@@ -343,7 +344,11 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
     const prmRoute = routes.find((candidate) => safeEqual(pathOnly, candidate.prmPath)) ?? null;
 
     const startedAt = Date.now();
+    const publication = { completedAt: null as number | null, failed: false };
+    res.once('close', () => { if (publication.completedAt === null) publication.failed = true; });
     res.on('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300 && !publication.failed) publication.completedAt = Date.now();
+      else publication.failed = true;
       const shape = route
         ? `mcp/${route.id}`
         : prmRoute
@@ -351,7 +356,7 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
           : pathOnly.slice(0, 40);
       const method = req.method ?? '?';
       const who = selfTest ? ' (self-test)' : tunnelProbe ? ' (tunnel probe)' : '';
-      const line = `${method} ${shape} → ${res.statusCode} in ${Date.now() - startedAt}ms${who}`;
+      const line = `${method} ${shape} → ${res.statusCode} in ${Date.now() - startedAt}ms${who}${formatInboundTiming(timing)}`;
       // Streamable HTTP makes the server-opened SSE stream and session deletion
       // optional, and 405 is the prescribed answer for a server that offers
       // neither. ChatGPT probes for both on every connect, so treating those two
@@ -414,11 +419,11 @@ export async function startMcpServer(getContext: () => ToolContext): Promise<Mcp
           jsonError(res, 400, 'invalid_json');
           return;
         }
-        withInboundRequestId(requestId, () => void route.handler(req, res, parsed.body));
+        withInboundRequestId(requestId, () => void route.handler(req, res, parsed.body), timing, publication);
       });
       return;
     }
-    withInboundRequestId(requestId, () => void route.handler(req, res));
+    withInboundRequestId(requestId, () => void route.handler(req, res), timing, publication);
   });
 
   // Reject slow or oversized bodies rather than holding sockets open indefinitely.

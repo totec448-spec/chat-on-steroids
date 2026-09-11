@@ -14,6 +14,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AssetRef, FileChange, ToolOutcome } from '../../shared/session.js';
+import type { OutputPublication } from '../codex/unified-exec.js';
 
 export interface CallEvidence {
   changes: FileChange[];
@@ -48,8 +49,8 @@ export interface CallCaller {
    * This is the join. ChatGPT stamps the same id on the request in its own message model,
    * the extension reports it, and the two meet here — so a call names the conversation
    * that issued it outright, rather than being placed by when it happened to arrive.
-   * Measured live on 2026-08-18: header `wfr_01a014bdd7cd7a15b6b533d3ce2b42f2/yqy1`
-   * against page evidence `read#wfr_01a014bdd7cd7a15b6b533d3ce2b42f2`.
+   * Measured live on 2026-08-18: header `wfr_00000000000000000000000000000001/yqy1`
+   * against page evidence `read#wfr_00000000000000000000000000000001`.
    */
   requestId: string | null;
   /**
@@ -62,6 +63,8 @@ export interface CallCaller {
 }
 
 export interface CallContext {
+  /** Result publication belongs to the transport, not to the generation-wide request ID. */
+  publication?: OutputPublication;
   /** Wall-clock start of this MCP request, shared by identity-sensitive handlers. */
   startedAt: number;
   /** Stable per-conversation key when the transport offers one, else null. */

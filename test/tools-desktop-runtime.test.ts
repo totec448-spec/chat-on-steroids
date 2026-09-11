@@ -28,7 +28,7 @@ vi.mock('../src/main/computer/index.js', () => ({
   waitForWindow: desktop.waitForWindow
 }));
 
-import { registerDesktopTools } from '../src/main/mcp/tools-desktop.js';
+import { registerMacOSDesktopTools as registerDesktopTools } from '../src/main/mcp/tools-desktop-macos.js';
 
 function caps(over: Partial<Capabilities>): Capabilities {
   return {

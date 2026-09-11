@@ -78,7 +78,7 @@ describe('the order a recorded turn is read in', () => {
   });
 
   it('puts the terminal assistant answer after every call even when ChatGPT opened its message earlier', () => {
-    // Live 2026-08-21 (`ce135bff`): ChatGPT stamped the final answer at 08:40:34 when it
+    // Live 2026-08-21 (`00000019`): ChatGPT stamped the final answer at 08:40:34 when it
     // opened that message object, then ran tool calls at 08:40:37 and 08:40:42 before the
     // prose actually closed the turn. The authored timestamp is useful chronology for ordinary
     // messages, but it cannot mean the terminal answer happened before work the same turn still

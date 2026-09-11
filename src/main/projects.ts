@@ -8,7 +8,7 @@ import { resolvePath } from './sandbox.js';
 import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
 import type { LocalProject } from '../shared/projects.js';
 
-const projectSchema = z.object({ id: z.string().uuid(), name: z.string().min(1).max(160), path: z.string().min(1).max(32768), createdAt: z.number().finite().nonnegative() });
+const projectSchema = z.object({ id: z.string().uuid(), name: z.string().min(1).max(160), path: z.string().min(1).max(32768), createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional() });
 const catalogSchema = z.array(projectSchema).max(200);
 let mutations: Promise<unknown> = Promise.resolve();
 const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -31,11 +31,31 @@ export function addProject(folderPath: string): Promise<LocalProject> {
     if (!(await fs.stat(resolved.real)).isDirectory()) throw new Error('Choose a project folder');
     const projects = await listProjects();
     const existing = projects.find(project => samePath(project.path, resolved.real));
-    if (existing) return existing;
+    if (existing) {
+      if (!existing.ungrouped) return existing;
+      const { ungrouped: _, ...restored } = existing;
+      await writeDurableNow('projects', projects.map(project => project.id === existing.id ? restored : project));
+      return restored;
+    }
     if (projects.length >= 200) throw new Error('Project catalog limit reached');
     const project: LocalProject = { id: randomUUID(), name: (path.basename(resolved.real) || resolved.real).slice(0, 160), path: resolved.real, createdAt: Date.now() };
     await writeDurableNow('projects', [...projects, project]);
     return project;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+/** Remove only the grouping. One catalog commit also covers unloaded sessions and
+ * in-flight inputs without rewriting their durable workspace/receipt identities. */
+export function removeProject(id: string): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(id);
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === id);
+    if (!project) throw new Error('Project not found');
+    const removed = { ...project, ungrouped: true };
+    if (!project.ungrouped) await writeDurableNow('projects', projects.map(row => row.id === id ? removed : row));
+    return removed;
   });
   mutations = operation.catch(() => undefined);
   return operation;

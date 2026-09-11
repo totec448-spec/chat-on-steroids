@@ -37,8 +37,8 @@ describe('finish producer to durable injection integration', () => {
     expect(rows[0]).toMatchObject({ state: 'queued', finishOwner: { turnId: 'turn-one' } });
     expect(await pendingBrowserInputs()).toEqual([]);
     const payload = await offerToolInput(session.id, conversationId, randomUUID(), Date.now() + 10);
-    expect(payload).toHaveLength(1);
-    expect(payload[0]!.text).toContain('Inspect the remaining work');
+    expect(payload.messages).toHaveLength(1);
+    expect(payload.messages[0]!.text).toContain('Inspect the remaining work');
     expect(notify).not.toHaveBeenCalled();
     await setGoalSwitchNow(conversationId, mode, false);
     expect((await listInputs())[0]!.state).toBe('cancelled');

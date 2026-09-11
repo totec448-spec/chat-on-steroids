@@ -15,49 +15,163 @@
  * process, and they were the only record of what the bridge decided and why.
  */
 
-import { appendFileSync, renameSync, statSync } from 'node:fs';
+import { promises as fs, statSync, writeFileSync } from 'node:fs';
 import type { LogEntry } from '../shared/types.js';
 import { currentAgent } from './mcp/call-context.js';
 
 const MAX_ENTRIES = 500;
 /** One rotation keeps the previous file, so the last two of these are always on disk. */
 const MAX_LOG_FILE_BYTES = 4 * 1024 * 1024;
+const MAX_LINE_BYTES = 16 * 1024;
+const MAX_PENDING_BYTES = 256 * 1024;
+const MAX_BATCH_BYTES = 64 * 1024;
 
 const entries: LogEntry[] = [];
 const listeners = new Set<(entry: LogEntry) => void>();
 
-let logFile: string | null = null;
-let logFileBytes = 0;
+interface FileMirror {
+  file: string;
+  bytes: number;
+  pending: string[];
+  pendingBytes: number;
+  dropped: number;
+  work: Promise<void> | null;
+  error: unknown;
+}
+let mirror: FileMirror | null = null;
 
 /**
  * Mirrors every line from here on to `file`, rotating it once to `file.1` when it fills.
  *
- * Synchronous and unconditional: the lines worth having are the ones written during a
- * crash or teardown, when nothing asynchronous is guaranteed to run. A write failure is
- * swallowed — the log is the reporting channel — and disables the mirror for this process.
+ * Normal writes are ordered asynchronous batches. Teardown explicitly flushes; fatal
+ * failure uses a separate bounded synchronous snapshot, never racing the live file writer.
  */
 export function initLogFile(file: string): void {
-  logFile = file;
+  let bytes = 0;
   try {
-    logFileBytes = statSync(file).size;
-  } catch {
-    logFileBytes = 0;
-  }
+    bytes = statSync(file).size;
+  } catch { /* A first run has no log yet. */ }
+  mirror = { file, bytes, pending: [], pendingBytes: 0, dropped: 0, work: null, error: null };
+}
+
+function boundedText(text: string): string {
+  const prefix = text.slice(0, MAX_LINE_BYTES);
+  if (prefix.length === text.length && Buffer.byteLength(prefix, 'utf8') <= MAX_LINE_BYTES) return text;
+  return Buffer.from(prefix, 'utf8').subarray(0, MAX_LINE_BYTES - 64).toString('utf8') + ' [log text truncated]';
+}
+
+function formatEntry(entry: LogEntry): string {
+  return `${new Date(entry.time).toISOString()}  ${entry.level.padEnd(5)}  ${entry.agent ? `[${entry.agent}] ` : ''}${entry.message}\n`;
+}
+
+function startWriter(state: FileMirror): void {
+  if (state.work || state.error || (!state.pending.length && !state.dropped)) return;
+  state.work = Promise.resolve().then(async () => {
+    try {
+      while (state.pending.length || state.dropped) {
+        const lines: string[] = [];
+        let bytes = 0;
+        while (state.pending.length) {
+          const line = state.pending[0]!;
+          const size = Buffer.byteLength(line, 'utf8');
+          if (bytes && bytes + size > MAX_BATCH_BYTES) break;
+          state.pending.shift();
+          state.pendingBytes -= size;
+          lines.push(line);
+          bytes += size;
+        }
+        if (!lines.length && state.dropped) {
+          lines.push(`${new Date().toISOString()}  warn   ${state.dropped} log line(s) omitted: file writer backlog exceeded its byte limit.\n`);
+          state.dropped = 0;
+          bytes = Buffer.byteLength(lines[0]!, 'utf8');
+        }
+        if (state.bytes && state.bytes + bytes > MAX_LOG_FILE_BYTES) {
+          await fs.rename(state.file, `${state.file}.1`);
+          state.bytes = 0;
+        }
+        await fs.appendFile(state.file, lines.join(''), 'utf8');
+        state.bytes += bytes;
+      }
+    } catch (error) {
+      state.error = error;
+      state.pending = [];
+      state.pendingBytes = 0;
+      state.dropped = 0;
+      // No recursive logging and no synchronous writes on the ordinary call path.
+      writeCrashSnapshot(state, `log file writer failed: ${String(error)}`);
+    }
+  }).finally(() => {
+    state.work = null;
+    startWriter(state);
+  });
 }
 
 function mirrorToFile(entry: LogEntry): void {
-  if (!logFile) return;
-  const line = `${new Date(entry.time).toISOString()}  ${entry.level.padEnd(5)}  ${entry.agent ? `[${entry.agent}] ` : ''}${entry.message}\n`;
-  try {
-    if (logFileBytes >= MAX_LOG_FILE_BYTES) {
-      renameSync(logFile, `${logFile}.1`);
-      logFileBytes = 0;
-    }
-    appendFileSync(logFile, line, 'utf8');
-    logFileBytes += Buffer.byteLength(line, 'utf8');
-  } catch {
-    logFile = null;
+  const state = mirror;
+  if (!state || state.error) return;
+  const line = formatEntry(entry);
+  const bytes = Buffer.byteLength(line, 'utf8');
+  if (state.pendingBytes + bytes > MAX_PENDING_BYTES) {
+    state.dropped = Math.min(Number.MAX_SAFE_INTEGER, state.dropped + 1);
+  } else {
+    state.pending.push(line);
+    state.pendingBytes += bytes;
   }
+  startWriter(state);
+}
+
+/** Includes lines accepted while an earlier batch was being written. */
+export async function flushLogFile(): Promise<void> {
+  const state = mirror;
+  if (!state) return;
+  startWriter(state);
+  while (state.work) await state.work;
+  if (state.error) throw state.error;
+}
+
+function writeCrashSnapshot(state: FileMirror, reason: string): void {
+  const lines = [formatEntry({ time: Date.now(), level: 'error', message: boundedText(redact(reason)) })];
+  let bytes = Buffer.byteLength(lines[0]!, 'utf8');
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const line = formatEntry(entries[i]!);
+    const size = Buffer.byteLength(line, 'utf8');
+    if (bytes + size > MAX_PENDING_BYTES) break;
+    lines.splice(1, 0, line);
+    bytes += size;
+  }
+  try {
+    writeFileSync(`${state.file}.crash`, lines.join(''), 'utf8');
+  } catch { /* The reporting channel cannot report its own storage failure. */ }
+}
+
+/** Fatal diagnostics only; does not install an exception handler or suppress a crash. */
+export function snapshotLogOnCrash(reason: string): void {
+  if (mirror) writeCrashSnapshot(mirror, reason);
+}
+
+/** Final exit barrier, including the shutdown sequence's last line. */
+export async function flushLogBeforeExit(timeoutMs = 2_000): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      flushLogFile(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('log flush deadline exceeded')), timeoutMs);
+        timer.unref?.();
+      })
+    ]);
+  } catch (error) {
+    snapshotLogOnCrash(`final log flush failed: ${String(error)}`);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Test seam; callers must finish outstanding file writes first. */
+export function resetLoggerForTests(): void {
+  mirror = null;
+  entries.length = 0;
+  listeners.clear();
 }
 
 /** Masks anything shaped like a credential, wherever it appears in a message. */
@@ -83,8 +197,8 @@ export function log(level: LogEntry['level'], message: string): void {
   const entry: LogEntry = {
     time: Date.now(),
     level,
-    message: redact(message),
-    ...(agent ? { agent } : {})
+    message: boundedText(redact(message)),
+    ...(agent ? { agent: boundedText(redact(agent)).slice(0, 200) } : {})
   };
   entries.push(entry);
   if (entries.length > MAX_ENTRIES) entries.shift();

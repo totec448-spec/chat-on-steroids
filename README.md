@@ -1,44 +1,80 @@
-> [!IMPORTANT]
-> **2.0.8 — Darkex by dark tibo — needs its matching companion extension.** Reload the unpacked extension after updating.
-> Model discovery now reads your account's native picker state across languages and nested version menus.
-> See [Browser behavior](#browser-behavior-in-the-current-source) for tab reuse, Browser only and native file attachments.
-
+<p align="center">
+  <a href="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Setup-x64.exe"><img src="https://img.shields.io/badge/Download-Windows_x64-58a6ff?style=for-the-badge" alt="Download for Windows x64" /></a>
+  <a href="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-macOS-arm64.dmg"><img src="https://img.shields.io/badge/Download-macOS_Apple_Silicon-58a6ff?style=for-the-badge" alt="Download for macOS Apple Silicon" /></a>
+  <a href="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Linux-x64.deb"><img src="https://img.shields.io/badge/Download-Linux_x64-58a6ff?style=for-the-badge" alt="Download for Linux x64, Debian and Ubuntu" /></a>
+</p>
+<p align="center">
+  <a href="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Setup-arm64.exe">Windows ARM64</a> ·
+  <a href="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-macOS-x64.dmg">Intel Mac</a> ·
+  <a href="https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/Chat-On-Steroids-Linux-arm64.deb">Linux ARM64</a> ·
+  <a href="#download">AppImage &amp; all downloads</a>
+</p>
 
 <div align="center">
-  <img src="extension/icons/icon128.png" width="88" alt="Chat On Steroids icon" />
+  <img src="extension/icons/icon128.png" width="64" alt="Chat On Steroids" />
   <h1>Chat On Steroids</h1>
-  <p><strong>ChatGPT, with hands on your computer.</strong></p>
-  <p>A desktop chat workspace and local MCP server for ChatGPT: project folders, images, plans, worker chats, and tools to read, patch and run code. Keep a local transcript and choose how the next instruction arrives.</p>
-  <p>
-    <a href="../../releases/latest"><strong>Download the latest release</strong></a>
-    · <a href="#quick-start">Quick start</a>
-    · <a href="#what-chatgpt-gets">Tools</a>
-    · <a href="#security-in-one-page">Security</a>
-    · <a href="CHANGELOG.md">Changelog</a>
-  </p>
+  <p><strong>Codex-style tools. Your ChatGPT plan. No Codex quota.</strong></p>
+  <p>Give ChatGPT a project and let it work.<br />Read files, edit code, run commands, use your desktop and delegate to sub-agents.</p>
+  <p><a href="LICENSE">Free &amp; open source</a> · Windows / macOS / Linux · <a href="#quick-start">Setup guide</a></p>
 </div>
 
 <p align="center">
-  <img src="docs/images/workspace.png" width="92%" alt="Chat On Steroids new-chat workspace with composer controls" />
+  <a href="docs/images/demo.mp4"><img src="docs/images/demo.gif" width="960" alt="Continuous 10-second Chat On Steroids demo showing the full workspace, model selection, task plan, tool results and sidebar navigation" /></a>
+  <br />The whole workspace. 10 seconds. <a href="docs/images/demo.mp4">Watch the sharper MP4</a> · <a href="#screenshots">Screenshots</a>
 </p>
+
+**Your ChatGPT conversation does the work.** Chat On Steroids gives it local tools and a desktop workspace; it does not run a Codex model or consume Codex quota. Your ChatGPT plan's model availability, usage and context limits still apply.
+
 <p align="center">
-  <img src="docs/images/settings.png" width="92%" alt="Chat On Steroids settings for tools and chat automation" />
+  <a href="#features">What you can do</a> · <a href="#before-you-install">Before you install</a> · <a href="#quick-start">Get started</a> · <a href="docs/plugins.md">Plugins</a> · <a href="CHANGELOG.md">Changelog</a>
 </p>
 
-Screenshots of the app with private conversation and folder details redacted. Chat history loads in small chunks as you scroll upward. Image attachments stay visible as thumbnails, and delivery controls sit below their messages.
+## Features
 
-## Why this exists
+### Less copy-paste. More done.
 
-ChatGPT is a good engineer trapped in a text box. Developer mode lets it call MCP servers, but most servers give it one narrow API. This one gives it a workbench.
+Ask for a fix, watch the edits and tests, then steer the next step from the same conversation. Your project, tool results and working history stay together.
 
-- **Codex-grade tools.** `apply_patch`, `exec_command` and `write_stdin` are ports of the tool contracts OpenAI's Codex CLI uses, so the model already knows how to hold them. Multi-file patches are preflighted before anything is written. Commands run as real processes with interactive stdin, output budgets and background results it can collect later.
-- **Sub agents inside ChatGPT.** One prime chat can spawn worker chats, hand them tasks, read their reports and wake them again later. Workers are ordinary ChatGPT conversations in your own browser, brokered by the app, so you can watch every one of them.
-- **Sessions that outlive the context window.** Every tool call is recorded locally with its real result. When a chat gets heavy, Compact & Resume asks it for a handoff brief, opens a fresh chat and moves the same local session across. The new chat can query everything the old one did.
-- **Plans, Goal and Loop.** Split a request into editable tasks or generate follow-ups through a separate ChatGPT helper or the API. Astra can receive the next task through `session_finish` in the same turn, without opening another model turn.
-- **External MCP plugins.** Settings → Plugins installs integrations such as Blender MCP, Playwright, Memory and Web Fetch behind a separate **Chat On Steroids Plugins** connector. Enable individual tools, import MCPB bundles or connect custom local/remote servers. [Setup and supported sources](docs/plugins.md). External servers run with their own OS/service permissions, outside CoS's approved-folder sandbox.
-- **You stay the permission boundary.** Only the folders you approve are visible. Each capability is a switch. Read-only mode is a single kill switch. Nothing runs on this machine that you did not turn on.
+| You want to… | Chat On Steroids gives you… |
+| --- | --- |
+| **Work on real code** | Codex-style file reading, multi-file patches, interactive terminals and background commands. Code mode combines several tools in one call. |
+| **Work in parallel** | Reusable sub-agents with their own ChatGPT conversations. Start with two workers; configure up to eight per family. |
+| **Keep a long project moving** | Compact & Resume carries the task into a fresh conversation attached to the same local session, with earlier history still searchable. |
+| **Steer without interrupting** | A visible plan, editable queued steps and Inject now for corrections while work is running. |
+| **Let ChatGPT use the interface** | Screenshots, clicks, typing and desktop inspection on Windows and macOS. |
+| **Choose how it thinks** | The models and reasoning levels available to your connected ChatGPT account, directly in the composer. |
+| **Connect more tools** | Plugins such as Blender, Playwright and Memory, plus custom local and remote MCP servers. |
 
-It runs in the tray, hosts no model of its own, and works with the ChatGPT you already use in the browser.
+### Keep going after the first answer
+
+**Infinite Astra turns:** with Session finish enabled, Astra can receive your next instruction, a queued checkpoint or a Goal/Loop follow-up through its tools in the same working turn. You can steer it or end the turn from the composer. Context, usage and runtime limits still apply.
+
+**Goal** follows unfinished work toward your objective. **Loop** keeps asking for more work within that objective until you switch it off. Generate plans and follow-ups through a ChatGPT helper, or choose an optional OpenRouter/custom API backend.
+
+**Compaction keeps the project together:** continue in a fresh chat without rebuilding your local history, project association or pending queue. Manual compaction is available; automatic compaction applies only to eligible active chats and excludes Pro models.
+
+<p align="center"><strong>Ready to give ChatGPT the tools?</strong><br /><a href="#download">Download Chat On Steroids</a> · <a href="#quick-start">Follow the setup guide</a></p>
+
+## Screenshots
+
+<details>
+<summary><strong>Explore the workspace, model picker and settings</strong></summary>
+
+<p align="center"><img src="docs/images/workspace.png" width="100%" alt="Chat On Steroids workspace with a coding conversation, three worker chats and a task plan" /></p>
+<p align="center"><img src="docs/images/model-picker.png" width="100%" alt="Model picker and reasoning-level slider in the composer" /></p>
+<p align="center"><img src="docs/images/settings.png" width="100%" alt="Settings for folders, file tools, terminal, desktop, history and sub-agents" /></p>
+
+</details>
+
+## Before you install
+
+**Does this use my Codex allowance?** No. Model execution happens in your normal ChatGPT conversation. ChatGPT's own limits still apply, including to worker and helper chats.
+
+**What do I need?** A ChatGPT account/workspace that supports Developer mode and custom MCP apps, a supported desktop OS, and Chrome or Edge with the companion extension. Check the [requirements](#requirements) and [setup guide](#quick-start).
+
+**Do I need an API key?** The coding conversation uses ChatGPT. The recommended Secure MCP Tunnel setup needs a restricted tunnel API key. Other tunnel options are available; an optional API backend for plans or Goal/Loop uses its own credentials and provider billing.
+
+**Is it ready for my machine?** Installers are available for Windows, macOS and Linux on x64 and ARM64. This is an unsigned beta; review the platform notes below and approve only the folders and capabilities you want to use.
 
 ## Download
 
@@ -64,7 +100,7 @@ shasum -a 256 Chat-On-Steroids-macOS-arm64.dmg    # macOS
 sha256sum Chat-On-Steroids-Linux-x64.AppImage     # Linux
 ```
 
-> **This is a beta with real permissions.** A fresh install starts with Core capabilities on except opt-in ChatGPT file saving, read-only mode off, multi-agent mode on with two workers, and, on Windows, the Desktop permissions on. On macOS the Desktop permissions start off; enable them in **Settings → Workspace**, then grant Screen Recording and Accessibility in System Settings. Linux has Core tools but no Desktop computer-control backend. Review folder access before connecting: `exec_command` runs programs as your logged-in user.
+> **This is a beta with real permissions.** A fresh install starts with Core capabilities on, including ChatGPT file saving, read-only mode off, multi-agent mode on with two workers, and, on Windows, the Desktop permissions on. On macOS the Desktop permissions start off; enable them in **Settings → Workspace**, then grant Screen Recording and Accessibility in System Settings. Linux has Core tools but no Desktop computer-control backend. Review folder access before connecting: `exec_command` runs programs as your logged-in user.
 
 ## Requirements
 
@@ -73,7 +109,7 @@ sha256sum Chat-On-Steroids-Linux-x64.AppImage     # Linux
 
 Using Edge? Choose **Settings → Browser & history → ChatGPT browser → Microsoft Edge**. Install the companion and sign in to ChatGPT in that browser's active profile (`edge://extensions` for Edge). This choice controls app-originated launches, including startup model discovery; already connected tabs and source-tab continuations keep their browser. Older configurations retain Chrome. If the selected browser is missing or cannot start, the app reports an error instead of opening a different browser. The setting chooses a browser family, not a particular profile.
 - **Linux:** a Secret Service keyring such as GNOME Keyring or KWallet. The app refuses Electron's unencrypted `basic_text` fallback for stored keys.
-- A ChatGPT workspace with **Developer mode** and custom MCP apps. OpenAI currently documents full MCP support, including write actions, as a beta for Business, Enterprise and Edu, with Pro limited to read and fetch. Business needs an admin to enable it. Check OpenAI's [Developer mode and MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt) page if your workspace looks different.
+- A ChatGPT account/workspace with **Developer mode** and custom MCP actions. Check [OpenAI’s availability guide](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt) for your plan and workspace.
 - An **OpenRouter API key** (or your own OpenAI-compatible endpoint) only if you select the API source for plans, Goal or Loop. The default ChatGPT helper source uses your connected browser session.
 
 Use a normal ChatGPT conversation with the custom app enabled. OpenAI's built-in Agent mode does not use custom apps.
@@ -109,12 +145,15 @@ Permission changes take effect locally immediately. Schema changes schedule a se
 
 | Connector | Tools | What they do |
 | --- | --- | --- |
-| **Core** (all platforms) | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `download_artifact`, `session`, `agents` | Bounded reads and search inside approved folders, preflighted multi-file patches, shell commands and interactive terminals, saving ChatGPT-generated files, lookups into the recorded session, and worker chat control |
+| **Core** (all platforms) | `read`, `view_image`, `find`, `apply_patch`, `exec_command`, `write_stdin`, `download_artifact`, `session`, `update_plan`, `agents`, `exec` | Bounded reads and search inside approved folders, preflighted multi-file patches, shell commands and interactive terminals, saving ChatGPT-generated files, lookups into the recorded session, and worker chat control |
 | **Desktop** (Windows, and macOS when switched on) | `observe`, `computer` | Screenshots, window and control inspection, mouse, keyboard and clipboard |
 
 The live tool list follows your settings: `find` is the no-shell search fallback and steps aside when commands are enabled. Enabling Session finish adds the Astra-only `session_finish` tool. Revoking a permission takes effect immediately, even while ChatGPT still shows the old schema. The full contract lives in [`docs/tool-surface.md`](docs/tool-surface.md).
 
 Every call is answered with a structured outcome the model can act on. A refused call says why and what to do next, whether that is a missing permission, a folder outside the approved roots, unread background results it has to collect first, or a chat that lost its identity.
+
+<details>
+<summary><strong>How sessions, compaction, Astra and sub-agents work</strong></summary>
 
 ## Sessions and the extension
 
@@ -150,7 +189,7 @@ For the API backend, choose OpenRouter or a custom OpenAI-compatible endpoint un
 
 One prime chat can open up to eight worker chats (two by default) and exchange brokered messages with them through the `agents` tool. Provider rate limits still apply. Workers cannot talk to each other.
 
-Workers are reusable conversations. When one reports its result it goes to sleep, frees its slot and keeps its full chat. Messaging it again wakes the same conversation. At about 400k recorded tokens a worker becomes non-revivable after its next stop; workers never compact themselves. With background chats enabled, app-managed tabs share one browser window. Sleeping and finished worker tabs become eligible for closure after one minute, even below the worker limit. This releases browser memory while preserving the reusable conversation. Active chats and unsent drafts remain protected.
+Workers are reusable conversations. When one reports its result it goes to sleep, frees its slot and keeps its full chat. Messaging it again wakes the same conversation. At about 400k recorded tokens a worker becomes non-revivable after its next stop; workers never compact themselves. With background chats enabled, app-managed tabs share one browser window. Sleeping workers remain available for reuse. Idle time alone does not authorize closing a tab; automatic closure requires terminal or other explicit retirement authority and fresh browser checks. Active generation, unsent drafts and user-pinned tabs remain protected.
 
 Each prime owns its worker history. If the last worker sleeps, the run is parked and another chat can start its own workers; the original prime still sees its full history in `agents action=status`, can spawn fresh workers, and can wake old ones when the execution slot is free. Turning multi-agent off pauses execution and keeps that history. **Clear swarm** is what discards it.
 
@@ -159,6 +198,8 @@ Identity is fail-closed. Spawning, messaging and every other identity-sensitive 
 ### Blocking a chat
 
 A wedged ChatGPT page can leave a turn running with no working Stop button while the model keeps calling tools. The app cannot end that turn, but it can take its tools away. **Block** in the Chat tab refuses every call from that conversation with a message telling the model to abandon the task and answer, and the turn ends itself. It is not a cancel, and it applies only to calls whose owner is proven.
+
+</details>
 
 ## Security in one page
 
@@ -176,9 +217,12 @@ Report vulnerabilities privately per [`SECURITY.md`](SECURITY.md).
 
 The MCP connector uses ChatGPT's documented Developer mode and Secure MCP Tunnel path. The extension is different: it observes ChatGPT's web UI, records rendered conversation state locally, and multi-agent mode opens and types into extra ChatGPT tabs. None of that is a documented public automation API. Depending on your account, OpenAI's [terms and policies](https://openai.com/policies/) on automated access, rate limits and permitted use may apply. Read the agreement that governs your account before using the extension or multi-agent mode, and do not use these features to scrape ChatGPT, evade limits or bypass safety controls.
 
+<details>
+<summary><strong>Browser behavior and troubleshooting</strong></summary>
+
 ## Browser behavior in the current source
 
-The published 2.0.6 build's English-language and nested-picker workaround remains relevant until you install a build containing these fixes. The current source reads account-evaluated model IDs, available efforts and version choices instead of English picker labels. New model families appear after **Reload ChatGPT models**, provided ChatGPT exposes them to your account in the supported picker structure. Discovery restores the previous selection and sends no message.
+The current source reads account-evaluated model IDs, available efforts and version choices instead of English picker labels. New model families appear after **Reload ChatGPT models**, provided ChatGPT exposes them to your account in the supported picker structure. Discovery restores the previous selection and sends no message.
 
 The current composer accepts dropped files (including Markdown) and dropped text, or **Add photos & files**. Files keep their original bytes and appear as compact filename cards above the message. Up to 20 files and 512 MB total can be prepared per message; ChatGPT's account, format and upload limits still determine acceptance. Files wait for the next native message when a turn is running. The app sends only after every attachment is confirmed and the draft is still unchanged. A failed upload leaves a visible error and is never automatically resent. Install the matching protocol-13 companion with this source build.
 
@@ -198,6 +242,11 @@ In **Chat settings → Browser & history**, enable **Browser only** to prevent a
 - **OS warning about an unverified app:** expected for the unsigned beta. Verify `SHA256SUMS.txt` before overriding.
 - **Linux says secure credential storage is unavailable:** unlock GNOME Keyring or KWallet and restart the app.
 - **Tunnel unavailable:** point Advanced settings at an explicit `tunnel-client` or `cloudflared`, or use the bundled copy.
+
+</details>
+
+<details>
+<summary><strong>Build from source and contribute</strong></summary>
 
 ## Development
 
@@ -225,6 +274,8 @@ Package on the target operating system. The release workflow runs on native Wind
 ## Contributing
 
 Bug reports, feature requests and PRs are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. Release history is in [`CHANGELOG.md`](CHANGELOG.md).
+
+</details>
 
 ## Licence
 

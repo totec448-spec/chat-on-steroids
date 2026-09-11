@@ -1,22 +1,7 @@
 /**
- * Compact & Resume has to create the replacement chat inside the Project the source chat is in.
- *
- * A ChatGPT Project is expressed only in the address. `/g/<project>/c/<id>` is a chat filed
- * under a Project, and a conversation created from anywhere else is not in it — there is no
- * parameter, header or later call that moves it. So the successor's URL is the whole mechanism,
- * and issue #84 is that all three places that build one hardcoded the site root.
- *
- * Two details drive most of what is asserted here:
- *
- * The slug in a chat's path is not the Project's identity. ChatGPT appends the Project's current
- * display name to it, so the same Project reads as `g-p-<hex>-example-project` on a chat and
- * as `g-p-<hex>` on the Project's own page. Carrying the chat's slug across verbatim would build
- * an address containing a name that a rename invalidates, so only the `g-p-<hex>` head is ever
- * stored or emitted.
- *
- * And the browser is the only thing that can see it, while the app is the only thing that
- * survives a restart. That is why the Project is observed from the page, written onto the
- * continuation, and read back from there by the fallback that runs when no page is left.
+ * Project scope is durable continuation intent. A replacement enters through the exact source
+ * conversation, then the content script clicks its native Project link before sending.
+ * Direct cold /project navigation reproduced ChatGPT's locked-chat loader error on 2026-09-09.
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -98,7 +83,7 @@ describe('the Project identity carried between a chat and its successor', () => 
     ['a custom GPT, which is served from /g/ but is not a Project', 'g-abc123def456'],
     ['a path segment escape', `${PROJECT}/../../etc`],
     ['a query smuggled into the id', `${PROJECT}?x=1`],
-    ['too few hex digits', 'g-p-6a93d6fe7f008191be6262248831c7d'],
+    ['too few hex digits', 'g-p-1111111122223333444455555555555'],
     ['too many hex digits', 'g-p-11111111222233334444555555555555a'],
     ['non-hex characters', 'g-p-zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'],
     ['an empty value', ''],
@@ -109,14 +94,14 @@ describe('the Project identity carried between a chat and its successor', () => 
 });
 
 describe('the URL the app opens when no page places the chat', () => {
-  it('starts a successor from the Project page so the new chat is created inside it', () => {
-    const url = commandUrl('cmd-1', null, null, PROJECT);
-    expect(url.startsWith(`https://chatgpt.com/g/${PROJECT}/project?`)).toBe(true);
+  it('enters a Project successor through its durable source conversation', () => {
+    const url = commandUrl('cmd-1', null, null, PROJECT, CHAT_A);
+    expect(url.startsWith(`https://chatgpt.com/c/${CHAT_A}?`)).toBe(true);
     // The marker still rides in both places, for the same reason it always did: ChatGPT
     // rewrites its own query during boot and which of the two survives has changed between
     // builds. Carrying a Project must not quietly cost the fragment.
     expect(url).toContain('clf=cmd-1');
-    expect(url.endsWith('#clf=cmd-1')).toBe(true);
+    expect(url.endsWith('#clf=cmd-1&clf_project=1')).toBe(true);
   });
 
   it('keeps opening at the site root for a chat that is in no Project', () => {
@@ -133,8 +118,8 @@ describe('the URL the app opens when no page places the chat', () => {
   });
 
   it('carries a Project alongside a requested model and reasoning level', () => {
-    const url = commandUrl('cmd-4', 'gpt-5.6-sol', 'high', PROJECT);
-    expect(url.startsWith(`https://chatgpt.com/g/${PROJECT}/project?`)).toBe(true);
+    const url = commandUrl('cmd-4', 'gpt-5.6-sol', 'high', PROJECT, CHAT_A);
+    expect(url.startsWith(`https://chatgpt.com/c/${CHAT_A}?`)).toBe(true);
     expect(url).toContain('model=gpt-5.6-sol');
     expect(url).toContain('reasoning_effort=high');
   });
@@ -168,8 +153,8 @@ describe('the Project surviving a restart', () => {
 
     await restoreContinuations(snapshot);
     expect(continuationByToken(opened.token)?.project).toBe(PROJECT);
-    expect(commandUrl('cmd-5', null, null, continuationByToken(opened.token)?.project)).toContain(
-      `/g/${PROJECT}/project?`
+    expect(commandUrl('cmd-5', null, null, continuationByToken(opened.token)?.project, continuationByToken(opened.token)?.from)).toContain(
+      `/c/${CHAT_A}?`
     );
   });
 
@@ -285,13 +270,13 @@ globalThis.probe = { placeSuccessorChat, projectFromUrl, successorChatBase };`, 
   }
 
   const chatInProject = `https://chatgpt.com/g/${NAMED_SLUG}/c/${CHAT_IN_PROJECT}`;
-  const offer = (extra: Record<string, unknown> = {}) => ({ id: 'cmd-9', model: null, reasoningEffort: null, ...extra });
+  const offer = (extra: Record<string, unknown> = {}) => ({ id: 'cmd-9', model: null, reasoningEffort: null, homeConversationId: CHAT_A, ...extra });
 
-  it('creates the successor on the Project page when the source chat is in one', async () => {
+  it('creates one Project successor at the durable source entry beside the source tab', async () => {
     const h = worker({ id: 7, url: chatInProject, windowId: 3, index: 1 });
     await h.api.placeSuccessorChat(offer({ project: PROJECT }), 7);
     expect(h.created).toHaveLength(1);
-    expect(h.created[0]!.url!.startsWith(`https://chatgpt.com/g/${PROJECT}/project?`)).toBe(true);
+    expect(h.created[0]!.url!.startsWith(`https://chatgpt.com/c/${CHAT_A}?`)).toBe(true);
     expect(h.created[0]!.url).toContain('clf=cmd-9');
     // Still beside the chat it continues, and still in that chat's own window.
     expect(h.created[0]!.windowId).toBe(3);
@@ -309,13 +294,13 @@ globalThis.probe = { placeSuccessorChat, projectFromUrl, successorChatBase };`, 
     // Chat A has already been navigated away to the root in this tab; the offer is still right.
     const h = worker({ id: 7, url: 'https://chatgpt.com/', windowId: 3, index: 0 });
     await h.api.placeSuccessorChat(offer({ project: PROJECT }), 7);
-    expect(h.created[0]!.url!.startsWith(`https://chatgpt.com/g/${PROJECT}/project?`)).toBe(true);
+    expect(h.created[0]!.url!.startsWith(`https://chatgpt.com/c/${CHAT_A}?`)).toBe(true);
   });
 
-  it('creates a background worker chat in the Project the app named', async () => {
+  it('keeps background workers at the root; only resumes have Project entry authority', async () => {
     const h = worker(null);
     await h.api.placeSuccessorChat(offer({ project: PROJECT, background: true }), null);
-    expect(h.created[0]!.url!.startsWith(`https://chatgpt.com/g/${PROJECT}/project?`)).toBe(true);
+    expect(h.created[0]!.url!.startsWith('https://chatgpt.com/?')).toBe(true);
   });
 
   it('leaves a chat outside any Project exactly where it was created before', async () => {

@@ -12,6 +12,8 @@ import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
+import { userPromptText } from '../src/shared/user-prompt.js';
+import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
 import { foldProgress, type SessionEvent } from '../src/shared/session.js';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
 import type { SwarmSnapshot } from '../src/main/agents.js';
@@ -112,6 +114,7 @@ const {
 } = await import('../src/main/session/continuation.js');
 const {
   acknowledgeOffers,
+  agentInfoForOwnedConversation,
   PRIME_ID,
   beginPrimeTransfer,
   bindConversation,
@@ -160,8 +163,8 @@ const LOST_ACK_CHAT = 'bcbcbcbc-1111-2222-3333-444444444444';
  * fresh chat is typed lives in the transaction, and the command carries only the right to
  * claim it. So a queued resume in these tests has to be a real one.
  */
-async function readyContinuation(sessionId: string, brief: string, from = 'c-compacted'): Promise<string> {
-  const opened = await openContinuationNow(sessionId, from);
+async function readyContinuation(sessionId: string, brief: string, from = 'c-compacted', project: string | null = null): Promise<string> {
+  const opened = await openContinuationNow(sessionId, from, false, project);
   // The caller's line is what its assertions look for; the rest is there because the app
   // refuses a brief too short to have carried a session across. See SAMPLE_BRIEF.
   const stored = await attachSummary(opened.token, `${brief}
@@ -551,7 +554,7 @@ describe('provisioning', () => {
 });
 
 describe('active agent tab discard projection', () => {
-  it('retains waiting and sleeping reusable chats beyond the idle deadline while blocked chats still retire', async () => {
+  it('reuses sleeping workers after two minutes and releases their pages after five without retiring them', async () => {
     const previous = getConfig();
     await saveConfig({ ...previous, multiAgent: { ...previous.multiAgent, maxWorkers: 3 }, ui: { ...previous.ui, tabsToKeepOpen: 1 } });
     try {
@@ -562,7 +565,9 @@ describe('active agent tab discard projection', () => {
       finishAgent({ conversationId: chats[0]! }, 'first sleeping');
       finishAgent({ conversationId: chats[1]! }, 'second sleeping');
       const status = (await request('POST', '/status', { body: { openConversations: chats } })).body;
-      expect(status.idleCloseAfterMs).toBe(120000);
+      expect(status.idleReuseAfterMs).toBe(120000);
+      expect(status.idleCloseAfterMs).toBe(300000);
+      expect(status.reusableConversations).toEqual([]);
       expect(status.sleepingWorkerConversations).toBeUndefined();
       expect(status.managedConversations).toEqual(expect.arrayContaining(chats));
       expect(status.closableConversations).toEqual([]);
@@ -574,6 +579,7 @@ describe('active agent tab discard projection', () => {
         const quiet = (await request('POST', '/status', { body: { openConversations: chats } })).body;
         expect(quiet.closableConversations).toEqual([]);
         expect(quiet.retiredConversations).toEqual([]);
+        expect(quiet.reusableConversations).toEqual(chats.slice(0, 2));
         setChatBlocked(chats[2]!, true);
         const newlyBlocked = (await request('POST', '/status', { body: { openConversations: chats } })).body;
         expect(newlyBlocked.blockedConversations).toContain(chats[2]);
@@ -583,6 +589,15 @@ describe('active agent tab discard projection', () => {
         const blockedIdle = (await request('POST', '/status', { body: { openConversations: chats } })).body;
         expect(blockedIdle.closableConversations).toContain(chats[2]);
         setChatBlocked(chats[2]!, false);
+        clock.mockReturnValue(now + 301_000);
+        noteAgentAlive(chats[0], 'page');
+        const expired = (await request('POST', '/status', { body: { openConversations: chats } })).body;
+        expect(expired.closableConversations).toEqual(chats.slice(0, 2));
+        expect(expired.retiredConversations).toEqual([]);
+        expect(agentInfoForOwnedConversation(chats[0]!)?.state).toBe('sleeping');
+        workerConversationGone(chats[0]!);
+        expect(agentInfoForOwnedConversation(chats[0]!)?.state).toBe('sleeping');
+        expect(agentInfoForOwnedConversation(chats[0]!)?.revivable).toBe(true);
       } finally { clock.mockRestore(); }
       const onlyOpen = (await request('POST', '/status', { body: { openConversations: [chats[0]] } })).body;
       expect(onlyOpen.managedConversations).toEqual([chats[0]]);
@@ -721,7 +736,7 @@ describe('observations', () => {
 
   it('stores what the page reported and skips what it does not recognise', async () => {
     await pair();
-    const conversationId = '6a805197-b090-83eb-bbd8-a32b482941da';
+    const conversationId = 'f0f00003-1111-4111-8111-111111111111';
     const reply = await request('POST', '/events', {
       body: {
         conversationId,
@@ -839,7 +854,7 @@ describe('activity feed', () => {
   it('atomically registers and verifies a live request id against its chat before the MCP call is filed', async () => {
     await pair();
     const conversationId = '13131313-3535-5757-7979-919191919191';
-    const requestId = '77186fb4-bdda-4849-8cd7-879bb08a1617';
+    const requestId = 'f0f00009-1111-4111-8111-111111111111';
     const mapped = await request('POST', '/correlations', {
       body: {
         conversationId,
@@ -1370,10 +1385,11 @@ describe('automatic compaction', () => {
       await request('POST', '/events', { body: { conversationId, events: [
         { kind: 'turn_start', time: Date.now(), turnId: 'before-astra' }, ...over()
       ] } });
-      await settled();
       const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      // Ticket persistence runs after event ingestion; wait for that fact rather
+      // than assuming the hosted runner commits it within a 25 ms sleep.
+      await vi.waitFor(() => expect(continuationForSession(activity.body.sessionId)).toMatchObject({ automatic: true }), { timeout: 3000 });
       const ticket = continuationForSession(activity.body.sessionId)!;
-      expect(ticket.automatic).toBe(true);
       await request('POST', '/events', { body: { conversationId, events: [
         { kind: 'model_selection', model: 'gpt-6', reasoningEffort: 'pro', time: Date.now() }
       ] } });
@@ -1394,8 +1410,13 @@ describe('automatic compaction', () => {
           events: [{ kind: 'turn_start', time: Date.now(), turnId: 'turn-live' }, ...over()]
         }
       });
-      await settled();
-      const working = await request('GET', `/activity?conversationId=${conversationId}`);
+      // Ticket creation and its durable job publication are asynchronous. Observe the
+      // published job instead of assuming a fixed sleep covers filesystem contention.
+      let working!: Reply;
+      await vi.waitFor(async () => {
+        working = await request('GET', `/activity?conversationId=${conversationId}`);
+        expect(working.body.job).toMatchObject({ stage: 'handoff-pending', automatic: true });
+      }, { timeout: 3000 });
       const sessionId = working.body.sessionId as string;
       const ticket = continuationForSession(sessionId);
       expect(ticket).toMatchObject({ automatic: true, state: 'awaiting-summary', from: conversationId });
@@ -1588,8 +1609,8 @@ describe('automatic compaction', () => {
       await settled();
       const activity = await request('GET', `/activity?conversationId=${conversationId}`);
       const sessionId = activity.body.sessionId as string;
+      await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
       const first = continuationForSession(sessionId);
-      expect(first).toMatchObject({ automatic: true, state: 'awaiting-summary' });
 
       const lost = await request('POST', '/compact', {
         body: { conversationId, token: first!.token, sourceLost: true }
@@ -1643,7 +1664,7 @@ describe('automatic compaction', () => {
         }
       });
       await settled();
-      expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' });
+      await vi.waitFor(() => expect(continuationForSession(sessionId)).toMatchObject({ automatic: true, state: 'awaiting-summary' }), { timeout: 3000 });
     });
   });
 
@@ -1919,6 +1940,102 @@ describe('delivering a bootstrap', () => {
     expect(ack.status).toBe(200);
     expect(ack.body.committed).toBe(true);
     expect(pendingCommands()).toEqual([]);
+  });
+
+  it('leases Project entry only to its exact durable source and returns the native navigation intent', async () => {
+    await pair();
+    const source = '91919191-1111-2222-3333-444444444444';
+    const project = 'g-p-11111111222233334444555555555555';
+    const session = await createSession({ conversationId: source, title: 'Project entry' });
+    const ticket = await readyContinuation(session.id, 'Continue inside the Project.', source, project);
+    const command = queueResume(session.id, ticket)!;
+    await waitForOpened(1);
+    expect(opened).toEqual([commandUrl(command.id, null, null, project, source)]);
+    for (const body of [
+      { conversationId: source },
+      { conversationId: 'ffffffff-1111-4222-8333-444444444444', projectEntry: true }
+    ]) {
+      const refused = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'wrong-page', ...body } });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error).toBe('command_wrong_conversation');
+    }
+    const claimed = await request('POST', '/commands/redeem', {
+      body: { id: command.id, client: 'project-entry-page', conversationId: source, projectEntry: true }
+    });
+    expect(claimed.status).toBe(200);
+    expect(claimed.body.command).toMatchObject({ type: 'resume', conversationId: null,
+      projectEntry: { id: project, sourceConversationId: source } });
+  });
+  it('recycles only settled app-owned chats, preserving personal history and open turns', async () => {
+    await pair();
+    const settled = 'aaaaaaaa-2222-4222-8333-444444444441';
+    const personal = 'aaaaaaaa-2222-4222-8333-444444444442';
+    const working = 'aaaaaaaa-2222-4222-8333-444444444443';
+    for (const id of [settled, working]) await noteChatOrigin(id, { kind: 'desktop', fromSessionId: null, agentId: null, task: '' });
+    for (const id of [settled, personal, working]) {
+      await request('POST', '/events', { body: { conversationId: id, events: [
+        { kind: 'turn_start', time: Date.now(), turnId: 'old-turn' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'old-turn', outcome: 'completed' }
+      ] } });
+    }
+    await request('POST', '/events', { body: { conversationId: working, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'still-running' }
+    ] } });
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 121_000);
+    try {
+      const early = (await request('POST', '/status', { body: { openConversations: [settled, personal, working] } })).body;
+      expect(early.reusableConversations).toEqual([settled]);
+      expect(early.closableConversations).toEqual([]);
+      clock.mockReturnValue(now + 301_000);
+      const expired = (await request('POST', '/status', { body: { openConversations: [settled, personal, working] } })).body;
+      expect(expired.closableConversations).toEqual([settled]);
+      expect(expired.retiredConversations).toEqual([]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('projects the proven worker opening even beyond the activity cursor, never a later visible question', async () => {
+    await pair();
+    const worker = '66666666-3333-2222-1111-000000000081';
+    spawn({ workers: [{ task: 'Read the bounded fixture' }], caller: { conversationId: PRIME_CHAT } });
+    const boot = await redeem();
+    await request('POST', '/commands/ack', { body: { id: boot.id, status: 'sent', conversationId: worker, agent: 'worker-1' } });
+    await request('POST', '/events', { body: { conversationId: worker, events: [
+      { kind: 'user_message', time: Date.now(), messageId: 'worker-opening', text: boot.text },
+      { kind: 'user_message', time: Date.now() + 1, messageId: 'worker-followup', text: 'Now read another file' }
+    ] } });
+    expect((await request('GET', `/activity?conversationId=${worker}&since=999999`)).body.bootstrapMessageId).toBe('worker-opening');
+
+    const missing = '66666666-3333-2222-1111-000000000082';
+    await noteChatOrigin(missing, { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'Read the bounded fixture' });
+    await request('POST', '/events', { body: { conversationId: missing, events: [
+      { kind: 'user_message', time: Date.now(), messageId: 'only-followup', text: 'Now read another file' }
+    ] } });
+    expect((await request('GET', `/activity?conversationId=${missing}`)).body.bootstrapMessageId).toBeNull();
+  });
+
+  it('projects only the current committed resume receipt through repeated compaction', async () => {
+    await pair();
+    const { upsertMessageEvent } = await import('../src/main/session/store.js');
+    const { beginContinuationDestinationSendNow, dispatchContinuationDestinationSendNow, bindContinuationDestinationMessageNow } =
+      await import('../src/main/session/continuation.js');
+    const from = '77777777-3333-2222-1111-000000000081';
+    const middle = '77777777-3333-2222-1111-000000000082';
+    const to = '77777777-3333-2222-1111-000000000083';
+    const session = await createSession({ conversationId: from, origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } });
+    for (const [source, target, messageId] of [[from, middle, 'resume-one'], [middle, to, 'resume-two']]) {
+      const token = await readyContinuation(session.id, 'Resume fixture', source!);
+      await beginContinuationDestinationSendNow(token);
+      await dispatchContinuationDestinationSendNow(token);
+      expect(await bindContinuationDestinationMessageNow(token, target!, messageId!)).toBe(true);
+      expect(await commitContinuation(token, target!)).toBe(true);
+      const body = `[[CLF-RESUME:${token}]]\n\nResume fixture`;
+      await upsertMessageEvent(session.id, { source: 'extension', time: Date.now(), kind: 'user_message', messageId: messageId!,
+        message: { text: body, chars: body.length, truncated: false } });
+      expect((await request('GET', `/activity?conversationId=${target}&since=999999`)).body.bootstrapMessageId).toBe(messageId);
+      expect((await request('GET', `/activity?conversationId=${source}`)).body.bootstrapMessageId).toBeNull();
+    }
+    expect((await request('GET', `/activity?conversationId=${middle}`)).body.bootstrapMessageId).toBeNull();
   });
 
   it('protects a resume destination before the browser opener can record a shadow session', async () => {
@@ -2247,11 +2364,13 @@ describe('delivering a bootstrap', () => {
     const command = await redeem();
 
     expect(command.agent).toBe('worker-1');
-    // The task itself is the first message. That is the whole invariant: the chat this app
-    // opened is already a worker, so there is nothing for the model to do about identity.
-    expect(command.text.startsWith('Audit the compaction transaction end to end')).toBe(true);
-    expect(command.text).not.toMatch(/join/i);
-    expect(command.text).not.toMatch(/agent[_ ]key/i);
+    // Shared guidance comes before the task. The app still binds worker identity;
+    // there is no joining/key handshake for the model to invent.
+    expect(command.text).toContain(await currentCoreInstructions());
+    const task = userPromptText(command.text)!;
+    expect(task.startsWith('Audit the compaction transaction end to end')).toBe(true);
+    expect(task).not.toMatch(/join/i);
+    expect(task).not.toMatch(/agent[_ ]key/i);
     expect(command.text).not.toContain('joinKey');
     // It still says how to report, because that is about the work rather than about who it is.
     expect(command.text).toContain('action=message');
@@ -2260,6 +2379,43 @@ describe('delivering a bootstrap', () => {
     await flushDurable();
     const stored = await readDurable<unknown>('bridge-commands');
     expect(JSON.stringify(stored)).not.toContain('joinKey');
+  });
+
+  it.each(['worker', 'resume'] as const)('adds setup only to a new worker, never a resumed chat (%s)', async kind => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { addProject, assignSessionProject } = await import('../src/main/projects.js');
+    const folder = path.join(dir, `prompt-project-${kind}`);
+    await fs.mkdir(folder, { recursive: true });
+    await fs.writeFile(path.join(folder, 'AGENTS.md'), 'SCOPED_AGENTS_HEAD\n' + 'a'.repeat(150000) + '\nSCOPED_AGENTS_TAIL');
+    await saveConfig({ ...suiteConfig, roots: [{ name: 'project', path: folder }] });
+    const project = await addProject(folder);
+    const conversationId = `c-prompt-project-${kind}`;
+    const source = await createSession({ title: 'Project source', conversationId });
+    await assignSessionProject(source.id, project.id);
+    await pair();
+    let command;
+    if (kind === 'worker') {
+      spawn({ workers: [{ task: 'PROJECT_TASK_PRESERVED' }], caller: { conversationId } });
+      command = await redeem();
+    } else {
+      const continuation = await readyContinuation(source.id, 'PROJECT_TASK_PRESERVED', conversationId);
+      const pending = queueResume(source.id, continuation)!;
+      command = await redeem(pending.id);
+    }
+    expect(command.text.length).toBeLessThanOrEqual(96000);
+    if (kind === 'worker') {
+      expect(command.text).toContain(await currentCoreInstructions());
+      expect(command.text).toContain('SCOPED_AGENTS_HEAD');
+      expect(command.text).toContain('Read AGENTS.md yourself');
+      expect(userPromptText(command.text)).toContain('PROJECT_TASK_PRESERVED');
+      expect(userPromptText(command.text)).not.toMatch(/SCOPED_AGENTS|Cut off/);
+    } else {
+      expect(command.text).not.toContain('[[COS_CONTEXT:');
+      expect(command.text).not.toContain('SCOPED_AGENTS_HEAD');
+      expect(command.text).toContain('PROJECT_TASK_PRESERVED');
+    }
+    expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
   });
 
   /**
@@ -2895,6 +3051,8 @@ describe('delivering a bootstrap', () => {
       body: { id, client: 'tab-browser-owner', conversationId }
     });
     expect(claimed.status).toBe(200);
+    expect(claimed.body.command.text).toContain('browser has the arbitration cut');
+    expect(claimed.body.command.text).not.toContain('[[COS_CONTEXT:');
     expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
       state: 'waking',
       revivable: false
@@ -3595,6 +3753,56 @@ describe('delivering a bootstrap', () => {
     expect(worker.result).toContain('one journal flush after its turn_end');
   });
 
+  it('keeps a revived worker active when an older final answer receives a new canonical revision', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'initial docs task' }], caller: { conversationId: PRIME_CHAT } });
+    const command = await redeem();
+    const conversationId = 'decafbad-7654-3210-fedc-ba9876543212';
+    await request('POST', '/commands/ack', { body: { id: command.id, status: 'sent', conversationId, agent: 'worker-1' } });
+    const time = Date.now();
+    const oldFinal = { kind: 'assistant_message', time: time + 1, turnId: 'worker-old-turn',
+      messageId: 'worker-old-final', text: 'Docs done. No new validator yet.', state: 'final', final: true };
+    const initial = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time, turnId: 'worker-old-turn' }, oldFinal,
+      { kind: 'turn_end', time: time + 2, turnId: 'worker-old-turn', outcome: 'completed' }
+    ] } });
+    expect(initial.status).toBe(200);
+    expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find(row => row.id === 'worker-1')?.state).toBe('sleeping');
+    const oldRow = (await readEvents(initial.body.sessionId)).find(row => row.kind === 'assistant_message' && row.messageId === oldFinal.messageId)!;
+
+    wake([{ to: 'worker-1', text: 'Now implement and verify the validator.' }]);
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: time + 10, turnId: 'worker-new-turn' }
+    ] } });
+    noteAgentAlive(conversationId, 'call');
+    expect(swarmState().agents.find(row => row.id === 'worker-1')?.state).toBe('active');
+
+    // The new turn receives its work on an ordinary tool result. Its eventual final can
+    // acknowledge that offer; an old final must never acknowledge it or end the new task.
+    offerMessages('worker-1');
+
+    // The live failure was a late rendered-HTML refresh: the old row kept its origin and turn
+    // but received a revision seq AFTER the new turn_start. That cursor is not a new finish.
+    const replay = await request('POST', '/events', { body: { conversationId, events: [
+      { ...oldFinal, renderedHtml: '<p><strong>Docs done.</strong> No new validator yet.</p>' }
+    ] } });
+    expect(replay.status).toBe(200);
+    const rows = await readEvents(initial.body.sessionId);
+    const revised = rows.find(row => row.kind === 'assistant_message' && row.messageId === oldFinal.messageId)!;
+    const newerStart = rows.find(row => row.kind === 'turn_start' && row.turnId === 'worker-new-turn')!;
+    if (revised.kind !== 'assistant_message' || oldRow.kind !== 'assistant_message') throw new Error('Missing final rows');
+    expect(revised.origin).toBe(oldRow.origin ?? oldRow.seq);
+    expect(revised.seq).toBeGreaterThan(newerStart.seq);
+    expect(swarmState().agents.find(row => row.id === 'worker-1')?.state).toBe('active');
+
+    await request('POST', '/events', { body: { conversationId, events: [
+      { ...oldFinal, time: time + 20, turnId: 'worker-new-turn', messageId: 'worker-new-final', text: 'Validator implemented and verified.' }
+    ] } });
+    expect(swarmStateForCaller({ conversationId: PRIME_CHAT }).agents.find(row => row.id === 'worker-1')).toMatchObject({
+      state: 'sleeping', result: 'Validator implemented and verified.'
+    });
+  });
+
   it('retires a worker on its stable final answer even when no turn_end ever arrives', async () => {
     await pair();
     spawn({ workers: [{ task: 'finish without a local turn_end' }], caller: { conversationId: PRIME_CHAT } });
@@ -3946,7 +4154,7 @@ describe('delivering a bootstrap', () => {
     });
 
     await waitForOpened(2);
-    expect(second.text.startsWith('second audit')).toBe(true);
+    expect(userPromptText(second.text)?.startsWith('second audit')).toBe(true);
     expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.conversationId).toBe(firstConversation);
     expect(swarmState().agents.find(agent => agent.id === 'worker-2')?.conversationId).toBe(secondConversation);
   });
@@ -4041,7 +4249,7 @@ describe('delivering a bootstrap', () => {
     await waitForOpened(1);
     const offeredB = await redeem(undefined, 'run-b-page');
     expect(offeredB.id).not.toBe(offeredA.id);
-    expect(offeredB.text.startsWith('run B task')).toBe(true);
+    expect(userPromptText(offeredB.text)?.startsWith('run B task')).toBe(true);
   });
 
   it('restores a resume when its continuation WAL is restored first', async () => {
@@ -4738,7 +4946,7 @@ describe('unattributed activity recovery', () => {
     await request('GET', '/status');
     expect(unattributedRepairEta()).toBeNull();
     await events(PRIME, [openTurn('eta-active')]);
-    expect(unattributedRepairEta()).toBe(15);
+    expect(unattributedRepairEta()).toBe(0);
     await events(PRIME, [endTurn('eta-active', 'stopped')]);
     expect(unattributedRepairEta()).toBeNull();
   });
@@ -4855,19 +5063,42 @@ describe('unattributed activity recovery', () => {
   const reopened = (conversationId: string): string[] =>
     opened.filter((url) => url === `https://chatgpt.com/c/${conversationId}`);
 
-  it('waits fifteen seconds on a lone suspect, then hands the browser that one chat to reload', async () => {
+  it.each([1, 2, 3])('wakes the extension at the exact deadline for %i suspects without a status poll', async count => {
+    vi.useFakeTimers();
+    let socket: WebSocket | undefined;
+    try {
+      await pair();
+      const chats = [PRIME, WORKER, OTHER].slice(0, count);
+      for (const chat of chats) await events(chat, [openTurn(`wake-${chat}`)]);
+      socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+      const wake = new Promise<void>(resolve => socket!.on('message', bytes => {
+        if (bytes.toString() === 'wake') resolve();
+      }));
+      await unattributed();
+      const delay = [0, 30_000, 60_000][count - 1]!;
+      if (delay) {
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(await maintenanceBatch()).toEqual([]);
+      }
+      await vi.advanceTimersByTimeAsync(delay ? 1 : 0);
+      await wake;
+      expect((await maintenanceBatch()).map(row => row.conversationId).sort()).toEqual(chats.sort());
+    } finally {
+      socket?.terminate();
+      vi.useRealTimers();
+    }
+  });
+
+  it('immediately hands a lone suspect to the browser once attribution has failed', async () => {
     vi.useFakeTimers();
     try {
       await pair();
       await events(PRIME, [openTurn('turn-live')]);
       await unattributed();
 
-      // One suspect is nobody to be told apart from, so the wait is not a discrimination budget
-      // at all - it is the round trip the identity notice promises the model for its retry.
-      await vi.advanceTimersByTimeAsync(14_999);
-      expect(await maintenance()).toBeNull();
-
-      await vi.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(0);
       const handout = await maintenance();
       expect(chatOf(handout)).toBe(PRIME);
       // Reported carried out, and that is the end of it: a reload whose effect there is any
@@ -5123,16 +5354,17 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       await events(PRIME, [openTurn('turn-live')]);
+      await events(OTHER, [openTurn('turn-other')]);
       await unattributed();
 
       await vi.advanceTimersByTimeAsync(10_000);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(4_999);
-      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(19_999);
+      expect(await maintenanceBatch()).toEqual([]);
 
-      // A rung after the *first* one, not twenty-five seconds after it or a rung after the last.
+      // Thirty seconds from the first call, not a renewed budget after the second.
       await vi.advanceTimersByTimeAsync(1);
-      expect(chatOf(await maintenance())).toBe(PRIME);
+      expect((await maintenanceBatch()).map(row => row.conversationId).sort()).toEqual([PRIME, OTHER].sort());
     } finally {
       vi.useRealTimers();
     }
@@ -5163,13 +5395,11 @@ describe('unattributed activity recovery', () => {
       await events(PRIME, [openTurn('turn-live')]);
       await unattributed();
 
-      // The document is alive and talking - a new turn, progress, everything except the one
-      // thing at issue. Its request ids are still reaching nobody, so the repair stands.
+      // The same turn is alive and reporting progress, but its request ids are still
+      // reaching nobody. Page activity alone must not cancel its queued repair.
       await vi.advanceTimersByTimeAsync(10_000);
       await events(PRIME, [
-        { kind: 'progress', time: Date.now(), turnId: 'turn-live', text: 'still here' },
-        endTurn('turn-live', 'completed'),
-        openTurn('turn-next')
+        { kind: 'progress', time: Date.now(), turnId: 'turn-live', text: 'still here' }
       ]);
 
       await vi.advanceTimersByTimeAsync(50_000);
@@ -6432,7 +6662,33 @@ describe('unattributed activity recovery', () => {
       expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBeNull();
       await vi.advanceTimersByTimeAsync(1_000);
       await attributed(timingChat, false, Date.now());
-      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(Date.now() + PRO_ACTIVITY_MS);
+      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(outcome === 'stopped' ? null : Date.now() + PRO_ACTIVITY_MS);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps a stopped non-Pro chat idle when its partial answer is revised and a late tool settles', async () => {
+    const timingChat = 'a3333333-1111-4111-8111-000000000009';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(timingChat, [openTurn('stopped-partial'), {
+        kind: 'assistant_message', time: Date.now(), turnId: 'stopped-partial', messageId: 'partial-answer',
+        text: 'Working', state: 'streaming', activeNow: true
+      }]);
+      const sessionId = (await request('GET', `/activity?conversationId=${timingChat}`)).body.sessionId;
+      const { sessionActivityExpiresAt } = await import('../src/main/bridge.js');
+      await vi.advanceTimersByTimeAsync(1_000);
+      await events(timingChat, [endTurn('stopped-partial', 'stopped')]);
+      await events(timingChat, [{ kind: 'assistant_message', time: Date.now(), messageId: 'partial-answer',
+        text: 'Re-observed partial answer', state: 'streaming', activeNow: true }]);
+      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBeNull();
+      await attributed(timingChat, false, Date.now());
+      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBeNull();
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      await events(timingChat, [openTurn('new-work')]);
+      expect(sessionActivityExpiresAt((await getSession(sessionId))!)).not.toBeNull();
     } finally { vi.useRealTimers(); }
   });
 
@@ -8938,6 +9194,66 @@ describe('app requests to stop one exact active turn', () => {
     expect(result.status).toBe(200);
     return result.body.sessionId as string;
   }
+  it('preserves the original question and turn for pending Stop adoption within one absolute deadline', async () => {
+    const { stopSessionTurn, STOP_COMMAND_TIMEOUT_MS } = await import('../src/main/bridge.js');
+    const conversationId = 'e6666666-aaaa-4bbb-8ccc-111111111111';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const result = await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), messageId: 'original-question', text: 'Original work' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'original-turn' }
+      ] } });
+      const sessionId = result.body.sessionId;
+      const began = Date.now();
+      await stopSessionTurn(sessionId, 'original-turn');
+      resetRecorderForTests(); // The new tab must restore the durable turn rather than minting one.
+      const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+      expect(activity.body).toMatchObject({ activeTurnId: 'original-turn', stopTurn: { turnId: 'original-turn', userMessageId: 'original-question' } });
+      await vi.advanceTimersByTimeAsync(30_001);
+      const command = (await request('GET', '/status')).body.stopTurns[0];
+      expect(command.expiresAt).toBe(began + STOP_COMMAND_TIMEOUT_MS);
+      const redeemed = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'reopened-page', conversationId } });
+      expect(redeemed.body.command.userMessageId).toBe('original-question');
+      await vi.advanceTimersByTimeAsync(STOP_COMMAND_TIMEOUT_MS - 30_001);
+      expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
+      expect((await request('GET', `/activity?conversationId=${conversationId}`)).body.activeTurnId).toBeNull();
+      expect((await getSession(sessionId))?.activeTurnId).toBe('original-turn');
+    } finally { vi.useRealTimers(); }
+  });
+  it('does not borrow a previous turn question when the Stop target has no native question anchor', async () => {
+    const { stopSessionTurn } = await import('../src/main/bridge.js');
+    const conversationId = 'e7777777-aaaa-4bbb-8ccc-111111111111';
+    await pair();
+    const result = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'user_message', time: Date.now(), messageId: 'previous-question', text: 'Previous work' },
+      { kind: 'turn_start', time: Date.now(), turnId: 'previous-turn' },
+      { kind: 'turn_end', time: Date.now(), turnId: 'previous-turn', outcome: 'completed' }
+    ] } });
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now() + 1, turnId: 'unanchored-turn' }
+    ] } });
+    await stopSessionTurn(result.body.sessionId, 'unanchored-turn');
+    const activity = await request('GET', `/activity?conversationId=${conversationId}`);
+    expect(activity.body.stopTurn).toEqual({ turnId: 'unanchored-turn', userMessageId: null });
+  });
+  it('hands a new Stop to the shared absent-browser startup owner once and revokes it for a newer turn', async () => {
+    const { stopSessionTurn } = await import('../src/main/bridge.js');
+    const conversationId = 'e8888888-aaaa-4bbb-8ccc-111111111111';
+    const sessionId = await active(conversationId);
+    await stopSessionTurn(sessionId, 'stop-turn-one');
+    expect(recoveryBrowserWake).toHaveBeenCalledTimes(1);
+    const [url, retry, , authority] = recoveryBrowserWake.mock.calls[0]!;
+    expect(url).toBe(`https://chatgpt.com/c/${conversationId}`);
+    expect(retry).toBe(false);
+    expect(authority!.current()).toBe(true);
+    await stopSessionTurn(sessionId, 'stop-turn-one');
+    expect(recoveryBrowserWake).toHaveBeenCalledTimes(1);
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now() + 1, turnId: 'newer-turn' }
+    ] } });
+    expect(authority!.current()).toBe(false);
+  });
   it('allows an exact worker Stop and suppresses recovery while that request is pending', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');
     const conversationId = 'e4444444-aaaa-4bbb-8ccc-111111111111';

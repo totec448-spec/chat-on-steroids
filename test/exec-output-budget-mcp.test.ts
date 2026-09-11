@@ -113,7 +113,7 @@ async function execOutput(url: string, maxOutputTokens: number | undefined): Pro
   return text;
 }
 
-it('ignores the retired max_output_tokens and says so, through the real exec_command handler', async () => {
+it('silently accepts the retired max_output_tokens while enforcing the same real output budget', async () => {
   endpoint = await serve();
 
   const requested = await execOutput(endpoint.url, 30_000);
@@ -128,8 +128,7 @@ it('ignores the retired max_output_tokens and says so, through the real exec_com
   expect(requested.length).toBeLessThan(60_000);
   expect(omitted.length).toBeLessThan(60_000);
 
-  // Accepted, not refused, and the caller is told once why it changed nothing.
-  expect(requested).toContain('max_output_tokens is retired and was ignored');
-  // Only the call that actually sent it gets the note.
+  // Cached-schema compatibility must not add migration instructions to every result.
+  expect(requested).not.toContain('max_output_tokens is retired');
   expect(omitted).not.toContain('max_output_tokens is retired');
 }, 30_000);

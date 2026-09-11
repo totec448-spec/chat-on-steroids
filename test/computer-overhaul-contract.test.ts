@@ -11,7 +11,9 @@ describe('desktop helper overhaul contract', () => {
 
   it('keeps observation coalesced and window capture background-first', () => {
     expect(HELPER_SCRIPT).toContain("'snapshot'");
-    expect(HELPER_SCRIPT).toContain('CaptureWindow');
+    expect(HELPER_SCRIPT).toContain('[CosWindowsCapture]::Capture');
+    expect(HELPER_SCRIPT).not.toContain('PrintWindow');
+    expect(HELPER_SCRIPT).not.toContain("$mode = 'screen_fallback'");
     expect(HELPER_SCRIPT).toContain("$mode = 'window'");
     expect(HELPER_SCRIPT).not.toContain('$root.FindAll(');
     expect(HELPER_SCRIPT).toContain('TreeWalker]::ControlViewWalker');

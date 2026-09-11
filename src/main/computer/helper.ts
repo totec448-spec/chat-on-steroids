@@ -13,6 +13,11 @@
  * keyboard layout can reach.
  */
 
+import { WINDOWS_CAPTURE_BOOTSTRAP } from './windows-capture.js';
+import { WINDOWS_APP_IDENTITY_SOURCE, WINDOWS_APPS_SCRIPT } from './windows-apps.js';
+import { WINDOWS_KEYS_SOURCE } from './windows-keys.js';
+import { BROWSER_PROCESS_PATTERN } from './browser-chords.js';
+
 export const HELPER_SCRIPT = String.raw`
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -58,7 +63,7 @@ public static class Clf {
   const uint MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_HWHEEL = 0x1000;
   // Nonzero when the user has swapped the primary and secondary mouse buttons. See ButtonFlags.
   const int SM_SWAPBUTTON = 23;
-  const uint KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
+  const uint KEYEVENTF_EXTENDEDKEY = 0x0001, KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
 
   [DllImport("user32.dll", SetLastError = true)]
   static extern uint SendInput(uint n, INPUT[] inputs, int size);
@@ -76,20 +81,38 @@ public static class Clf {
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);
+  [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassNameW(IntPtr window, StringBuilder value, int count);
+  [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int index);
   [DllImport("user32.dll")] static extern bool AttachThreadInput(uint from, uint to, bool attach);
-  [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr hwnd, IntPtr hdcBlt, uint flags);
   [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+  [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
 
   public struct POINT { public int X, Y; }
   public struct RECT { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)]
+  struct GUITHREADINFO {
+    public uint cbSize, flags;
+    public IntPtr active, focus, capture, menuOwner, moveSize, caret;
+    public RECT caretRect;
+  }
   delegate bool EnumProc(IntPtr h, IntPtr lp);
 
   static int VX { get { return GetSystemMetrics(76); } }
   static int VY { get { return GetSystemMetrics(77); } }
   static int VW { get { return GetSystemMetrics(78); } }
   static int VH { get { return GetSystemMetrics(79); } }
+
+  public static void EnsureDpiAware() {
+    // WGC/DWM surfaces use physical pixels. Keep Win32 geometry on the same scale,
+    // including on monitors whose scaling differs from the primary display.
+    if (SetThreadDpiAwarenessContext(new IntPtr(-4)) == IntPtr.Zero)
+      throw new InvalidOperationException("DPI_AWARENESS_FAILED: cannot establish per-monitor physical coordinates");
+  }
 
   static void Send(INPUT[] inputs) {
     uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
@@ -148,6 +171,7 @@ public static class Clf {
   }
 
   public static void Click(int x, int y, string button, int times) {
+    if (times < 1 || times > 3) throw new ArgumentException("BAD_ACTION: click count must be between 1 and 3");
     Move(x, y);
     uint down, up;
     ButtonFlags(button, out down, out up);
@@ -156,33 +180,71 @@ public static class Clf {
       batch.Add(Mouse(down, 0, 0, 0));
       batch.Add(Mouse(up, 0, 0, 0));
     }
-    Send(batch.ToArray());
+    try { Send(batch.ToArray()); }
+    catch {
+      // A short SendInput may have accepted a button-down without its matching up.
+      try { Send(new INPUT[] { Mouse(up, 0, 0, 0) }); } catch { }
+      throw;
+    }
   }
 
   public static void Scroll(int x, int y, int dx, int dy) {
+    Scroll(x, y, dx, dy, false);
+  }
+
+  public static void Scroll(int x, int y, int dx, int dy, bool rawWheel) {
     Move(x, y);
     List<INPUT> batch = new List<INPUT>();
     // Positive scroll_y means "scroll down" for the caller; the wheel API is the
     // other way round, hence the negation.
-    if (dy != 0) batch.Add(Mouse(MOUSEEVENTF_WHEEL, 0, 0, unchecked((uint)(-dy * 120))));
-    if (dx != 0) batch.Add(Mouse(MOUSEEVENTF_HWHEEL, 0, 0, unchecked((uint)(dx * 120))));
+    int unit = rawWheel ? 1 : 120;
+    if (dy != 0) batch.Add(Mouse(MOUSEEVENTF_WHEEL, 0, 0, unchecked((uint)(-dy * unit))));
+    if (dx != 0) batch.Add(Mouse(MOUSEEVENTF_HWHEEL, 0, 0, unchecked((uint)(dx * unit))));
     if (batch.Count > 0) Send(batch.ToArray());
   }
 
   public static void Drag(int[] xs, int[] ys, string button) {
+    Drag(xs, ys, button, 350);
+  }
+
+  public static void Drag(int[] xs, int[] ys, string button, int durationMs) {
+    if (xs == null || ys == null || xs.Length != ys.Length || xs.Length < 2 || xs.Length > 64 || durationMs < 50 || durationMs > 2000)
+      throw new ArgumentException("BAD_ACTION: drag requires 2-64 points and a 50-2000 ms duration");
+    double[] distance = new double[xs.Length];
+    for (int i = 1; i < xs.Length; i++) {
+      double dx = (double)xs[i] - xs[i - 1], dy = (double)ys[i] - ys[i - 1];
+      distance[i] = distance[i - 1] + Math.Sqrt(dx * dx + dy * dy);
+    }
     uint down, up;
     ButtonFlags(button, out down, out up);
     Move(xs[0], ys[0]);
-    Send(new INPUT[] { Mouse(down, 0, 0, 0) });
-    for (int i = 1; i < xs.Length; i++) { Move(xs[i], ys[i]); System.Threading.Thread.Sleep(12); }
-    Send(new INPUT[] { Mouse(up, 0, 0, 0) });
+    try {
+      Send(new INPUT[] { Mouse(down, 0, 0, 0) });
+      int steps = Math.Min(256, Math.Max(2, (int)Math.Ceiling(durationMs / 10.0)));
+      int segment = 1;
+      var clock = System.Diagnostics.Stopwatch.StartNew();
+      for (int step = 1; step <= steps; step++) {
+        double at = distance[distance.Length - 1] * step / steps;
+        while (segment < distance.Length - 1 && distance[segment] < at) segment++;
+        double length = distance[segment] - distance[segment - 1];
+        double fraction = length <= 0 ? 1 : (at - distance[segment - 1]) / length;
+        int x = (int)Math.Round(xs[segment - 1] + (xs[segment] - (double)xs[segment - 1]) * fraction);
+        int y = (int)Math.Round(ys[segment - 1] + (ys[segment] - (double)ys[segment - 1]) * fraction);
+        Move(x, y);
+        int remaining = (int)Math.Ceiling((double)durationMs * step / steps - clock.ElapsedMilliseconds);
+        if (remaining > 0) System.Threading.Thread.Sleep(Math.Min(10, remaining));
+      }
+    } finally {
+      Send(new INPUT[] { Mouse(up, 0, 0, 0) });
+    }
   }
 
-  static INPUT Key(ushort vk, bool up) {
+  static INPUT Key(int encoded, bool up) {
     INPUT i = new INPUT();
     i.type = INPUT_KEYBOARD;
-    i.u.ki.wVk = vk;
-    i.u.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0;
+    i.u.ki.wVk = (ushort)(encoded & 0xFFFF);
+    bool extended = (encoded & 0x10000) != 0;
+    i.u.ki.dwFlags = (up ? KEYEVENTF_KEYUP : 0) | (extended ? KEYEVENTF_EXTENDEDKEY : 0);
     return i;
   }
 
@@ -197,16 +259,29 @@ public static class Clf {
 
   /** Types literal text, layout-independently. */
   public static void Type(string text) {
+    if (text.IndexOf('\r') >= 0 || text.IndexOf('\n') >= 0)
+      throw new InvalidOperationException("MULTILINE_REQUIRES_PASTE: literal multiline text requires the clipboard paste action");
     List<INPUT> batch = new List<INPUT>();
     foreach (char c in text) {
-      if (c == '\n') { batch.Add(Key(0x0D, false)); batch.Add(Key(0x0D, true)); continue; }
-      if (c == '\r') continue;
       batch.Add(Unicode(c, false));
       batch.Add(Unicode(c, true));
       // SendInput caps out on very long batches; flush in chunks.
-      if (batch.Count >= 200) { Send(batch.ToArray()); batch.Clear(); }
+      if (batch.Count >= 200) { SendText(batch); batch.Clear(); }
     }
-    if (batch.Count > 0) Send(batch.ToArray());
+    if (batch.Count > 0) SendText(batch);
+  }
+
+  static void SendText(List<INPUT> batch) {
+    try { Send(batch.ToArray()); }
+    catch {
+      // A short injection can split a Unicode packet's down/up pair too.
+      List<INPUT> release = new List<INPUT>();
+      foreach (INPUT input in batch) {
+        if ((input.u.ki.dwFlags & KEYEVENTF_KEYUP) == 0) release.Add(Unicode((char)input.u.ki.wScan, true));
+      }
+      try { Send(release.ToArray()); } catch { }
+      throw;
+    }
   }
 
   /**
@@ -216,14 +291,17 @@ public static class Clf {
    * the modifiers physically down for a few milliseconds makes the sequence match
    * a real keyboard much more closely without making ordinary shortcuts feel slow.
    */
-  public static void Press(ushort[] vks) {
+  public static void Press(int[] vks) {
     List<INPUT> down = new List<INPUT>();
     List<INPUT> up = new List<INPUT>();
     for (int i = 0; i < vks.Length; i++) down.Add(Key(vks[i], false));
     for (int i = vks.Length - 1; i >= 0; i--) up.Add(Key(vks[i], true));
-    Send(down.ToArray());
-    System.Threading.Thread.Sleep(35);
-    Send(up.ToArray());
+    try {
+      Send(down.ToArray());
+      System.Threading.Thread.Sleep(35);
+    } finally {
+      Send(up.ToArray());
+    }
   }
 
   public static string Cursor() {
@@ -246,19 +324,25 @@ public static class Clf {
     IntPtr h = new IntPtr(handle);
     if (!IsWindow(h) || !IsWindowVisible(h)) return "";
     int len = GetWindowTextLengthW(h);
-    if (len == 0 || (GetWindowLong(h, -20) & 0x00000080) != 0) return "";
+    // An exact handle may name a menu/popup without a title. General listing still
+    // filters these; related-window discovery supplies their ownership proof.
     StringBuilder sb = new StringBuilder(len + 1);
     GetWindowTextW(h, sb, sb.Capacity);
     RECT r;
     if (!GetWindowRect(h, out r) || r.Right - r.Left <= 0 || r.Bottom - r.Top <= 0) return "";
     uint pid;
     GetWindowThreadProcessId(h, out pid);
-    string proc = "";
-    try { proc = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { }
+    string[] identity = CosWindowsAppIdentity.Read(handle, pid);
+    if (identity[0].Length == 0) return ""; // Unknown app identity cannot be targeted by the window API.
+    string proc = System.IO.Path.GetFileNameWithoutExtension(identity[1]);
+    if (proc.Length == 0) try { using (var process = System.Diagnostics.Process.GetProcessById((int)pid)) proc = process.ProcessName; } catch { }
+    uint dpi = GetDpiForWindow(h);
+    if (dpi == 0) return "";
     return string.Join(((char)31).ToString(), new string[] {
-      h.ToInt64().ToString(), sb.ToString(), proc,
+      h.ToInt64().ToString(), sb.ToString().Replace((char)31, ' '), proc,
       r.Left.ToString(), r.Top.ToString(), (r.Right - r.Left).ToString(), (r.Bottom - r.Top).ToString(),
-      IsIconic(h) ? "minimized" : (h == GetForegroundWindow() ? "foreground" : "open")
+      IsIconic(h) ? "minimized" : (h == GetForegroundWindow() ? "foreground" : "open"),
+      identity[0], pid.ToString(), identity[1], identity[2], dpi.ToString()
     });
   }
 
@@ -271,41 +355,114 @@ public static class Clf {
       // WS_EX_TOOLWINDOW: palettes and other chrome the user never thinks of as
       // a window, which would otherwise bury the real ones.
       if ((GetWindowLong(h, -20) & 0x00000080) != 0) return true;
-      StringBuilder sb = new StringBuilder(len + 1);
-      GetWindowTextW(h, sb, sb.Capacity);
-      RECT r; GetWindowRect(h, out r);
-      if (r.Right - r.Left <= 0 || r.Bottom - r.Top <= 0) return true;
-      uint pid; GetWindowThreadProcessId(h, out pid);
-      string proc = "";
-      try { proc = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { }
-      found.Add(string.Join(((char)31).ToString(), new string[] {
-        h.ToInt64().ToString(), sb.ToString(), proc,
-        r.Left.ToString(), r.Top.ToString(), (r.Right - r.Left).ToString(), (r.Bottom - r.Top).ToString(),
-        IsIconic(h) ? "minimized" : (h == GetForegroundWindow() ? "foreground" : "open")
-      }));
+      string row = Window(h.ToInt64());
+      if (row.Length > 0) found.Add(row);
       return true;
     }, IntPtr.Zero);
     return found;
   }
 
+  static bool OwnedBy(IntPtr candidate, IntPtr target) {
+    IntPtr root = GetAncestor(candidate, 2); // GA_ROOT: child controls belong to their top-level window.
+    if (root != IntPtr.Zero) candidate = root;
+    for (int depth = 0; depth < 16 && candidate != IntPtr.Zero; depth++) {
+      if (candidate == target) return true;
+      candidate = GetWindow(candidate, 4); // GW_OWNER: exact owner chain, never merely same PID.
+    }
+    return false;
+  }
+
+  static bool IsMenu(IntPtr window) {
+    StringBuilder name = new StringBuilder(256);
+    GetClassNameW(window, name, name.Capacity);
+    return name.ToString() == "#32768";
+  }
+
+  public static bool IsRelatedWindow(long candidateHandle, long targetHandle) {
+    IntPtr candidate = new IntPtr(candidateHandle), target = new IntPtr(targetHandle);
+    if (candidate == target || !IsWindow(target) || !IsWindowVisible(candidate) || IsIconic(candidate)) return false;
+    if (OwnedBy(candidate, target)) return true;
+    if (!IsMenu(candidate)) return false;
+    uint targetProcess, candidateProcess;
+    uint targetThread = GetWindowThreadProcessId(target, out targetProcess);
+    uint candidateThread = GetWindowThreadProcessId(candidate, out candidateProcess);
+    GUITHREADINFO gui = new GUITHREADINFO();
+    gui.cbSize = (uint)Marshal.SizeOf(typeof(GUITHREADINFO));
+    return candidateThread == targetThread && candidateProcess == targetProcess && GetGUIThreadInfo(targetThread, ref gui) &&
+      gui.menuOwner != IntPtr.Zero && OwnedBy(gui.menuOwner, target);
+  }
+
+  static IntPtr InputRoot(IntPtr window) {
+    bool menu = IsMenu(window);
+    if ((GetWindowLong(window, -20) & 0x08000000) == 0 && !menu) return window; // WS_EX_NOACTIVATE
+    IntPtr owner = GetWindow(window, 4);
+    if (owner == IntPtr.Zero && menu) {
+      uint process;
+      uint thread = GetWindowThreadProcessId(window, out process);
+      GUITHREADINFO gui = new GUITHREADINFO();
+      gui.cbSize = (uint)Marshal.SizeOf(typeof(GUITHREADINFO));
+      if (GetGUIThreadInfo(thread, ref gui)) owner = GetAncestor(gui.menuOwner, 2);
+    }
+    for (int depth = 0; depth < 16 && owner != IntPtr.Zero; depth++) {
+      if ((GetWindowLong(owner, -20) & 0x08000000) == 0 && !IsMenu(owner)) break;
+      owner = GetWindow(owner, 4);
+    }
+    return owner != IntPtr.Zero && IsRelatedWindow(window.ToInt64(), owner.ToInt64()) ? owner : IntPtr.Zero;
+  }
+
+  public static bool InputIsFocused(long handle) {
+    IntPtr window = new IntPtr(handle);
+    if (!IsWindowVisible(window) || IsIconic(window)) return false;
+    IntPtr root = InputRoot(window);
+    return root != IntPtr.Zero && GetForegroundWindow() == root;
+  }
+
+  public static List<string> RelatedWindows(long handle) {
+    IntPtr target = new IntPtr(handle);
+    List<string> related = new List<string>();
+    if (!IsWindow(target)) return related;
+    uint targetProcess;
+    uint targetThread = GetWindowThreadProcessId(target, out targetProcess);
+    GUITHREADINFO gui = new GUITHREADINFO();
+    gui.cbSize = (uint)Marshal.SizeOf(typeof(GUITHREADINFO));
+    bool menuOwned = GetGUIThreadInfo(targetThread, ref gui) && gui.menuOwner != IntPtr.Zero && OwnedBy(gui.menuOwner, target);
+    EnumWindows(delegate(IntPtr candidate, IntPtr lp) {
+      if (candidate == target || !IsWindowVisible(candidate) || IsIconic(candidate)) return true;
+      bool owned = OwnedBy(candidate, target);
+      if (!owned && menuOwned) {
+        uint candidateProcess;
+        uint candidateThread = GetWindowThreadProcessId(candidate, out candidateProcess);
+        StringBuilder className = new StringBuilder(256);
+        GetClassNameW(candidate, className, className.Capacity);
+        owned = candidateThread == targetThread && candidateProcess == targetProcess && className.ToString() == "#32768";
+      }
+      if (!owned) return true;
+      string row = Window(candidate.ToInt64());
+      if (row.Length > 0) related.Add(row);
+      return related.Count < 3;
+    }, IntPtr.Zero);
+    return related;
+  }
+
   /**
-   * Windows refuses SetForegroundWindow to a process that does not own the current
-   * foreground window. Briefly attaching to that window's input thread is the
-   * long-standing way to be allowed to do it.
+   * Attachment can fail, and Windows still owns permission to activate the target.
+   * Only a successful attachment is ours to detach, including when activation throws.
    */
   public static bool Focus(long handle) {
-    IntPtr h = new IntPtr(handle);
+    IntPtr h = InputRoot(new IntPtr(handle));
+    if (h == IntPtr.Zero) return false;
     if (!IsWindow(h)) return false;
     if (GetForegroundWindow() == h) return true;
     if (IsIconic(h)) ShowWindow(h, 9);
     uint dummy;
-    uint target = GetWindowThreadProcessId(h, out dummy);
     uint fore = GetWindowThreadProcessId(GetForegroundWindow(), out dummy);
     uint self = GetCurrentThreadId();
-    if (fore != self) AttachThreadInput(fore, self, true);
-    bool ok = SetForegroundWindow(h);
-    if (fore != self) AttachThreadInput(fore, self, false);
-    return ok;
+    bool attached = fore != 0 && fore != self && AttachThreadInput(self, fore, true);
+    try {
+      return SetForegroundWindow(h);
+    } finally {
+      if (attached) AttachThreadInput(self, fore, false);
+    }
   }
 
   public static long ForegroundId() {
@@ -349,70 +506,22 @@ public static class Clf {
     }
   }
 
-  /** Captures a classic top-level window without changing the foreground. */
-  public static string CaptureWindow(long handle, int maxW, string file) {
-    IntPtr h = new IntPtr(handle);
-    RECT r;
-    if (!IsWindow(h) || IsIconic(h) || !GetWindowRect(h, out r)) return "";
-    int w = r.Right - r.Left, height = r.Bottom - r.Top;
-    if (w <= 0 || height <= 0) return "";
-    using (Bitmap shot = new Bitmap(w, height))
-    using (Graphics g = Graphics.FromImage(shot)) {
-      IntPtr dc = g.GetHdc();
-      bool ok;
-      try { ok = PrintWindow(h, dc, 2); }
-      finally { g.ReleaseHdc(dc); }
-      if (!ok) return "";
-      return SavePng(shot, maxW, file);
-    }
-  }
 }
+${WINDOWS_KEYS_SOURCE}
+${WINDOWS_APP_IDENTITY_SOURCE}
 '@ -ReferencedAssemblies System.Drawing
+
+${WINDOWS_CAPTURE_BOOTSTRAP}
 
 # Requests arrive as one JSON object per stdin line. The process stays alive, so the
 # expensive Add-Type/C# compilation above happens once instead of on every MCP call.
 # Model-supplied text is data parsed by ConvertFrom-Json and is never evaluated as
 # PowerShell source.
 
-function Vk([string]$name) {
-  $n = $name.ToUpperInvariant()
-  $map = @{
-    'CTRL'=0x11; 'CONTROL'=0x11; 'ALT'=0x12; 'SHIFT'=0x10; 'WIN'=0x5B; 'SUPER'=0x5B; 'CMD'=0x5B;
-    'ENTER'=0x0D; 'RETURN'=0x0D; 'TAB'=0x09; 'ESC'=0x1B; 'ESCAPE'=0x1B; 'SPACE'=0x20;
-    'BACKSPACE'=0x08; 'DELETE'=0x2E; 'DEL'=0x2E; 'INSERT'=0x2D; 'HOME'=0x24; 'END'=0x23;
-    'PAGEUP'=0x21; 'PAGEDOWN'=0x22; 'UP'=0x26; 'DOWN'=0x28; 'LEFT'=0x25; 'RIGHT'=0x27;
-    'F1'=0x70;'F2'=0x71;'F3'=0x72;'F4'=0x73;'F5'=0x74;'F6'=0x75;
-    'F7'=0x76;'F8'=0x77;'F9'=0x78;'F10'=0x79;'F11'=0x7A;'F12'=0x7B;
-    'PRINTSCREEN'=0x2C; 'CAPSLOCK'=0x14;
-    'PGUP'=0x21; 'PGDN'=0x22; 'ARROWUP'=0x26; 'ARROWDOWN'=0x28; 'ARROWLEFT'=0x25; 'ARROWRIGHT'=0x27;
-    'META'=0x5B; 'COMMAND'=0x5B; 'OPTION'=0x12; 'INS'=0x2D; 'BKSP'=0x08; 'PAUSE'=0x13;
-    'NUMLOCK'=0x90; 'SCROLLLOCK'=0x91; 'MENU'=0x5D; 'APPS'=0x5D;
-    'F13'=0x7C;'F14'=0x7D;'F15'=0x7E;'F16'=0x7F;'F17'=0x80;'F18'=0x81;
-    'F19'=0x82;'F20'=0x83;'F21'=0x84;'F22'=0x85;'F23'=0x86;'F24'=0x87;
-    'MINUS'=0xBD; '-'=0xBD; 'EQUALS'=0xBB; 'EQUAL'=0xBB; '='=0xBB; 'PLUS'=0xBB;
-    'LBRACKET'=0xDB; 'BRACKETLEFT'=0xDB; '['=0xDB; 'RBRACKET'=0xDD; 'BRACKETRIGHT'=0xDD; ']'=0xDD;
-    'BACKSLASH'=0xDC; '\'=0xDC; 'SEMICOLON'=0xBA; ';'=0xBA; 'QUOTE'=0xDE; 'APOSTROPHE'=0xDE; "'"=0xDE;
-    'COMMA'=0xBC; ','=0xBC; 'PERIOD'=0xBE; '.'=0xBE; 'SLASH'=0xBF; '/'=0xBF;
-    'BACKQUOTE'=0xC0; 'GRAVE'=0xC0; 'TILDE'=0xC0; '~'=0xC0
-  }
-  # The backtick cannot be spelled inside this script's own quoting, so it joins the map by code.
-  $map[[string][char]96] = 0xC0
-  if ($map.ContainsKey($n)) { return [uint16]$map[$n] }
-  if ($n.Length -eq 1) {
-    $c = [char]$n
-    if (($c -ge 'A' -and $c -le 'Z') -or ($c -ge '0' -and $c -le '9')) { return [uint16][int][char]$c }
-  }
-  throw "BAD_KEY: Unknown key: $name. Use one character, or a key name: enter, tab, esc, space, backspace, delete, insert, home, end, pageup, pagedown, up, down, left, right, f1-f24, printscreen, or a modifier ctrl, alt, shift, win."
-}
-
 function Get-WindowRows {
   $rows = @()
   foreach ($line in [Clf]::Windows()) {
-    $f = $line -split ([char]31)
-    $rows += @{
-      id = [int64]$f[0]; title = $f[1]; process = $f[2]
-      x = [int]$f[3]; y = [int]$f[4]; width = [int]$f[5]; height = [int]$f[6]; state = $f[7]
-    }
+    $rows += Convert-WindowRow $line
   }
   return $rows
 }
@@ -423,6 +532,7 @@ function Convert-WindowRow([string]$line) {
   return @{
     id = [int64]$f[0]; title = $f[1]; process = $f[2]
     x = [int]$f[3]; y = [int]$f[4]; width = [int]$f[5]; height = [int]$f[6]; state = $f[7]
+    app = $f[8]; processId = [uint32]$f[9]; processPath = $f[10]; appUserModelId = $f[11]; dpi = [int]$f[12]
   }
 }
 
@@ -439,13 +549,14 @@ function Get-ScreenRect {
 }
 
 function Try-Focus([int64]$id) {
-  if ([Clf]::ForegroundId() -eq $id) { return $true }
-  if (-not [Clf]::Focus($id)) { return $false }
+  if ([Clf]::InputIsFocused($id)) { return $true }
+  $null = [Clf]::Focus($id)
   # Activation is asynchronous for some windows. Confirm the actual foreground state and
-  # stop as soon as it lands instead of charging every call one fixed 120 ms sleep.
+  # stop as soon as it lands, including when SetForegroundWindow returned false. That
+  # immediate result does not replace the target's actual foreground postcondition.
   $timer = [Diagnostics.Stopwatch]::StartNew()
   do {
-    if ([Clf]::ForegroundId() -eq $id) { return $true }
+    if ([Clf]::InputIsFocused($id)) { return $true }
     Start-Sleep -Milliseconds 10
   } while ($timer.ElapsedMilliseconds -lt 250)
   return $false
@@ -460,6 +571,36 @@ function Assert-Focused([int64]$id) {
 
 function Ui-RuntimeKey($element) {
   try { return (@($element.GetRuntimeId()) -join '.') } catch { return '' }
+}
+
+function Get-UiRoot([int64]$id) {
+  $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$id)
+  if ($null -eq $root) { throw "UIA_FAILED: no accessible window with id $id" }
+  if ($root.Current.ClassName -ne 'Chrome_WidgetWin_1') { return $root }
+  $window = Get-WindowRow $id
+  if ($null -eq $window) { throw "UIA_FAILED: window $id disappeared during observation" }
+  if ($window.process -notmatch '${BROWSER_PROCESS_PATTERN.source}') { return $root }
+
+  # Chromium also exposes legacy renderer HWNDs as direct children. They retain
+  # old tabs, plausible bounds and even IsOffscreen=false. BrowserRootView owns
+  # the current browser UI, including its address bar and selected document.
+  # Select that exact provider before spending the bounded element traversal.
+  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+  $child = $walker.GetFirstChild($root)
+  $browserRoot = $null
+  $visited = 0
+  while ($null -ne $child -and $visited -lt 128) {
+    $visited += 1
+    if ($child.Current.ClassName -eq 'BrowserRootView') {
+      if ($null -ne $browserRoot) { throw 'UIA_FAILED: multiple browser UI roots; use the screenshot instead' }
+      $browserRoot = $child
+    }
+    $child = $walker.GetNextSibling($child)
+  }
+  if ($null -ne $child -or $null -eq $browserRoot) {
+    throw 'UIA_FAILED: current browser UI root is unavailable; use the screenshot instead'
+  }
+  return $browserRoot
 }
 
 $script:UiSnapshots = [ordered]@{}
@@ -501,11 +642,10 @@ function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
     throw "UI_ELEMENT_GONE: the referenced UI element is not part of snapshot $snapshotId. Use a ref printed by that snapshot, or observe the window again."
   }
   try {
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$id)
+    $root = Get-UiRoot $id
   } catch {
-    throw "UIA_FAILED: no accessible window with id $id"
+    throw "UIA_FAILED: cannot inspect window $id. $($_.Exception.Message)"
   }
-  if ($null -eq $root) { throw "UIA_FAILED: no accessible window with id $id" }
   try {
     if ((Ui-RuntimeKey $root) -ne [string]$snapshot.rootRuntimeKey) {
       throw "STALE_UI_SNAPSHOT: window $id no longer has the UIA root from snapshot $snapshotId. Call observe on the window again and use a ref from that reply."
@@ -516,7 +656,15 @@ function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
     if ((Ui-RuntimeKey $element) -ne $runtimeKey) {
       throw "STALE_UI_REF: the cached element identity changed"
     }
-    return $element
+    # A live legacy provider is not proof that its old tab is still displayed.
+    # Revalidate membership in the same current UI root before semantic input.
+    $parent = $element
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    for ($depth = 0; $depth -le 64 -and $null -ne $parent; $depth++) {
+      if ((Ui-RuntimeKey $parent) -eq [string]$snapshot.rootRuntimeKey) { return $element }
+      $parent = $walker.GetParent($parent)
+    }
+    throw 'STALE_UI_REF: the element is no longer in the observed window UI; observe again'
   } catch {
     $message = $_.Exception.Message
     if ($message -match '^[A-Z0-9_]+:') { throw $message }
@@ -524,11 +672,90 @@ function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
   }
 }
 
+$script:UiActionNames = @('invoke','toggle','select','expand','collapse','focus','scroll_up','scroll_down','scroll_left','scroll_right','scroll_into_view')
+
+function Get-UiActions($element, $current) {
+  $actions = New-Object 'System.Collections.Generic.List[string]'
+  $supported = @($element.GetSupportedPatterns() | ForEach-Object { $_.Id })
+  if ($supported -contains [System.Windows.Automation.InvokePattern]::Pattern.Id) { $actions.Add('invoke') }
+  if ($supported -contains [System.Windows.Automation.TogglePattern]::Pattern.Id) { $actions.Add('toggle') }
+  if ($supported -contains [System.Windows.Automation.SelectionItemPattern]::Pattern.Id) { $actions.Add('select') }
+  if ($supported -contains [System.Windows.Automation.ExpandCollapsePattern]::Pattern.Id) {
+    $pattern = [System.Windows.Automation.ExpandCollapsePattern]$element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+    if ($pattern.Current.ExpandCollapseState -ne [System.Windows.Automation.ExpandCollapseState]::LeafNode) {
+      $actions.Add('expand'); $actions.Add('collapse')
+    }
+  }
+  if ($supported -contains [System.Windows.Automation.ScrollPattern]::Pattern.Id) {
+    $pattern = [System.Windows.Automation.ScrollPattern]$element.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern)
+    if ($pattern.Current.VerticallyScrollable) { $actions.Add('scroll_up'); $actions.Add('scroll_down') }
+    if ($pattern.Current.HorizontallyScrollable) { $actions.Add('scroll_left'); $actions.Add('scroll_right') }
+  }
+  if ($supported -contains [System.Windows.Automation.ScrollItemPattern]::Pattern.Id) { $actions.Add('scroll_into_view') }
+  if ($current.IsKeyboardFocusable) { $actions.Add('focus') }
+  return @($actions.ToArray())
+}
+
+function Invoke-UiAction($element, [string]$action) {
+  # Explicit semantic actions never degrade to a click at guessed coordinates.
+  $patternId = switch ($action) {
+    'invoke' { [System.Windows.Automation.InvokePattern]::Pattern }
+    'toggle' { [System.Windows.Automation.TogglePattern]::Pattern }
+    'select' { [System.Windows.Automation.SelectionItemPattern]::Pattern }
+    { $_ -in @('expand','collapse') } { [System.Windows.Automation.ExpandCollapsePattern]::Pattern }
+    { $_ -in @('scroll_up','scroll_down','scroll_left','scroll_right') } { [System.Windows.Automation.ScrollPattern]::Pattern }
+    'scroll_into_view' { [System.Windows.Automation.ScrollItemPattern]::Pattern }
+    'focus' { $null }
+    default { throw "BAD_ACTION: unsupported UI element action $action" }
+  }
+  if ($action -eq 'focus') {
+    if (-not $element.Current.IsKeyboardFocusable) { throw 'UI_ACTION_UNSUPPORTED: element is not keyboard focusable' }
+    $element.SetFocus()
+    return
+  }
+  $pattern = $null
+  if (-not $element.TryGetCurrentPattern($patternId, [ref]$pattern)) {
+    throw "UI_ACTION_UNSUPPORTED: element does not currently support $action"
+  }
+  switch ($action) {
+    'invoke' { ([System.Windows.Automation.InvokePattern]$pattern).Invoke() }
+    'toggle' { ([System.Windows.Automation.TogglePattern]$pattern).Toggle() }
+    'select' { ([System.Windows.Automation.SelectionItemPattern]$pattern).Select() }
+    'expand' { ([System.Windows.Automation.ExpandCollapsePattern]$pattern).Expand() }
+    'collapse' { ([System.Windows.Automation.ExpandCollapsePattern]$pattern).Collapse() }
+    'scroll_into_view' { ([System.Windows.Automation.ScrollItemPattern]$pattern).ScrollIntoView() }
+    { $_ -in @('scroll_up','scroll_down','scroll_left','scroll_right') } {
+      $scroll = [System.Windows.Automation.ScrollPattern]$pattern
+      $horizontal = [System.Windows.Automation.ScrollAmount]::NoAmount
+      $vertical = [System.Windows.Automation.ScrollAmount]::NoAmount
+      if ($action -in @('scroll_up','scroll_down')) {
+        if (-not $scroll.Current.VerticallyScrollable) { throw 'UI_ACTION_UNSUPPORTED: element is not vertically scrollable' }
+        $vertical = if ($action -eq 'scroll_up') { [System.Windows.Automation.ScrollAmount]::LargeDecrement } else { [System.Windows.Automation.ScrollAmount]::LargeIncrement }
+      } else {
+        if (-not $scroll.Current.HorizontallyScrollable) { throw 'UI_ACTION_UNSUPPORTED: element is not horizontally scrollable' }
+        $horizontal = if ($action -eq 'scroll_left') { [System.Windows.Automation.ScrollAmount]::LargeDecrement } else { [System.Windows.Automation.ScrollAmount]::LargeIncrement }
+      }
+      $scroll.Scroll($horizontal, $vertical)
+    }
+  }
+}
+
+function Get-RequestedClickCount($request) {
+  $value = if ($request -is [Collections.IDictionary]) { $request['count'] } else { $request.count }
+  if ($null -eq $value) { return 1 }
+  if ([double]$value -lt 1 -or [double]$value -gt 3 -or [double]$value -ne [int]$value) { throw 'BAD_ACTION: click count must be an integer between 1 and 3' }
+  return [int]$value
+}
+
 function Act-UiElement($request) {
+  $action = [string]$request.action
+  if ($action -notin $script:UiActionNames -and $action -notin @('click','set_value')) {
+    throw "BAD_ACTION: unsupported UI element action $action"
+  }
   $id = [int64]$request.id
+  Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
   $element = Resolve-UiElement $id ([int]$request.snapshotId) ([string]$request.runtimeKey)
   if (-not $element.Current.IsEnabled) { throw "UI_ELEMENT_DISABLED: the referenced element is disabled" }
-  $action = [string]$request.action
   if ($action -eq 'set_value') {
     $pattern = $null
     if (-not $element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
@@ -536,12 +763,26 @@ function Act-UiElement($request) {
     }
     $value = [System.Windows.Automation.ValuePattern]$pattern
     if ($value.Current.IsReadOnly) { throw "UI_VALUE_READONLY: the referenced element is read-only" }
+    Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
     $value.SetValue([string]$request.value)
     $route = 'uia'
   } elseif ($action -eq 'click') {
+    $button = if ($request.button) { [string]$request.button } else { 'left' }
+    $count = Get-RequestedClickCount $request
+    if ($button -notin @('left','right','middle') -or $count -lt 1 -or $count -gt 3) { throw 'BAD_ACTION: unsupported click button or count' }
+    $semanticClick = $button -eq 'left' -and $count -eq 1
     $pattern = $null
-    if ($element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+    if ($semanticClick -and $element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+      Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
       ([System.Windows.Automation.InvokePattern]$pattern).Invoke()
+      $route = 'uia'
+    } elseif ($semanticClick -and $element.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) {
+      Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
+      ([System.Windows.Automation.TogglePattern]$pattern).Toggle()
+      $route = 'uia'
+    } elseif ($semanticClick -and $element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) {
+      Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
+      ([System.Windows.Automation.SelectionItemPattern]$pattern).Select()
       $route = 'uia'
     } else {
       # A semantic control without InvokePattern has to fall back to physical input. Make
@@ -550,11 +791,14 @@ function Act-UiElement($request) {
       Assert-Focused $id
       $r = $element.Current.BoundingRectangle
       if ($r.Width -le 0 -or $r.Height -le 0) { throw "UI_ELEMENT_OFFSCREEN: the referenced element has no clickable bounds" }
-      [Clf]::Click([int][Math]::Round($r.X + $r.Width / 2), [int][Math]::Round($r.Y + $r.Height / 2), 'left', 1)
+      Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
+      [Clf]::Click([int][Math]::Round($r.X + $r.Width / 2), [int][Math]::Round($r.Y + $r.Height / 2), $button, $count)
       $route = 'sendinput'
     }
   } else {
-    throw "BAD_ACTION: unsupported UI element action $action"
+    Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
+    Invoke-UiAction $element $action
+    $route = 'uia'
   }
   return @{ runtimeKey = (Ui-RuntimeKey $element); name = [string]$element.Current.Name; route = $route }
 }
@@ -562,11 +806,10 @@ function Act-UiElement($request) {
 function Find-UiElements($request) {
   $id = if ($request.id) { [int64]$request.id } else { [Clf]::ForegroundId() }
   try {
-    $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$id)
+    $root = Get-UiRoot $id
   } catch {
-    throw "UIA_FAILED: no accessible window with id $id"
+    throw "UIA_FAILED: cannot inspect window $id. $($_.Exception.Message)"
   }
-  if ($null -eq $root) { throw "UIA_FAILED: no accessible window with id $id" }
 
   $query = ([string]$request.query).Trim().ToLowerInvariant()
   $role = ([string]$request.role).Trim().ToLowerInvariant()
@@ -575,6 +818,13 @@ function Find-UiElements($request) {
   $found = @()
   $handles = New-Object 'System.Collections.Generic.List[object]'
   $visited = 0
+  $documentText = $null
+  $selectedText = $null
+  $focusedElement = $null
+  $textPattern = $null
+  $textPriority = 0
+  $browserDocument = $root.Current.ClassName -eq 'BrowserRootView'
+  $depthLimited = $false
   try {
     # ControlView avoids the enormous raw Chromium implementation tree. TreeWalker lets the
     # limit bound traversal work as well as output; FindAll(Descendants) materialised the full
@@ -589,8 +839,13 @@ function Find-UiElements($request) {
     $cache.Add([System.Windows.Automation.AutomationElement]::IsEnabledProperty)
     $cache.Add([System.Windows.Automation.AutomationElement]::IsOffscreenProperty)
     $cache.Add([System.Windows.Automation.AutomationElement]::BoundingRectangleProperty)
+    $cache.Add([System.Windows.Automation.AutomationElement]::HasKeyboardFocusProperty)
+    $cache.Add([System.Windows.Automation.AutomationElement]::IsKeyboardFocusableProperty)
+    $cache.Add([System.Windows.Automation.AutomationElement]::IsPasswordProperty)
+    $cache.Add([System.Windows.Automation.SelectionItemPattern]::IsSelectedProperty)
     $stack = New-Object System.Collections.Stack
     $element = $walker.GetFirstChild($root, $cache)
+    $depth = 1
     while ($null -ne $element -and $found.Count -lt $limit -and $visited -lt $visitLimit) {
       $visited += 1
       try {
@@ -604,32 +859,65 @@ function Find-UiElements($request) {
         if ($matches) {
           $r = $current.BoundingRectangle
           if ($r.Width -gt 0 -and $r.Height -gt 0) {
-            $found += @{
-              runtimeKey = (Ui-RuntimeKey $element)
+            $runtimeKey = Ui-RuntimeKey $element
+            $availableActions = @()
+            try { $availableActions = @(Get-UiActions $element $current) } catch { }
+            $entry = @{
+              runtimeKey = $runtimeKey
               name = $name
               role = $control
               automationId = $automationId
               enabled = [bool]$current.IsEnabled
               offscreen = [bool]$current.IsOffscreen
+              focused = [bool]$current.HasKeyboardFocus
+              depth = $depth
+              actions = $availableActions
               bounds = @{
                 x = [int][Math]::Round($r.X); y = [int][Math]::Round($r.Y)
                 width = [int][Math]::Round($r.Width); height = [int][Math]::Round($r.Height)
               }
             }
+            try {
+              $selected = $element.GetCachedPropertyValue([System.Windows.Automation.SelectionItemPattern]::IsSelectedProperty, $true)
+              if ($selected -is [bool]) { $entry.selected = $selected }
+            } catch { }
+            if ($current.HasKeyboardFocus) { $focusedElement = $runtimeKey }
+            $found += $entry
             $handles.Add($element)
+            # Select within this traversal, then read just one provider. Browser
+            # toolbar editors precede the page and must never become document_text.
+            # Native editors remain useful when no Document provider is observed.
+            $priority = if ($current.IsPassword) { 0 }
+              elseif ($control -eq 'Document') { 3 }
+              elseif ($browserDocument) { 0 }
+              elseif ($current.HasKeyboardFocus) { 2 }
+              elseif ($control -eq 'Edit') { 1 }
+              else { 0 }
+            if ($priority -gt $textPriority) {
+              try {
+                $candidate = $null
+                if ($element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$candidate)) {
+                  $textPattern = [System.Windows.Automation.TextPattern]$candidate
+                  $textPriority = $priority
+                }
+              } catch { }
+            }
           }
         }
       } catch { }
 
       $sibling = $null
       try { $sibling = $walker.GetNextSibling($element, $cache) } catch { }
-      if ($null -ne $sibling) { $stack.Push($sibling) }
+      if ($null -ne $sibling) { $stack.Push(@{ element = $sibling; depth = $depth }) }
       $child = $null
-      try { $child = $walker.GetFirstChild($element, $cache) } catch { }
+      if ($depth -lt 64) { try { $child = $walker.GetFirstChild($element, $cache) } catch { } } else { $depthLimited = $true }
       if ($null -ne $child) {
         $element = $child
+        $depth += 1
       } elseif ($stack.Count -gt 0) {
-        $element = $stack.Pop()
+        $next = $stack.Pop()
+        $element = $next.element
+        $depth = $next.depth
       } else {
         $element = $null
       }
@@ -637,13 +925,32 @@ function Find-UiElements($request) {
   } catch {
     throw "UIA_FAILED: $($_.Exception.Message)"
   }
+  if ($null -ne $textPattern) {
+    try {
+      $budget = 8000
+      $selection = New-Object System.Text.StringBuilder
+      $ranges = @($textPattern.GetSelection())
+      foreach ($range in ($ranges | Select-Object -First 4)) {
+        $remaining = [Math]::Min(2000 - $selection.Length, $budget)
+        if ($remaining -le 0) { break }
+        $part = $range.GetText($remaining)
+        $null = $selection.Append($part)
+        $budget -= $part.Length
+      }
+      $selectedText = $selection.ToString()
+      $documentText = $textPattern.DocumentRange.GetText($budget)
+    } catch { }
+  }
   $snapshotId = Remember-UiSnapshot $id $root $handles
   return @{
     window = $id
     snapshotId = $snapshotId
     elements = @($found)
     visited = $visited
-    truncated = ($visited -ge $visitLimit -and $found.Count -lt $limit)
+    truncated = ($null -ne $element -or $stack.Count -gt 0 -or $depthLimited)
+    document_text = $documentText
+    selected_text = $selectedText
+    focused_element = $focusedElement
   }
 }
 
@@ -652,6 +959,7 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
   $id = if ($null -ne $forcedWindow) { [int64]$forcedWindow } elseif ($request.id) { [int64]$request.id } else { $null }
   $mode = 'screen'
   $focused = $null
+  $windowGeometry = $null
   if ($request.region) {
     $x = [int]$request.region.x; $y = [int]$request.region.y
     $w = [int]$request.region.width; $h = [int]$request.region.height
@@ -660,6 +968,7 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
       throw "WINDOW_NOT_FOUND: window $id is no longer open, so there is nothing to capture. Call observe what=windows for the current windows."
     }
     $x = [int]$r[0]; $y = [int]$r[1]; $w = [int]$r[2]; $h = [int]$r[3]
+    $windowGeometry = @{ x = $x; y = $y; width = $w; height = $h }
     $focused = ([Clf]::ForegroundId() -eq [int64]$id)
   } elseif ($request.full) {
     $x = [int]$screen.virtual.x; $y = [int]$screen.virtual.y
@@ -670,16 +979,31 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
   if ($w -le 0 -or $h -le 0) { throw "CAPTURE_FAILED: target has no drawable area" }
   $maxW = if ($request.maxWidth) { [int]$request.maxWidth } else { 0 }
   $out = $null
-  # PrintWindow is background-first and leaves the foreground alone. Providers that reject
-  # it fall back to truthful screen pixels, explicitly marked as potentially occluded.
+  # Capture the named window's compositor surface, never pixels of an occluding window.
+  # DWM excludes invisible resize borders, so preserve outer geometry separately.
   if ($null -ne $id -and $request.file) {
-    $direct = [Clf]::CaptureWindow([int64]$id, $maxW, [string]$request.file)
-    if ($direct) {
-      $out = $direct -split ','
-      $mode = 'window'
-    } else {
-      $mode = 'screen_fallback'
+    if ($request.ownerWindow -and -not [Clf]::IsRelatedWindow([int64]$id, [int64]$request.ownerWindow)) {
+      throw 'RELATED_WINDOW_GONE: popup no longer belongs to the observed window'
     }
+    Initialize-WindowsCapture
+    try {
+      $direct = [CosWindowsCapture]::Capture([int64]$id, $maxW, [string]$request.file) -split ','
+    } catch {
+      # PowerShell wraps C# exceptions in invocation text; retain the native error
+      # code so callers distinguish stale geometry from a transport/helper failure.
+      throw $_.Exception.GetBaseException().Message
+    }
+    $after = [Clf]::Rect([int64]$id) -split ','
+    if ([int]$after[0] -ne $windowGeometry.x -or [int]$after[1] -ne $windowGeometry.y -or
+        [int]$after[2] -ne $windowGeometry.width -or [int]$after[3] -ne $windowGeometry.height) {
+      throw 'STALE_FRAME: window geometry changed during capture'
+    }
+    if ($request.ownerWindow -and -not [Clf]::IsRelatedWindow([int64]$id, [int64]$request.ownerWindow)) {
+      throw 'RELATED_WINDOW_GONE: popup ownership changed during capture'
+    }
+    $x = [int]$direct[0]; $y = [int]$direct[1]; $w = [int]$direct[2]; $h = [int]$direct[3]
+    $out = @($direct[4], $direct[5])
+    $mode = 'window'
   }
   if ($null -eq $out) {
     $out = [Clf]::Capture($x, $y, $w, $h, $maxW, [string]$request.file) -split ','
@@ -690,6 +1014,25 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
     screen = $screen.virtual
     focused = $focused
     captureMode = $mode
+    windowGeometry = $windowGeometry
+  }
+}
+
+function Assert-InputOwner([int64]$target, $owner, $targetApp, $ownerApp) {
+  if ($targetApp) {
+    $targetRow = Get-WindowRow $target
+    if ($null -eq $targetRow -or $targetRow.app -cne [string]$targetApp) {
+      throw 'WINDOW_APP_MISMATCH: input target no longer belongs to the observed application'
+    }
+  }
+  if ($ownerApp) {
+    $ownerRow = if ($owner) { Get-WindowRow ([int64]$owner) } else { $null }
+    if ($null -eq $ownerRow -or $ownerRow.app -cne [string]$ownerApp) {
+      throw 'WINDOW_APP_MISMATCH: input owner no longer belongs to the observed application'
+    }
+  }
+  if ($owner -and ($target -le 0 -or ($target -ne [int64]$owner -and -not [Clf]::IsRelatedWindow($target, [int64]$owner)))) {
+    throw 'RELATED_WINDOW_GONE: input target no longer belongs to the observed window'
   }
 }
 
@@ -697,6 +1040,7 @@ function Assert-CoordinateFrame($frame) {
   $region = $frame.region
   if ($frame.window) {
     $id = [int64]$frame.window
+    Assert-InputOwner $id $frame.ownerWindow $frame.targetApp $frame.ownerApp
     $geometry = if ($frame.windowGeometry) { $frame.windowGeometry } else { $region }
     $row = Get-WindowRow $id
     if ($null -eq $row -or $row.state -eq 'minimized') {
@@ -708,6 +1052,7 @@ function Assert-CoordinateFrame($frame) {
     # A background snapshot is safe to observe, but physical coordinates must land on that
     # exact window rather than on an overlay. Focus only here, on the mutating path.
     Assert-Focused $id
+    Assert-InputOwner $id $frame.ownerWindow $frame.targetApp $frame.ownerApp
     $after = Get-WindowRow $id
     if ($null -eq $after -or $after.x -ne [int]$geometry.x -or $after.y -ne [int]$geometry.y -or $after.width -ne [int]$geometry.width -or $after.height -ne [int]$geometry.height) {
       throw "STALE_FRAME: target window $id changed geometry while it was activated"
@@ -724,7 +1069,10 @@ function Assert-CoordinateFrame($frame) {
   }
 }
 
+${WINDOWS_APPS_SCRIPT}
+
 function Handle-Request($request) {
+  [Clf]::EnsureDpiAware()
   $result = @{ ok = $true }
   switch ($request.op) {
     'warm' {
@@ -744,6 +1092,10 @@ function Handle-Request($request) {
       $result.windows = @(Get-WindowRows)
       $result.screen = $screen.virtual
     }
+    'apps' {
+      $apps = Get-WindowsApps $request
+      foreach ($key in $apps.Keys) { $result[$key] = $apps[$key] }
+    }
     'active' {
       $screen = Get-ScreenRect
       $foreground = [Clf]::ForegroundId()
@@ -757,6 +1109,9 @@ function Handle-Request($request) {
       $result.elements = @($ui.elements)
       $result.visited = $ui.visited
       $result.truncated = $ui.truncated
+      $result.document_text = $ui.document_text
+      $result.selected_text = $ui.selected_text
+      $result.focused_element = $ui.focused_element
     }
     'act_ui' {
       $ui = Act-UiElement $request
@@ -773,6 +1128,9 @@ function Handle-Request($request) {
       $window = Get-WindowRow $id
       if ($null -eq $window) { throw "WINDOW_NOT_FOUND: no matching visible window is available" }
       $result.window = $window
+      if ($request.includeRelated) {
+        $result.relatedWindows = @([Clf]::RelatedWindows($id) | ForEach-Object { Convert-WindowRow $_ })
+      }
       if ($request.includeScreenshot) {
         $capture = Capture-Target $request ([Nullable[int64]]$id)
         foreach ($key in $capture.Keys) { $result[$key] = $capture[$key] }
@@ -785,11 +1143,21 @@ function Handle-Request($request) {
           maxResults = $request.maxResults
           maxVisited = $request.maxVisited
         }
-        $ui = Find-UiElements $uiRequest
-        $result.snapshotId = $ui.snapshotId
-        $result.elements = @($ui.elements)
-        $result.visited = $ui.visited
-        $result.truncated = $ui.truncated
+        try {
+          $ui = Find-UiElements $uiRequest
+          $result.snapshotId = $ui.snapshotId
+          $result.elements = @($ui.elements)
+          $result.visited = $ui.visited
+          $result.truncated = $ui.truncated
+          $result.document_text = $ui.document_text
+          $result.selected_text = $ui.selected_text
+          $result.focused_element = $ui.focused_element
+        } catch {
+          # Accessibility is optional observation metadata. Preserve successful pixels
+          # when an application provider cannot expose its controls.
+          $result.uiUnavailable = @{ code = 'UIA_FAILED'; message = $_.Exception.Message }
+          $result.elements = @()
+        }
       }
     }
     'focus' {
@@ -798,30 +1166,71 @@ function Handle-Request($request) {
       $result.foreground = [Clf]::ForegroundId()
     }
     'act' {
-      $pointing = @($request.actions | Where-Object { $_.type -in @('move','click','double_click','scroll','drag') })
-      if ($pointing.Count -gt 0 -and $request.frame) { Assert-CoordinateFrame $request.frame }
+      # Resolve every key before focus, pointer or text effects. A typo in a later chord
+      # must not leave the earlier half of a deterministic-invalid batch applied.
+      $keyTarget = if ($request.targetWindow) { [int64]$request.targetWindow } else { [Clf]::ForegroundId() }
+      foreach ($action in $request.actions) {
+        if ($action.type -eq 'focus') { $keyTarget = [int64]$action.window }
+        if ($action.type -eq 'keypress') {
+          try { $resolved = [CosWindowsKeys]::Resolve([string[]]$action.keys, $keyTarget) }
+          catch { throw $_.Exception.GetBaseException().Message }
+          $action | Add-Member -NotePropertyName resolvedKeys -NotePropertyValue $resolved -Force
+        }
+        if ($action.type -eq 'type' -and [string]$action.text -match '[\r\n]') {
+          throw 'MULTILINE_REQUIRES_PASTE: literal multiline text requires the clipboard paste action'
+        }
+        if ($action.type -eq 'ui_action' -and [string]$action.action -notin $script:UiActionNames) {
+          throw "BAD_ACTION: unsupported UI element action $($action.action)"
+        }
+        if ($action.type -in @('click','click_ui')) { $null = Get-RequestedClickCount $action }
+        if ($action.type -eq 'drag' -and $null -ne $action.durationMs -and
+            ([double]$action.durationMs -lt 50 -or [double]$action.durationMs -gt 2000 -or [double]$action.durationMs -ne [int]$action.durationMs)) {
+          throw 'BAD_ACTION: drag duration must be an integer between 50 and 2000 milliseconds'
+        }
+      }
       $routes = @()
+      $launches = @()
       $completed = 0
       for ($index = 0; $index -lt $request.actions.Count; $index++) {
         $a = $request.actions[$index]
         try {
+          $actionTarget = if ($a.type -in @('click_ui','set_value_ui','ui_action','focus')) { [int64]$a.window } elseif ($request.targetWindow) { [int64]$request.targetWindow } elseif ($request.frame.window) { [int64]$request.frame.window } else { 0 }
+          Assert-InputOwner $actionTarget $request.ownerWindow $request.targetApp $request.ownerApp
+          if ($request.targetWindow -and $a.type -in @('move','click','double_click','scroll','drag','type','keypress')) {
+            Assert-Focused ([int64]$request.targetWindow)
+            Assert-InputOwner $actionTarget $request.ownerWindow $request.targetApp $request.ownerApp
+          }
+          # Earlier actions may have changed focus or moved the target. Revalidate at
+          # each physical action, including actions after a semantic UI invocation.
+          if ($a.type -in @('move','click','double_click','scroll','drag') -and $request.frame) {
+            Assert-CoordinateFrame $request.frame
+          }
+          Assert-InputOwner $actionTarget $request.ownerWindow $request.targetApp $request.ownerApp
           switch ($a.type) {
             'click_ui' {
-              $ui = Act-UiElement @{ id = $a.window; snapshotId = $a.snapshotId; runtimeKey = $a.runtimeKey; action = 'click' }
+              $ui = Act-UiElement @{ id = $a.window; snapshotId = $a.snapshotId; runtimeKey = $a.runtimeKey; action = 'click'; button = $a.button; count = (Get-RequestedClickCount $a); ownerWindow = $request.ownerWindow; targetApp = $request.targetApp; ownerApp = $request.ownerApp }
               $routes += $ui.route
             }
             'set_value_ui' {
-              $ui = Act-UiElement @{ id = $a.window; snapshotId = $a.snapshotId; runtimeKey = $a.runtimeKey; action = 'set_value'; value = $a.value }
+              $ui = Act-UiElement @{ id = $a.window; snapshotId = $a.snapshotId; runtimeKey = $a.runtimeKey; action = 'set_value'; value = $a.value; ownerWindow = $request.ownerWindow; targetApp = $request.targetApp; ownerApp = $request.ownerApp }
               $routes += $ui.route
             }
+            'ui_action' {
+              $ui = Act-UiElement @{ id = $a.window; snapshotId = $a.snapshotId; runtimeKey = $a.runtimeKey; action = $a.action; ownerWindow = $request.ownerWindow; targetApp = $request.targetApp; ownerApp = $request.ownerApp }
+              $routes += $ui.route
+            }
+            'launch_app' {
+              $launches += Launch-WindowsApp @{ app = $a.app }
+              $routes += 'shell'
+            }
             'move'         { [Clf]::Move([int]$a.x, [int]$a.y); $routes += 'sendinput' }
-            'click'        { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, 1); $routes += 'sendinput' }
+            'click'        { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, (Get-RequestedClickCount $a)); $routes += 'sendinput' }
             'double_click' { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, 2); $routes += 'sendinput' }
-            'scroll'       { [Clf]::Scroll([int]$a.x, [int]$a.y, [int]$a.scroll_x, [int]$a.scroll_y); $routes += 'sendinput' }
-            'drag'         { [Clf]::Drag([int[]]$a.xs, [int[]]$a.ys, $a.button); $routes += 'sendinput' }
+            'scroll'       { [Clf]::Scroll([int]$a.x, [int]$a.y, [int]$a.scroll_x, [int]$a.scroll_y, [bool]$a.rawWheel); $routes += 'sendinput' }
+            'drag'         { $duration = if ($null -ne $a.durationMs) { [int]$a.durationMs } else { 350 }; [Clf]::Drag([int[]]$a.xs, [int[]]$a.ys, $a.button, $duration); $routes += 'sendinput' }
             'type'         { [Clf]::Type([string]$a.text); $routes += 'sendinput' }
-            'keypress'     { [Clf]::Press([uint16[]]@($a.keys | ForEach-Object { Vk $_ })); $routes += 'sendinput' }
-            'focus'        { Assert-Focused ([int64]$a.window); $routes += 'focus' }
+            'keypress'     { [Clf]::Press([int[]]$a.resolvedKeys); $routes += 'sendinput' }
+            'focus'        { Assert-Focused ([int64]$a.window); Assert-InputOwner ([int64]$a.window) $request.ownerWindow $request.targetApp $request.ownerApp; $routes += 'focus' }
             default        { throw "BAD_ACTION: Unknown action: $($a.type)" }
           }
           $completed += 1
@@ -839,6 +1248,7 @@ function Handle-Request($request) {
             completed_count = $completed
             failed_index = $index
             routes = @($routes)
+            launches = @($launches)
           }
         }
       }
@@ -847,6 +1257,7 @@ function Handle-Request($request) {
       $result.foreground = [Clf]::ForegroundId()
       $result.completed_count = $completed
       $result.routes = @($routes)
+      $result.launches = @($launches)
     }
     default { throw "BAD_REQUEST: Unknown op: $($request.op)" }
   }

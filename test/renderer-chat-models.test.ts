@@ -6,6 +6,25 @@ import { readFile } from 'node:fs/promises';
 let dom: JSDOM;
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
 
+it.each([true, false])('a model-rejection refresh waits beyond cached availability (still available=%s)', async available => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  let receive!: (catalog: any) => void;
+  const models = [{ id: 'gpt-6', label: 'GPT-6', efforts: ['high'] }];
+  const requestChatModels = vi.fn(async () => ({ ok: true, data: { state: 'pending', models } }));
+  Object.assign(dom.window, { api: { requestChatModels,
+    getChatModels: async () => ({ ok: true, data: { state: 'ready', models } }),
+    onChatModelsChanged: (listener: typeof receive) => { receive = listener; } } });
+  const { initChatModels, applyChatModels, ensureComposerModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  let done = false;
+  const result = ensureComposerModel(true).then(value => { done = true; return value; });
+  await Promise.resolve(); await Promise.resolve();
+  expect(done).toBe(false); expect(requestChatModels).toHaveBeenCalledTimes(1);
+  receive({ state: 'ready', models: available ? models : [{ id: 'gpt-6', label: 'GPT-6', efforts: ['medium'] }] });
+  expect(await result).toEqual(available ? { model: 'gpt-6', reasoningEffort: 'high' } : null);
+});
+
 it('a send requests missing models once and waits for the pushed catalog before selecting', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);

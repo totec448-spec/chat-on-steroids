@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { promises as fs } from 'node:fs';
 
 const fake = vi.hoisted(() => {
   type Listener = { fn: (...args: any[]) => void; once: boolean };
@@ -29,7 +30,7 @@ const fake = vi.hoisted(() => {
   const children: any[] = [];
   const retirementReleases: Array<() => void> = [];
 
-  const spawn = vi.fn(() => {
+  const spawn = vi.fn((_host: string, _args: string[], _options: { env: NodeJS.ProcessEnv }) => {
     const index = children.length;
     const child = new Emitter() as any;
     child.pid = 9000 + index;
@@ -102,10 +103,11 @@ vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }))
 // The child process is mocked, but Darwin still resolves the native host before spawn.
 vi.stubEnv('COS_MACOS_DESKTOP_HELPER', process.execPath);
 
-import { listWindows } from '../src/main/computer/index.js';
+import { listWindows, stopComputerHelper } from '../src/main/computer/index.js';
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   fake.reset();
 });
 
@@ -122,6 +124,14 @@ describe('desktop helper retirement ordering', () => {
       }
     );
     await vi.waitFor(() => expect(fake.children[0]?.writeCount).toBe(1));
+    let script: string | undefined;
+    if (process.platform !== 'darwin') {
+      const [, args, options] = fake.spawn.mock.calls[0]!;
+      expect(args).toEqual(expect.arrayContaining(['-ExecutionPolicy', 'Bypass', '-File']));
+      script = args[args.indexOf('-File') + 1]!;
+      expect((await fs.readFile(script, 'utf8')).startsWith('\uFEFF')).toBe(true);
+      expect(options.env['CLF_HELPER']).toBeUndefined();
+    }
     fake.children[0]!.emit('error', new Error('pipe broke'));
     await vi.waitFor(() => expect(fake.terminateProcessTree).toHaveBeenCalledWith(9000));
 
@@ -135,6 +145,7 @@ describe('desktop helper retirement ordering', () => {
     await observed;
     await expect(second).resolves.toEqual({ windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } });
     expect(fake.spawn).toHaveBeenCalledTimes(2);
+    if (script) await expect(fs.stat(script)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('does not release the queue or spawn a replacement until a timed-out helper is dead', async () => {
@@ -154,6 +165,9 @@ describe('desktop helper retirement ordering', () => {
     );
     // Window metadata has its own short deadline; the 30s watchdog remains only the
     // final boundary for unknown operations.
+    // The helper first materializes its script asynchronously; start the test clock
+    // from actual request admission rather than from the beginning of file I/O.
+    await vi.waitFor(() => expect(fake.children[0]?.writeCount).toBe(1));
     await vi.advanceTimersByTimeAsync(15_000);
     await Promise.resolve();
     expect(fake.terminateProcessTree).toHaveBeenCalledWith(9000);
@@ -170,5 +184,26 @@ describe('desktop helper retirement ordering', () => {
 
     await expect(second).resolves.toEqual({ windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } });
     expect(fake.spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it.runIf(process.platform !== 'darwin')('cancels startup before spawning if shutdown begins while the script is being written', async () => {
+    const original = fs.writeFile.bind(fs);
+    let release!: () => void;
+    let script = '';
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (...args) => {
+      script = String(args[0]);
+      await original(...args);
+      await paused;
+    });
+    const starting = listWindows();
+    const rejected = expect(starting).rejects.toThrow(/shutting down/);
+    await vi.waitFor(() => expect(script).not.toBe(''));
+    const stopped = stopComputerHelper();
+    release();
+    await rejected;
+    await stopped;
+    expect(fake.spawn).not.toHaveBeenCalled();
+    await expect(fs.stat(script)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

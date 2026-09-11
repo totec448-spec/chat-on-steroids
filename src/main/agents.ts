@@ -17,6 +17,8 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
+import { getChatModels } from './chat-models.js';
+import type { ChatModelOption } from '../shared/chat-models.js';
 import { logInfo, logWarn } from './logger.js';
 import { inheritWorkspace, releasePrimeWorkspace, bindAgentWorkspace } from './workspace.js';
 
@@ -1127,8 +1129,8 @@ function settleSpawnStage(stage: SpawnStageState, accepted: boolean): void {
  *
  * Malformed input fails the whole spawn rather than opening a worker under a model nobody
  * asked for: like every other spawn validation, this runs before the first mutation, so a
- * rejection leaves zero workers behind. A well-formed slug ChatGPT does not recognise is
- * not ours to refuse — the fresh chat simply opens with the default.
+ * rejection leaves zero workers behind. Account membership is checked separately once
+ * both requested settings have been resolved.
  */
 function normalizeModel(index: number, value: string | null | undefined): string | null {
   if (value === undefined || value === null) return null;
@@ -1144,9 +1146,8 @@ function normalizeModel(index: number, value: string | null | undefined): string
 
 /**
  * Whether a string is shaped like a ChatGPT model slug. The single vocabulary check for
- * worker models, shared by the broker and the bridge's durable restore: slugs are OpenAI's
- * vocabulary, so anything shaped like one passes through and an unknown one simply opens
- * with the account default.
+ * worker models, shared by the broker and the bridge's durable restore. Syntax does not
+ * prove availability; admission checks observed choices and the browser confirms at Send.
  */
 export function isModelSlug(value: unknown): value is string {
   return typeof value === 'string' && MODEL_SLUG_RE.test(value);
@@ -1172,6 +1173,23 @@ function normalizeReasoningEffort(index: number, value: string | null | undefine
     );
   }
   return effort;
+}
+
+/** Reject known-invalid choices before reserving any workers or opening browser documents. */
+function validateWorkerModel(index: number, model: string | null, effort: ReasoningEffort | null, models: ChatModelOption[]): void {
+  // No observation is not an empty entitlement list. Preserve the requested settings for
+  // native confirmation; never guess an account default or manufacture a model alias.
+  if (!models.length) return;
+  const choices = model ? models.filter(choice => choice.id === model || choice.aliases?.includes(model)) : models;
+  const available = models.map(choice => `${choice.id} (${choice.efforts.join(', ')})`).join('; ');
+  if (model && choices.length !== 1) {
+    throw new AgentError(`Worker ${index + 1}'s model "${model}" is ${choices.length ? 'ambiguous' : 'not observed'} in the ChatGPT account. Observed model ids and reasoning: ${available}`);
+  }
+  if (effort && !choices.some(choice => choice.efforts.includes(effort))) {
+    throw new AgentError(`Worker ${index + 1}'s reasoning_effort "${effort}" is not observed${model ? ` for model "${model}"` : ' in the ChatGPT account'}. Observed model ids and reasoning: ${available}`);
+  }
+  // Keep provider aliases exact: reducing a lane-specific slug to its family without an
+  // explicit effort can change the requested lane. The native picker still proves the pair.
 }
 
 /**
@@ -1250,6 +1268,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     throw new AgentError(`The shared context is too long (limit ${MAX_CONTEXT_CHARS} characters)`);
   }
 
+  const observedModels = getChatModels().models;
   const planned = input.workers.map((worker, index) => {
     const task = worker.task.trim();
     if (!task) throw new AgentError(`Worker ${index + 1} has no task. Every worker needs one.`);
@@ -1260,6 +1279,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     }
     const model = normalizeModel(index, worker.model === undefined ? getConfig().multiAgent.defaultModel : worker.model);
     const reasoningEffort = normalizeReasoningEffort(index, worker.reasoning_effort === undefined ? getConfig().multiAgent.defaultReasoning : worker.reasoning_effort);
+    validateWorkerModel(index, model, reasoningEffort, observedModels);
     // Composed once, here, and stored as *the* task. Everything downstream — the bootstrap
     // the browser types, the repeated-spawn match, the status table, the snapshot — then
     // sees the same single string a worker actually receives, with no second field to keep
@@ -2022,9 +2042,8 @@ function planFinish(agent: Agent, result: string): { info: AgentInfo; report: Ag
 (${agent.info.id} is finished for good: its own chat has reached the context limit, so it cannot be woken again. ` +
       `${slots}Spawn a new worker for any remaining work.)`
     : `
-(${agent.info.id} is sleeping, not gone. ${slots}It keeps this chat and everything it has already worked out. For ` +
-      `related follow-up work, reuse it first with agents action=message to="${agent.info.id}" — that wakes it up where ` +
-      'it left off. Use action=spawn only when no sleeping worker is suitable or true parallel capacity is needed.)';
+(${agent.info.id} sleeping; ${slots}Reuse first: agents action=message to="${agent.info.id}". ` +
+      'Spawn only when no sleeping worker is suitable or more parallel capacity is needed.)';
   const report = newMessage(
     agent.info.id,
     PRIME_ID,

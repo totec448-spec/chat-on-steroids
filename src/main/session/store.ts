@@ -35,8 +35,10 @@ import type {
   SessionSummary,
   StoredText
 } from '../../shared/session.js';
-import { eventTokens, normalizedToolOutcome } from '../../shared/session.js';
+import { CONTINUATION_MARKER, eventTokens, normalizedToolOutcome } from '../../shared/session.js';
 import { chronological } from '../../shared/chronology.js';
+import { automaticTitle, firstTitleMessage, legacyContextTitle, refreshUserTitle } from './title.js';
+import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
 import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 
@@ -163,6 +165,9 @@ interface OpenSession {
   historySeq: number;
   /** Recent durable events, so incremental /activity polls do not reread the whole JSONL. */
   tail: SessionEvent[];
+  /** Earliest cursor covered by tail; reopening starts with no journal rows cached. */
+  tailFrom: number;
+  activityHydrated: boolean;
   /** Serialises appends so two events can never interleave inside one line. */
   queue: Promise<void>;
   /** Canonical ChatGPT messages. A later streaming/final snapshot replaces by stable id. */
@@ -383,12 +388,14 @@ async function flushSessionEntry(entry: OpenSession): Promise<void> {
 
 export async function createSession(options: {
   title?: string;
+  titleSource?: SessionSummary['titleSource'];
   conversationId?: string | null;
   origin?: SessionOrigin | null;
 }): Promise<SessionSummary> {
   const id = `${new Date().toISOString().slice(0, 10)}-${randomUUID().slice(0, 8)}`;
   const summary = emptySummary(id, options.title?.trim() || 'ChatGPT session', options.conversationId ?? null);
   summary.origin = options.origin ?? null;
+  if (options.titleSource) summary.titleSource = options.titleSource;
   if (options.origin?.fromSessionId) {
     const source = await getSession(options.origin.fromSessionId);
     if (source?.projectId) summary.projectId = source.projectId;
@@ -401,6 +408,8 @@ export async function createSession(options: {
     nextSeq: 1,
     historySeq: 0,
     tail: [],
+    tailFrom: 1,
+    activityHydrated: true,
     queue: Promise.resolve(),
     messages: new Map(),
     metaDirty: false,
@@ -716,6 +725,7 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     const journalSeq = await lastSeqOnDisk(id);
     const historySeq = Math.max(journalSeq, messageSeq);
     const checkpoint = await readMetaCheckpoint(id);
+    const titleRepaired = checkpoint ? refreshUserTitle(checkpoint.summary, messages.values()) : false;
 
     // A pre-taxonomy checkpoint can have a current watermark but stale outcome classification.
     if (
@@ -727,7 +737,7 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     ) {
       // A successful no-op migration is still a completed migration. Without this stamp,
       // every launch rereads all old transcripts that happened to contain no aliases.
-      const migrated = !checkpoint.canonicalProjectionCurrent;
+      const migrated = !checkpoint.canonicalProjectionCurrent || titleRepaired;
       if (migrated) await writeSummary(checkpoint.summary, historySeq);
       return { summary: checkpoint.summary, messages, historySeq, reconciled: migrated };
     }
@@ -789,6 +799,8 @@ async function ensureOpen(id: string): Promise<OpenSession> {
       nextSeq: snapshot.historySeq + 1,
       historySeq: snapshot.historySeq,
       tail: [],
+      tailFrom: snapshot.historySeq + 1,
+      activityHydrated: false,
       queue: Promise.resolve(),
       messages: snapshot.messages,
       metaDirty: false,
@@ -973,7 +985,10 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
       }
       entry.nextSeq += 1;
       entry.tail.push(full);
-      if (entry.tail.length > MAX_EVENT_TAIL) entry.tail.splice(0, entry.tail.length - MAX_EVENT_TAIL);
+      if (entry.tail.length > MAX_EVENT_TAIL) {
+        const removed = entry.tail.splice(0, entry.tail.length - MAX_EVENT_TAIL);
+        entry.tailFrom = removed[removed.length - 1]!.seq + 1;
+      }
       applyToSummary(entry.summary, full);
       entry.historySeq = full.seq;
       scheduleMeta(entry);
@@ -1067,7 +1082,9 @@ export function upsertMessageEvent(
           : previous?.kind === 'user_message' && event.kind === 'user_message'
             ? { ...event, inputId: event.inputId ?? previous.inputId,
                 authoredText: event.authoredText ?? previous.authoredText,
-                attachments: event.attachments ?? previous.attachments,
+                // App-owned originals/previews retain their outbox identity when the
+                // provider later observes different native attachment ids for that send.
+                attachments: previous.inputId ? previous.attachments ?? event.attachments : event.attachments ?? previous.attachments,
                 inputDelivery: previous.inputDelivery === 'confirmed' ? 'confirmed' : event.inputDelivery ?? previous.inputDelivery,
                 model: event.model ?? previous.model,
                 reasoningEffort: event.reasoningEffort ?? previous.reasoningEffort,
@@ -1080,7 +1097,7 @@ export function upsertMessageEvent(
       // revised as ChatGPT re-homes the same stable user object, so preserve that existing
       // behaviour instead of freezing it under the first marker we happened to observe.
       //
-      // Live 2026-08-21, session `ce135bff`: ChatGPT re-mounted its stop control for two
+      // Live 2026-08-21, session `00000019`: ChatGPT re-mounted its stop control for two
       // seconds well after a page load, the extension minted generation `g-11kz85q585v4s-0-1`
       // for it, and the re-observation of the already finished 08:40:34 answer re-filed that
       // answer under a turn that started at 08:45:22. The consequences are not cosmetic — the
@@ -1115,6 +1132,14 @@ export function upsertMessageEvent(
       }
       const full = {
         ...nextEvent,
+        ...(nextEvent.kind === 'assistant_message' && nextEvent.final
+          ? { finalContentSeq: sameMessage && previous?.kind === 'assistant_message' &&
+                (previous.final === true || previous.state === 'final')
+              // Old records do not distinguish a content revision from an HTML update.
+              // Keep their first anchor until genuinely new final content is observed.
+              ? previous.finalContentSeq ?? previous.origin ?? previous.seq
+              : entry.nextSeq }
+          : {}),
         // First appearance is chronology; current seq is delivery cursor/revision.
         // A page-model authored timestamp is stronger than a DOM first-sight timestamp. The
         // recorder opts into that correction explicitly; ordinary revisions still keep the
@@ -1132,6 +1157,7 @@ export function upsertMessageEvent(
 
       entry.nextSeq += 1;
       entry.messages.set(key, full);
+      if (full.kind === 'user_message') refreshUserTitle(entry.summary, entry.messages.values());
       if (!previous) {
         applyToSummary(entry.summary, full);
       } else {
@@ -1190,7 +1216,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
   const active = open.get(sessionId);
   if (options.from !== undefined && active) {
     if (from >= active.nextSeq) return [];
-    const cacheFloor = Math.max(1, active.nextSeq - MAX_EVENT_TAIL);
+    const cacheFloor = active.tailFrom;
     if (from >= cacheFloor) {
       const cached: SessionEvent[] = [...active.tail, ...active.messages.values()].filter((parsed) => {
         if (parsed.seq < from) return false;
@@ -1273,6 +1299,14 @@ export async function readRecentEvents(
 ): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
   await flushSession(sessionId);
+  return readRecentEventsFromDisk(sessionId, limit, options);
+}
+
+async function readRecentEventsFromDisk(
+  sessionId: string,
+  limit: number,
+  options: Pick<ReadOptions, 'kinds' | 'agent'> & { maxBytes?: number; before?: number } = {}
+): Promise<SessionEvent[]> {
   const cap = Math.max(1, Math.min(MAX_EVENT_TAIL, Math.floor(limit)));
   const active = open.get(sessionId);
   const needsMessages =
@@ -1375,6 +1409,47 @@ export async function readRecentEvents(
   return chronological(selected);
 }
 
+/** Browser projection joins committed writes without forcing the debounced metadata to disk.
+ * A cold store hydrates one bounded journal tail. Thereafter the existing append/message owners
+ * maintain it, including revisions whose origin is older than the browser cursor. */
+export async function readActivityEvents(sessionId: string, since: number, limit = 1200): Promise<{
+  events: SessionEvent[]; reset: boolean; resumeBoundary: number;
+  openingUserMessage: Extract<SessionEvent, { kind: 'user_message' }> | null;
+  resumeUserMessage: Extract<SessionEvent, { kind: 'user_message' }> | null;
+}> {
+  const entry = await ensureOpen(sessionId);
+  return enqueueSessionOperation(entry, 'activity read', async () => {
+    if (!entry.activityHydrated) {
+      const recent = await readRecentEventsFromDisk(sessionId, MAX_EVENT_TAIL);
+      entry.tail = recent.filter((event) => !((event.kind === 'user_message' || event.kind === 'assistant_message') && entry.messages.has(messageKey(event)!)));
+      // Old canonical messages do not prove that intervening journal rows fitted inside
+      // the byte budget. Only the retained journal suffix establishes cursor coverage.
+      entry.tailFrom = entry.tail.reduce((first, event) => Math.min(first, event.seq), entry.nextSeq);
+      entry.activityHydrated = true;
+    }
+    const cap = Math.max(1, Math.min(MAX_EVENT_TAIL, Math.floor(limit)));
+    const cursor = Number.isFinite(since) ? Math.max(0, since) : 0;
+    const candidates = [...entry.tail, ...entry.messages.values()].sort((a, b) => a.seq - b.seq);
+    const reset = cursor < entry.tailFrom && !(cursor === 0 && entry.tailFrom === 1);
+    const selected = reset || cursor === 0
+      ? candidates.slice(-cap)
+      : candidates.filter((event) => event.seq >= cursor).slice(0, cap);
+    // All canonical messages remain authoritative after tail eviction and message revision.
+    let openingUserMessage: Extract<SessionEvent, { kind: 'user_message' }> | null = null;
+    let resumeUserMessage: Extract<SessionEvent, { kind: 'user_message' }> | null = null;
+    for (const event of candidates) {
+      if (event.kind !== 'user_message') continue;
+      const position = event.origin ?? event.seq;
+      if (!openingUserMessage || position < (openingUserMessage.origin ?? openingUserMessage.seq)) openingUserMessage = event;
+      if (CONTINUATION_MARKER.exec(event.message.text)?.[1] === 'RESUME' &&
+          (!resumeUserMessage || position > (resumeUserMessage.origin ?? resumeUserMessage.seq))) resumeUserMessage = event;
+    }
+    const resumeBoundary = resumeUserMessage ? resumeUserMessage.origin ?? resumeUserMessage.seq : 0;
+    return { events: chronological(selected), reset: reset || (cursor === 0 && candidates.length > cap), resumeBoundary,
+      openingUserMessage, resumeUserMessage };
+  });
+}
+
 /**
  * Atomically keeps only the supplied tool calls in an Unattributed activity session.
  *
@@ -1387,8 +1462,9 @@ export async function readRecentEvents(
 export async function rewriteUnattributedToolCalls(
   sessionId: string,
   calls: readonly Extract<SessionEvent, { kind: 'tool_call' }>[],
-  scannedThroughSeq: number
-): Promise<void> {
+  scannedThroughSeq: number,
+  deleteEmpty = false
+): Promise<{ retained: number; deleted: boolean }> {
   assertSessionId(sessionId);
   const entry = await ensureOpen(sessionId);
   const rewrite = entry.queue.then(async () => {
@@ -1429,6 +1505,17 @@ export async function rewriteUnattributedToolCalls(
       title: entry.summary.title
     };
     const retainedCalls = [...calls, ...concurrentCalls].sort((left, right) => left.seq - right.seq);
+    // Only the recorder can prove this is not its writable bucket: a live call may hold
+    // that bucket's id while preparing assets outside this queue. For inactive history,
+    // the empty check and deletion share the same queue operation as concurrent-row capture.
+    if (deleteEmpty && retainedCalls.length === 0 && entry.queue === settled) {
+      if (entry.metaTimer) clearTimeout(entry.metaTimer);
+      await fs.rm(sessionDir(sessionId), { recursive: true, force: true });
+      if (open.get(sessionId) === entry) open.delete(sessionId);
+      invalidateAssetUsage(sessionId);
+      publishAttachmentRemoval(sessionId);
+      return { retained: 0, deleted: true };
+    }
     const kept: SessionEvent[] = [start, ...retainedCalls.map((event, index) => ({ ...event, seq: index + 2 }))];
 
     const target = path.join(sessionDir(sessionId), 'events.jsonl');
@@ -1466,13 +1553,17 @@ export async function rewriteUnattributedToolCalls(
     entry.nextSeq = kept.length + 1;
     entry.historySeq = rewrittenHistorySeq;
     entry.tail = kept.slice(-MAX_EVENT_TAIL);
+    entry.tailFrom = entry.tail[0]?.seq ?? entry.nextSeq;
+    entry.activityHydrated = true;
     entry.metaDirty = false;
+    return { retained: retainedCalls.length, deleted: false };
   });
-  entry.queue = rewrite.then(
+  const settled = rewrite.then(
     () => undefined,
     (err: Error) => logError(`session unattributed repair failed: ${err.message}`)
   );
-  await rewrite;
+  entry.queue = settled;
+  return rewrite;
 }
 
 function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
@@ -1485,6 +1576,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         : null;
     const { [META_HISTORY_SEQ]: _historySeq, [META_CANONICAL_PROJECTION]: canonicalProjection, ...publicFields } = parsed;
     const publicSummary = publicFields as SessionSummary;
+    if (publicSummary.titleSource !== undefined && !['fallback', 'provider', 'manual'].includes(publicSummary.titleSource)) delete publicSummary.titleSource;
     const selected = publicSummary.selectedModel;
     if (selected !== undefined && (!selected || typeof selected !== 'object' ||
         typeof selected.conversationId !== 'string' || typeof selected.model !== 'string' ||
@@ -1602,7 +1694,7 @@ async function readCatalogSummary(id: string): Promise<SessionSummary | null> {
     const metadata = await fs.stat(path.join(dir, 'meta.json'));
     const checkpoint = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.json'), 'utf8'));
     if (checkpoint && checkpoint.historySeq !== null && checkpoint.canonicalProjectionCurrent &&
-        !checkpoint.outcomeCountersMissing && !checkpoint.activityBoundaryMissing && checkpoint.summary.finishTurn !== undefined) {
+        !checkpoint.outcomeCountersMissing && !checkpoint.activityBoundaryMissing && checkpoint.summary.finishTurn !== undefined && !legacyContextTitle(checkpoint.summary)) {
       const mutations = await Promise.all(['events.jsonl', 'messages.json', 'messages'].map(async name => {
         try { return (await fs.stat(path.join(dir, name))).mtimeMs; }
         catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; }
@@ -1788,7 +1880,7 @@ async function readAllSummaries(): Promise<SessionSummary[]> {
  * folder after an arbitrary cap can resume the wrong work. Keep the expensive path explicit
  * and use it only where "every session" is part of the contract.
  */
-export async function readEverySummary(): Promise<SessionSummary[]> {
+async function readEverySummary(): Promise<SessionSummary[]> {
   const catalog = await ensureAttachmentCatalog();
   const summaries = new Map<string, SessionSummary>();
   for (const summary of catalog.summaries.values()) summaries.set(summary.id, summary);
@@ -1887,6 +1979,11 @@ export async function listUsageSessions(): Promise<SessionSummary[]> {
 
 export async function listAllSessions(): Promise<SessionSummary[]> {
   return readAllSummaries();
+}
+
+/** Uncapped authoritative catalog plus live projections, without reopening every metadata file. */
+export async function indexedSessions(): Promise<SessionSummary[]> {
+  return readEverySummary();
 }
 
 /**
@@ -2030,6 +2127,55 @@ export async function getSession(id: string): Promise<SessionSummary | null> {
   return summary ? { ...summary } : null;
 }
 
+/** A plan is one replaceable session document, not another execution queue. */
+async function readPlanFile(id: string): Promise<AgentPlan | null> {
+  let handle;
+  try {
+    handle = await fs.open(path.join(sessionDir(id), 'plan.json'), 'r');
+    const buffer = Buffer.alloc(MAX_AGENT_PLAN_BYTES + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    if (bytesRead > MAX_AGENT_PLAN_BYTES) return null;
+    const parsed = agentPlanSchema.safeParse(JSON.parse(buffer.toString('utf8', 0, bytesRead)));
+    return parsed.success ? parsed.data : null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return null;
+    throw error;
+  } finally {
+    await handle?.close();
+  }
+}
+
+export async function readSessionPlan(id: string): Promise<AgentPlan | null> {
+  assertSessionId(id);
+  await open.get(id)?.queue;
+  return readPlanFile(id);
+}
+
+export async function updateSessionPlan(
+  id: string, conversationId: string, input: AgentPlanUpdate, startedAt: number
+): Promise<boolean> {
+  const plan = agentPlanSchema.parse({ ...agentPlanUpdateSchema.parse(input), updatedAt: startedAt });
+  const bytes = JSON.stringify(plan);
+  if (Buffer.byteLength(bytes) > MAX_AGENT_PLAN_BYTES) throw new Error('Plan exceeds its storage budget');
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'plan', async () => {
+    // Rebind and plan updates use this same queue. A delayed A call cannot overwrite
+    // B's plan after Compact & Resume, even if A was current when the tool started.
+    if (entry.summary.conversationId !== conversationId) return false;
+    const previous = await readPlanFile(id);
+    if (previous && previous.updatedAt > startedAt) return false;
+    const target = path.join(sessionDir(id), 'plan.json');
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, bytes, 'utf8');
+      await fs.rename(temporary, target);
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+    }
+    return true;
+  });
+}
+
 export async function endSession(id: string): Promise<void> {
   const entry = open.get(id);
   if (!entry) return;
@@ -2063,10 +2209,17 @@ export async function reopenSession(id: string): Promise<void> {
   });
 }
 
-export async function renameSession(id: string, title: string): Promise<void> {
+export async function renameSession(id: string, title: string, source: SessionSummary['titleSource'] = 'manual', conversationId?: string): Promise<void> {
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'rename', async () => {
+    if (source !== 'manual') {
+      if (conversationId && entry.summary.conversationId !== conversationId) return;
+      if (!automaticTitle(entry.summary, firstTitleMessage(entry.messages.values()))) return;
+      if (source === 'fallback' && entry.summary.titleSource === 'provider') return;
+    }
+    if (entry.summary.title === title.slice(0, 120) && entry.summary.titleSource === source) return;
     entry.summary.title = title.slice(0, 120);
+    entry.summary.titleSource = source;
     await writeMeta(entry);
   });
 }

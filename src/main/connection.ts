@@ -13,7 +13,7 @@ import { effectiveCapabilities, getConfig } from './config.js';
 import { logError, logInfo, logWarn } from './logger.js';
 import { lastRequestAt, startMcpServer, tunnelProbeHeaders, type McpEndpoint } from './mcp/server.js';
 import { lastToolCallAt } from './mcp/tools.js';
-import { SURFACE_LIST, surfaceIsUseful, type SurfaceId } from './mcp/surfaces.js';
+import { SURFACE_LIST, surfaceIsUseful, desktopToolNames, type SurfaceId } from './mcp/surfaces.js';
 import { getSecret } from './secrets.js';
 import { startTunnel, TunnelError, type TunnelHandle } from './tunnel/index.js';
 import { desktopAutomationSupported } from './platform.js';
@@ -146,8 +146,7 @@ function toolsFor(id: SurfaceId): string[] {
   const config = getConfig();
   const caps = effectiveCapabilities(config);
   if (id === 'desktop') {
-    const computer = caps.control || caps.clipboardRead || caps.clipboardWrite;
-    return [...(caps.screen ? ['observe'] : []), ...(computer ? ['computer'] : [])];
+    return desktopToolNames(caps);
   }
   const tools: string[] = [];
   if (caps.read || caps.browse || caps.metadata) tools.push('read');

@@ -11,6 +11,7 @@ import http from 'node:http';
 import { promises as fs } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Caller } from '../src/main/agents.js';
+import * as chatModels from '../src/main/chat-models.js';
 
 vi.mock('electron', () => ({
   safeStorage: {
@@ -311,6 +312,75 @@ describe('spawning a run', () => {
     expect(staged.waking).toEqual(['worker-1']);
     staged.commit();
     expect(pendingWorkerRevivals()[0]).toMatchObject({ id: 'worker-1', conversationId: 'c-worker-1' });
+  });
+});
+
+describe('account-observed worker admission', () => {
+  const choices = [{ id: '5.6', label: 'GPT-5.6 Sol', efforts: ['high', 'pro'] as const, aliases: ['gpt-5-6-thinking', 'gpt-5-6-pro'] }];
+  let catalog: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    catalog = vi.spyOn(chatModels, 'getChatModels').mockReturnValue({
+      state: 'ready', requestedAt: null, observedAt: 1,
+      models: choices.map(choice => ({ ...choice, efforts: [...choice.efforts] }))
+    });
+  });
+  afterEach(() => catalog.mockRestore());
+
+  it('rejects the whole batch before topology or browser work for a guessed alias', () => {
+    const opened = vi.fn();
+    onSpawnRequest(opened);
+    expect(() => spawn({ caller: prime, workers: [
+      { task: 'valid first', model: '5.6', reasoning_effort: 'high' },
+      { task: 'invalid second', model: 'gpt-5.6', reasoning_effort: 'high' }
+    ] })).toThrow(/not observed.*5\.6 \(high, pro\)/);
+    expect(swarmState().agents).toEqual([]);
+    expect(currentRunId()).toBeNull();
+    expect(pendingWorkerSpawns()).toEqual([]);
+    expect(opened).not.toHaveBeenCalled();
+  });
+
+  it('accepts observed ids and preserves an explicit provider lane alias', () => {
+    const result = spawn({ caller: prime, workers: [
+      { task: 'canonical', model: ' 5.6 ', reasoning_effort: 'high' },
+      { task: 'specific lane', model: 'gpt-5-6-pro', reasoning_effort: null }
+    ] });
+    expect(result.created.map(worker => [worker.model, worker.reasoningEffort])).toEqual([
+      ['5.6', 'high'], ['gpt-5-6-pro', null]
+    ]);
+  });
+
+  it('rejects unsupported effort for the observed family', () => {
+    expect(() => spawn({ caller: prime, workers: [{ task: 'wrong pair', model: '5.6', reasoning_effort: 'ultra' }] }))
+      .toThrow(/reasoning_effort "ultra" is not observed for model "5.6"/);
+    expect(swarmRunning()).toBe(false);
+  });
+
+  it('validates effective app defaults before reservation', async () => {
+    const base = defaultConfig();
+    await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, defaultModel: '5.6', defaultReasoning: 'ultra' } });
+    try {
+      expect(() => spawn({ caller: prime, workers: [{ task: 'defaults' }] })).toThrow(/reasoning_effort "ultra"/);
+      expect(swarmRunning()).toBe(false);
+    } finally { await setEnabled(true); }
+  });
+
+  it('rejects ambiguous aliases even when one matching family supports the effort', () => {
+    vi.mocked(chatModels.getChatModels).mockReturnValue({ state: 'ready', requestedAt: null, observedAt: 1, models: [
+      { id: 'a', label: 'A', efforts: ['high'], aliases: ['shared'] },
+      { id: 'b', label: 'B', efforts: ['pro'], aliases: ['shared'] }
+    ] });
+    expect(() => spawn({ caller: prime, workers: [{ task: 'ambiguous', model: 'shared', reasoning_effort: 'high' }] }))
+      .toThrow(/ambiguous/);
+    expect(swarmRunning()).toBe(false);
+  });
+
+  it('uses retained observations during refresh but preserves exact settings when no catalog exists', () => {
+    vi.mocked(chatModels.getChatModels).mockReturnValue({ state: 'pending', requestedAt: 2, observedAt: 1,
+      models: choices.map(choice => ({ ...choice, efforts: [...choice.efforts] })) });
+    expect(() => spawn({ caller: prime, workers: [{ task: 'unknown', model: 'gpt-5.6' }] })).toThrow(/not observed/);
+    vi.mocked(chatModels.getChatModels).mockReturnValue({ state: 'unavailable', requestedAt: null, observedAt: null, models: [] });
+    const result = spawn({ caller: prime, workers: [{ task: 'native confirmation', model: 'future-model', reasoning_effort: 'high' }] });
+    expect(result.created[0]).toMatchObject({ model: 'future-model', reasoningEffort: 'high' });
   });
 });
 
@@ -2818,9 +2888,9 @@ describe('through the MCP endpoint', () => {
     );
     // worker-2 is still live against a limit of 3, so two slots are free — not three.
     expect(report?.text).toContain('2 of 3 worker slots are free');
-    expect(report?.text).toContain('is sleeping, not gone');
-    expect(report?.text).toContain('reuse it first with agents action=message');
-    expect(report?.text).toContain('action=spawn only when no sleeping worker is suitable');
+    expect(report?.text).toContain('worker-1 sleeping');
+    expect(report?.text).toContain('Reuse first: agents action=message to="worker-1"');
+    expect(report?.text).toContain('Spawn only when no sleeping worker is suitable');
     expect(report?.text).not.toContain('cannot be reused');
 
     const status = await asChat(PRIME_CHAT, 'status');

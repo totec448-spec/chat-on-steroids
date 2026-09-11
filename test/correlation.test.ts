@@ -267,12 +267,12 @@ describe('request correlation ownership', () => {
     try {
       resetDurableForTests();
       initDurableStore(dir);
-      const requestId = '93c113a1-16a6-439d-bda1-cfcd4f2e39d6';
+      const requestId = 'f0f00012-1111-4111-8111-111111111111';
       observeRequestCorrelation({
         requestId,
         conversationId: 'conv-bare-request-id',
-        sessionId: '2026-09-01-dd2e9210',
-        messageId: '88056b37-984c-4428-9f69-a4aa5bbbf7ac',
+        sessionId: '2026-01-01-00000028',
+        messageId: 'f0f00013-1111-4111-8111-111111111111',
         tool: '',
         observedAt: 1_788_276_631_192
       });
@@ -282,7 +282,7 @@ describe('request correlation ownership', () => {
       await restoreRequestCorrelations();
 
       expect(requestCorrelation(requestId)?.conversationId).toBe('conv-bare-request-id');
-      expect(requestCorrelation(requestId)?.sessionId).toBe('2026-09-01-dd2e9210');
+      expect(requestCorrelation(requestId)?.sessionId).toBe('2026-01-01-00000028');
     } finally {
       resetCorrelationRegistryForTests();
       resetDurableForTests();

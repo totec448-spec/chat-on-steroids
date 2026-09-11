@@ -42,6 +42,7 @@
  */
 
 import { requestBrowserDecision, authorizeBrowserHelperRetry } from './session/input.js';
+import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
 import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
@@ -2067,7 +2068,7 @@ async function firstUserMessage(sessionId: string): Promise<ChatMessage | null> 
   if (cached) return cached;
   const [event] = await readEvents(sessionId, { kinds: ['user_message'], limit: 1 });
   if (!event || event.kind !== 'user_message') return null;
-  const content = clip(event.message.text);
+  const content = clip(event.authoredText ?? userPromptText(event.message.text) ?? event.message.text);
   if (!content) return null;
   const message: ChatMessage = { role: 'user', content };
   firstUserCache.set(sessionId, message);
@@ -2144,7 +2145,8 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     let next: ChatMessage | null = null;
     if (event.kind === 'user_message') {
       if (event.inputId && excludedInputIds.has(event.inputId)) continue;
-      const content = clip(event.message.text);
+      // The helper judges the user's work, not the executor's transport guidance.
+      const content = clip(event.authoredText ?? userPromptText(event.message.text) ?? event.message.text);
       if (content) next = { role: 'user', content };
     } else if ((event.kind === 'assistant_message' && (event.final || event.messageId)) || (event.kind === 'progress' && event.source === 'extension')) {
       const content = clip(event.message.text);
@@ -2169,7 +2171,7 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     }
   }
   for (const text of deliveredInput.slice(-5)) {
-    const content = clip(text);
+    const content = clip(userPromptText(text) ?? text);
     if (content) ordered.push({ role: 'user', content });
   }
   // A saturated recent read does not prove it reached the start of the conversation. Its first

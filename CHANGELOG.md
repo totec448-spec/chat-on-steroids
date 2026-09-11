@@ -9,7 +9,12 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## Unreleased
+## [2.0.9] — they nerfed astra
+
+- Code mode combines local and plugin tools in one JavaScript call, with saved task plans and automatic background command results.
+- More reliable message delivery, workflow retries, Compact & Resume, worker reuse, and idle browser-tab handling.
+- Improved Windows desktop control and window capture, plus faster recording and clearer tool results.
+- Simplified Chinese UI, better project and transcript controls, and a reminder to refresh ChatGPT connectors after updates.
 
 ## [2.0.8] — 2026-09-08
 

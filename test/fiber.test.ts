@@ -44,7 +44,7 @@ interface Descriptor {
 
 // ------------------------------------------------------------------ fixtures
 
-const THREAD = '6a81871f-bbec-83eb-8595-4a292446b686';
+const THREAD = 'f0f00004-1111-4111-8111-111111111111';
 /**
  * The connector name the live page actually holds, taken from a real conversation.
  *
@@ -57,9 +57,9 @@ const DESKTOP_APP = 'Chat On Steroids Desktop';
 /** What the connector was called before 1.7.1 split it. Older chats still hold it. */
 const LEGACY_APP = 'TobisComputer';
 /** The connector's link id, as it appears in a request path. */
-const LINK = 'link_6a7f78baf7e881918261b0731fac4c35';
+const LINK = 'link_11111111222233334444555555555555';
 /** A result's resource uri names the app instance rather than the connector. */
-const ASDK = 'asdk_app_6a7f78b22adc8191b61ddd83beba7da5';
+const ASDK = 'asdk_app_22222222333344445555666666666666';
 /** The depth the live page put the group node at. The old limit was 30 exclusive. */
 const LIVE_DEPTH = 30;
 
@@ -571,6 +571,34 @@ describe('the calls a turn says it made', () => {
     expect(turns[0]).toMatchObject({ conversationId: THREAD, conversationConflict: false });
   });
 
+  it('reads the durable server identity instead of the mounted WEB identity', async () => {
+    const conversation = { id: 'WEB:11111111-2222-4333-8444-555555555555', serverId$: () => THREAD };
+    const { turns } = await scan([], [{
+      id: 'server-bound-user', messages: [{ ...authored('native-user', 'Keep `literal` text.'), author: { role: 'user' } }],
+      conversationProps: { conversation }
+    }]);
+    expect(turns[0]).toMatchObject({ conversationId: THREAD, conversationConflict: false });
+    expect(turns[0]!.messages[0]).toMatchObject({ role: 'user', rawText: 'Keep `literal` text.' });
+    expect(JSON.stringify(turns)).not.toContain('WEB:');
+  });
+
+  it.each([undefined, () => null, () => { throw new Error('unresolved'); }])('does not promote a local WEB identity when the durable signal is unavailable (%s)', async (serverId$) => {
+    const { turns } = await scan([], [{
+      id: 'unresolved-server-owner', messages: [authored('native-answer', 'Answer.')],
+      conversationProps: { conversation: { id: 'WEB:11111111-2222-4333-8444-555555555555', serverId$ } }
+    }]);
+    expect(turns[0]).toMatchObject({ conversationId: null, conversationConflict: false });
+  });
+
+  it('keeps a contradictory durable server identity conflicted', async () => {
+    const { turns } = await scan([], [{
+      id: 'conflicting-server-owner', messages: [authored('native-answer', 'Answer.')],
+      conversationProps: { conversationId: THREAD,
+        conversation: { id: 'WEB:11111111-2222-4333-8444-555555555555', serverId$: () => '22222222-3333-4444-8555-666666666666' } }
+    }]);
+    expect(turns[0]).toMatchObject({ conversationId: null, conversationConflict: true });
+  });
+
   it.each([{ clientThreadId: THREAD }, { conversation: { id: THREAD } }])('distinguishes contradictory conversation metadata from missing conversation metadata: %j', async (identity) => {
     const other = '11111111-2222-3333-4444-555555555555';
     const messages = [authored('assistant-conflicted-chat', 'Stale mounted answer.')];
@@ -774,6 +802,19 @@ describe('the calls a turn says it made', () => {
       'raw-second'
     ]);
     expect(turns[0]!.messages[1]!.stable).toBe(false);
+  });
+
+  it.each(['', 'Inspect this image.'])('captures native image metadata without inventing user prose (%s)', async text => {
+    const message: Message = { id: 'native-image-user', author: { role: 'user' }, recipient: 'all',
+      content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer', asset_pointer: 'must-not-cross-worlds' }, text] },
+      metadata: { attachments: [{ id: 'native-file-id', name: 'example.avif', size: 123, mime_type: 'image/avif',
+        library_file_id: 'private-library-id', source: 'private-source' }] } };
+    const { turns } = await scan([], [{ id: 'image-turn', messages: [message] }]);
+    expect(turns[0]!.messages).toEqual([expect.objectContaining({ messageId: message.id, rawText: text,
+      attachments: [{ id: 'native-file-id', name: 'example.avif', size: 123, mimeType: 'image/avif' }] })]);
+    expect(JSON.stringify(turns)).not.toMatch(/must-not-cross-worlds|private-library-id|private-source/);
+    const assistant = await scan([], [{ id: 'not-user', messages: [{ ...message, author: { role: 'assistant' } }] }]);
+    expect(assistant.turns).toEqual([]);
   });
 
   it('captures the opening user message from the page model before the DOM exposes a message id', async () => {
