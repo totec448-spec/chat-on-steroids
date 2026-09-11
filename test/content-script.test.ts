@@ -1100,6 +1100,36 @@ describe('desktop input delivery and helper ownership', () => {
     expect(clicks).toBe(1);
   });
 
+  it('reads canonical Markdown for a pending fresh send even when native generation already ended', async () => {
+    const prompt = 'Inspect `src/main/bridge.ts` and reply briefly.';
+    live = await harness(`https://chatgpt.com/?cos-input=${inputId}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack
+        ? { ok: true } : { input: claimed({ text: prompt }) } })
+    }, undefined, false, true);
+    let user!: HTMLElement;
+    let clicked!: () => void;
+    let clicks = 0;
+    const click = new Promise<void>(resolve => { clicked = resolve; });
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      clicks++;
+      live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` });
+      user = userTurn(live!.document, 'fast-markdown-user', prompt.replaceAll('`', ''), { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      clicked();
+    });
+    const delivery = live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null });
+    await click;
+    user.setAttribute('data-clf-fiber-turn', '0');
+    await replyFiber([], [{ conversationId: chatA, turnId: 'fast-markdown-user', messages: [{
+      role: 'user', stable: true, messageId: 'm-fast-markdown-user', rawMessageId: 'm-fast-markdown-user', rawText: prompt
+    }] }], null, true, live, true);
+    expect(live.sent.filter(message => message.ack)).toEqual([
+      expect.objectContaining({ messageId: 'm-fast-markdown-user' })
+    ]);
+    expect(await delivery).toEqual({ ok: true });
+    expect(clicks).toBe(1);
+  });
+
   it.each([false, true])('acknowledges a helper Markdown prompt with delayed provider evidence (fresh: %s)', async (fresh) => {
     const prompt = ('Inspect `src/main/bridge.ts` and report the exact next step.\n').repeat(1800);
     const rendered = prompt.replaceAll('`', '');
@@ -1619,7 +1649,8 @@ async function replyFiber(
   restamp = true,
   // Describe blocks that keep their own harness variable pass it; everything else uses the
   // shared one.
-  harnessed: Harness | null = null
+  harnessed: Harness | null = null,
+  observeOnly = false
 ): Promise<void> {
   const active = harnessed ?? live!;
   const window = active.window as any;
@@ -1657,7 +1688,10 @@ async function replyFiber(
   };
   window.addEventListener('message', onAsk);
   try {
-    await active.hook.refreshFiber(settled);
+    if (observeOnly) {
+      active.hook.observe();
+      await new Promise(resolve => globalThis.setTimeout(resolve, 100));
+    } else await active.hook.refreshFiber(settled);
   } finally {
     window.removeEventListener('message', onAsk);
     window.setTimeout = instant;
