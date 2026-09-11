@@ -818,9 +818,8 @@ describe('desktop input delivery and helper ownership', () => {
     });
     const delivery = live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null });
     await click;
-    live.hook.observe();
     await bindFiberTurns([{ section: user, turn: { turnId: 'framed-app-user', conversationId: chatA,
-      messages: [{ role: 'user', stable: true, messageId: 'm-framed-app-user', rawMessageId: 'm-framed-app-user', rawText: prompt }] } }]);
+      messages: [{ role: 'user', stable: true, messageId: 'm-framed-app-user', rawMessageId: 'm-framed-app-user', rawText: prompt }] } }], true);
     expect(await delivery).toEqual({ ok: true });
     live.hook.observe(); await live.hook.flush();
     expect(live.sent.filter(message => message.ack)).toEqual([expect.objectContaining({ conversationId: chatA, messageId: 'm-framed-app-user' })]);
@@ -1153,8 +1152,7 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toEqual([]);
     const userProof = { turnId: 'long-helper-user', conversationId: chatA, messages: [{ role: 'user', stable: true,
       messageId: 'm-long-helper-user', rawMessageId: 'm-long-helper-user', rawText: prompt }] };
-    if (fresh) live.hook.observe();
-    await bindFiberTurns([{ section: user, turn: userProof }]);
+    await bindFiberTurns([{ section: user, turn: userProof }], fresh);
     expect(await delivery).toEqual({ ok: true });
     expect(live.sent.filter(message => message.ack)).toEqual([expect.objectContaining({ messageId: 'm-long-helper-user' })]);
     const section = assistantTurn(live.document, 'long-helper-final', []);
@@ -3465,7 +3463,8 @@ function renderingOn(): void {
  * The numeric index is test plumbing only; production never persists it as identity.
  */
 async function bindFiberTurns(
-  bindings: Array<{ section: HTMLElement; turn: Record<string, unknown> }>
+  bindings: Array<{ section: HTMLElement; turn: Record<string, unknown> }>,
+  observeOnly = false
 ): Promise<void> {
   bindings.forEach(({ section }, index) => section.setAttribute('data-clf-fiber-turn', String(index)));
   await replyFiber(
@@ -3477,7 +3476,7 @@ async function bindFiberTurns(
       messages: [],
       activities: [],
       ...turn
-    }))
+    })), null, true, null, observeOnly
   );
   await settle();
 }
