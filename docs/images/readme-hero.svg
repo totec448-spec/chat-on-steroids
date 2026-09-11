@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="330" viewBox="0 0 960 330" role="img" aria-labelledby="title desc">
+  <title id="title">Chat On Steroids — Turn ChatGPT into your coding team.</title>
+  <desc id="desc">Your files. Your terminal. Your ChatGPT plan. No Codex quota.</desc>
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#b0f4d8"/><stop offset="1" stop-color="#80caff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="100%" r="75%">
+      <stop stop-color="#173d3b" stop-opacity=".7"/><stop offset="1" stop-color="#10141a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x=".5" y=".5" width="959" height="329" rx="18" fill="#10141a" stroke="#303a45"/>
+  <rect x="1" y="1" width="958" height="328" rx="18" fill="url(#glow)"/>
+  <g text-anchor="middle" font-family="Arial, Helvetica, sans-serif">
+    <text x="480" y="48" font-size="13" font-weight="700" letter-spacing="3.4" fill="#b3c1cc">CHAT ON STEROIDS</text>
+    <text x="480" y="122" font-size="56" font-weight="700" letter-spacing="-2" fill="#f4f7fb">Turn ChatGPT into</text>
+    <text x="480" y="187" font-size="64" font-weight="700" letter-spacing="-2.5" fill="url(#accent)">your coding team.</text>
+    <text x="480" y="237" font-size="20" fill="#c5ced7">Your files. Your terminal. Your ChatGPT plan.</text>
+    <text x="480" y="286" font-size="14" font-weight="700" fill="#a9e7ca">No Codex quota.</text>
+  </g>
+</svg>
