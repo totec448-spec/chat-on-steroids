@@ -144,6 +144,21 @@ describe('thin external control', () => {
     });
   });
 
+  it('uses durable sequence when provider timestamps put the exact final before its input', async () => {
+    const stored = session();
+    deps.sessions.set(stored.id, stored);
+    deps.recorded.set(stored.id, [
+      { seq: 3, time: 300, source: 'extension', kind: 'user_message', inputId: requestId, messageId: 'user-a',
+        inputDelivery: 'confirmed', model: 'gpt-5.6-sol', reasoningEffort: 'xhigh',
+        message: { text: 'Run', chars: 3, truncated: false } },
+      { seq: 4, time: 200, source: 'extension', kind: 'assistant_message', messageId: 'answer-a',
+        message: { text: 'Exact answer', chars: 12, truncated: false }, final: true, state: 'final' }
+    ]);
+
+    const view = await controlRequestView(deps, row('sent', { deliveredSessionId: stored.id, deliveredAt: 300 }));
+    expect(view).toMatchObject({ state: 'completed', result: { text: 'Exact answer', truncated: false } });
+  });
+
   it('does not guess completion from an unconfirmed handout or another turn', async () => {
     const stored = session();
     deps.sessions.set(stored.id, stored);

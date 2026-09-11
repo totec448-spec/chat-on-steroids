@@ -108,7 +108,12 @@ export async function controlRequestView(deps: ControlDependencies, entry: Input
   };
   if (entry.state !== 'sent' || !sessionId) return base;
 
-  const events = await deps.events(sessionId);
+  // Request/result ownership follows the recorder's durable sequence, never provider clocks.
+  // A freshly opened ChatGPT page can report its final DOM snapshot with an earlier provider
+  // timestamp than the delivery acknowledgement even though the recorder assigned it the next
+  // sequence. Presentation chronology is useful in the UI, but would strand that exact answer
+  // before its owning user message here.
+  const events = (await deps.events(sessionId)).sort((left, right) => left.seq - right.seq);
   const authored = events.findIndex(event => event.kind === 'user_message' && event.inputId === entry.id &&
     event.inputDelivery === 'confirmed');
   if (authored < 0) return base;
