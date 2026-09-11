@@ -2709,6 +2709,47 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(new Set(revisions.map((entry) => entry.messageId))).toEqual(new Set(['assistant-first-interim-raw-id']));
   });
 
+  it('re-publishes an assistant revision when its exact request id arrives later', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    assistantTurn(live.document, 'page-turn-late-request', []);
+    live.hook.observe();
+    await settle();
+    const message = {
+      messageId: 'assistant-late-request', rawMessageId: 'assistant-late-request', role: 'assistant', stable: true,
+      rawText: 'Waiting for request identity.', renderedHtml: '<p>Waiting for request identity.</p>'
+    };
+    const descriptor = {
+      turnId: 'page-turn-late-request',
+      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      calls: [], messages: [message], activities: []
+    };
+    await replyFiber([], [descriptor]);
+    await live.hook.flush();
+    await settle();
+    await replyFiber([], [{ ...descriptor, calls: [{
+      messageId: 'call-late-request', tool: 'read_file', order: 0, answered: true, requestId: 'wfr-late-request'
+    }] }]);
+    await live.hook.flush();
+    await settle();
+    await replyFiber([], [{ ...descriptor, calls: [{
+      messageId: 'call-late-request', tool: 'read_file', order: 0, answered: true, requestId: 'wfr-late-request'
+    }, {
+      messageId: 'call-second-request', tool: 'read_file', order: 1, answered: true, requestId: 'wfr-second-request'
+    }] }]);
+    await live.hook.flush();
+    await settle();
+
+    const revisions = emitted(live.sent, 'assistant_message').map((entry) => entry.event);
+    expect(revisions).toHaveLength(3);
+    expect(revisions[0]!.requestId).toBeUndefined();
+    expect(revisions[1]).toMatchObject({ requestId: 'wfr-late-request', requestIds: ['wfr-late-request'],
+      requestSetUniqueToPageTurn: true });
+    expect(revisions[2]).toMatchObject({ requestIds: ['wfr-late-request', 'wfr-second-request'],
+      requestSetUniqueToPageTurn: true });
+    expect(revisions[2]!.requestId).toBeUndefined();
+  });
+
   it('records a page-model user message even when the DOM has not exposed data-message-id yet', async () => {
     live = await harness();
     assistantTurn(live.document, 'page-turn-model-user', []);
@@ -3150,6 +3191,8 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     await settle();
     expect(emitted(live.sent, 'assistant_message').at(-1)!.event).toMatchObject({
       turnId: undefined,
+      requestId: 'wfr-late-owner',
+      requestIds: ['wfr-late-owner'],
       state: 'streaming',
       final: false
     });
@@ -12973,6 +13016,7 @@ describe('a request id ChatGPT reused across retries', () => {
     // ChatGPT responses under one local turn and render the same answer twice.
     expect(answers.map((event) => event.messageId)).toEqual(['msg-first', 'msg-second']);
     expect(answers.map((event) => event.turnId)).toEqual([undefined, undefined]);
+    expect(answers.map((event) => event.requestSetUniqueToPageTurn)).toEqual([undefined, undefined]);
   });
 
   it('still gives its turn id to the one page turn that claims it', async () => {
@@ -12986,6 +13030,7 @@ describe('a request id ChatGPT reused across retries', () => {
 
     const answers = emitted(live.sent, 'assistant_message').map((entry) => entry.event);
     expect(answers.map((event) => [event.messageId, event.turnId])).toEqual([['msg-only', 'g-retried-8-11']]);
+    expect(answers[0]).toMatchObject({ requestIds: [requestId], requestSetUniqueToPageTurn: true });
   });
 });
 

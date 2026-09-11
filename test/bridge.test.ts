@@ -792,6 +792,33 @@ describe('observations', () => {
     expect(events[0]!.time).toBe(historical);
   });
 
+  it('validates and preserves a bounded multi-request assistant identity', async () => {
+    await pair();
+    const conversationId = 'bbbbbbbb-cccc-dddd-eeee-fffffffffff1';
+    const requestIds = ['wfr_bridge_first', 'wfr_bridge_second'];
+    const opened = await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'turn_start', time: Date.now(), turnId: 'bridge-multi-turn' },
+      { kind: 'assistant_message', time: Date.now(), turnId: 'bridge-multi-turn',
+        messageId: 'bridge-commentary', text: 'Working.', state: 'streaming' }
+    ] } });
+    for (const requestId of requestIds) {
+      await recordToolCall({ tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }],
+        outcome: 'ok', durationMs: 1, requestId, startedAt: Date.now(),
+        conversationId, sessionId: opened.body.sessionId });
+    }
+    await closeConversation(conversationId);
+
+    await request('POST', '/events', { body: { conversationId, events: [{
+      kind: 'assistant_message', time: Date.now(), messageId: 'bridge-multi-final',
+      providerMessageId: '11111111-2222-4333-8444-555555555555',
+      text: 'Done.', state: 'final', final: true, activeNow: true,
+      requestIds: [...requestIds, requestIds[0], 'invalid request id'],
+      requestSetUniqueToPageTurn: true
+    }] } });
+
+    expect((await getSession(opened.body.sessionId))?.activeTurnId).toBeNull();
+  });
+
   it('stores a message once when a reloaded tab reports it twice', async () => {
     await pair();
     const conversationId = '11111111-2222-3333-4444-555555555555';

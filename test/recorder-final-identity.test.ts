@@ -77,6 +77,191 @@ it.each(['missing', 'replaced', 'matching', 'restart'])('closes the canonical re
   expect(await readEvents(sessionId, { kinds: ['turn_end'] })).toHaveLength(1);
 });
 
+it('closes the open turn when reload gives the current final answer a distinct message identity', async () => {
+  const conversationId = 'distinct-active-final-after-reload';
+  const turnId = 'original-turn';
+  const requestId = 'wfr_distinct_final';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId },
+    { kind: 'assistant_message', time: 11, turnId, messageId: 'commentary-before-reload',
+      providerMessageId: 'provider-commentary', text: 'I am working.', state: 'streaming' }
+  ]);
+  await recordChatObservations(conversationId, [
+    { kind: 'tool_evidence', time: 12, turnId, fiberConversationId: conversationId,
+      calls: [{ messageId: 'call', tool: 'read', order: 0, answered: false, requestId }] }
+  ]);
+  await recordToolCall({ tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }],
+    outcome: 'ok', durationMs: 1, requestId, startedAt: 13 });
+  await closeConversation(conversationId);
+
+  const recovered = await recordChatObservations(conversationId, [{
+    kind: 'assistant_message', time: 20, messageId: 'answer-after-reload',
+    providerMessageId: 'provider-answer', text: 'The final answer.', state: 'final', final: true,
+    activeNow: true, requestId, requestSetUniqueToPageTurn: true
+  }]);
+
+  const sessionId = opened.sessionId!;
+  expect((await getSession(sessionId))?.activeTurnId).toBeNull();
+  expect(liveConversations().find(row => row.conversationId === conversationId)?.activeTurnId).toBeNull();
+  expect(recovered.activity).toMatchObject({ terminal: true, endedTurnId: turnId });
+  expect(await readEvents(sessionId, { kinds: ['turn_end'] })).toEqual([
+    expect.objectContaining({ turnId, outcome: 'completed' })
+  ]);
+});
+
+it('uses exact page request evidence while an attributed call is still pending repair', async () => {
+  const conversationId = 'distinct-final-page-evidence';
+  const turnId = 'page-evidence-turn';
+  const requestId = 'wfr_page_evidence_final';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId },
+    { kind: 'assistant_message', time: 11, turnId, messageId: 'commentary',
+      providerMessageId: 'provider-commentary', text: 'I am working.', state: 'streaming' }
+  ]);
+  await recordChatObservations(conversationId, [
+    { kind: 'tool_evidence', time: 12, turnId, fiberConversationId: conversationId,
+      calls: [{ messageId: 'call', tool: 'read', order: 0, answered: false, requestId }] }
+  ]);
+
+  const recovered = await recordChatObservations(conversationId, [{
+    kind: 'assistant_message', time: 20, messageId: 'answer',
+    providerMessageId: 'provider-answer', text: 'The final answer.', state: 'final', final: true,
+    activeNow: true, requestId, requestSetUniqueToPageTurn: true
+  }]);
+
+  expect((await getSession(opened.sessionId!))?.activeTurnId).toBeNull();
+  expect(recovered.activity).toMatchObject({ terminal: true, endedTurnId: turnId });
+});
+
+it('recovers a distinct final carrying every request from a multi-request turn', async () => {
+  const conversationId = 'distinct-final-multi-request';
+  const turnId = 'multi-request-turn';
+  const requestIds = ['wfr_multi_first', 'wfr_multi_second'];
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId },
+    { kind: 'assistant_message', time: 11, turnId, messageId: 'multi-commentary',
+      providerMessageId: 'provider-multi-commentary', text: 'I am working.', state: 'streaming' },
+    { kind: 'tool_evidence', time: 12, turnId, fiberConversationId: conversationId,
+      calls: requestIds.map((requestId, order) => ({
+        messageId: `multi-call-${order}`, tool: 'read', order, answered: true, requestId
+      })) }
+  ]);
+  for (const [order, requestId] of requestIds.entries()) {
+    await recordToolCall({ tool: 'read', args: { order }, content: [{ type: 'text', text: 'ok' }],
+      outcome: 'ok', durationMs: 1, requestId, startedAt: 13 + order });
+  }
+  await closeConversation(conversationId);
+
+  const recovered = await recordChatObservations(conversationId, [{
+    kind: 'assistant_message', time: 20, messageId: 'multi-final',
+    providerMessageId: 'provider-multi-final', text: 'The final answer.', state: 'final', final: true,
+    activeNow: true, requestIds, requestSetUniqueToPageTurn: true
+  }]);
+
+  expect((await getSession(opened.sessionId!))?.activeTurnId).toBeNull();
+  expect(recovered.activity).toMatchObject({ terminal: true, endedTurnId: turnId });
+});
+
+it('does not assign a previous distinct final to a newly open turn from activeNow alone', async () => {
+  const conversationId = 'distinct-old-final-during-new-turn';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId: 'old-turn' },
+    { kind: 'assistant_message', time: 11, turnId: 'old-turn', messageId: 'old-answer',
+      providerMessageId: 'old-provider', text: 'Old result.', state: 'final', final: true },
+    { kind: 'turn_end', time: 12, turnId: 'old-turn', outcome: 'completed' },
+    { kind: 'turn_start', time: 20, turnId: 'new-turn' }
+  ]);
+
+  const observed = await recordChatObservations(conversationId, [{
+    kind: 'assistant_message', time: 30, messageId: 'old-answer-after-reload',
+    providerMessageId: 'old-provider-after-reload', text: 'Old result.', state: 'final', final: true,
+    activeNow: true
+  }]);
+
+  expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('new-turn');
+  expect(observed.activity.terminal).toBe(false);
+  expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(1);
+});
+
+it('does not attach stale page request evidence to a newer open turn', async () => {
+  const conversationId = 'stale-page-evidence-during-new-turn';
+  const requestId = 'wfr_old_page_evidence';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId: 'old-turn' },
+    { kind: 'assistant_message', time: 11, turnId: 'old-turn', messageId: 'old-answer',
+      providerMessageId: 'old-provider', text: 'Old result.', state: 'final', final: true },
+    { kind: 'turn_end', time: 12, turnId: 'old-turn', outcome: 'completed' },
+    { kind: 'turn_start', time: 20, turnId: 'new-turn' }
+  ]);
+  await recordChatObservations(conversationId, [
+    { kind: 'tool_evidence', time: 21, turnId: 'old-turn', fiberConversationId: conversationId,
+      calls: [{ messageId: 'old-call', tool: 'read', order: 0, answered: true, requestId }] }
+  ]);
+
+  const observed = await recordChatObservations(conversationId, [{
+    kind: 'assistant_message', time: 30, messageId: 'old-answer-after-reload',
+    providerMessageId: 'old-provider-after-reload', text: 'Old result.', state: 'final', final: true,
+    activeNow: true, requestId
+  }]);
+
+  expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('new-turn');
+  expect(observed.activity.terminal).toBe(false);
+  expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(1);
+});
+
+it('does not recover an old final from a request id reused by the current turn', async () => {
+  const conversationId = 'stale-overlap-multi-request';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId: 'old-turn' },
+    { kind: 'assistant_message', time: 11, turnId: 'old-turn', messageId: 'old-answer',
+      providerMessageId: 'old-provider', text: 'Old result.', state: 'final', final: true },
+    { kind: 'turn_end', time: 12, turnId: 'old-turn', outcome: 'completed' },
+    { kind: 'turn_start', time: 20, turnId: 'new-turn' }
+  ]);
+  for (const requestId of ['wfr_shared_request', 'wfr_current_only']) {
+    await recordToolCall({ tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }],
+      outcome: 'ok', durationMs: 1, requestId, startedAt: 21,
+      conversationId, sessionId: opened.sessionId! });
+  }
+
+  const observed = await recordChatObservations(conversationId, [{
+    kind: 'assistant_message', time: 30, messageId: 'old-multi-final',
+    providerMessageId: 'old-multi-provider', text: 'Old result.', state: 'final', final: true,
+    activeNow: true, requestIds: ['wfr_shared_request']
+  }]);
+
+  expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('new-turn');
+  expect(observed.activity.terminal).toBe(false);
+  expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(1);
+});
+
+it('does not recover an old final when two page turns reuse the same request set', async () => {
+  const conversationId = 'stale-exact-request-set-reuse';
+  const requestId = 'wfr_exact_reused_request';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId: 'old-turn' },
+    { kind: 'assistant_message', time: 11, turnId: 'old-turn', messageId: 'old-commentary',
+      providerMessageId: 'old-commentary-provider', text: 'Old work.', state: 'streaming' },
+    { kind: 'tool_evidence', time: 12, turnId: 'old-turn', fiberConversationId: conversationId,
+      calls: [{ messageId: 'old-call', tool: 'read', order: 0, answered: true, requestId }] },
+    { kind: 'turn_end', time: 13, turnId: 'old-turn', outcome: 'completed' },
+    { kind: 'turn_start', time: 20, turnId: 'new-turn' }
+  ]);
+  await recordToolCall({ tool: 'read', args: {}, content: [{ type: 'text', text: 'ok' }],
+    outcome: 'ok', durationMs: 1, requestId, startedAt: 21,
+    conversationId, sessionId: opened.sessionId! });
+
+  const observed = await recordChatObservations(conversationId, [{
+    kind: 'assistant_message', time: 30, messageId: 'old-final-after-reload',
+    providerMessageId: 'old-final-provider', text: 'Old result.', state: 'final', final: true,
+    activeNow: true, requestId, requestSetUniqueToPageTurn: false
+  }]);
+
+  expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('new-turn');
+  expect(observed.activity.terminal).toBe(false);
+  expect(await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).toHaveLength(1);
+});
+
 it.each(['missing', 'current-page-id'])('never closes newer work from an old canonical answer with %s identity', async mode => {
   const conversationId = `historical-final-${mode}`;
   const opened = await recordChatObservations(conversationId, [

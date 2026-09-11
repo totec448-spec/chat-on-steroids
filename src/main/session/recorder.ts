@@ -327,6 +327,7 @@ async function initializeSessionForConversation(
         lastTurnStartedAt: null,
         activeTurnId: null,
         activeTurnStartedAt: null,
+        activeTurnRequestIds: new Set<string>(),
         pageTools: new Map<string, ProgressRecord>()
       };
 
@@ -359,7 +360,7 @@ async function initializeSessionForConversation(
     knownTurnEnds: history.knownTurnEnds,
     lastTurnOutcome: summary.lastTurnOutcome,
     lastTurnStartedAt: history.lastTurnStartedAt,
-    turnRequestIds: new Set<string>(),
+    turnRequestIds: history.activeTurnRequestIds,
     endedTurn: null,
     pageTools: history.pageTools
   });
@@ -486,6 +487,8 @@ interface StoredHistory {
   activeTurnId: string | null;
   /** Durable start time of activeTurnId. */
   activeTurnStartedAt: number | null;
+  /** Exact request ids durably recorded under activeTurnId. */
+  activeTurnRequestIds: Set<string>;
   /** Latest stable ChatGPT-native activity row by website thought/message identity. */
   pageTools: Map<string, ProgressRecord>;
 }
@@ -509,9 +512,10 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
   let lastTurnStartedAt: number | null = null;
   const turnStarts = new Map<string, number>();
   const pageTools = new Map<string, ProgressRecord>();
+  const requestIdsByTurn = new Map<string, Set<string>>();
   try {
     const events = await readRecentEvents(sessionId, 4096, {
-      kinds: ['turn_start', 'turn_end', 'page_tool'],
+      kinds: ['turn_start', 'turn_end', 'page_tool', 'tool_call'],
       maxBytes: 2 * 1024 * 1024
     });
     // Presentation groups a turn's starts before its end. Lifecycle replay must
@@ -548,6 +552,10 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
           held.text = event.label;
           if (!held.turnId && event.turnId) held.turnId = event.turnId;
         }
+      } else if (event.kind === 'tool_call' && event.turnId && event.call.requestId) {
+        const held = requestIdsByTurn.get(event.turnId);
+        if (held) held.add(event.call.requestId);
+        else requestIdsByTurn.set(event.turnId, new Set([event.call.requestId]));
       }
     }
   } catch (err) {
@@ -563,7 +571,8 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
       activeTurnStartedAt = startedAt;
     }
   }
-  return { openTurns, knownTurnStarts, knownTurnEnds, lastTurnStartedAt, activeTurnId, activeTurnStartedAt, pageTools };
+  return { openTurns, knownTurnStarts, knownTurnEnds, lastTurnStartedAt, activeTurnId, activeTurnStartedAt,
+    activeTurnRequestIds: activeTurnId ? requestIdsByTurn.get(activeTurnId) ?? new Set<string>() : new Set<string>(), pageTools };
 }
 
 async function ensureUnattributedSession(): Promise<string | null> {
@@ -1607,6 +1616,12 @@ export interface ChatObservation {
   authoredNow?: boolean;
   /** True only when the current page generation owns this assistant revision now. */
   activeNow?: boolean;
+  /** Exact server request carried by this assistant's Fiber turn, when unambiguous. */
+  requestId?: string;
+  /** Every exact server request carried by this assistant's Fiber turn, bounded by the bridge. */
+  requestIds?: string[];
+  /** True only when the page proved this exact request set occurs on one Fiber page turn. */
+  requestSetUniqueToPageTurn?: boolean;
   text?: string;
   /** Exact native user-message attachment metadata; no remote URL or image bytes. */
   attachments?: import('../../shared/input.js').InputAttachment[];
@@ -1730,6 +1745,18 @@ export async function recordRequestEvidence(
   for (const item of observations) {
     if (item.kind === 'tool_evidence' && item.calls?.length) {
       noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time);
+      // The page can prove a request before its MCP call is filed, or while that call still
+      // lives in the Unattributed repair bucket. Preserve the exact local-turn binding here:
+      // after reload, the same request on a distinct final can then close only this turn.
+      const live = conversations.get(conversationId);
+      if (
+        item.turnId &&
+        live?.sessionId === sessionId &&
+        live.turnId === item.turnId &&
+        live.turnStartedAt !== null
+      ) {
+        for (const call of item.calls) if (call.requestId) live.turnRequestIds.add(call.requestId);
+      }
     }
   }
   return sessionId;
@@ -1944,10 +1971,6 @@ async function recordChatObservationsNow(
             ? live.lastTurnStartedAt
             : null;
         const uncertainTurnStartedAt = batchUncertainStartedAt ?? priorUncertainStartedAt;
-        const terminalActivity =
-          state === 'final' &&
-          (item.activeNow === true ||
-            (uncertainTurnStartedAt !== null && item.time >= uncertainTurnStartedAt));
         const recoveredGoalEligible =
           state === 'final' &&
           !item.turnId &&
@@ -1971,6 +1994,34 @@ async function recordChatObservationsNow(
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
         }, { preferTime: item.authoredTime === true });
         const canonicalTurn = written.event.turnId;
+        // A reload can split one generation into separate canonical messages: commentary
+        // observed before the reload and the final answer observed afterwards may have
+        // different provider/message ids. Position/`activeNow` cannot identify that final:
+        // a new question may already be generating while the previous answer remains the
+        // newest finished Fiber message. Require the exact server-request set shared by this
+        // page turn and the locally open turn, plus proof that no second Fiber page turn in
+        // the scan reuses that set; the post-loop work/user/tool fences below then decide
+        // whether it is still safe to close.
+        const finalRequestIds = item.requestIds?.length
+          ? item.requestIds
+          : item.requestId
+            ? [item.requestId]
+            : [];
+        const activeRecoveredTurn =
+          state === 'final' &&
+          item.activeNow === true &&
+          item.requestSetUniqueToPageTurn === true &&
+          finalRequestIds.length > 0 &&
+          finalRequestIds.length === live?.turnRequestIds.size &&
+          finalRequestIds.every((requestId) => live?.turnRequestIds.has(requestId)) &&
+          !canonicalTurn &&
+          live?.turnId &&
+          live.turnStartedAt !== null &&
+          item.time >= live.turnStartedAt &&
+          recoverableTurns.has(live.turnId) &&
+          !explicitEnds.has(live.turnId)
+            ? live.turnId
+            : null;
         // A stopped partial answer stays streaming in history. Re-observing its
         // DOM after restart cannot renew work, nor can an old message borrow a
         // newer page turn. Preserve the revision while using its canonical owner
@@ -1978,9 +2029,14 @@ async function recordChatObservationsNow(
         const workingActivity = state !== 'final' && item.activeNow === true &&
           (!canonicalTurn || canonicalTurn === live?.turnId) &&
           !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
-        if (state === 'final' && written.event.kind === 'assistant_message' && canonicalTurn && recoverableTurns.has(canonicalTurn) &&
-            !explicitEnds.has(canonicalTurn) && live?.turnId === canonicalTurn) {
-          recoveredFinal = { turnId: canonicalTurn, time: item.time,
+        const recoveredTurn = canonicalTurn ?? activeRecoveredTurn;
+        const terminalActivity =
+          state === 'final' &&
+          (recoveredTurn === live?.turnId ||
+            (uncertainTurnStartedAt !== null && item.time >= uncertainTurnStartedAt));
+        if (state === 'final' && written.event.kind === 'assistant_message' && recoveredTurn && recoverableTurns.has(recoveredTurn) &&
+            !explicitEnds.has(recoveredTurn) && live?.turnId === recoveredTurn) {
+          recoveredFinal = { turnId: recoveredTurn, time: item.time,
             seq: written.event.finalContentSeq ?? written.event.origin ?? written.event.seq,
             origin: written.event.origin ?? written.event.seq, native: Boolean(written.event.providerMessageId) };
         }

@@ -866,6 +866,24 @@ function parseObservations(input: unknown): ChatObservation[] {
     if (item['authoredTime'] === true) observation.authoredTime = true;
     if (item['authoredNow'] === true && kind === 'user_message') observation.authoredNow = true;
     if (item['activeNow'] === true && kind === 'assistant_message') observation.activeNow = true;
+    if (kind === 'assistant_message') {
+      const requestIds: string[] = [];
+      const seenRequestIds = new Set<string>();
+      if (Array.isArray(item['requestIds'])) {
+        for (const value of item['requestIds'].slice(0, MAX_CALL_EVIDENCE)) {
+          if (typeof value !== 'string' || !/^[a-z0-9_-]{1,100}$/i.test(value) || seenRequestIds.has(value)) continue;
+          seenRequestIds.add(value);
+          requestIds.push(value);
+        }
+      }
+      if (requestIds.length === 0 && typeof item['requestId'] === 'string' &&
+          /^[a-z0-9_-]{1,100}$/i.test(item['requestId'])) {
+        requestIds.push(item['requestId']);
+      }
+      if (requestIds.length) observation.requestIds = requestIds;
+      if (requestIds.length === 1) observation.requestId = requestIds[0];
+      if (item['requestSetUniqueToPageTurn'] === true) observation.requestSetUniqueToPageTurn = true;
+    }
     if (kind === 'model_selection') {
       if (typeof item['model'] !== 'string' || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(item['model'])) continue;
       observation.model = item['model'];

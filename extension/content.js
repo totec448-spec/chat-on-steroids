@@ -3197,11 +3197,18 @@
    * position or "nearest turn" guess takes part: the answer is a single turn id or nothing.
    */
   function settledTurnOwner(turn) {
-    const requests = new Set();
-    for (const call of (turn && turn.calls) || []) if (call && call.requestId) requests.add(call.requestId);
-    if (requests.size !== 1) return null;
-    const requestId = requests.values().next().value;
+    const requests = requestIdsForTurn(turn);
+    if (requests.length !== 1) return null;
+    const requestId = requests[0];
     return streamRequestTurnOwners.get(requestId) || null;
+  }
+
+  /** Stable exact request set carried by one Fiber page-turn descriptor. */
+  function requestIdsForTurn(turn) {
+    return [...new Set(
+      ((turn && turn.calls) || []).map((call) => call && call.requestId)
+        .filter((requestId) => typeof requestId === 'string' && /^[a-z0-9_-]{1,100}$/i.test(requestId))
+    )].sort();
   }
 
   /**
@@ -3674,6 +3681,21 @@
     for (const [turn, owner] of settledOwners) {
       if ((ownerClaims.get(owner) || 0) > 1) settledOwners.delete(turn);
     }
+    // Reload recovery may need to identify a final whose local generation binding was lost.
+    // A request set is usable for that narrower job only when exactly one Fiber page turn in
+    // this complete scan carries it. Retry/regenerate can reuse request ids across distinct
+    // page turns; forwarding the set without this page-specific uniqueness proof lets an old
+    // final close the newer live turn. Count descriptors, not messages, because one page turn
+    // can legitimately contain several assistant revisions.
+    const requestIdsByTurn = new Map();
+    const requestSetClaims = new Map();
+    for (const pageTurn of answer.turns) {
+      const requestIds = requestIdsForTurn(pageTurn);
+      requestIdsByTurn.set(pageTurn, requestIds);
+      if (requestIds.length === 0) continue;
+      const key = JSON.stringify(requestIds);
+      requestSetClaims.set(key, (requestSetClaims.get(key) || 0) + 1);
+    }
     for (let index = 0; index < answer.turns.length; index++) {
       const turn = answer.turns[index];
       // The live generation owns the turn it is writing; a settled one is claimed only by
@@ -3763,6 +3785,14 @@
         // were the dedupe key, that first unowned snapshot permanently prevented the later
         // exact local turn id from reaching the recorder. The recorder upsert is expressly
         // able to promote the same canonical message when stronger ownership arrives.
+        // One visible answer may span several connector/server requests. Keep the whole
+        // bounded Fiber set: collapsing it to one id made a multi-request final lose every
+        // bit of recovery identity after reload. Sorted so a page-model reorder alone does
+        // not manufacture a new message revision.
+        const responseRequestIds = requestIdsByTurn.get(turn) || [];
+        const responseRequestId = responseRequestIds.length === 1 ? responseRequestIds[0] : null;
+        const requestSetUniqueToPageTurn = responseRequestIds.length > 0 &&
+          requestSetClaims.get(JSON.stringify(responseRequestIds)) === 1;
         const priorMessage = messagesReported.get(message.messageId);
         const ownerConflict = Boolean(
           priorMessage?.conflicted || (localOwner && priorMessage?.owner && priorMessage.owner !== localOwner)
@@ -3774,7 +3804,8 @@
         // claim is different and fails closed instead of choosing either generation.
         const signature =
           `${state}\u0000${message.rawText}\u0000${message.renderedHtml}\u0000${owner}` +
-          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}`;
+          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}\u0000${responseRequestIds.join(',')}` +
+          `\u0000${requestSetUniqueToPageTurn ? '1' : '0'}`;
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict });
         if (state === 'streaming') noteTurnProgress();
@@ -3785,6 +3816,9 @@
           kind: 'assistant_message',
           messageId: message.messageId,
           providerMessageId: message.rawMessageId,
+          ...(responseRequestIds.length ? { requestIds: responseRequestIds } : {}),
+          ...(responseRequestId ? { requestId: responseRequestId } : {}),
+          ...(requestSetUniqueToPageTurn ? { requestSetUniqueToPageTurn: true } : {}),
           turnId: localOwner || undefined,
           text: message.rawText,
           renderedHtml: message.renderedHtml,
