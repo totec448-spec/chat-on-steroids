@@ -824,7 +824,7 @@
                   <label class="setting">
                     <span class="setting-text">
                       <b>Allow unattributed calls</b>
-                      <em>Run self-contained calls even when the extension cannot prove which chat sent them. Activity stays visible as Unattributed.</em>
+                      <em>Allow tools, including computer use, file editing and JavaScript, without chat attribution. Sub-agents and other chat-owned actions still need an identified chat. Activity appears as Unattributed.</em>
                     </span>
                     <input id="allowUnattributedCalls" type="checkbox" />
                   </label>
@@ -847,7 +847,7 @@
             <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
             <form class="composer" id="composer">
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
-              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" maxlength="16000" placeholder="Ask anything…"></textarea>
+              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…"></textarea>
               <div class="composer-toolbar">
                 <details class="composer-menu" id="attachmentMenu">
                   <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
@@ -865,6 +865,7 @@
                         <button type="button" role="radio" aria-checked="false" data-mode="goal" data-keep-menu="true">Goal</button>
                         <button type="button" role="radio" aria-checked="false" data-mode="loop" data-keep-menu="true">Loop</button>
                         </div><select hidden id="chatAutomation" aria-label="Chat automation"><option value="off">Off</option><option value="goal">Goal</option><option value="loop">Loop</option></select>
+                      <label id="loopDeliveryRow" hidden>Pro Loop delivery<select id="loopDelivery"><option value="finish">Only finish</option><option value="after-turn">After this turn + finish</option></select></label>
               <div id="sessionControls" hidden>
                 <div class="session-controls-menu">
                   <label for="sessionObjective">This chat's goal</label>

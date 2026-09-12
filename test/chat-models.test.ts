@@ -54,7 +54,7 @@ describe('durable observed ChatGPT model catalog', () => {
     const nonce = pendingChatModelRequest()!.nonce;
     const first = startChatModelDiscovery(), second = startChatModelDiscovery();
     expect(wake).toHaveBeenCalledTimes(1);
-    release(); await passive;
+    release(); await passive; await Promise.resolve();
     expect(wake.mock.calls).toEqual([[nonce, false], [nonce, true]]);
     release(); await Promise.all([first, second]);
     expect(pendingChatModelRequest()).toMatchObject({ nonce, allowOpen: true });
@@ -85,6 +85,17 @@ describe('durable observed ChatGPT model catalog', () => {
     configureChatModelDiscovery({ wake: async () => { throw new Error('Chrome not found'); }, changed: () => {} });
     expect(await startChatModelDiscovery()).toMatchObject({ state: 'unavailable', models: [], error: expect.stringMatching(/Chrome not found/) });
     expect(pendingChatModelRequest()).toBeNull();
+  });
+  it('returns pending while OS wake hangs and lets a new nonce retry after the bounded deadline', async () => {
+    const wake = vi.fn(() => new Promise<void>(() => {}));
+    configureChatModelDiscovery({ wake, changed: () => {} });
+    expect(await startChatModelDiscovery()).toMatchObject({ state: 'pending' });
+    const old = pendingChatModelRequest()!.nonce;
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(getChatModels().state).toBe('unavailable');
+    expect(await startChatModelDiscovery()).toMatchObject({ state: 'pending' });
+    expect(pendingChatModelRequest()!.nonce).not.toBe(old);
+    expect(wake).toHaveBeenCalledTimes(2);
   });
   it('reuses a pending request, accepts only its nonce, and detaches all public views', () => {
     expect(getChatModels().state).toBe('unknown');

@@ -13,7 +13,7 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>): Promise
   const messageId = offered ? `input:${entry.id}` : entry.messageId!;
   const time = offered ? entry.offeredAt! : entry.deliveredAt!;
   if (!await getSession(sessionId)) return false;
-  const images = entry.images ?? [];
+  const images = [...entry.images ?? [], ...entry.toolImages ?? []];
   const text = entry.deliveryText ?? entry.text;
   await validateInputImages(images);
   const assets = [];
@@ -31,7 +31,7 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>): Promise
     // Browser delivery uses its exact native key, so a later page echo updates this row.
     // Tool delivery has no native user row and keeps the stable input id as its key.
     messageId, inputId: entry.id, inputDelivery: offered ? 'offered' : 'confirmed', authoredText: entry.text,
-    ...(entry.attachments?.length ? { attachments: entry.attachments } : {}),
+    ...(entry.attachments?.length && entry.attachmentDelivery !== 'tool' ? { attachments: entry.attachments } : {}),
     // Injection does not change the running model. Only the native send path verifies
     // picker selection before delivery; a later sparse browser echo keeps this evidence.
     ...(!messageId.startsWith('input:') && selection.model

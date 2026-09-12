@@ -1360,6 +1360,22 @@ var CLF_DOM = (() => {
       for (const turn of turns()) {
         if (turn.role !== 'assistant') continue;
         for (const section of turnNodes(turn)) {
+          // Native Pro failure header observed in Chrome, 2026-09-12: an
+          // expandable button outside authored markdown, not an alert/Retry card.
+          // Keep every occurrence's node identity; old failed turns remain rendered.
+          for (const button of section.querySelectorAll('button[aria-expanded]')) {
+            if (button.closest(`${OWN_SURFACES}, .markdown, [data-message-author-role="user"], [hidden], [inert], [aria-hidden="true"]`) ||
+                button.closest(TURN) !== section || !displayed(button) ||
+                (button.textContent || '').trim() !== 'Thinking failed') continue;
+            let hidden = false;
+            for (let parent = button; parent; parent = parent.parentElement) {
+              const style = getComputedStyle(parent);
+              if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') { hidden = true; break; }
+            }
+            if (hidden) continue;
+            out.push({ text: 'Thinking failed', node: button, turnId: turn.id, turn,
+              reason: 'thinking_failed', recoverable: false });
+          }
           for (const markdown of section.querySelectorAll('.markdown')) {
             const value = text(markdown, 500).replace(/\s+/g, ' ').trim();
             if (!value || !transportFailure(value) || texts.has(value)) continue;
@@ -2064,6 +2080,23 @@ var CLF_DOM = (() => {
       before.chat.click(); check();
     });
   }
+  function collectModelChoices(result, state) {
+    for (const choice of state.choices.filter(c => c.available)) {
+      const entry = result.get(choice.familyId) || { id: choice.familyId, label: choice.familyLabel, efforts: [], aliases: [] };
+      if (!entry.efforts.includes(choice.effort)) entry.efforts.push(choice.effort);
+      if (!entry.aliases.includes(choice.id)) entry.aliases.push(choice.id);
+      result.set(choice.familyId, entry);
+    }
+  }
+  /** Account-evaluated choices already mounted in the closed native picker. */
+  async function inspectVisibleModelSettings(stillCurrent = () => true) {
+    if (!stillCurrent() || !modelPickerTrigger()) return null;
+    const state = await readPickerState();
+    if (!stillCurrent() || !state) return null;
+    const result = new Map();
+    collectModelChoices(result, state);
+    return result.size ? [...result.values()] : null;
+  }
   async function inspectModelSettings(stillCurrent = () => true, failure = () => {}) {
     const ui = modelPickerAccess(stillCurrent), original = await ui.open();
     if (!original) { ui.close(); failure('picker_unavailable'); return null; }
@@ -2075,14 +2108,7 @@ var CLF_DOM = (() => {
       for (const version of original.versions) {
         const state = await ui.version(version.id);
         if (!state) throw new Error('model_unconfirmed');
-        for (const choice of state.choices.filter(c => c.available)) {
-          // A provider family owns its execution lanes. Instant/Thinking/Pro slugs
-          // are selectable pairs within that family, not separate model rows.
-          const entry = result.get(choice.familyId) || { id: choice.familyId, label: choice.familyLabel, efforts: [], aliases: [] };
-          if (!entry.efforts.includes(choice.effort)) entry.efforts.push(choice.effort);
-          if (!entry.aliases.includes(choice.id)) entry.aliases.push(choice.id);
-          result.set(choice.familyId, entry);
-        }
+        collectModelChoices(result, state);
       }
     } catch { failure('model_unconfirmed'); result.clear(); }
     finally {
@@ -2212,6 +2238,7 @@ var CLF_DOM = (() => {
     projectHomeId,
     enterProject,
     visibleModelSelection,
+    inspectVisibleModelSettings,
     inspectModelSettings,
     uploadImages,
     captureComposerDraft,

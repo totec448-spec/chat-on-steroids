@@ -18,11 +18,12 @@ import { trackInFlight, emptyEvidence, type CallContext } from '../src/main/mcp/
 const offerToolInput = async (...args: Parameters<typeof offerToolInputBatch>) => (await offerToolInputBatch(...args)).messages;
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
 
-const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; turnId: string; time: number } }));
+const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; reason?: string; turnId: string; time: number } }));
 vi.mock('../src/main/session/store.js', () => ({
   listUsageSessions: vi.fn(async () => []),
   conversationWasSuperseded: vi.fn(async () => false),
   readRecentEvents: vi.fn(async () => binding.end ? [binding.end] : []),
+  turnHasMcpCall: vi.fn(async () => true),
   getSession: vi.fn(async (id: string) => ({ id, conversationId: id === 'session-two' ? 'conversation-b' : binding.conversationId, activeTurnId: binding.activeTurnId,
     origin: { kind: binding.origin }, lastToolCallAt: binding.lastToolCallAt,
     finishTurn: { turnId: binding.activeTurnId, released: binding.finishReleased },
@@ -74,6 +75,23 @@ afterEach(async () => {
 });
 
 describe('durable user input ownership', () => {
+  it('preserves messages beyond the former composer limit through admission, restart and browser claim', async () => {
+    binding.finishEnabled = false;
+    const text = 'Long user request. '.repeat(2000);
+    const row = await enqueueInput(input({ text }));
+    resetInputForTests();
+    expect((await listInputs())[0]?.text).toBe(text.trim());
+    expect(await claimBrowserInput(row.id, 'page', binding.conversationId)).toMatchObject({ text: text.trim(), deliveryText: text.trim() });
+  });
+  it('edits queued text beyond 16000 characters while retaining the message transport ceiling', async () => {
+    const row = await enqueueInput(input({ mode: 'after-turn' }));
+    const text = 'x'.repeat(32_000);
+    expect(await editQueuedInput(row.id, text)).toBe(true);
+    expect((await listInputs())[0]?.text).toBe(text);
+    await expect(editQueuedInput(row.id, 'x'.repeat(96_001))).rejects.toThrow();
+    expect((await listInputs())[0]?.text).toBe(text);
+    expect(inputArgs.safeParse(input({ text: 'x'.repeat(96_001) })).success).toBe(false);
+  });
   it('sends a tool-free non-Pro correction through one durable browser claim and native receipt', async () => {
     binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
@@ -948,12 +966,50 @@ it.each(['finish', 'after-turn'] as const)('sends only one queued %s after each 
 it.each(['finish', 'after-turn'] as const)('does not advance %s on interruption, unknown outcome, error, or stale completion', async mode => {
   binding.model = 'gpt-5.6-sol';
   const row = await enqueueInput(input({ mode }));
-  for (const outcome of ['interrupted', 'unknown', 'error']) {
+  for (const outcome of ['interrupted', 'unknown', 'error', 'failed', 'stopped', 'stalled']) {
     binding.end = { kind: 'turn_end', outcome, turnId: 'turn-one', time: now + 1 };
     expect(await pendingBrowserInputs()).toEqual([]);
     expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).toBeNull();
   }
   binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'old-turn', time: now - 1 };
+  expect(await pendingBrowserInputs()).toEqual([]);
+});
+
+it.each(['finish', 'after-turn'] as const)('spends a settled Thinking failed once for ten queued %s messages across restart', async mode => {
+  const rows = [];
+  for (let n = 0; n < 10; n++) rows.push(await enqueueInput(input({ mode, afterTurn: true, text: `Checkpoint ${n}` })));
+  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1 };
+  expect(await pendingBrowserInputs()).toEqual([{ id: rows[0]!.id, conversationId: binding.conversationId }]);
+  expect(await claimBrowserInput(rows[1]!.id, 'page', binding.conversationId, true)).toBeNull();
+  expect(await claimBrowserInput(rows[0]!.id, 'page', binding.conversationId, true)).not.toBeNull();
+  expect(await authorizeBrowserInput(rows[0]!.id, 'page', binding.conversationId)).toBe(true);
+  expect(await acknowledgeBrowserInput(rows[0]!.id, 'page', binding.conversationId, 'next-native-user')).toBe(true);
+  resetInputForTests();
+  expect(await pendingBrowserInputs()).toEqual([]);
+  expect((await listInputs()).filter(row => row.state === 'queued')).toHaveLength(9);
+  binding.end = { ...binding.end, turnId: 'next-failed-pro-turn', time: now + 2 };
+  expect(await pendingBrowserInputs()).toEqual([{ id: rows[1]!.id, conversationId: binding.conversationId }]);
+});
+
+it.each(['late-tool', 'running-tool', 'new-turn', 'different-end', 'blocked'])('revokes a Thinking failed claim before Send after %s', async change => {
+  const row = await enqueueInput(input({ mode: 'after-turn', afterTurn: true }));
+  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1 };
+  expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).not.toBeNull();
+  if (change === 'late-tool') binding.lastToolCallAt = now + 2;
+  if (change === 'new-turn') binding.activeTurnId = 'resumed-turn';
+  if (change === 'different-end') binding.end = { ...binding.end, turnId: 'other-turn' };
+  if (change === 'blocked') binding.blocked = true;
+  if (change === 'running-tool') {
+    await trackInFlight({ startedAt: now + 2, transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+      caller: { requestId: 'resumed-work', conversationId: binding.conversationId, transportKey: null } }, async () => {
+      expect(await authorizeBrowserInput(row.id, 'page', binding.conversationId)).toBe(false);
+    });
+  } else expect(await authorizeBrowserInput(row.id, 'page', binding.conversationId)).toBe(false);
+});
+
+it('keeps Astra finish-only tasks queued after Thinking failed without explicit after-turn opt-in', async () => {
+  await enqueueInput(input({ mode: 'finish' }));
+  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1 };
   expect(await pendingBrowserInputs()).toEqual([]);
 });
 
