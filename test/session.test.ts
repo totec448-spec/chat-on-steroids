@@ -934,6 +934,38 @@ describe('session store', () => {
     expect(ends.map((event) => event.kind === 'turn_end' && event.outcome)).toEqual(['completed']);
   });
 
+  it.each(['completed', 'stopped'] as const)('does not restore an abandoned older turn after the latest turn %s', async (outcome) => {
+    const conversationId = 'c-restore-latest-terminal';
+    const opened = await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 10, turnId: 'g-abandoned' },
+      { kind: 'turn_start', time: 20, turnId: 'g-latest' },
+      { kind: 'turn_end', time: 30, turnId: 'g-latest', outcome }
+    ]);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await closeConversation(conversationId);
+      await sessionForConversation(conversationId);
+      expect(liveConversations().find(entry => entry.conversationId === conversationId)).toMatchObject({
+        generating: false, activeTurnId: null
+      });
+    }
+    // The older incomplete history is preserved without inventing a terminal for it.
+    expect((await readEvents(opened.sessionId!, { kinds: ['turn_end'] })).map(event => event.turnId)).toEqual(['g-latest']);
+  });
+
+  it('restores the latest committed start without promoting an older orphan by timestamp', async () => {
+    const conversationId = 'c-restore-latest-start';
+    await recordChatObservations(conversationId, [
+      { kind: 'turn_start', time: 100, turnId: 'g-orphan-clock-ahead' },
+      { kind: 'turn_start', time: 20, turnId: 'g-current' },
+      { kind: 'turn_end', time: 110, turnId: 'g-orphan-clock-ahead', outcome: 'completed' }
+    ]);
+    await closeConversation(conversationId);
+    await sessionForConversation(conversationId);
+    expect(liveConversations().find(entry => entry.conversationId === conversationId)).toMatchObject({
+      generating: true, activeTurnId: 'g-current'
+    });
+  });
+
   it('offers a stable final reply to Goal after reload lost an uncertain turn identity', async () => {
     const conversationId = 'c-goal-final-after-reload';
     await recordChatObservations(conversationId, [

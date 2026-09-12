@@ -7187,13 +7187,25 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  /**
-   * The other half of "an ordinary chat is recovered exactly like Prime".
-   *
-   * The silence deadline already reopened this chat, but only two minutes after its last sign
-   * of life. A closed tab is first-hand proof that the page is gone now, and the user watching
-   * a Worker come straight back while their own chat sat there dead is the whole bug.
-   */
+  it('keeps a completed chat closed across repeated history visits with an older unended turn', async () => {
+    const SOLO = 'b2b2b2b2-1111-2222-3333-444444444444';
+    await pair();
+    await events(SOLO, [openTurn('turn-orphan-before-reload')]);
+    await attributed(SOLO);
+    await events(SOLO, [openTurn('turn-latest-completed'), endTurn('turn-latest-completed', 'completed')]);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await request('POST', '/closed', { body: { conversationId: SOLO } });
+      expect(await maintenance()).toBeNull();
+      // Opening history hydrates the recorder; it must not revive the orphan.
+      await events(SOLO, [{ kind: 'conversation_title', time: Date.now(), text: 'Settled chat' }]);
+      expect(liveConversations().find(entry => entry.conversationId === SOLO)?.activeTurnId).toBeNull();
+    }
+    // Explicit new work in the same chat still earns ordinary recovery.
+    await events(SOLO, [openTurn('turn-new-work')]);
+    await request('POST', '/closed', { body: { conversationId: SOLO } });
+    expect(await maintenance()).toMatchObject({ conversationId: SOLO, reason: 'no-tab' });
+  });
+
   it('reopens an ordinary chat that uses this connector the moment its last tab closes mid-turn', async () => {
     const SOLO = 'b2b2b2b2-1111-2222-3333-444444444444';
     await pair();

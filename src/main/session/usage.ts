@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
 import { listUsageSessions, readEvents } from './store.js';
 import { readDurable, writeDurableSoon } from '../durable.js';
 import { logInfo } from '../logger.js';
@@ -28,8 +29,8 @@ const cacheSchema = z.object({ version: z.literal(CACHE_VERSION), rows: z.array(
 const dayCache = new Map<string, { revision: string; days: Map<string, UsageModelTokens[]> }>();
 let cacheLoaded = false;
 let overviewFlight: Promise<UsageOverview> | null = null;
-export function usageOverview(): Promise<UsageOverview> {
-  return overviewFlight ??= computeOverview().finally(() => { overviewFlight = null; });
+export function usageOverview(signal?: AbortSignal): Promise<UsageOverview> {
+  return overviewFlight ??= computeOverview(signal).finally(() => { overviewFlight = null; });
 }
 function mergeModels(target: Map<string, UsageModelTokens>, rows: readonly UsageModelTokens[]): void {
   for (const row of rows) {
@@ -47,7 +48,8 @@ function attribution(raw: { model?: string; reasoningEffort?: string }, previous
   if (effort) return { ...previous, reasoningEffort: effort };
   return previous;
 }
-async function computeOverview(): Promise<UsageOverview> {
+async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
+  signal?.throwIfAborted();
   const started = performance.now();
   // One observed Pro choice raises the comparison ceiling for the whole account,
   // including ordinary models. Read existing catalog evidence without discovery.
@@ -64,9 +66,13 @@ async function computeOverview(): Promise<UsageOverview> {
   const days = new Map<string, Map<string, UsageModelTokens>>();
   const models = new Map<string, UsageModelTokens>();
   for (const session of sessions) {
+    signal?.throwIfAborted();
     const revision = `${contextTokenCap}:${timezone}:${session.updatedAt}:${session.events}:${session.estimatedTokens}`;
     let cached = dayCache.get(session.id);
     if (cached?.revision !== revision) {
+      // Startup and the Usage page share this one flight. Read only one changed
+      // session at a time, giving interactive work a turn before each disk read.
+      await yieldToEventLoop(undefined, { signal });
       rebuilt++;
       const perDay = new Map<string, Map<string, UsageModelTokens>>();
       let context = 0;
@@ -85,7 +91,9 @@ async function computeOverview(): Promise<UsageOverview> {
         }
         calls.length = 0; context = 0; selected = LEGACY;
       };
-      for (const event of await readEvents(session.id)) {
+      const events = await readEvents(session.id);
+      signal?.throwIfAborted();
+      for (const event of events) {
         if (event.kind === 'session_start') { finishSegment(); conversation = event.conversationId; }
         if (event.kind === 'tool_call') {
           if (countedCalls.has(event.call.callId)) continue;
@@ -114,6 +122,7 @@ async function computeOverview(): Promise<UsageOverview> {
     }
   }
   const ids = new Set(sessions.map((session) => session.id));
+  signal?.throwIfAborted();
   for (const id of dayCache.keys()) if (!ids.has(id)) { dayCache.delete(id); dirty = true; }
   if (dirty) writeDurableSoon('usage-cache', { version: CACHE_VERSION, rows: [...dayCache].map(([id, row]) => ({ id, revision: row.revision, days: [...row.days] })) });
   logInfo(`usage overview sessions=${sessions.length} reused=${sessions.length - rebuilt} rebuilt=${rebuilt} elapsed_ms=${Math.round(performance.now() - started)}`);

@@ -864,7 +864,11 @@ old final into a new completion. Legacy rows retain their first anchor until fre
 That content revision must follow the latest recorded work boundary, with no running local tool
 or newer user/turn overriding it, independently of observation order within a browser batch.
 Replay lifecycle boundaries in publication sequence; display chronology must not erase an
-app-authored reopen after an earlier completed end. A same-request call that **starts after** a
+app-authored reopen after an earlier completed end. Restore the current generation by that
+same replay: a new start replaces the active turn, and its exact end clears it. An older
+turn with a missing end remains history and cannot become active again after a later turn
+finishes, including when the user repeatedly closes and revisits the chat.
+A same-request call that **starts after** a
 reported completed end can prove the page ended it falsely; recorder reopens that turn and
 retires the corresponding Goal attempt. A call started before the end, a new request or a
 manual Stop cannot be used as that proof. This reopen evidence is process-local.
@@ -918,7 +922,11 @@ belongs to the Usage snapshot and cache revision; availability changes invalidat
 Model changes affect attribution; compaction starts another frontend segment. Duplicate call
 ids do not count twice. Historical rows without model proof carry an explicitly assumed legacy
 model. Canonical revision/timezone-keyed `usage-cache` avoids rereading unchanged transcripts;
-formula changes only project cached totals. These charts are not a provider invoice, exact
+formula changes only project cached totals. Startup warms this same cache once without awaiting
+it; a Usage visit joins the in-flight calculation. Only changed sessions are read, sequentially
+with an event-loop yield between reads, and quitting cancels the warmup before cache publication.
+The loading message explains a potentially slow post-update rebuild and that the app remains usable.
+These charts are not a provider invoice, exact
 token consumption or proof of current prices/entitlements.
 
 ## 13. Extension, account models and browser preferences

@@ -220,6 +220,30 @@ describe('passive usage limits and canonical token totals', () => {
     await expect(usage.usageOverview()).rejects.toThrow('temporary read failure');
     expect((await usage.usageOverview()).tokens).toBe(0);
   });
+  it('shares background work with page visits and reads changed sessions one at a time', async () => {
+    store.listUsageSessions.mockResolvedValue(['one', 'two'].map(id => ({ id, updatedAt: 1, events: 1, estimatedTokens: 0 })));
+    let release!: () => void;
+    store.readEvents.mockImplementationOnce(() => new Promise(resolve => { release = () => resolve([]); }));
+    const background = usage.usageOverview(new AbortController().signal);
+    expect(usage.usageOverview()).toBe(background);
+    await vi.waitFor(() => expect(store.readEvents).toHaveBeenCalledTimes(1));
+    expect(store.readEvents.mock.calls[0]).toEqual(['one']);
+    release();
+    await background;
+    expect(store.readEvents.mock.calls).toEqual([['one'], ['two']]);
+    await usage.usageOverview();
+    expect(store.readEvents).toHaveBeenCalledTimes(2);
+  });
+  it('cancels warmup between reads without publishing a partial cache and permits a later retry', async () => {
+    store.listUsageSessions.mockResolvedValue(['one', 'two'].map(id => ({ id, updatedAt: 1, events: 1, estimatedTokens: 0 })));
+    const controller = new AbortController();
+    store.readEvents.mockImplementationOnce(async () => { controller.abort(); return []; });
+    await expect(usage.usageOverview(controller.signal)).rejects.toThrow();
+    expect(store.readEvents.mock.calls).toEqual([['one']]);
+    expect(durable.writeDurableSoon).not.toHaveBeenCalled();
+    expect((await usage.usageOverview()).sessions).toBe(2);
+    expect(durable.writeDurableSoon).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('model attribution and equivalent cost', () => {
