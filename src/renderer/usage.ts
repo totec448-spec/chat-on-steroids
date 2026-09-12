@@ -34,7 +34,7 @@ export async function refreshUsage(): Promise<void> {
   const generation = ++loadGeneration;
   $('refreshUsage').setAttribute('disabled', '');
   const status = $('usageStatus');
-  ui(status, 'textContent', () => snapshot ? t("Updating…") : t("Calculating recorded tool usage…"));
+  ui(status, 'textContent', () => t("Updating usage in the background. After an update, this can take a few minutes. You can keep using the app."));
   status.setAttribute('role', 'status');
   try {
     const [value, catalog] = await Promise.all([run(window.api.getUsage()), run(window.api.getChatModels())]);
@@ -70,6 +70,8 @@ export async function refreshUsage(): Promise<void> {
     paintRates();
     paintCost();
     ui(status, 'textContent', () => t("Recorded model attribution; missing history assumes GPT-5.6 High. Unchanged recordings reuse saved totals."));
+  } catch {
+    if (generation === loadGeneration) ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh."));
   } finally { if (generation === loadGeneration) $('refreshUsage').removeAttribute('disabled'); }
 }
 function paintRates(): void {

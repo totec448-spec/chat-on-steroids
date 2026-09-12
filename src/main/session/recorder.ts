@@ -482,7 +482,7 @@ interface StoredHistory {
   knownTurnEnds: Set<string>;
   /** Durable start time of the newest turn that ended in the recovered tail. */
   lastTurnStartedAt: number | null;
-  /** Newest still-open local generation, so a reloaded page can adopt it after app restart. */
+  /** Current generation from lifecycle replay; older unended turns are history, not active work. */
   activeTurnId: string | null;
   /** Durable start time of activeTurnId. */
   activeTurnStartedAt: number | null;
@@ -507,6 +507,8 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
   const knownTurnEnds = new Set<string>();
   let lastTurnEndedAt: number | null = null;
   let lastTurnStartedAt: number | null = null;
+  let activeTurnId: string | null = null;
+  let activeTurnStartedAt: number | null = null;
   const turnStarts = new Map<string, number>();
   const pageTools = new Map<string, ProgressRecord>();
   try {
@@ -523,11 +525,20 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
           knownTurnEnds.delete(event.turnId);
           openTurns.add(event.turnId);
           turnStarts.set(event.turnId, event.time);
+          // Match live recording: each committed start replaces the current generation.
+          // An older turn missing its end remains forensic history; it must not become
+          // active again after a later turn completes and the user closes/revisits the chat.
+          activeTurnId = event.turnId;
+          activeTurnStartedAt = event.time;
         }
       } else if (event.kind === 'turn_end') {
         if (event.turnId) {
           knownTurnEnds.add(event.turnId);
           openTurns.delete(event.turnId);
+          if (activeTurnId === event.turnId) {
+            activeTurnId = null;
+            activeTurnStartedAt = null;
+          }
         }
         if (lastTurnEndedAt === null || event.time >= lastTurnEndedAt) {
           lastTurnEndedAt = event.time;
@@ -552,16 +563,6 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
     }
   } catch (err) {
     logWarn(`could not read stored session history: ${(err as Error).message}`);
-  }
-  let activeTurnId: string | null = null;
-  let activeTurnStartedAt: number | null = null;
-  for (const turnId of openTurns) {
-    const startedAt = turnStarts.get(turnId) ?? null;
-    if (startedAt === null) continue;
-    if (activeTurnStartedAt === null || startedAt > activeTurnStartedAt) {
-      activeTurnId = turnId;
-      activeTurnStartedAt = startedAt;
-    }
   }
   return { openTurns, knownTurnStarts, knownTurnEnds, lastTurnStartedAt, activeTurnId, activeTurnStartedAt, pageTools };
 }

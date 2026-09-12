@@ -6,6 +6,26 @@ import type { UsageOverview } from '../src/shared/usage.js';
 let dom: JSDOM;
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
 
+it('explains a pending background rebuild and replaces transport failure with a retryable status', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  let reject!: (error: Error) => void;
+  Object.assign(dom.window, { api: {
+    getUsage: () => new Promise((_resolve, fail) => { reject = fail; }),
+    getChatModels: async () => ({ ok: true, data: { models: [] } })
+  } });
+  const { refreshUsage } = await import('../src/renderer/usage.js');
+  const pending = refreshUsage();
+  const status = dom.window.document.getElementById('usageStatus')!;
+  const refresh = dom.window.document.getElementById('refreshUsage') as HTMLButtonElement;
+  expect(status.textContent).toContain('You can keep using the app.');
+  expect(refresh.disabled).toBe(true);
+  reject(new Error('IPC disconnected'));
+  await pending;
+  expect(status.textContent).toBe('Usage could not be loaded. Try Refresh.');
+  expect(refresh.disabled).toBe(false);
+});
+
 it.each([256_000, 400_000])('shows the calculated %i context cap and edits formula preferences without reloading recordings', async (contextTokenCap) => {
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);

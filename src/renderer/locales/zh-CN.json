@@ -45,7 +45,7 @@
   "Open full third-party license texts": "打开第三方许可证全文",
   "YOUR ACTIVITY": "你的活动",
   "Model availability and the work recorded in this workspace.": "此工作区中的模型可用情况与工作记录。",
-  "Calculating recorded tool usage…": "正在统计已记录的工具用量…",
+  "Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.": "正在后台更新用量。应用更新后，重新计算可能需要几分钟。你可以继续使用应用。",
   "Token activity per day": "每日 Token 活动",
   "Estimated context processed per tool call · last 52 weeks": "每次工具调用处理的估算上下文 · 最近 52 周",
   "Cost estimate per day": "每日费用估算",
