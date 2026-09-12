@@ -16,7 +16,14 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { AppState, Capabilities, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import type {
+  AppState,
+  Capabilities,
+  Config,
+  Diagnosis,
+  LogEntry,
+  RemoteSteeringPinView
+} from '../shared/types.js';
 import type {
   Handoff,
   SessionEvent,
@@ -39,6 +46,7 @@ export interface SettingsPatch {
   sessions: Config['sessions'];
   compaction: Config['compaction'];
   multiAgent: Config['multiAgent'];
+  remoteSteering: Config['remoteSteering'];
   goal: Config['goal'];
   mcp: Config['mcp'];
 }
@@ -177,6 +185,16 @@ const api = {
   // to own is refused until it is released. Returns the whole blocked set, so one press
   // repaints without a second read.
   setSessionBlocked: (id: string, blocked: boolean) => call<string[]>('sessions:block', { id, blocked }),
+
+  // The Command Center remote-steering pin. Public identity only in both directions: the
+  // renderer sends a pasted public key and receives a fingerprint, and there is no channel
+  // through which it could reach an envelope, a signature or a decision.
+  getRemoteSteeringPin: () => call<RemoteSteeringPinView>('remoteSteering:get'),
+  previewRemoteSteeringKey: (publicKeySpkiBase64: string) =>
+    call<{ fingerprint: string; matchesExistingPin: boolean }>('remoteSteering:preview', { publicKeySpkiBase64 }),
+  pinRemoteSteeringKey: (publicKeySpkiBase64: string) =>
+    call<RemoteSteeringPinView>('remoteSteering:pin', { publicKeySpkiBase64 }),
+  unpinRemoteSteeringKey: () => call<RemoteSteeringPinView>('remoteSteering:unpin'),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   getHandoff: (id: string, handoffId?: string) => call<Handoff | null>('handoff:get', { id, handoffId }),
 

@@ -1570,15 +1570,19 @@ export interface StagedAgentMessages {
  */
 export function stageMessages(
   caller: Caller,
-  items: ReadonlyArray<{ to: string; text: string }>
+  items: ReadonlyArray<{ to: string; text: string }>,
+  options: { expectedRunId?: string; preserveText?: boolean } = {}
 ): StagedAgentMessages {
   if (items.length === 0) throw new AgentError('No messages were given');
   if (items.length > MAX_BATCH_MESSAGES) {
     throw new AgentError(`Too many messages in one call (limit ${MAX_BATCH_MESSAGES})`);
   }
   let run = runForConversation(caller.conversationId);
+  if (options.expectedRunId && run?.runId !== options.expectedRunId) {
+    throw new AgentError('RUN_ID_MISMATCH: the caller is not bound to the exact run this operation names.');
+  }
   let resumedDormant = false;
-  if (!run && caller.conversationId) {
+  if (!run && caller.conversationId && !options.expectedRunId) {
     const dormant = dormantRunForPrime(caller.conversationId);
     if (dormant) {
       if (!(run = reactivateDormantRun(dormant))) {
@@ -1590,7 +1594,7 @@ export function stageMessages(
     }
   }
   try {
-    return stageMessagesActive(caller, items, resumedDormant);
+    return stageMessagesActive(caller, items, resumedDormant, options);
   } catch (error) {
     if (resumedDormant) parkRun(run, 'a dormant-owner message was rejected before any worker was woken');
     throw error;
@@ -1600,9 +1604,13 @@ export function stageMessages(
 function stageMessagesActive(
   caller: Caller,
   items: ReadonlyArray<{ to: string; text: string }>,
-  resumedDormant: boolean
+  resumedDormant: boolean,
+  options: { expectedRunId?: string; preserveText?: boolean }
 ): StagedAgentMessages {
   const run = runForConversation(caller.conversationId);
+  if (options.expectedRunId && run?.runId !== options.expectedRunId) {
+    throw new AgentError('RUN_ID_MISMATCH: the caller is not bound to the exact run this operation names.');
+  }
   const from = requireMember(caller);
   if (run && (activeSpawnStages.has(run) || run.transfer)) throw new AgentError('OWNER_TRANSITION_IN_PROGRESS: wait for this run spawn or prime transfer to settle.');
   if (activeFinishStages.has(from)) {
@@ -1625,9 +1633,9 @@ function stageMessagesActive(
   const reserved = new Set<Agent>();
   for (const [index, item] of items.entries()) {
     const where = items.length > 1 ? ` (message ${index + 1} of ${items.length})` : '';
-    const trimmed = item.text?.trim() ?? '';
-    if (!trimmed) throw new AgentError(`The message is empty${where}`);
-    if (trimmed.length > MAX_MESSAGE_CHARS) {
+    const text = options.preserveText ? (item.text ?? '') : (item.text?.trim() ?? '');
+    if (!text) throw new AgentError(`The message is empty${where}`);
+    if (text.length > MAX_MESSAGE_CHARS) {
       throw new AgentError(`Message is too long (limit ${MAX_MESSAGE_CHARS} characters)${where}`);
     }
     const toId = item.to?.trim() ?? '';
@@ -1688,7 +1696,7 @@ function stageMessagesActive(
     const already = perRecipient.get(to.info.id) ?? 0;
     assertRoom(to, already + 1);
     perRecipient.set(to.info.id, already + 1);
-    planned.push({ to, message: newMessage(from.info.id, to.info.id, trimmed) });
+    planned.push({ to, message: newMessage(from.info.id, to.info.id, text) });
   }
 
   for (const { to, message } of planned) {

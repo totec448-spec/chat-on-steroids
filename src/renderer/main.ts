@@ -505,6 +505,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     compaction: previous.compaction,
     mcp: previous.mcp ?? { instructions: '' },
     multiAgent: previous.multiAgent,
+    remoteSteering: previous.remoteSteering,
     goal: previous.goal
   };
   const next = await run(api.saveSettings(patch, base));
@@ -1696,7 +1697,7 @@ initSidebarResize();
 initUsage();
 initPlugins(apply);
 initBrowserPreferences();
-initChat({ save: () => save(), state: () => state });
+initChat({ save: () => save(), refresh: () => refresh(), state: () => state });
 
 void (async () => {
   await refresh();

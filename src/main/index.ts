@@ -41,6 +41,7 @@ import {
 import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
+import { restoreRemoteSteering } from './remote-steering.js';
 import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
@@ -329,6 +330,11 @@ void app.whenReady().then(async () => {
   // And the user's blocks, for the same reason: a chat blocked yesterday is still the rogue
   // turn today, and a block that loads after the first call is a tool the turn already got.
   await restoreBlockedChats();
+  if (windowActivation.isDisabled()) return;
+  // The pinned Command Center key and the remote-steering operation receipts, before the MCP
+  // endpoint can accept a call. Without the pin an authentic envelope is refused; without the
+  // receipts a message this app already delivered before the restart is delivered again.
+  await restoreRemoteSteering();
   if (windowActivation.isDisabled()) return;
   setAgentConversationLookup(agentConversation);
   // The prime's chat is the user's own, so no extension report can name it. It is bound

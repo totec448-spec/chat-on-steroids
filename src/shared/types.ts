@@ -316,6 +316,37 @@ export interface ArtifactSettings {
   maxFileBytes: number;
 }
 
+/**
+ * The Command Center remote-steering bridge.
+ *
+ * One switch, because there is only one thing to decide here: whether this app will honour
+ * signed operations at all. Everything else about the bridge is already fixed by the signed
+ * envelope itself — which run, which worker, which action, for how long — so there is no
+ * scope, allowlist or timeout for a settings file to disagree with.
+ *
+ * Off on every fresh install and on every migration. It is also useless until the operator
+ * pins a Command Center public key, which is a separate attended act stored outside this
+ * file: a config that merely says `true` authorizes nothing.
+ */
+export interface RemoteSteeringSettings {
+  enabled: boolean;
+}
+
+/**
+ * What the settings panel knows about the pinned signing key.
+ *
+ * Public identity only. There is no private half on this side of the bridge, so there is
+ * nothing here for the renderer to be trusted with — the fingerprint is exactly what the
+ * operator compares against what Command Center shows them.
+ */
+export interface RemoteSteeringPinView {
+  pinned: boolean;
+  /** SHA-256 of the SPKI DER, 64 lowercase hex. */
+  fingerprint: string | null;
+  publicKeySpkiBase64: string | null;
+  pinnedAt: string | null;
+}
+
 export interface Config {
   artifacts: ArtifactSettings;
   roots: Root[];
@@ -326,6 +357,7 @@ export interface Config {
   sessions: SessionSettings;
   compaction: CompactionSettings;
   multiAgent: MultiAgentSettings;
+  remoteSteering: RemoteSteeringSettings;
   goal: GoalSettings;
   mcp: McpSettings;
 }
@@ -570,6 +602,8 @@ export interface AppState {
   bundledTunnelVersion: string | null;
   bridge: BridgeStatus;
   update: UpdateStatus;
+  /** The Command Center signing key this app has pinned, if the operator pinned one. */
+  remoteSteeringPin: RemoteSteeringPinView;
   /** Present only on macOS once the in-process native backend has reported its live TCC state. */
   desktopAccess?: MacOSDesktopAccessStatus | null;
 }

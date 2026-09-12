@@ -25,6 +25,7 @@ import {
   type Config,
   type GoalSettings,
   type MultiAgentSettings,
+  type RemoteSteeringSettings,
   type Root,
   type SessionSettings
 } from '../shared/types.js';
@@ -170,6 +171,18 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   // a plain chat that once called a tool — is the user's choice to make.
   recoverAgentTabs: false
 };
+/**
+ * Remote steering is off everywhere, and stays off.
+ *
+ * Unlike the other feature defaults there is no fresh-install variant of this one. A fresh
+ * install enabling it would mean a brand-new machine willing to act on a signed envelope
+ * relayed by an unattributed phone before its owner had decided anything at all — and it
+ * could not work anyway, because the operator still has to pin a Command Center key by hand.
+ * One constant, used by the fresh install, the migration baseline and conservative recovery
+ * alike, so there is no path through this file that turns it on.
+ */
+const DEFAULT_REMOTE_STEERING: RemoteSteeringSettings = { enabled: false };
+
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
   CAPABILITIES.map((capability) => [capability, true])
@@ -359,6 +372,12 @@ const configSchema = z.object({
     })
     .optional()
     .default({ ...DEFAULT_ARTIFACTS }),
+  // Absent means off, for a config written before the bridge existed and for one written by
+  // a build that has it. There is no "inherit", no "auto" and no widening migration.
+  remoteSteering: z
+    .object({ enabled: z.boolean().optional().default(DEFAULT_REMOTE_STEERING.enabled) })
+    .optional()
+    .default({ ...DEFAULT_REMOTE_STEERING }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with
   // every root and permission in it intact.
@@ -478,6 +497,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     compaction: { ...DEFAULT_COMPACTION },
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },
     artifacts: { ...DEFAULT_ARTIFACTS },
+    remoteSteering: { ...DEFAULT_REMOTE_STEERING },
     goal: { ...DEFAULT_GOAL },
     mcp: { ...DEFAULT_MCP }
   };
@@ -498,7 +518,9 @@ function conservativeRecoveryConfig(): Config {
     readOnly: true,
     multiAgent: { ...DEFAULT_MULTI_AGENT },
     // A config file that could not be trusted is not consent to have a second model typing
-    // into the user's chat, whatever the unreadable file said.
+    // into the user's chat, whatever the unreadable file said — nor to have an off-machine
+    // envelope steering this one.
+    remoteSteering: { ...DEFAULT_REMOTE_STEERING },
     goal: { ...DEFAULT_GOAL }
   };
 }

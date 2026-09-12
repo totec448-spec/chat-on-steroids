@@ -112,6 +112,14 @@ export interface ToolContext {
   /** Whether multi-agent mode is live right now. Defaults to the live setting. */
   agentTools?: boolean;
   /**
+   * Whether the Command Center remote-steering bridge is live right now.
+   *
+   * Its own switch, separate from `agentTools`, because they answer different questions: one
+   * is whether this machine runs workers at all, the other is whether it will act on a signed
+   * envelope relayed from off-machine. Defaults to the live setting, which is off.
+   */
+  remoteSteeringTools?: boolean;
+  /**
    * Whether these feature tools must stay registered for the lifetime of the endpoint,
    * for the same reason as `exposedCaps`: ChatGPT caches a tools/list snapshot, and a
    * tool that disappears from under a cached snapshot surfaces as a transport-level
@@ -119,6 +127,7 @@ export interface ToolContext {
    */
   exposedSessionTools?: boolean;
   exposedAgentTools?: boolean;
+  exposedRemoteSteeringTools?: boolean;
   /**
    * Whether `find` must stay registered for the lifetime of the endpoint.
    *
@@ -1030,6 +1039,8 @@ export interface SurfaceRegistrar {
   sessionToolsExposed: boolean;
   agentToolsLive: boolean;
   agentToolsExposed: boolean;
+  remoteSteeringToolsLive: boolean;
+  remoteSteeringToolsExposed: boolean;
   /** Whether `find` is part of this endpoint's surface. See ToolContext.exposedFind. */
   findExposed: boolean;
   register<Schema extends z.ZodType>(
@@ -1069,8 +1080,10 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
   // feature off does not delete a tool a cached ChatGPT snapshot still believes in.
   const sessionToolsLive = ctx.sessionTools ?? getConfig().sessions.record;
   const agentToolsLive = ctx.agentTools ?? getConfig().multiAgent.enabled;
+  const remoteSteeringToolsLive = ctx.remoteSteeringTools ?? getConfig().remoteSteering.enabled;
   const sessionToolsExposed = ctx.exposedSessionTools ?? sessionToolsLive;
   const agentToolsExposed = ctx.exposedAgentTools ?? agentToolsLive;
+  const remoteSteeringToolsExposed = ctx.exposedRemoteSteeringTools ?? remoteSteeringToolsLive;
   const findExposed = ctx.exposedFind ?? (!exposedCaps.command && exposedCaps.search);
   const names: string[] = [];
   const handlers = new Map<string, { description: string; run: (args: unknown) => Promise<ToolResult> }>();
@@ -1083,6 +1096,8 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
     sessionToolsExposed,
     agentToolsLive,
     agentToolsExposed,
+    remoteSteeringToolsLive,
+    remoteSteeringToolsExposed,
     findExposed,
     registered: () => [...names],
     descriptions: () => [...handlers].map(([name, entry]) => ({ name, description: entry.description })),
