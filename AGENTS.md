@@ -1566,6 +1566,11 @@ Use at most two direct development subagents concurrently and explicitly prohibi
 delegation. Audit-only means no source/test/config/AppData writes beyond the named report.
 The prime independently verifies important claims; parallel reports are hypotheses, not votes.
 
+When integrating external PRs, preserve original authorship. Adapted or snapshot-integrated
+work must name the original PR/author and carry appropriate GitHub-linked `Co-authored-by`
+trailers; update `CONTRIBUTORS.md` and distinguish incorporated code from reports/proposals.
+Closing a PR or rewriting its implementation does not remove the contributor's credit.
+
 Record changes and actual checks in a focused worklog. Keep security reproductions/private
 session material out of public docs and fixtures; follow `SECURITY.md`. Do not package, install,
 commit or publish merely because a source/documentation task was requested.
