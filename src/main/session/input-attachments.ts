@@ -5,6 +5,8 @@ import { z } from 'zod';
 import sharp from 'sharp';
 import { sessionsRoot } from './store.js';
 import type { InputAttachment } from '../../shared/input.js';
+import { injectableAttachments } from '../../shared/input.js';
+import { normalizeInputImage } from './input-images.js';
 
 export const MAX_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 export const ATTACHMENT_CHUNK_BYTES = 512 * 1024;
@@ -76,6 +78,32 @@ async function stage(source: AttachmentSource, retained: Set<string>): Promise<I
 }
 export function validateInputAttachments(attachments: InputAttachment[]): Promise<void> {
   const next = staging.then(() => validate(attachments));
+  staging = next.catch(() => undefined);
+  return next;
+}
+/** Resolve only validated staged membership, under the same lock as pruning. */
+export function normalizeInputAttachments(attachments: InputAttachment[]) {
+  const next = staging.then(async () => {
+    if (!injectableAttachments(attachments)) throw new Error('Inject up to four PNG, JPEG, WebP or GIF images');
+    await validate(attachments);
+    const images = [];
+    for (const attachment of attachments) {
+      if (attachment.size > 12 * 1024 * 1024) throw new Error('Images for injection must be 12 MB or smaller');
+      const handle = await fs.open(fileFor(attachment.id), 'r');
+      try {
+        if ((await handle.stat()).size !== attachment.size) throw new Error('Attachment changed; attach it again');
+        const bytes = Buffer.alloc(attachment.size);
+        let offset = 0;
+        while (offset < bytes.length) {
+          const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+          if (!bytesRead) throw new Error('Attachment read incomplete');
+          offset += bytesRead;
+        }
+        images.push(await normalizeInputImage(bytes, attachment.name));
+      } finally { await handle.close(); }
+    }
+    return images;
+  });
   staging = next.catch(() => undefined);
   return next;
 }

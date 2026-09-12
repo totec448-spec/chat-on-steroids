@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { beforeAll, afterAll, afterEach, expect, it, vi } from 'vitest';
-import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
+import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { initSessionStore, createSession, readEvents, rebindSession, appendEvent, observeSessionModel, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
@@ -47,7 +47,11 @@ beforeAll(async () => {
   ctx = { roots: [{ name: 'workspace', path: directory }], caps: config.capabilities, readOnly: false, sessionTools: true, agentTools: true };
   endpoint = await startMcpServer(() => ctx);
 });
-afterEach(() => { vi.restoreAllMocks(); ctx.caps = defaultConfig().capabilities; ctx.roots = [{ name: 'workspace', path: directory }]; resetBlockedChatsForTests(); });
+afterEach(async () => {
+  vi.restoreAllMocks(); ctx.caps = defaultConfig().capabilities; ctx.roots = [{ name: 'workspace', path: directory }]; resetBlockedChatsForTests();
+  const config = getConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, allowUnattributedCalls: true } });
+});
 afterAll(async () => {
   await endpoint.stop(); await unifiedExecManager.terminateAllProcesses(); await flushRecorder(); await flushDurable(); resetInputForTests(); resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(directory);
 });
@@ -86,11 +90,11 @@ it('initializes, discovers and executes the actual model-facing MCP contract wit
   expect(JSON.stringify(events.filter(event => event.call.tool === 'exec'))).not.toContain('PRIVATE_ALPHA');
 });
 
-it.runIf(process.platform === 'win32')('routes sky through the actual Desktop MCP registrar, facade, image output and exact child caller', async () => {
-  const who = await identity();
+it.runIf(process.platform === 'win32').each([true, false])('routes sky through Desktop MCP with attributed=%s, retaining observation and live permissions', async attributed => {
+  const who = attributed ? await identity() : { requestId: undefined, session: { id: null } };
   const window = { id: 77, app: 'fixture.exe', title: 'Owned fixture', process: 'fixture', x: 0, y: 0, width: 2, height: 2, dpi: 96 };
   const data = (await sharp({ create: { width: 2, height: 2, channels: 3, background: 'green' } }).png().toBuffer()).toString('base64');
-  const callers: string[] = [];
+  const callers: Array<string | null | undefined> = [];
   vi.spyOn(desktopBackend, 'listWindows').mockImplementation(async () => {
     callers.push(currentCall()!.caller.sessionId!);
     return { windows: [window], screen: { x: 0, y: 0, width: 2, height: 2 } } as never;
@@ -117,8 +121,10 @@ it.runIf(process.platform === 'win32')('routes sky through the actual Desktop MC
   expect(text(revoked)).toContain('TOOL_DISABLED');
   expect(text(revoked)).not.toContain('should not run');
   expect(action).toHaveBeenCalledTimes(1);
-  const names = (await readEvents(who.session.id)).filter(event => event.kind === 'tool_call').map(event => event.call.tool);
-  expect(names).toEqual(expect.arrayContaining(['list_windows', 'get_window_state', 'click', 'activate_window', 'exec']));
+  if (who.session.id) {
+    const names = (await readEvents(who.session.id)).filter(event => event.kind === 'tool_call').map(event => event.call.tool);
+    expect(names).toEqual(expect.arrayContaining(['list_windows', 'get_window_state', 'click', 'activate_window', 'exec']));
+  }
 });
 
 it.runIf(process.platform === 'win32')('prints a complete Desktop state without serializing screenshot bytes as text or losing its images', async () => {
@@ -166,12 +172,47 @@ it('delivers completed terminal output on the outer result even when code filter
 });
 
 it('rejects missing proof, foreign tools, invalid child arguments and nested lifecycle calls', async () => {
+  const config = getConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, allowUnattributedCalls: false } });
   expect(text(await call(undefined, 'text("SHOULD_NOT_RUN")'))).toContain('CALLER_IDENTITY_REQUIRED');
   const who = await identity();
   expect(text(await call(who.requestId, 'text([typeof tools.computer,typeof tools.exec])'))).toBe('["undefined","undefined"]');
   expect(text(await call(who.requestId, 'text(await tools.read({paths:1}))'))).toContain('INVALID_ARGUMENTS');
   for (const code of ['text(await tools.session_finish({summary:"done"}))', 'text(await tools.agents({action:"finish",summary:"done"}))']) {
     expect(text(await call(who.requestId, code))).toContain('DIRECT_CALL_REQUIRED');
+  }
+});
+
+it('allows unattributed file edits through code mode while preserving permissions and chat-owned operations', async () => {
+  const patch = '*** Begin Patch\n*** Add File: /workspace/unattributed.txt\n+created anonymously\n*** End Patch';
+  const response = await call(undefined, `text(await tools.apply_patch({patch:${JSON.stringify(patch)}}));`);
+  expect(response.result.isError, text(response)).not.toBe(true);
+  expect(JSON.parse(text(response)).isError).not.toBe(true);
+  expect(await fs.readFile(path.join(directory, 'unattributed.txt'), 'utf8')).toBe('created anonymously\n');
+  const read = await call(`wfr_${randomUUID().replaceAll('-', '')}`, 'text(await tools.read({paths:["/workspace/unattributed.txt"]}));');
+  expect(text(read)).toContain('created anonymously');
+  const edit = '*** Begin Patch\n*** Update File: /workspace/unattributed.txt\n@@\n-created anonymously\n+edited anonymously\n*** End Patch';
+  const edited = await call(undefined, `text(await tools.apply_patch({patch:${JSON.stringify(edit)}}));`);
+  expect(JSON.parse(text(edited)).isError).not.toBe(true);
+  expect(await fs.readFile(path.join(directory, 'unattributed.txt'), 'utf8')).toBe('edited anonymously\n');
+  ctx.caps = { ...ctx.caps, edit: false };
+  const deniedPatch = edit.replace('-created anonymously', '-edited anonymously').replace('+edited anonymously', '+must not change');
+  const denied = await call(undefined, `text(await tools.apply_patch({patch:${JSON.stringify(deniedPatch)}}));`);
+  expect(JSON.parse(text(denied)).isError).toBe(true);
+  expect(await fs.readFile(path.join(directory, 'unattributed.txt'), 'utf8')).toBe('edited anonymously\n');
+  const plan = await call(undefined, 'text(await tools.update_plan({plan:[{step:"Anonymous plan",status:"in_progress"}]}));');
+  expect(JSON.parse(text(plan)).isError).toBe(true);
+  const finish = await rpc('tools/call', { name: 'session_finish', arguments: { summary: 'done' } });
+  expect(finish.result.isError).toBe(true);
+  expect(text(finish)).toContain('Exact session identity');
+  const config = getConfig();
+  try {
+    await saveConfig({ ...config, multiAgent: { ...config.multiAgent, enabled: true } });
+    const spawn = await call(undefined, 'text(await tools.agents({action:"spawn",workers:[{task:"Must never start"}]}));');
+    expect(JSON.parse(text(spawn)).isError).toBe(true);
+    expect(text(spawn)).toContain('UNIDENTIFIED_CALLER');
+  } finally {
+    await saveConfig(config);
   }
 });
 

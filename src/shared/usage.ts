@@ -15,6 +15,8 @@ export interface UsageModelTokens {
   tokens: number;
 }
 export interface UsageOverview {
+  /** Account-wide comparison ceiling selected from the observed model catalog. */
+  contextTokenCap: number;
   limits: ModelUsage[];
   days: Array<{ date: string; tokens: number; models: UsageModelTokens[] }>;
   models: UsageModelTokens[];

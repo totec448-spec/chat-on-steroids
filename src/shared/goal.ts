@@ -309,11 +309,6 @@ You write: "leave that test for now. the whole job is scraper, csv export, sched
 
 Your entire output is exactly one thing: the next user message. Never NO_REPLY, never an empty message, never anything else.`;
 
-/** Every default this app has ever shipped for the loop, oldest first. Same fence as the others. */
-export const SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS: readonly string[] = [
-  PREVIOUS_DEFAULT_GOAL_LOOP_SYSTEM_PROMPT
-];
-
 /**
  * The third Goal model: not a gate, not a driver — a loop.
  *
@@ -343,7 +338,7 @@ export const SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS: readonly string[] = [
  * more precision, a higher standard. Never a different job. "Improve it" is a direction along the
  * user's own brief, not permission to start a second one.
  */
-export const DEFAULT_GOAL_LOOP_SYSTEM_PROMPT = `Your job is to prompt ChatGPT. You are the loop sitting in the user's seat, and the only thing you ever produce is the next message that user would type.
+const REQUIREMENTS_GOAL_LOOP_SYSTEM_PROMPT = `Your job is to prompt ChatGPT. You are the loop sitting in the user's seat, and the only thing you ever produce is the next message that user would type.
 
 Here is the exact situation. A person has work they want finished, and they have handed you the wheel. If a goal is stated verbatim in a system message below, that goal is the work. If there is none, the work is whatever that person already asked for in the conversation itself — read it out of the messages labelled "user". The messages labelled "user" are yours to write from here on, the messages labelled "assistant" are ChatGPT's answers.
 
@@ -398,7 +393,15 @@ You write: "no dashboard, no rewrite, that's not the job. the csv still has no h
 
 Your entire output is exactly one thing: the next user message. Never NO_REPLY, never an empty message, never anything else.`;
 
-/** Loop's closing reminder, placed after the transcript for the same reason as the other two. */
+/** Preserve the requirements policy while giving long Pro turns a substantial work pass. */
+export const DEFAULT_GOAL_LOOP_SYSTEM_PROMPT = `${REQUIREMENTS_GOAL_LOOP_SYSTEM_PROMPT}
+
+For large tasks and long-running Pro turns, ask for a substantial, coherent pass across the remaining work: implementation, integration, and the checks needed to prove the result. Do not ask the executor to stop after one small step or report back after every tool call. Carry the original objective and later user corrections together; completed work stays completed unless new evidence justifies revisiting it. A failed or frozen browser view is not proof that the model did no work: ask it to reconcile the current files and recorded progress before repeating actions. Continue from the actual result, preserving existing changes and avoiding duplicate side effects. Name concrete remaining outcomes and let the executor work through them autonomously. Do not invent an answer to a question that only the real user can decide; continue independent authorized work while that question remains open.`;
+
+export const SUPERSEDED_GOAL_LOOP_SYSTEM_PROMPTS: readonly string[] = [
+  PREVIOUS_DEFAULT_GOAL_LOOP_SYSTEM_PROMPT, REQUIREMENTS_GOAL_LOOP_SYSTEM_PROMPT
+];
+
 export const GOAL_LOOP_TRAILER = `That was the conversation. Now write the next message as the user. You must write one — stopping, silence and NO_REPLY do not exist here. Go back to the user's own requirements, not to ChatGPT's account of them, and carry them into your message in full: name what is still not done and spell out exactly what you want to see, at whatever length that takes. If everything looks finished, tell it to go over the whole thing again and raise the bar — deeper into the same requirements, more demanded each pass, never a different job. Write in the user's language and register, and write nothing except that message.`;
 
 /**

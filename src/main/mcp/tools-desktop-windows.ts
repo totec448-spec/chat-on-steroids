@@ -4,6 +4,7 @@ import { act, getWindowState, ComputerError } from '../computer/index.js';
 import { createWindowsComputerApi, WINDOWS_API_METHODS, WINDOWS_API_SCHEMAS, type WindowsComputerApi } from '../computer/windows-api.js';
 import { browserTabChord, isBrowserProcess } from '../computer/browser-chords.js';
 import { currentCall, noteCount } from './call-context.js';
+import { getConfig } from '../config.js';
 import { fail, type SurfaceRegistrar, type ToolContent, type ToolResult } from './kernel.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
 import { toolDeclaration } from './tool-declarations.js';
@@ -12,18 +13,21 @@ const READ_METHODS = new Set<string>(WINDOWS_COMPUTER_READ_METHODS);
 const STATE_INPUT_METHODS = new Set<string>(WINDOWS_COMPUTER_STATE_INPUT_METHODS);
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024 - 64 * 1024;
 // Only disposable observation indexes/geometry live here; the native frame/ref owner still
-// validates generation, identity and current geometry. A missing caller cannot borrow a
-// different conversation's latest element indexes. No images or userData are persisted.
+// validates generation, identity and current geometry. Explicitly allowed unattributed
+// calls share a separate context; they never borrow an identified chat's observations.
+// No images or userData are persisted.
 const contexts = new Map<string, WindowsComputerApi>();
 const MAX_CONTEXTS = 32;
 
 function apiForCaller(method: string): WindowsComputerApi {
   const caller = currentCall()?.caller;
   const principal = caller?.sessionId ? `session:${caller.sessionId}`
-    : caller?.conversationId ? `chat:${caller.conversationId}` : null;
+    : caller?.conversationId ? `chat:${caller.conversationId}`
+    : getConfig().multiAgent.allowUnattributedCalls ? 'unattributed' : null;
   if (!principal) {
+    contexts.delete('unattributed');
     if (STATE_INPUT_METHODS.has(method)) {
-      throw new ComputerError('CALLER_IDENTITY_REQUIRED: indexed and coordinate input requires this conversation’s exact companion identity; no input ran.');
+      throw new ComputerError('CALLER_IDENTITY_REQUIRED: indexed and coordinate input requires exact companion identity or Allow unattributed calls enabled in app settings; no input ran.');
     }
     // Unattributed reads/simple exact-window operations remain useful, but never publish
     // an implicit latest-observation authority that another anonymous call could consume.

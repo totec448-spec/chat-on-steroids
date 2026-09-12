@@ -9,6 +9,7 @@ import { initSessionStore, createSession, appendEvent, observeSessionModel, rese
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import { enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
 import { validateInputImages } from '../src/main/session/input-images.js';
+import { stageInputAttachment } from '../src/main/session/input-attachments.js';
 import { startMcpServer } from '../src/main/mcp/server.js';
 import { setFinishNotifier, releaseSessionFinish } from '../src/main/session/finish.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -30,7 +31,11 @@ it('carries validated user image bytes through an exact-session MCP result and a
     const bytes = await sharp({ create: { width: 12, height: 12, channels: 3, background: '#437b79' } }).webp().toBuffer();
     const images = [{ name: 'reference.webp', dataUrl: `data:image/webp;base64,${bytes.toString('base64')}` }];
     await validateInputImages(images);
-    const input = await enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'Use this image', images, mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+    const attachment = await stageInputAttachment({ name: 'reference.webp', bytes }, new Set());
+    const authored = { id: randomUUID(), sessionId: session.id, text: 'Use this image', attachments: [attachment], attachmentDelivery: 'tool' as const, mode: 'auto' as const, dueAt: 0, model: null, reasoningEffort: null };
+    const input = await enqueueInput(authored);
+    expect((await enqueueInput(authored)).id).toBe(input.id);
+    const injectedBytes = input.toolImages![0]!.dataUrl.split(',')[1]!;
     const additional = [];
     for (const text of ['Use the connected plugin', 'Include the requested movements']) {
       additional.push(await enqueueInput({ id: randomUUID(), sessionId: session.id, text, ...(text === 'Include the requested movements' ? { images } : {}), mode: 'auto', dueAt: 0, model: null, reasoningEffort: null }));
@@ -45,6 +50,7 @@ it('carries validated user image bytes through an exact-session MCP result and a
     const first = await call();
     expect(first.result.isError).not.toBe(true);
     expect(first.result.content).toContainEqual({ type: 'image', mimeType: 'image/webp', data: bytes.toString('base64') });
+    expect(first.result.content).toContainEqual({ type: 'image', mimeType: 'image/webp', data: injectedBytes });
     const texts = first.result.content.filter((row: { type: string }) => row.type === 'text').map((row: { text: string }) => row.text).join('\n');
     expect(texts.match(/--- New instructions from the user ---/g)).toHaveLength(1);
     expect(texts.match(/Use session_finish/g)).toHaveLength(1);

@@ -1371,7 +1371,10 @@
   function readPickerSnapshot(node) {
     let fiber = node && fiberOf(node);
     for (let up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
-      const props = fiber.memoizedProps;
+      // The September composer retains the unmounted menu as dropdownContent.
+      // Read that exact native child too; opening it is unnecessary for observation.
+      const owner = fiber.memoizedProps;
+      const props = owner?.composerIntelligencePickerState ? owner : owner?.dropdownContent?.props;
       const state = props?.composerIntelligencePickerState, data = props?.modelsData;
       if (!state || !Array.isArray(data?.versions)) continue;
       if (data.versions.length > 20 || !Array.isArray(state.bucketSelections) || state.bucketSelections.length > 12) return null;

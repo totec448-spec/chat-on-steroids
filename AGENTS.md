@@ -362,7 +362,9 @@ internal length and closing boundary; authored whitespace after the frame remain
 ### `exec({code})` composes tools; it is not a shell
 
 Code mode offers top-level await, `tools.<name>(args)`, `Promise.all`, `text(...)` and `image(...)`
-within one surface. Exact request/conversation/durable-session proof is required before evaluation.
+within one surface. Evaluation requires exact request/conversation/durable-session proof or
+the user's `allowUnattributedCalls` setting. Composition itself owns no chat state; children
+retain their individual identity requirements and current capability checks.
 QuickJS runs in a disposable Node Worker with no ambient Node, filesystem or network API.
 Children reuse the same registrar, validation, handler and dispatcher, inherit exact caller proof
 and recheck live permissions/roots. Each child records fresh evidence; only the outer response
@@ -428,8 +430,13 @@ open at admission; calls sharing a request serialize in admission order and each
 session serializes its writes. Different chats must not wait behind one global grace timer.
 Already-proven calls await their own recording; unresolved recordings may settle after response.
 
-`allowUnattributedCalls` relaxes only selected ambiguity fences. Identity-sensitive routing,
-code mode, plan updates, agent operations and terminal custody still need their own proof.
+`allowUnattributedCalls` permits ordinary tools and code mode without chat attribution,
+including computer use, approved file edits, shell commands and external plugin tools.
+Windows observations use a separate shared unattributed context so follow-up input works.
+Plan updates, agent operations, finish signals, chat-specific workspace selection and owned
+terminal access still require their actual owner; the setting cannot invent that identity.
+Anonymous terminals retain their existing anonymous custody. Live capabilities, approved roots
+and native window/frame/ref validation still apply.
 A positively known blocked, retired, ended or superseded caller is refused regardless of that
 preference. Refused historical calls must not revive workers, acknowledge inboxes or grant
 activity to a successor chat.
@@ -586,6 +593,8 @@ and nested code-mode calls do not receive or acknowledge these automatic pages.
 limits. Structural checks plus actual Sharp/libvips pixel decoding precede an MCP image block.
 Metadata parsing alone is insufficient. Return one native image copy, not duplicate base64 in
 structured output. Its validator also owns code-mode emitted-image admission.
+JPEG end markers terminate the codestream, not necessarily the containing file; trailing bytes
+must not reject an otherwise decodable image. Full bounded pixel decoding still owns validity.
 
 `download_artifact` saves a native ChatGPT/user-supplied file reference into an approved
 destination. `artifact-fetch.ts` validates the allowed HTTPS source and every redirect;
@@ -601,6 +610,9 @@ or duplicating a message after an ambiguous browser outcome. One outbox owns all
 
 ### Input from composition to receipt
 
+The chat composer and queued-message editor have no HTML character cap. Send and queue edits
+share the existing 96,000-character message admission ceiling; prepared delivery additionally
+enforces framing and UTF-8 byte budgets with an explicit error.
 The desktop composer uses native CSS content sizing, bounded at 220px. Layout owns its
 height across draft changes, hidden panels and width changes; do not persist a measured
 `scrollHeight` as an inline height. Empty and fitting input must not overflow; longer text
@@ -620,9 +632,10 @@ text remains separate. A failed write cannot later become a successful hidden en
 | Delivery choice | Eligibility and behavior |
 | --- | --- |
 | Immediate / `auto` | In an exact active non-Pro turn before its first MCP call, show **Send directly**: claim that original turn, stop its native generation, then use normal browser Send. After the first MCP call, show **Inject now** and deliver in an eligible outer MCP result. Pro (including Astra) keeps injection throughout. A new turn resets eligibility; old tool history does not count. For a proven idle chat/New Chat, elect the normal browser send. Unknown model/turn identity grants no interruption. |
-| After turn | Existing-session FIFO spends one distinct verified completed `turn_end` per browser claim. Replays/restart cannot drain the next entry. Does not block an otherwise eligible immediate tool injection. |
+| After turn | Existing-session FIFO spends one distinct completion, settled native Thinking failed, or confirmed silence-refresh ticket per browser claim. Replays/restart cannot drain the next entry. Does not block an otherwise eligible immediate tool injection. |
 | Finish checkpoint | Waits for a successful finish-tool boundary; ordinary eligible chats can deliver after verified completion. Astra's separate after-turn opt-in remains explicit. Checkpoints inherit the current chat model. |
 | Native attachment | Browser upload/send only. A file-bearing active-chat input waits for the browser-safe boundary; it never becomes a tool-result file reference. |
+| Image injection | When **Inject now** is available, an image-only selection of up to four PNG/JPEG/WebP/GIF files enters the exact chat's outer tool result as image blocks. New Chat, after-turn, mixed files and larger selections use native upload. |
 | Decision/planner | Role-specific request through the same claim/receipt infrastructure, with its own result consumer and cancellation. |
 
 Browser delivery elects one exact tab/document/epoch and checks the right existing conversation
@@ -641,7 +654,32 @@ turn-start and last-tool evidence plus in-flight MCP custody decide eligibility;
 tool-seen flag owns it. Recheck the exact claim before native interruption and before Send.
 Navigation, a newer question, an occupied draft or a first MCP call during preparation can
 revoke delivery. A claimed browser correction never also enters a tool result. After-turn
-entries retain their verified-completion policy and never acquire interruption authority.
+entries retain their source-boundary policy and never acquire interruption authority.
+
+Native **Thinking failed** is recognized only by its exact visible disclosure button inside the
+current assistant turn, excluding quoted Markdown, old turns and app UI. Detection begins a fixed
+30-second ignore period for delayed activity, followed by five minutes listening for MCP/interim
+work. New work during listening abandons the failure verdict and returns to the ordinary silence
+clock; an exact native final wins immediately. Only the settled failure carries the structured
+`thinking_failed` reason into recording and after-turn delivery. Generic failure prose does not.
+Failure/silence-based delivery requires a recorded, exactly attributed local MCP call in that
+source turn. Native ChatGPT tools, request-id sightings without a call, and earlier turns' MCP
+history do not qualify. Check the recorded evidence again for restored tickets and before claim;
+refresh itself and normal delivery after a genuine final do not require this MCP proof.
+For Pro, a settled failure files the same outbox ticket used by silence recovery: a still-running
+native page adds five minutes before pickup, including after restart. It cannot bypass an existing
+busy deadline, and another queued message cannot overtake its deferred ticket. Non-Pro failure
+delivery retains its existing policy.
+
+Queued after-turn work uses the bridge's existing ten-minute silence/refresh authority. An ACK
+for that exact refresh files `silenceBoundary` on the next existing outbox row before publication.
+It records source conversation/turn and work sequence; no parallel ticket ledger or scheduler.
+Native Stop prevents claiming/sending and durably extends listening by five minutes, rechecking
+again if it remains busy. A genuine final can release the message normally during that window.
+New work withdraws an unspent ticket/pre-send claim and rearms the ten-minute clock. Authorized
+sends retain exclusive custody until their exact receipt or proven pre-send failure. Source work,
+document epoch, question, draft and native Send are rechecked across preparation awaits. An
+unclassified `stalled` end alone does not release a message; the refresh receipt is required.
 
 Prepared text enters the native editor in one native `execCommand('insertHTML')` operation,
 with inline text nodes and BR line breaks, without an extra outer paragraph. Select the replacement/append range and
@@ -690,9 +728,16 @@ reject an upload. Staging has a 2 GiB quota, serialized pruning/admission, and p
 retained bytes. Thumbnails do not modify originals or prove provider upload success.
 
 Bridge chunks are bounded to 512 KiB and require the exact pre-send claimed input and attachment
-membership. Native upload completion and final provider submission are separate checks. Legacy
-normalized tool images live in `input-images.ts`; do not confuse them with arbitrary native
-files. Never send a path/reference while implying its bytes reached ChatGPT.
+membership. Native upload completion and final provider submission are separate checks.
+Explicit image injection freezes `attachmentDelivery: tool` plus normalized `toolImages` in
+the same outbox row, preserving authored attachment IDs for idempotent retries. Staging owns
+the bounded original reads; `input-images.ts` fully decodes at most 12 MiB/30 million pixels
+per source and normalizes to WebP within 1600x1600 and the existing encoded-image limit.
+The exact active owner is rechecked after preparation. A tool-only input never falls back to
+a native browser message; existing outer-result offers and receipts own delivery. History
+records the normalized assets once, without duplicating thumbnail cards. Legacy `images`
+remain supported under the same combined four-image and queue limits. Never send a path or
+reference while implying its bytes reached ChatGPT.
 
 ### Generated workflow vs the agent's displayed plan
 
@@ -746,8 +791,8 @@ checkpoint; empty holds can wait without inventing new work. “End turn” dura
 hold so ChatGPT may finish; it does not pretend native generation has stopped.
 
 For Astra, **both Goal and Loop use the Loop decision path at the finish boundary** and inject
-the resulting instruction through tools. A completed final answer does not automatically send
-another browser message. `automaticFinishEnabled()` is shared by generation and queued-input
+the resulting instruction through tools. A completed final answer sends another browser message
+only when Pro Loop explicitly enables after-turn delivery (§17). `automaticFinishEnabled()` is shared by generation and queued-input
 validity: armed Goal/Loop suppresses Notify even if the global finish action is Notify.
 
 Finish decision generation deduplicates by actual recorded work/input revision, not a new
@@ -828,6 +873,10 @@ Large text has distinct inline/overflow/asset/read/render limits. Do not silentl
 authored history to fix the UI. Asset quotas and explicit overflow ceilings remain enforced;
 if earlier recording already lost content, expose that loss. Retention runs once on startup
 and every six hours using current settings, even when new recording is Off.
+Image asset admission failures preserve the original MCP response and tool outcome. The recorder
+adds a bounded, path-free warning to the existing activity summary, including quota exhaustion;
+older successful `view_image` rows without assets explicitly show that no preview was retained.
+Neither a saved preview nor a local HTTP completion proves remote model comprehension.
 
 ### Two history consumers
 
@@ -859,8 +908,13 @@ already available state; it does not retain raw account payloads. App `session/u
 one fresh validated snapshot, replaces rather than merges accounts/tabs, and distinguishes
 model, shared and feature pools. Missing/expired values mean unreported, never zero/full.
 
-Daily work/cost charts use a **local estimate**, currently final frontend-context size / 2 per
-unique recorded tool call, with editable divisor, multiplier and per-model comparison rates.
+Daily work/cost charts use a **local estimate**: cap final frontend context, then / 2 per unique
+recorded tool call, with editable divisor, multiplier and per-model comparison rates. If the
+observed account catalog offers any Pro model or Pro reasoning option, the cap is 400,000 for
+all models; otherwise it is 256,000. Historical usage alone does not establish availability.
+This billing policy neither changes recorded context/compaction nor claims a provider input
+limit. Cap each frontend before aggregation, never the daily/model totals. The selected cap
+belongs to the Usage snapshot and cache revision; availability changes invalidate old totals.
 Model changes affect attribution; compaction starts another frontend segment. Duplicate call
 ids do not count twice. Historical rows without model proof carry an explicitly assumed legacy
 model. Canonical revision/timezone-keyed `usage-cache` avoids rereading unchanged transcripts;
@@ -920,10 +974,15 @@ Send. A visible option, an English label, a remembered release name or “Upgrad
 entitlement. Do not enumerate every model × effort or create helper tabs to compensate for an
 uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 
-Direct Chrome selection is observed even with the picker closed. The existing MAIN scan joins
-the current composer's exact model identity to the native trigger's visible effort, then stamps
-that same document/route for the isolated reader. It does not open the picker or discover new
-entitlements. Unknown labels, conflicting model identities and ambiguous triggers remain unknown.
+Direct Chrome selection is observed even with the picker closed. The existing MAIN scan reads
+the current native picker state, including September's retained `dropdownContent.props`, then
+stamps exact model/effort and document/route for the isolated reader. The older closed-trigger
+model/effort join remains supported. Ambiguous triggers and unrecognized state remain unknown.
+Passive discovery copies only account-evaluated available choices from that snapshot and works
+while a Pro turn runs or a draft exists; it never opens the menu, changes selection or clears text.
+Older interfaces may use the existing idle-only picker inspection. OS wake is dispatch, not
+discovery completion: the IPC request returns pending and the bounded observation deadline owns
+the result, so a stalled launch cannot hold Refresh/Send indefinitely.
 
 Successful catalogs retain their observation time and persist across restart. Discovery is a
 bounded nonce-scoped operation (120 seconds, at most 20 accepted models); failed refresh leaves
@@ -1016,7 +1075,7 @@ permission to reopen the session list. A plain historical chat with no current w
 | Page silence | Known live activity with model-specific deadline; a live local process and browser liveness are different facts. |
 | Assistant error | Exact turn/error, per-turn retry budget and cooldown; repair the broken page without fabricating a new task. |
 | Unattributed | A separate unresolved incident after attribution has landed; re-observe suspects, never assign ownership by proximity. |
-| Goal watch | One qualified waiting episode for an eligible exact non-Pro source turn and still-active obligation. |
+| Goal watch | One qualified waiting episode for an eligible exact source turn and still-active obligation; opted-in Pro Loop uses a ten-minute floor. |
 | Compaction pickup | A durable continuation ticket whose current transport phase allows that pickup. |
 
 Unattributed recovery uses staged 0/30/60-second incident deadlines according to live suspects;
@@ -1027,8 +1086,9 @@ compaction and no-tab are independently gated rather than sharing that cooldown.
 
 Silence handling gives ordinary positively known non-Pro work a two-minute policy and Pro a
 longer ten-minute evidence budget; unknown-model work remains conservative. A synthesized
-continuation additionally needs exact durable non-Pro source-turn proof. Reloading Pro does
-not authorize a new Pro turn. Goal's shorter watch is not a generic one-minute keepalive.
+continuation additionally needs exact durable source-turn proof. Reloading Pro can file the next
+queued after-turn input under §11, or an opted-in Pro Loop ticket under §17. User inputs take
+precedence. Goal's shorter watch is not a generic one-minute keepalive.
 Publishing a repair wakes the extension over the existing authenticated socket; due repairs run
 before window layout, input preparation and idle-tab pruning. The MV3 30-second maintenance
 alarm remains a recovery cadence, not the normal pickup path.
@@ -1203,10 +1263,22 @@ its pending attempt. Objective text survives Off/completion for later reuse. Rep
 → On → Off must operate on current durable authority, not an old callback's enabled snapshot.
 Master Off clears ordinary chat overrides while keeping internal helper-role records.
 
-Ordinary non-Astra Goal/Loop considers verified **completed final answers**, not interrupted
-turns or generic composer idleness. Exact Pro is excluded from synthetic automatic next turns.
-Astra instead uses `session_finish`: both selected modes invoke the Loop decision policy and
-inject through the eligible tool response (§11), never browser-auto-send after its final.
+Ordinary non-Pro Goal/Loop considers verified **completed final answers**, not interrupted
+turns or generic composer idleness. Pro Loop defaults to **Only finish**. Its per-chat switch
+can opt into **After this turn + finish**; the preference survives toggles, restart and resume.
+Astra Goal remains finish-only. At `session_finish`, both modes use the Loop decision policy
+and inject through the eligible tool response (§11).
+
+Opted-in Pro Loop uses the existing Goal reply ledger for real finals, settled Thinking failed
+(§11), and ten minutes of silence followed by an acknowledged refresh. Synthetic tickets require
+the same current-turn MCP proof as after-turn input; no MCP means no synthetic reply debt.
+They retain the exact source turn, work sequence and Pro policy. Native busy durably defers the same ticket
+by five minutes, repeatedly if necessary. MCP/interim work revokes the ticket and pending draft
+and rearms ten minutes; fresh work/queue priority and exact document/draft authority are checked
+again before Send. The existing uncollected-ticket refresh schedule has a ten-minute floor for
+this mode and respects its listening deadline. No second scheduler or outbox is introduced.
+The default Loop instruction asks for substantial integrated work on large tasks and reconciles
+recorded progress after a failed view; only exact shipped defaults migrate, preserving custom text.
 Decision helpers/planners and workers cannot recursively start their own Goal/Loop driver.
 
 Stop, block, replacement, a newer turn, mode/settings changes and input revision invalidate
@@ -1359,7 +1431,10 @@ postconditions. Registrars own live capability checks. Windows `windows-api.ts` 
 13 Window2 methods: `list_windows`, `get_window`, `list_apps`, `launch_app`, `get_window_state`,
 `click`, `press_key`, `type_text`, `scroll`, `set_value`, `drag`, `perform_secondary_action`,
 `activate_window`. The old `observe`/`computer` wrapper is macOS-only. Windows observation state
-is bounded per exact caller, contains no pixels/text, and input consumes its indexes/geometry.
+is bounded per exact caller or a separate shared unattributed context when explicitly allowed,
+contains no pixels/text, and input consumes its indexes/geometry. Identified and unattributed
+calls never borrow each other's observations. Opted-out anonymous calls discard that context
+and refuse indexed/coordinate input.
 Explicit activation consumes observation state too; ordinary input already activates its target.
 Late observations and replaced principals cannot lend another call their state.
 Observe → act uses exact frame/ref, target geometry and

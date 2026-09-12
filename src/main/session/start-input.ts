@@ -57,7 +57,7 @@ export async function sendDesktopInput(input: InputArgs): Promise<InputEntry> {
     // Cancellation can arrive while the durable enqueue is committing.
     if (controller.signal.aborted) { await cancelInput(input.id); controller.signal.throwIfAborted(); }
     starting.delete(input.id);
-    if (entry.state !== 'queued') return entry;
+    if (entry.state !== 'queued' || entry.attachmentDelivery === 'tool') return entry;
     return deliver(entry);
   } finally { if (starting.get(input.id) === controller) starting.delete(input.id); }
 }

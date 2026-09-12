@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { deflateSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import sharp from 'sharp';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   VIEW_IMAGE_INVALID_MESSAGE,
@@ -215,6 +216,28 @@ function webpWithPlausibleVp8PrefixButNoBitstream(): Buffer {
 }
 
 describe('Codex view_image runtime parity', () => {
+  it.each(['\n', '\r\n', '\0trailing bytes'])('accepts a decodable JPEG with trailing %j without changing its pixels or bytes', async tail => {
+    const root = await tempRoot();
+    const jpeg = await sharp({ create: { width: 8, height: 6, channels: 3, background: '#d23761' } }).jpeg().toBuffer();
+    const bytes = Buffer.concat([jpeg, Buffer.from(tail)]);
+    const file = path.join(root, 'trailing.jpg');
+    await writeFile(file, bytes);
+    const result = await viewImage(file, null);
+    expect(result.mimeType).toBe('image/jpeg');
+    expect(Buffer.from(result.base64, 'base64')).toEqual(bytes);
+    expect(await sharp(Buffer.from(result.base64, 'base64')).raw().toBuffer()).toEqual(await sharp(jpeg).raw().toBuffer());
+  });
+
+  it('still rejects a truncated JPEG and corrupt scan data even with a trailing end marker', async () => {
+    const root = await tempRoot();
+    const jpeg = await sharp({ create: { width: 8, height: 6, channels: 3, background: '#d23761' } }).jpeg().toBuffer();
+    const file = path.join(root, 'truncated.jpg');
+    await writeFile(file, jpeg.subarray(0, jpeg.length - 2));
+    await expect(viewImage(file, null)).rejects.toThrow(VIEW_IMAGE_INVALID_MESSAGE);
+    await writeFile(file, Buffer.concat([jpegWithScanHeaderButNoEntropyData(), Buffer.from('\n')]));
+    await expect(viewImage(file, null)).rejects.toThrow(VIEW_IMAGE_INVALID_MESSAGE);
+  });
+
   it('budgets the native MCP base64 image inside the connector wire envelope', () => {
     const encodedChars = 4 * Math.ceil(MAX_VIEW_IMAGE_BYTES / 3);
     expect(encodedChars + 64 * 1024).toBeLessThanOrEqual(8 * 1024 * 1024);
