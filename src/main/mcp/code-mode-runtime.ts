@@ -129,8 +129,10 @@ export async function runCodeMode(
         if (emission.kind === 'text' && typeof value === 'string') content.push({ type: 'text', text: value });
         else if (emission.kind === 'image') content.push(await emittedImage(value));
         else throw new Error('OUTPUT_INVALID');
-      } catch { return { content: [...content, ...errorResult('OUTPUT_INVALID: image or text could not be validated.').content], isError: true }; }
+      } catch { return { content: [...errorResult('OUTPUT_INVALID: image or text could not be validated.').content, ...content], isError: true }; }
     }
+    // Status must survive head-only logs and bounded history previews, even after a full emission.
+    const diagnostics: ToolContent[] = [];
     if (status) {
       const effects = calls
         ? `${calls} tool calls already dispatched; side effects were not rolled back. Inspect current state before retrying.`
@@ -142,10 +144,10 @@ export async function runCodeMode(
           : status === 'SCRIPT_ERROR'
             ? ' Check the JavaScript and available tool names; catch an expected error and explicitly text(...) only the details you need.'
             : '';
-      content.push(...errorResult(`${status}: execution stopped. ${effects}${hint} Unemitted values remain private.`).content);
+      diagnostics.push(...errorResult(`${status}: execution stopped. ${effects}${hint} Unemitted values remain private.`).content);
     }
-    if (pending.size) content.push(...errorResult('UNAWAITED_CALLS: dispatched tool calls are still running and remain recorded. Side effects were not cancelled.').content);
-    return { content, ...(status || pending.size ? { isError: true } : {}) };
+    if (pending.size) diagnostics.push(...errorResult('UNAWAITED_CALLS: dispatched tool calls are still running and remain recorded. Side effects were not cancelled.').content);
+    return { content: [...diagnostics, ...content], ...(status || pending.size ? { isError: true } : {}) };
   } finally {
     ended = true;
     await worker?.terminate();

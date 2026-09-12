@@ -190,15 +190,16 @@ const excludeFolderPattern = z
 
 const unifiedExecOutputSchema = z
   .object({
-    chunk_id: z.string().optional().describe('Chunk identifier included when the response reports one.'),
-    wall_time_seconds: z.number().describe('Elapsed wall time spent waiting for output in seconds.'),
+    chunk_id: z.string().optional().describe('Output chunk identifier.'),
+    wall_time_seconds: z.number().describe('Seconds spent waiting for output.'),
     exit_code: z.number().optional().describe('Process exit code when the command finished during this call.'),
     session_id: z
       .number()
       .optional()
       .describe('Session identifier to pass to write_stdin when the process is still running.'),
     original_token_count: z.number().optional().describe('Approximate token count before output truncation.'),
-    output: z.string().describe('Command output text, possibly truncated.')
+    output: z.string().describe('Command output text, possibly truncated.'),
+    supplemental_context: z.string().optional().describe('App context, not process output.')
   })
   .strict();
 

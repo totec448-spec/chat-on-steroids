@@ -802,6 +802,14 @@ async function dispatchTracked(
     const added = pluginManager.redactResult({ content: delivered.content.slice(baseResult.content.length) });
     delivered = { ...delivered, content: [...baseResult.content, ...added.content as ToolResult['content']] };
   }
+  // Some hosts consume structured results instead of content. Core owns these shapes;
+  // project its final app appendices once without changing the underlying tool data.
+  if (surface === 'core' && delivered.structuredContent) {
+    const supplemental = delivered.content.slice(baseResult.content.length)
+      .filter((part): part is Extract<ToolContent, { type: 'text' }> => part.type === 'text')
+      .map(part => part.text).join('\n');
+    if (supplemental) delivered = { ...delivered, structuredContent: { ...delivered.structuredContent, supplemental_context: supplemental } };
+  }
   const recorderStartedAt = Date.now();
   // Event duration includes identity/handler/delivery work. Recorder and local HTTP finish
   // are measured separately because a row cannot contain the time of its own later commit.
