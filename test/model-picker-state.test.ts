@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 const domSource = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
 const fiberSource = readFileSync(new URL('../extension/fiber.js', import.meta.url), 'utf8');
+const contentSource = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
 let page: JSDOM;
 afterEach(() => { page?.window.close(); });
 it('reveals the native New Chat control through the compact sidebar before reuse', async () => {
@@ -94,6 +95,34 @@ it('reads localized nested models and future efforts from account state, exclude
   // Only restore the original High once; discovery never sweeps every power level.
   expect(f.actions.mock.calls.filter(([action]) => action === 'effort')).toHaveLength(1);
 });
+it.each([true, false])('discovers 5.6 Pro outside Latest through the content workflow only when available (%s)', async available => {
+  const f = fixture();
+  f.props.modelsData.versions[1]!.id = '5.6';
+  f.props.modelsData.versions[1]!.displayTextForIntelligence = 'GPT-5.6 Sol';
+  const latest = f.selections[0]!;
+  latest[2]!.availability.status = 'available';
+  for (const choice of latest.slice(0, 2)) (choice.category as any).modelVersion = '5.6';
+  f.selections[1] = [...latest.slice(0, 2), { ...latest[2]!, modelSlug: 'gpt-5-6-pro',
+    availability: { status: available ? 'available' : 'upgrade_required' },
+    category: { ...latest[2]!.category, shortLabel: '5.6 Pro', modelVersion: '5.6' } as any }];
+  const ask = vi.fn(async () => ({ ok: true }));
+  const section = contentSource.slice(contentSource.indexOf('  function catalogPageReady('), contentSource.indexOf('  /** Popup commands target this tab'));
+  const run = page.window.Function('ask', `
+    const alive = true, epoch = 1, conversationId = null;
+    let desktopInputBusy = false, modelCatalogBusy = false, generating = false;
+    ${section}
+    return inspectAppModelCatalog({ nonce: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', expiresAt: Date.now() + 10000 });
+  `);
+  expect(await run(ask)).toBe(true);
+  expect(ask).toHaveBeenCalledTimes(1);
+  const models = (ask.mock.calls[0] as any)[0].models;
+  expect(models).toContainEqual({ id: '5.6', label: 'GPT-5.6 Sol', efforts: available ? ['medium', 'high', 'pro'] : ['medium', 'high'],
+    aliases: available ? ['gpt-5-6-thinking', 'gpt-5-6-pro'] : ['gpt-5-6-thinking'] });
+  expect(models).toContainEqual({ id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'], aliases: ['gpt-6-pro'] });
+  expect(f.state.selectedVersionEntry.id).toBe('latest');
+  expect(f.state.currentBucket).toBe(2);
+  expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+});
 it('rejects a mounted composer hidden by Settings while recognizing the visible High picker', async () => {
   const f = fixture(), doc = page.window.document;
   doc.querySelector('button')!.textContent = 'High';
@@ -115,6 +144,45 @@ it('confirms the exact model and effort and refuses visible upgrade-only entries
   expect(f.state.currentSelection).toMatchObject({ modelSlug: 'future-model', thinkingEffort: 'ultra' });
   expect(await f.api.selectModelSettings('gpt-6-pro', 'pro')).toBe(false);
   expect(f.state.currentSelection).toMatchObject({ modelSlug: 'future-model', thinkingEffort: 'ultra' });
+});
+function workSurfaceFixture(cold: boolean) {
+  const f = fixture(), doc = page.window.document;
+  const versions = f.props.modelsData.versions;
+  // Work has a different account picker. The Chat reader must not treat it as
+  // an unavailable Chat model, including while the home editor hydrates first.
+  f.props.modelsData.versions = [];
+  doc.body.insertAdjacentHTML('afterbegin', '<button role="radio" data-tpp-toggle-value="chatgpt" aria-checked="false">Chat</button><button role="radio" data-tpp-toggle-value="work" aria-checked="true">Work</button>');
+  const chat = doc.querySelector('[data-tpp-toggle-value="chatgpt"]')!;
+  const switchChat = vi.fn(() => {
+    chat.setAttribute('aria-checked', 'true');
+    doc.querySelector('[data-tpp-toggle-value="work"]')!.setAttribute('aria-checked', 'false');
+    doc.querySelector('#prompt-textarea')!.replaceWith(doc.querySelector('#prompt-textarea')!.cloneNode(true));
+    f.props.modelsData.versions = versions;
+  });
+  chat.addEventListener('click', switchChat);
+  if (cold) {
+    const trigger = doc.querySelector('form button')!, parent = trigger.parentElement!;
+    trigger.remove();
+    queueMicrotask(() => parent.prepend(trigger));
+  }
+  return { ...f, chat, switchChat };
+}
+it.each([false, true])('selects a worker model from the native Work surface after picker hydration (cold=%s)', async cold => {
+  const f = workSurfaceFixture(cold);
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(true);
+  expect(f.switchChat).toHaveBeenCalledTimes(1);
+  expect(f.state.currentSelection).toMatchObject({ modelSlug: 'future-model', thinkingEffort: 'ultra' });
+  expect(page.window.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  expect(await f.api.selectModelSettings('future-model', 'ultra')).toBe(true);
+  expect(f.switchChat).toHaveBeenCalledTimes(1);
+});
+it('refuses model selection when the owned page changes during the Work to Chat transition', async () => {
+  const f = workSurfaceFixture(false);
+  let current = true;
+  f.chat.addEventListener('click', () => { current = false; });
+  expect(await f.api.selectModelSettings('future-model', 'ultra', () => current)).toBe(false);
+  expect(f.switchChat).toHaveBeenCalledTimes(1);
+  expect(f.actions).not.toHaveBeenCalled();
 });
 it('groups provider family lanes and selects Pro through the same family instead of a separate execution slug', async () => {
   const f = fixture();
@@ -188,7 +256,7 @@ it('keeps an explicit model denial unavailable even when the preset is visible',
   const f = fixture(); (f.props.modelSwitcherDenialsBySlug as any)['future-model'] = { reason: 'workspace_policy' };
   expect(await f.api.inspectModelSettings()).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] }]);
 });
-it('reads the September closed 6 Pro dropdown without opening or changing a working composer', async () => {
+it('observes the September closed 6 Pro selection without opening or changing a working composer', async () => {
   const f = fixture(), doc = page.window.document, trigger = doc.querySelector('button')!;
   const pro = f.selections[0]![2]!;
   pro.availability.status = 'available';
@@ -197,13 +265,18 @@ it('reads the September closed 6 Pro dropdown without opening or changing a work
   (trigger as any).__reactFiber$test = { memoizedProps: { dropdownContent: { props: f.props } }, return: null };
   doc.querySelector('#prompt-textarea')!.textContent = 'Unsent user draft';
   doc.querySelector('[data-testid="send-button"]')!.setAttribute('data-testid', 'stop-button');
-  expect(await f.api.inspectVisibleModelSettings()).toContainEqual({ id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'], aliases: ['gpt-6-pro'] });
+  const observe = () => new Promise<void>(resolve => {
+    const receive = (event: MessageEvent) => { if (event.data?.source === 'clf-picker-reply') { page.window.removeEventListener('message', receive as any); resolve(); } };
+    page.window.addEventListener('message', receive as any);
+    page.window.postMessage({ source: 'clf-picker-ask', nonce: 'closed-selection' }, page.window.location.origin);
+  });
+  await observe();
   expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
   expect(doc.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
   expect(f.actions).not.toHaveBeenCalled();
   expect(doc.querySelector('#prompt-textarea')!.textContent).toBe('Unsent user draft');
   (f.props.modelSwitcherDenialsBySlug as any)['gpt-6-pro'] = { reason: 'workspace_policy' };
-  expect(await f.api.inspectVisibleModelSettings()).not.toContainEqual(expect.objectContaining({ id: 'gpt-6-pro' }));
+  await observe();
   expect(f.api.visibleModelSelection()).toBeNull();
 });
 it('recognizes the provider min effort as Low without invalidating the account catalog', async () => {
@@ -220,4 +293,49 @@ it('projects an allowlist rather than leaking conversation props through the bri
   await f.api.inspectModelSettings();
   expect(replies.length).toBeGreaterThan(0);
   expect(JSON.stringify(replies)).not.toMatch(/privateSecret|must-never-cross|conversation|modelsData/);
+});
+
+it('observes Work grouping ids without changing exact execution ids or merging max with xhigh', async () => {
+  const f = fixture(), trigger = page.window.document.querySelector('button')!;
+  const version = { id: '6 Astra', displayTextForIntelligence: 'GPT-6 Astra', enabled: true };
+  f.props.modelsData.versions.splice(0, f.props.modelsData.versions.length, version);
+  const choices = ['min', 'standard', 'extended', 'xhigh', 'max', 'ultra'].map((thinkingEffort, bucket) => ({
+    bucket, modelSlug: 'gpt-6-astra-wm', thinkingEffort, availability: { status: 'available' },
+    category: { modelLane: 'thinking_plus_plus', modelVersion: '6 Astra', shortLabel: '6 Astra' },
+    modelConfig: { title: 'GPT-6 Astra', isWorkModeModel: true }
+  }));
+  Object.assign(f.state, { bucketSelections: choices, currentBucket: 3, currentSelection: choices[3], selectedVersionEntry: version });
+  trigger.innerHTML = '<span>GPT-6 Astra</span><span>Extra High</span>';
+  (trigger as any).__reactFiber$test = { memoizedProps: { dropdownContent: { props: f.props } }, return: null };
+  const read = () => new Promise<any>(resolve => {
+    const receive = (event: MessageEvent) => { if (event.data?.source === 'clf-picker-reply') { page.window.removeEventListener('message', receive as any); resolve(event.data.picker); } };
+    page.window.addEventListener('message', receive as any);
+    page.window.postMessage({ source: 'clf-picker-ask', nonce: 'work-shape' }, page.window.location.origin);
+  });
+  const state = await read();
+  expect(state?.version).toBe('6 Astra');
+  expect(await f.api.selectModelSettings('gpt-6-astra-wm', 'xhigh')).toBe(true);
+  expect(state?.choices.map((choice: any) => choice.effort)).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-astra-wm', reasoningEffort: 'xhigh' });
+  Object.assign(f.state, { currentBucket: 4, currentSelection: choices[4] });
+  await read();
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-astra-wm', reasoningEffort: 'max' });
+  (f.state as any).currentSelection = { ...choices[4], modelSlug: 'foreign-model' };
+  expect(await read()).toBeNull();
+  expect(f.api.visibleModelSelection()).toBeNull();
+  Object.assign(f.state, { currentSelection: choices[4] });
+  await read();
+  page.window.history.pushState({}, '', '/c/other');
+  expect(f.api.visibleModelSelection()).toBeNull();
+  choices[4]!.modelSlug = 'invalid execution id';
+  expect(await read()).toBeNull();
+  page.window.history.pushState({}, '', '/');
+  expect(f.api.visibleModelSelection()).toBeNull();
+  expect(f.actions).not.toHaveBeenCalled();
+});
+it('retains the Chat max-to-xhigh mapping without a Work owner flag', async () => {
+  const f = fixture();
+  f.state.currentSelection.thinkingEffort = 'max';
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'xhigh')).toBe(true);
+  expect(f.state.currentSelection.thinkingEffort).toBe('max');
 });

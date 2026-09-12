@@ -194,6 +194,30 @@ async function compactedSession(from: string, brief: string): Promise<{ sessionI
   return { sessionId, token: await readyContinuation(sessionId, brief, from) };
 }
 
+/**
+ * The same, but the ticket the app files for itself rather than one the user asked for.
+ *
+ * Automatic tickets take a different failure path: a manual resume that never reports back is
+ * aborted, an automatic one keeps its ticket for a later pickup. Only the automatic one can
+ * reach the state this file's claim test is about.
+ */
+async function automaticCompactedSession(from: string, brief: string): Promise<{ sessionId: string; token: string }> {
+  const reply = await request('POST', '/events', {
+    body: {
+      conversationId: from,
+      events: [{ kind: 'user_message', time: Date.now(), text: 'do the work', messageId: `m-${from}` }]
+    }
+  });
+  const sessionId = reply.body.sessionId as string;
+  expect(sessionId, 'the chat was not recorded, so there is no session to compact').toBeTruthy();
+  const ticket = await openContinuationNow(sessionId, from, true);
+  const stored = await attachSummary(ticket.token, `${brief}
+
+${SAMPLE_BRIEF}`);
+  expect(stored, 'the brief was not stored, so there is no resume to queue').not.toBeNull();
+  return { sessionId, token: ticket.token };
+}
+
 /** Every URL the app asked the OS to open, in order. Stands in for Electron's shell. */
 const opened: string[] = [];
 let anonymousRedeemIndex = 0;
@@ -2096,11 +2120,11 @@ describe('delivering a bootstrap', () => {
     const second = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-2' } });
     expect(second.status).toBe(200);
 
-    const claimed = await request('POST', '/compact', { body: { token, destinationAttempt: true } });
+    const claimed = await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-2', destinationAttempt: true } });
     expect(claimed.body.allowed).toBe(true);
     expect((await redeem(command.id, 'tab-3')).text).toContain('the only brief');
 
-    const armed = await request('POST', '/compact', { body: { token, destinationDispatch: true } });
+    const armed = await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-3', destinationDispatch: true } });
     expect(armed.body.armed).toBe(true);
     expect((await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-3' } })).status).toBe(409);
     expect((await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-4' } })).status).toBe(409);
@@ -2114,12 +2138,12 @@ describe('delivering a bootstrap', () => {
     const { sessionId, token } = await compactedSession('99999999-8888-7777-6666-555555555556', 'the lost brief');
     const command = queueResume(sessionId, token)!;
     expect((await redeem(command.id, 'tab-1')).text).toContain('the lost brief');
-    expect((await request('POST', '/compact', { body: { token, destinationAttempt: true } })).body.allowed).toBe(true);
-    expect((await request('POST', '/compact', { body: { token, destinationDispatch: true } })).body.armed).toBe(true);
+    expect((await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-1', destinationAttempt: true } })).body.allowed).toBe(true);
+    expect((await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-1', destinationDispatch: true } })).body.armed).toBe(true);
     expect((await request('POST', '/commands/redeem', { body: { id: command.id, client: 'tab-2' } })).status).toBe(409);
 
     const before = opened.length;
-    const lost = await request('POST', '/compact', { body: { token, destinationLost: true } });
+    const lost = await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-1', destinationLost: true } });
     expect(lost.status).toBe(200);
     expect(lost.body.released).toBe(true);
     // The lease went with the page that lost the draft, and a fresh chat opens for the same
@@ -2145,8 +2169,8 @@ describe('delivering a bootstrap', () => {
     const { sessionId, token } = await compactedSession(chatA, 'the brief for the refused move');
     const command = queueResume(sessionId, token)!;
     expect((await redeem(command.id, 'tab-b')).text).toContain('the brief for the refused move');
-    expect((await request('POST', '/compact', { body: { token, destinationAttempt: true } })).body.allowed).toBe(true);
-    expect((await request('POST', '/compact', { body: { token, destinationDispatch: true } })).body.armed).toBe(true);
+    expect((await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-b', destinationAttempt: true } })).body.allowed).toBe(true);
+    expect((await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-b', destinationDispatch: true } })).body.armed).toBe(true);
     // The handover is gone while the continuation is live: the swarm preflight will refuse.
     cancelPrimeTransfer(chatA);
 
@@ -2172,8 +2196,8 @@ describe('delivering a bootstrap', () => {
     const { sessionId, token } = await compactedSession(chatA, 'the brief for the armed move');
     const command = queueResume(sessionId, token)!;
     expect((await redeem(command.id, 'tab-b2')).text).toContain('the brief for the armed move');
-    expect((await request('POST', '/compact', { body: { token, destinationAttempt: true } })).body.allowed).toBe(true);
-    expect((await request('POST', '/compact', { body: { token, destinationDispatch: true } })).body.armed).toBe(true);
+    expect((await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-b2', destinationAttempt: true } })).body.allowed).toBe(true);
+    expect((await request('POST', '/compact', { body: { token, commandId: command.id, client: 'tab-b2', destinationDispatch: true } })).body.armed).toBe(true);
     const logged = getLog().length;
 
     const reply = await request('POST', '/compact', {
@@ -4567,6 +4591,63 @@ describe('targeted open', () => {
     expect(continuationByToken(token)?.state).toBe('aborted');
   });
 
+  it('does not spin automatic retirement when no browser opener exists and its durable removal fails', async () => {
+    await pair();
+    const { sessionId, token } = await automaticCompactedSession('71111111-8888-9999-aaaa-bbbbbbbbbbbb', 'keep the ticket');
+    const durable = await import('../src/main/durable.js');
+    const original = durable.writeDurableNow;
+    let removals = 0;
+    const write = vi.spyOn(durable, 'writeDurableNow').mockImplementation(async (name, value) => {
+      if (name === 'bridge-commands' && (value as any)?.commands?.length === 0) {
+        removals++;
+        // Bound the old failure's retry storm so the regression terminates even before repair.
+        if (removals <= 3) throw new Error('retirement disk unavailable');
+      }
+      return original(name, value);
+    });
+    try {
+      setBrowserOpener(null);
+      const command = queueResume(sessionId, token)!;
+      await vi.waitFor(() => expect(removals).toBeGreaterThan(0));
+      for (let n = 0; n < 40; n++) await Promise.resolve();
+      expect(removals).toBe(1);
+      expect(pendingCommands().some(entry => entry.id === command.id)).toBe(true);
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+    } finally { write.mockRestore(); }
+  });
+
+  it.each(['committing', 'committed', 'manual'] as const)('rechecks %s continuation ownership when queued retirement starts', async phase => {
+    await pair();
+    const { sessionId, token } = await automaticCompactedSession('72222222-8888-9999-aaaa-bbbbbbbbbbbb', 'retain changed ownership');
+    const continuations = await import('../src/main/session/continuation.js');
+    const original = continuations.continuationByToken;
+    let changed = false;
+    let refreshed = false;
+    const durable = await import('../src/main/durable.js');
+    const originalWrite = durable.writeDurableNow;
+    let removals = 0;
+    const write = vi.spyOn(durable, 'writeDurableNow').mockImplementation(async (name, value) => {
+      if (name === 'bridge-commands' && (value as any)?.commands?.length === 0) removals++;
+      return originalWrite(name, value);
+    });
+    const read = vi.spyOn(continuations, 'continuationByToken').mockImplementation(candidate => {
+      const current = original(candidate);
+      if (candidate === token && changed) refreshed = true;
+      // Publish the newer authoritative projection after drop queues its async transition.
+      return current && candidate === token && changed ? { ...current,
+        ...(phase === 'manual' ? { automatic: false } : { state: phase }) } : current;
+    });
+    try {
+      setBrowserOpener(null);
+      const command = queueResume(sessionId, token)!;
+      changed = true;
+      for (let n = 0; n < 80; n++) await Promise.resolve();
+      expect(refreshed).toBe(true);
+      expect(removals).toBe(0);
+      expect(pendingCommands().some(entry => entry.id === command.id)).toBe(true);
+    } finally { read.mockRestore(); write.mockRestore(); }
+  });
+
   it('collapses repeated presses for one session into one job, one command and one tab', async () => {
     setBrowserOpener(async (url) => {
       opened.push(url);
@@ -4646,6 +4727,65 @@ describe('targeted open', () => {
       expect(continuationByToken(token)?.state).toBe('aborted');
       // And no second tab was opened for it on the way out.
       expect(opened).toEqual([commandUrl(command.id)]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * The claim outliving the command that made it.
+   *
+   * Redeeming is what claims the brief: the app records the redeeming command as `claimedBy` so
+   * a second tab on the same marker cannot be handed the same handoff twice. An *automatic*
+   * ticket deliberately survives a failed attempt — `drop()` retires the command and keeps the
+   * ticket, so a later pickup can try again — but the claim was never released with it, and
+   * every later pickup is a *new* command id which can therefore never equal `claimedBy`.
+   *
+   * `claimContinuationNow` then returns null for the rest of the ticket's six-hour life, the
+   * command is handed out with an empty brief, and the page stops without typing, without an
+   * ack and without a log line. Observed on 2026-09-09: four pickups, four opened tabs, four
+   * silent stops, `claimedBy` still naming the first tab's command hours after it was closed.
+   *
+   * Nothing here was ever submitted — `destinationSend` never leaves `not-attempted` — so
+   * releasing the claim cannot re-send anything.
+   */
+  it('lets the next pickup claim a brief whose first chat died before typing anything', async () => {
+    vi.useFakeTimers();
+    try {
+      setBrowserOpener(async (url) => {
+        opened.push(url);
+      });
+      await pair();
+      const { sessionId, token } = await automaticCompactedSession(
+        '55555555-6666-7777-8888-999999999999',
+        'the wedged brief'
+      );
+      const first = queueResume(sessionId, token)!;
+      await waitForOpened(1);
+
+      // The chat opens and its page redeems, which is the act that claims the brief. Then the
+      // tab is closed: nothing is typed, nothing is acked, nothing is reported.
+      expect((await redeem(first.id, 'tab-1')).text).toContain('the wedged brief');
+      expect(continuationByToken(token)?.destinationSend.state).toBe('not-attempted');
+
+      // The command's own deadline passes with nothing reported.
+      await vi.advanceTimersByTimeAsync(16 * 60_000);
+
+      // An automatic ticket is kept on purpose — this is the state a later pickup exists for.
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      await vi.waitFor(() => expect(pendingCommands().some((entry) => entry.id === first.id)).toBe(false));
+
+      // So the next pickup, whose id is necessarily different, has to be able to carry it.
+      const second = queueResume(sessionId, token)!;
+      expect(second.id).not.toBe(first.id);
+      expect((await redeem(second.id, 'tab-2')).text).toContain('the wedged brief');
+      for (const flag of ['destinationAttempt', 'destinationDispatch', 'destinationLost']) {
+        expect((await request('POST', '/compact', { body: { token, commandId: first.id, client: 'tab-1', [flag]: true } })).status).toBe(409);
+        expect((await request('POST', '/compact', { body: { token, commandId: second.id, client: 'tab-1', [flag]: true } })).status).toBe(409);
+      }
+      expect(continuationByToken(token)?.destinationSend.state).toBe('not-attempted');
+      expect((await request('POST', '/compact', { body: { token, destinationAttempt: true } })).status).toBe(409);
+      expect((await request('POST', '/compact', { body: { token, commandId: second.id, client: 'tab-2', destinationAttempt: true } })).body.allowed).toBe(true);
     } finally {
       vi.useRealTimers();
     }
@@ -7120,6 +7260,13 @@ describe('unattributed activity recovery', () => {
         await events(OTHER, [{ kind: 'assistant_message', messageId: `answer-${turn}`, turnId: turn, time: Date.now(),
           text: 'The requested pass is complete.', final: true, state: 'final', activeNow: true, goalEligible: true }, endTurn(turn, 'completed')]);
       } else await events(OTHER, [{ kind: 'turn_end', turnId: turn, outcome: 'failed', reason: 'thinking_failed', time: Date.now() }]);
+      if (kind === 'thinking_failed') {
+        expect(goalPendingReplyFor(OTHER)).toBeNull();
+        await sweepStaleSwarm(Date.now());
+        const repair = await maintenance();
+        expect(repair?.reason).toBe('silence');
+        await maintenance(repair!.token);
+      }
       const pending = goalPendingReplyFor(OTHER);
       expect(pending).not.toBeNull();
       if (kind === 'thinking_failed') {
@@ -8751,7 +8898,9 @@ describe('the goal loop over the bridge', () => {
       const chat = 'cafe0173-0000-4000-8000-000000000173';
       await request('POST', '/events', { body: { conversationId: chat, events: [
         { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-cold-goal' },
-        { kind: 'assistant_message', time: Date.now(), messageId: 'a-cold-goal', text: 'First part done.',
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-cold-goal' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-cold-goal', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'g-cold-goal', messageId: 'a-cold-goal', text: 'First part done.',
           state: 'final', final: true, goalEligible: true, activeNow: true }
       ] } });
       expect(goalPendingReplyFor(chat)).not.toBeNull();
@@ -8779,6 +8928,48 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('gives a queued head the bounded pickup schedule without an enabled Goal', async () => {
+    const { enqueueInput, cancelInput, reorderQueuedInputs, resetInputForTests } = await import('../src/main/session/input.js');
+    vi.useFakeTimers();
+    resetInputForTests();
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0173-0000-4000-8000-000000000173';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'queued-watch-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'queued-watch-turn' }
+      ] } });
+      const session = await findSessionByConversation(chat, { requireUnique: true });
+      const id = 'abca0173-0000-4000-8000-000000000173';
+      const second = 'abca0174-0000-4000-8000-000000000174';
+      await enqueueInput({ id, sessionId: session!.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await enqueueInput({ id: second, sessionId: session!.id, text: 'another step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'queued-watch-turn', outcome: 'completed' }
+      ] } });
+      for (const [index, minutes] of [2, 2, 5, 10, 15].entries()) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.[0];
+        expect(repair).toMatchObject({ conversationId: chat, reason: 'goal' });
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+        if (index === 0) expect(await reorderQueuedInputs(session!.id, [second, id])).toBe(true);
+        if (index === 1) expect(await cancelInput(second)).toBe(true);
+        if (index === 2) await request('POST', '/settings', { body: { conversationId: chat, goal: false } });
+      }
+      await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs).toEqual([]);
+      expect(await cancelInput(id)).toBe(true);
+    } finally {
+      await writeDurableNow('session-input', []);
+      resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
   it('reloads a chat whose finished reply nothing ever came to collect, then stops', async () => {
     vi.useFakeTimers();
     try {
@@ -8801,6 +8992,7 @@ describe('the goal loop over the bridge', () => {
             kind: 'assistant_message',
             time: Date.now(),
             messageId: 'a-watchdog',
+            turnId: 'g-watchdog',
             text: 'Done with that part.',
             state: 'final',
             final: true,
@@ -8835,6 +9027,9 @@ describe('the goal loop over the bridge', () => {
           conversationId: chat,
           reason: 'goal'
         });
+        // Missing ACK retains the issued token, not a new repair on each poll.
+        expect((await request('GET', '/status')).body.repairs).toEqual([]);
+        expect((await request('GET', '/status')).body.repairs).toEqual([]);
         expect((await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`)).status).toBe(200);
         // And never twice for the same step: the next one is owed only after its own gap.
         expect(await takeRepair()).toBeNull();

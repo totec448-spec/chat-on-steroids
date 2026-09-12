@@ -6,6 +6,7 @@ import { TaskRequestError } from '../src/main/task-request.js';
 const hooks = vi.hoisted(() => ({ caller: { sessionId: '', conversationId: '' }, startedAt: 2000, followup: vi.fn(), enqueue: vi.fn(), hasInput: true, delivered: [] as Array<{ id: string; sessionId: string; text: string; state: string }>, inputListeners: new Set<() => void>() }));
 vi.mock('../src/main/session/input.js', () => ({
   hasEligibleToolInput: async () => hooks.hasInput,
+  finishNeedsBrowserInput: async () => false,
   listInputs: async () => hooks.delivered,
   enqueueInput: hooks.enqueue,
   onInputChange: (listener: () => void) => { hooks.inputListeners.add(listener); return () => hooks.inputListeners.delete(listener); }

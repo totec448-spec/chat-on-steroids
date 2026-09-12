@@ -6,7 +6,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
-  inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
+  fileSilenceInput, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy
 } from '../src/main/session/input.js';
@@ -18,7 +18,7 @@ import { trackInFlight, emptyEvidence, type CallContext } from '../src/main/mcp/
 const offerToolInput = async (...args: Parameters<typeof offerToolInputBatch>) => (await offerToolInputBatch(...args)).messages;
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
 
-const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; reason?: string; turnId: string; time: number } }));
+const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; reason?: string; turnId: string; time: number; seq?: number } }));
 vi.mock('../src/main/session/store.js', () => ({
   listUsageSessions: vi.fn(async () => []),
   conversationWasSuperseded: vi.fn(async () => false),
@@ -978,8 +978,10 @@ it.each(['finish', 'after-turn'] as const)('does not advance %s on interruption,
 it.each(['finish', 'after-turn'] as const)('spends a settled Thinking failed once for ten queued %s messages across restart', async mode => {
   const rows = [];
   for (let n = 0; n < 10; n++) rows.push(await enqueueInput(input({ mode, afterTurn: true, text: `Checkpoint ${n}` })));
-  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1 };
-  expect(await pendingBrowserInputs()).toEqual([{ id: rows[0]!.id, conversationId: binding.conversationId }]);
+  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1, seq: 12 };
+  expect(await pendingBrowserInputs()).toEqual([]);
+  await fileSilenceInput(sessionId, binding.conversationId, binding.end.turnId, () => true);
+  expect(await pendingBrowserInputs()).toEqual([{ id: rows[0]!.id, conversationId: binding.conversationId, silenceTurnId: binding.end.turnId }]);
   expect(await claimBrowserInput(rows[1]!.id, 'page', binding.conversationId, true)).toBeNull();
   expect(await claimBrowserInput(rows[0]!.id, 'page', binding.conversationId, true)).not.toBeNull();
   expect(await authorizeBrowserInput(rows[0]!.id, 'page', binding.conversationId)).toBe(true);
@@ -988,12 +990,14 @@ it.each(['finish', 'after-turn'] as const)('spends a settled Thinking failed onc
   expect(await pendingBrowserInputs()).toEqual([]);
   expect((await listInputs()).filter(row => row.state === 'queued')).toHaveLength(9);
   binding.end = { ...binding.end, turnId: 'next-failed-pro-turn', time: now + 2 };
-  expect(await pendingBrowserInputs()).toEqual([{ id: rows[1]!.id, conversationId: binding.conversationId }]);
+  await fileSilenceInput(sessionId, binding.conversationId, binding.end.turnId, () => true);
+  expect(await pendingBrowserInputs()).toEqual([{ id: rows[1]!.id, conversationId: binding.conversationId, silenceTurnId: binding.end.turnId }]);
 });
 
 it.each(['late-tool', 'running-tool', 'new-turn', 'different-end', 'blocked'])('revokes a Thinking failed claim before Send after %s', async change => {
   const row = await enqueueInput(input({ mode: 'after-turn', afterTurn: true }));
-  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1 };
+  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1, seq: 12 };
+  await fileSilenceInput(sessionId, binding.conversationId, binding.end.turnId, () => true);
   expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).not.toBeNull();
   if (change === 'late-tool') binding.lastToolCallAt = now + 2;
   if (change === 'new-turn') binding.activeTurnId = 'resumed-turn';
@@ -1009,7 +1013,7 @@ it.each(['late-tool', 'running-tool', 'new-turn', 'different-end', 'blocked'])('
 
 it('keeps Astra finish-only tasks queued after Thinking failed without explicit after-turn opt-in', async () => {
   await enqueueInput(input({ mode: 'finish' }));
-  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1 };
+  binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-pro-turn', time: now + 1, seq: 12 };
   expect(await pendingBrowserInputs()).toEqual([]);
 });
 
@@ -1351,21 +1355,87 @@ it('keeps Astra finish-only tasks off browser transport across restart and permi
   expect(await pendingBrowserInputs()).toEqual([]);
   expect(await offerToolInput(sessionId, binding.conversationId, 'finish-only-test', now, true)).toHaveLength(1);
 });
-it('elects an opted-in after-turn task past finish-only stages and spends the completed turn once', async () => {
+it('keeps a finish-only head ahead of opted-in browser tasks until explicitly reordered', async () => {
   const blocked = await enqueueInput(input({ mode: 'finish', text: 'Finish-only implementation' }));
   const after = await enqueueInput(input({ mode: 'finish', text: 'Inspect the current result', afterTurn: true }));
   const later = await enqueueInput(input({ mode: 'finish', text: 'Inspect again', afterTurn: true }));
   binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'astra-ended', time: now + 1 };
   resetInputForTests();
-  expect(await pendingBrowserInputs()).toEqual([{ id: after.id, conversationId: binding.conversationId }]);
+  expect(await pendingBrowserInputs()).toEqual([]);
   expect(await claimBrowserInput(blocked.id, 'page', binding.conversationId, true)).toBeNull();
   expect(await claimBrowserInput(later.id, 'page', binding.conversationId, true)).toBeNull();
+  expect(await claimBrowserInput(after.id, 'page', binding.conversationId, true)).toBeNull();
+  expect(await reorderQueuedInputs(sessionId, [after.id, blocked.id, later.id])).toBe(true);
+  expect(await pendingBrowserInputs()).toEqual([{ id: after.id, conversationId: binding.conversationId }]);
   expect(await claimBrowserInput(after.id, 'page', binding.conversationId, true)).not.toBeNull();
   expect(await authorizeBrowserInput(after.id, 'page', binding.conversationId)).toBe(true);
-  await acknowledgeBrowserInput(after.id, 'page', 'message-after', binding.conversationId);
+  expect(await acknowledgeBrowserInput(after.id, 'page', binding.conversationId, 'message-after')).toBe(true);
   resetInputForTests();
   expect(await pendingBrowserInputs()).toEqual([]);
   expect((await listInputs()).find(row => row.id === blocked.id)?.state).toBe('queued');
+});
+
+describe('visible input priority before Goal', () => {
+  it('keeps an ineligible future finish-only head ahead of Goal without affecting another session', async () => {
+    const row = await enqueueInput(input({ mode: 'finish', dueAt: now + 60_000 }));
+    expect(await pendingBrowserInputs()).toEqual([]);
+    expect(await inputBeforeGoal(sessionId, 'previous-turn')).toBe('queued');
+    expect(await inputBeforeGoal('session-two', 'previous-turn')).toBeNull();
+    expect(await cancelInput(row.id)).toBe(true);
+    expect(await inputBeforeGoal(sessionId, 'previous-turn')).toBeNull();
+  });
+
+  it.each(['browser', 'tool'] as const)('keeps unresolved %s custody ahead of Goal across input restore', async transport => {
+    const row = await enqueueInput(input());
+    if (transport === 'browser') expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).not.toBeNull();
+    else expect(await offerToolInput(sessionId, binding.conversationId, 'offer', now)).toHaveLength(1);
+    resetInputForTests();
+    expect(await inputBeforeGoal(sessionId, 'previous-turn')).toBe('queued');
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe(transport);
+  });
+
+  it('keeps a consumed completion ahead of Goal after its last user card is sent and restored', async () => {
+    const row = await enqueueInput(input({ mode: 'after-turn' }));
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'source-final', time: now + 1 };
+    expect(await claimBrowserInput(row.id, 'page', binding.conversationId, true)).not.toBeNull();
+    expect(await inputBeforeGoal(sessionId, 'source-final')).toBe('queued');
+    expect(await authorizeBrowserInput(row.id, 'page', binding.conversationId)).toBe(true);
+    expect(await acknowledgeBrowserInput(row.id, 'page', binding.conversationId, 'accepted-question')).toBe(true);
+    resetInputForTests();
+    expect(await pendingBrowserInputs()).toEqual([]);
+    expect(await inputBeforeGoal(sessionId, 'source-final')).toBe('consumed');
+    expect(await inputBeforeGoal(sessionId, 'different-final')).toBeNull();
+    expect(await inputBeforeGoal('session-two', 'source-final')).toBeNull();
+  });
+
+  it('does not let a tool-only finish checkpoint overtake an after-turn head', async () => {
+    const head = await enqueueInput(input({ mode: 'after-turn', text: 'First via browser' }));
+    await enqueueInput(input({ mode: 'finish', text: 'Later checkpoint' }));
+    expect(await hasEligibleToolInput(sessionId, true)).toBe(false);
+    expect(await offerToolInput(sessionId, binding.conversationId, 'finish', now, true)).toEqual([]);
+    expect((await listInputs()).every(row => row.state === 'queued')).toBe(true);
+    expect(await cancelInput(head.id)).toBe(true);
+    expect(await hasEligibleToolInput(sessionId, true)).toBe(true);
+    expect((await offerToolInput(sessionId, binding.conversationId, 'next-finish', now + 1, true))[0]?.text).toContain('Later checkpoint');
+  });
+
+  it('moves an unclaimed silence boundary to the newly elected visible head without resetting its wait', async () => {
+    const a = await enqueueInput(input({ mode: 'after-turn', text: 'A' }));
+    const b = await enqueueInput(input({ mode: 'after-turn', text: 'B' }));
+    binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-source', time: now, seq: 12 };
+    const listenUntil = now + 300_000;
+    expect(await fileSilenceInput(sessionId, binding.conversationId, binding.end.turnId, () => true, listenUntil)).toBe(true);
+    expect(await reorderQueuedInputs(sessionId, [b.id, a.id])).toBe(true);
+    resetInputForTests();
+    const reordered = await listInputs();
+    expect(reordered.find(row => row.id === a.id)?.silenceBoundary).toBeUndefined();
+    expect(reordered.find(row => row.id === b.id)?.silenceBoundary).toMatchObject({ turnId: 'failed-source', listenUntil });
+    expect(await pendingBrowserInputs()).toEqual([]);
+    now = listenUntil;
+    expect(await pendingBrowserInputs()).toEqual([{ id: b.id, conversationId: binding.conversationId, silenceTurnId: 'failed-source' }]);
+    expect(await claimBrowserInput(a.id, 'page', binding.conversationId, true)).toBeNull();
+    expect(await claimBrowserInput(b.id, 'page', binding.conversationId, true)).not.toBeNull();
+  });
 });
 it('rechecks Astra finish-only policy at final browser authorization after a model change', async () => {
   binding.model = 'gpt-5.6-pro';

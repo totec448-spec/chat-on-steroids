@@ -621,6 +621,60 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
   });
+  it('retains a reused-document send boundary when canonical Fiber text arrives before activity identity', async () => {
+    const submitted = 'Keep [literal] #tags in the receipt.';
+    const escaped = String.raw`Keep \[literal\] \#tags in the receipt\.`;
+    const run = async (canonical: string, acknowledge = true, invalidate?: 'epoch' | 'receipt'): Promise<number> => {
+      let holdActivity = false;
+      let releaseActivity!: (value: unknown) => void;
+      live = await harness(`https://chatgpt.com/c/${chatA}`, {
+        activity: () => holdActivity
+          ? new Promise(resolve => { releaseActivity = resolve; })
+          : ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [] } }),
+        desktop_input: message => ({ ok: true, data: message.authorize
+          ? { ok: true } : message.ack ? { ok: acknowledge } : { input: claimed({ text: submitted }) } })
+      });
+      holdActivity = true;
+      live.dom.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+      live.hook.observe();
+      let user!: HTMLElement;
+      live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        user = userTurn(live!.document, 'gated-spa-user', submitted, { sent: false });
+        startGenerating(live!.document, { send: false });
+        live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+        live!.hook.observe();
+      });
+      expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: acknowledge });
+      expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toHaveLength(1);
+      expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+      await bindFiberTurns([{ section: user, turn: { turnId: 'gated-spa-user', conversationId: chatB,
+        messages: [{ role: 'user', stable: true, messageId: 'm-gated-spa-user', rawMessageId: 'm-gated-spa-user', rawText: canonical }] } }]);
+      await live.hook.flush();
+      if (invalidate === 'epoch') {
+        live.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` }); live.hook.observe(); await settle();
+        live.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` }); live.hook.observe(); await settle();
+      } else if (invalidate === 'receipt') {
+        live.document.querySelector('#prompt-textarea')!.textContent = submitted;
+        live.document.dispatchEvent(new live.window.Event('submit', { bubbles: true }));
+      }
+      releaseActivity({ ok: true, data: { entries: [], stream: [], nextSince: 1, activeTurnId: null,
+        userAnchors: [{ seq: 1, time: 1_700_000_000_000, messageId: 'm-gated-spa-user' }] } });
+      await settle(); live.hook.observe(); await settle(); await live.hook.flush();
+      const starts = emitted(live.sent, 'turn_start').length;
+      if (acknowledge && !invalidate) {
+        expect(emitted(live.sent, 'user_message').filter(row => row.event.messageId === 'm-gated-spa-user').at(-1)?.event.text).toBe(canonical);
+        live.hook.observe(); await settle(); await live.hook.flush();
+        expect(emitted(live.sent, 'turn_start')).toHaveLength(starts);
+      }
+      live.close(); live = null;
+      return starts;
+    };
+    expect(await run(submitted)).toBe(1);
+    expect(await run(escaped)).toBe(1);
+    expect(await run(escaped, false)).toBe(0);
+    expect(await run(escaped, true, 'epoch')).toBe(0);
+    expect(await run(escaped, true, 'receipt')).toBe(0);
+  });
   it('keeps a helper claim revocable until its delayed Send is ready', async () => {
     let authorized = true;
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
@@ -2637,6 +2691,46 @@ describe('recording authored message text', () => {
     const messages = emitted(live.sent, 'user_message');
     expect(messages).toHaveLength(1);
     expect(messages[0]!.event.text).toBe('the exact authored message');
+  });
+
+  /**
+   * One authored block that contains another.
+   *
+   * `messageText` collects `.whitespace-pre-wrap` with `querySelectorAll`, which also
+   * returns matches nested inside an earlier match, and `text()` reads a node's whole
+   * subtree. So an inner block was read twice: once as part of its container and once on
+   * its own account. The recorded message then carried a second copy of that passage, and
+   * every reader that compares authored text against what was submitted saw a message
+   * longer than the one it sent and refused to recognise it.
+   */
+  it('reads a nested authored block once, not once per enclosing block', async () => {
+    live = await harness();
+    const section = userTurn(live.document, 'turn-user-nested', 'the opening passage');
+    const body = section.querySelector('.whitespace-pre-wrap')!;
+    const nested = live.document.createElement('div');
+    nested.className = 'whitespace-pre-wrap';
+    nested.textContent = 'the quoted passage';
+    body.append(nested);
+
+    live.hook.observe();
+    await settle();
+
+    const messages = emitted(live.sent, 'user_message');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]!.event.text).toBe('the opening passagethe quoted passage');
+  });
+
+  it.each([false, true])('preserves separate authored blocks when the message root has the same class (%s)', async rootClass => {
+    live = await harness();
+    const section = userTurn(live.document, 'turn-user-siblings', 'First');
+    const message = section.querySelector('[data-message-id]')!;
+    if (rootClass) message.classList.add('whitespace-pre-wrap');
+    const sibling = live.document.createElement('div');
+    sibling.className = 'whitespace-pre-wrap';
+    sibling.textContent = 'Second';
+    message.append(sibling);
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'user_message')[0]!.event.text).toBe('First\nSecond');
   });
 
   /**
@@ -6456,7 +6550,7 @@ describe('a stop button that goes missing while the turn is still running', () =
 
     expect(live.sent.some((message) => message.type === 'reload_owned_chat')).toBe(false);
     expect(emitted(live.sent, 'chat_error').map((entry) => entry.event.text)).toContain(
-      'No visible progress for ten minutes. The turn is still marked as generating.'
+      'No visible progress for ten minutes. The app could not confirm that this turn finished.'
     );
     expect(emitted(live.sent, 'chat_error').at(-1)!.event.recoverable).toBe(true);
 
@@ -6652,7 +6746,7 @@ describe('a stop button that goes missing while the turn is still running', () =
     live.hook.observe();
     await settle();
     expect(emitted(live.sent, 'chat_error').map((entry) => entry.event.text)).not.toContain(
-      'No visible progress for ten minutes. The turn is still marked as generating.'
+      'No visible progress for ten minutes. The app could not confirm that this turn finished.'
     );
   });
 
@@ -6672,7 +6766,7 @@ describe('a stop button that goes missing while the turn is still running', () =
     live.hook.observe();
     await settle();
     expect(emitted(live.sent, 'chat_error').map((entry) => entry.event.text)).toContain(
-      'No visible progress for ten minutes. The turn is still marked as generating.'
+      'No visible progress for ten minutes. The app could not confirm that this turn finished.'
     );
   });
 
@@ -6899,6 +6993,26 @@ describe('a content script reloaded into a turn already in flight', () => {
     await settle();
     await live.hook.flush();
     expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+  });
+
+  it('recognizes an unrecorded running turn after another conversation used this SPA document', async () => {
+    live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      { activity: () => activity({ activeTurnId: null, userAnchors: [] }) }, midTurn);
+    live.hook.observe(); await settle();
+    live.advance(live.hook.TURN_SETTLE_MS); live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+    const firstTurn = emitted(live.sent, 'turn_start')[0]!.event.turnId;
+    for (const node of live.document.querySelectorAll('[data-turn-id]')) node.remove();
+    live.dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-cccc-4ddd-8eee-ffffffffffff' });
+    live.hook.observe(); await live.hook.pullActivity(); await settle();
+    userTurn(live.document, 'other-user', 'A separate running task', { sent: false });
+    assistantTurn(live.document, 'other-assistant', ['Still working']);
+    startGenerating(live.document, { send: false });
+    live.hook.observe(); await settle();
+    live.advance(live.hook.TURN_SETTLE_MS); live.hook.observe(); await settle(); await live.hook.flush();
+    const starts = emitted(live.sent, 'turn_start');
+    expect(starts).toHaveLength(2);
+    expect(starts[1]!.event.turnId).not.toBe(firstTurn);
   });
 
   it.each([false, true])('does not reopen a completed native answer from a stale Stop control (new question: %s)', async newQuestion => {
@@ -7663,115 +7777,50 @@ describe('how a turn is recorded as having ended', () => {
     live.hook.observe(); await settle();
     return { section, button, id };
   }
-  it('records Thinking failed promptly but requires 30 seconds silence and then five full minutes', async () => {
+  it('closes Thinking failed immediately, once, without inventing a final answer', async () => {
     const { id } = await failedThinkingTurn();
-    expect(emitted(live!.sent, 'chat_error').map(row => row.event)).toContainEqual(
-      expect.objectContaining({ text: 'Thinking failed', turnId: id, recoverable: false }));
-    live!.advance(30_000); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    live!.advance(300_000 - 1); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    live!.advance(1); live!.hook.observe(); await settle();
     expect(emitted(live!.sent, 'turn_end').map(row => row.event)).toEqual([
       expect.objectContaining({ turnId: id, outcome: 'failed', reason: 'thinking_failed' })]);
-    live!.hook.observe(); await settle();
+    live!.advance(330_000); live!.hook.observe(); await settle();
     expect(emitted(live!.sent, 'turn_end')).toHaveLength(1);
     expect(emitted(live!.sent, 'assistant_message').some(row => row.event.final)).toBe(false);
   });
-  it('does not let a silence refresh ticket bypass the Thinking failed grace', async () => {
+  it.each(['tool_call', 'page_tool', 'progress', 'assistant_message'])('resumes the same failed turn on fresh %s even within 30 seconds', async kind => {
     const { id } = await failedThinkingTurn();
-    expect(await live!.runtimeMessage({ type: 'clf-desktop-input', id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
-      conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', silenceTurnId: id })).toEqual({ ok: false });
-    expect(live!.sent.filter(row => row.type === 'desktop_input')).toEqual([]);
-  });
-  it.each(['tool_call', 'progress', 'assistant_message'])('returns Thinking failed to the ten-minute fallback on fresh %s, without counting replay', async kind => {
-    const { id } = await failedThinkingTurn();
-    live!.advance(240_000);
-    const entry = { seq: 51, time: Date.now(), kind, turnId: id, text: 'New model activity',
+    live!.advance(1000);
+    const entry = { seq: 51, time: live!.window.Date.now(), kind, turnId: id, text: 'New model activity',
       ...(kind === 'assistant_message' ? { messageId: 'interim', state: 'streaming' } : {}) };
     live!.reply.set('activity', () => ({ ok: true, data: { entries: [], stream: [entry], pendingTools: 0, activeTurnId: id } }));
     await live!.hook.pullActivity();
-    live!.advance(329_999);
-    await live!.hook.pullActivity(); // replay is not new model work
     live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    live!.advance(1); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    live!.advance(270_001); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end').at(-1)?.event.outcome).toBe('stalled');
+    expect(emitted(live!.sent, 'turn_start')).toHaveLength(1);
+    live!.advance(599_999); await live!.hook.pullActivity(); live!.hook.observe(); await settle();
+    expect(emitted(live!.sent, 'turn_end')).toHaveLength(1);
+    live!.advance(2); live!.hook.observe(); await settle();
+    expect(emitted(live!.sent, 'turn_end').at(-1)?.event).toMatchObject({turnId: id, outcome: 'stalled'});
   });
-  it('keeps Thinking failed open while a local tool runs and returns to the ten-minute fallback', async () => {
+  it('adopts the exact app-reopened failed turn while MCP is running', async () => {
     const { id } = await failedThinkingTurn();
-    let pendingTools = 1;
-    live!.reply.set('activity', () => ({ ok: true, data: { entries: [], stream: [], pendingTools, activeTurnId: id } }));
+    live!.reply.set('activity', () => ({ ok: true, data: { entries: [], stream: [], pendingTools: 1, activeTurnId: id } }));
     await live!.hook.pullActivity();
     live!.advance(330_000); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    pendingTools = 0; await live!.hook.pullActivity();
-    live!.advance(329_999); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    live!.advance(1); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    live!.advance(270_001); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end').at(-1)?.event.outcome).toBe('stalled');
+    expect(emitted(live!.sent, 'turn_end')).toHaveLength(1);
   });
-  it.each(['tool_call', 'assistant_message'])('ignores delayed %s during the first fixed 30 seconds', async kind => {
-    const { id } = await failedThinkingTurn();
-    live!.advance(20_000);
-    const entry = { seq: 51, time: live!.window.Date.now(), kind, turnId: id, text: 'Delayed delivery',
-      ...(kind === 'assistant_message' ? { messageId: 'late-interim', state: 'streaming' } : {}) };
-    live!.reply.set('activity', () => ({ ok: true, data: { entries: [], stream: [entry], pendingTools: 0, activeTurnId: id } }));
-    await live!.hook.pullActivity();
-    live!.advance(309_999); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    live!.advance(1); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end').at(-1)?.event.reason).toBe('thinking_failed');
-  });
-  it('restarts the failure grace after Stop returns, retaining a disappeared failure header', async () => {
-    const { button } = await failedThinkingTurn();
-    live!.advance(240_000); startGenerating(live!.document, { send: false });
-    live!.hook.observe(); await settle();
-    live!.advance(60_000); stopGenerating(live!.document);
-    live!.hook.observe(); await settle();
-    button.remove();
-    live!.advance(329_999); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    live!.advance(1); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end').at(-1)?.event.reason).toBe('thinking_failed');
-  });
-  it('accepts a later exact native final during the failure grace as successful completion', async () => {
+  it('accepts a later exact native final after Thinking failed', async () => {
     const { section } = await failedThinkingTurn();
-    live!.advance(60_000);
+    live!.advance(1000);
     await bindFiberTurns([{ section, turn: { turnId: 'failed-thinking-page-turn', endMessageId: 'recovered-final',
       messages: [{ messageId: 'recovered-final', rawMessageId: 'recovered-final', stable: true,
         rawText: 'The answer completed.', renderedHtml: '<p>The answer completed.</p>' }] } }]);
     await live!.hook.refreshFiber(); await settle();
-    expect(emitted(live!.sent, 'turn_end').at(-1)?.event).toMatchObject({ outcome: 'completed' });
-    expect(emitted(live!.sent, 'turn_end').at(-1)?.event.reason).toBeUndefined();
+    expect(emitted(live!.sent, 'assistant_message').at(-1)?.event).toMatchObject({final: true});
   });
-  it('does not let the ten-minute watchdog preempt a late Thinking failed observation', async () => {
-    const { button } = await failedThinkingTurn();
-    // Return to an unknown quiet turn, then let the native failure appear after
-    // nine quiet minutes. It still receives the full 30s plus five-minute grace.
-    startGenerating(live!.document, { send: false });
-    button.remove(); live!.hook.observe(); await settle();
-    live!.advance(540_000);
-    const section = live!.document.querySelector('[data-turn-id="failed-thinking-page-turn"]') as HTMLElement;
-    thinkingFailed(section); stopGenerating(live!.document);
-    live!.hook.observe(); await settle();
-    live!.advance(329_999); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
-    expect(emitted(live!.sent, 'chat_error').some(row => row.event.recoverable === true)).toBe(false);
-    live!.advance(1); live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end').at(-1)?.event.reason).toBe('thinking_failed');
-  });
-  it('does not grant failure queue authority when a user replaces the turn before grace expires', async () => {
-    await failedThinkingTurn();
+  it('keeps a new user turn separate from a failed turn', async () => {
+    const { id } = await failedThinkingTurn();
     live!.advance(1000); startGenerating(live!.document);
     assistantTurn(live!.document, 'next-response', []);
     live!.hook.observe(); await settle();
-    expect(emitted(live!.sent, 'turn_end').at(-1)?.event.reason).toBeUndefined();
-    live!.advance(300_000); live!.hook.observe(); await settle();
+    expect(emitted(live!.sent, 'turn_start').at(-1)?.event.turnId).not.toBe(id);
     expect(emitted(live!.sent, 'turn_end')).toHaveLength(1);
   });
   it.each(['historical', 'quoted', 'hidden', 'user', 'own-ui'])('does not let a %s Thinking failed header fail the live turn', async location => {
@@ -7792,7 +7841,7 @@ describe('how a turn is recorded as having ended', () => {
     stopGenerating(live.document); live.hook.observe(); await settle();
     live.advance(300_000); live.hook.observe(); await settle();
     expect(emitted(live.sent, 'turn_end')).toEqual([]);
-    if (location !== 'historical') expect(emitted(live.sent, 'chat_error')).toEqual([]);
+    expect(emitted(live.sent, 'chat_error')).toEqual([]);
   });
 
   it('does not turn ordinary assistant prose into an error because it quotes transport-failure wording', async () => {
@@ -11674,6 +11723,39 @@ describe('the fresh chat the app opened', () => {
     expect(selections).toEqual(confirmed ? [expect.objectContaining({ conversationId: workerChat,
       event: expect.objectContaining({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }) })] : []);
   });
+  it.each([true, false])('confirms resume selection before Send and journals it only for B (%s)', async confirmed => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const destination = '22222222-3333-4444-5555-666666666666';
+    const text = '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nResume task';
+    let sends = 0;
+    live = await harness('https://chatgpt.com/?clf=cmd-resume-model', {
+      redeem: () => redeemed,
+      compact: message => ({ ok: true, data: message.destinationAttempt ? { allowed: true }
+        : message.destinationDispatch ? { armed: true } : { committed: true, conversationId: destination } }),
+      ack: () => ({ ok: true }),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        sessionId: sends ? 'resumed-model-session' : null, job: null, bootstrap: 'resume' } })
+    }, (document, dom) => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        sends++;
+        dom.reconfigure({ url: `https://chatgpt.com/c/${destination}` });
+        userTurn(document, 'verified-resume-user', text, { sent: false });
+      });
+    });
+    const picker = vi.fn(async () => confirmed);
+    (live.window as any).CLF_DOM.selectModelSettings = picker;
+    release({ ok: true, command: { id: 'cmd-resume-model', type: 'resume', text, agent: null,
+      model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
+    await settle(800); await live.hook.pullActivity(); await live.hook.flush();
+    expect(picker).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
+    expect(sends).toBe(confirmed ? 1 : 0);
+    const selections = live.sent.filter(message => message.type === 'events').flatMap(message => message.entries)
+      .filter(entry => entry.event.kind === 'model_selection');
+    expect(selections).toEqual(confirmed ? [expect.objectContaining({ conversationId: destination,
+      event: expect.objectContaining({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }) })] : []);
+  });
+
   it.each(['empty', 'draft', 'retargeted'])('proves an acknowledged failed opening worker is safe to retire only with an empty composer (%s)', async mode => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });
@@ -14151,14 +14233,14 @@ describe('the goal loop', () => {
     expect(acks(live)).toHaveLength(0);
   });
 
-  it.each(['off', 'new-token', 'editor'])('rechecks the exact Goal authority when delayed Send becomes ready (%s)', async change => {
-    let draft: ReturnType<typeof readyDraft> | null = null, enabled = true;
+  it.each(['off', 'new-token', 'editor', 'queue'])('rechecks the exact Goal authority when delayed Send becomes ready (%s)', async change => {
+    let draft: ReturnType<typeof readyDraft> | null = null, enabled = true, queuePending = false;
     live = await harness(`https://chatgpt.com/c/${CHAT}`, {
       ...goalReplies(),
       activity: () => {
         const value = feed(draft)();
         value.data.goal.enabled = enabled;
-        return value;
+        return { ...value, data: { ...value.data, goal: { ...value.data.goal, queuePending } } };
       },
       goal_ack: message => {
         if (draft?.token === message.token) draft = null;
@@ -14174,6 +14256,7 @@ describe('the goal loop', () => {
     expect(composerText(live.document)).toBe('Old Goal reply');
     if (change === 'off') { enabled = false; draft = null; }
     else if (change === 'new-token') draft = { ...readyDraft('New Goal reply'), token: 'new-token' };
+    else if (change === 'queue') queuePending = true;
     else {
       const editor = live.document.querySelector('#prompt-textarea')!;
       editor.replaceWith(editor.cloneNode(true));
@@ -14190,6 +14273,44 @@ describe('the goal loop', () => {
       expect(composerText(live.document)).toBe('New Goal reply');
       expect(acks(live).at(-1)?.token).toBe('new-token');
     }
+  });
+
+  it('holds a ready Goal draft while the queue owns priority without spending its acknowledgement', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null, queuePending = true;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => {
+        const value = feed(draft)();
+        return { ...value, data: { ...value.data, goal: { ...value.data.goal, queuePending } } };
+      },
+      goal_ack: () => { draft = null; return { ok: true, data: { acknowledged: true } }; }
+    });
+    const sends = watchSend(live.document);
+    draft = readyDraft('Continue only after user input');
+    await live.hook.pullActivity(); await settle();
+    expect(composerText(live.document)).toBe('');
+    expect(sends()).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+    // Cancelling an unclaimed queue entry can restore the still-valid original Goal.
+    queuePending = false;
+    await live.hook.pullActivity(); await settle();
+    expect(sends()).toBe(1);
+    expect(acks(live).at(-1)?.token).toBe('g-token');
+  });
+
+  it('does not collect a durable Goal ticket while user input is ahead of it', async () => {
+    let queuePending = true;
+    const pending = { replyId: 'stable-final', turnId: 'g-original', eventSeq: 12, acceptedAt: 1000 };
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        goal: { enabled: true, own: true, hasKey: true, model: MODEL, pending, draft: null, queuePending } } })
+    });
+    await live.hook.pullActivity(); await settle();
+    expect(drafts(live)).toHaveLength(0);
+    queuePending = false;
+    await live.hook.pullActivity(); await settle();
+    expect(drafts(live)).toHaveLength(1);
   });
 
   it('rejects a prepared reply after A to B to A navigation', async () => {

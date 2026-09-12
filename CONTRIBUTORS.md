@@ -12,6 +12,7 @@ Listed alphabetically by GitHub handle. "Adapted" means the implementation chang
 | --- | --- |
 | [@becoolmin](https://github.com/becoolmin) | Preserving window size on reopen: [#122](https://github.com/totec448-spec/chat-on-steroids/pull/122), adapted into [#134](https://github.com/totec448-spec/chat-on-steroids/pull/134). |
 | [@Bemirror99](https://github.com/Bemirror99) | Resume-shadow recovery and stale Fiber attribution fixes: merged [#19](https://github.com/totec448-spec/chat-on-steroids/pull/19) and [#20](https://github.com/totec448-spec/chat-on-steroids/pull/20). |
+| [@devrajmahar](https://github.com/devrajmahar) | Conversation-scoped generation reset, extracted with an independent SPA recovery regression from [#163](https://github.com/totec448-spec/chat-on-steroids/pull/163). The renderer rewrite and other feature changes were not incorporated. |
 | [@Firefulcar](https://github.com/Firefulcar) | Claimed Compact & Resume leases: merged [#33](https://github.com/totec448-spec/chat-on-steroids/pull/33). Selected-browser startup routing: [#100](https://github.com/totec448-spec/chat-on-steroids/pull/100), adapted into [#91](https://github.com/totec448-spec/chat-on-steroids/pull/91). |
 | [@frytufrytu](https://github.com/frytufrytu) | Diagnosing and fixing blocked-handoff compaction recovery loops: [#127](https://github.com/totec448-spec/chat-on-steroids/pull/127), adapted with durable refusal and draft preservation into [#134](https://github.com/totec448-spec/chat-on-steroids/pull/134). |
 | [@gnustella-lab](https://github.com/gnustella-lab) | Brave Browser support: merged [#106](https://github.com/totec448-spec/chat-on-steroids/pull/106). |
@@ -22,8 +23,21 @@ Listed alphabetically by GitHub handle. "Adapted" means the implementation chang
 | [@Maximapple](https://github.com/Maximapple) | Merged fixes for public-history scope, Project routes, swapped mouse buttons, tunnel readiness, access limits, RTL text, Linux packaging, complete session enumeration and continuation relays: [#37](https://github.com/totec448-spec/chat-on-steroids/pull/37), [#38](https://github.com/totec448-spec/chat-on-steroids/pull/38), [#79](https://github.com/totec448-spec/chat-on-steroids/pull/79), [#110](https://github.com/totec448-spec/chat-on-steroids/pull/110), [#116](https://github.com/totec448-spec/chat-on-steroids/pull/116), [#117](https://github.com/totec448-spec/chat-on-steroids/pull/117), [#131](https://github.com/totec448-spec/chat-on-steroids/pull/131), [#139](https://github.com/totec448-spec/chat-on-steroids/pull/139), [#141](https://github.com/totec448-spec/chat-on-steroids/pull/141). Adapted work on handoff lifetime, macOS sealing, Project successors, worker schemas, custom instructions and caller-evidence waits: [#39](https://github.com/totec448-spec/chat-on-steroids/pull/39), [#80](https://github.com/totec448-spec/chat-on-steroids/pull/80), [#86](https://github.com/totec448-spec/chat-on-steroids/pull/86), [#87](https://github.com/totec448-spec/chat-on-steroids/pull/87), [#88](https://github.com/totec448-spec/chat-on-steroids/pull/88), [#115](https://github.com/totec448-spec/chat-on-steroids/pull/115). |
 | [@PatrickSys](https://github.com/PatrickSys) | Windows installer sandbox folder permissions: [#62](https://github.com/totec448-spec/chat-on-steroids/pull/62), incorporated into the 2.0.6 snapshot and retained in [#91](https://github.com/totec448-spec/chat-on-steroids/pull/91). |
 | [@TaeyanG4](https://github.com/TaeyanG4) | Handling plugin schemas when a Refresh control is unavailable: [#92](https://github.com/totec448-spec/chat-on-steroids/pull/92), adapted into [#91](https://github.com/totec448-spec/chat-on-steroids/pull/91). |
+| [@ventianima-lab](https://github.com/ventianima-lab) | Preserving the exact message, conversation and page-epoch identity accepted by a desktop-send ACK when later canonical text differs, so the same send retains its turn-start boundary: adapted from the [code and regression tests in #185](https://github.com/totec448-spec/chat-on-steroids/issues/185#issuecomment-5647883368). This narrow repair does not reconstruct earlier missing history or resolve every symptom in the issue. |
+
+The September 12 repair snapshot also adapts [@Maximapple](https://github.com/Maximapple)'s
+destination loading guard ([#164](https://github.com/totec448-spec/chat-on-steroids/pull/164)),
+expired automatic resume claim release ([#165](https://github.com/totec448-spec/chat-on-steroids/pull/165)),
+nested user-message text fix ([#179](https://github.com/totec448-spec/chat-on-steroids/pull/179)) and
+disabled-permission guidance from [#146](https://github.com/totec448-spec/chat-on-steroids/pull/146).
+The claim release was strengthened with durable command/document ownership; this does not
+incorporate the rest of the native Desktop proposal.
 
 ## Reports, review and proposed work
+
+[@ventianima-lab](https://github.com/ventianima-lab)'s reproductions also led to the focused
+resume-selection ([#155](https://github.com/totec448-spec/chat-on-steroids/issues/155)) and Windows
+plugin-path ([#178](https://github.com/totec448-spec/chat-on-steroids/issues/178)) repairs.
 
 Contributions also include reproductions, independent testing, designs and patches that are still under review or were superseded. Thank you to:
 

@@ -90,6 +90,28 @@ it('has no host authority or state shared with the next invocation', async () =>
   expect(rendered(await runCodeMode(`throw new Error('UNEMITTED_SECRET')`, [], async () => result('unused'), limits))).not.toContain('UNEMITTED_SECRET');
 });
 
+it('explains malformed source without echoing source strings or dispatching a child', async () => {
+  const invoke = vi.fn(async () => result('unused'));
+  const output = await runCodeMode("await tools.lookup({text:'PRIVATE_SOURCE", tools, invoke, limits);
+  expect(rendered(output)).toContain('CODE_MODE_PARSE_ERROR');
+  expect(rendered(output)).toContain('quoting');
+  expect(rendered(output)).not.toContain('PRIVATE_SOURCE');
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+it('retains a UTF-8-safe preview of explicitly emitted oversized text and stops later actions', async () => {
+  const invoke = vi.fn(async () => result('unused'));
+  const output = await runCodeMode('text("界".repeat(100)); await tools.lookup({});', tools, invoke,
+    { ...limits, textBytes: 100 });
+  expect(output.content[1]).toEqual({ type: 'text', text: '界'.repeat(33) });
+  expect(rendered(output)).toContain('CODE_MODE_OUTPUT_LIMIT');
+  expect(rendered(output)).toContain('truncated');
+  expect(rendered(output)).toContain('100');
+  expect(invoke).not.toHaveBeenCalled();
+  const escaped = await runCodeMode('text("\\n".repeat(90));', tools, invoke, { ...limits, textBytes: 100 });
+  expect(escaped.isError).not.toBe(true);
+});
+
 it('bounds CPU, unresolved promises, memory, output and call admission', async () => {
   const invoke = vi.fn(async () => result('yes'));
   expect(rendered(await runCodeMode('while(true) {}', [], invoke, limits))).toContain('CPU_LIMIT');
@@ -128,11 +150,35 @@ it('emits valid native images and rejects malformed or remote image payloads', a
 it('stops new admission on timeout while an accepted tool finishes under its own owner', async () => {
   let resolve!: (value: ToolResult) => void;
   const invoke = vi.fn(() => new Promise<ToolResult>(done => { resolve = done; }));
-  const output = await runCodeMode('await tools.lookup({}); await tools.lookup({});', tools, invoke, { ...limits, wallMs: 500 });
+  const output = await runCodeMode('text("retained"); await tools.lookup({}); await tools.lookup({});', tools, invoke, { ...limits, wallMs: 500 });
   expect(rendered(output)).toContain('TIME_LIMIT');
-  expect(rendered(output)).toContain('UNAWAITED_CALLS');
+  expect(output.content.slice(0, 2)).toEqual([
+    { type: 'text', text: expect.stringContaining('CODE_MODE_TIME_LIMIT') },
+    { type: 'text', text: expect.stringContaining('CODE_MODE_UNAWAITED_CALLS') }
+  ]);
+  expect(output.content[2]).toEqual({ type: 'text', text: 'retained' });
   expect(invoke).toHaveBeenCalledTimes(1);
   resolve(result('late private value'));
   await new Promise(done => setImmediate(done));
   expect(invoke).toHaveBeenCalledTimes(1);
+});
+
+it('keeps output-limit diagnostics ahead of a full 40000-byte preview and preserves dispatched effects', async () => {
+  for (const priorCall of [false, true]) {
+    const invoke = vi.fn(async () => result('done'));
+    const output = await runCodeMode(`${priorCall ? 'await tools.lookup({id:1});' : ''}text("x".repeat(40001)); await tools.lookup({id:2});`, tools, invoke, limits);
+    expect(output.isError).toBe(true);
+    expect(output.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('CODE_MODE_OUTPUT_LIMIT') });
+    expect(output.content[0]).toMatchObject({ text: expect.stringContaining(priorCall ? '1 tool calls already dispatched; side effects were not rolled back' : 'No tool calls were dispatched') });
+    expect(output.content.slice(1)).toEqual([{ type: 'text', text: 'x'.repeat(40000) }]);
+    expect(invoke).toHaveBeenCalledTimes(priorCall ? 1 : 0);
+    if (priorCall) expect(invoke).toHaveBeenCalledWith('lookup', { id: 1 });
+  }
+});
+
+it('puts invalid-output diagnostics before the validated emissions without changing their order', async () => {
+  const output = await runCodeMode('text("first"); text("second"); image("data:image/png;base64,YWJj");', [], async () => result('unused'), limits);
+  expect(output.isError).toBe(true);
+  expect(output.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('CODE_MODE_OUTPUT_INVALID') });
+  expect(output.content.slice(1)).toEqual([{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }]);
 });
