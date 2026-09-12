@@ -1729,6 +1729,278 @@ describe('a chat driven towards a specific goal', () => {
     });
   });
 
+  it('keeps a quota-paused reply durable and wakes it once after the recheck time', async () => {
+    const conversationId = 'c-reply-quota-paused';
+    const turnId = 'g-reply-quota-paused';
+    const session = await createSession({ conversationId, title: 'Quota pause' });
+    await appendEvent(session.id, {
+      time: Date.now(), source: 'extension', kind: 'user_message',
+      message: { text: 'continue', truncated: false, chars: 8 }
+    });
+    globalThis.fetch = (async () => decision('continue', 'Continue safely.')) as never;
+    await goal.acceptGoalReplyNow({
+      conversationId,
+      sessionId: session.id,
+      replyId: 'assistant-message-quota-paused',
+      turnId,
+      eventSeq: 8,
+      blocked: false
+    });
+    const draft = goal.startGoalDraft({ conversationId, sessionId: session.id, turnId, clientId: 'tab-quota' });
+    expect((await settled(conversationId)).stage).toBe('ready');
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const resumeAt = await goal.deferGoalReplyForQuotaNow(conversationId, turnId, draft.token, 'tab-quota');
+      expect(resumeAt).toBe(Date.now() + 5 * 60_000);
+      now += 30_000;
+      expect(await goal.deferGoalReplyForQuotaNow(conversationId, turnId, draft.token, 'tab-quota')).toBe(resumeAt);
+      expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+      expect(goal.pendingGoalReplies()).toEqual([]);
+
+      const saved = goal.snapshotGoalReplies();
+      goal.resetGoalStateForTests();
+      goal.restoreGoalReplies(saved);
+      now += 5 * 60_000 - 30_000 - 1;
+      expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+      now += 1;
+      expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({
+        replyId: 'assistant-message-quota-paused', turnId, acceptedAt: resumeAt
+      });
+      expect(goal.pendingGoalReplies()).toHaveLength(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('preserves a quota pause when a provisional reply is promoted to its stable identity', async () => {
+    const conversationId = 'c-provisional-quota-promotion';
+    const turnId = 'g-provisional-quota-promotion';
+    const session = await createSession({ conversationId, title: 'Provisional quota promotion' });
+    await appendEvent(session.id, {
+      time: Date.now(), source: 'extension', kind: 'user_message',
+      message: { text: 'continue after quota', truncated: false, chars: 20 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId, sessionId: session.id, replyId: `turn:${turnId}`, turnId, eventSeq: 0, blocked: false
+    });
+    globalThis.fetch = (async () => decision('continue', 'Continue once access returns.')) as never;
+    const draft = goal.startGoalDraft({ conversationId, sessionId: session.id, turnId, clientId: 'tab-provisional' });
+    expect((await settled(conversationId)).stage).toBe('ready');
+
+    const base = Date.now();
+    let now = base;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const resumeAt = await goal.deferGoalReplyForQuotaNow(
+        conversationId, turnId, draft.token, 'tab-provisional'
+      );
+      expect(resumeAt).toBe(base + 5 * 60_000);
+      await goal.acceptGoalReplyNow({
+        conversationId, sessionId: session.id, replyId: 'assistant-stable-after-quota',
+        turnId, eventSeq: 12, blocked: false
+      });
+      expect(goal.goalReplyResumeAtFor(conversationId, turnId)).toBe(resumeAt);
+      expect(goal.goalViewFor(conversationId, 'tab-provisional')).toBeNull();
+      expect(goal.snapshotGoalReplies().replies).toContainEqual(expect.objectContaining({
+        replyId: 'assistant-stable-after-quota', turnId, eventSeq: 12,
+        state: 'pending', resumeAt
+      }));
+      now = resumeAt!;
+      expect(goal.goalViewFor(conversationId, 'tab-provisional')).toMatchObject({
+        token: draft.token, stage: 'ready'
+      });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('withholds a paused ready payload and safely redrafts it after a long offline wake', async () => {
+    const conversationId = 'c-ready-quota-paused';
+    const turnId = 'g-ready-quota-paused';
+    const session = await createSession({ conversationId, title: 'Ready quota pause' });
+    await appendEvent(session.id, {
+      time: Date.now(), source: 'extension', kind: 'user_message',
+      message: { text: 'continue the proof', truncated: false, chars: 18 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId, sessionId: session.id, replyId: 'assistant-ready-quota', turnId, eventSeq: 9, blocked: false
+    });
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return decision('continue', 'Run the next bounded check.');
+    }) as never;
+    const first = goal.startGoalDraft({ conversationId, sessionId: session.id, turnId });
+    expect((await settled(conversationId)).stage).toBe('ready');
+
+    const base = Date.now();
+    let now = base;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const firstWake = await goal.deferGoalReplyForQuotaNow(conversationId, turnId, first.token, '');
+      expect(firstWake).toBe(base + 5 * 60_000);
+      expect(goal.goalViewFor(conversationId)).toBeNull();
+      expect(goal.goalReplyResumeAtFor(conversationId, turnId)).toBe(firstWake);
+
+      // React removing the dialog cannot expose the payload before the app-owned deadline.
+      now = firstWake! - 1;
+      expect(goal.goalViewFor(conversationId)).toBeNull();
+      now = firstWake!;
+      expect(goal.goalViewFor(conversationId)).toMatchObject({ token: first.token, stage: 'ready' });
+
+      // If the machine stays down beyond the payload TTL after that wake, the exact durable
+      // obligation remains. It may buy another helper decision, but never lose the loop or
+      // reuse a payload whose browser-send state is no longer knowable.
+      now = firstWake! + 11 * 60_000;
+      expect(goal.goalViewFor(conversationId)).toBeNull();
+      expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({ turnId });
+      const replacement = goal.startGoalDraft({ conversationId, sessionId: session.id, turnId });
+      expect(replacement.token).not.toBe(first.token);
+      expect((await settled(conversationId)).stage).toBe('ready');
+      expect(calls).toBe(2);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('does not roll a failed defer write back over a newer acknowledgement', async () => {
+    const conversationId = 'c-quota-defer-race';
+    const turnId = 'g-quota-defer-race';
+    const session = await createSession({ conversationId, title: 'Quota defer race' });
+    await appendEvent(session.id, {
+      time: Date.now(), source: 'extension', kind: 'user_message',
+      message: { text: 'continue once', truncated: false, chars: 13 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId, sessionId: session.id, replyId: 'assistant-quota-defer-race', turnId, eventSeq: 10, blocked: false
+    });
+    globalThis.fetch = (async () => decision('continue', 'One exact continuation.')) as never;
+    const draft = goal.startGoalDraft({ conversationId, sessionId: session.id, turnId, clientId: 'tab-race' });
+    expect((await settled(conversationId)).stage).toBe('ready');
+
+    const durable = await import('../src/main/durable.js');
+    const realWrite = durable.writeDurableNow;
+    let entered!: () => void;
+    let fail!: (error: Error) => void;
+    const writeEntered = new Promise<void>(resolve => { entered = resolve; });
+    const heldWrite = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const spy = vi.spyOn(durable, 'writeDurableNow')
+      .mockImplementationOnce(async () => { entered(); await heldWrite; })
+      .mockImplementation(realWrite);
+    try {
+      const pausing = goal.deferGoalReplyForQuotaNow(conversationId, turnId, draft.token, 'tab-race');
+      await writeEntered;
+      expect(goal.goalReplyResumeAtFor(conversationId, turnId)).toEqual(expect.any(Number));
+
+      expect(await goal.ackGoalDraftNow(conversationId, draft.token, 'tab-race')).toBe(true);
+      expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+      fail(new Error('older defer fsync failed'));
+      await expect(pausing).rejects.toThrow('older defer fsync failed');
+
+      expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+      expect(goal.snapshotGoalReplies()).toMatchObject({
+        replies: expect.arrayContaining([
+          expect.objectContaining({ conversationId, replyId: 'assistant-quota-defer-race', state: 'handled' })
+        ])
+      });
+      expect(await durable.readDurable<{ replies: Array<{ conversationId: string; state: string }> }>(goal.GOAL_REPLIES_STATE))
+        .toMatchObject({ replies: expect.arrayContaining([expect.objectContaining({ conversationId, state: 'handled' })]) });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('retires a quota-paused draft when a newer final replaces its obligation', async () => {
+    const conversationId = 'c-quota-draft-superseded';
+    const session = await createSession({ conversationId, title: 'Superseded paused draft' });
+    await appendEvent(session.id, {
+      time: Date.now(), source: 'extension', kind: 'user_message',
+      message: { text: 'continue A', truncated: false, chars: 10 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId, sessionId: session.id, replyId: 'assistant-a',
+      turnId: 'turn-a', eventSeq: 10, blocked: false
+    });
+    globalThis.fetch = (async () => decision('continue', 'Continuation for A.')) as never;
+    const oldDraft = goal.startGoalDraft({
+      conversationId, sessionId: session.id, turnId: 'turn-a', clientId: 'tab-a'
+    });
+    expect((await settled(conversationId)).stage).toBe('ready');
+    expect(await goal.deferGoalReplyForQuotaNow(
+      conversationId, 'turn-a', oldDraft.token, 'tab-a'
+    )).toEqual(expect.any(Number));
+
+    // Another tab records a genuinely newer completed answer before A's pause expires.
+    await goal.acceptGoalReplyNow({
+      conversationId, sessionId: session.id, replyId: 'assistant-b',
+      turnId: 'turn-b', eventSeq: 20, blocked: false
+    });
+
+    expect(goal.goalViewFor(conversationId, 'tab-a')).toBeNull();
+    expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({
+      replyId: 'assistant-b', turnId: 'turn-b', eventSeq: 20
+    });
+    const replacement = goal.startGoalDraft({
+      conversationId, sessionId: session.id, turnId: 'turn-b', clientId: 'tab-b', deferStart: true
+    });
+    expect(replacement.token).not.toBe(oldDraft.token);
+    expect(replacement.turnId).toBe('turn-b');
+  });
+
+  it('does not roll a failed promotion write back over a durable quota renewal', async () => {
+    const conversationId = 'c-promotion-renewal-race';
+    const turnId = 'g-promotion-renewal-race';
+    const session = await createSession({ conversationId, title: 'Promotion renewal race' });
+    await appendEvent(session.id, {
+      time: Date.now(), source: 'extension', kind: 'user_message',
+      message: { text: 'continue after quota', truncated: false, chars: 20 }
+    });
+    await goal.acceptGoalReplyNow({
+      conversationId, sessionId: session.id, replyId: `turn:${turnId}`,
+      turnId, eventSeq: 0, blocked: false
+    });
+    globalThis.fetch = (async () => decision('continue', 'Continue after access returns.')) as never;
+    const draft = goal.startGoalDraft({ conversationId, sessionId: session.id, turnId, clientId: 'tab-race' });
+    expect((await settled(conversationId)).stage).toBe('ready');
+
+    const durable = await import('../src/main/durable.js');
+    const realWrite = durable.writeDurableNow;
+    let entered!: () => void;
+    let fail!: (error: Error) => void;
+    const writeEntered = new Promise<void>(resolve => { entered = resolve; });
+    const heldWrite = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const spy = vi.spyOn(durable, 'writeDurableNow')
+      .mockImplementationOnce(async () => { entered(); await heldWrite; })
+      .mockImplementation(realWrite);
+    try {
+      const promotion = goal.acceptGoalReplyNow({
+        conversationId, sessionId: session.id, replyId: 'assistant-stable-race',
+        turnId, eventSeq: 30, blocked: false
+      });
+      await writeEntered;
+      const resumeAt = await goal.deferGoalReplyForQuotaNow(
+        conversationId, turnId, draft.token, 'tab-race'
+      );
+      expect(resumeAt).toEqual(expect.any(Number));
+      fail(new Error('older promotion fsync failed'));
+      await expect(promotion).rejects.toThrow('older promotion fsync failed');
+
+      expect(goal.goalReplyResumeAtFor(conversationId, turnId)).toBe(resumeAt);
+      expect(goal.goalViewFor(conversationId, 'tab-race')).toBeNull();
+      expect(goal.snapshotGoalReplies().replies).toContainEqual(expect.objectContaining({
+        conversationId, replyId: 'assistant-stable-race', turnId, eventSeq: 30,
+        state: 'pending', resumeAt
+      }));
+      expect(await durable.readDurable<{ replies: Array<Record<string, unknown>> }>(goal.GOAL_REPLIES_STATE))
+        .toMatchObject({ replies: expect.arrayContaining([expect.objectContaining({
+          conversationId, replyId: 'assistant-stable-race', state: 'pending', resumeAt
+        })]) });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('stores a handled tombstone when Goal was off at terminal acceptance', async () => {
     await saveConfig({
       ...defaultConfig(),

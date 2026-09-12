@@ -47,6 +47,7 @@ import {
   endSession,
   findSessionByConversation,
   getSession,
+  hasCanonicalMessage,
   readAsset,
   readEvents,
   readRecentEvents,
@@ -89,10 +90,16 @@ interface LiveConversation {
   knownTurnEnds: Set<string>;
   /** Newest durable turn verdict, used only to interpret post-reload final/call evidence. */
   lastTurnOutcome: TurnOutcome | null;
+  /** Durable id of that newest ended turn, for exact post-reload recovery fences. */
+  lastTurnId: string | null;
   /** Start of that turn, so its final may predate a later detach/end while old finals cannot. */
   lastTurnStartedAt: number | null;
+  /** Provider response branches durably associated with lastTurnId. */
+  lastTurnResponseBranches: Set<string>;
   /** ChatGPT request ids — one per server turn — that called tools while the open turn ran. */
   turnRequestIds: Set<string>;
+  /** Exact provider response branches observed while the open local turn was still bound. */
+  turnResponseBranches: Set<string>;
   /**
    * The newest turn the page reported completed, with the server turns it was calling under.
    *
@@ -103,7 +110,13 @@ interface LiveConversation {
    * finished. See reopenFalselyEndedTurn. In-memory only: an app restart inside such a turn
    * loses the proof, and the turn stays closed as the page reported it.
    */
-  endedTurn: { turnId: string; startedAt: number | null; endedAt: number; requestIds: Set<string> } | null;
+  endedTurn: {
+    turnId: string;
+    startedAt: number | null;
+    endedAt: number;
+    requestIds: Set<string>;
+    responseBranches: Set<string>;
+  } | null;
   /** Visible ChatGPT-native activity rows, updated by the page's stable row identity. */
   pageTools: Map<string, ProgressRecord>;
 }
@@ -121,6 +134,12 @@ interface ProgressRecord {
 }
 
 const conversations = new Map<string, LiveConversation>();
+
+function responseBranchKey(exchangeId?: string, workingId?: string): string | null {
+  if (!exchangeId || !workingId) return null;
+  return `${exchangeId}\u0000${workingId}`;
+}
+const AMBIGUOUS_RESPONSE_BRANCH = '\u0000ambiguous-response-branch';
 /** One full first-sight initialization per ChatGPT conversation at a time. */
 const sessionInitializations = new Map<string, Promise<string | null>>();
 /**
@@ -325,8 +344,11 @@ async function initializeSessionForConversation(
         knownTurnStarts: new Set<string>(),
         knownTurnEnds: new Set<string>(),
         lastTurnStartedAt: null,
+        lastTurnId: null,
         activeTurnId: null,
         activeTurnStartedAt: null,
+        activeTurnResponseBranches: new Set<string>(),
+        lastTurnResponseBranches: new Set<string>(),
         pageTools: new Map<string, ProgressRecord>()
       };
 
@@ -358,8 +380,11 @@ async function initializeSessionForConversation(
     knownTurnStarts: history.knownTurnStarts,
     knownTurnEnds: history.knownTurnEnds,
     lastTurnOutcome: summary.lastTurnOutcome,
+    lastTurnId: history.lastTurnId,
     lastTurnStartedAt: history.lastTurnStartedAt,
+    lastTurnResponseBranches: history.lastTurnResponseBranches,
     turnRequestIds: new Set<string>(),
+    turnResponseBranches: history.activeTurnResponseBranches,
     endedTurn: null,
     pageTools: history.pageTools
   });
@@ -482,10 +507,16 @@ interface StoredHistory {
   knownTurnEnds: Set<string>;
   /** Durable start time of the newest turn that ended in the recovered tail. */
   lastTurnStartedAt: number | null;
+  /** Durable id of the newest turn that ended in the recovered tail. */
+  lastTurnId: string | null;
   /** Newest still-open local generation, so a reloaded page can adopt it after app restart. */
   activeTurnId: string | null;
   /** Durable start time of activeTurnId. */
   activeTurnStartedAt: number | null;
+  /** Provider response branches durably bound to activeTurnId. */
+  activeTurnResponseBranches: Set<string>;
+  /** Provider response branches durably bound to lastTurnId. */
+  lastTurnResponseBranches: Set<string>;
   /** Latest stable ChatGPT-native activity row by website thought/message identity. */
   pageTools: Map<string, ProgressRecord>;
 }
@@ -505,13 +536,14 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
   const openTurns = new Set<string>();
   const knownTurnStarts = new Set<string>();
   const knownTurnEnds = new Set<string>();
-  let lastTurnEndedAt: number | null = null;
   let lastTurnStartedAt: number | null = null;
+  let lastTurnId: string | null = null;
   const turnStarts = new Map<string, number>();
   const pageTools = new Map<string, ProgressRecord>();
+  const responseBranchesByTurn = new Map<string, Set<string>>();
   try {
     const events = await readRecentEvents(sessionId, 4096, {
-      kinds: ['turn_start', 'turn_end', 'page_tool'],
+      kinds: ['turn_start', 'turn_end', 'page_tool', 'assistant_message'],
       maxBytes: 2 * 1024 * 1024
     });
     // Presentation groups a turn's starts before its end. Lifecycle replay must
@@ -529,10 +561,11 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
           knownTurnEnds.add(event.turnId);
           openTurns.delete(event.turnId);
         }
-        if (lastTurnEndedAt === null || event.time >= lastTurnEndedAt) {
-          lastTurnEndedAt = event.time;
-          lastTurnStartedAt = event.turnId ? turnStarts.get(event.turnId) ?? null : null;
-        }
+        // The journal is authoritative by publication order, not provider wall-clock time.
+        // A delayed end may be appended after an older timestamp; summary recovery follows
+        // this same sequence, so retain the last end encountered in the seq-sorted stream.
+        lastTurnId = event.turnId ?? null;
+        lastTurnStartedAt = event.turnId ? turnStarts.get(event.turnId) ?? null : null;
       } else if (event.kind === 'page_tool' && event.messageId) {
         const held = pageTools.get(event.messageId);
         if (!held) {
@@ -548,6 +581,12 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
           held.text = event.label;
           if (!held.turnId && event.turnId) held.turnId = event.turnId;
         }
+      } else if (event.kind === 'assistant_message' && event.turnId) {
+        const key = responseBranchKey(event.responseExchangeId, event.responseWorkingId);
+        const held = responseBranchesByTurn.get(event.turnId) ?? new Set<string>();
+        if (key) held.add(key);
+        if (event.responseBranchAmbiguous === true) held.add(AMBIGUOUS_RESPONSE_BRANCH);
+        if (held.size > 0) responseBranchesByTurn.set(event.turnId, held);
       }
     }
   } catch (err) {
@@ -563,7 +602,16 @@ async function storedHistory(sessionId: string): Promise<StoredHistory> {
       activeTurnStartedAt = startedAt;
     }
   }
-  return { openTurns, knownTurnStarts, knownTurnEnds, lastTurnStartedAt, activeTurnId, activeTurnStartedAt, pageTools };
+  return {
+    openTurns, knownTurnStarts, knownTurnEnds, lastTurnStartedAt, lastTurnId, activeTurnId, activeTurnStartedAt,
+    activeTurnResponseBranches: activeTurnId
+      ? responseBranchesByTurn.get(activeTurnId) ?? new Set<string>()
+      : new Set<string>(),
+    lastTurnResponseBranches: lastTurnId
+      ? responseBranchesByTurn.get(lastTurnId) ?? new Set<string>()
+      : new Set<string>(),
+    pageTools
+  };
 }
 
 async function ensureUnattributedSession(): Promise<string | null> {
@@ -1452,6 +1500,7 @@ async function reopenFalselyEndedTurn(
   live.turnStartedAt = ended.startedAt ?? startedAt;
   live.lastTurnOutcome = null;
   live.turnRequestIds = new Set(ended.requestIds);
+  live.turnResponseBranches = new Set(ended.responseBranches);
   logInfo(
     `session ${sessionId} reopened turn ${ended.turnId} — request ${requestId} kept calling tools after the page reported it completed`
   );
@@ -1615,6 +1664,10 @@ export interface ChatObservation {
   messageId?: string;
   /** Raw public provider message UUID, retained as evidence, never used to guess ownership. */
   providerMessageId?: string;
+  /** Exact provider response branch, stable across a page reload. */
+  responseExchangeId?: string;
+  /** Provider working branch, paired with responseExchangeId to reject contradictions. */
+  responseWorkingId?: string;
   turnId?: string;
   final?: boolean;
   state?: 'streaming' | 'final';
@@ -1862,17 +1915,21 @@ async function recordChatObservationsNow(
   let pageTitle: ChatObservation | undefined;
   const explicitEnds = new Set<string>();
   const batchTurnStarts = new Map<string, number>();
-  let batchUncertainEndId: string | null = null;
+  const batchUncertainEndIds: string[] = [];
+  const batchAuthoredUserIds = new Set<string>();
   // This batch is hot while ChatGPT is streaming. Collect the three facts needed before the
   // write loop in one pass instead of find + find + filter + map (the latter two also allocated
   // an intermediate array for every batch).
   for (const item of observations) {
     if (!firstUser && item.kind === 'user_message') firstUser = item;
+    if (item.kind === 'user_message' && item.authoredNow === true && item.messageId) {
+      batchAuthoredUserIds.add(item.messageId);
+    }
     if (item.kind === 'conversation_title') pageTitle = item;
     if (item.kind === 'turn_start' && item.turnId) batchTurnStarts.set(item.turnId, item.time);
     if (item.kind === 'turn_end' && item.turnId) {
       explicitEnds.add(item.turnId);
-      if (item.outcome !== 'completed' && item.outcome !== 'stopped') batchUncertainEndId = item.turnId;
+      if (item.outcome !== 'completed' && item.outcome !== 'stopped') batchUncertainEndIds.push(item.turnId);
     }
   }
   const sessionId = await sessionForConversation(
@@ -1890,7 +1947,88 @@ async function recordChatObservationsNow(
   // Only a turn already open before this batch qualifies; apply the end after all
   // observations so a newer turn or an explicit verdict cannot be overwritten.
   const recoverableTurns = new Set(live?.openTurns);
+  const preBatchTurnId = live?.turnId ?? null;
+  const preBatchTurnStartedAt = live?.turnStartedAt ?? null;
+  const preBatchResponseBranches = new Set(live?.turnResponseBranches);
+  const freshExplicitEnds = new Set(
+    [...explicitEnds].filter(turnId => !live?.knownTurnEnds.has(turnId))
+  );
+  let freshBatchUncertainEndId: string | null = null;
+  for (let index = batchUncertainEndIds.length - 1; index >= 0; index--) {
+    const candidate = batchUncertainEndIds[index]!;
+    if (!live?.knownTurnEnds.has(candidate)) {
+      freshBatchUncertainEndId = candidate;
+      break;
+    }
+  }
+  const freshBatchUncertainStartedAt = freshBatchUncertainEndId
+    ? batchTurnStarts.get(freshBatchUncertainEndId) ??
+      (live?.turnId === freshBatchUncertainEndId ? live.turnStartedAt : null)
+    : null;
+  const freshBatchTurnIds = new Set([...batchTurnStarts.keys()].filter(turnId =>
+    !live?.knownTurnStarts.has(turnId) && !live?.knownTurnEnds.has(turnId)
+  ));
+  const batchStartsFreshTurn = freshBatchTurnIds.size > 0;
+  const priorUncertainTurnId =
+    !batchStartsFreshTurn &&
+    live?.turnStartedAt === null &&
+    live.lastTurnOutcome !== null &&
+    live.lastTurnOutcome !== 'completed' &&
+    live.lastTurnOutcome !== 'stopped'
+      ? live.lastTurnId
+      : null;
+  const priorUncertainStartedAt = priorUncertainTurnId ? live?.lastTurnStartedAt ?? null : null;
+  const recoveryFenceTurns = new Set(recoverableTurns);
+  if (freshBatchUncertainEndId && freshBatchUncertainStartedAt !== null) {
+    recoveryFenceTurns.add(freshBatchUncertainEndId);
+  }
+  if (priorUncertainTurnId) recoveryFenceTurns.add(priorUncertainTurnId);
+  // A new authored row supersedes both a still-open pre-batch turn and the previous call's
+  // uncertain boundary. Do not apply this to a turn born wholly inside this batch: its opening
+  // user row belongs to that same turn and is not evidence of later work.
+  const hasPreexistingRecoveryFence = recoverableTurns.size > 0 || priorUncertainTurnId !== null;
+  const batchFreshUserSupersedesRecovery = hasPreexistingRecoveryFence &&
+    (await Promise.all([...batchAuthoredUserIds].map(messageId =>
+      hasCanonicalMessage(sessionId, 'user_message', messageId)
+    ))).some(exists => !exists);
+  const batchFreshTurnSupersedesRecovery = recoverableTurns.size > 0 &&
+    [...freshBatchTurnIds].some(turnId => !recoverableTurns.has(turnId));
+  const recoveryOwnerSupersededByBatch = (turnId: string | null): boolean =>
+    turnId !== null && !freshBatchTurnIds.has(turnId) &&
+    (batchFreshUserSupersedesRecovery || batchFreshTurnSupersedesRecovery);
+  const freshUncertainOwnsUnboundObservation = (item: ChatObservation): boolean => {
+    if (item.kind !== 'assistant_message' || item.turnId ||
+        freshBatchUncertainEndId === null || !freshBatchTurnIds.has(freshBatchUncertainEndId) ||
+        freshBatchUncertainStartedAt === null || item.time < freshBatchUncertainStartedAt) return false;
+    const branch = responseBranchKey(item.responseExchangeId, item.responseWorkingId);
+    // A complete branch already bound to stale O is stronger ownership evidence than T's
+    // timestamp fence. Provider/message aliases without branch metadata are rejected after the
+    // canonical upsert below, where their stable identity resolves to O.
+    return branch === null || !preBatchResponseBranches.has(branch);
+  };
+  const batchResponseBranches = new Set(preBatchResponseBranches);
+  for (const item of observations) {
+    if (item.kind !== 'assistant_message' || item.activeNow !== true) continue;
+    if ((item.turnId && freshBatchTurnIds.has(item.turnId)) || freshUncertainOwnsUnboundObservation(item)) continue;
+    const branch = responseBranchKey(item.responseExchangeId, item.responseWorkingId);
+    if (branch) batchResponseBranches.add(branch);
+  }
+  const batchResponseBranchAmbiguous = recoverableTurns.size > 0 &&
+    (batchResponseBranches.has(AMBIGUOUS_RESPONSE_BRANCH) || batchResponseBranches.size > 1);
   let recoveredFinal: { turnId: string; time: number; seq: number; origin: number; native: boolean } | undefined;
+  const ambiguousCanonicalTurns = new Set<string>();
+  const unboundAmbiguousTurns = new Set<string>();
+  const canonicalResponseBranches = new Map<string, Set<string>>();
+  if (live?.turnId && recoverableTurns.has(live.turnId)) {
+    canonicalResponseBranches.set(live.turnId, new Set(live.turnResponseBranches));
+  }
+  if (priorUncertainTurnId) {
+    canonicalResponseBranches.set(priorUncertainTurnId, new Set(live?.lastTurnResponseBranches));
+  }
+  const goalCandidateRecoveryOwners: Array<string | null> = [];
+  const goalEligibilityWrites: Array<string | null> = [];
+  const latestAssistantSnapshots = new Map<string, Extract<SessionEvent, { kind: 'assistant_message' }>>();
+  const assistantTerminalTurns = new Map<string | null, string | null>();
 
   for (const item of observations) {
     const base = {
@@ -1927,36 +2065,56 @@ async function recordChatObservationsNow(
       case 'assistant_message': {
         if (!item.messageId) continue;
         const state = item.state ?? (item.final === true ? 'final' : 'streaming');
+        const responseBranch = responseBranchKey(item.responseExchangeId, item.responseWorkingId);
+        const freshBatchOwnsObservation =
+          Boolean(item.turnId && freshBatchTurnIds.has(item.turnId)) ||
+          freshUncertainOwnsUnboundObservation(item);
+        // A reload may replace the public message object and lose or replace the document-local
+        // turn id, but it does not change ChatGPT's native response branch. Bind that branch
+        // while the page still has an exact local owner and persist it on the canonical message
+        // from the first streaming snapshot. A retry or regenerate introduces another branch
+        // and therefore fails closed.
+        const branchOwnedTurn =
+          item.turnId !== preBatchTurnId &&
+          !freshBatchOwnsObservation &&
+          item.activeNow === true &&
+          responseBranch !== null &&
+          preBatchTurnId !== null &&
+          preBatchTurnStartedAt !== null &&
+          preBatchResponseBranches.size === 1 &&
+          preBatchResponseBranches.has(responseBranch) &&
+          !batchResponseBranchAmbiguous &&
+          recoverableTurns.has(preBatchTurnId) &&
+          !freshExplicitEnds.has(preBatchTurnId)
+            ? preBatchTurnId
+            : null;
+        // The native response branch is the durable owner proof. A replacement document may
+        // mint a fresh page-local turn id during the same reload race, so let that exact proof
+        // override only a missing or contradictory page hint. Before native branch metadata is
+        // readable, keep an unknown contradictory page id unowned; a later provider-id alias can
+        // then promote it from unknown to the proven durable owner instead of freezing poison.
+        // Existing canonical historical messages retain their proven owner in the store.
+        const activeRecoveredTurn = state === 'final' ? branchOwnedTurn : null;
+        const weakReplacementTurn =
+          item.activeNow === true &&
+          item.turnId !== undefined &&
+          live !== undefined &&
+          live.turnId !== null &&
+          live.turnStartedAt !== null &&
+          item.turnId !== live.turnId &&
+          !freshBatchTurnIds.has(item.turnId);
+        const effectiveTurnId = branchOwnedTurn ?? (weakReplacementTurn ? undefined : item.turnId);
         // A reload can destroy the document-local generation id after this recorder already
         // made the only honest lifecycle verdict it could: unknown/failed/interrupted/stalled.
         // A new stable final reply is stronger evidence about Goal than that lost id, but an
         // old final seen merely by opening an idle chat is not. The prior uncertain boundary is
         // therefore the exact fence; the stable reply id is the durable exactly-once identity.
-        const batchUncertainStartedAt = batchUncertainEndId
-          ? batchTurnStarts.get(batchUncertainEndId) ??
-            (live?.turnId === batchUncertainEndId ? live.turnStartedAt : null)
-          : null;
-        const priorUncertainStartedAt =
-          live?.turnStartedAt === null &&
-          live.lastTurnOutcome !== null &&
-          live.lastTurnOutcome !== 'completed' &&
-          live.lastTurnOutcome !== 'stopped'
-            ? live.lastTurnStartedAt
-            : null;
-        const uncertainTurnStartedAt = batchUncertainStartedAt ?? priorUncertainStartedAt;
-        const terminalActivity =
-          state === 'final' &&
-          (item.activeNow === true ||
-            (uncertainTurnStartedAt !== null && item.time >= uncertainTurnStartedAt));
-        const recoveredGoalEligible =
-          state === 'final' &&
-          !item.turnId &&
-          live !== undefined &&
-          uncertainTurnStartedAt !== null &&
-          item.time >= uncertainTurnStartedAt;
-        const goalEligible = item.goalEligible === true || recoveredGoalEligible;
-        const written = await upsertMessageEvent(sessionId, {
-          ...base,
+        const uncertainTurnStartedAt = freshBatchUncertainStartedAt ?? priorUncertainStartedAt;
+        const uncertainRecoveryTurnId = freshBatchUncertainEndId ?? priorUncertainTurnId;
+        const assistantEvent = {
+          time: item.time,
+          source: 'extension',
+          ...(agent ? { agent } : {}),
           kind: 'assistant_message',
           // Keep normal 15k–20k-token handoff-style answers inline rather than making the
           // local transcript itself look truncated while the continuation carries more.
@@ -1967,10 +2125,142 @@ async function recordChatObservationsNow(
           messageId: item.messageId,
           state,
           final: state === 'final',
+          ...(effectiveTurnId ? { turnId: effectiveTurnId } : {}),
           ...(item.providerMessageId ? { providerMessageId: item.providerMessageId } : {}),
-          ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
-        }, { preferTime: item.authoredTime === true });
-        const canonicalTurn = written.event.turnId;
+          ...(item.responseExchangeId ? { responseExchangeId: item.responseExchangeId } : {}),
+          ...(item.responseWorkingId ? { responseWorkingId: item.responseWorkingId } : {})
+        } as const;
+        const writeOptions = { preferTime: item.authoredTime === true };
+        let written = await upsertMessageEvent(sessionId, assistantEvent, writeOptions);
+        let canonicalTurn = written.event.turnId;
+        if (written.event.kind === 'assistant_message' && written.event.messageId) {
+          latestAssistantSnapshots.set(written.event.messageId, written.event);
+        }
+        if (written.event.kind === 'assistant_message' && canonicalTurn && recoveryFenceTurns.has(canonicalTurn)) {
+          let canonicalBranches = canonicalResponseBranches.get(canonicalTurn);
+          if (!canonicalBranches) {
+            canonicalBranches = new Set<string>();
+            canonicalResponseBranches.set(canonicalTurn, canonicalBranches);
+          }
+          const canonicalBranch = responseBranchKey(written.event.responseExchangeId, written.event.responseWorkingId);
+          if (canonicalBranch) canonicalBranches.add(canonicalBranch);
+          if (written.event.responseBranchAmbiguous === true) {
+            canonicalBranches.add(AMBIGUOUS_RESPONSE_BRANCH);
+          }
+          if (canonicalBranches.has(AMBIGUOUS_RESPONSE_BRANCH) || canonicalBranches.size > 1) {
+            ambiguousCanonicalTurns.add(canonicalTurn);
+          }
+        }
+        if (written.event.kind === 'assistant_message' && canonicalTurn === undefined && !item.turnId &&
+            uncertainRecoveryTurnId && uncertainTurnStartedAt !== null && item.time >= uncertainTurnStartedAt) {
+          let uncertainBranches = canonicalResponseBranches.get(uncertainRecoveryTurnId);
+          if (!uncertainBranches) {
+            uncertainBranches = new Set<string>();
+            canonicalResponseBranches.set(uncertainRecoveryTurnId, uncertainBranches);
+          }
+          const candidateBranch = responseBranchKey(
+            written.event.responseExchangeId,
+            written.event.responseWorkingId
+          );
+          if (candidateBranch) uncertainBranches.add(candidateBranch);
+          if (written.event.responseBranchAmbiguous === true) {
+            uncertainBranches.add(AMBIGUOUS_RESPONSE_BRANCH);
+          }
+          if (uncertainBranches.has(AMBIGUOUS_RESPONSE_BRANCH) || uncertainBranches.size > 1) {
+            ambiguousCanonicalTurns.add(uncertainRecoveryTurnId);
+            unboundAmbiguousTurns.add(uncertainRecoveryTurnId);
+          }
+        }
+        const uncertainRecoveryBranches = uncertainRecoveryTurnId
+          ? canonicalResponseBranches.get(uncertainRecoveryTurnId)
+          : undefined;
+        const uncertainRecoveryAmbiguous = Boolean(uncertainRecoveryBranches &&
+          (uncertainRecoveryBranches.has(AMBIGUOUS_RESPONSE_BRANCH) || uncertainRecoveryBranches.size > 1));
+        if (live && written.event.kind === 'assistant_message' &&
+            canonicalTurn === live.turnId && live.turnStartedAt !== null) {
+          const canonicalBranch = responseBranchKey(written.event.responseExchangeId, written.event.responseWorkingId);
+          if (canonicalBranch) live.turnResponseBranches.add(canonicalBranch);
+          if (written.event.responseBranchAmbiguous === true) {
+            live.turnResponseBranches.add(AMBIGUOUS_RESPONSE_BRANCH);
+          }
+          if (live.turnResponseBranches.size > 1) ambiguousCanonicalTurns.add(canonicalTurn);
+        } else if (written.event.kind === 'assistant_message' &&
+            canonicalTurn && written.event.responseBranchAmbiguous === true) {
+          ambiguousCanonicalTurns.add(canonicalTurn);
+        }
+        const canonicalBranchAmbiguous =
+          written.event.kind === 'assistant_message' &&
+          ((!freshBatchOwnsObservation && batchResponseBranchAmbiguous) ||
+            written.event.responseBranchAmbiguous === true ||
+            (live !== undefined && canonicalTurn === live.turnId && live.turnResponseBranches.size > 1));
+        const uncertainOwnerConflictsCanonical = uncertainRecoveryTurnId !== null &&
+          canonicalTurn !== undefined && canonicalTurn !== uncertainRecoveryTurnId;
+        const recoveredGoalEligible =
+          state === 'final' &&
+          (!item.turnId || activeRecoveredTurn !== null) &&
+          live !== undefined &&
+          !uncertainOwnerConflictsCanonical &&
+          ((activeRecoveredTurn !== null && !recoveryOwnerSupersededByBatch(activeRecoveredTurn)) ||
+            (!uncertainRecoveryAmbiguous && uncertainRecoveryTurnId !== null &&
+              !recoveryOwnerSupersededByBatch(uncertainRecoveryTurnId) &&
+              uncertainTurnStartedAt !== null && item.time >= uncertainTurnStartedAt));
+        const weakReplacementOwnerProven =
+          !weakReplacementTurn ||
+          (canonicalTurn !== undefined &&
+            canonicalTurn === live?.turnId &&
+            recoverableTurns.has(canonicalTurn) &&
+            (branchOwnedTurn === canonicalTurn ||
+              (!item.responseExchangeId && !item.responseWorkingId)));
+        const canonicalRecoveryOwnerTurn = canonicalTurn && recoveryFenceTurns.has(canonicalTurn)
+          ? canonicalTurn
+          : null;
+        const provisionalRecoveryOwnerTurn = activeRecoveredTurn ?? canonicalRecoveryOwnerTurn ??
+          (!item.turnId && uncertainRecoveryTurnId && !uncertainOwnerConflictsCanonical &&
+              uncertainTurnStartedAt !== null &&
+              item.time >= uncertainTurnStartedAt
+            ? uncertainRecoveryTurnId
+            : !item.turnId && recoverableTurns.size === 1 ? [...recoverableTurns][0]! : null);
+        const recoveredOwnerSuperseded = recoveryOwnerSupersededByBatch(provisionalRecoveryOwnerTurn) ||
+          (provisionalRecoveryOwnerTurn === null && !item.turnId && recoverableTurns.size > 0 &&
+            (batchFreshUserSupersedesRecovery || batchFreshTurnSupersedesRecovery));
+        // Stable canonical ownership outranks a page-local turn hint and a timestamp fallback.
+        // A distinct matching response branch deliberately rewrites effectiveTurnId to its
+        // durable owner above; every other canonical mismatch is an old answer mounted inside
+        // different live work and must not inherit raw or previously persisted eligibility.
+        const canonicalOwnerConsistent = canonicalTurn === undefined ||
+          canonicalTurn === effectiveTurnId ||
+          (effectiveTurnId === undefined && canonicalTurn === provisionalRecoveryOwnerTurn) ||
+          (effectiveTurnId !== undefined && canonicalTurn === live?.turnId && item.turnId !== live.turnId);
+        const uncertainRecoveryUnsafe = uncertainRecoveryAmbiguous &&
+          (canonicalTurn === uncertainRecoveryTurnId || (!item.turnId && activeRecoveredTurn === null));
+        const currentGoalSafe =
+          state === 'final' &&
+          !canonicalBranchAmbiguous &&
+          canonicalOwnerConsistent &&
+          !uncertainRecoveryUnsafe &&
+          !recoveredOwnerSuperseded &&
+          weakReplacementOwnerProven;
+        const goalEligible = currentGoalSafe &&
+          (recoveredGoalEligible || item.goalEligible === true);
+        const recoveryOwnerTurn = provisionalRecoveryOwnerTurn;
+        const goalEligibilityChanged = goalEligible &&
+          written.event.kind === 'assistant_message' && written.event.goalEligible !== true;
+        // Raw activeNow is only a page presentation hint. Retire recovery authority only after
+        // canonical storage accepts this final for the live turn, or the established uncertain
+        // boundary proves an otherwise-unowned same-turn final. Wrong/partial/ambiguous branch
+        // snapshots must leave the recovery watch armed instead of creating a split terminal
+        // activity verdict while the durable turn remains open.
+        const terminalActivity =
+          state === 'final' &&
+          !canonicalBranchAmbiguous &&
+          !uncertainRecoveryUnsafe &&
+          !recoveredOwnerSuperseded &&
+          ((canonicalTurn !== undefined && canonicalTurn === live?.turnId) ||
+            (canonicalTurn === undefined && !weakReplacementTurn &&
+              uncertainTurnStartedAt !== null && item.time >= uncertainTurnStartedAt));
+        const candidateGoalEligible = currentGoalSafe &&
+          written.event.kind === 'assistant_message' &&
+          (goalEligible || written.event.goalEligible === true);
         // A stopped partial answer stays streaming in history. Re-observing its
         // DOM after restart cannot renew work, nor can an old message borrow a
         // newer page turn. Preserve the revision while using its canonical owner
@@ -1978,15 +2268,16 @@ async function recordChatObservationsNow(
         const workingActivity = state !== 'final' && item.activeNow === true &&
           (!canonicalTurn || canonicalTurn === live?.turnId) &&
           !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
-        if (state === 'final' && written.event.kind === 'assistant_message' && canonicalTurn && recoverableTurns.has(canonicalTurn) &&
-            !explicitEnds.has(canonicalTurn) && live?.turnId === canonicalTurn) {
+        if (state === 'final' && written.event.kind === 'assistant_message' && !canonicalBranchAmbiguous &&
+            canonicalTurn && recoverableTurns.has(canonicalTurn) &&
+            !freshExplicitEnds.has(canonicalTurn) && live?.turnId === canonicalTurn) {
           recoveredFinal = { turnId: canonicalTurn, time: item.time,
             seq: written.event.finalContentSeq ?? written.event.origin ?? written.event.seq,
             origin: written.event.origin ?? written.event.seq, native: Boolean(written.event.providerMessageId) };
         }
         if (
           written.event.kind === 'assistant_message' &&
-          written.event.goalEligible === true &&
+          candidateGoalEligible &&
           state === 'final' &&
           written.event.messageId
         ) {
@@ -1995,16 +2286,20 @@ async function recordChatObservationsNow(
             turnId: written.event.turnId ?? `reply:${written.event.messageId}`.slice(0, 200),
             eventSeq: written.event.origin ?? written.event.seq
           });
+          goalCandidateRecoveryOwners.push(recoveryOwnerTurn);
+          goalEligibilityWrites.push(goalEligibilityChanged ? written.event.messageId : null);
         }
-        if (recoveredGoalEligible && live) {
+        if (recoveredGoalEligible && candidateGoalEligible && live) {
           // This is an in-memory verdict for later call/reload decisions, not a fabricated
           // turn_end. The canonical message keeps goalEligible monotonically, so an HTTP 503
           // can still replay the same obligation even after this stronger final evidence wins.
           recoveredGoalSeen = true;
         }
-        if (!written.changed) continue;
+        if (!written.changed && !goalEligibilityChanged) continue;
         if (terminalActivity || workingActivity) { activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time); }
-        if (terminalActivity) activity.terminal = true;
+        if (terminalActivity) {
+          assistantTerminalTurns.set(canonicalTurn ?? recoveryOwnerTurn, recoveryOwnerTurn);
+        }
         if (workingActivity) activity.working = true;
         break;
       }
@@ -2061,6 +2356,7 @@ async function recordChatObservationsNow(
           live.openTurns.add(item.turnId);
           // A page-authored start is a new send; whatever end came before it is settled.
           live.turnRequestIds = new Set<string>();
+          live.turnResponseBranches = new Set<string>();
           live.endedTurn = null;
         }
         activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
@@ -2085,16 +2381,27 @@ async function recordChatObservationsNow(
           live.knownTurnEnds.add(item.turnId);
           live.openTurns.delete(item.turnId);
           live.lastTurnOutcome = item.outcome ?? 'unknown';
+          live.lastTurnId = item.turnId;
           live.lastTurnStartedAt = endedStartedAt;
+          live.lastTurnResponseBranches = endedStartedAt === null
+            ? new Set<string>()
+            : new Set(live.turnResponseBranches);
           // Only a completed end can be proven false by a later call: it is the one verdict
           // Goal acts on, and the one a reloaded page fabricates. A stop is the user's own
           // decision and the failure outcomes already belong to recovery.
           live.endedTurn =
             live.turnId === item.turnId && item.outcome === 'completed'
-              ? { turnId: item.turnId, startedAt: endedStartedAt, endedAt: item.time, requestIds: live.turnRequestIds }
+              ? {
+                  turnId: item.turnId,
+                  startedAt: endedStartedAt,
+                  endedAt: item.time,
+                  requestIds: live.turnRequestIds,
+                  responseBranches: live.turnResponseBranches
+                }
               : null;
           live.turnRequestIds = new Set<string>();
           if (live.turnId === item.turnId) {
+            live.turnResponseBranches = new Set<string>();
             live.turnStartedAt = null;
             live.turnId = null;
           }
@@ -2108,6 +2415,64 @@ async function recordChatObservationsNow(
     }
     stored++;
   }
+  // Canonical aliasing can reveal a contradiction only after an earlier item in this same
+  // batch looked safe. Resolve the batch as a whole: ambiguity for a recoverable turn retracts
+  // every provisional completion/Goal/terminal verdict accumulated for that turn, independent
+  // of item order. The durable ambiguity marker keeps later replays fail-closed as well.
+  const unsafeRecoveredTurns = new Set(
+    [...ambiguousCanonicalTurns].filter(turnId => recoveryFenceTurns.has(turnId))
+  );
+  if (unsafeRecoveredTurns.size > 0) {
+    if (recoveredFinal && unsafeRecoveredTurns.has(recoveredFinal.turnId)) recoveredFinal = undefined;
+    for (let index = goalCandidates.length - 1; index >= 0; index--) {
+      const recoveryOwner = goalCandidateRecoveryOwners[index];
+      if (unsafeRecoveredTurns.has(goalCandidates[index]!.turnId) ||
+          (recoveryOwner !== null && recoveryOwner !== undefined && unsafeRecoveredTurns.has(recoveryOwner))) {
+        goalCandidates.splice(index, 1);
+        goalCandidateRecoveryOwners.splice(index, 1);
+        goalEligibilityWrites.splice(index, 1);
+      }
+    }
+    for (const [turnId, recoveryOwner] of assistantTerminalTurns) {
+      if ((turnId !== null && unsafeRecoveredTurns.has(turnId)) ||
+          (recoveryOwner !== null && unsafeRecoveredTurns.has(recoveryOwner))) {
+        assistantTerminalTurns.delete(turnId);
+      }
+    }
+    if (live?.lastTurnId && unsafeRecoveredTurns.has(live.lastTurnId)) {
+      live.lastTurnResponseBranches.add(AMBIGUOUS_RESPONSE_BRANCH);
+    }
+    recoveredGoalSeen = false;
+  }
+  // An unbound contradictory branch must stay unowned, but its contradiction with the turn's
+  // existing owned branch is itself durable evidence. Mark the latest owned canonical anchor so
+  // storedHistory restores the ambiguity after any later app restart. This is a rare fail-closed
+  // path, so a full assistant-only read is preferable to a bounded scan that could miss the anchor.
+  for (const turnId of unboundAmbiguousTurns) {
+    if (!unsafeRecoveredTurns.has(turnId)) continue;
+    const anchors = await readEvents(sessionId, { kinds: ['assistant_message'] });
+    const anchor = [...anchors].reverse().find(event =>
+      event.kind === 'assistant_message' && event.turnId === turnId && event.messageId
+    );
+    if (anchor?.kind === 'assistant_message' && anchor.messageId && anchor.responseBranchAmbiguous !== true) {
+      const durableFence = { ...anchor, responseBranchAmbiguous: true as const };
+      await upsertMessageEvent(sessionId, durableFence, { preferTime: false });
+    }
+  }
+  // Eligibility is durable exactly-once recovery state, so publish it only after the entire
+  // observation batch has proved the candidate safe. A later alias/branch conflict in the same
+  // batch must be able to retract the provisional verdict without leaving a poisonous true bit
+  // that a subsequent replay could revive.
+  for (const replyId of new Set(goalEligibilityWrites.filter((id): id is string => id !== null))) {
+    const latest = latestAssistantSnapshots.get(replyId);
+    if (latest && latest.goalEligible !== true) {
+      // Use the newest canonical body/HTML/final revision. Replaying the earlier observation
+      // that first proved eligibility would overwrite later content merely to set this bit.
+      const promoted = { ...latest, goalEligible: true as const };
+      await upsertMessageEvent(sessionId, promoted, { preferTime: false });
+    }
+  }
+  if (assistantTerminalTurns.size > 0) activity.terminal = true;
   if (pageTitle) await promoteConversationTitle(sessionId, pageTitle.text, conversationId);
   // An old final cannot finish a turn reopened for later tool work. Sequence proves
   // revision order even when ChatGPT keeps its original message creation timestamp.
@@ -2124,7 +2489,8 @@ async function recordChatObservationsNow(
   const nativeReopen = recoveredFinal?.native && lastBoundary?.kind === 'turn_start' && lastBoundary.source === 'app' &&
     lastBoundary.turnId === recoveredFinal.turnId && priorBoundary?.kind === 'turn_end' &&
     priorBoundary.turnId === recoveredFinal.turnId && priorBoundary.outcome === 'completed';
-  if (recoveredFinal && latestWork && (latestWork.seq < recoveredFinal.seq || nativeReopen) &&
+  if (recoveredFinal && !batchFreshUserSupersedesRecovery && !batchFreshTurnSupersedesRecovery && latestWork &&
+      (latestWork.seq < recoveredFinal.seq || nativeReopen) &&
       (!latestUser || (latestUser.kind === 'user_message' && (latestUser.origin ?? latestUser.seq) < recoveredFinal.origin)) &&
       runningToolCalls(conversationId) === 0 && live?.turnId === recoveredFinal.turnId && live.openTurns.has(recoveredFinal.turnId)) {
     const { turnId, time } = recoveredFinal;
@@ -2137,10 +2503,19 @@ async function recordChatObservationsNow(
     live.openTurns.delete(turnId);
     live.knownTurnEnds.add(turnId);
     live.lastTurnOutcome = 'completed';
+    live.lastTurnId = turnId;
     live.lastTurnStartedAt = live.turnStartedAt;
+    live.lastTurnResponseBranches = new Set(live.turnResponseBranches);
     // Native message time may be its creation time, long before this final was observed.
-    live.endedTurn = { turnId, startedAt: live.turnStartedAt, endedAt: Date.now(), requestIds: live.turnRequestIds };
+    live.endedTurn = {
+      turnId,
+      startedAt: live.turnStartedAt,
+      endedAt: Date.now(),
+      requestIds: live.turnRequestIds,
+      responseBranches: live.turnResponseBranches
+    };
     live.turnRequestIds = new Set<string>();
+    live.turnResponseBranches = new Set<string>();
     live.turnStartedAt = null;
     live.turnId = null;
     activity.meaningful = true;
@@ -2348,8 +2723,11 @@ export function rebindConversation(sessionId: string, fromConversationId: string
     knownTurnStarts: new Set<string>(),
     knownTurnEnds: new Set<string>(),
     lastTurnOutcome: null,
+    lastTurnId: null,
     lastTurnStartedAt: null,
+    lastTurnResponseBranches: new Set<string>(),
     turnRequestIds: new Set<string>(),
+    turnResponseBranches: new Set<string>(),
     endedTurn: null,
     pageTools: new Map()
   });

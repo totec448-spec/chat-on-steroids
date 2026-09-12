@@ -400,6 +400,8 @@ interface GoalReplyObligation {
   eventSeq: number;
   /** When this app froze the decision. The row's whole lifetime is measured from here. */
   acceptedAt: number;
+  /** Provider quota pause. No browser pickup or watchdog send is allowed before this time. */
+  resumeAt?: number;
   state: 'pending' | 'handled';
 }
 
@@ -419,7 +421,19 @@ const goalReplies = new Map<string, GoalReplyObligation>();
  * unbounded ledger would make every reply in every chat pay for every chat that came before.
  */
 const GOAL_REPLY_TTL_MS = 12 * 60 * 60_000;
+const UNKNOWN_QUOTA_RECHECK_MS = 5 * 60_000;
 const MAX_GOAL_REPLIES = 200;
+
+function goalReplyClock(reply: GoalReplyObligation): number {
+  return Math.max(reply.acceptedAt, reply.resumeAt ?? 0);
+}
+
+/** Exact durable no-send fence for one pending turn. */
+export function goalReplyResumeAtFor(conversationId: string, turnId?: string, now = Date.now()): number | null {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.state !== 'pending' || (turnId && reply.turnId !== turnId)) return null;
+  return (reply.resumeAt ?? 0) > now ? reply.resumeAt! : null;
+}
 
 /** Retires expired pickups and caps the stable-final ledger to its newest conversations. */
 function boundGoalReplies(now: number): void {
@@ -427,7 +441,9 @@ function boundGoalReplies(now: number): void {
     // Expiry revokes automatic pickup authority; it does not erase the exact final assistant
     // identity. A later deliberate On may re-arm that tombstone, while leaving it handled here
     // prevents a stale page or watchdog from collecting it on its own.
-    if (reply.state === 'pending' && now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) reply.state = 'handled';
+    if (reply.state === 'pending' && now >= (reply.resumeAt ?? 0) && now - goalReplyClock(reply) >= GOAL_REPLY_TTL_MS) {
+      reply.state = 'handled';
+    }
   }
   if (goalReplies.size <= MAX_GOAL_REPLIES) return;
   const oldestFirst = [...goalReplies.values()].sort((a, b) => a.acceptedAt - b.acceptedAt);
@@ -477,6 +493,7 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
         { silenceSourceTurnId: raw.silenceSourceTurnId.slice(0, 200) } : {}),
       eventSeq: raw.eventSeq,
       acceptedAt: raw.acceptedAt,
+      ...(Number.isSafeInteger(raw.resumeAt) && raw.resumeAt! > 0 ? { resumeAt: raw.resumeAt } : {}),
       state: raw.state
     });
   }
@@ -512,9 +529,9 @@ export function goalPendingReplyFor(
   // Expiry is read here as well as pruned on write, because the ledger is only pruned when
   // something writes to it. A chat reopened after the window must not be offered work the
   // next prune would have thrown away.
-  if (reply && Date.now() - reply.acceptedAt >= GOAL_REPLY_TTL_MS) return null;
+  if (reply && (Date.now() < (reply.resumeAt ?? 0) || Date.now() - goalReplyClock(reply) >= GOAL_REPLY_TTL_MS)) return null;
   return reply?.state === 'pending'
-    ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq, acceptedAt: reply.acceptedAt,
+    ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq, acceptedAt: goalReplyClock(reply),
       ...(reply.silenceSourceTurnId ? { silenceSourceTurnId: reply.silenceSourceTurnId } : {}) }
     : null;
 }
@@ -532,12 +549,12 @@ export function pendingGoalReplies(
 ): Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number }> {
   const owed: Array<{ conversationId: string; sessionId: string; replyId: string; acceptedAt: number }> = [];
   for (const reply of goalReplies.values()) {
-    if (reply.state !== 'pending' || now - reply.acceptedAt >= GOAL_REPLY_TTL_MS) continue;
+    if (reply.state !== 'pending' || now < (reply.resumeAt ?? 0) || now - goalReplyClock(reply) >= GOAL_REPLY_TTL_MS) continue;
     owed.push({
       conversationId: reply.conversationId,
       sessionId: reply.sessionId,
       replyId: reply.replyId,
-      acceptedAt: reply.acceptedAt
+      acceptedAt: goalReplyClock(reply)
     });
   }
   return owed.sort((a, b) => b.acceptedAt - a.acceptedAt);
@@ -563,13 +580,28 @@ export async function acceptGoalReplyNow(input: {
       current.replyId === `turn:${input.turnId}`.slice(0, 200)
   );
   const before = current ? { ...current } : null;
-  const bounded = snapshotGoalReplies().replies;
+  // A genuinely newer final replaces the old continuation obligation. Retire its payload
+  // before publishing the new row so no concurrent /activity poll can send A after B has
+  // advanced the conversation. A provisional-to-stable identity promotion is the same
+  // obligation and deliberately keeps its draft and quota deadline.
+  if (current && !provisionalUpgrade) {
+    const obsoleteDraft = drafts.get(input.conversationId);
+    if (obsoleteDraft) {
+      obsoleteDraft.acknowledged = true;
+      obsoleteDraft.abort?.abort();
+      if (obsoleteDraft.settledAt === 0) obsoleteDraft.settledAt = Date.now();
+      obsoleteDraft.text = '';
+      obsoleteDraft.reply = '';
+      drafts.delete(input.conversationId);
+      notifyGoalChange();
+    }
+  }
   const active =
     !input.blocked &&
     getConfig().sessions.record &&
     goalArmedFor(input.conversationId) &&
     await goalKeyPresent(goalSwitchFor(input.conversationId).mode);
-  goalReplies.set(input.conversationId, {
+  const accepted: GoalReplyObligation = {
     conversationId: input.conversationId,
     sessionId: input.sessionId,
     replyId: input.replyId.slice(0, 200),
@@ -580,18 +612,20 @@ export async function acceptGoalReplyNow(input: {
     // stable assistant id. The later id strengthens that same row; it must not re-evaluate
     // policy or reopen a decision the page already acknowledged in the meantime.
     acceptedAt: provisionalUpgrade ? current!.acceptedAt : Date.now(),
+    ...(provisionalUpgrade && current!.resumeAt !== undefined ? { resumeAt: current!.resumeAt } : {}),
     state: provisionalUpgrade ? current!.state : active ? 'pending' : 'handled'
-  });
+  };
+  goalReplies.set(input.conversationId, accepted);
   try {
     await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
   } catch (error) {
-    // The rejected write is one whole revision, so the rollback is too: the row this accept
-    // added and the expired rows it pruned go back together, leaving the ledger exactly as the
-    // decision found it.
-    goalReplies.clear();
-    for (const reply of bounded) goalReplies.set(reply.conversationId, reply);
-    if (before) goalReplies.set(input.conversationId, before);
-    else goalReplies.delete(input.conversationId);
+    // Roll back only if this exact row is still current. A quota renewal or newer final may
+    // have replaced it and durably written a later snapshot while this fsync was pending;
+    // restoring the older revision would erase that no-send fence or revive obsolete work.
+    if (goalReplies.get(input.conversationId) === accepted) {
+      if (before) goalReplies.set(input.conversationId, before);
+      else goalReplies.delete(input.conversationId);
+    }
     persistGoalRepliesSoon();
     throw error;
   }
@@ -602,6 +636,55 @@ function handleGoalReply(conversationId: string, turnId?: string): void {
   if (!reply || reply.state !== 'pending' || (turnId && reply.turnId !== turnId)) return;
   reply.state = 'handled';
   persistGoalRepliesSoon();
+}
+
+/**
+ * Keeps one exact unsent automatic continuation dormant while ChatGPT refuses Pro traffic.
+ * A short recheck only re-reads the blocking dialog and never clicks Send while it remains.
+ */
+export async function deferGoalReplyForQuotaNow(
+  conversationId: string,
+  turnId: string,
+  token: string,
+  clientId: string
+): Promise<number | null> {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.state !== 'pending' || reply.turnId !== turnId) return null;
+  const draft = drafts.get(conversationId);
+  if (!draft || draft.token !== token || draft.turnId !== turnId || draft.clientId !== clientId ||
+      draft.stage !== 'ready' || draft.acknowledged) return null;
+  const now = Date.now();
+  // Page reloads can rediscover the same blocked draft. Keep its original wake deadline
+  // instead of sliding the pause forward forever on every rediscovery.
+  if ((reply.resumeAt ?? 0) > now) return reply.resumeAt!;
+  // Usage snapshots are global UI observations, not bound to this conversation, account, or
+  // selected model. Never borrow their reset time as send authority. A short durable recheck
+  // is safe for every provider dialog because it only republishes the draft for the page to
+  // inspect; the page defers again without Send while the block remains.
+  const resumeAt = now + UNKNOWN_QUOTA_RECHECK_MS;
+  if ((reply.resumeAt ?? 0) >= resumeAt - 1000) return reply.resumeAt ?? resumeAt;
+  const before = { ...reply };
+  // Replace rather than mutate the row. Object identity is the in-memory revision fence used
+  // by acceptGoalReplyNow's rollback when promotion and renewal writes overlap.
+  const paused: GoalReplyObligation = { ...reply, resumeAt };
+  goalReplies.set(conversationId, paused);
+  const beforeSettledAt = draft?.settledAt;
+  draft.settledAt = now;
+  try {
+    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+  } catch (error) {
+    // Another request may have acknowledged this draft, switched the chat Off, or accepted a
+    // newer final while this fsync was pending. Roll back only the exact revision we wrote;
+    // restoring `before` over a newer row would revive obsolete automatic-send authority.
+    const current = goalReplies.get(conversationId);
+    if (current === paused && current.state === 'pending' && current.turnId === turnId && current.resumeAt === resumeAt) {
+      goalReplies.set(conversationId, before);
+      if (beforeSettledAt !== undefined && draft.settledAt === now) draft.settledAt = beforeSettledAt;
+      persistGoalRepliesSoon();
+    }
+    throw error;
+  }
+  return resumeAt;
 }
 
 /** Durable state file for per-chat Goal objectives. */
@@ -999,6 +1082,11 @@ function view(draft: GoalDraft): GoalDraftView {
 
 function expireDraftPayload(draft: GoalDraft): void {
   if (draft.settledAt === 0 || Date.now() - draft.settledAt <= DRAFT_TTL_MS) return;
+  // A quota-paused ready message has definitely not crossed Send. Its durable no-send fence
+  // outlives the ordinary delivery payload TTL, so keep the exact text until the page can
+  // recheck the provider. If the app stays down past the wake time, startGoalDraft recreates
+  // the payload from this same still-pending exact turn.
+  if (draft.stage === 'ready' && goalReplyResumeAtFor(draft.conversationId, draft.turnId)) return;
   // The TTL is for the *payload*, not the idempotency key. A ready draft can have crossed
   // ChatGPT's irreversible send boundary while its local ACK was lost. Keep this turn's token
   // as a spent tombstone until a genuinely newer generation supersedes it.
@@ -1018,8 +1106,17 @@ function expireDraftPayload(draft: GoalDraft): void {
 export function goalViewFor(conversationId: string, clientId?: string): GoalDraftView | null {
   const draft = drafts.get(conversationId);
   if (!draft) return null;
-  expireDraftPayload(draft);
   if (clientId !== undefined && draft.clientId !== clientId) return null;
+  // Defense in depth: the sole durable obligation is the conversation's current authority.
+  // Never publish a leftover payload for A after the ledger has advanced to B, even if an
+  // unexpected retirement path failed to remove that in-memory draft.
+  const obligation = goalReplies.get(conversationId);
+  if (obligation && obligation.turnId !== draft.turnId) return null;
+  expireDraftPayload(draft);
+  // This is an authorization fence, not display state. React may remove ChatGPT's access
+  // dialog immediately after it is observed; neither draft publication nor the final
+  // pre-Send activity check may expose the payload before the persisted deadline.
+  if (goalReplyResumeAtFor(conversationId, draft.turnId)) return null;
   // An acknowledged draft has already been acted on — typed, or decided against. It is kept
   // here only so the turn it belongs to cannot be drafted a second time, and reporting it
   // would leave the page polling fast and the panel above the composer describing something
@@ -1159,7 +1256,10 @@ export async function setGoalReplyActiveNow(conversationId: string, active: bool
   before.state = active ? 'pending' : 'handled';
   // A deliberate On is a new pickup episode for the same stable final reply. It gets the
   // recovery schedule from now, not from when that answer happened under an Off switch.
-  if (active) before.acceptedAt = Math.max(Date.now(), previous.acceptedAt + 1);
+  if (active) {
+    before.acceptedAt = Math.max(Date.now(), previous.acceptedAt + 1);
+    delete before.resumeAt;
+  }
   try {
     await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
   } catch (error) {
@@ -1241,7 +1341,9 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
   // its answer once the setting that broke it is fixed.
   const spentFailure =
     existing?.stage === 'failed' && existing.acknowledged && !SETTLED_FAILURE.test(existing.error ?? '');
-  if (existing && existing.turnId === input.turnId && !spentFailure) return view(existing);
+  const expiredReadyPayload = existing?.stage === 'ready' && existing.acknowledged &&
+    goalPendingReplyFor(input.conversationId)?.turnId === input.turnId;
+  if (existing && existing.turnId === input.turnId && !spentFailure && !expiredReadyPayload) return view(existing);
   // A different turn supersedes whatever the last one left behind, including an unfinished
   // request: the answer it was writing was about a conversation that has since moved on.
   if (existing) {

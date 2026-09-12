@@ -282,6 +282,12 @@ export type SessionEvent =
       renderedHtml?: StoredText;
       /** Public provider object UUID. Evidence for identity drift; not a canonical key or turn owner. */
       providerMessageId?: string;
+      /** Provider-native response branch. Durable ownership evidence across page reloads. */
+      responseExchangeId?: string;
+      /** Provider-native working branch, retained to reject contradictory response ownership. */
+      responseWorkingId?: string;
+      /** More than one native branch was observed for this canonical message; never recover ownership. */
+      responseBranchAmbiguous?: boolean;
       state?: MessageState;
       /** Compatibility mirror for older consumers; equivalent to state === 'final'. */
       final: boolean;

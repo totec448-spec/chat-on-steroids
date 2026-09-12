@@ -2546,11 +2546,11 @@ describe('extension observation journal', () => {
     expect(journalOf(session)).toEqual([]);
   });
 
-  it('carries the browser tab identity through Goal activity, draft and acknowledgement', async () => {
+  it('carries the exact browser tab and token through Goal activity, draft, defer and acknowledgement', async () => {
     const conversationId = '22222222-3333-4444-5555-666666666666';
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token' });
     const session = new FakeStorageArea();
-    const seen: Array<{ route: string; client: string | null }> = [];
+    const seen: Array<{ route: string; client: string | null; token?: string }> = [];
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);
       if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
@@ -2558,10 +2558,16 @@ describe('extension observation journal', () => {
         seen.push({ route: url.pathname, client: url.searchParams.get('goalClient') });
         return response(200, { sessionId: 'session', entries: [], stream: [], nextSince: 0 });
       }
-      if (url.pathname === '/goal/draft' || url.pathname === '/goal/ack') {
+      if (url.pathname === '/goal/draft' || url.pathname === '/goal/ack' || url.pathname === '/goal/defer') {
         const body = JSON.parse(String(init.body || '{}'));
-        seen.push({ route: url.pathname, client: typeof body.clientId === 'string' ? body.clientId : null });
-        return response(200, url.pathname.endsWith('/draft') ? { goal: { stage: 'drafting' } } : { acknowledged: true });
+        seen.push({
+          route: url.pathname,
+          client: typeof body.clientId === 'string' ? body.clientId : null,
+          ...(typeof body.token === 'string' ? { token: body.token } : {})
+        });
+        return response(200, url.pathname.endsWith('/draft') ? { goal: { stage: 'drafting' } }
+          : url.pathname.endsWith('/defer') ? { deferred: true, resumeAt: Date.now() + 300_000 }
+          : { acknowledged: true });
       }
       return response(404, {});
     });
@@ -2569,12 +2575,14 @@ describe('extension observation journal', () => {
 
     await worker.send({ type: 'activity', conversationId, since: 0 }, 73);
     await worker.send({ type: 'goal_draft', conversationId, turnId: 'generation-owned' }, 73);
+    await worker.send({ type: 'goal_defer', conversationId, turnId: 'generation-owned', token: 'goal-token' }, 73);
     await worker.send({ type: 'goal_ack', conversationId, token: 'goal-token' }, 73);
 
     expect(seen).toEqual([
       { route: '/activity', client: '73' },
       { route: '/goal/draft', client: '73' },
-      { route: '/goal/ack', client: '73' }
+      { route: '/goal/defer', client: '73', token: 'goal-token' },
+      { route: '/goal/ack', client: '73', token: 'goal-token' }
     ]);
   });
 

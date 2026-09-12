@@ -3123,6 +3123,21 @@ const HANDLERS = {
     });
     return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
   },
+  /** Persist a provider-quota pause without acknowledging or spending the ready draft. */
+  async goal_defer(message, _sender, source) {
+    await load();
+    if (!ownsDocument(source)) return { ok: false, error: 'stale_document' };
+    const result = await call('/goal/defer', {
+      method: 'POST',
+      body: JSON.stringify({
+        conversationId: message.conversationId,
+        turnId: String(message.turnId || ''),
+        token: String(message.token || ''),
+        clientId: String(source.tab)
+      })
+    });
+    return ownsDocument(source) ? result : { ok: false, error: 'stale_document' };
+  },
   /**
    * This chat's specific goal, set or cleared from the settings sheet.
    *
@@ -3300,6 +3315,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'goal_draft',
     'focus_tab',
     'goal_ack',
+    'goal_defer',
     'goal_objective',
     'goal_open',
     'settings_set',

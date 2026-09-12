@@ -52,6 +52,7 @@ import {
   ackGoalDraftNow,
   applyGoalSwitch,
   beginGoalDraft,
+  deferGoalReplyForQuotaNow,
   discardPreparedGoalDraft,
   draftOpeningMessage,
   goalKeyPresent,
@@ -62,6 +63,7 @@ import {
   goalArmedFor,
   goalObjectiveFor,
   goalPendingReplyFor,
+  goalReplyResumeAtFor,
   goalSwitchFor,
   goalViewFor,
   pendingGoalReplies,
@@ -866,6 +868,16 @@ function parseObservations(input: unknown): ChatObservation[] {
     if (item['authoredTime'] === true) observation.authoredTime = true;
     if (item['authoredNow'] === true && kind === 'user_message') observation.authoredNow = true;
     if (item['activeNow'] === true && kind === 'assistant_message') observation.activeNow = true;
+    if (kind === 'assistant_message') {
+      const responseWorkingId = item['responseWorkingId'];
+      const responseExchangeId = item['responseExchangeId'];
+      if (typeof responseWorkingId === 'string' && /^[a-z0-9_-]{1,200}$/i.test(responseWorkingId)) {
+        observation.responseWorkingId = responseWorkingId;
+      }
+      if (typeof responseExchangeId === 'string' && /^[a-z0-9_-]{1,200}$/i.test(responseExchangeId)) {
+        observation.responseExchangeId = responseExchangeId;
+      }
+    }
     if (kind === 'model_selection') {
       if (typeof item['model'] !== 'string' || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(item['model'])) continue;
       observation.model = item['model'];
@@ -2676,6 +2688,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const clientId = typeof body['clientId'] === 'string' ? body['clientId'].slice(0, 100) : '';
     if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
     if (!turnId) return json(res, 400, { error: 'bad_turn_id' }, origin);
+    const quotaResumeAt = goalReplyResumeAtFor(id, turnId);
+    if (quotaResumeAt) {
+      return json(res, 409, { error: 'goal_quota_paused', retryable: true, resumeAt: quotaResumeAt }, origin);
+    }
     const astraSession = await findSessionByConversation(id, { requireUnique: true });
     if (astraSession && await astraFinishOnly(astraSession.id, id)) return json(res, 409, { error: 'astra_finish_only', retryable: false }, origin);
     if (turnId.startsWith('g-silence-') && goalPendingReplyFor(id)?.turnId !== turnId) {
@@ -2801,6 +2817,24 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     } catch (err) {
       logWarn(`bridge: Goal acknowledgement for ${id} is not durable yet — ${err instanceof Error ? err.message : String(err)}`);
       return json(res, 503, { error: 'goal_ack_not_durable', retryable: true }, origin);
+    }
+  }
+
+  if (route === '/goal/defer' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try { body = (await readBody(req)) as Record<string, unknown>; }
+    catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    const id = conversationId(body['conversationId']);
+    const turnId = typeof body['turnId'] === 'string' ? body['turnId'].slice(0, 200) : '';
+    const token = typeof body['token'] === 'string' ? body['token'].slice(0, 200) : '';
+    const clientId = typeof body['clientId'] === 'string' ? body['clientId'].slice(0, 100) : '';
+    if (!id || !turnId || !token || !clientId) return json(res, 400, { error: 'bad_goal_defer' }, origin);
+    try {
+      const resumeAt = await deferGoalReplyForQuotaNow(id, turnId, token, clientId);
+      return json(res, resumeAt ? 200 : 409, resumeAt ? { deferred: true, resumeAt } : { error: 'goal_not_pending' }, origin);
+    } catch (err) {
+      logWarn(`bridge: Goal quota pause for ${id} is not durable — ${err instanceof Error ? err.message : String(err)}`);
+      return json(res, 503, { error: 'goal_defer_not_durable', retryable: true }, origin);
     }
   }
 

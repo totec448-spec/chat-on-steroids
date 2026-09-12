@@ -118,6 +118,11 @@ export function locateBinary(name: BinaryName, hint?: string): string | null {
       locateCache.set(key, sibling);
       return sibling;
     }
+    // An explicit selection is a fail-closed policy boundary, not merely a search hint.
+    // Falling through to the bundle hid permission damage and ran a different executable
+    // than the user configured.
+    locateCache.set(key, null);
+    return null;
   }
 
   const bundled = bundledDir();

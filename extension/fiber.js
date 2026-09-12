@@ -41,7 +41,7 @@
   'use strict';
 
   /** Bumped when the descriptor shape changes, so a stale pair cannot half-understand. */
-  const VERSION = 10;
+  const VERSION = 11;
   // The MAIN world survives an extension reload because the ChatGPT document survives it.
   // Recovery may therefore execute this file again in a page that still has an older helper
   // listener. Keep at most one listener for this protocol version; content.js rejects older
@@ -108,7 +108,7 @@
    * Exact names, never a prefix: `Chat On Steroids Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
    */
-  const OUR_APPS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'TobisComputer'];
+  const OUR_APPS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins', 'TobisComputer'];
 
   /** Whether an `invoked_resource.app_name` names one of this app's own connectors. */
   function ourApp(name) {
@@ -516,6 +516,8 @@
         messageId: logicalId,
         role: 'assistant',
         stable,
+        ...(workingTurnId ? { workingTurnId } : {}),
+        ...(turnExchangeId ? { turnExchangeId } : {}),
         rawText,
         order: index,
         createTime
@@ -739,6 +741,8 @@
         rawMessageId: assistantCandidates[c].id,
         role: 'assistant',
         stable: assistantCandidates[c].stable,
+        ...(assistantCandidates[c].workingTurnId ? { workingTurnId: assistantCandidates[c].workingTurnId } : {}),
+        ...(assistantCandidates[c].turnExchangeId ? { turnExchangeId: assistantCandidates[c].turnExchangeId } : {}),
         order: assistantCandidates[c].order,
         createTime: assistantCandidates[c].createTime,
         rawText: assistantCandidates[c].rawText,

@@ -1679,7 +1679,7 @@ async function replyFiber(
     );
     window.dispatchEvent(
       new window.MessageEvent('message', {
-        data: { source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken, v: 10, scanOk: true, rows, turns: indexedTurns },
+        data: { source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken, v: 11, scanOk: true, rows, turns: indexedTurns },
         source: window
       })
     );
@@ -2146,7 +2146,7 @@ describe('naming the agent behind a row', () => {
     }));
     await replyFiber([
       {
-        v: 10,
+        v: 11,
         index: 0,
         tool: 'run_command',
         path: null,
@@ -2185,7 +2185,7 @@ describe('naming the agent behind a row', () => {
  */
 describe('the calls a row folded away', () => {
   const FOLDED = {
-    v: 10,
+    v: 11,
     index: 0,
     tool: 'run_command',
     path: '/TobisComputer/mcp/run_command',
@@ -6157,7 +6157,7 @@ describe('a stop button that goes missing while the turn is still running', () =
           source: 'clf-fiber-reply',
           nonce: event.data.nonce,
           scanToken: event.data.nonce,
-          v: 10,
+          v: 11,
           scanOk: true,
           rows: [],
           turns: [{
@@ -7830,7 +7830,7 @@ describe('a page leaving the screen', () => {
  */
 describe('evidence from the page context', () => {
   const GOOD = {
-    v: 10,
+    v: 11,
     index: 0,
     tool: 'agent_status',
     path: '/TobisComputer/mcp/agent_status',
@@ -8875,7 +8875,7 @@ describe('evidence from the page context', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken: event.data.nonce,
-            v: 10,
+            v: 11,
             scanOk: true,
             rows: [],
             turns: [
@@ -8982,7 +8982,7 @@ describe('evidence from the page context', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken: event.data.nonce,
-            v: 10,
+            v: 11,
             scanOk: true,
             rows: [{ ...GOOD, tool: 'read' }],
             turns: []
@@ -13890,6 +13890,281 @@ describe('the goal loop', () => {
     expect(acked).toBe(1);
   });
 
+  it('defers a provider-blocked ready draft without sending or acknowledging it', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null;
+    let deferred = 0;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_defer: () => {
+        deferred += 1;
+        return { ok: true, data: { deferred: true, resumeAt: Date.now() + 5 * 60_000 } };
+      }
+    });
+    const sends = watchSend(live.document);
+    const providerNode = live.document.createElement('div');
+    (live.window as any).CLF_DOM.errors = () => [{
+      blocking: true, recoverable: false, text: 'Pro access limit reached', node: providerNode, turnId: null
+    }];
+    draft = readyDraft('Continue after the quota reset.');
+    await live.hook.pullActivity();
+    await settle();
+
+    expect(deferred).toBe(1);
+    expect(sends()).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+    expect(composerText(live.document)).toBe('');
+
+    // The app hides the payload while its durable wake deadline is active. Even if React has
+    // already removed the dialog, the next poll cannot fall through to Send from local state.
+    draft = null;
+    (live.window as any).CLF_DOM.errors = () => [];
+    await live.hook.pullActivity();
+    await settle();
+    expect(sends()).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+  });
+
+  it('defers from cached provider-limit evidence after the observer dismisses the dialog', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null;
+    let deferred = 0;
+    let firstRead = true;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_defer: () => {
+        deferred += 1;
+        return { ok: true, data: { deferred: true, resumeAt: Date.now() + 5 * 60_000 } };
+      }
+    });
+    const providerNode = live.document.createElement('div');
+    (live.window as any).CLF_DOM.errors = () => {
+      if (!firstRead) return [];
+      firstRead = false;
+      return [{
+        blocking: true, recoverable: false, text: 'ChatGPT access is limited', node: providerNode, turnId: null
+      }];
+    };
+    const sends = watchSend(live.document);
+
+    // The ordinary transcript pass sees and acknowledges the dialog before /activity
+    // publishes the ready draft. React removes it, so every later DOM read is empty.
+    live.hook.observe();
+    draft = readyDraft('Do not lose the continuation after dismissal.');
+    await live.hook.pullActivity();
+    await settle();
+
+    expect(firstRead).toBe(false);
+    expect(deferred).toBe(1);
+    expect(sends()).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+    expect(composerText(live.document)).toBe('');
+  });
+
+  it('renews a dismissed provider limit revealed only by the retry click', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null;
+    let deferred = 0;
+    let firstRead = true;
+    let refusedAfterClick = false;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_defer: () => {
+        deferred += 1;
+        return { ok: true, data: { deferred: true, resumeAt: live!.window.Date.now() + 5 * 60_000 } };
+      }
+    }, document => {
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        refusedAfterClick = true;
+      });
+    });
+    const providerNode = live.document.createElement('div');
+    (live.window as any).CLF_DOM.errors = () => {
+      if (firstRead) {
+        firstRead = false;
+        return [{
+          blocking: true, recoverable: false, text: 'ChatGPT access is limited', node: providerNode, turnId: null
+        }];
+      }
+      return refusedAfterClick ? [{
+        blocking: true, recoverable: false, text: 'ChatGPT access is still limited', node: providerNode, turnId: null
+      }] : [];
+    };
+    const sends = watchSend(live.document);
+
+    live.hook.observe();
+    draft = readyDraft('Retry this exact continuation only when access returns.');
+    await live.hook.pullActivity();
+    await settle();
+    expect(deferred).toBe(1);
+    expect(sends()).toBe(0);
+
+    // The app hides the draft until this deadline, then republishes that same token. The
+    // original dialog is gone, and the provider reveals the continuing limit only on click.
+    draft = null;
+    live.advance(5 * 60_000);
+    draft = readyDraft('Retry this exact continuation only when access returns.');
+    await live.hook.pullActivity();
+    await settle();
+
+    expect(sends()).toBe(1);
+    expect(deferred).toBe(2);
+    expect(acks(live)).toHaveLength(0);
+    expect(composerText(live.document)).toBe('');
+  });
+
+  it('renews the same ready draft pause when the provider is still blocked at its deadline', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null;
+    let deferred = 0;
+    let now = Date.now();
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_defer: () => {
+        deferred += 1;
+        return { ok: true, data: { deferred: true, resumeAt: now + 5 * 60_000 } };
+      }
+    });
+    (live.window as any).Date.now = () => now;
+    const providerNode = live.document.createElement('div');
+    (live.window as any).CLF_DOM.errors = () => [{
+      blocking: true, recoverable: false, text: 'ChatGPT access is limited', node: providerNode, turnId: null
+    }];
+    const sends = watchSend(live.document);
+    draft = readyDraft('Continue when access returns.');
+    await live.hook.pullActivity();
+    await settle();
+    expect(deferred).toBe(1);
+
+    now += 5 * 60_000 - 1;
+    await live.hook.pullActivity();
+    await settle();
+    expect(deferred).toBe(1);
+
+    now += 1;
+    await live.hook.pullActivity();
+    await settle();
+    expect(deferred).toBe(2);
+    expect(sends()).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+  });
+
+  it('defers when the provider limit appears during composer preparation', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null;
+    let deferred = 0;
+    let blocked = false;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_defer: () => {
+        deferred += 1;
+        return { ok: true, data: { deferred: true, resumeAt: Date.now() + 5 * 60_000 } };
+      }
+    });
+    const providerNode = live.document.createElement('div');
+    (live.window as any).CLF_DOM.errors = () => blocked ? [{
+      blocking: true, recoverable: false, text: 'ChatGPT access is limited', node: providerNode, turnId: null
+    }] : [];
+    const sends = watchSend(live.document);
+    let resume: (() => void) | undefined;
+    const timer = live.window.setTimeout;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === 200) { resume = fn; return 0; }
+      return timer(fn, ms);
+    }) as typeof live.window.setTimeout;
+
+    draft = readyDraft('Keep this exact continuation.');
+    const pulling = live.hook.pullActivity();
+    await settle();
+    expect(composerText(live.document)).toBe('Keep this exact continuation.');
+    blocked = true;
+    resume!();
+    await pulling; await settle();
+
+    expect(deferred).toBe(1);
+    expect(sends()).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+    expect(composerText(live.document)).toBe('');
+  });
+
+  it('defers when the provider limit appears while native Send is unavailable', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null;
+    let deferred = 0;
+    let blocked = false;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => feed(draft)(),
+      goal_defer: () => {
+        deferred += 1;
+        return { ok: true, data: { deferred: true, resumeAt: Date.now() + 5 * 60_000 } };
+      }
+    }, () => undefined, false, true);
+    const providerNode = live.document.createElement('div');
+    (live.window as any).CLF_DOM.errors = () => blocked ? [{
+      blocking: true, recoverable: false, text: 'ChatGPT access is limited', node: providerNode, turnId: null
+    }] : [];
+    const button = live.document.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
+    button.disabled = true;
+    const sends = watchSend(live.document);
+
+    draft = readyDraft('Wait for provider access.');
+    const pulling = live.hook.pullActivity();
+    await settle();
+    expect(composerText(live.document)).toBe('Wait for provider access.');
+    blocked = true;
+    button.disabled = false;
+    await pulling; await settle();
+
+    expect(deferred).toBe(1);
+    expect(sends()).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+    expect(composerText(live.document)).toBe('');
+  });
+
+  it('defers when the provider limit appears during final app authorization', async () => {
+    let draft: ReturnType<typeof readyDraft> | null = null;
+    let deferred = 0;
+    let blocked = false;
+    let publishedReady = false;
+    let authorizationStarted = () => undefined as void;
+    let releaseAuthorization = () => undefined as void;
+    const started = new Promise<void>(resolve => { authorizationStarted = resolve; });
+    const held = new Promise<void>(resolve => { releaseAuthorization = resolve; });
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: async () => {
+        if (draft && publishedReady) {
+          authorizationStarted();
+          await held;
+        }
+        if (draft) publishedReady = true;
+        return feed(draft)();
+      },
+      goal_defer: () => {
+        deferred += 1;
+        return { ok: true, data: { deferred: true, resumeAt: Date.now() + 5 * 60_000 } };
+      }
+    });
+    const providerNode = live.document.createElement('div');
+    (live.window as any).CLF_DOM.errors = () => blocked ? [{
+      blocking: true, recoverable: false, text: 'ChatGPT access is limited', node: providerNode, turnId: null
+    }] : [];
+    const sends = watchSend(live.document);
+
+    draft = readyDraft('Authorize this exact continuation.');
+    const pulling = live.hook.pullActivity();
+    await started;
+    expect(composerText(live.document)).toBe('Authorize this exact continuation.');
+    blocked = true;
+    releaseAuthorization();
+    await pulling; await settle();
+
+    expect(deferred).toBe(1);
+    expect(sends()).toBe(0);
+    expect(acks(live)).toHaveLength(0);
+    expect(composerText(live.document)).toBe('');
+  });
+
   /**
    * The composer belongs to the user, and this is the moment the loop borrows it. It types
    * the message, sends it, and acknowledges the draft — the acknowledgement being what stops
@@ -13924,7 +14199,7 @@ describe('the goal loop', () => {
     expect(acks(live)).toHaveLength(0);
   });
 
-  it.each(['off', 'new-token', 'editor'])('rechecks the exact Goal authority when delayed Send becomes ready (%s)', async change => {
+  it.each(['off', 'quota-pause', 'new-token', 'editor'])('rechecks the exact Goal authority when delayed Send becomes ready (%s)', async change => {
     let draft: ReturnType<typeof readyDraft> | null = null, enabled = true;
     live = await harness(`https://chatgpt.com/c/${CHAT}`, {
       ...goalReplies(),
@@ -13946,6 +14221,7 @@ describe('the goal loop', () => {
     await settle();
     expect(composerText(live.document)).toBe('Old Goal reply');
     if (change === 'off') { enabled = false; draft = null; }
+    else if (change === 'quota-pause') draft = null;
     else if (change === 'new-token') draft = { ...readyDraft('New Goal reply'), token: 'new-token' };
     else {
       const editor = live.document.querySelector('#prompt-textarea')!;
@@ -14881,7 +15157,7 @@ describe('the goal loop', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken,
-            v: 10,
+            v: 11,
             scanOk: true,
             rows: [],
             turns: [{
@@ -14964,7 +15240,7 @@ describe('the goal loop', () => {
             source: 'clf-fiber-reply',
             nonce: event.data.nonce,
             scanToken,
-            v: 10,
+            v: 11,
             scanOk: true,
             rows: [],
             turns: [{
@@ -16114,7 +16390,7 @@ describe('app Stop command uses current native turn proof', () => {
       if (event.data?.source !== 'clf-fiber-ask') return;
       section.setAttribute('data-clf-fiber-turn', `${event.data.nonce}:0`);
       window.dispatchEvent(new window.MessageEvent('message', { source: window, data: {
-        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 10, scanOk: true, rows: [],
+        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 11, scanOk: true, rows: [],
         turns: [{ ...terminal, index: 0, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [{
           messageId: 'late-final-message', stable: true, rawText: 'First words and the complete final answer.', renderedHtml: '<p>First words and the complete final answer.</p>'
         }] }]
@@ -16153,7 +16429,7 @@ describe('app Stop command uses current native turn proof', () => {
       }
       section.setAttribute('data-clf-fiber-turn', `${event.data.nonce}:0`);
       window.dispatchEvent(new window.MessageEvent('message', { source: window, data: {
-        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 10, scanOk: true, rows: [],
+        source: 'clf-fiber-reply', nonce: event.data.nonce, scanToken: event.data.nonce, v: 11, scanOk: true, rows: [],
         turns: [{ ...terminal, index: 0, conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', endMessageId: next === 'retry' ? null : terminal.endMessageId }]
       } }));
     };

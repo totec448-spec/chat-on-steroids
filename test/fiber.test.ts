@@ -54,6 +54,7 @@ const THREAD = 'f0f00004-1111-4111-8111-111111111111';
  */
 const APP = 'Chat On Steroids Core';
 const DESKTOP_APP = 'Chat On Steroids Desktop';
+const PLUGINS_APP = 'Chat On Steroids Plugins';
 /** What the connector was called before 1.7.1 split it. Older chats still hold it. */
 const LEGACY_APP = 'TobisComputer';
 /** The connector's link id, as it appears in a request path. */
@@ -254,6 +255,8 @@ interface TurnEvidence {
     rawMessageId: string;
     role?: 'user' | 'assistant';
     stable: boolean;
+    workingTurnId?: string | null;
+    turnExchangeId?: string | null;
     order: number;
     createTime?: number | null;
     rawText: string;
@@ -392,8 +395,8 @@ describe('reading a row out of the page', () => {
 
   it('keeps the version it was built for on the reply', async () => {
     const { version, rows } = await scan([row([request('req-1', 'read_file')])]);
-    expect(version).toBe(10);
-    expect(rows[0]!.v).toBe(10);
+    expect(version).toBe(11);
+    expect(rows[0]!.v).toBe(11);
   });
   it('counts only TobisComputer requests in the complete turn, not api_tool metadata calls', async () => {
     const mine1 = request('req-1', 'read_file');
@@ -440,12 +443,14 @@ describe('the calls a turn says it made', () => {
    * ours, so no turn produced evidence and one chat's whole run of calls was filed under
    * `Unattributed activity`. Both current connectors and the old name must read.
    */
-  it('recognises both 1.7.1 connectors and the pre-1.7.1 name', async () => {
+  it('recognises every current connector and the pre-1.7.1 name', async () => {
     const messages = [
       request('req-core', 'read'),
       answer('res-core', 'req-core', 'read'),
       request('req-desk', 'computer', { app: DESKTOP_APP }),
       answer('res-desk', 'req-desk', 'computer', DESKTOP_APP),
+      request('req-plugins', 'search', { app: PLUGINS_APP }),
+      answer('res-plugins', 'req-plugins', 'search', PLUGINS_APP),
       request('req-old', 'read_file', { app: LEGACY_APP }),
       answer('res-old', 'req-old', 'read_file', LEGACY_APP)
     ];
@@ -454,7 +459,8 @@ describe('the calls a turn says it made', () => {
     expect(turns[0]!.calls).toEqual([
       { messageId: 'req-core', tool: 'read', order: 0, answered: true, requestId: 'wfr_01a009', createTime: 1786873658.125 },
       { messageId: 'req-desk', tool: 'computer', order: 1, answered: true, requestId: 'wfr_01a009', createTime: 1786873658.125 },
-      { messageId: 'req-old', tool: 'read_file', order: 2, answered: true, requestId: 'wfr_01a009', createTime: 1786873658.125 }
+      { messageId: 'req-plugins', tool: 'search', order: 2, answered: true, requestId: 'wfr_01a009', createTime: 1786873658.125 },
+      { messageId: 'req-old', tool: 'read_file', order: 3, answered: true, requestId: 'wfr_01a009', createTime: 1786873658.125 }
     ]);
   });
 
@@ -755,6 +761,14 @@ describe('the calls a turn says it made', () => {
     expect(reloaded.turns[0]!.messages[0]!.messageId).toBe(live.turns[0]!.messages[0]!.messageId);
     expect(live.turns[0]!.messages[0]!.stable).toBe(true);
     expect(reloaded.turns[0]!.messages[0]!.stable).toBe(true);
+    expect(live.turns[0]!.messages[0]).toMatchObject({
+      workingTurnId: branch.workingTurnId,
+      turnExchangeId: branch.turnExchangeId
+    });
+    expect(reloaded.turns[0]!.messages[0]).toMatchObject({
+      workingTurnId: branch.workingTurnId,
+      turnExchangeId: branch.turnExchangeId
+    });
   });
 
   it('falls back to the parent tuple when two messages of one branch share a creation stamp', async () => {

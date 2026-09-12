@@ -359,6 +359,20 @@
   const seenErrors = new WeakMap();
   /** The generation an error node was first seen in, so an old banner cannot fail a later turn. */
   const errorFirstSeen = new WeakMap();
+  // errors() acknowledges ChatGPT's access-limit dialog as it reads it. Preserve that
+  // synchronous observation long enough for the next activity poll to durably pause an
+  // already-authorized Goal draft even if React removes the dialog in between.
+  const PROVIDER_LIMIT_EVIDENCE_MS = 5 * 60_000;
+  let providerLimitObservedUntil = 0;
+  function observedErrors() {
+    const errors = CLF_DOM.errors();
+    if (errors.some(error => error.blocking === true) && Date.now() >= providerLimitObservedUntil) {
+      // Re-reading the same still-mounted notice must not slide this window forever. A
+      // fresh notice after expiry starts a fresh bounded observation.
+      providerLimitObservedUntil = Date.now() + PROVIDER_LIMIT_EVIDENCE_MS;
+    }
+    return errors;
+  }
   /** The last label sent for each identified ChatGPT-native tool row of this generation. */
   const pageToolsReported = new Map();
 
@@ -895,6 +909,8 @@
   let goalBusy = false;
   /** When this tab started trying to type a ready draft, so a held composer eventually gives up. */
   let goalTypingSince = 0;
+  /** Ready Goal drafts and the durable time at which each may recheck the provider. */
+  const goalQuotaDeferred = new Map();
   /** Terminal Goal card the user dismissed. Keyed to its chat + finished turn across repaints. */
   let dismissedGoalStage = null;
   /**
@@ -1823,7 +1839,7 @@
     // Only this turn's failures. An error inside another turn's section is that turn's,
     // and a toast still on screen from an earlier failure was already on screen when this
     // turn began — neither says anything about how this one ended.
-    const failures = CLF_DOM.errors().filter(
+    const failures = observedErrors().filter(
       (error) => !isStale(error.node) && Boolean(turnId) && localErrorGeneration(error) === turnId
     );
     if (failures.length > 0) return { outcome: 'failed', detail: failures[0].text };
@@ -2383,7 +2399,7 @@
     // apart in the same tick. At millisecond resolution they tie, and a tie read as "this
     // turn's" — so an undismissed banner from an earlier failure could fail the next turn,
     // which is the exact thing that comparison exists to prevent.
-    const visibleErrors = CLF_DOM.errors();
+    const visibleErrors = observedErrors();
     for (const error of visibleErrors) {
       if (!errorFirstSeen.has(error.node)) errorFirstSeen.set(error.node, turnId);
     }
@@ -2860,7 +2876,7 @@
   // 6: adds request-id ownership evidence used by deterministic MCP attribution.
   // 7: keys streaming commentary and native activity by ChatGPT thought/message identity,
   //    so React row replacement, raw text UUID rotation and refresh cannot mint duplicates.
-  const FIBER_VERSION = 10;
+  const FIBER_VERSION = 11;
   const FIBER_TIMEOUT_MS = 1500;
   const FIBER_MAX_ROWS = 400;
   /** Assistant turns whose per-call evidence is accepted from one scan. */
@@ -3046,6 +3062,8 @@
         rawMessageId: cap(entry.rawMessageId, 200),
         role: entry.role === 'user' ? 'user' : 'assistant',
         stable: entry.stable === true,
+        responseWorkingId: cap(entry.workingTurnId, 200),
+        responseExchangeId: cap(entry.turnExchangeId, 200),
         order:
           Number.isInteger(entry.order) && entry.order >= 0 && entry.order < FIBER_MAX_MESSAGES * 4
             ? entry.order
@@ -3785,7 +3803,8 @@
         // claim is different and fails closed instead of choosing either generation.
         const signature =
           `${state}\u0000${message.rawText}\u0000${message.renderedHtml}\u0000${owner}` +
-          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}`;
+          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}` +
+          `\u0000${message.responseWorkingId || ''}\u0000${message.responseExchangeId || ''}`;
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict });
         if (state === 'streaming') noteTurnProgress();
@@ -3796,6 +3815,8 @@
           kind: 'assistant_message',
           messageId: message.messageId,
           providerMessageId: message.rawMessageId,
+          ...(message.responseWorkingId ? { responseWorkingId: message.responseWorkingId } : {}),
+          ...(message.responseExchangeId ? { responseExchangeId: message.responseExchangeId } : {}),
           turnId: localOwner || undefined,
           text: message.rawText,
           renderedHtml: message.renderedHtml,
@@ -5311,7 +5332,7 @@
    * Exact names, never a prefix: `Chat On Steroids Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
    */
-  const OUR_CONNECTORS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'TobisComputer'];
+  const OUR_CONNECTORS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins', 'TobisComputer'];
 
   function ourConnectorApp(name) {
     return typeof name === 'string' && OUR_CONNECTORS.includes(name);
@@ -8932,6 +8953,38 @@
     if (!draft || !conversationId || draft.conversationId !== conversationId) return;
     const target = conversationId, forEpoch = epoch;
     const onDocument = () => alive && epoch === forEpoch && conversationId === target && CLF_DOM.conversationId() === target;
+    const providerLimited = () => {
+      const visible = observedErrors().some(error => error.blocking === true);
+      return visible || Date.now() < providerLimitObservedUntil;
+    };
+    const deferForProviderLimit = async () => {
+      if (!providerLimited()) return false;
+      // This is a pre-Send refusal, so retain the exact ready draft and its durable obligation.
+      // The app schedules a durable short recheck whose only action is to inspect this same
+      // dialog again. No Pro message is attempted while the block remains visible, and
+      // restart cannot lose the pending continuation.
+      goalTypingSince = 0;
+      setGoalPhase('retrying', 'ChatGPT access is limited; this Loop will recheck shortly.');
+      const key = `${target}\u0000${draft.token}`;
+      const deferredUntil = goalQuotaDeferred.get(key) || 0;
+      if (Date.now() >= deferredUntil) {
+        // Infinity closes duplicate-poll overlap while the durable write is in flight. A
+        // successful response replaces it with the actual wake time, so the same still-
+        // blocked payload renews its pause after that deadline instead of staying cached
+        // forever and waking the watchdog behind the visible access dialog.
+        goalQuotaDeferred.set(key, Infinity);
+        while (goalQuotaDeferred.size > 64) goalQuotaDeferred.delete(goalQuotaDeferred.keys().next().value);
+        const deferred = await ask({
+          type: 'goal_defer', conversationId: target, turnId: draft.turnId, token: draft.token
+        }).catch(() => null);
+        const resumeAt = Number(deferred?.data?.resumeAt);
+        if (deferred?.ok && Number.isFinite(resumeAt) && resumeAt > Date.now()) {
+          goalQuotaDeferred.set(key, resumeAt);
+        }
+        else goalQuotaDeferred.delete(key);
+      }
+      return true;
+    };
     if (goalBusy) return;
     if (goalWasSpent(conversationId, draft.token)) {
       // The message already crossed the browser's irreversible boundary. A lost ACK may make
@@ -8998,6 +9051,7 @@
       await ask({ type: 'goal_ack', conversationId, token: draft.token }).catch(() => undefined);
       return;
     }
+    if (await deferForProviderLimit()) return;
     goalBusy = true;
     const composerBefore = CLF_DOM.composer()?.textContent || '';
     let preparedDraft = null, sendAttempted = false;
@@ -9026,6 +9080,11 @@
       const sent = await sendSubmittedText(current, true, async sendCurrent => {
         // Off or a replacement task retires this exact token in the app. Re-read it
         // when native Send is ready, including after a delayed React update.
+        if (!sendCurrent() || !current()) return false;
+        // React may mount the access-limit dialog during composer preparation or while
+        // native Send is disabled. This is the last reversible boundary: persist the
+        // exact draft's pause here, before the click can spend or discard it.
+        if (await deferForProviderLimit()) return false;
         const authorization = await ask({ type: 'activity', conversationId: target, since });
         if (!sendCurrent() || !current() || !authorization?.ok || !authorization.data) return false;
         const allowed = authorization.data.goal;
@@ -9034,18 +9093,33 @@
             !(allowed.enabled === true || (allowed.own !== true && allowed.objective)) || allowed.hasKey !== true ||
             allowed.blocked || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
             generating || CLF_DOM.generating() || nativeBusy || job?.busy) return false;
+        // Authorization is asynchronous. Check once more after it returns, synchronously
+        // adjacent to the irreversible click, so a dialog mounted during that request wins.
+        if (providerLimited()) {
+          await deferForProviderLimit();
+          return false;
+        }
         rememberUserSend();
         sendAttempted = true;
         return true;
       });
       if (!onDocument() || !sendAttempted) return;
       const ownsDraft = goalDraft?.token === draft.token;
-      if (ownsDraft) goalDraft = null;
       if (!sent) {
+        // A click can be the event that makes ChatGPT reveal its access-limit dialog. No
+        // accepted user message means this boundary is still reversible: durably defer the
+        // same token, retain it unacknowledged, and let finally remove only our unchanged
+        // insertion. This is also the renewal path after an acknowledged dialog stayed gone.
+        if (await deferForProviderLimit()) {
+          sendAttempted = false;
+          return;
+        }
+        if (ownsDraft) goalDraft = null;
         await ask({ type: 'goal_ack', conversationId: target, token: draft.token }).catch(() => undefined);
         if (ownsDraft) setGoalPhase('sending', 'ChatGPT would not send the message');
         return;
       }
+      if (ownsDraft) goalDraft = null;
       // Sending is the irreversible step. Record it before the fallible ACK hop so a lost
       // receipt can never turn the same ready draft into a second user message.
       rememberGoalSpent(target, draft.token);
@@ -10212,7 +10286,7 @@
         await waitPageView(() => CLF_DOM.temporaryChatReady(), onTarget, 3000);
       }
       if (temporary && (!temporaryPlannerPage() || !CLF_DOM.temporaryChatReady())) return fail('Temporary Chat was not confirmed. Open the planner tab and complete its Temporary Chat introduction.');
-      const providerLimitation = () => CLF_DOM.errors().find(error => error.blocking === true)?.text;
+      const providerLimitation = () => observedErrors().find(error => error.blocking === true)?.text;
       const limitation = providerLimitation();
       if (limitation) return fail(limitation);
       if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) return fail(providerLimitation() || 'Requested model or reasoning could not be confirmed');

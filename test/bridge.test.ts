@@ -89,6 +89,7 @@ const {
   goalDraftBusy,
   goalPendingReplyFor,
   acceptGoalReplyNow,
+  startGoalDraft,
   setGoalReplyActiveNow,
   goalSwitchFor,
   humanReply,
@@ -801,6 +802,18 @@ describe('observations', () => {
     expect(first.body.stored).toBe(1);
     expect(second.body.stored).toBe(0);
     expect(await readEvents(first.body.sessionId, { kinds: ['user_message'] })).toHaveLength(1);
+  });
+
+  it('bounds provider response-branch evidence before storing it', async () => {
+    await pair();
+    const conversationId = '12121212-3434-5656-7878-909090909090';
+    const reply = await request('POST', '/events', { body: { conversationId, events: [{
+      kind: 'assistant_message', time: Date.now(), text: 'working', messageId: 'branch-message', state: 'streaming',
+      responseExchangeId: 'exchange_valid-1', responseWorkingId: '../invalid working id'
+    }] } });
+    const [message] = await readEvents(reply.body.sessionId, { kinds: ['assistant_message'] });
+    expect(message).toMatchObject({ responseExchangeId: 'exchange_valid-1' });
+    expect(message).not.toHaveProperty('responseWorkingId');
   });
 
   it('refuses an over-sized body with an answer, not a reset connection', async () => {
@@ -8127,6 +8140,61 @@ describe('the goal loop over the bridge', () => {
     const keyless = await request('POST', '/goal/draft', { body: { conversationId: 'cafe0002-0000-4000-8000-000000000002', turnId: 'g-1' } });
     expect(keyless.status).toBe(409);
     expect(keyless.body.error).toBe('no_api_key');
+  });
+
+  it('withholds a quota-paused draft from activity and refuses an early draft request', async () => {
+    await pair();
+    const chat = 'cafe0201-0000-4000-8000-000000000201';
+    const turnId = 'g-quota-fenced';
+    const session = await createSession({ conversationId: chat, title: 'Quota fenced' });
+    await request('POST', '/events', { body: { conversationId: chat, events: [
+      { kind: 'user_message', time: Date.now(), text: 'continue safely', messageId: 'quota-user' }
+    ] } });
+    await acceptGoalReplyNow({
+      conversationId: chat, sessionId: session.id, replyId: 'assistant-quota-fenced', turnId, eventSeq: 1, blocked: false
+    });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => Response.json({
+      choices: [{ message: { content: JSON.stringify({ action: 'continue', reply: 'Run the bounded check.' }) } }]
+    })) as never;
+    try {
+      const prepared = startGoalDraft({ conversationId: chat, sessionId: session.id, turnId, clientId: '201' });
+      let activity: any = null;
+      for (let attempt = 0; attempt < 200; attempt++) {
+        activity = await request('GET', `/activity?conversationId=${chat}&goalClient=201`);
+        if (activity.body.goal.draft?.stage === 'ready') break;
+        await new Promise(resolve => setTimeout(resolve, 5));
+      }
+      expect(activity.body.goal.draft).toMatchObject({ token: prepared.token, stage: 'ready' });
+
+      // Neither an old token nor another tab may postpone the current owner's draft.
+      for (const body of [
+        { conversationId: chat, turnId, token: 'old-token', clientId: '201' },
+        { conversationId: chat, turnId, token: prepared.token, clientId: '202' }
+      ]) {
+        const stale = await request('POST', '/goal/defer', { body });
+        expect(stale.status).toBe(409);
+        expect(stale.body.error).toBe('goal_not_pending');
+      }
+      expect((await request('GET', `/activity?conversationId=${chat}&goalClient=201`)).body.goal.draft).not.toBeNull();
+
+      const paused = await request('POST', '/goal/defer', {
+        body: { conversationId: chat, turnId, token: prepared.token, clientId: '201' }
+      });
+      const resumeAt = paused.body.resumeAt;
+      expect(paused.status).toBe(200);
+      expect(resumeAt).toEqual(expect.any(Number));
+
+      activity = await request('GET', `/activity?conversationId=${chat}&goalClient=201`);
+      expect(activity.body.goal.pending).toBeNull();
+      expect(activity.body.goal.draft).toBeNull();
+
+      const early = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId, clientId: '201' } });
+      expect(early.status).toBe(409);
+      expect(early.body).toMatchObject({ error: 'goal_quota_paused', retryable: true, resumeAt });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   /** A generation is the draft's identity, so it has to be given one. */

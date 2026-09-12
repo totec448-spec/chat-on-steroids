@@ -1056,6 +1056,40 @@ export function upsertMessageEvent(
       const sameMessage =
         previous?.kind === event.kind && storedTextEqual(previous.message, event.message);
 
+      const previousResponse = previous?.kind === 'assistant_message' && event.kind === 'assistant_message'
+        ? previous : null;
+      const previousResponseComplete = Boolean(previousResponse?.responseExchangeId && previousResponse?.responseWorkingId);
+      const incomingResponseComplete = event.kind === 'assistant_message' &&
+        Boolean(event.responseExchangeId && event.responseWorkingId);
+      const responseBranchAmbiguous = event.kind === 'assistant_message' && (
+        event.responseBranchAmbiguous === true ||
+        (previousResponse !== null && (
+          previousResponse.responseBranchAmbiguous === true ||
+          Boolean(previousResponse.responseExchangeId && event.responseExchangeId &&
+            previousResponse.responseExchangeId !== event.responseExchangeId) ||
+          Boolean(previousResponse.responseWorkingId && event.responseWorkingId &&
+            previousResponse.responseWorkingId !== event.responseWorkingId)
+        ))
+      );
+      // Response identity is an atomic pair. Never manufacture a branch by combining sparse
+      // exchange/working fragments from different observations. Preserve the first complete
+      // pair; a later contradiction is retained separately as a permanent ambiguity fence.
+      const selectedResponse = previousResponseComplete
+        ? {
+            exchangeId: previousResponse!.responseExchangeId,
+            workingId: previousResponse!.responseWorkingId
+          }
+        : incomingResponseComplete && event.kind === 'assistant_message'
+          ? { exchangeId: event.responseExchangeId, workingId: event.responseWorkingId }
+          : previousResponse && (previousResponse.responseExchangeId || previousResponse.responseWorkingId)
+            ? {
+                exchangeId: previousResponse.responseExchangeId,
+                workingId: previousResponse.responseWorkingId
+              }
+            : event.kind === 'assistant_message'
+              ? { exchangeId: event.responseExchangeId, workingId: event.responseWorkingId }
+              : { exchangeId: undefined, workingId: undefined };
+
       const nextEvent: NewMessageEvent =
         previous?.kind === 'assistant_message' && event.kind === 'assistant_message'
           ? {
@@ -1064,6 +1098,9 @@ export function upsertMessageEvent(
               // identity through every revision; a different id is a different logical row.
               messageId: previous.messageId,
               providerMessageId: event.providerMessageId ?? previous.providerMessageId,
+              responseExchangeId: selectedResponse.exchangeId,
+              responseWorkingId: selectedResponse.workingId,
+              responseBranchAmbiguous: responseBranchAmbiguous || undefined,
               // `final` is a compatibility mirror of state, not an independent truth.
               state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
               final: event.state === 'final' || event.final === true,
@@ -1121,7 +1158,10 @@ export function upsertMessageEvent(
             previous.state === nextEvent.state &&
             previous.final === nextEvent.final &&
             previous.goalEligible === nextEvent.goalEligible &&
-            previous.providerMessageId === nextEvent.providerMessageId)) &&
+            previous.providerMessageId === nextEvent.providerMessageId &&
+            previous.responseExchangeId === nextEvent.responseExchangeId &&
+            previous.responseWorkingId === nextEvent.responseWorkingId &&
+            previous.responseBranchAmbiguous === nextEvent.responseBranchAmbiguous)) &&
         (nextEvent.kind !== 'user_message' || previous.kind !== 'user_message' ||
           (nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
         (previous.turnId ?? undefined) === settledTurnId &&
@@ -1186,6 +1226,16 @@ export function upsertMessageEvent(
     );
     return write;
   });
+}
+
+/** Exact canonical-key lookup used to distinguish a new page-authored user row from journal replay. */
+export async function hasCanonicalMessage(
+  sessionId: string,
+  kind: MessageEvent['kind'],
+  messageId: string
+): Promise<boolean> {
+  const entry = await ensureOpen(sessionId);
+  return entry.messages.has(`${kind}\u0000${messageId}`);
 }
 
 // ------------------------------------------------------------------- read

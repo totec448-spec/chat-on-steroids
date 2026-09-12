@@ -17,6 +17,7 @@ export function observeUsage(raw: unknown, capturedAt: unknown = Date.now()): vo
   latestObservedAt = capturedAt;
   limits = parsed.map((entry) => ({ ...entry, observedAt: capturedAt }));
 }
+
 // One persisted derived cache owns both daily and model totals. Formula edits project
 // this baseline; only changed canonical session revisions reread transcripts.
 const CACHE_VERSION = 4;
