@@ -430,6 +430,45 @@ it('shows a native image-only message immediately as a card without a guessed ca
   expect(row.querySelector('img')).toBeNull();
 });
 
+it.each(['image', 'txt', 'mixed', 'new-chat', 'after-turn'])('routes the composer attachment action truthfully (%s)', async kind => {
+  const app = await boot([], kind !== 'new-chat');
+  const image = { id: '11111111-2222-4333-8444-555555555555', name: 'image.png', mimeType: 'image/png', size: 42 };
+  const txt = { ...image, id: '22222222-2222-4333-8444-555555555555', name: 'notes.txt', mimeType: 'text/plain' };
+  const files = kind === 'txt' ? [txt] : kind === 'mixed' ? [image, txt] : [image];
+  (app.w as any).api.chooseFiles = async () => ({ ok: true, data: files });
+  app.w.document.getElementById('attachImages')!.click(); await settle();
+  expect(app.w.document.getElementById('immediateDeliveryLabel')!.textContent).toBe(
+    kind === 'new-chat' ? 'Send' : ['txt', 'mixed'].includes(kind) ? 'After this turn' : 'Inject now');
+  if (kind === 'after-turn') (app.w.document.getElementById('sendMode') as HTMLSelectElement).value = 'after-turn';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(app.live.sent).toHaveLength(1);
+  expect(app.live.sent[0]).toMatchObject({ text: 'Please look at the attached files.', attachments: files });
+  expect(app.live.sent[0]!.attachmentDelivery).toBe(kind === 'image' ? 'tool' : undefined);
+});
+
+it('restores the image draft after rejected injection and removes native-only delivery when the document is removed', async () => {
+  const app = await boot([]);
+  const image = { id: '11111111-2222-4333-8444-555555555555', name: 'image.png', mimeType: 'image/png', size: 42 };
+  const txt = { ...image, id: '22222222-2222-4333-8444-555555555555', name: 'notes.txt', mimeType: 'text/plain' };
+  (app.w as any).api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, activeTurnId: 'held-turn', canInject: true, queueAtFinish: true } });
+  await app.append([]);
+  (app.w as any).api.chooseFiles = async () => ({ ok: true, data: [image, txt] });
+  app.w.document.getElementById('attachImages')!.click(); await settle();
+  expect(app.w.document.getElementById('afterTurnLabel')!.textContent).toBe('After this turn');
+  expect(app.w.document.getElementById('queueAtFinish')!.hidden).toBe(true);
+  (app.w.document.querySelector('[aria-label="Remove notes.txt"]') as HTMLButtonElement).click();
+  expect(app.w.document.getElementById('immediateDeliveryLabel')!.textContent).toBe('Inject now');
+  (app.w as any).api.sendInput = async () => ({ ok: false, error: 'Image is too large for injection' });
+  const field = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  field.value = 'Use the original image';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  expect(field.value).toBe('Use the original image');
+  expect(app.w.document.querySelectorAll('#composerImages .image-remove')).toHaveLength(1);
+  expect(app.w.document.querySelector('[aria-label="Remove image.png"]')).not.toBeNull();
+});
+
 it('uses the same separate image row for pending and recorded native attachments', async () => {
   const app = await boot([]);
   const attachment = { id: 'a'.repeat(32), name: 'meme.png', mimeType: 'image/png', size: 42, preview: 'data:image/webp;base64,YQ==' };
@@ -445,6 +484,17 @@ it('uses the same separate image row for pending and recorded native attachments
   expect(recorded.querySelector('.message-attachments')?.nextElementSibling?.classList.contains('user-message-text')).toBe(true);
   expect(recorded.querySelector('.message-attachments > img')?.getAttribute('alt')).toBe('meme.png');
   expect(recorded.querySelector('.composer-image')).toBeNull();
+});
+
+it('explains a legacy missing image recording without asserting a provider receipt', async () => {
+  const app = await boot([]);
+  const event = toolCall(1, 'missing-image') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  event.call.tool = 'view_image';
+  event.call.result = text('');
+  await app.append([event]);
+  const tool = app.w.document.querySelector('details.tool')!;
+  expect(tool.textContent).toContain('No image preview was retained in this recording.');
+  expect(tool.textContent).not.toContain('received');
 });
 
 it('loads recorded tool images on expansion and hides truncated binary envelopes', async () => {

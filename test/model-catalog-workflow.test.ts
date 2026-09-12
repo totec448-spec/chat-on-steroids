@@ -88,6 +88,23 @@ it('inspects an idle existing conversation without clearing or sending its compo
   expect(f.clear).not.toHaveBeenCalled();
   expect(f.ask).toHaveBeenCalledWith(expect.objectContaining({ type: 'model_catalog' }));
 });
+it('reads a running Pro tab passively without clearing its draft or opening the picker', async () => {
+  const composer = { textContent: 'Unsent follow-up' };
+  const models = [{ id: '6', label: 'GPT-6 Pro', efforts: ['pro'], aliases: ['gpt-6-pro'] }];
+  const ask = vi.fn(async () => ({ ok: true })), prepare = vi.fn(), inspect = vi.fn(), clear = vi.fn();
+  const context = vm.createContext({ URL, Date, alive: true, epoch: 1, conversationId: 'existing-chat', generating: true,
+    desktopInputBusy: false, modelCatalogBusy: false, location: { pathname: '/c/existing-chat', href: 'https://chatgpt.com/c/existing-chat' }, ask,
+    CLF_DOM: { composerVisible: () => true, composer: () => composer, generating: () => true, hasComposerAttachments: () => false,
+      inspectVisibleModelSettings: async (current: () => boolean) => current() ? models : null,
+      prepareChatModelSurface: prepare, inspectModelSettings: inspect, clearPromptExact: clear }
+  });
+  vm.runInContext(`${section}\nglobalThis.run = inspectAppModelCatalog;`, context);
+  expect(await (context.run as Function)({ nonce, expiresAt: Date.now() + 10000 })).toBe(true);
+  expect(ask).toHaveBeenCalledWith({ type: 'model_catalog', nonce, models });
+  expect(prepare).not.toHaveBeenCalled(); expect(inspect).not.toHaveBeenCalled(); expect(clear).not.toHaveBeenCalled();
+  expect(composer.textContent).toBe('Unsent follow-up');
+});
+
 it('binds discovery to the Chat composer after Work replaces its composer', async () => {
   let composer = { textContent: '' };
   const old = composer, ask = vi.fn(async () => ({ ok: true }));

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const store = vi.hoisted(() => ({ listUsageSessions: vi.fn(), readEvents: vi.fn() }));
 vi.mock('../src/main/session/store.js', () => store);
+const catalog = vi.hoisted(() => ({ getChatModels: vi.fn() }));
+vi.mock('../src/main/chat-models.js', () => catalog);
 const durable = vi.hoisted(() => ({ readDurable: vi.fn(), writeDurableSoon: vi.fn() }));
 vi.mock('../src/main/durable.js', () => durable);
 let usage: typeof import('../src/main/session/usage.js');
@@ -8,6 +10,7 @@ let now: number;
 const limit = (overrides: Record<string, unknown> = {}) => ({ model: 'Shared ChatGPT usage', scope: 'shared', remaining: null, remainingPercent: 40, resetAt: null, windowSeconds: 18000, ...overrides });
 beforeEach(async () => {
   vi.resetModules();
+  catalog.getChatModels.mockReset().mockReturnValue({ models: [] });
   durable.readDurable.mockReset().mockResolvedValue(null); durable.writeDurableSoon.mockReset();
   store.listUsageSessions.mockReset().mockResolvedValue([]);
   store.readEvents.mockReset().mockResolvedValue([]);
@@ -120,6 +123,96 @@ describe('passive usage limits and canonical token totals', () => {
     vi.resetModules(); durable.readDurable.mockResolvedValue(persisted); store.readEvents.mockClear();
     usage = await import('../src/main/session/usage.js');
     expect((await usage.usageOverview()).tokens).toBe(first.tokens);
+    expect(store.readEvents).not.toHaveBeenCalled();
+  });
+  it('caps long frontend estimates before aggregation while preserving raw context and short successors', async () => {
+    const first = new Date(2026, 8, 4, 12).getTime();
+    const second = new Date(2026, 8, 5, 12).getTime();
+    const call = (callId: string, time: number, model: string, conversationId = 'a') => ({ kind: 'tool_call', time, call: { callId, conversationId, model, args: { text: 'aaaa' }, result: { text: '' }, summary: { title: '' } } });
+    const session = { id: 'one', updatedAt: 1, events: 9, estimatedTokens: 2_000_000, contextTokens: 2_000_000 };
+    const events = [
+      { kind: 'user_message', time: first, message: { text: 'preview', truncated: true, chars: 8_000_000 } },
+      call('1', first, 'gpt-6-pro'), call('2', first, 'gpt-6-pro'), call('3', first, 'gpt-6-pro'),
+      call('4', second, 'gpt-5-6-thinking'), call('4', second, 'gpt-5-6-thinking'),
+      { kind: 'session_start', time: second, conversationId: 'b' },
+      { kind: 'user_message', time: second, message: { text: 'aaaa' } },
+      call('5', second, 'gpt-6-pro', 'b')
+    ];
+    store.listUsageSessions.mockResolvedValue([session]); store.readEvents.mockResolvedValue(events);
+    const result = await usage.usageOverview();
+    expect(result.tokens).toBe(512_001);
+    expect(result.days.map(day => [day.date, day.tokens])).toEqual([['2026-09-04', 384_000], ['2026-09-05', 128_001]]);
+    expect(result.models).toEqual([
+      { model: 'gpt-6-pro', reasoningEffort: null, assumed: false, tokens: 384_001 },
+      { model: 'gpt-5-6-thinking', reasoningEffort: null, assumed: false, tokens: 128_000 }
+    ]);
+    const { usageEstimate, DEFAULT_USAGE_FORMULA } = await import('../src/shared/usage.js');
+    expect(usageEstimate(result.models, { ...DEFAULT_USAGE_FORMULA, divisor: 1 }).tokens).toBe(1_024_002);
+    expect(usageEstimate(result.models, { ...DEFAULT_USAGE_FORMULA, divisor: 4 }).tokens).toBe(256_000.5);
+    expect(session).toMatchObject({ estimatedTokens: 2_000_000, contextTokens: 2_000_000 });
+    const { eventTokens } = await import('../src/shared/session.js');
+    expect(eventTokens(events[0] as Parameters<typeof eventTokens>[0])).toBe(2_000_000);
+  });
+  it.each([255_999, 256_000, 256_001, 2_000_000])('bounds a %i-token frontend without scaling short context', async (context) => {
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: context }]);
+    store.readEvents.mockResolvedValue([{ kind: 'tool_call', time: now, call: { callId: 'a', conversationId: 'chat', args: { text: '', truncated: true, chars: context * 4 }, result: { text: '' }, summary: { title: '' } } }]);
+    expect((await usage.usageOverview()).tokens).toBe(Math.min(context, 256_000) / 2);
+  });
+  it.each([
+    { id: 'gpt-6-pro', efforts: [] },
+    { id: 'gpt-6-astra', efforts: ['high'] },
+    { id: 'gpt-5-6-pro', efforts: [] },
+    { id: 'gpt-5-6-thinking', efforts: ['high', 'pro'] }
+  ])('uses a selectable Pro option %j to raise every model to 400K', async (option) => {
+    catalog.getChatModels.mockReturnValue({ models: [option] });
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 2, estimatedTokens: 2_000_000 }]);
+    store.readEvents.mockResolvedValue(['gpt-5-6-thinking', 'gpt-6-pro'].map((model, i) => ({ kind: 'tool_call', time: now,
+      call: { callId: String(i), conversationId: 'chat', model, args: { text: '', truncated: true, chars: 4_000_000 }, result: { text: '' }, summary: { title: '' } } })));
+    const result = await usage.usageOverview();
+    expect(result.contextTokenCap).toBe(400_000);
+    expect(result.models.map(row => row.tokens)).toEqual([200_000, 200_000]);
+    expect(result.tokens).toBe(400_000);
+  });
+  it.each([399_999, 400_000, 400_001])('caps Pro-account context %i at 400K before the divisor', async context => {
+    catalog.getChatModels.mockReturnValue({ models: [{ id: 'gpt-6-pro', efforts: [] }] });
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: context }]);
+    store.readEvents.mockResolvedValue([{ kind: 'tool_call', time: now, call: { callId: 'a', conversationId: 'chat', model: 'gpt-5.6',
+      args: { text: '', truncated: true, chars: context * 4 }, result: { text: '' }, summary: { title: '' } } }]);
+    expect((await usage.usageOverview()).tokens).toBe(Math.min(context, 400_000) / 2);
+  });
+  it('rebuilds unchanged recordings when Pro availability changes, while ordinary catalog updates reuse the cache', async () => {
+    const ordinary = { id: 'gpt-5-6-thinking', efforts: ['high'] };
+    catalog.getChatModels.mockReturnValue({ models: [ordinary, { id: 'unknown-pro-lookalike', efforts: ['high'] }] });
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: 2_000_000 }]);
+    store.readEvents.mockResolvedValue([{ kind: 'tool_call', time: now, call: { callId: 'a', conversationId: 'chat', model: 'gpt-6-pro',
+      args: { text: '', truncated: true, chars: 8_000_000 }, result: { text: '' }, summary: { title: '' } } }]);
+    // Historical Pro usage does not establish current selectable models.
+    expect(await usage.usageOverview()).toMatchObject({ contextTokenCap: 256_000, tokens: 128_000 });
+    catalog.getChatModels.mockReturnValue({ models: [ordinary, { id: 'gpt-6-pro', efforts: [] }] });
+    expect(await usage.usageOverview()).toMatchObject({ contextTokenCap: 400_000, tokens: 200_000 });
+    expect(store.readEvents).toHaveBeenCalledTimes(2);
+    const saved = durable.writeDurableSoon.mock.calls.at(-1)![1];
+    vi.resetModules(); durable.readDurable.mockResolvedValue(saved); store.readEvents.mockClear();
+    usage = await import('../src/main/session/usage.js');
+    catalog.getChatModels.mockReturnValue({ models: [ordinary, { id: 'gpt-6-pro', efforts: ['high'] }] });
+    expect((await usage.usageOverview()).tokens).toBe(200_000);
+    expect(store.readEvents).not.toHaveBeenCalled();
+    catalog.getChatModels.mockReturnValue({ models: [ordinary] });
+    expect(await usage.usageOverview()).toMatchObject({ contextTokenCap: 256_000, tokens: 128_000 });
+    expect(store.readEvents).toHaveBeenCalledTimes(1);
+  });
+  it.each([4, 5])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    durable.readDurable.mockResolvedValue({ version, rows: [{ id: 'one', revision: `${timezone}:1:1:2000000`, days: [['2026-09-05', [{ model: 'gpt-6-pro', reasoningEffort: null, assumed: false, tokens: 1_000_000 }]]] }] });
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: 2_000_000 }]);
+    store.readEvents.mockResolvedValue([{ kind: 'tool_call', time: now, call: { callId: 'a', conversationId: 'chat', model: 'gpt-6-pro', args: { text: '', truncated: true, chars: 8_000_000 }, result: { text: '' }, summary: { title: '' } } }]);
+    expect((await usage.usageOverview()).tokens).toBe(128_000);
+    expect(store.readEvents).toHaveBeenCalledTimes(1);
+    const persisted = durable.writeDurableSoon.mock.calls.at(-1)![1];
+    expect(persisted.version).toBe(6);
+    vi.resetModules(); durable.readDurable.mockResolvedValue(persisted); store.readEvents.mockClear();
+    usage = await import('../src/main/session/usage.js');
+    expect((await usage.usageOverview()).tokens).toBe(128_000);
     expect(store.readEvents).not.toHaveBeenCalled();
   });
   it('releases a failed calculation so opening again can retry', async () => {

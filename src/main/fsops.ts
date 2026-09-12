@@ -240,13 +240,17 @@ function validatePng(data: Buffer): void {
 }
 
 function validateJpeg(data: Buffer): void {
-  if (data.length < 8 || data[data.length - 2] !== 0xff || data[data.length - 1] !== 0xd9) {
+  // EOI ends the JPEG codestream, not necessarily the containing file. Downloads can
+  // carry trailing bytes (including a newline). Pixel decoding remains mandatory at
+  // the MCP image boundary; finding this marker alone never proves valid scan data.
+  const end = data.lastIndexOf(Buffer.from([0xff, 0xd9]));
+  if (data.length < 8 || end < 2) {
     invalidImage('JPEG', 'end marker is missing');
   }
   let offset = 2;
   let sawFrame = false;
   const frameMarkers = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
-  while (offset < data.length - 2) {
+  while (offset < end) {
     while (offset < data.length && data[offset] === 0xff) offset++;
     if (offset >= data.length) break;
     const marker = data[offset++]!;

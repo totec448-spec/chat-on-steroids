@@ -266,7 +266,7 @@
   "Requires the Chrome extension to be loaded and connected. This sets the most worker chats one run may open.": "需要加载并连接 Chrome 扩展。此设置限制一次运行可打开的子智能体聊天数量。",
   "max": "上限",
   "Allow unattributed calls": "允许未归属的调用",
-  "Run self-contained calls even when the extension cannot prove which chat sent them. Activity stays visible as Unattributed.": "即使扩展无法证明调用来自哪个聊天，也执行可独立完成的调用。活动仍显示为“未归属”。",
+  "Allow tools, including computer use, file editing and JavaScript, without chat attribution. Sub-agents and other chat-owned actions still need an identified chat. Activity appears as Unattributed.": "允许在未确定聊天归属时使用工具，包括电脑操作、文件编辑和 JavaScript。子代理及其他依赖聊天归属的操作仍需识别聊天。活动显示为“未归属”。",
   "Recover other chats’ tabs": "恢复其他聊天的标签页",
   "Restore missing or unresponsive work chats. Goal and Loop chats recover automatically.": "恢复缺失或无响应的工作聊天。目标和循环聊天会自动恢复。",
   "Clear swarm": "清除智能体组",
@@ -291,6 +291,9 @@
   "Inject now": "立即注入",
   "Send directly": "直接发送",
   "After this turn": "本轮结束后",
+  "Pro Loop delivery": "Pro 循环发送时机",
+  "Only finish": "仅在完成时",
+  "After this turn + finish": "本轮结束后或完成时",
   "Send": "发送",
   "All": "全部",
   "Problems": "问题",
@@ -905,7 +908,7 @@
   "{0} + unpriced": "{0} + 未定价部分",
   "{0} estimated tokens; {1} have no comparison rate. Cached-input equivalent, not a bill.": "估算 {0} Token，其中 {1} 无对比单价。仅为缓存输入等值估算，并非账单。",
   "{0}: {1} estimated tokens": "{0}：估算 {1} Token",
-  "Final frontend context × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "最终前端上下文 × 去重工具调用数 ÷ {0} × 各模型缓存输入单价 ÷ 一百万 × {1}。",
+  "Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.": "最终前端上下文（本估算最多计入 {2} 个 token）× 去重工具调用数 ÷ {0} × 各模型缓存输入单价 ÷ 一百万 × {1}。",
   "{0} estimated equivalent. {1}This is a comparison, not a bill.": "估算等值费用 {0}。{1}仅供对比，并非账单。",
   "{0} tokens have no rate. ": "{0} Token 尚无单价。",
   "Recorded model / effort": "记录的模型／强度",
@@ -1025,5 +1028,6 @@
   "Vectorize images": "将图片矢量化",
   "Remove or replace backgrounds": "移除或替换背景",
   "Upscale images": "放大图片",
-  "Create custom styles": "创建自定义风格"
+  "Create custom styles": "创建自定义风格",
+  "No image preview was retained in this recording.": "此记录未保留图像预览。"
 }

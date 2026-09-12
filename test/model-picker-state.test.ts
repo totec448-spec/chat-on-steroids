@@ -188,6 +188,24 @@ it('keeps an explicit model denial unavailable even when the preset is visible',
   const f = fixture(); (f.props.modelSwitcherDenialsBySlug as any)['future-model'] = { reason: 'workspace_policy' };
   expect(await f.api.inspectModelSettings()).toEqual([{ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'], aliases: ['gpt-5-6-thinking'] }]);
 });
+it('reads the September closed 6 Pro dropdown without opening or changing a working composer', async () => {
+  const f = fixture(), doc = page.window.document, trigger = doc.querySelector('button')!;
+  const pro = f.selections[0]![2]!;
+  pro.availability.status = 'available';
+  f.state.currentBucket = pro.bucket; f.state.currentSelection = pro;
+  trigger.innerHTML = '<span>6</span><span>Pro</span>';
+  (trigger as any).__reactFiber$test = { memoizedProps: { dropdownContent: { props: f.props } }, return: null };
+  doc.querySelector('#prompt-textarea')!.textContent = 'Unsent user draft';
+  doc.querySelector('[data-testid="send-button"]')!.setAttribute('data-testid', 'stop-button');
+  expect(await f.api.inspectVisibleModelSettings()).toContainEqual({ id: 'gpt-6-pro', label: 'GPT-6 Pro', efforts: ['pro'], aliases: ['gpt-6-pro'] });
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-pro', reasoningEffort: 'pro' });
+  expect(doc.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+  expect(f.actions).not.toHaveBeenCalled();
+  expect(doc.querySelector('#prompt-textarea')!.textContent).toBe('Unsent user draft');
+  (f.props.modelSwitcherDenialsBySlug as any)['gpt-6-pro'] = { reason: 'workspace_policy' };
+  expect(await f.api.inspectVisibleModelSettings()).not.toContainEqual(expect.objectContaining({ id: 'gpt-6-pro' }));
+  expect(f.api.visibleModelSelection()).toBeNull();
+});
 it('recognizes the provider min effort as Low without invalidating the account catalog', async () => {
   const f = fixture(); f.selections[0]![0]!.thinkingEffort = 'min';
   expect(await f.api.inspectModelSettings()).toContainEqual({ id: 'gpt-5-6-thinking', label: 'GPT-5.6 Sol', efforts: ['low', 'high'], aliases: ['gpt-5-6-thinking'] });

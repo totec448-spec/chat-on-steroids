@@ -109,7 +109,7 @@ function paintCost(): void {
     const date = new Date(); date.setDate(date.getDate() - ago); const key = dateKey(date), tokens = byDay.get(key) ?? 0;
     const cell = el('span', 'heat-cell'); cell.dataset.level = String(tokens ? Math.max(1, Math.ceil(tokens / peak * 4)) : 0); const hint = () => t("{0}: {1} estimated tokens", [key, Math.round(tokens).toLocaleString()]); usageHint(cell, hint); ui(cell, 'aria-label', hint); heat.append(cell);
   }
-  ui($('usageFormula'), 'textContent', () => t("Final frontend context × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.", [formula.divisor, formula.multiplier]));
+  ui($('usageFormula'), 'textContent', () => t("Final frontend context (capped at {2} tokens for this estimate) × unique tool calls ÷ {0} × each model’s cached-input rate ÷ 1M × {1}.", [formula.divisor, formula.multiplier, snapshot!.contextTokenCap.toLocaleString()]));
   ui($('usageCost'), 'textContent', () => t("{0} estimated equivalent. {1}This is a comparison, not a bill.", [costText(total), total.unpricedTokens ? t("{0} tokens have no rate. ", [Math.round(total.unpricedTokens).toLocaleString()]) : '']));
   const modelTable = el('table', 'usage-table'); const modelHead = el('tr');
   for (const title of ['Recorded model / effort', 'Estimated tokens', 'Estimated equivalent']) modelHead.append(el('th', '', () => t(title)));

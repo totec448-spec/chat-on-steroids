@@ -6,14 +6,14 @@ import type { UsageOverview } from '../src/shared/usage.js';
 let dom: JSDOM;
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); vi.resetModules(); });
 
-it('edits the canonical formula controls and per-model rates without reloading recordings, then restores preferences', async () => {
+it.each([256_000, 400_000])('shows the calculated %i context cap and edits formula preferences without reloading recordings', async (contextTokenCap) => {
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
   const models = [
     { model: 'gpt-5.6', reasoningEffort: 'high', assumed: true, tokens: 1e6 },
     { model: 'another-model', reasoningEffort: 'low', assumed: false, tokens: 1e6 }
   ];
-  const data: UsageOverview = { tokens: 2e6, models, days: [{ date: '2026-09-05', tokens: 2e6, models }], sessions: 1, limits: ['deep_research', 'file_upload', 'paste_text_to_file', 'image_gen'].map(model => ({ model, scope: 'feature', remaining: 3, remainingPercent: 50, resetAt: null, windowSeconds: null, observedAt: Date.now() })) };
+  const data: UsageOverview = { contextTokenCap, tokens: 2e6, models, days: [{ date: '2026-09-05', tokens: 2e6, models }], sessions: 1, limits: ['deep_research', 'file_upload', 'paste_text_to_file', 'image_gen'].map(model => ({ model, scope: 'feature', remaining: 3, remainingPercent: 50, resetAt: null, windowSeconds: null, observedAt: Date.now() })) };
   const getUsage = vi.fn(async () => ({ ok: true, data }));
   Object.assign(dom.window, { api: { getUsage, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
   const { initUsage, refreshUsage } = await import('../src/renderer/usage.js');
@@ -22,6 +22,7 @@ it('edits the canonical formula controls and per-model rates without reloading r
   const cost = () => dom.window.document.getElementById('usageTotalCost')!.textContent;
   const divisor = field('usageDivisor');
   initUsage(); await refreshUsage();
+  expect(dom.window.document.getElementById('usageFormula')!.textContent).toContain(`capped at ${contextTokenCap.toLocaleString()} tokens`);
   const formulaDetails = dom.window.document.getElementById('usageFormulaDetails') as HTMLDetailsElement;
   expect(formulaDetails.open).toBe(false);
   expect(divisor.closest('details')).toBe(formulaDetails);
@@ -62,7 +63,7 @@ it('shows the Sol picker alias rate and preserves an explicitly cleared rate aft
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
   const models = [{ model: 'gpt-5-6-thinking', reasoningEffort: 'high', assumed: false, tokens: 427245 }];
-  const data: UsageOverview = { tokens: 427245, models, days: [{ date: '2026-09-07', tokens: 427245, models }], sessions: 1, limits: [] };
+  const data: UsageOverview = { contextTokenCap: 256_000, tokens: 427245, models, days: [{ date: '2026-09-07', tokens: 427245, models }], sessions: 1, limits: [] };
   const getUsage = vi.fn(async () => ({ ok: true, data }));
   Object.assign(dom.window, { api: { getUsage, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
   const usage = await import('../src/renderer/usage.js');
@@ -85,7 +86,7 @@ it('combines equivalent recorded names in the table while keeping raw rate edits
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
   const models = ['5.6', 'gpt-5-6-thinking', 'gpt-5.6-sol'].map(model => ({ model, reasoningEffort: 'high', assumed: false, tokens: 1e6 }));
-  const data: UsageOverview = { tokens: 3e6, models, days: [{ date: '2026-09-08', tokens: 3e6, models }], sessions: 1, limits: [] };
+  const data: UsageOverview = { contextTokenCap: 256_000, tokens: 3e6, models, days: [{ date: '2026-09-08', tokens: 3e6, models }], sessions: 1, limits: [] };
   const getUsage = vi.fn(async () => ({ ok: true, data }));
   Object.assign(dom.window, { api: { getUsage, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
   const usage = await import('../src/renderer/usage.js'); usage.initUsage(); await usage.refreshUsage();

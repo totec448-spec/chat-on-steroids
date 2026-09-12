@@ -8,6 +8,7 @@
  */
 
 import http from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { WebSocket } from 'ws';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -6535,6 +6536,7 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-loop-dead')]);
+      await attributed(OTHER, false, Date.now());
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const handout = await maintenance();
@@ -6729,19 +6731,22 @@ describe('unattributed activity recovery', () => {
     } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); }
   });
 
-  for (const proof of ['missing', 'exact', 'older', 'new turn']) it(`requires ${proof} canonical Pro final proof without any recent tool call`, async () => {
+  for (const afterTurn of [false, true]) for (const proof of ['missing', 'exact', 'older', 'new turn']) it(`requires ${proof} canonical Pro final proof without any recent tool call (after-turn ${afterTurn})`, async () => {
+    const conversationId = randomUUID();
     const previous = getConfig();
     await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
     await setSecret('openRouterApiKey', 'sk-or-pro-final');
     resetGoalStateForTests();
     try {
       await pair();
-      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Pro', time: Date.now() }, openTurn('pro-final-' + proof)]);
-      if (proof !== 'missing') await events(OTHER, [{ kind: 'assistant_message', time: Date.now(), messageId: 'pro-answer-' + proof, turnId: proof === 'older' ? 'old-turn' : 'pro-final-' + proof, text: 'Finished.', state: 'final', final: true, activeNow: true }]);
-      await events(OTHER, [endTurn('pro-final-' + proof, 'completed')]);
-      if (proof === 'new turn') await events(OTHER, [openTurn('next-pro-turn')]);
-      const result = await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: 'pro-final-' + proof, clientId: 'tab-1' } });
-      expect(result.status).toBe(proof === 'exact' ? 200 : 409);
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(conversationId, 'loop', true, afterTurn);
+      await events(conversationId, [{ kind: 'model_selection', model: 'GPT-5.6 Pro', time: Date.now() }, openTurn('pro-final-' + proof)]);
+      if (proof !== 'missing') await events(conversationId, [{ kind: 'assistant_message', time: Date.now(), messageId: 'pro-answer-' + proof, turnId: proof === 'older' ? 'old-turn' : 'pro-final-' + proof, text: 'Finished.', state: 'final', final: true, activeNow: true }]);
+      await events(conversationId, [endTurn('pro-final-' + proof, 'completed')]);
+      if (proof === 'new turn') await events(conversationId, [openTurn('next-pro-turn')]);
+      const result = await request('POST', '/goal/draft', { body: { conversationId: conversationId, turnId: 'pro-final-' + proof, clientId: 'tab-1' } });
+      expect(result.status, JSON.stringify(result.body)).toBe(afterTurn && proof === 'exact' ? 200 : 409);
     } finally {
       resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous);
     }
@@ -6866,6 +6871,7 @@ describe('unattributed activity recovery', () => {
         await pair();
         const turnId = `turn-loop-${what.length}`;
         await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn(turnId)]);
+        await attributed(OTHER, false, Date.now());
         await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
         await sweepStaleSwarm(Date.now());
         const handout = await maintenance();
@@ -7023,6 +7029,7 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-lost')]);
+      await attributed(OTHER, false, Date.now());
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const handout = await maintenance();
@@ -7043,6 +7050,93 @@ describe('unattributed activity recovery', () => {
       await saveConfig(previous);
       vi.useRealTimers();
     }
+  });
+
+  it('files one opted-in Pro Loop ticket on refresh, defers native busy, and revokes it on MCP work', async () => {
+    const OTHER = 'c9191919-1111-2222-3333-444444444444';
+    const previous = getConfig();
+    const goal = await import('../src/main/goal.js');
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await setSecret('openRouterApiKey', 'sk-or-pro-loop-test');
+    resetGoalStateForTests();
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await goal.setGoalSwitchNow(OTHER, 'loop', true, true);
+      await events(OTHER, [{ kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: Date.now() }, openTurn('pro-loop-after-turn')]);
+      await attributed(OTHER, false, Date.now());
+      // Canonical revisions spend sequence numbers without adding presentation rows.
+      for (const text of ['Working', 'Working on the requested pass']) await events(OTHER, [{ kind: 'assistant_message',
+        messageId: 'pro-loop-interim', turnId: 'pro-loop-after-turn', time: Date.now(), text, state: 'streaming', activeNow: true }]);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - 1);
+      expect(await maintenance()).toBeNull();
+      expect(goalPendingReplyFor(OTHER)).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      const repair = await maintenance();
+      expect(repair?.reason).toBe('silence');
+      await maintenance(repair!.token);
+      const ticket = goalPendingReplyFor(OTHER)!;
+      expect(ticket).toMatchObject({ silenceSourceTurnId: 'pro-loop-after-turn', silencePro: true });
+      const busy = await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: ticket.turnId, nativeBusy: true } });
+      expect(busy.body.error).toBe('chat_still_working');
+      const deferred = goalPendingReplyFor(OTHER)!;
+      expect(deferred.listenUntil).toBe(Date.now() + 5 * 60_000);
+      goal.restoreGoalReplies(goal.snapshotGoalReplies());
+      expect(goalPendingReplyFor(OTHER)).toEqual(deferred);
+      const waiting = await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: ticket.turnId, terminalRequired: true } });
+      expect(waiting.body.error).toBe('chat_still_working');
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      const ready = await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: ticket.turnId, terminalRequired: true } });
+      expect(`${ready.status} ${JSON.stringify(ready.body)}`).toMatch(/^200 /);
+      await vi.advanceTimersByTimeAsync(1000);
+      await attributed(OTHER, false, Date.now());
+      await request('GET', `/activity?conversationId=${OTHER}`);
+      expect(goalPendingReplyFor(OTHER)).toBeNull();
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - 1);
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      expect((await maintenance())?.reason).toBe('silence');
+    } finally {
+      resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers();
+    }
+  });
+
+  it.each(['completed', 'thinking_failed'])('lets opted-in Pro Loop draft at its confirmed %s boundary', async kind => {
+    const OTHER = kind === 'completed' ? 'c9292929-1111-2222-3333-444444444444' : 'c9393939-1111-2222-3333-444444444444';
+    const previous = getConfig();
+    const goal = await import('../src/main/goal.js');
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await setSecret('openRouterApiKey', 'sk-or-pro-loop-boundary'); resetGoalStateForTests();
+    vi.useFakeTimers();
+    try {
+      await pair(); await goal.setGoalSwitchNow(OTHER, 'loop', true, true);
+      const turn = `pro-loop-${kind}`;
+      await events(OTHER, [{ kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: Date.now() }, openTurn(turn)]);
+      if (kind === 'thinking_failed') await attributed(OTHER, false, Date.now());
+      await vi.advanceTimersByTimeAsync(330000);
+      if (kind === 'completed') {
+        await events(OTHER, [{ kind: 'assistant_message', messageId: `answer-${turn}`, turnId: turn, time: Date.now(),
+          text: 'The requested pass is complete.', final: true, state: 'final', activeNow: true, goalEligible: true }, endTurn(turn, 'completed')]);
+      } else await events(OTHER, [{ kind: 'turn_end', turnId: turn, outcome: 'failed', reason: 'thinking_failed', time: Date.now() }]);
+      const pending = goalPendingReplyFor(OTHER);
+      expect(pending).not.toBeNull();
+      if (kind === 'thinking_failed') {
+        expect((await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending!.turnId, nativeBusy: true } })).body.error).toBe('chat_still_working');
+        goal.restoreGoalReplies(goal.snapshotGoalReplies());
+        await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+        expect((await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending!.turnId, terminalRequired: true } })).body.error).toBe('chat_still_working');
+        await vi.advanceTimersByTimeAsync(1);
+      }
+      const reply = await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending!.turnId, terminalRequired: true } });
+      expect(`${reply.status} ${JSON.stringify(reply.body)}`).toMatch(/^200 /);
+      if (kind === 'thinking_failed') {
+        await goal.setGoalSwitchNow(OTHER, 'loop', false);
+        await request('GET', `/activity?conversationId=${OTHER}`);
+        expect((await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending!.turnId } })).status).toBe(409);
+      }
+    } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers(); }
   });
 
   it('leaves a silent plain chat where it fell when tab recovery is off', async () => {

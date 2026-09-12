@@ -1312,10 +1312,23 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     const authoredResultText = redactResult(input.tool, textParts.join('\n'));
     const resultText = input.protocolResult === undefined ? authoredResultText : redactResult(input.tool, safeJson(input.protocolResult));
     const assets: AssetRef[] = [...evidence.assets];
+    let missingImages = 0;
+    const imageRecordingReasons = new Set<string>();
     for (const part of input.content) {
-      if (part.type !== 'image' || !part.data) continue;
-      const asset = await storeImage(sessionId, part.data, part.mimeType ?? 'image/png');
-      if (asset) assets.push(asset);
+      if (part.type !== 'image') continue;
+      try {
+        assets.push(await storeImage(sessionId, part.data ?? '', part.mimeType ?? 'image/png'));
+      } catch (err) {
+        missingImages++;
+        // Only fixed storage diagnostics may enter the transcript; arbitrary fs errors
+        // can contain private paths. Recording failure never changes the MCP payload.
+        const message = err instanceof Error ? err.message : '';
+        const reason = message === 'Global session asset quota exceeded' || message === 'Session asset quota exceeded'
+          ? 'recording storage limit reached'
+          : message === 'Session image exceeds the recording limit' ? 'recording image size limit' : 'recording write failed';
+        imageRecordingReasons.add(reason);
+        logWarn(`session image not stored: ${reason}`);
+      }
     }
 
     const summary: ActivitySummary = summarizeToolCall({
@@ -1326,6 +1339,11 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       durationMs: input.durationMs,
       resultHead: authoredResultText.split('\n', 1)[0] ?? ''
     });
+    if (missingImages) {
+      const notice = `${missingImages} image preview(s) not saved: ${[...imageRecordingReasons].join('; ')}. Image content remains in the tool response.`;
+      summary.detail = summary.detail ? `${summary.detail} · ${notice}` : notice;
+      if (summary.tone !== 'bad') summary.tone = 'warn';
+    }
 
     const call: ToolCallRecord = {
       ...callModel,
@@ -1571,16 +1589,10 @@ async function targetSession(target: Target): Promise<string | null> {
   return ensureUnattributedSession();
 }
 
-async function storeImage(sessionId: string, base64: string, mimeType: string): Promise<AssetRef | null> {
-  try {
-    const data = Buffer.from(base64, 'base64');
-    if (data.length === 0 || data.length > MAX_ASSET_BYTES) return null;
-    const asset = await writeAsset(sessionId, data, mimeType);
-    return asset;
-  } catch (err) {
-    logWarn(`session asset not stored: ${(err as Error).message}`);
-    return null;
-  }
+async function storeImage(sessionId: string, base64: string, mimeType: string): Promise<AssetRef> {
+  const data = Buffer.from(base64, 'base64');
+  if (data.length === 0 || data.length > MAX_ASSET_BYTES) throw new Error('Session image exceeds the recording limit');
+  return writeAsset(sessionId, data, mimeType);
 }
 
 // ------------------------------------------------------- extension events
@@ -1621,6 +1633,8 @@ export interface ChatObservation {
   /** Internal React conversation id used only to cross-check the URL conversation id. */
   fiberConversationId?: string;
   outcome?: TurnOutcome;
+  /** Native Thinking failed after 30s ignoring delayed activity, then 5m listening. */
+  reason?: 'thinking_failed';
   detail?: string;
   /** Browser terminal proof; app-owned Goal policy is applied only after this is durable. */
   goalEligible?: boolean;
@@ -1975,8 +1989,14 @@ async function recordChatObservationsNow(
         // DOM after restart cannot renew work, nor can an old message borrow a
         // newer page turn. Preserve the revision while using its canonical owner
         // and the recorder's terminal boundary to decide activity.
+        const [uncertainEnd] = state !== 'final' && item.activeNow === true && canonicalTurn && !live?.turnId
+          ? await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end'] }) : [];
+        // A fresh exact interim can resume an uncertain failure without inventing
+        // a new user turn. Old messages and explicit completed/stopped turns cannot.
+        const resumedUncertainTurn = uncertainEnd?.kind === 'turn_end' && uncertainEnd.turnId === canonicalTurn &&
+          uncertainEnd.outcome !== 'completed' && uncertainEnd.outcome !== 'stopped' && item.time > uncertainEnd.time;
         const workingActivity = state !== 'final' && item.activeNow === true &&
-          (!canonicalTurn || canonicalTurn === live?.turnId) &&
+          (!canonicalTurn || canonicalTurn === live?.turnId || resumedUncertainTurn) &&
           !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
         if (state === 'final' && written.event.kind === 'assistant_message' && canonicalTurn && recoverableTurns.has(canonicalTurn) &&
             !explicitEnds.has(canonicalTurn) && live?.turnId === canonicalTurn) {
@@ -2076,6 +2096,7 @@ async function recordChatObservationsNow(
           ...base,
           kind: 'turn_end',
           outcome: item.outcome ?? 'unknown',
+          ...(item.outcome === 'failed' && item.reason === 'thinking_failed' ? { reason: item.reason } : {}),
           ...(item.detail ? { detail: item.detail } : {})
         });
         // As above, durable journal state owns idempotency; in-memory state follows it.

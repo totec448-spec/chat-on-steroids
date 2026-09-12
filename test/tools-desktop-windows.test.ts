@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { capabilityTools, DESKTOP_CAPABILITIES, type Capabilities } from '../src/shared/types.js';
 
-const native = vi.hoisted(() => ({ act: vi.fn(), getWindowState: vi.fn(), call: null as any, apis: [] as any[] }));
+const native = vi.hoisted(() => ({ act: vi.fn(), getWindowState: vi.fn(), call: null as any, apis: [] as any[], allowUnattributed: false }));
+vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ multiAgent: { allowUnattributedCalls: native.allowUnattributed } }) }));
 vi.mock('../src/main/computer/index.js', () => ({
   ComputerError: class extends Error {}, act: native.act, getWindowState: native.getWindowState
 }));
@@ -27,7 +28,7 @@ function surface(over: Partial<Capabilities> = {}) {
 }
 const window = { app: 'fixture.exe', id: 71 };
 let principalSequence = 0;
-beforeEach(() => { vi.clearAllMocks(); native.apis.length = 0; native.call = { caller: { sessionId: `test-${++principalSequence}` } }; });
+beforeEach(() => { vi.clearAllMocks(); native.apis.length = 0; native.allowUnattributed = false; native.call = { caller: { sessionId: `test-${++principalSequence}` } }; });
 
 describe('Windows Desktop public registrar', () => {
   it('matches the settings tool names to registration for each Desktop permission', () => {
@@ -81,6 +82,30 @@ describe('Windows Desktop public registrar', () => {
     expect(result.structuredContent.value).toBeNull();
     expect(result.content[0].text).toContain('observe to verify');
     expect(JSON.stringify(result)).not.toContain('three');
+  });
+
+  it('honors unattributed opt-in across registrars, isolates known callers and rechecks opt-out', async () => {
+    await surface().call('get_window_state', { window });
+    const identified = native.apis[0];
+    native.call = { caller: { requestId: 'unresolved-observation' } };
+    native.allowUnattributed = true;
+    await surface().call('get_window_state', { window });
+    const anonymous = native.apis[1];
+    native.call = { caller: { requestId: 'unresolved-input' } };
+    await surface().call('click', { window, element_index: 2 });
+    expect(anonymous.click).toHaveBeenCalledExactlyOnceWith({ window, element_index: 2 });
+    expect(identified.click).not.toHaveBeenCalled();
+    native.call = null;
+    await surface().call('drag', { window, from_x: 1, from_y: 1, to_x: 2, to_y: 2 });
+    expect(native.apis).toHaveLength(2);
+    native.allowUnattributed = false;
+    await expect(surface().call('click', { window, x: 2, y: 3 })).rejects.toThrow(/CALLER_IDENTITY_REQUIRED/);
+    expect(anonymous.click).toHaveBeenCalledTimes(1);
+    native.allowUnattributed = true;
+    await surface().call('get_window_state', { window });
+    expect(native.apis).toHaveLength(3);
+    native.allowUnattributed = false;
+    await surface().call('list_windows');
   });
 
   it('returns image blocks and structured screenshot values under one combined response bound', async () => {

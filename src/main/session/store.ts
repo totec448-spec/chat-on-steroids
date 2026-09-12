@@ -1302,6 +1302,13 @@ export async function readRecentEvents(
   return readRecentEventsFromDisk(sessionId, limit, options);
 }
 
+/** Recorded local execution, not a native tool label or a request-id sighting alone. */
+export async function turnHasMcpCall(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
+  const [call] = await readRecentEvents(sessionId, 1, { kinds: ['tool_call'] });
+  return call?.kind === 'tool_call' && call.turnId === turnId && call.source === 'mcp' &&
+    call.call.conversationId === conversationId && call.call.attribution === 'request_id';
+}
+
 async function readRecentEventsFromDisk(
   sessionId: string,
   limit: number,

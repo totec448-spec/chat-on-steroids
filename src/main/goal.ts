@@ -52,16 +52,23 @@ import { getConfig } from './config.js';
 import { writeDurableNow, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
-import { getSession, readEvents, readHandoff, readRecentEvents } from './session/store.js';
+import { getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
 import { foldProgress } from '../shared/session.js';
-import { isAstraModel } from '../shared/chat-models.js';
+import { isAstraModel, isProModel } from '../shared/chat-models.js';
 
-/** Astra continuation belongs to session_finish, never to a new browser turn. */
+/** Pro Loop defaults to finish-only; an exact chat switch may allow browser continuation. */
 export async function astraFinishOnly(sessionId: string, conversationId: string): Promise<boolean> {
   const session = await getSession(sessionId);
   const selection = session?.selectedModel;
   return session?.conversationId === conversationId && selection?.conversationId === conversationId &&
-    isAstraModel(selection.model, selection.reasoningEffort);
+    (isAstraModel(selection.model, selection.reasoningEffort) ||
+      (goalSwitchFor(conversationId).mode === 'loop' && isProModel(selection.model, selection.reasoningEffort))) &&
+    !loopAfterTurnFor(conversationId);
+}
+/** Opt-in continuation uses the same durable switch as the existing Loop driver. */
+export function loopAfterTurnFor(conversationId: string): boolean {
+  const control = goalSwitchFor(conversationId);
+  return control.enabled && control.mode === 'loop' && control.afterTurn;
 }
 import { resumeBootstrapMatches, resumeBootstrapText } from './session/handoff.js';
 import {
@@ -391,8 +398,10 @@ function notifyGoalChange(): void { for (const listener of goalListeners) listen
  * only an explicit later activation may turn that exact tombstone into a fresh pickup.
  */
 interface GoalReplyObligation {
-  /** Non-Pro identity was captured with this source turn, before its silence grant retired. */
+  /** Exact source turn captured before its silence grant retired. Pro also requires opt-in. */
   silenceSourceTurnId?: string;
+  silencePro?: boolean;
+  listenUntil?: number;
   conversationId: string;
   sessionId: string;
   replyId: string;
@@ -475,6 +484,8 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
       turnId: String(raw.turnId).slice(0, 200),
       ...(typeof raw.silenceSourceTurnId === 'string' && raw.silenceSourceTurnId ?
         { silenceSourceTurnId: raw.silenceSourceTurnId.slice(0, 200) } : {}),
+      ...(Number.isSafeInteger(raw.listenUntil) && raw.listenUntil! > 0 ? { listenUntil: raw.listenUntil } : {}),
+      ...(raw.silencePro === true ? { silencePro: true } : {}),
       eventSeq: raw.eventSeq,
       acceptedAt: raw.acceptedAt,
       state: raw.state
@@ -507,7 +518,7 @@ export function goalDraftBusy(conversationId: string): boolean {
 
 export function goalPendingReplyFor(
   conversationId: string
-): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq' | 'acceptedAt' | 'silenceSourceTurnId'> | null {
+): Pick<GoalReplyObligation, 'replyId' | 'turnId' | 'eventSeq' | 'acceptedAt' | 'silenceSourceTurnId' | 'silencePro' | 'listenUntil'> | null {
   const reply = goalReplies.get(conversationId);
   // Expiry is read here as well as pruned on write, because the ledger is only pruned when
   // something writes to it. A chat reopened after the window must not be offered work the
@@ -515,7 +526,9 @@ export function goalPendingReplyFor(
   if (reply && Date.now() - reply.acceptedAt >= GOAL_REPLY_TTL_MS) return null;
   return reply?.state === 'pending'
     ? { replyId: reply.replyId, turnId: reply.turnId, eventSeq: reply.eventSeq, acceptedAt: reply.acceptedAt,
-      ...(reply.silenceSourceTurnId ? { silenceSourceTurnId: reply.silenceSourceTurnId } : {}) }
+      ...(reply.silenceSourceTurnId ? { silenceSourceTurnId: reply.silenceSourceTurnId } : {}),
+      ...(reply.listenUntil ? { listenUntil: reply.listenUntil } : {}),
+      ...(reply.silencePro ? { silencePro: true } : {}) }
     : null;
 }
 
@@ -546,14 +559,18 @@ export function pendingGoalReplies(
 /** Freezes Goal eligibility at the durable recorder boundary. */
 export async function acceptGoalReplyNow(input: {
   silenceSourceTurnId?: string;
+  silencePro?: boolean;
   conversationId: string;
   sessionId: string;
   replyId: string;
   turnId: string;
   eventSeq: number;
   blocked: boolean;
+  current?: () => boolean;
 }): Promise<void> {
   if (await astraFinishOnly(input.sessionId, input.conversationId)) return;
+  if (input.silenceSourceTurnId &&
+      !await turnHasMcpCall(input.sessionId, input.conversationId, input.silenceSourceTurnId)) return;
   const current = goalReplies.get(input.conversationId);
   if (current?.replyId === input.replyId || (current && current.eventSeq > input.eventSeq)) return;
   const provisionalUpgrade = Boolean(
@@ -569,12 +586,14 @@ export async function acceptGoalReplyNow(input: {
     getConfig().sessions.record &&
     goalArmedFor(input.conversationId) &&
     await goalKeyPresent(goalSwitchFor(input.conversationId).mode);
+  if (input.current && !input.current()) return;
   goalReplies.set(input.conversationId, {
     conversationId: input.conversationId,
     sessionId: input.sessionId,
     replyId: input.replyId.slice(0, 200),
     turnId: input.turnId.slice(0, 200),
     ...(input.silenceSourceTurnId ? { silenceSourceTurnId: input.silenceSourceTurnId.slice(0, 200) } : {}),
+    ...(input.silencePro ? { silencePro: true } : {}),
     eventSeq: input.eventSeq,
     // `/goal/draft` may have had to persist the local turn before Fiber exposed ChatGPT's
     // stable assistant id. The later id strengthens that same row; it must not re-evaluate
@@ -756,7 +775,7 @@ export interface GoalSwitchesSnapshot {
  * old conversation is retired: turning Goal off where it pops up writes `enabled: false` for
  * that chat alone, and no later app-wide change can revive it.
  */
-type GoalSwitchRow = { enabled: boolean; mode: GoalMode; at: number; role?: 'decision'; sourceSessionId?: string;
+type GoalSwitchRow = { enabled: boolean; mode: GoalMode; afterTurn?: boolean; at: number; role?: 'decision'; sourceSessionId?: string;
   context?: { count: number; hash: string; instructions: string } };
 const goalSwitches = new Map<string, GoalSwitchRow>();
 let goalSwitchWrites: Promise<unknown> = Promise.resolve();
@@ -805,6 +824,7 @@ export function restoreGoalSwitches(snapshot: GoalSwitchesSnapshot | null): void
     const context = sourceSessionId && raw.context && Number.isSafeInteger(raw.context.count) && raw.context.count >= 0
       && /^[a-f0-9]{64}$/.test(raw.context.hash) && /^[a-f0-9]{64}$/.test(raw.context.instructions) ? raw.context : undefined;
     goalSwitches.set(raw.conversationId, { enabled: raw.role === 'decision' ? false : raw.enabled, mode: raw.mode, at,
+      ...(raw.afterTurn === true && raw.role !== 'decision' ? { afterTurn: true } : {}),
       ...(raw.role === 'decision' ? { role: 'decision' as const, sourceSessionId, context } : {}) });
   }
   boundGoalSwitches();
@@ -815,11 +835,11 @@ function persistGoalSwitches(): void {
 }
 
 /** This chat's switch: its own override when it has one, otherwise the app-wide setting. */
-export function goalSwitchFor(conversationId: string): { enabled: boolean; mode: GoalMode; own: boolean } {
+export function goalSwitchFor(conversationId: string): { enabled: boolean; mode: GoalMode; own: boolean; afterTurn: boolean } {
   const own = goalSwitches.get(conversationId);
-  if (own) return { enabled: own.role !== 'decision' && own.enabled, mode: own.mode, own: true };
+  if (own) return { enabled: own.role !== 'decision' && own.enabled, mode: own.mode, own: true, afterTurn: own.afterTurn === true };
   const goal = getConfig().goal;
-  return { enabled: goal.enabled, mode: goal.mode, own: false };
+  return { enabled: goal.enabled, mode: goal.mode, own: false, afterTurn: false };
 }
 
 /** One authority for finish generation and the lifetime of its queued instruction. */
@@ -895,7 +915,8 @@ export function goalArmedFor(conversationId: string): boolean {
 export async function setGoalSwitchNow(
   conversationId: string,
   which: 'goal' | 'loop',
-  on: boolean
+  on: boolean,
+  afterTurn?: boolean
 ): Promise<{ enabled: boolean; mode: GoalMode }> {
   return serialGoalSwitch(async () => {
     const before = goalSwitches.get(conversationId);
@@ -904,7 +925,8 @@ export async function setGoalSwitchNow(
       throw new Error('goal_switch_capacity');
     }
     const next = applyGoalSwitch(goalSwitchFor(conversationId), which, on);
-    goalSwitches.set(conversationId, { enabled: next.enabled, mode: next.mode, at: Date.now() });
+    goalSwitches.set(conversationId, { enabled: next.enabled, mode: next.mode,
+      afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
     try {
       await writeDurableNow(GOAL_SWITCHES_STATE, snapshotGoalSwitches());
       return { enabled: next.enabled, mode: next.mode };
@@ -1186,6 +1208,17 @@ export async function withdrawSilenceGoalReplyNow(conversationId: string, replyI
     persistGoalRepliesSoon();
     throw error;
   }
+}
+
+/** Native busy after refresh defers this exact ticket; it never earns another ticket. */
+export async function deferSilenceGoalReplyNow(conversationId: string, turnId: string): Promise<boolean> {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.state !== 'pending' || reply.turnId !== turnId || !reply.silenceSourceTurnId) return false;
+  if ((reply.listenUntil ?? 0) > Date.now()) return true;
+  reply.listenUntil = Date.now() + 5 * 60_000;
+  try { await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies()); }
+  catch (error) { persistGoalRepliesSoon(); throw error; }
+  return goalReplies.get(conversationId) === reply;
 }
 
 export function resetGoalStateForTests(): void {
