@@ -1562,10 +1562,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
  * sometimes required and sometimes not, which is exactly the ambiguity `agents` exists
  * without.
  *
- * Nothing about the ordinary identity rules is relaxed to make room for it. The dispatcher's
- * retired-worker, dormant-worker, blocked-chat, superseded-chat and `CALLER_IDENTITY_REQUIRED`
- * fences all run ahead of this handler exactly as they do for every other tool; a call refused
- * there is refused here, and its envelope stays unspent because nothing was claimed.
+ * Nothing about the ordinary identity rules is relaxed to make room for it. Instead, the
+ * dispatcher gives this exact direct tool name an identity-neutral lane: it never adopts a
+ * caller, acknowledges/offers a caller inbox, changes worker liveness, or consults another
+ * chat's retired/dormant/blocked/superseded fences. Those rules remain byte-for-byte in force
+ * for ordinary tools. The signed handler below is the first code allowed to decide whether a
+ * relay has authority or to touch the exact signed run.
  *
  * The whole verify → replay → authorize → remeasure → claim → deliver transaction belongs to
  * `remote-steering.ts`. This function is the schema, the feature switch and the projection

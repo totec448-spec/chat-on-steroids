@@ -31,6 +31,7 @@ const {
   pendingCount,
   pendingWorkerRevivals,
   persistCriticalSwarmNow,
+  releaseQuiescentRun,
   resetAgentsForTests,
   sleepWorker,
   spawn,
@@ -64,6 +65,8 @@ const { makeTempDir, removeTempDir } = await import('./helpers.js');
 const PRIME_CHAT = 'c-remote-prime';
 const WORKER_CHAT = 'c-remote-worker-1';
 const WORKER_CHAT_2 = 'c-remote-worker-2';
+const PRIME_CHAT_B = 'c-remote-prime-b';
+const WORKER_CHAT_B = 'c-remote-worker-b-1';
 let dir: string;
 
 interface SignedFixture {
@@ -362,6 +365,77 @@ describe('remote steering target-scoped measurement', () => {
 });
 
 describe('remote steering is not caller identity', () => {
+  it('accepts an anonymous signed STATUS for live run B even while dormant run A still fences ordinary anonymous calls', async () => {
+    const dormantRunId = startRun();
+    expect(sleepWorker('worker-1', 'park run A before signed run B', dormantRunId)?.info.state).toBe('sleeping');
+    expect(releaseQuiescentRun({}, dormantRunId)).toBe(true);
+
+    const live = spawn({
+      workers: [{ task: 'live run B target' }],
+      caller: { conversationId: PRIME_CHAT_B }
+    });
+    expect(bindConversation('worker-1', WORKER_CHAT_B, live.runId)).toBe(true);
+    const fixture = signedFixture(live.runId, 'STATUS', '30000000000000000000000000000004', null, null);
+    await pinRemoteSteeringKey(fixture.publicKeySpkiBase64);
+
+    const endpoint = await startMcpServer(() => ({
+      roots: [],
+      caps: { ...DEFAULT_CAPABILITIES, read: true },
+      readOnly: true,
+      sessionTools: false,
+      agentTools: true,
+      remoteSteeringTools: true
+    }));
+    let rpcId = 1;
+    const post = (name: string, args: unknown): Promise<any> =>
+      new Promise((resolve, reject) => {
+        const url = new URL(endpoint.url);
+        const payload = JSON.stringify({
+          jsonrpc: '2.0',
+          id: rpcId++,
+          method: 'tools/call',
+          params: { name, arguments: args }
+        });
+        const request = http.request(
+          {
+            hostname: url.hostname,
+            port: url.port,
+            path: url.pathname,
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              accept: 'application/json, text/event-stream',
+              'content-length': Buffer.byteLength(payload)
+            }
+          },
+          (response) => {
+            const chunks: Buffer[] = [];
+            response.on('data', (chunk: Buffer) => chunks.push(chunk));
+            response.on('end', () => {
+              const text = Buffer.concat(chunks).toString('utf8').trim();
+              const frame = text.startsWith('{') ? text : ([...text.matchAll(/^data:\s*(.*)$/gm)].at(-1)?.[1] ?? '{}');
+              resolve(JSON.parse(frame));
+            });
+          }
+        );
+        request.on('error', reject);
+        request.end(payload);
+      });
+    const textOf = (reply: any): string =>
+      ((reply.result?.content ?? []) as Array<{ text?: string }>).map((part) => part.text ?? '').join('\n');
+
+    try {
+      const relayed = await post('remote_steering', { envelope: fixture.envelopeText });
+      expect(relayed.result?.structuredContent).toMatchObject({ status: 'accepted', action: 'STATUS', run_id: live.runId });
+      expect(textOf(relayed)).not.toContain('CALLER_IDENTITY_REQUIRED');
+
+      const ordinary = textOf(await post('read', { paths: ['/anything'] }));
+      expect(ordinary).toContain('CALLER_IDENTITY_REQUIRED');
+    } finally {
+      await endpoint.stop();
+    }
+  }, 15_000);
+
   it('keeps ordinary WORKER_IDENTITY_LOST and CALLER_IDENTITY_REQUIRED fences after an anonymous signed relay', async () => {
     const runId = startRun();
     const fixture = signedFixture(runId, 'STATUS', '30000000000000000000000000000003', null, null);
