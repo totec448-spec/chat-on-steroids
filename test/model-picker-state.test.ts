@@ -294,3 +294,48 @@ it('projects an allowlist rather than leaking conversation props through the bri
   expect(replies.length).toBeGreaterThan(0);
   expect(JSON.stringify(replies)).not.toMatch(/privateSecret|must-never-cross|conversation|modelsData/);
 });
+
+it('observes Work grouping ids without changing exact execution ids or merging max with xhigh', async () => {
+  const f = fixture(), trigger = page.window.document.querySelector('button')!;
+  const version = { id: '6 Astra', displayTextForIntelligence: 'GPT-6 Astra', enabled: true };
+  f.props.modelsData.versions.splice(0, f.props.modelsData.versions.length, version);
+  const choices = ['min', 'standard', 'extended', 'xhigh', 'max', 'ultra'].map((thinkingEffort, bucket) => ({
+    bucket, modelSlug: 'gpt-6-astra-wm', thinkingEffort, availability: { status: 'available' },
+    category: { modelLane: 'thinking_plus_plus', modelVersion: '6 Astra', shortLabel: '6 Astra' },
+    modelConfig: { title: 'GPT-6 Astra', isWorkModeModel: true }
+  }));
+  Object.assign(f.state, { bucketSelections: choices, currentBucket: 3, currentSelection: choices[3], selectedVersionEntry: version });
+  trigger.innerHTML = '<span>GPT-6 Astra</span><span>Extra High</span>';
+  (trigger as any).__reactFiber$test = { memoizedProps: { dropdownContent: { props: f.props } }, return: null };
+  const read = () => new Promise<any>(resolve => {
+    const receive = (event: MessageEvent) => { if (event.data?.source === 'clf-picker-reply') { page.window.removeEventListener('message', receive as any); resolve(event.data.picker); } };
+    page.window.addEventListener('message', receive as any);
+    page.window.postMessage({ source: 'clf-picker-ask', nonce: 'work-shape' }, page.window.location.origin);
+  });
+  const state = await read();
+  expect(state?.version).toBe('6 Astra');
+  expect(await f.api.selectModelSettings('gpt-6-astra-wm', 'xhigh')).toBe(true);
+  expect(state?.choices.map((choice: any) => choice.effort)).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'ultra']);
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-astra-wm', reasoningEffort: 'xhigh' });
+  Object.assign(f.state, { currentBucket: 4, currentSelection: choices[4] });
+  await read();
+  expect(f.api.visibleModelSelection()).toEqual({ model: 'gpt-6-astra-wm', reasoningEffort: 'max' });
+  (f.state as any).currentSelection = { ...choices[4], modelSlug: 'foreign-model' };
+  expect(await read()).toBeNull();
+  expect(f.api.visibleModelSelection()).toBeNull();
+  Object.assign(f.state, { currentSelection: choices[4] });
+  await read();
+  page.window.history.pushState({}, '', '/c/other');
+  expect(f.api.visibleModelSelection()).toBeNull();
+  choices[4]!.modelSlug = 'invalid execution id';
+  expect(await read()).toBeNull();
+  page.window.history.pushState({}, '', '/');
+  expect(f.api.visibleModelSelection()).toBeNull();
+  expect(f.actions).not.toHaveBeenCalled();
+});
+it('retains the Chat max-to-xhigh mapping without a Work owner flag', async () => {
+  const f = fixture();
+  f.state.currentSelection.thinkingEffort = 'max';
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'xhigh')).toBe(true);
+  expect(f.state.currentSelection.thinkingEffort).toBe('max');
+});

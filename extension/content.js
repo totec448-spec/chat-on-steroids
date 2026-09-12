@@ -1979,11 +1979,17 @@
           userSendReceipt = null;
         } else {
           const conversationId = CLF_DOM.conversationId();
+          // A durable desktop ACK may precede the activity pull that releases transcript
+          // custody. Keep that exact send identity stronger than later Fiber text spelling.
+          const accepted = receipt.accepted;
+          const acceptedIdentity = accepted?.messageId === message.id &&
+            accepted.conversationId === conversationId && accepted.epoch === epoch;
           const sameConversation = !receipt.conversationId || receipt.conversationId === conversationId;
           const newIdentity = !receipt.previousMessageId || receipt.previousMessageId !== message.id;
           const attachmentsMatch = receipt.text || (receipt.attachmentNames?.length &&
             JSON.stringify(receipt.attachmentNames) === JSON.stringify((userMessageSource(message)?.attachments || []).map(file => file.name).sort()));
-          if (sameConversation && newIdentity && attachmentsMatch && matchesSubmittedUser(message, receipt.text)) {
+          if (sameConversation && newIdentity && attachmentsMatch &&
+              (acceptedIdentity || matchesSubmittedUser(message, receipt.text))) {
             userSendReceipt = null;
             return { messageId: message.id, baseline: receipt.baseline };
           }
@@ -10355,6 +10361,8 @@
         return { conversation, user: users.at(-1) };
       }, sendingTarget, 15000);
       if (!receipt) return false;
+      // Native Send listeners refresh the receipt; pin only that witnessed object.
+      const witnessedSendReceipt = userSendReceipt;
       const deliveredConversation = receipt.conversation;
       sent = true;
       if (decision) {
@@ -10368,6 +10376,13 @@
       // The claim remains inert if this ACK is lost; no duplicate send after a reload.
       const acknowledged = await ask({ type: 'desktop_input', id: message.id, conversationId: deliveredConversation, messageId: receipt.user?.id, owner: input.owner, lifetime: input.lifetime, ack: true });
       const accepted = acknowledged?.data?.ok === true;
+      if (accepted && deliveredConversation && receipt.user?.id && sendingTarget() &&
+          userSendReceipt === witnessedSendReceipt && witnessedSendReceipt?.text === submittedText &&
+          witnessedSendReceipt.conversationId === target &&
+          (witnessedSendReceipt.previousMessageId ?? null) === (previousUserId ?? null) &&
+          Date.now() - witnessedSendReceipt.at <= USER_SEND_RECEIPT_MS) {
+        witnessedSendReceipt.accepted = { messageId: receipt.user.id, conversationId: deliveredConversation, epoch };
+      }
       // Stop/composer-clear may precede the exact user row. This receipt, not that early
       // native acceptance, owns retirement of the still-untouched prepared draft. A
       // rejected/cancelled claim, trusted edit, replacement editor or route preserves it.

@@ -621,6 +621,60 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
   });
+  it('retains a reused-document send boundary when canonical Fiber text arrives before activity identity', async () => {
+    const submitted = 'Keep [literal] #tags in the receipt.';
+    const escaped = String.raw`Keep \[literal\] \#tags in the receipt\.`;
+    const run = async (canonical: string, acknowledge = true, invalidate?: 'epoch' | 'receipt'): Promise<number> => {
+      let holdActivity = false;
+      let releaseActivity!: (value: unknown) => void;
+      live = await harness(`https://chatgpt.com/c/${chatA}`, {
+        activity: () => holdActivity
+          ? new Promise(resolve => { releaseActivity = resolve; })
+          : ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: null, userAnchors: [] } }),
+        desktop_input: message => ({ ok: true, data: message.authorize
+          ? { ok: true } : message.ack ? { ok: acknowledge } : { input: claimed({ text: submitted }) } })
+      });
+      holdActivity = true;
+      live.dom.reconfigure({ url: `https://chatgpt.com/?cos-input=${inputId}` });
+      live.hook.observe();
+      let user!: HTMLElement;
+      live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        user = userTurn(live!.document, 'gated-spa-user', submitted, { sent: false });
+        startGenerating(live!.document, { send: false });
+        live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+        live!.hook.observe();
+      });
+      expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: acknowledge });
+      expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toHaveLength(1);
+      expect(emitted(live.sent, 'turn_start')).toHaveLength(0);
+      await bindFiberTurns([{ section: user, turn: { turnId: 'gated-spa-user', conversationId: chatB,
+        messages: [{ role: 'user', stable: true, messageId: 'm-gated-spa-user', rawMessageId: 'm-gated-spa-user', rawText: canonical }] } }]);
+      await live.hook.flush();
+      if (invalidate === 'epoch') {
+        live.dom.reconfigure({ url: `https://chatgpt.com/c/${chatA}` }); live.hook.observe(); await settle();
+        live.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` }); live.hook.observe(); await settle();
+      } else if (invalidate === 'receipt') {
+        live.document.querySelector('#prompt-textarea')!.textContent = submitted;
+        live.document.dispatchEvent(new live.window.Event('submit', { bubbles: true }));
+      }
+      releaseActivity({ ok: true, data: { entries: [], stream: [], nextSince: 1, activeTurnId: null,
+        userAnchors: [{ seq: 1, time: 1_700_000_000_000, messageId: 'm-gated-spa-user' }] } });
+      await settle(); live.hook.observe(); await settle(); await live.hook.flush();
+      const starts = emitted(live.sent, 'turn_start').length;
+      if (acknowledge && !invalidate) {
+        expect(emitted(live.sent, 'user_message').filter(row => row.event.messageId === 'm-gated-spa-user').at(-1)?.event.text).toBe(canonical);
+        live.hook.observe(); await settle(); await live.hook.flush();
+        expect(emitted(live.sent, 'turn_start')).toHaveLength(starts);
+      }
+      live.close(); live = null;
+      return starts;
+    };
+    expect(await run(submitted)).toBe(1);
+    expect(await run(escaped)).toBe(1);
+    expect(await run(escaped, false)).toBe(0);
+    expect(await run(escaped, true, 'epoch')).toBe(0);
+    expect(await run(escaped, true, 'receipt')).toBe(0);
+  });
   it('keeps a helper claim revocable until its delayed Send is ready', async () => {
     let authorized = true;
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
