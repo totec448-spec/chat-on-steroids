@@ -62,6 +62,63 @@ beforeEach(async () => {
   goal.resetGoalStateForTests(); input.resetInputForTests(); pushed.mockClear();
   await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
 });
+it.each([false, true])('retires Goal only when queued input commits its exact source, including restored aliases (%s)', async alias => {
+  const store = await import('../src/main/session/store.js');
+  const durable = await import('../src/main/durable.js');
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Queue before Goal commitment', conversationId });
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'templates' } });
+    await goal.setGoalObjectiveNow(conversationId, 'Complete the current requested work');
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    const row = await input.enqueueInput({ ...message(session.id, 'off'), automation: undefined, mode: 'after-turn' });
+    now += 10;
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'turn_start', turnId: 'queue-source', time: now },
+      { kind: 'assistant_message', turnId: 'queue-source', messageId: 'queue-source-answer', text: 'Current result', state: 'final', final: true, time: now + 1 },
+      { kind: 'turn_end', turnId: 'queue-source', outcome: 'completed', time: now + 2 }
+    ] });
+    now += 3;
+    const [answer] = await store.readRecentEvents(session.id, 1, { kinds: ['assistant_message'] });
+    expect(answer?.kind).toBe('assistant_message');
+    const source = alias && answer?.kind === 'assistant_message' ? `reply:${answer.messageId}` : 'queue-source';
+    const obligation = { conversationId, sessionId: session.id, replyId: 'queue-source-obligation', turnId: source, eventSeq: answer!.seq, blocked: false };
+    await goal.acceptGoalReplyNow(obligation);
+    expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe(obligation.replyId);
+    const activity = async () => {
+      const response = await fetch(`http://127.0.0.1:${bridgePort()}/activity?conversationId=${conversationId}`, {
+        headers: { authorization: `Bearer ${bearer}`, 'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL) }
+      });
+      expect(response.status).toBe(200);
+      return await response.json() as any;
+    };
+    expect(await input.claimBrowserInput(row.id, 'queue-page', conversationId, true)).not.toBeNull();
+    expect((await activity()).goal.queuePending).toBe(true);
+    expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe(obligation.replyId);
+    expect(await input.failBrowserInput(row.id, 'queue-page', 'After-turn pickup was withdrawn before Send.')).toBe(true);
+    expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe(obligation.replyId);
+    expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('queued');
+
+    expect(await input.claimBrowserInput(row.id, 'queue-page-retry', conversationId, true)).not.toBeNull();
+    expect(await input.authorizeBrowserInput(row.id, 'queue-page-retry', conversationId)).toBe(true);
+    expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    expect(await input.acknowledgeBrowserInput(row.id, 'queue-page-retry', conversationId, 'queued-user-message')).toBe(true);
+    await flushDurable();
+    const saved = await durable.readDurable<Parameters<typeof goal.restoreGoalReplies>[0]>(goal.GOAL_REPLIES_STATE);
+    const switches = goal.snapshotGoalSwitches(), objectives = goal.snapshotGoalObjectives();
+    await writeDurableNow('session-input', []); // Simulate receipt retention pruning after other sessions advance.
+    input.resetInputForTests(); goal.resetGoalStateForTests(); goal.restoreGoalSwitches(switches); goal.restoreGoalObjectives(objectives); goal.restoreGoalReplies(saved);
+    await goal.acceptGoalReplyNow(obligation); // Replayed old final cannot recreate the handled obligation.
+    expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    expect(await input.inputBeforeGoal(session.id, 'queue-source')).toBeNull();
+    await goal.acceptGoalReplyNow({ ...obligation, replyId: 'new-source-obligation', turnId: 'new-source', eventSeq: answer!.seq + 100 });
+    expect(goal.goalPendingReplyFor(conversationId)?.turnId).toBe('new-source');
+  } finally { clock.mockRestore(); }
+});
+
 it('refreshes account models after an owned picker failure without authorizing another tab', async () => {
   const catalog = await import('../src/main/chat-models.js');
   catalog.resetChatModelsForTests();
@@ -152,6 +209,60 @@ async function attributedMcp(conversationId: string): Promise<void> {
     outcome: 'ok', durationMs: 1, startedAt: Date.now(), requestId });
 }
 
+it.each(['interim', 'native-tool', 'mcp', 'final', 'replay'] as const)('releases failed input immediately and reconciles later %s', async activity => {
+  const bridge = await import('../src/main/bridge.js');
+  const store = await import('../src/main/session/store.js');
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Failed view lifecycle', conversationId });
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-6-pro', time: now },
+      { kind: 'user_message', messageId: 'question', text: 'Work', authoredNow: true, time: now },
+      { kind: 'turn_start', turnId: 'failed-view', time: now }
+    ] });
+    await attributedMcp(conversationId);
+    now++;
+    const failure = { kind: 'turn_end', turnId: 'failed-view', reason: 'thinking_failed', outcome: 'failed', time: now };
+    await post('/events', { conversationId, events: [failure] });
+    expect(await input.sessionInputPolicy(session.id)).toMatchObject({canInject: false, browserAllowed: true});
+    const manual = await input.enqueueInput({...message(session.id, 'off'), mode: 'auto'});
+    expect((await input.pendingBrowserInputs()).some(row => row.id === manual.id)).toBe(true);
+    await input.cancelInput(manual.id);
+    const queued = await input.enqueueInput({...message(session.id, 'off'), mode: 'after-turn'});
+    now += 1000;
+    if (activity === 'mcp') await attributedMcp(conversationId);
+    else await post('/events', { conversationId, events: [activity === 'replay' ? failure : activity === 'native-tool'
+      ? {kind: 'page_tool', turnId: 'failed-view', messageId: 'new-tool', text: 'Searching files', time: now}
+      : {kind: 'assistant_message', turnId: 'failed-view', messageId: 'new-answer', providerMessageId: 'abababab-1111-2222-3333-444444444444',
+          text: 'Fresh answer', state: activity === 'final' ? 'final' : 'streaming', final: activity === 'final', activeNow: true, time: now}] });
+    const resumed = activity !== 'final' && activity !== 'replay';
+    expect((await store.getSession(session.id))?.activeTurnId).toBe(resumed ? 'failed-view' : null);
+    if (resumed) {
+      await post('/events', {conversationId, events: [failure]});
+      expect((await store.getSession(session.id))?.activeTurnId).toBe('failed-view');
+    }
+    expect(await input.sessionInputPolicy(session.id)).toMatchObject({canInject: resumed, browserAllowed: !resumed});
+    now += 29_000;
+    await bridge.sweepStaleSwarm(now);
+    const repairs = (await post('/status', {openConversations: [conversationId]})).body.repairs;
+    expect(repairs.some((row: any) => row.conversationId === conversationId)).toBe(activity === 'replay');
+    expect((await input.pendingBrowserInputs()).some(row => row.id === queued.id)).toBe(activity === 'final');
+  } finally { clock.mockRestore(); }
+});
+
+async function refreshFailedView(conversationId: string, advance: (ms: number) => void, delay = 0) {
+  const bridge = await import('../src/main/bridge.js');
+  if (delay) expect((await post('/status', { openConversations: [conversationId] })).body.repairs.some((r: any) => r.conversationId === conversationId)).toBe(false);
+  advance(delay);
+  await bridge.sweepStaleSwarm(Date.now());
+  const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs.find((r: any) => r.conversationId === conversationId);
+  expect(repair).toMatchObject({ reason: 'silence' });
+  await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+  advance(5 * 60_000);
+}
+
 describe.each(['input', 'loop'] as const)('MCP admission for %s recovery', destination => {
   describe.each(['silence', 'thinking_failed'] as const)('%s boundary', boundary => {
     it.each(['none', 'previous-turn', 'native-tool', 'request-only', 'current-turn'] as const)(
@@ -194,6 +305,7 @@ describe.each(['input', 'loop'] as const)('MCP admission for %s recovery', desti
           await post('/events', { conversationId, events: [
             { kind: 'turn_end', turnId: 'current-turn', outcome: 'failed', reason: 'thinking_failed', time: now }
           ] });
+          await refreshFailedView(conversationId, ms => { now += ms; });
         }
         const eligible = evidence === 'current-turn';
         if (row) {
@@ -223,18 +335,21 @@ it.each(['gpt-6-pro', 'gpt-5.6-sol'])('carries settled Thinking failed through H
   const second = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn', afterTurn: true });
   await attributedMcp(conversationId);
   await post('/events', { conversationId, events: [
-    { kind: 'chat_error', turnId: 'native-failed-turn', text: 'Thinking failed', recoverable: false, time: Date.now() }
+    { kind: 'chat_error', turnId: 'native-failed-turn', text: 'Thinking failed', reason: 'thinking_failed', recoverable: false, time: Date.now() }
   ] });
+  expect((await readEvents(session.id, { kinds: ['chat_error'] })).at(-1)).toMatchObject({ reason: 'thinking_failed', recoverable: false });
   expect(await input.pendingBrowserInputs()).toEqual([]);
-  // Content-script tests prove the actual 30s + 5m boundary. This is its wire result.
+  // Content closes the failed view immediately; the refresh/listening owner gates automatic delivery.
   const end = { kind: 'turn_end', turnId: 'native-failed-turn', outcome: 'failed', reason: 'thinking_failed', detail: 'Thinking failed', time: Date.now() + 1 };
   expect((await post('/events', { conversationId, events: [end] })).status).toBe(200);
   expect((await readEvents(session.id, { kinds: ['turn_end'] })).at(-1)).toMatchObject({ reason: 'thinking_failed', outcome: 'failed' });
-  const pro = model === 'gpt-6-pro';
-  expect(await input.pendingBrowserInputs()).toEqual([{ id: first.id, conversationId, ...(pro ? { silenceTurnId: 'native-failed-turn' } : {}) }]);
-  const clock = vi.spyOn(Date, 'now');
+  expect(await input.pendingBrowserInputs()).toEqual([]);
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
   try {
-    if (pro) {
+    await refreshFailedView(conversationId, ms => { now += ms; });
+    expect(await input.pendingBrowserInputs()).toEqual([{ id: first.id, conversationId, silenceTurnId: 'native-failed-turn' }]);
+    {
       const busyAt = Date.now();
       clock.mockReturnValue(busyAt);
       expect((await post('/input/claim', { id: first.id, owner: 'failed-turn-page', conversationId, silenceBusyTurnId: 'native-failed-turn' })).body.ok).toBe(true);
@@ -293,6 +408,51 @@ it('does not turn generic failed/error prose or an unknown wire reason into queu
   expect(await input.pendingBrowserInputs()).toEqual([]);
 });
 
+it.each([false, true])('normal queued recovery uses 2+1 and spends its source before Goal (Goal enabled: %s)', async enabled => {
+  const bridge = await import('../src/main/bridge.js');
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Normal queued recovery', conversationId });
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled } });
+    if (enabled) await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', reasoningEffort: 'high', time: now },
+      { kind: 'turn_start', turnId: 'normal-silence', time: now }
+    ] });
+    const first = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' });
+    const second = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' });
+    await attributedMcp(conversationId);
+    now += 119_999;
+    await bridge.sweepStaleSwarm(now);
+    expect((await post('/status', { openConversations: [conversationId] })).body.repairs.some((r: any) => r.conversationId === conversationId)).toBe(false);
+    now += 2;
+    await bridge.sweepStaleSwarm(now);
+    const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs.find((r: any) => r.conversationId === conversationId);
+    expect(repair).toMatchObject({ reason: 'silence' });
+    await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+    const boundary = (await input.listInputs()).find(row => row.id === first.id)!.silenceBoundary!;
+    expect(boundary.listenUntil).toBe(now + 60_000);
+    now += 59_999;
+    expect(await input.pendingBrowserInputs()).toEqual([]);
+    now++;
+    input.resetInputForTests();
+    expect(await input.pendingBrowserInputs()).toEqual([expect.objectContaining({ id: first.id })]);
+    const activity = await fetch(`http://127.0.0.1:${bridgePort()}/activity?conversationId=${conversationId}`, { headers: {
+      authorization: `Bearer ${bearer}`, 'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL)
+    } }).then(r => r.json());
+    expect(activity.goal).toMatchObject({ queuePending: true, draft: null, pending: null });
+    if (enabled) expect((await post('/goal/draft', { conversationId, turnId: 'normal-silence' })).body.error).toBe('user_input_pending');
+    const claim = { id: first.id, owner: 'normal-page', conversationId, requiresAuthorization: true };
+    expect((await post('/input/claim', claim)).body.input?.id).toBe(first.id);
+    expect((await post('/input/claim', { ...claim, authorize: true })).body.ok).toBe(true);
+    expect((await post('/input/ack', { ...claim, messageId: 'normal-next' })).body.ok).toBe(true);
+    expect(await input.pendingBrowserInputs()).toEqual([]);
+    expect((await input.listInputs()).find(row => row.id === second.id)?.state).toBe('queued');
+  } finally { clock.mockRestore(); }
+});
+
 it.each(['open', 'stalled', 'final-during-listen', 'failure-during-listen'])('files one durable after-turn ticket only after the silence refresh ACK (%s)', async boundary => {
   const bridge = await import('../src/main/bridge.js');
   let now = Date.now();
@@ -331,6 +491,8 @@ it.each(['open', 'stalled', 'final-during-listen', 'failure-during-listen'])('fi
       await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId: 'silence-turn', time: now,
         ...(boundary === 'final-during-listen' ? { outcome: 'completed' } : { outcome: 'failed', reason: 'thinking_failed' }) }] });
     }
+    // A reload already in flight keeps its existing three-minute hydration protection.
+    if (boundary === 'failure-during-listen') await refreshFailedView(conversationId, ms => { now += ms; }, 3 * 60_000);
     if (boundary !== 'final-during-listen') {
       const until = (await input.listInputs()).find(row => row.id === first.id)!.silenceBoundary!.listenUntil!;
       now = until - 1;

@@ -491,6 +491,32 @@ describe('a brief longer than the app can type', () => {
 });
 
 describe('the replacement chat', () => {
+  it('carries frozen source selection to placement and redemption, then records fresh destination evidence', async () => {
+    await connect();
+    const sessionId = await record();
+    const observedAt = Date.now();
+    const select = (conversationId: string, model: string, time: number) => request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'model_selection', time, model, reasoningEffort: 'high' }] }
+    });
+    await select(CHAT_A, 'gpt-5.6-sol', observedAt);
+    const { token: continuation } = await press();
+    await select(CHAT_A, 'gpt-6-astra', observedAt + 1);
+    const captured = await capture(continuation);
+    expect(captured.body.placement).toMatchObject({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+    const commandId = captured.body.commandId;
+    const redeemed = await redeem(commandId, 'model-page');
+    expect(redeemed.body.command).toMatchObject({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+    const ack = await request('POST', '/commands/ack', {
+      body: { id: commandId, status: 'sent', conversationId: CHAT_B, client: 'model-page' }
+    });
+    expect(ack.body.committed).toBe(true);
+    // Carrying intent and rebinding are not a new model observation.
+    expect((await getSession(sessionId))?.selectedModel?.conversationId).not.toBe(CHAT_B);
+    await select(CHAT_B, 'gpt-5.6-sol', observedAt + 2);
+    expect((await getSession(sessionId))?.selectedModel).toEqual({ conversationId: CHAT_B,
+      model: 'gpt-5.6-sol', reasoningEffort: 'high', observedAt: observedAt + 2 });
+  });
+
   // Two pages on one marker is the shape every duplicate-tab failure takes: a reload
   // restored into a new document, "reopen closed tab", a link opened twice.
   it('can move documents until a page arms the click, and never after it', async () => {
@@ -509,7 +535,7 @@ describe('the replacement chat', () => {
     // Claimed, then gone before the click — the same crash point as the source half, and the
     // same answer: nothing was typed under this state, so the next document may have it.
     const claimed = await request('POST', '/compact', {
-      body: { token: continuation, destinationAttempt: true }
+      body: { token: continuation, commandId, client: 'page-2', destinationAttempt: true }
     });
     expect(claimed.body.allowed).toBe(true);
     const afterClaim = await redeem(commandId, 'page-3');
@@ -519,13 +545,13 @@ describe('the replacement chat', () => {
     // Armed. This bootstrap may exist in a chat this app cannot yet name, so it is never
     // handed to another document; only the marked message can resolve it.
     const armed = await request('POST', '/compact', {
-      body: { token: continuation, destinationDispatch: true }
+      body: { token: continuation, commandId, client: 'page-3', destinationDispatch: true }
     });
     expect(armed.body.armed).toBe(true);
     expect((await redeem(commandId, 'page-3')).status).toBe(409);
     expect((await redeem(commandId, 'page-4')).status).toBe(409);
     expect(
-      (await request('POST', '/compact', { body: { token: continuation, destinationAttempt: true } })).body.allowed
+      (await request('POST', '/compact', { body: { token: continuation, commandId, client: 'page-3', destinationAttempt: true } })).body.allowed
     ).toBe(false);
   });
 

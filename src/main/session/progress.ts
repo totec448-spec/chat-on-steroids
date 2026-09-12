@@ -6,7 +6,7 @@ export function conversationProgress(conversationId: string) {
   let workers: { total: number; active: number; finished: number; failed: number; names: string[] } | null = null;
   try {
     const snapshot = statusForCaller({ conversationId });
-    if (snapshot.self.role === 'prime') {
+    if (snapshot.self?.role === 'prime') {
       const list = snapshot.state.agents.filter(agent => agent.role === 'worker');
       const active = list.filter(agent => ['active', 'waking', 'detached'].includes(agent.state));
       if (list.length) workers = { total: list.length, active: active.length,

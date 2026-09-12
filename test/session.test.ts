@@ -1928,7 +1928,9 @@ describe('canonical recorder 1.8', () => {
     resetRecorderForTests();
     resetSessionStoreForTests();
     await recordChatObservations(conversationId, [{ ...error, time: error.time + 1_000 }]);
-    expect(await readEvents(sessionId, { kinds: ['chat_error'] })).toHaveLength(1);
+    expect(await readEvents(sessionId, { kinds: ['chat_error'] })).toEqual([
+      expect.objectContaining({ blocking: true, recoverable: false })
+    ]);
 
     await recordChatObservations(conversationId, [{ ...error, time: error.time + 30_001 }]);
     expect(await readEvents(sessionId, { kinds: ['chat_error'] })).toHaveLength(2);
@@ -1960,6 +1962,21 @@ describe('canonical recorder 1.8', () => {
     const retry = await recordChatObservations(conversationId, [error]);
     expect(retry.stored).toBe(1);
     expect(await readEvents(retry.sessionId!, { kinds: ['chat_error'] })).toHaveLength(1);
+  });
+
+  it('keeps one exact Thinking failed notice across reload/restart beyond the burst window', async () => {
+    const conversationId = 'conv-failed-header-reload';
+    const error = { kind: 'chat_error' as const, time: 100_000, text: 'Thinking failed',
+      reason: 'thinking_failed' as const, turnId: 'failed-turn', recoverable: false };
+    const first = await recordChatObservations(conversationId, [error]);
+    await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+    await recordChatObservations(conversationId, [{ ...error, time: 500_000 }]);
+    await recordChatObservations(conversationId, [{ ...error, time: 600_000, turnId: undefined }]);
+    expect(await readEvents(first.sessionId!, { kinds: ['chat_error'] })).toEqual([
+      expect.objectContaining({ reason: 'thinking_failed', turnId: 'failed-turn' })
+    ]);
+    await recordChatObservations(conversationId, [{ ...error, time: 700_000, turnId: 'another-turn' }]);
+    expect(await readEvents(first.sessionId!, { kinds: ['chat_error'] })).toHaveLength(2);
   });
 
   it('deduplicates replayed turn lifecycle boundaries from the at-least-once browser journal', async () => {

@@ -2741,6 +2741,7 @@ select option { background: var(--card); color: var(--ink); }
 .chat-error-notice { border: 1px solid var(--red-line); border-radius: 12px; background: var(--red-wash); padding: 14px 16px; color: var(--ink); }
 .chat-error-notice > strong { display: block; color: var(--red); font-size: 13px; font-weight: 500; margin-bottom: 6px; }
 .chat-error-notice .msg { font-size: 14px; }
+.chat-error-next { margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--soft); }
 
 .settings-section-title { margin: 34px 0 14px; font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink); }
 .composer-popover .muted { margin: 6px 9px; font-size: 11px; line-height: 1.5; }

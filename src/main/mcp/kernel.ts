@@ -27,6 +27,7 @@ import { beginToolTiming, inboundRequestId, inboundPublication } from './inbound
 import { McpServer, type ServerContext } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 import type { Capabilities, Root } from '../../shared/types.js';
+import { CAPABILITY_LABELS, WRITE_CAPABILITIES } from '../../shared/types.js';
 import { FsOpError, formatBytes, type FileInfo } from '../fsops.js';
 import { logInfo, logWarn } from '../logger.js';
 import { toolSchema } from './tool-declarations.js';
@@ -801,6 +802,14 @@ async function dispatchTracked(
     const added = pluginManager.redactResult({ content: delivered.content.slice(baseResult.content.length) });
     delivered = { ...delivered, content: [...baseResult.content, ...added.content as ToolResult['content']] };
   }
+  // Some hosts consume structured results instead of content. Core owns these shapes;
+  // project its final app appendices once without changing the underlying tool data.
+  if (surface === 'core' && delivered.structuredContent) {
+    const supplemental = delivered.content.slice(baseResult.content.length)
+      .filter((part): part is Extract<ToolContent, { type: 'text' }> => part.type === 'text')
+      .map(part => part.text).join('\n');
+    if (supplemental) delivered = { ...delivered, structuredContent: { ...delivered.structuredContent, supplemental_context: supplemental } };
+  }
   const recorderStartedAt = Date.now();
   // Event duration includes identity/handler/delivery work. Recorder and local HTTP finish
   // are measured separately because a row cannot contain the time of its own later commit.
@@ -1087,7 +1096,13 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
       names.push(name);
       handlers.set(name, { description: config.description, run: async args => {
         const parsed = await config.inputSchema.safeParseAsync(args);
-        return parsed.success ? handler(parsed.data) : fail('INVALID_ARGUMENTS: arguments do not match this tool’s schema.');
+        if (parsed.success) return handler(parsed.data);
+        // Preserve the schema owner's corrective explanation for code-mode children too.
+        // Zod issues omit input values; bound paths/messages and the number of diagnostics.
+        const details = parsed.error.issues.slice(0, 3).map(issue =>
+          `${issue.path.map(String).join('.').slice(0, 80) || 'arguments'}: ${issue.message.slice(0, 300)}`
+        ).join('; ');
+        return fail(`INVALID_ARGUMENTS: ${details}`);
       } });
       observe?.(name, config);
       // No identity field is ever added here. Every tool's schema is exactly what its
@@ -1105,9 +1120,12 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
     guarded(cap, name, fn) {
       return guard(name, async () => {
         if (!caps[cap]) {
+          // The effective capability can be off because Read-only overrides its checkbox.
+          // Name that owner, otherwise use the same permission label as Settings.
           return fail(
-            `TOOL_DISABLED: ${name} is disabled by the current Chat On Steroids permissions. ` +
-              'Ask the user to enable the permission in the app, then retry. If the tool list in this conversation is stale, start a new chat.'
+            ctx.readOnly && WRITE_CAPABILITIES.includes(cap)
+              ? `TOOL_DISABLED: ${name} is disabled because Read-only mode is on. Ask the user to turn Read-only off in the app, then retry.`
+              : `TOOL_DISABLED: ${name} requires the "${CAPABILITY_LABELS[cap]}" permission. Ask the user to enable "${CAPABILITY_LABELS[cap]}" in the app, then retry.`
           );
         }
         return fn();

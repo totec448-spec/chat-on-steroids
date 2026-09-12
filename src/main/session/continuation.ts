@@ -51,7 +51,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import type { Handoff } from '../../shared/session.js';
+import { isReasoningEffort, type Handoff, type ReasoningEffort } from '../../shared/session.js';
 import { logInfo, logWarn } from '../logger.js';
 import {
   PRIME_ID,
@@ -165,7 +165,19 @@ export function normalizeProjectId(value: unknown): string | null {
   return /^g-p-[0-9a-f]{32}$/.test(candidate) ? candidate : null;
 }
 
+type RequestedModel = { model: string; reasoningEffort: ReasoningEffort | null };
+
+function requestedModel(value: unknown): RequestedModel | null {
+  if (!value || typeof value !== 'object') return null;
+  const { model, reasoningEffort } = value as Record<string, unknown>;
+  if (typeof model !== 'string' || !/^[a-zA-Z0-9 ._-]{1,80}$/.test(model) ||
+      (reasoningEffort != null && !isReasoningEffort(reasoningEffort))) return null;
+  return { model, reasoningEffort: isReasoningEffort(reasoningEffort) ? reasoningEffort : null };
+}
+
 interface Continuation {
+  /** Frozen source selection intent; only the destination picker proves B's actual selection. */
+  requestedModel: RequestedModel | null;
   sourceTurnId: string | null;
   token: string;
   sessionId: string;
@@ -232,6 +244,8 @@ export const CONTINUATIONS_STATE = 'continuations';
 const RESUME_SHADOW_COLLISION = 'the replacement chat already belongs to another local session';
 
 interface ContinuationRecord {
+  /** Absent in legacy WALs; never reconstruct from a later session selection. */
+  requestedModel?: RequestedModel | null;
   sourceTurnId?: string | null;
   token: string;
   sessionId: string;
@@ -267,6 +281,7 @@ export interface ContinuationSnapshot {
 
 function durableRecord(entry: Continuation): ContinuationRecord {
   return {
+    requestedModel: requestedModel(entry.requestedModel),
     sourceTurnId: entry.sourceTurnId,
     token: entry.token,
     sessionId: entry.sessionId,
@@ -324,6 +339,7 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   if (record.state === 'committed' || record.state === 'aborted') endResumeClaim(entry.token);
   entry.to = record.to;
   entry.project = normalizeProjectId(record.project);
+  entry.requestedModel = requestedModel(record.requestedModel);
   // Never let a durable read move the deadline backwards: a snapshot written before this field
   // existed reports nothing, and reading that as "last touched when it opened" would expire a
   // handoff that has been progressing since.
@@ -396,6 +412,7 @@ export function setContinuationRecoveryHooks(hooks: ContinuationRecoveryHooks): 
 }
 
 export interface ContinuationView {
+  requestedModel: RequestedModel | null;
   touchedAt: number;
   token: string;
   sessionId: string;
@@ -415,6 +432,7 @@ export interface ContinuationView {
 }
 
 const view = (entry: Continuation): ContinuationView => ({
+  requestedModel: requestedModel(entry.requestedModel),
   touchedAt: entry.touchedAt,
   token: entry.token,
   sessionId: entry.sessionId,
@@ -692,6 +710,7 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
  */
 function makeContinuation(sessionId: string, fromConversationId: string, automatic: boolean, project: string | null): Continuation {
   return {
+    requestedModel: null,
     sourceTurnId: null,
     token: randomBytes(16).toString('base64url'),
     sessionId,
@@ -732,7 +751,11 @@ export async function openContinuationNow(
     const again = [...byToken.values()].find((entry) => entry.sessionId === sessionId && isOpen(entry));
     if (again) return view(again);
     const entry = makeContinuation(sessionId, fromConversationId, automatic, normalizeProjectId(project));
-    entry.sourceTurnId = (await getSession(sessionId))?.activeTurnId ?? null;
+    const source = await getSession(sessionId);
+    entry.sourceTurnId = source?.activeTurnId ?? null;
+    if (source?.conversationId === fromConversationId && source.selectedModel?.conversationId === fromConversationId) {
+      entry.requestedModel = requestedModel(source.selectedModel);
+    }
     try {
       await writeDurableNow(CONTINUATIONS_STATE, snapshotWith(entry.token, durableRecord(entry)));
     } catch (err) {
@@ -920,10 +943,18 @@ export async function dispatchContinuationDestinationSendNow(token: string): Pro
  * case. A composer still holding the text is the ambiguous one and stays armed; only the marked
  * message or a cancel resolves it. Released, the brief may be offered to a fresh chat again.
  */
-export async function releaseContinuationDestinationSendNow(token: string): Promise<boolean> {
+export function continuationClaimedBy(token: string, claimant: string): boolean {
+  return byToken.get(token)?.claimedBy === claimant;
+}
+
+export async function releaseContinuationDestinationSendNow(token: string, unattemptedClaimant?: string): Promise<boolean> {
   return withCheckpointLock(token, async () => {
     const entry = byToken.get(token);
     if (!entry || !isOpen(entry) || !entry.handoffId || entry.state === 'awaiting-summary') return false;
+    // Command retirement has no page proof of loss. It can release only its own
+    // still-unattempted claim, rechecked inside the same Send checkpoint lock.
+    if (unattemptedClaimant !== undefined &&
+        (entry.claimedBy !== unattemptedClaimant || entry.destinationSend.state !== 'not-attempted')) return false;
     if (entry.destinationSend.state === 'sent') return false;
     if (entry.destinationSend.state === 'not-attempted' && entry.claimedBy === null) return true;
     // The claim goes with the dispatch. It named the one command whose page was to send the
@@ -1483,6 +1514,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       continue;
     }
     const entry: Continuation = {
+      requestedModel: requestedModel(raw.requestedModel),
       sourceTurnId: typeof raw.sourceTurnId === 'string' ? raw.sourceTurnId : null,
       token: raw.token,
       sessionId: raw.sessionId,

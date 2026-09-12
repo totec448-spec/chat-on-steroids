@@ -7,7 +7,7 @@ import { initDurableStore, flushDurable, resetDurableForTests } from '../src/mai
 import { initSessionStore, createSession, readEvents, rebindSession, appendEvent, observeSessionModel, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { observeRequestCorrelation } from '../src/main/session/correlation.js';
 import { flushRecorder } from '../src/main/session/recorder.js';
-import { enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
+import { cancelInput, enqueueInput, listInputs, resetInputForTests } from '../src/main/session/input.js';
 import { setChatBlocked, resetBlockedChatsForTests } from '../src/main/session/blocked-chats.js';
 import { startMcpServer, type McpEndpoint } from '../src/main/mcp/server.js';
 import type { ToolContext } from '../src/main/mcp/kernel.js';
@@ -17,6 +17,9 @@ import * as desktopBackend from '../src/main/computer/index.js';
 import sharp from 'sharp';
 import { randomBytes } from 'node:crypto';
 import { unifiedExecManager } from '../src/main/codex/manager.js';
+import { noteExecOwner, forgetExecOwner } from '../src/main/codex/ownership.js';
+import * as ownership from '../src/main/codex/ownership.js';
+import type { ExecCommandToolOutput } from '../src/main/codex/unified-exec.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let directory: string, endpoint: McpEndpoint, ctx: ToolContext;
@@ -36,6 +39,88 @@ async function identity() {
 }
 const call = (requestId: string | undefined, code: string) => rpc('tools/call', { name: 'exec', arguments: { code } }, requestId);
 const text = (response: any) => response.result.content.filter((item: any) => item.type === 'text').map((item: any) => item.text).join('\n');
+
+it.each(['exec_command', 'write_stdin'] as const)('delivers terminal corrections through the actual %s structured wire without changing process output', async name => {
+  const who = await identity();
+  const processId = 739100;
+  noteExecOwner(processId, who.session.id);
+  const output: ExecCommandToolOutput = { chunkId: '623c3d', wallTimeMs: 30011.45, rawOutput: Buffer.from(''),
+    truncationPolicy: { kind: 'tokens', tokens: 1000 }, maxOutputTokens: undefined, processId, exitCode: null,
+    originalTokenCount: 0, outputOmittedBytes: null };
+  const handler = name === 'exec_command' ? vi.spyOn(unifiedExecManager, 'execCommand') : vi.spyOn(unifiedExecManager, 'writeStdin');
+  handler.mockResolvedValue(output);
+  const args = name === 'exec_command' ? { cmd: 'echo fixture', workdir: '/workspace' } : { session_id: processId };
+  const send = () => rpc('tools/call', { name, arguments: args }, who.requestId);
+  try {
+    const plain = await send();
+    expect(plain.result.isError).not.toBe(true);
+    expect(plain.result.structuredContent).not.toHaveProperty('supplemental_context');
+    const input = await enqueueInput({ id: randomUUID(), sessionId: who.session.id, text: 'ACK_G7391_CORRECTION', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+    const notices = vi.spyOn(ownership, 'backgroundExecRecoveryNotices').mockReturnValue(['CONTROLLED_BACKGROUND_NOTICE']);
+    const response = await send();
+    notices.mockRestore();
+    expect(response.result.isError).not.toBe(true);
+    expect(response.result.structuredContent).toEqual({ ...plain.result.structuredContent,
+      supplemental_context: expect.stringContaining('ACK_G7391_CORRECTION') });
+    expect(response.result.structuredContent.output).toBe('');
+    expect(response.result.structuredContent.supplemental_context).toContain('CONTROLLED_BACKGROUND_NOTICE');
+    expect(response.result.structuredContent.session_id).toBe(processId);
+    expect(response.result.structuredContent).not.toHaveProperty('exit_code');
+    expect(text(response).match(/ACK_G7391_CORRECTION/g)).toHaveLength(1);
+    expect((await listInputs()).find(row => row.id === input.id)?.state).toBe('tool');
+    const receipt = await send();
+    expect(receipt.result.structuredContent).toEqual(plain.result.structuredContent);
+    expect(text(receipt)).not.toContain('ACK_G7391_CORRECTION');
+    expect((await listInputs()).find(row => row.id === input.id)?.state).toBe('sent');
+    const invalid = await rpc('tools/call', { name, arguments: { ...args, unexpected: true } }, who.requestId);
+    expect(invalid.result.isError).toBe(true);
+    expect(invalid.result.structuredContent).toBeUndefined();
+    expect(handler).toHaveBeenCalledTimes(3);
+  } finally {
+    await send(); // Settle any offered correction even when a regression assertion fails.
+    for (const entry of await listInputs()) if (entry.sessionId === who.session.id) await cancelInput(entry.id);
+    forgetExecOwner(processId);
+  }
+});
+
+it('preserves a nonzero terminal exit and leaves nested correction delivery with the outer result', async () => {
+  const who = await identity();
+  vi.spyOn(unifiedExecManager, 'execCommand').mockResolvedValue({ chunkId: 'exit-seven', wallTimeMs: 2,
+    rawOutput: Buffer.from('process failure'), truncationPolicy: { kind: 'tokens', tokens: 1000 },
+    maxOutputTokens: undefined, processId: null, exitCode: 7, originalTokenCount: 2, outputOmittedBytes: null });
+  await enqueueInput({ id: randomUUID(), sessionId: who.session.id, text: 'NONZERO_CORRECTION', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+  const direct = await rpc('tools/call', { name: 'exec_command', arguments: { cmd: 'echo fixture', workdir: '/workspace' } }, who.requestId);
+  expect(direct.result.structuredContent).toMatchObject({ exit_code: 7, output: 'process failure', supplemental_context: expect.stringContaining('NONZERO_CORRECTION') });
+  expect(direct.result.structuredContent).not.toHaveProperty('session_id');
+  await call(who.requestId, 'text("receipt")');
+  await enqueueInput({ id: randomUUID(), sessionId: who.session.id, text: 'OUTER_ONLY_CORRECTION', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+  const nested = await call(who.requestId, 'const child=await tools.exec_command({cmd:"echo fixture",workdir:"/workspace"});text(child.structuredContent);');
+  const child = JSON.parse(nested.result.content[0].text);
+  expect(child).toMatchObject({ exit_code: 7, output: 'process failure' });
+  expect(child).not.toHaveProperty('supplemental_context');
+  expect(text(nested).match(/OUTER_ONLY_CORRECTION/g)).toHaveLength(1);
+  await call(who.requestId, 'text("receipt")');
+});
+
+it('projects corrections for other Core structured results without changing the empty worker family', async () => {
+  const config = getConfig();
+  await saveConfig({ ...config, multiAgent: { ...config.multiAgent, enabled: true } });
+  const who = await identity();
+  const status = () => rpc('tools/call', { name: 'agents', arguments: { action: 'status' } }, who.requestId);
+  try {
+    const before = await status();
+    expect(before.result.isError).not.toBe(true);
+    expect(before.result.structuredContent).toMatchObject({ action: 'status', run_id: null, self: null, agents: [] });
+    await enqueueInput({ id: randomUUID(), sessionId: who.session.id, text: 'CORE_STATUS_CORRECTION', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+    const delivered = await status();
+    expect(delivered.result.structuredContent).toEqual({ ...before.result.structuredContent, supplemental_context: expect.stringContaining('CORE_STATUS_CORRECTION') });
+    expect(text(delivered).match(/CORE_STATUS_CORRECTION/g)).toHaveLength(1);
+    expect((await status()).result.structuredContent).toEqual(before.result.structuredContent);
+  } finally {
+    await status();
+    await saveConfig(config);
+  }
+});
 
 beforeAll(async () => {
   directory = await makeTempDir('clf-code-mode-mcp-');
@@ -178,6 +263,8 @@ it('rejects missing proof, foreign tools, invalid child arguments and nested lif
   const who = await identity();
   expect(text(await call(who.requestId, 'text([typeof tools.computer,typeof tools.exec])'))).toBe('["undefined","undefined"]');
   expect(text(await call(who.requestId, 'text(await tools.read({paths:1}))'))).toContain('INVALID_ARGUMENTS');
+  const invalidCursor = await call(who.requestId, `text(await tools.session({action:'read', session_id:${JSON.stringify(who.session.id)}, cursor:'opaque', include:['user']}));`);
+  expect(text(invalidCursor)).toContain('do not combine it with include or tool_call');
   for (const code of ['text(await tools.session_finish({summary:"done"}))', 'text(await tools.agents({action:"finish",summary:"done"}))']) {
     expect(text(await call(who.requestId, code))).toContain('DIRECT_CALL_REQUIRED');
   }

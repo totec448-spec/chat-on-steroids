@@ -1029,5 +1029,17 @@
   "Remove or replace backgrounds": "移除或替换背景",
   "Upscale images": "放大图片",
   "Create custom styles": "创建自定义风格",
-  "No image preview was retained in this recording.": "此记录未保留图像预览。"
+  "No image preview was retained in this recording.": "此记录未保留图像预览。",
+  "Thinking failed": "思考失败",
+  "Work continued after this notice. Automatic continuation waits for work to settle; the failed page alone does not trigger another message.": "此提示之后工作仍在继续。自动续接会等待工作稳定结束；页面失败本身不会触发另一条消息。",
+  "Response stalled": "回复停滞",
+  "No visible progress for ten minutes. The app could not confirm that this turn finished.": "十分钟内没有可见进展。应用无法确认本轮已结束。",
+  "Wait until ChatGPT allows requests again, then retry. Reloading cannot remove this limit.": "请等待 ChatGPT 恢复接受请求后重试。刷新无法解除此限制。",
+  "ChatGPT’s page reported a failure. This does not prove the work stopped.": "ChatGPT 页面报告了失败。这不代表工作已经停止。",
+  "You can send a follow-up. Automatic recovery, when allowed, refreshes the page and waits five minutes before a queued continuation; new work postpones it.": "你可以发送后续消息。允许自动恢复时会刷新页面，然后等待五分钟再发送排队续接消息；新进展会推迟发送。",
+  "The app will try to refresh this chat when recovery is eligible. A refresh does not resend your message. If it stays stuck, open ChatGPT and check the page before retrying.": "满足恢复条件时，应用会尝试刷新此对话。刷新不会重新发送消息。如果仍然卡住，请先打开 ChatGPT 检查页面，再重试。",
+  "Open this chat in ChatGPT and check the error. If your message is already there, do not send it again; otherwise retry when the page is ready.": "在 ChatGPT 中打开此对话并检查错误。如果消息已存在，请勿重复发送；否则请在页面就绪后重试。",
+  "This turn later completed. You can continue with a new message.": "本轮随后已完成。你可以发送新消息继续。",
+  "You can send a follow-up. After a confirmed refresh, automatic continuation waits five minutes and checks for new work before sending.": "你可以发送后续消息。确认刷新后，自动续接会等待五分钟，并在发送前检查是否有新进展。",
+  "Queued messages still wait until sending is safe. If the chat stays stuck, open ChatGPT and check the page before retrying.": "排队消息仍会等待安全发送条件。如果对话仍然卡住，请先打开 ChatGPT 检查页面，再重试。"
 }

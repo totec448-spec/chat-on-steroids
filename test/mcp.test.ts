@@ -2703,7 +2703,7 @@ describe('apply_patch', () => {
     expect(content.some((item) => item.type === 'image')).toBe(true);
   });
 
-  it('charges base64 image content to the aggregate read cap and points large images to view_image', async () => {
+  it('uses a separate bounded image budget so ordinary screenshots work through read', async () => {
     const target = path.join(approved, 'large-noise.png');
     await sharp(randomBytes(512 * 512 * 4), { raw: { width: 512, height: 512, channels: 4 } })
       .png({ compressionLevel: 0 })
@@ -2713,8 +2713,7 @@ describe('apply_patch', () => {
       name: 'read',
       arguments: { paths: ['/workspace/large-noise.png'] }
     });
-    expect(readReply.body.result?.isError).toBe(true);
-    expect(textOf(readReply)).toMatch(/aggregate output cap.*view_image/i);
+    expect(readReply.body.result?.isError, textOf(readReply)).not.toBe(true);
 
     const imageReply = await core('tools/call', {
       name: 'view_image',
@@ -2722,6 +2721,24 @@ describe('apply_patch', () => {
     });
     expect(imageReply.body.result?.isError, textOf(imageReply)).not.toBe(true);
     expect((imageReply.body.result?.content as Array<{ type: string }>).some((item) => item.type === 'image')).toBe(true);
+    expect(readReply.body.result?.content.filter((item: any) => item.type === 'image'))
+      .toEqual(imageReply.body.result?.content.filter((item: any) => item.type === 'image'));
+
+    const batch = await core('tools/call', { name: 'read', arguments: {
+      paths: [...Array(5).fill('/workspace/large-noise.png'), '/workspace/pixel.png']
+    } });
+    expect(batch.body.result?.content.filter((item: any) => item.type === 'image')).toHaveLength(4);
+    expect(textOf(batch)).toContain('image output cap');
+
+    await sharp(randomBytes(1500 * 1000 * 4), { raw: { width: 1500, height: 1000, channels: 4 } })
+      .png({ compressionLevel: 0 }).toFile(path.join(approved, 'image-budget.png'));
+    const bytes = await core('tools/call', { name: 'read', arguments: {
+      paths: ['/workspace/image-budget.png', '/workspace/image-budget.png', '/workspace/pixel.png']
+    } });
+    const emitted = bytes.body.result?.content.filter((item: any) => item.type === 'image');
+    expect(emitted).toHaveLength(2); // The refused large second file cannot suppress a later fitting image.
+    expect(emitted.reduce((n: number, item: any) => n + item.data.length, 0)).toBeLessThanOrEqual(12 * 1024 * 1024);
+    expect(textOf(bytes)).toContain('image output cap');
   });
 
   it('accepts a native filesystem path inside apply_patch', async () => {

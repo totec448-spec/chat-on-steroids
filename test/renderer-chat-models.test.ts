@@ -272,6 +272,26 @@ it('keeps observed composer choices in provider order except the user-excluded G
   expect(confirmedComposerModel()).toBeNull();
 });
 
+it('offers GPT-5.6 Pro and GPT-6 Pro as distinct observed slider choices', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [
+    { id: '5.6', label: 'GPT-5.6 Sol', efforts: ['none', 'medium', 'high', 'xhigh', 'pro'] },
+    { id: '6', label: 'GPT-6 Pro', efforts: ['pro'] }
+  ];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', models } }) } });
+  const { initChatModels, applyChatModels, confirmedComposerModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const slider = dom.window.document.querySelector<HTMLInputElement>('#composerPowerChoices input')!;
+  expect(slider.max).toBe('4');
+  for (const [index, model] of [[3, '5.6'], [4, '6']] as const) {
+    slider.value = String(index); slider.dispatchEvent(new dom.window.Event('input'));
+    expect(confirmedComposerModel()).toEqual({ model, reasoningEffort: 'pro' });
+    expect(slider.getAttribute('aria-valuetext')).toBe(`GPT-${model} Pro`);
+    expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe(`GPT-${model} Pro`);
+  }
+});
+
 it('keeps the trigger consistent with send admission during reload and a removed effort', async () => {
   dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
