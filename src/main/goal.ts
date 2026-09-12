@@ -560,6 +560,7 @@ export function pendingGoalReplies(
 export async function acceptGoalReplyNow(input: {
   silenceSourceTurnId?: string;
   silencePro?: boolean;
+  listenUntil?: number;
   conversationId: string;
   sessionId: string;
   replyId: string;
@@ -594,6 +595,7 @@ export async function acceptGoalReplyNow(input: {
     turnId: input.turnId.slice(0, 200),
     ...(input.silenceSourceTurnId ? { silenceSourceTurnId: input.silenceSourceTurnId.slice(0, 200) } : {}),
     ...(input.silencePro ? { silencePro: true } : {}),
+    ...(input.listenUntil ? { listenUntil: input.listenUntil } : {}),
     eventSeq: input.eventSeq,
     // `/goal/draft` may have had to persist the local turn before Fiber exposed ChatGPT's
     // stable assistant id. The later id strengthens that same row; it must not re-evaluate
@@ -621,6 +623,23 @@ function handleGoalReply(conversationId: string, turnId?: string): void {
   if (!reply || reply.state !== 'pending' || (turnId && reply.turnId !== turnId)) return;
   reply.state = 'handled';
   persistGoalRepliesSoon();
+}
+
+/** A queued user message spends the same completed/silence source as Goal.
+ * Keep the handled Goal tombstone after the outbox's bounded receipt history ages out. */
+export async function consumeGoalReplyForInputNow(conversationId: string, sessionId: string, sourceTurnId: string): Promise<void> {
+  const reply = goalReplies.get(conversationId);
+  if (!reply || reply.sessionId !== sessionId || reply.state !== 'pending') return;
+  const source = await goalReplySourceTurn(sessionId, reply.silenceSourceTurnId ?? reply.turnId);
+  if (source !== sourceTurnId || goalReplies.get(conversationId) !== reply) return;
+  await setGoalReplyActiveNow(conversationId, false);
+}
+
+/** Resolve only the exact canonical answer; never infer an alias from the latest turn. */
+export async function goalReplySourceTurn(sessionId: string, turnId: string): Promise<string | undefined> {
+  if (!turnId.startsWith('reply:')) return turnId;
+  const events = await readRecentEvents(sessionId, 256, { kinds: ['assistant_message'] });
+  return events.find(event => event.kind === 'assistant_message' && event.messageId === turnId.slice(6))?.turnId ?? undefined;
 }
 
 /** Durable state file for per-chat Goal objectives. */

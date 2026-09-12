@@ -7,6 +7,7 @@ import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { toolResultText } from './tool-result.js';
+import { chatErrorPresentation } from './chat-error.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { isAstraModel } from '../shared/chat-models.js';
@@ -1139,7 +1140,8 @@ async function loadDetail(navigate = false, prepend = false, newerFrom?: number)
     paintDetail();
     return;
   }
-  if (detailFor !== wanted) historyBefore = null;
+  const opening = detailFor !== wanted;
+  if (opening) historyBefore = null;
   // Live deltas must not evict a historical page while the user is reading it.
   const incremental = newerFrom === undefined && historyBefore === null && detailFor === wanted && detailCursor !== null;
   const detail = await run(
@@ -1177,6 +1179,9 @@ async function loadDetail(navigate = false, prepend = false, newerFrom?: number)
       : detail.events.reduce((cursor, event) => Math.max(cursor, event.seq + 1), incremental ? detailCursor! : 0);
   totalEvents = detail.total;
   paintDetail(!prepend && newerFrom === undefined);
+  // A selection opens at the latest message; the previous chat's viewport is not
+  // a reading position in this one. Apply only after the current load has rendered.
+  if (opening) $('chatBody').scrollTop = $('chatBody').scrollHeight;
   void loadHandoff();
   // A burst can contain more than one renderer-sized page between coalesced notifications.
   // Drain it page by page rather than silently jumping the cursor or lifting the payload cap.
@@ -1557,7 +1562,7 @@ function paintInputReceipt(row: HTMLElement, item: ReturnType<typeof timelineIte
   receipt.parentElement?.classList.toggle('has-input-receipt', !receipt.hidden);
 }
 
-function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean }): HTMLElement {
+function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }): HTMLElement {
   switch (event.kind) {
     case 'session_start':
       return el('p', 'meta', () => t("Session started — {0}", [event.title]));
@@ -1621,8 +1626,10 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'chat_error': {
       const notice = el('div', 'chat-error-notice');
       notice.setAttribute('role', 'status');
-      const title = el('strong', '', () => t("ChatGPT reported a problem"));
-      notice.append(title, textBlock('msg', event.message.text, event.message.truncated, event.message.chars));
+      const presentation = () => chatErrorPresentation(event, context?.history ?? events);
+      const title = el('strong', '', () => presentation().title);
+      notice.append(title, textBlock('msg', presentation().message, event.message.truncated, event.message.chars),
+        el('p', 'chat-error-next', () => presentation().next));
       return notice;
     }
     case 'tool_call':
@@ -2194,7 +2201,8 @@ function paintDetail(followBottom = true): void {
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && ['session_start', 'session_end', 'turn_start', 'turn_end', 'note'].includes(item.event.kind)) continue;
     const key = itemKey(item);
-    const sig = itemSignature(item);
+    const sig = itemSignature(item) + (item.kind === 'event' && item.event.kind === 'chat_error'
+      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '');
     keep.add(key);
     const cached = rowCache.get(key);
     if (cached && cached.sig === sig) {
@@ -3375,7 +3383,7 @@ export function initChat(next: Deps): void {
         if (!['user_message', 'assistant_message', 'tool_call', 'page_tool', 'agent_message', 'chat_error'].includes(event.kind)) return [];
         const row = el('div', `ev ev-${event.kind}`); const body = el('div', 'ev-body');
         row.dataset.timelineKey = `event:${event.seq}`; row.dataset.activityBoundary = boundary;
-        body.append(eventBody(event, { id, current })); row.append(body); return [row];
+        body.append(eventBody(event, { id, current, history: source })); row.append(body); return [row];
       });
       return groupToolRows(rows, `pane:${id}`, agentToolGroups);
     }

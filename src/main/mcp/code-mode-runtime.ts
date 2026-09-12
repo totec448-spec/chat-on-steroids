@@ -56,7 +56,7 @@ export async function runCodeMode(
   const pending = new Set<Promise<void>>();
   const emissions: Array<{ kind: 'text' | 'image'; json: string }> = [];
   let worker: Worker | undefined, ended = false, calls = 0, resultBytes = 0, emittedBytes = 0;
-  let textBytes = 0, images = 0;
+  let textBytes = 0, images = 0, textTruncated = false;
   const allowed = new Set(tools.map(tool => tool.name));
   try {
     const status = await new Promise<string | null>(resolve => {
@@ -83,7 +83,22 @@ export async function runCodeMode(
         if (message.type === 'emit') {
           if ((message.kind !== 'text' && message.kind !== 'image') || emissions.length >= limits.outputItems ||
               bytes > limits.resultBytes || (emittedBytes += bytes) > limits.outputBytes) { finish('OUTPUT_LIMIT'); return; }
-          if (message.kind === 'text' ? (textBytes += bytes) > limits.textBytes : ++images > limits.images) { finish('OUTPUT_LIMIT'); return; }
+          if (message.kind === 'text') {
+            let value: unknown;
+            try { value = JSON.parse(message.json); } catch { finish('OUTPUT_INVALID'); return; }
+            if (typeof value !== 'string') { finish('OUTPUT_INVALID'); return; }
+            const buffer = Buffer.from(value, 'utf8');
+            if (buffer.length > limits.textBytes - textBytes) {
+              // This value was explicitly emitted. Preserve the available prefix instead of
+              // replacing a whole useful read with an opaque error; never expose intermediates.
+              let end = Math.max(0, limits.textBytes - textBytes);
+              while (end > 0 && (buffer[end]! & 0xc0) === 0x80) end--;
+              if (end) emissions.push({ kind: 'text', json: JSON.stringify(buffer.subarray(0, end).toString('utf8')) });
+              textTruncated = true;
+              finish('OUTPUT_LIMIT'); return;
+            }
+            textBytes += buffer.length;
+          } else if (++images > limits.images) { finish('OUTPUT_LIMIT'); return; }
           emissions.push({ kind: message.kind, json: message.json });
           return;
         }
@@ -120,7 +135,14 @@ export async function runCodeMode(
       const effects = calls
         ? `${calls} tool calls already dispatched; side effects were not rolled back. Inspect current state before retrying.`
         : 'No tool calls were dispatched.';
-      content.push(...errorResult(`${status}: execution stopped. ${effects} Unemitted values remain private.`).content);
+      const hint = status === 'PARSE_ERROR'
+        ? ' Source could not be parsed or initialized; check quoting, closing brackets, and unsupported imports.'
+        : status === 'OUTPUT_LIMIT'
+          ? ` ${textTruncated ? 'Explicit text was truncated. ' : ''}Limits: ${limits.textBytes} UTF-8 text bytes, ${limits.images} images, ${limits.outputItems} output items. Filter results or read smaller ranges; use direct tools for large reads.`
+          : status === 'SCRIPT_ERROR'
+            ? ' Check the JavaScript and available tool names; catch an expected error and explicitly text(...) only the details you need.'
+            : '';
+      content.push(...errorResult(`${status}: execution stopped. ${effects}${hint} Unemitted values remain private.`).content);
     }
     if (pending.size) content.push(...errorResult('UNAWAITED_CALLS: dispatched tool calls are still running and remain recorded. Side effects were not cancelled.').content);
     return { content, ...(status || pending.size ? { isError: true } : {}) };

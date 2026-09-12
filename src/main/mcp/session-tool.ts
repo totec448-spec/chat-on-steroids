@@ -120,7 +120,7 @@ const inputSchema = z
       .max(CURSOR_MAX_CHARS)
       .optional()
       .describe(
-        'A short token this tool printed earlier: update_cursor, continuation_cursor, older_cursor, read_cursor or next_cursor. Copy it exactly; it carries a checksum and a mistyped copy is refused.'
+        'A short token this tool printed earlier: update_cursor, continuation_cursor, older_cursor, read_cursor or next_cursor. Copy it exactly. With a cursor, omit include, tool_call and query: the token already contains the filters and mode.'
       )
   })
   .superRefine((input, ctx) => {

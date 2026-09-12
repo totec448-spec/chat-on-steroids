@@ -163,6 +163,8 @@ const MAX_DIR_ENTRIES = 200;
 const MAX_GLOB_MATCHES = 20;
 /** Files a single `read` call may touch after every path and glob is expanded. */
 const MAX_READ_TARGETS = 40;
+const MAX_READ_IMAGES = 4;
+const MAX_READ_IMAGE_BYTES = 12 * 1024 * 1024;
 /** Entries a glob walk will look at before giving up on the pattern. */
 const GLOB_SCAN_LIMIT = 5_000;
 
@@ -279,7 +281,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           'Paths may contain * ? and ** and are expanded here. Every result starts with a header giving size, timestamps and line count. ' +
           `The line-number prefix is display metadata, not file content — strip it before quoting text into apply_patch. ` +
           `start_line/end_line apply to every file the call resolves to; a path may instead carry its own range as path:12-40 or path:12, so several ranges of one file fit in one call. A typical 1,500-line source file fits in the default read: do not pre-paginate it. ` +
-          `Batch related paths in one call; only continue from a line when the returned header says more lines follow. The aggregate payload remains bounded at about ${formatBytes(MAX_READ_BYTES)}.`,
+          `Batch related paths in one call; only continue from a line when the returned header says more lines follow. Text is bounded at about ${formatBytes(MAX_READ_BYTES)}; images have a separate ${MAX_READ_IMAGES}-image, ${formatBytes(MAX_READ_IMAGE_BYTES)} base64 budget and view_image's per-file validation.`,
         inputSchema: z
           .object({
             paths: z
@@ -369,6 +371,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
           const sections: string[] = [];
           const images: Array<{ data: string; mimeType: string }> = [];
           let remaining = MAX_READ_BYTES;
+          let imageBytes = 0;
           let failures = 0;
           let successes = 0;
 
@@ -385,12 +388,15 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                 startLine: target.range ? target.range.start : start_line,
                 endLine: target.range ? target.range.end : end_line,
                 maxBytes: Math.min(max_bytes ?? DEFAULT_READ_BYTES, remaining),
-                aggregateBytes: remaining
+                imageBytes: images.length < MAX_READ_IMAGES ? MAX_READ_IMAGE_BYTES - imageBytes : 0
               });
               remaining -= section.bytes;
               successes++;
               sections.push(section.text);
-              if (section.image) images.push(section.image);
+              if (section.image) {
+                images.push(section.image);
+                imageBytes += section.image.data.length;
+              }
             } catch (err) {
               failures++;
               // One stale or missing path must not destroy the useful reads. The requested
@@ -1111,7 +1117,9 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
  * handing back a worker the prime was already told was finished.
  */
 async function measureSleepingWorkers(caller: Caller): Promise<void> {
-  for (const info of swarmStateForCaller(caller).agents) {
+  const state = swarmStateForCaller(caller);
+  if (state.agents.length === 0) return;
+  for (const info of state.agents) {
     if (info.role !== 'worker' || info.state !== 'sleeping' || !info.conversationId) continue;
     const summary = await findSessionByConversation(info.conversationId, { requireUnique: true }).catch(() => null);
     if (summary) noteAgentContextTokens(info.conversationId, summary.contextTokens);
@@ -1427,15 +1435,17 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           };
         }
 
-        // status. Read-only, and deliberately small: it is the run as its own members see it,
-        // and `identify` is what decides whether this caller is one of them. An unrelated
-        // chat is told AGENTS_BUSY and nothing else — not who the prime is, not how many
-        // workers there are, not what any of them are doing.
+        // Status describes only this exact caller's family. No family is a normal empty
+        // result, independent of whether another prime has workers; discovery grants no role.
         const caller = await callerNow(startedAt);
         await measureSleepingWorkers(caller);
         const status = statusForCaller(caller);
         const me = status.self;
         const state = status.state;
+        if (!me) return {
+          content: [{ type: 'text' as const, text: 'No workers or retained worker history belong to this conversation. Use agents action=spawn if the task needs workers.' }],
+          structuredContent: { action: 'status', run_id: null, self: null, agents: [], free_worker_slots: status.freeWorkerSlots }
+        };
         const failed = state.agents.filter((info) => info.state === 'failed');
         // The word the model reads here is the whole answer to "may I use this worker again".
         // A sleeping worker is not a spent one, and calling it finished in this table is what
@@ -2098,7 +2108,7 @@ interface ReadOneOptions {
   startLine?: number;
   endLine?: number;
   maxBytes: number;
-  aggregateBytes: number;
+  imageBytes: number;
 }
 
 interface ReadTarget {
@@ -2221,21 +2231,21 @@ async function readOne(
     // decoded identically. `view_image` still exists in its own right: it is Codex's tool, with
     // Codex's name, schema and errors, and this branch is only `read` continuing to answer "what
     // is at this path" for a path that happens to be a picture.
-    // Do not inherit the 64 KiB text-section default: ordinary screenshots are not text.
-    // The enclosing read call still has a 512 KiB aggregate wire budget, and the base64
-    // representation—not merely the smaller compressed file—is what consumes it.
+    // Text and image representations have separate aggregate bounds. An ordinary screenshot
+    // must not fail solely because it is larger than the text budget. Still charge base64,
+    // not just compressed file bytes, and refuse an exhausted image batch before decoding.
+    if (options.imageBytes <= 0) throw new Error('Read image output cap reached; read remaining images in another call or use view_image.');
     const image = await viewImage(resolved.real, null, undefined, resolved.virtual);
     logInfo(`tool read image ${resolved.virtual} (${formatBytes(image.bytes)})`);
     const text = `--- ${resolved.virtual} — ${formatBytes(image.bytes)} ${image.mimeType} ---`;
-    const responseBytes = Buffer.byteLength(text, 'utf8') + image.base64.length;
-    if (responseBytes > options.aggregateBytes) {
+    if (image.base64.length > options.imageBytes) {
       throw new Error(
-        `Image response would exceed read's ${formatBytes(MAX_READ_BYTES)} aggregate output cap; use view_image for this file.`
+        `Read image output cap reached (${formatBytes(MAX_READ_IMAGE_BYTES)} base64 per call); read remaining images in another call or use view_image.`
       );
     }
     return {
       text,
-      bytes: responseBytes,
+      bytes: Buffer.byteLength(text, 'utf8'),
       image: { data: image.base64, mimeType: image.mimeType }
     };
   }

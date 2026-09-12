@@ -178,6 +178,8 @@ it('rejects missing proof, foreign tools, invalid child arguments and nested lif
   const who = await identity();
   expect(text(await call(who.requestId, 'text([typeof tools.computer,typeof tools.exec])'))).toBe('["undefined","undefined"]');
   expect(text(await call(who.requestId, 'text(await tools.read({paths:1}))'))).toContain('INVALID_ARGUMENTS');
+  const invalidCursor = await call(who.requestId, `text(await tools.session({action:'read', session_id:${JSON.stringify(who.session.id)}, cursor:'opaque', include:['user']}));`);
+  expect(text(invalidCursor)).toContain('do not combine it with include or tool_call');
   for (const code of ['text(await tools.session_finish({summary:"done"}))', 'text(await tools.agents({action:"finish",summary:"done"}))']) {
     expect(text(await call(who.requestId, code))).toContain('DIRECT_CALL_REQUIRED');
   }

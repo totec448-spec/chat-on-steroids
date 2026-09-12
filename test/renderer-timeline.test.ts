@@ -2012,6 +2012,49 @@ it('offers a per-task post-turn opt-in only for Astra', async () => {
   expect(edit).toHaveBeenCalledWith('choice-task', 'Next task', true);
 });
 
+it('opens every selected chat at the bottom and preserves manual reading during live updates', async () => {
+  const rows = Array.from({ length: 160 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
+    source: 'extension', kind: 'user_message', messageId: `opening-${i}`, message: text(`Opening item ${i + 1}`) }));
+  const first = summary(rows), second = { ...summary(rows), id: '2026-09-02-test0002', title: 'Other chat' };
+  const { w, append } = await boot(rows, false, [], [], { sessions: [first, second] });
+  const pane = w.document.getElementById('chatBody')!;
+  const timeline = w.document.getElementById('timeline')!;
+  Object.defineProperties(pane, { clientHeight: { value: 400 },
+    scrollHeight: { get: () => timeline.querySelectorAll('[data-timeline-key]').length * 100 } });
+  const select = async (id: string) => {
+    (w.document.querySelector(`#sessionList [data-id="${id}"]`) as HTMLElement).click();
+    await settle();
+    expect(pane.scrollTop).toBe(pane.scrollHeight); // Chromium clamps to the actual bottom.
+  };
+  await select(first.id);
+  for (let i = 0; i < 3; i++) {
+    pane.scrollTop = 700;
+    await append([]);
+    expect(pane.scrollTop).toBe(700);
+    await select(second.id);
+    pane.scrollTop = 0;
+    await select(first.id);
+  }
+
+  // A late opening response must neither replace the current chat nor drag its reader down.
+  const api = (w as any).api, original = api.getSession;
+  const pending: Array<() => void> = [];
+  api.getSession = async (id: string, options: unknown) => {
+    await new Promise<void>(resolve => pending.push(resolve));
+    return original(id, options);
+  };
+  await append([]); // Old A refresh is still in flight when A -> B -> A begins.
+  (w.document.querySelector(`#sessionList [data-id="${second.id}"]`) as HTMLElement).click();
+  (w.document.querySelector(`#sessionList [data-id="${first.id}"]`) as HTMLElement).click();
+  expect(pending).toHaveLength(3);
+  pending[2]!(); await settle();
+  expect(pane.scrollTop).toBe(pane.scrollHeight);
+  pane.scrollTop = 850;
+  pending[1]!(); pending[0]!(); await settle();
+  expect(pane.scrollTop).toBe(850);
+  expect(w.document.getElementById('chatTitle')!.textContent).toBe(first.title);
+});
+
 it('loads bounded earlier pages on deliberate upward scrolling without draining on render', async () => {
   const rows = Array.from({ length: 360 }, (_, i): SessionEvent => ({ seq: i + 1, time: T0 + i,
     source: 'extension', kind: 'user_message', messageId: `history-${i}`, message: text(`History item ${i + 1}`) }));

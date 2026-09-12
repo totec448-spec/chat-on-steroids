@@ -90,6 +90,28 @@ it('has no host authority or state shared with the next invocation', async () =>
   expect(rendered(await runCodeMode(`throw new Error('UNEMITTED_SECRET')`, [], async () => result('unused'), limits))).not.toContain('UNEMITTED_SECRET');
 });
 
+it('explains malformed source without echoing source strings or dispatching a child', async () => {
+  const invoke = vi.fn(async () => result('unused'));
+  const output = await runCodeMode("await tools.lookup({text:'PRIVATE_SOURCE", tools, invoke, limits);
+  expect(rendered(output)).toContain('CODE_MODE_PARSE_ERROR');
+  expect(rendered(output)).toContain('quoting');
+  expect(rendered(output)).not.toContain('PRIVATE_SOURCE');
+  expect(invoke).not.toHaveBeenCalled();
+});
+
+it('retains a UTF-8-safe preview of explicitly emitted oversized text and stops later actions', async () => {
+  const invoke = vi.fn(async () => result('unused'));
+  const output = await runCodeMode('text("界".repeat(100)); await tools.lookup({});', tools, invoke,
+    { ...limits, textBytes: 100 });
+  expect(output.content[0]).toEqual({ type: 'text', text: '界'.repeat(33) });
+  expect(rendered(output)).toContain('CODE_MODE_OUTPUT_LIMIT');
+  expect(rendered(output)).toContain('truncated');
+  expect(rendered(output)).toContain('100');
+  expect(invoke).not.toHaveBeenCalled();
+  const escaped = await runCodeMode('text("\\n".repeat(90));', tools, invoke, { ...limits, textBytes: 100 });
+  expect(escaped.isError).not.toBe(true);
+});
+
 it('bounds CPU, unresolved promises, memory, output and call admission', async () => {
   const invoke = vi.fn(async () => result('yes'));
   expect(rendered(await runCodeMode('while(true) {}', [], invoke, limits))).toContain('CPU_LIMIT');

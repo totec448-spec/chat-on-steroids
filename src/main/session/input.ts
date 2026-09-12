@@ -18,7 +18,7 @@ import { logInfo } from '../logger.js';
 import { noteChatOrigin } from './recorder.js';
 import { isAstraModel, isProModel } from '../../shared/chat-models.js';
 import { inFlightToolCalls } from '../mcp/call-context.js';
-import { automaticFinishEnabled } from '../goal.js';
+import { automaticFinishEnabled, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
@@ -46,7 +46,7 @@ const entrySchema = inputArgs.extend({
   /** Frozen image projection; authored attachment IDs remain the replay identity. */
   toolImages: inputArgs.shape.images,
   /** One after-turn pickup earned by confirmed silence or settled Thinking failed. */
-  silenceBoundary: z.object({ turnId: z.string().min(1).max(256), conversationId: z.string().min(1).max(256), workSeq: z.number().int().nonnegative(), listenUntil: z.number().nonnegative().optional() }).optional(),
+  silenceBoundary: z.object({ turnId: z.string().min(1).max(256), conversationId: z.string().min(1).max(256), workSeq: z.number().int().nonnegative(), acceptedAt: z.number().nonnegative().optional(), listenUntil: z.number().nonnegative().optional() }).optional(),
   /** Exact tool-free turn this explicit browser correction may interrupt. */
   directTurn: z.object({ id: z.string().min(1).max(256), startedAt: z.number() }).optional(),
   finishOwner: z.object({ turnId: z.string().min(1).max(256), periodic: z.boolean(), userRequested: z.boolean().optional() }).optional(),
@@ -158,10 +158,12 @@ export function hasEligibleToolInput(sessionId: string, finishBoundary = false):
   return serial(async () => {
     const current = ordered(await load());
     if (current.some(row => row.sessionId === sessionId && row.state === 'browser')) return false;
+    const head = current.find(row => row.sessionId === sessionId && queuedFollowup(row) && ['queued', 'tool'].includes(row.state));
     for (const row of current) {
       if (row.sessionId !== sessionId || row.dueAt > Date.now()) continue;
       if (row.attachments?.length && row.attachmentDelivery !== 'tool') continue;
       if (row.mode === 'after-turn' || (row.mode === 'finish' && !finishBoundary)) continue;
+      if (row.mode === 'finish' && row !== head) continue;
       if (row.state === 'tool') return true;
       if (row.state === 'queued') return row.mode === 'auto' || (finishBoundary && row.mode === 'finish');
     }
@@ -489,7 +491,9 @@ export function reorderQueuedInputs(sessionId: string, ids: string[]): Promise<b
     if (!ids.length || ids.length !== queue.length || new Set(ids).size !== ids.length ||
         queue.some(row => !ids.includes(row.id))) return false;
     const positions = new Map(ids.map((id, index) => [id, index]));
-    await commit(current.map(row => positions.has(row.id) ? { ...row, queueOrder: positions.get(row.id)! } : row));
+    const ticket = queue.find(row => row.silenceBoundary)?.silenceBoundary;
+    await commit(current.map(row => positions.has(row.id) ? { ...row, queueOrder: positions.get(row.id)!,
+      ...(ticket ? { silenceBoundary: row.id === ids[0] ? ticket : undefined } : {}) } : row));
     return true;
   });
 }
@@ -526,6 +530,8 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
     if (!row || row.sendAuthorizedAt !== undefined) return false;
     if (!(await browserInputAllowed(row)) || await target(row) !== conversationId) return false;
     await commit(current.map(entry => entry === row ? { ...row, sendAuthorizedAt: Date.now() } : entry));
+    if (row.completedTurnId && row.sessionId && conversationId)
+      await consumeGoalReplyForInputNow(conversationId, row.sessionId, row.completedTurnId);
     return true;
   });
 }
@@ -576,33 +582,19 @@ async function eligibleStageEnd(entry: InputEntry): Promise<string | null> {
     if (end?.turnId !== boundary.turnId) return null;
     if (!(end.kind === 'turn_end' && end.outcome === 'completed') &&
         !await turnHasMcpCall(entry.sessionId, boundary.conversationId, boundary.turnId)) return null;
-    const settledFailure = end.kind === 'turn_end' && end.outcome === 'failed' && end.reason === 'thinking_failed' && end.seq > boundary.workSeq;
-    const pro = session.selectedModel?.conversationId === boundary.conversationId &&
-      isProModel(session.selectedModel.model, session.selectedModel.reasoningEffort);
-    // Pro failure cannot supersede native-busy listening; genuine completion can.
-    if ((!settledFailure || pro) && (end.kind !== 'turn_end' || end.outcome !== 'completed')) {
-      if ((boundary.listenUntil ?? 0) > Date.now()) return null;
-    }
-    if (end.kind === 'turn_start' || (end.kind === 'turn_end' && end.outcome !== 'completed' && end.outcome !== 'stopped' && !settledFailure)) {
+    if (end.kind !== 'turn_end' || end.outcome !== 'completed') {
+      if (end.kind === 'turn_end' && end.outcome === 'stopped') return null;
+      if ((boundary.listenUntil ?? 0) > Date.now() ||
+          (end.kind === 'turn_end' && (session.lastToolCallAt ?? 0) > end.time)) return null;
       const [work] = await readRecentEvents(entry.sessionId, 1, { kinds: INPUT_WORK_KINDS });
       return work?.seq === boundary.workSeq ? boundary.turnId : null;
     }
-    // A real final after refresh supersedes the silence assumption and spends
-    // this same source turn through the ordinary completion policy below.
+    // A real final supersedes the silence assumption and spends the same source turn.
   }
   if (session.activeTurnId) return null;
-  // Completion or an explicitly classified Thinking failed after its browser
-  // inactivity grace can release one checkpoint. Generic failures and idle pages cannot.
-  if (end?.kind !== 'turn_end' || !end.turnId || end.time < entry.createdAt) return null;
-  const thinkingFailed = end.outcome === 'failed' && end.reason === 'thinking_failed';
-  const silent = thinkingFailed;
-  if (end.outcome !== 'completed' && !silent) return null;
-  if (silent && ((session.lastToolCallAt ?? 0) > end.time || inFlightToolCalls(session.conversationId) > 0)) return null;
-  if (silent) {
-    if (!session.conversationId || !await turnHasMcpCall(entry.sessionId, session.conversationId, end.turnId)) return null;
-    const [work] = await readRecentEvents(entry.sessionId, 1, { kinds: INPUT_WORK_KINDS });
-    if (work && work.seq > end.seq) return null;
-  }
+  // A failure releases manual input immediately. Automatic follow-ups require
+  // the confirmed refresh ticket above; only a real completion bypasses it.
+  if (end?.kind !== 'turn_end' || end.outcome !== 'completed' || !end.turnId || end.time < entry.createdAt) return null;
   return end.turnId;
 }
 const INPUT_WORK_KINDS: import('../../shared/session.js').SessionEvent['kind'][] =
@@ -619,8 +611,62 @@ export async function hasQueuedAfterTurnInput(sessionId: string): Promise<boolea
   return !!session && (await load()).some(row => queuedAfterTurn(row, session));
 }
 
+/** Read the same visible head as claims, including its still-running listening window.
+ * Historical restored tickets without an acceptance timestamp never arm browser recovery. */
+export function pendingQueuedPickups(): Promise<Array<{ conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean }>> {
+  return serial(async () => {
+    const rows = await load();
+    const result: Array<{ conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean }> = [];
+    const seen = new Set<string>();
+    for (const row of ordered(rows)) {
+      if (!row.sessionId || row.purpose === 'decision' || !['queued', 'browser', 'tool'].includes(row.state) || seen.has(row.sessionId)) continue;
+      seen.add(row.sessionId);
+      if (row.state !== 'queued' || !queuedFollowup(row) || row.dueAt > Date.now()) continue;
+      const session = await getSession(row.sessionId);
+      if (!session?.conversationId || !queuedAfterTurn(row, session)) continue;
+      const probe = row.silenceBoundary ? { ...row, silenceBoundary: { ...row.silenceBoundary, listenUntil: undefined } } : row;
+      const sourceTurnId = await eligibleStageEnd(probe);
+      if (!sourceTurnId || rows.some(other => other.sessionId === row.sessionId &&
+          (other.completedTurnId === sourceTurnId || other.state === 'browser' || other.state === 'tool'))) continue;
+      const [end] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
+      const completed = end?.kind === 'turn_end' && end.outcome === 'completed';
+      const acceptedAt = row.silenceBoundary?.acceptedAt ?? (!row.silenceBoundary && completed ? end.time : undefined);
+      if (acceptedAt === undefined) continue;
+      const selection = session.selectedModel;
+      result.push({ conversationId: session.conversationId, sessionId: row.sessionId, sourceTurnId, acceptedAt,
+        listenUntil: completed ? 0 : row.silenceBoundary?.listenUntil ?? 0,
+        pro: selection?.conversationId === session.conversationId && isProModel(selection.model, selection.reasoningEffort) });
+    }
+    return result;
+  });
+}
+
+/** The visible outbox precedes automatic Goal work, including an ineligible head.
+ * A spent completion also belongs to its user input after that row leaves the queue. */
+export function inputBeforeGoal(sessionId: string, sourceTurnId?: string): Promise<'queued' | 'consumed' | null> {
+  return serial(async () => {
+    const rows = await load();
+    if (rows.some(row => row.sessionId === sessionId && row.purpose !== 'decision' &&
+      ['queued', 'browser', 'tool'].includes(row.state))) return 'queued';
+    return sourceTurnId && rows.some(row => row.sessionId === sessionId && row.completedTurnId === sourceTurnId &&
+      (row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined || row.requiresAuthorization === false)) ? 'consumed' : null;
+  });
+}
+
+/** A native-only queue head needs the held answer to finish before it can send. */
+export function finishNeedsBrowserInput(sessionId: string): Promise<boolean> {
+  return serial(async () => {
+    const head = ordered(await load()).find(row => row.sessionId === sessionId && row.purpose !== 'decision' &&
+      ['queued', 'browser', 'tool'].includes(row.state));
+    if (!head || head.state !== 'queued' || head.dueAt > Date.now() ||
+      !(head.mode === 'after-turn' || (head.attachments?.length && head.attachmentDelivery !== 'tool'))) return false;
+    const session = await getSession(sessionId);
+    return !!session && queuedAfterTurn(head, session);
+  });
+}
+
 /** File on the existing outbox row, never in a parallel retry/ticket ledger. */
-export function fileSilenceInput(sessionId: string, conversationId: string, turnId: string, currentOwner: () => boolean): Promise<boolean> {
+export function fileSilenceInput(sessionId: string, conversationId: string, turnId: string, currentOwner: () => boolean, listenUntil?: number): Promise<boolean> {
   return serial(async () => {
     const current = await load();
     const session = await getSession(sessionId);
@@ -633,13 +679,17 @@ export function fileSilenceInput(sessionId: string, conversationId: string, turn
     if (current.some(row => row.sessionId === sessionId &&
       (row.completedTurnId === turnId || (row.silenceBoundary?.turnId === turnId && row.state === 'browser')))) return true;
     if (current.some(row => row.sessionId === sessionId && (row.state === 'browser' || row.state === 'tool'))) return false;
-    const row = ordered(current).find(row => queuedAfterTurn(row, session));
-    if (!row) return false;
-    if (row.silenceBoundary?.turnId === turnId) return true;
+    const row = ordered(current).find(row => row.sessionId === sessionId && queuedFollowup(row) && row.state === 'queued');
+    if (!row || !queuedAfterTurn(row, session)) return false;
     const [work] = await readRecentEvents(sessionId, 1, { kinds: INPUT_WORK_KINDS });
     if (!work || !currentOwner()) return false;
+    const previous = current.find(entry => entry.sessionId === sessionId && entry.silenceBoundary?.turnId === turnId)?.silenceBoundary;
+    const listening = Math.max(listenUntil ?? 0, previous?.listenUntil ?? 0);
+    if (row.silenceBoundary?.turnId === turnId && row.silenceBoundary.workSeq === work.seq &&
+        (row.silenceBoundary.listenUntil ?? 0) === listening) return true;
     await commit(current.map(entry => entry === row ? { ...entry,
-      silenceBoundary: { turnId, conversationId, workSeq: work.seq } } : entry));
+      silenceBoundary: { turnId, conversationId, workSeq: work.seq, acceptedAt: previous ? previous.acceptedAt : Date.now(), ...(listening ? { listenUntil: listening } : {}) } }
+      : entry.sessionId === sessionId && entry.state === 'queued' && entry.silenceBoundary?.turnId === turnId ? { ...entry, silenceBoundary: undefined } : entry));
     return true;
   });
 }
@@ -674,13 +724,10 @@ export function revokeSilenceInputs(sessionId: string): Promise<void> {
 /** Metadata only. Text is disclosed to one document only after an exclusive durable claim. */
 async function completedStageBoundary(entry: InputEntry, current: InputEntry[]): Promise<string | null> {
   if (!entry.sessionId || !queuedFollowup(entry)) return null;
-  // Finish-only stages have no browser authority. They must not block a later
-  // explicit After This Turn instruction from spending this completed turn.
-  let first: InputEntry | undefined;
-  for (const row of ordered(current)) {
-    if (row.sessionId === entry.sessionId && queuedFollowup(row) && row.state === 'queued' && row.dueAt <= Date.now() && await browserInputAllowed(row)) { first = row; break; }
-  }
-  if (first?.id !== entry.id) return null;
+  // Match the displayed order. A finish-only/file/delayed head cannot be silently
+  // skipped by a later after-turn row just because that transport is ready first.
+  const first = ordered(current).find(row => row.sessionId === entry.sessionId && queuedFollowup(row) && row.state === 'queued');
+  if (first?.id !== entry.id || first.dueAt > Date.now() || !await browserInputAllowed(first)) return null;
   const turnId = await eligibleStageEnd(entry);
   if (!turnId) return null;
   // A deferred ticket still owns this boundary. Later queue rows cannot overtake it.
@@ -753,6 +800,8 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     }
     await transition(current, current.map((row) => row === entry ? claimed : row),
       entry.state === 'queued' && entry.automation && conversationId && entry.purpose !== 'decision' ? [claimed] : [], 'before-send');
+    if (!requiresAuthorization && completedTurnId && entry.sessionId && conversationId)
+      await consumeGoalReplyForInputNow(conversationId, entry.sessionId, completedTurnId);
     logInfo(`input ${id}: browser claimed after ${Math.max(0, Date.now() - entry.createdAt)} ms`);
     return { ...claimed, ...selection, text: claimed.deliveryText ?? claimed.text };
   });
@@ -805,6 +854,8 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
       ...(messageId ? { messageId } : {}), deliveredAt: Date.now() };
     await transition(current, current.map((row) => row === entry ? acknowledged : row),
       entry.state !== 'cancelled' && !entry.sessionId && entry.automation && deliveredConversation && entry.purpose !== 'decision' ? [acknowledged] : [], 'after-send');
+    if (entry.completedTurnId && entry.sessionId && deliveredConversation)
+      await consumeGoalReplyForInputNow(deliveredConversation, entry.sessionId, entry.completedTurnId);
     logInfo(`input ${id}: browser acknowledged after ${Math.max(0, Date.now() - entry.createdAt)} ms`);
     await publishHistory();
     return true;
@@ -846,6 +897,8 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
     const current = await load();
     // A claimed browser send owns this session until its send outcome is known.
     if (current.some((entry) => entry.sessionId === sessionId && entry.state === 'browser')) return batch;
+    const head = ordered(current).find(row => row.sessionId === sessionId && queuedFollowup(row) &&
+      ['queued', 'tool'].includes(row.state) && !terminal(toolInputReceipt(row, sessionId, conversationId, startedAt)));
     const delivered: string[] = [];
     let inputTaken = false;
     let payloadBytes = Buffer.byteLength(TOOL_INPUT_HEADER);
@@ -861,6 +914,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
       if (received !== entry) return received;
       if (payloadFull || (inputTaken && (entry.mode === 'finish' || entry.finishOwner)) || (entry.finishOwner && entry.createdAt >= startedAt)) return entry;
       if (entry.mode === 'finish' && !finishBoundary) return entry;
+      if (entry.mode === 'finish' && entry !== head) return entry;
       // After-turn tasks own a future browser turn; they cannot block an explicit
       // Inject now message from the current tool response. Their own FIFO is unchanged.
       if ((entry.state === 'queued' && (entry.mode === 'finish' || entry.mode === 'auto')) || entry.state === 'tool') {

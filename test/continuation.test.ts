@@ -144,6 +144,40 @@ async function readyContinuation(): Promise<{ sessionId: string; token: string }
 }
 
 describe('capturing the brief', () => {
+  it('freezes exact source model intent across selection changes and durable restore', async () => {
+    const summary = await createSession({ title: 'model transfer', conversationId: CHAT_A });
+    await store.observeSessionModel(summary.id, CHAT_A, 'gpt-5.6-sol', 10, 'high');
+    const opened = await openContinuationNow(summary.id, CHAT_A);
+    expect(opened.requestedModel).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+    opened.requestedModel!.model = 'caller-mutated';
+    await store.observeSessionModel(summary.id, CHAT_A, 'gpt-6-astra', 20, 'ultra');
+    expect((await openContinuationNow(summary.id, CHAT_A)).requestedModel).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+    const snapshot = snapshotContinuations();
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    expect(continuationByToken(opened.token)?.requestedModel).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+  });
+
+  it('does not borrow selection from another conversation or invent missing effort', async () => {
+    const summary = await createSession({ title: 'source evidence', conversationId: CHAT_A });
+    await store.observeSessionModel(summary.id, CHAT_A, 'gpt-5.6-sol', 10);
+    expect((await openContinuationNow(summary.id, CHAT_A)).requestedModel).toEqual({ model: 'gpt-5.6-sol', reasoningEffort: null });
+    resetContinuationsForTests();
+    await store.rebindSession(summary.id, CHAT_A, CHAT_B);
+    expect((await openContinuationNow(summary.id, CHAT_B)).requestedModel).toBeNull();
+  });
+
+  it.each([undefined, { model: '<invalid>', reasoningEffort: 'high' }, { model: 'gpt-5.6-sol', reasoningEffort: 'invented' }])(
+    'keeps legacy or invalid restored model intent unknown (%j)', async requestedModel => {
+      const { token } = await readyContinuation();
+      const snapshot = snapshotContinuations();
+      Object.assign(snapshot.entries[0]!, { requestedModel });
+      resetContinuationsForTests();
+      await restoreContinuations(snapshot);
+      expect(continuationByToken(token)?.requestedModel).toBeNull();
+    }
+  );
+
   it('keeps a pre-send automatic refusal across restart, scoped to its original turn', async () => {
     const summary = await createSession({ title: 'refused turn', conversationId: CHAT_A });
     await store.appendEvent(summary.id, { time: 1, source: 'extension', kind: 'turn_start', turnId: 'refused' });
@@ -453,6 +487,32 @@ describe('committing', () => {
     expect(await releaseContinuationDestinationSendNow('0000000000000000000000000000dead')).toBe(false);
   });
 
+  it.each(['unattempted', 'attempted', 'dispatched', 'sent'])('command retirement only releases its own unattempted claim (%s)', async state => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'old-command');
+    expect(await releaseContinuationDestinationSendNow(token, 'foreign-command')).toBe(false);
+    if (state !== 'unattempted') await beginContinuationDestinationSendNow(token);
+    if (state === 'dispatched' || state === 'sent') await dispatchContinuationDestinationSendNow(token);
+    if (state === 'sent') await bindContinuationDestinationMessageNow(token, CHAT_B, 'exact-resume-message');
+    const before = snapshotContinuations();
+    expect(await releaseContinuationDestinationSendNow(token, 'old-command')).toBe(state === 'unattempted');
+    if (state === 'unattempted') {
+      expect(await claimContinuationNow(token, 'new-command')).not.toBeNull();
+      expect(await releaseContinuationDestinationSendNow(token, 'old-command')).toBe(false);
+      expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('new-command');
+    } else expect(snapshotContinuations().entries).toEqual(before.entries);
+  });
+
+  it('retains the old claimant when retiring its claim cannot be saved', async () => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'old-command');
+    const durable = await import('../src/main/durable.js');
+    vi.spyOn(durable, 'writeDurableNow').mockRejectedValueOnce(new Error('disk full'));
+    await expect(releaseContinuationDestinationSendNow(token, 'old-command')).rejects.toThrow('disk full');
+    expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('old-command');
+    expect(await claimContinuationNow(token, 'new-command')).toBeNull();
+  });
+
   it('re-proves the exact destination message after the continuation already committed', async () => {
     const { token } = await readyContinuation();
     await claimContinuationNow(token, 'tab-1');
@@ -552,7 +612,7 @@ describe('the swarm handover', () => {
       revivable: true,
       conversationId: 'worker-history-chat'
     });
-    expect(() => swarmStateForCaller({ conversationId: CHAT_A })).toThrow(/No sub-agent history/i);
+    expect(swarmStateForCaller({ conversationId: CHAT_A }).agents).toEqual([]);
 
     sendMessage({ conversationId: CHAT_B }, 'worker-1', 'continue from the exact chat you already know');
     expect(pendingWorkerRevivals()).toEqual([
@@ -587,8 +647,8 @@ describe('the swarm handover', () => {
 
     expect(goalObjectiveFor(CHAT_B)).toBe('');
     expect(goalObjectiveFor(CHAT_C)).toBe('finish every requested release task overnight');
-    expect(() => swarmStateForCaller({ conversationId: CHAT_A })).toThrow(/No sub-agent history/i);
-    expect(() => swarmStateForCaller({ conversationId: CHAT_B })).toThrow(/No sub-agent history/i);
+    expect(swarmStateForCaller({ conversationId: CHAT_A }).agents).toEqual([]);
+    expect(swarmStateForCaller({ conversationId: CHAT_B }).agents).toEqual([]);
     expect(swarmStateForCaller({ conversationId: CHAT_C }).agents.find((agent) => agent.id === 'worker-1')).toMatchObject({
       state: 'sleeping',
       revivable: true,
@@ -656,7 +716,7 @@ describe('the swarm handover', () => {
     });
     expect(goalObjectiveFor(CHAT_A)).toBe('');
     expect(goalObjectiveFor(CHAT_B)).toBe('keep the recovery objective attached to this work');
-    expect(() => swarmStateForCaller({ conversationId: CHAT_A })).toThrow(/No sub-agent history/i);
+    expect(swarmStateForCaller({ conversationId: CHAT_A }).agents).toEqual([]);
   });
 
   it('carries the full sleeping and terminal worker history plus Goal through repeated overnight resumes', async () => {
@@ -708,8 +768,8 @@ describe('the swarm handover', () => {
       revivable: false,
       conversationId: 'worker-chain-terminal'
     });
-    expect(() => swarmStateForCaller({ conversationId: CHAT_A })).toThrow(/No sub-agent history/i);
-    expect(() => swarmStateForCaller({ conversationId: CHAT_B })).toThrow(/No sub-agent history/i);
+    expect(swarmStateForCaller({ conversationId: CHAT_A }).agents).toEqual([]);
+    expect(swarmStateForCaller({ conversationId: CHAT_B }).agents).toEqual([]);
 
     // Revival authority follows the owner chain but the worker conversation itself never moves.
     sendMessage({ conversationId: CHAT_C }, 'worker-1', 'resume in the exact old worker chat');

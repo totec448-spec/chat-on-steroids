@@ -96,7 +96,7 @@ function finish(error) { if (closed) return; send({ type: 'done', error }); clos
     check();
   });
   const evaluated = enter(() => vm.evalCode(workerData.code, 'code-mode.mjs', { type: 'module' }));
-  if (evaluated.error) { evaluated.error.dispose(); finish(fatal || (usedCpu > workerData.limits.cpuMs ? 'CPU_LIMIT' : 'SCRIPT_ERROR')); return; }
+  if (evaluated.error) { evaluated.error.dispose(); finish(fatal || (usedCpu > workerData.limits.cpuMs ? 'CPU_LIMIT' : 'PARSE_ERROR')); return; }
   execution = evaluated.value;
   check();
 })().catch(() => finish('RUNTIME_ERROR'));

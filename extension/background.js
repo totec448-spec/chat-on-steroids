@@ -3015,8 +3015,16 @@ const HANDLERS = {
     // ChatGPT assigns /c/B through an SPA transition. Read Chrome's current tab and
     // retain the exact document/epoch lease across that await before accepting its route.
     const tab = await chrome.tabs.get(source.tab).catch(() => null);
-    if (!ownsDocument(source) || !tab || tab.pendingUrl || tab.status === 'loading' ||
-        !isChatGptUrl(tab.url) || conversationFromUrl(tab.url) !== cleanConversationId(message.conversationId))
+    if (!ownsDocument(source) || !tab || !isChatGptUrl(tab.url))
+      return { ok: false, error: 'stale_document' };
+    const named = cleanConversationId(message.conversationId);
+    // Destination permits precede the first Send and therefore have no chat route.
+    // Loading that same leased document is normal; leaving it for another route is not.
+    // Named source checkpoints still require a fully settled matching conversation.
+    if (named
+      ? (tab.pendingUrl || tab.status === 'loading' || conversationFromUrl(tab.url) !== named)
+      : (conversationFromUrl(tab.url) !== null ||
+          (tab.pendingUrl && tab.pendingUrl !== tab.url)))
       return { ok: false, error: 'stale_document' };
     const sourceUrl = tab.url;
     const result = await call('/compact', {
@@ -3028,6 +3036,8 @@ const HANDLERS = {
         cancel: message.cancel === true,
         ticket: message.ticket === true,
         automatic: message.automatic === true,
+        ...((message.destinationAttempt === true || message.destinationDispatch === true || message.destinationLost === true)
+          ? { commandId: String(message.commandId || ''), client: String(message.client || '') } : {}),
         // The capture. `token` names the transaction the page was given when it marked the
         // compaction turn, and `summary` is that turn's own answer. Both are forwarded
         // verbatim and only together: the app refuses a brief whose token does not name an

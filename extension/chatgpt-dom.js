@@ -174,7 +174,19 @@ var CLF_DOM = (() => {
     return safe(() => {
       if (!node) return '';
       if (role === 'user') {
+        // Only blocks that nothing else here already contains. `querySelectorAll` also
+        // returns a match nested inside an earlier match, and `text()` reads a whole
+        // subtree, so an inner block was read twice: once as part of its container and
+        // once on its own. The recorded message then carried that passage twice, and every
+        // reader comparing authored text against what was submitted saw a message longer
+        // than the one it sent. `node` itself never counts as a container: the query cannot
+        // return it, and treating it as one would empty this preferred path.
         const parts = [...node.querySelectorAll('.whitespace-pre-wrap')]
+          .filter((part) => {
+            const outer = part.parentElement && part.parentElement.closest &&
+              part.parentElement.closest('.whitespace-pre-wrap');
+            return !outer || outer === node || !(node.contains && node.contains(outer));
+          })
           .filter(part => !part.hasAttribute?.('data-clf-user-text'))
           .map((part) => text(part))
           .filter(Boolean);
@@ -2001,6 +2013,11 @@ var CLF_DOM = (() => {
     return {
       state,
       async open() {
+        // A cold home editor mounts before its native Chat/Work picker. Workers
+        // enter here directly, without the New Chat reuse/catalog preparation.
+        // Wait for that surface, then use the same owned Chat transition before
+        // interpreting account choices. Work's picker is not a denied Chat model.
+        if (!await wait(trigger, 15000) || !await prepareChatModelSurface(stillCurrent)) return null;
         if (!picker()) { const button = await wait(trigger, 15000); if (!key(button, 'Enter') || !await wait(picker)) return null; }
         return state();
       },
@@ -2087,15 +2104,6 @@ var CLF_DOM = (() => {
       if (!entry.aliases.includes(choice.id)) entry.aliases.push(choice.id);
       result.set(choice.familyId, entry);
     }
-  }
-  /** Account-evaluated choices already mounted in the closed native picker. */
-  async function inspectVisibleModelSettings(stillCurrent = () => true) {
-    if (!stillCurrent() || !modelPickerTrigger()) return null;
-    const state = await readPickerState();
-    if (!stillCurrent() || !state) return null;
-    const result = new Map();
-    collectModelChoices(result, state);
-    return result.size ? [...result.values()] : null;
   }
   async function inspectModelSettings(stillCurrent = () => true, failure = () => {}) {
     const ui = modelPickerAccess(stillCurrent), original = await ui.open();
@@ -2238,7 +2246,6 @@ var CLF_DOM = (() => {
     projectHomeId,
     enterProject,
     visibleModelSelection,
-    inspectVisibleModelSettings,
     inspectModelSettings,
     uploadImages,
     captureComposerDraft,

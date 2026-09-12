@@ -1483,6 +1483,103 @@ describe('worker settings authority', () => {
   });
 
   /**
+   * The half of this route that no test covered: the replacement chat's own checkpoints.
+   *
+   * Every case above sends `conversationId` alongside the token, because every one of them is
+   * the *source* chat — a conversation that exists. The destination is the opposite by
+   * construction: content.js asks for its permit from a page opened at `/?clf=<id>`, before
+   * ChatGPT has assigned anything, so it sends a token and a flag and no conversation id at
+   * all. Nothing here ever exercised that shape, and it is the shape the whole handoff depends
+   * on: refuse it and the page clears its composer and stops, with no ack and no log line
+   * anywhere — which is exactly what a stuck handoff looks like from the outside.
+   */
+  /**
+   * The replacement chat asks for its permit while ChatGPT is still loading.
+   *
+   * Measured in the browser on 2026-09-10: the tab redeemed at 04:39:55.218 and got the whole
+   * 48,975-character brief, then asked for `destinationAttempt` at 04:39:58.262 — three seconds
+   * into a freshly opened ChatGPT, which is still `loading`. The worker refused it as a stale
+   * document without ever calling the app, content.js read that as a denied permit, cleared the
+   * composer and returned without an ack. The app then waited out its whole deadline and gave up
+   * with "the chat this app opened did not report back in time", and nothing anywhere said why.
+   *
+   * The loading/pendingUrl guard is for a tab navigating *away* from what the message names. A
+   * checkpoint that names no conversation, from a document the worker still owns, is the
+   * opposite case: there is nothing to navigate away from yet.
+   */
+  it.each(['loading', 'pending'])('forwards a replacement chat permit while the tab is still %s', async state => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { allowed: true });
+      }
+      return response(404, {});
+    });
+    const tab = state === 'loading'
+      ? { id: 47, url: 'https://chatgpt.com/?clf=cmd-successor', status: 'loading' }
+      : { id: 47, url: 'https://chatgpt.com/?clf=cmd-successor', pendingUrl: 'https://chatgpt.com/?clf=cmd-successor' };
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsGet: async () => tab });
+    await worker.registerTab(47);
+    const token = '0123456789abcdef0123456789abcdef';
+
+    const commandId = 'cmd-successor', client = 'run-successor-document';
+    const reply = await worker.send({ type: 'compact', token, commandId, client, destinationAttempt: true }, 47);
+
+    expect(reply).not.toMatchObject({ error: 'stale_document' });
+    expect(posted).toEqual([expect.objectContaining({ token, commandId, client, destinationAttempt: true })]);
+  });
+
+  it('forwards the destination checkpoints a replacement chat sends, which name no conversation', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/compact' && init.method === 'POST') {
+        posted.push(JSON.parse(String(init.body || '{}')));
+        return response(200, { allowed: true });
+      }
+      return response(404, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsGet: async () => ({ id: 46, url: 'https://chatgpt.com/?clf=cmd-successor' }) });
+    await worker.registerTab(46);
+    const token = '0123456789abcdef0123456789abcdef';
+
+    const commandId = 'cmd-successor', client = 'run-successor-document';
+    await worker.send({ type: 'compact', token, commandId, client, destinationAttempt: true }, 46);
+    await worker.send({ type: 'compact', token, commandId, client, destinationDispatch: true }, 46);
+    await worker.send({ type: 'compact', token, commandId, client, destinationLost: true }, 46);
+
+    expect(posted).toEqual([
+      expect.objectContaining({ token, commandId, client, destinationAttempt: true }),
+      expect.objectContaining({ token, commandId, client, destinationDispatch: true }),
+      expect.objectContaining({ token, commandId, client, destinationLost: true })
+    ]);
+  });
+
+  it.each(['conversation', 'pending-conversation', 'pending-foreign'])('refuses a replacement permit on a %s route', async state => {
+    const fetch = vi.fn(async (input: string) => new URL(input).pathname === '/hello'
+      ? response(200, { app: 'chat-on-steroids', paired: true }) : response(200, { allowed: true }));
+    const home = 'https://chatgpt.com/?clf=cmd-successor';
+    const chat = `https://chatgpt.com/c/${CHAT}`;
+    const tab = { id: 48, url: state === 'conversation' ? chat : home,
+      ...(state === 'pending-conversation' ? { pendingUrl: chat } : {}),
+      ...(state === 'pending-foreign' ? { pendingUrl: 'https://example.com/' } : {}) };
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsGet: async () => tab });
+    await worker.registerTab(48);
+    expect(await worker.send({ type: 'compact', token: '0123456789abcdef0123456789abcdef',
+      commandId: 'cmd-successor', client: 'run-successor-document', destinationAttempt: true }, 48))
+      .toMatchObject({ ok: false, error: 'stale_document' });
+    expect(fetch.mock.calls.some(([input]) => new URL(input).pathname === '/compact')).toBe(false);
+  });
+
+
+  /**
    * The mode a goal was written in, which the app turns into a durable per-chat switch.
    *
    * Both halves matter. It has to cross — a goal written with "add specific loop" that arrives
