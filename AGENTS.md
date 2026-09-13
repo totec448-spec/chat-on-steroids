@@ -748,6 +748,9 @@ editor/route identity and attachment changes still do.
 The witnessed Send receipt captures the pre-send assistant baseline. If app identity or native
 message source arrives after a fast reply has rendered, that question still owns its reply and
 exact final marker. A later observation must not classify its own answer as old history.
+An exact accepted fresh-chat receipt remains valid when native submit promotes its null
+conversation to the delivered conversation. The same receipt, message, epoch and send lifetime
+must still agree; a second navigation or replaced receipt cannot inherit that acceptance.
 While an exact send receipt still has a bounded evidence reader, the existing observation also
 requests canonical MAIN-world text even after native generation stops. Rendered Markdown can
 remove submitted bytes; recognizing the generation must not be a prerequisite for reading the
@@ -1026,6 +1029,8 @@ a different lifetime from MV3 suspension (§2).
 
 An idle composer or missing Stop button alone does not prove a completed answer. Turn state
 combines native message/terminal evidence with exact user/assistant identities and live tools.
+Adopted generation recovery excludes historical assistant nodes above the latest user question,
+even when hydration remounts them after its baseline. DOM novelty cannot reassign that answer.
 Interim prose, tool progress, refusal/error presentation, interrupted generation and final
 completion remain distinct. Navigation first retires the old epoch; no late callback may record
 or send for it. A settings overlay must not count as a usable hidden composer.
@@ -1471,6 +1476,8 @@ The sidebar groups local projects/sessions, exposes worker state and retains del
 and expansion preferences. The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.
+The plan heading is a native disclosure with a visible open/closed chevron. Collapsing it
+returns height to the conversation; status updates preserve its current disclosure state.
 
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
 the first authored user message, at one 80-character bound; injected instructions/AGENTS frames

@@ -6121,7 +6121,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-dead')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-dead')]);
       await events(OTHER, [endTurn('turn-dead', 'failed')]);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
@@ -6263,7 +6263,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-heavy')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-heavy')]);
       await events(OTHER, [
         {
           kind: 'chat_error',
@@ -6300,7 +6300,7 @@ describe('unattributed activity recovery', () => {
       await pair();
       // An earlier transport failure, repaired and then retired by a turn the chat got through.
       // That spends this chat's browser action and starts its three-minute floor.
-      await events(OTHER, [openTurn('turn-first')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-first')]);
       await events(OTHER, [
         {
           kind: 'chat_error',
@@ -6317,7 +6317,7 @@ describe('unattributed activity recovery', () => {
       await events(OTHER, [openTurn('turn-through'), endTurn('turn-through', 'completed')]);
       expect(await maintenance()).toBeNull();
 
-      await events(OTHER, [openTurn('turn-broken')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-broken')]);
       await events(OTHER, [
         {
           kind: 'chat_error',
@@ -6402,7 +6402,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-silent-from-the-start')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-silent-from-the-start')]);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
       await sweepStaleSwarm(Date.now());
@@ -6432,7 +6432,7 @@ describe('unattributed activity recovery', () => {
       // that spent handout, and this is about arming a fresh episode on time.
       const PUNCTUAL = 'a1a1a1a1-1111-2222-3333-444444444444';
       await pair();
-      await events(PUNCTUAL, [openTurn('turn-silent-punctual')]);
+      await events(PUNCTUAL, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-silent-punctual')]);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
       expect(await maintenance()).toBeNull();
@@ -6445,7 +6445,7 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('makes a newly started session recoverable for the full two-minute opening window', async () => {
+  it('makes a newly started session recoverable for the full unknown-model opening window', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -6457,7 +6457,7 @@ describe('unattributed activity recovery', () => {
         text: 'start working'
       }]);
 
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - 1);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
 
@@ -6520,6 +6520,7 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       await events(OTHER, [
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
         {
           kind: 'user_message',
           time: Date.now(),
@@ -6585,7 +6586,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-ends-uncertain')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-ends-uncertain')]);
       await events(OTHER, [
         { kind: 'turn_end', time: Date.now(), turnId: 'turn-ends-uncertain', outcome: 'unknown' }
       ]);
@@ -6618,7 +6619,7 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       spawn({ workers: [{ task: 'hold the run open' }], caller: { conversationId: PRIME } });
-      await events(PRIME, [openTurn('turn-prime-silent')]);
+      await events(PRIME, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-prime-silent')]);
       await attributed(PRIME);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
@@ -6648,7 +6649,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-loop-silent')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-loop-silent')]);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toMatchObject({ conversationId: OTHER, reason: 'silence' });
@@ -6986,6 +6987,51 @@ describe('unattributed activity recovery', () => {
     } finally { await saveConfig(previous); vi.useRealTimers(); }
   });
 
+  it.each(['unknown', 'normal'] as const)('uses the %s model recovery clock without queued input', async model => {
+    const chat = model === 'unknown' ? 'a7777777-1111-4111-8111-000000000001' : 'a7777777-1111-4111-8111-000000000002';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      expect(getConfig().multiAgent.recoverAgentTabs).toBe(true);
+      await events(chat, [
+        ...(model === 'normal' ? [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }] : []),
+        openTurn(`no-queue-${model}`)
+      ]);
+      const deadline = model === 'unknown' ? PRO_SILENCE_MS : CHAT_SILENCE_MS;
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
+      expect(await maintenance()).toBeNull();
+      if (model === 'unknown') {
+        await vi.advanceTimersByTimeAsync(deadline - CHAT_SILENCE_MS);
+        expect(await maintenance()).toBeNull();
+      }
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
+      expect(goalPendingReplyFor(chat)).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('retires unknown activity after five minutes when recovery is off and no input is queued', async () => {
+    const previous = getConfig();
+    const chat = 'a7777777-1111-4111-8111-000000000003';
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: false },
+      multiAgent: { ...previous.multiAgent, recoverAgentTabs: false } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [openTurn('unknown-recovery-off')]);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_RETIRE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.activeTurnId).toBeNull();
+      expect(await maintenance()).toBeNull();
+      // Enabling recovery later must not resurrect the already-retired grant.
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: true } });
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - PRO_SILENCE_RETIRE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally { await saveConfig(previous); vi.useRealTimers(); }
+  });
+
   for (const selection of ['missing', 'stale', 'after-start']) it(`does not synthesize a silence Goal from ${selection} model evidence`, async () => {
     // Persisted model observations survive the bridge reset: use a fresh conversation.
     const uncertainChat = `a4444444-1111-4111-8111-00000000000${["missing", "stale", "after-start"].indexOf(selection)}`;
@@ -6999,7 +7045,7 @@ describe('unattributed activity recovery', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       await events(uncertainChat, [openTurn('uncertain-' + selection)]);
       if (selection === 'after-start') await events(uncertainChat, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() + 1 }]);
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const reload = await maintenance();
       expect(reload).toMatchObject({ reason: 'silence' });
@@ -7041,7 +7087,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events('a6666666-1111-4111-8111-000000000006', [openTurn('turn-loop-slow')]);
+      await events('a6666666-1111-4111-8111-000000000006', [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-loop-slow')]);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const handout = await maintenance();
@@ -7468,7 +7514,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-solo-silent')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-solo-silent')]);
       await attributed(OTHER);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
@@ -7494,7 +7540,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-closed-while-tools-run')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-closed-while-tools-run')]);
       await request('POST', '/closed', { body: { conversationId: OTHER } });
 
       // The model keeps running server-side after Chrome has gone. Exact attribution is the
@@ -7528,7 +7574,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-reload-episode-one')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-reload-episode-one')]);
       await attributed(OTHER);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
@@ -7539,8 +7585,9 @@ describe('unattributed activity recovery', () => {
       await sweepStaleSwarm(Date.now());
 
       // A confirmed reload alone is spent. A new exact call is the sole fact that starts episode 2.
+      // Its replacement page has supplied no new model proof, so recovery is conservative.
       await attributed(OTHER);
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - 1);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
 
@@ -7556,7 +7603,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-reload-interim-one')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-reload-interim-one')]);
       await attributed(OTHER);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
@@ -7574,7 +7621,8 @@ describe('unattributed activity recovery', () => {
         final: false,
         activeNow: true
       }]);
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      // The old grant was spent; this unowned interim carries no fresh model selection.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       expect(chatOf(await maintenance())).toBe(OTHER);
     } finally {
@@ -7664,7 +7712,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-lost-on-reload')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-lost-on-reload')]);
       await events(OTHER, [endTurn('turn-lost-on-reload', 'unknown')]);
       await attributed(OTHER);
 
@@ -7722,7 +7770,7 @@ describe('unattributed activity recovery', () => {
       await request('POST', '/commands/ack', {
         body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
       });
-      await events(WORKER, [openTurn('turn-worker-pruned')]);
+      await events(WORKER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-worker-pruned')]);
       await attributed(WORKER);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);

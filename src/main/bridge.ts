@@ -6046,9 +6046,10 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
       spent.push(conversationId);
       continue;
     }
-    // Queue and Goal share the model's work clock. Unknown models retain the
-    // conservative ten-minute input floor; known normal models use two minutes.
-    if (afterTurn && grant.model !== 'other' && !grant.thinkingFailed && now < grant.evidenceAt + PRO_SILENCE_MS) {
+    // Recovery and queued delivery share the same model clock. Missing selection
+    // is not evidence of a normal model, even when no follow-up input is queued.
+    // Thinking failed keeps its separately proven immediate refresh authority.
+    if ((afterTurn || tabRecoveryWanted(conversationId)) && grant.model !== 'other' && !grant.thinkingFailed && now < grant.evidenceAt + PRO_SILENCE_MS) {
       grant.until = grant.evidenceAt + PRO_SILENCE_MS;
       deferred = true;
       continue;
@@ -6095,7 +6096,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     if (queueBrowserRecovery(conversationId, grant.sessionId, `silence:${grant.until}`, 'silence', 0, now)) {
       queued = true;
       logInfo(
-        `bridge: active chat silent for ${grant.model === 'pro' ? 'ten' : 'two'} minutes — asking the browser to reload ${conversationId} once`
+        `bridge: active chat silent for ${grant.model === 'other' ? 'two' : 'ten'} minutes — asking the browser to reload ${conversationId} once`
       );
     }
   }

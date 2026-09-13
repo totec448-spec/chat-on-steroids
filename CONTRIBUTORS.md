@@ -33,11 +33,34 @@ disabled-permission guidance from [#146](https://github.com/totec448-spec/chat-o
 The claim release was strengthened with durable command/document ownership; this does not
 incorporate the rest of the native Desktop proposal.
 
+The September 13 review confirms the incorporated bounded tab-reuse work from
+[@ventianima-lab](https://github.com/ventianima-lab) ([#144](https://github.com/totec448-spec/chat-on-steroids/pull/144),
+[#159](https://github.com/totec448-spec/chat-on-steroids/pull/159)), the stream-attribution design
+from [#170](https://github.com/totec448-spec/chat-on-steroids/pull/170), and
+[@nofihq](https://github.com/nofihq)'s fetch-reattachment follow-up. The implementation retains
+bounded server-metadata parsing and exact page ownership; this does not claim every attribution
+failure is resolved. Pinned-tab protection incorporates the proposals from
+[@Maximapple](https://github.com/Maximapple) ([#161](https://github.com/totec448-spec/chat-on-steroids/pull/161))
+and [@L4XB](https://github.com/L4XB) ([#158](https://github.com/totec448-spec/chat-on-steroids/pull/158)),
+with fresh pin checks at the existing close sites.
+[@pop15106](https://github.com/pop15106)'s [#192](https://github.com/totec448-spec/chat-on-steroids/pull/192)
+corrected the README and hero's absolute quota claim. The adapted wording describes CoS's Chat
+surface and links to OpenAI's current Work/Codex usage policy.
+
+Additional receipt-promotion and adopted-answer ownership fixes adapt
+[@ventianima-lab](https://github.com/ventianima-lab)'s minimal reproductions and proposed repairs
+in [#185](https://github.com/totec448-spec/chat-on-steroids/issues/185#issuecomment-5650663451)
+and its [remounted-answer follow-up](https://github.com/totec448-spec/chat-on-steroids/issues/185#issuecomment-5651819276).
+
 ## Reports, review and proposed work
 
 [@ventianima-lab](https://github.com/ventianima-lab)'s reproductions also led to the focused
 resume-selection ([#155](https://github.com/totec448-spec/chat-on-steroids/issues/155)) and Windows
 plugin-path ([#178](https://github.com/totec448-spec/chat-on-steroids/issues/178)) repairs.
+[@rcnir](https://github.com/rcnir) identified the unknown-model silence-recovery gap in
+[#172](https://github.com/totec448-spec/chat-on-steroids/issues/172), and
+[@Gauthammaster2012Code](https://github.com/Gauthammaster2012Code) reported the missing visible
+plan-collapse affordance in [#191](https://github.com/totec448-spec/chat-on-steroids/issues/191).
 
 Contributions also include reproductions, independent testing, designs and patches that are still under review or were superseded. Thank you to:
 

@@ -1735,6 +1735,13 @@
    * whole point of this batch is that the local session log stops containing those.
    */
   function generationTurn(turns = CLF_DOM.turns()) {
+    // Hydration may remount an old answer with a new node after our baseline.
+    // An adopted generation still belongs after the latest question; DOM novelty
+    // above that boundary cannot establish or retain its assistant owner.
+    if (unwitnessedGeneration) {
+      const question = turns.findLastIndex(turn => turn.role === 'user');
+      if (question >= 0) turns = turns.slice(question + 1);
+    }
     if (genNode) {
       const held = turnForNode(genNode, turns);
       if (held) return held;
@@ -10378,7 +10385,8 @@
       const accepted = acknowledged?.data?.ok === true;
       if (accepted && deliveredConversation && receipt.user?.id && sendingTarget() &&
           userSendReceipt === witnessedSendReceipt && witnessedSendReceipt?.text === submittedText &&
-          witnessedSendReceipt.conversationId === target &&
+          (witnessedSendReceipt.conversationId === target ||
+            (!target && witnessedSendReceipt.conversationId === deliveredConversation)) &&
           (witnessedSendReceipt.previousMessageId ?? null) === (previousUserId ?? null) &&
           Date.now() - witnessedSendReceipt.at <= USER_SEND_RECEIPT_MS) {
         witnessedSendReceipt.accepted = { messageId: receipt.user.id, conversationId: deliveredConversation, epoch };

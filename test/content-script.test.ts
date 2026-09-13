@@ -621,7 +621,7 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
   });
-  it('retains a reused-document send boundary when canonical Fiber text arrives before activity identity', async () => {
+  it.each([false, true])('retains a reused-document send boundary when canonical Fiber text arrives before activity identity (promoted submit: %s)', async promotedSubmit => {
     const submitted = 'Keep [literal] #tags in the receipt.';
     const escaped = String.raw`Keep \[literal\] \#tags in the receipt\.`;
     const run = async (canonical: string, acknowledge = true, invalidate?: 'epoch' | 'receipt'): Promise<number> => {
@@ -639,6 +639,11 @@ describe('desktop input delivery and helper ownership', () => {
       live.hook.observe();
       let user!: HTMLElement;
       live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        if (promotedSubmit) {
+          live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
+          live!.hook.observe();
+          live!.document.dispatchEvent(new live!.window.Event('submit', { bubbles: true }));
+        }
         user = userTurn(live!.document, 'gated-spa-user', submitted, { sent: false });
         startGenerating(live!.document, { send: false });
         live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` });
@@ -7318,7 +7323,7 @@ describe('a content script reloaded into a turn already in flight', () => {
    * reload while the same request went on calling tools. A section above the question is not
    * this turn's; with none after it, the turn stays open until one appears and ends.
    */
-  it('never binds an adopted turn to an answer that sits above the question it is answering', async () => {
+  it.each(['static', 'remounted-final', 'remounted-interim'])('never binds an adopted turn to an answer above its question (%s)', async variant => {
     live = await harness(
       'https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
       { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) },
@@ -7338,12 +7343,17 @@ describe('a content script reloaded into a turn already in flight', () => {
     await settle();
 
     // The page model names the previous answer terminal. It is the previous answer.
-    const settled = live.document.querySelector('[data-turn-id="turn-old"]') as HTMLElement;
+    let settled = live.document.querySelector('[data-turn-id="turn-old"]') as HTMLElement;
+    if (variant !== 'static') {
+      const replacement = settled.cloneNode(true) as HTMLElement;
+      settled.replaceWith(replacement); settled = replacement;
+      live.hook.observe(); await settle();
+    }
     await bindFiberTurns([{
       section: settled,
       turn: {
         turnId: 'turn-old',
-        endMessageId: 'reload-prev-final',
+        endMessageId: variant === 'remounted-interim' ? undefined : 'reload-prev-final',
         messages: [{
           messageId: 'reload-prev-final', rawMessageId: 'reload-prev-final', stable: true, order: 1,
           rawText: 'The recorder is fixed.', renderedHtml: '<p>The recorder is fixed.</p>'
@@ -7374,7 +7384,7 @@ describe('a content script reloaded into a turn already in flight', () => {
     live.hook.observe();
     await settle();
     await bindFiberTurns([
-      { section: settled, turn: { turnId: 'turn-old', endMessageId: 'reload-prev-final', messages: [{
+      { section: settled, turn: { turnId: 'turn-old', endMessageId: variant === 'remounted-interim' ? undefined : 'reload-prev-final', messages: [{
         messageId: 'reload-prev-final', rawMessageId: 'reload-prev-final', stable: true, order: 1,
         rawText: 'The recorder is fixed.', renderedHtml: '<p>The recorder is fixed.</p>'
       }] } },
