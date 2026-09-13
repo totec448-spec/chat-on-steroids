@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { recordLoopMcpProof } from './goal-mcp-proof.js';
 import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../src/shared/goal-templates.js';
 import { promises as fs } from 'node:fs';
 const browser = vi.hoisted(() => ({ request: vi.fn(), authorize: vi.fn() }));
@@ -123,6 +124,7 @@ async function recording(conversationId: string, text: string): Promise<string> 
       message: { text: message, chars: message.length, truncated: false }
     });
   }
+  await recordLoopMcpProof(session.id);
   return session.id;
 }
 async function settled(id: string) {
@@ -145,6 +147,7 @@ describe('Goal decision backends', () => {
     const fetcher = vi.fn(async () => Response.json({ choices: [{ message: { content: '{"action":"continue","reply":"Refine the geometry"}' } }] }));
     vi.stubGlobal('fetch', fetcher);
     await goal.setGoalSwitchNow(id, 'loop', true, true);
+    await recordLoopMcpProof(session.id, 'failed-turn');
     goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'failed-turn' });
     expect((await settled(id)).stage).toBe('ready');
     const payload = backend === 'chatgpt' ? browser.request.mock.calls[0]?.[0]

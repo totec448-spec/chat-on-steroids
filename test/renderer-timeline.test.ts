@@ -2204,3 +2204,32 @@ it('clears a delivered check when later model activity arrives without a timer',
   expect(app.w.document.querySelector('.input-receipt')).toBe(receipt);
   expect(receipt.hidden).toBe(true);
 });
+
+
+it('keeps a cancelled automatic draft at its creation time as later messages arrive', async () => {
+  const app = await boot([
+    { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'before-draft', message: text('Original work') },
+    { seq: 2, time: T0 + 2000, source: 'extension', kind: 'user_message', messageId: 'after-draft', message: text('Later continuation') }
+  ]);
+  const { w, live } = app;
+  live.inputs.push({ id: 'retired-auto', sessionId: summary([]).id, conversationId: 'chat-b', text: 'Unused automatic instruction',
+    mode: 'auto', dueAt: T0 + 1000, createdAt: T0 + 1000, state: 'cancelled', owner: null, model: null, reasoningEffort: null,
+    finishOwner: { turnId: 'old-turn', periodic: false },
+    error: 'Automatic follow-up cancelled because its active turn or setting changed.' });
+  await app.append([]);
+  const timeline = w.document.getElementById('timeline')!;
+  const retired = timeline.querySelector<HTMLElement>('[data-input-id="retired-auto"]')!;
+  expect(retired).not.toBeNull();
+  expect(retired.querySelector('time')!.textContent).toBe(new Date(T0 + 1000).toLocaleString());
+  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Unused automatic instruction');
+  const before = () => timeline.textContent!.indexOf('Unused automatic instruction') < timeline.textContent!.indexOf('Later continuation');
+  expect(before()).toBe(true);
+  await app.append([{ seq: 3, time: T0 + 3000, source: 'extension', kind: 'assistant_message', messageId: 'new-progress', message: text('New work continues'), final: false }]);
+  expect(timeline.querySelector('[data-input-id="retired-auto"]')).toBe(retired);
+  expect(before()).toBe(true);
+  expect(live.sent).toHaveLength(0);
+  retired.querySelector<HTMLButtonElement>('[title="Dismiss delivery notice"]')!.click();
+  await app.append([]);
+  expect(timeline.textContent).not.toContain('Unused automatic instruction');
+  expect(live.sent).toHaveLength(0);
+});

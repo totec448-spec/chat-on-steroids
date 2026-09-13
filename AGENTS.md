@@ -748,6 +748,9 @@ editor/route identity and attachment changes still do.
 The witnessed Send receipt captures the pre-send assistant baseline. If app identity or native
 message source arrives after a fast reply has rendered, that question still owns its reply and
 exact final marker. A later observation must not classify its own answer as old history.
+An exact accepted fresh-chat receipt remains valid when native submit promotes its null
+conversation to the delivered conversation. The same receipt, message, epoch and send lifetime
+must still agree; a second navigation or replaced receipt cannot inherit that acceptance.
 While an exact send receipt still has a bounded evidence reader, the existing observation also
 requests canonical MAIN-world text even after native generation stops. Rendered Markdown can
 remove submitted bytes; recognizing the generation must not be a prerequisite for reading the
@@ -1026,9 +1029,16 @@ a different lifetime from MV3 suspension (§2).
 
 An idle composer or missing Stop button alone does not prove a completed answer. Turn state
 combines native message/terminal evidence with exact user/assistant identities and live tools.
+Adopted generation recovery excludes historical assistant nodes above its user question, even
+when hydration remounts them. When a proven new question closes the adopted turn, its answer
+lookup ends before that exact new message, preserving legitimate completion of the prior answer.
 Interim prose, tool progress, refusal/error presentation, interrupted generation and final
 completion remain distinct. Navigation first retires the old epoch; no late callback may record
 or send for it. A settings overlay must not count as a usable hidden composer.
+The activity feed's `recordedTurnId` preserves an open recorder turn for boot adoption even
+after its runtime activity deadline expires. `activeTurnId` and `generating` retain their live
+projection. Restart/reinstallation cannot mint a new turn for that same answer and thereby
+detach its recorded MCP proof; adopting the recorded identity emits no new `turn_start`.
 An exact terminal Fiber descriptor on the latest assistant turn also vetoes recovery of an
 unrecorded generation from a persistent Stop control. An older terminal before a newer user
 question grants no such veto; a presentation artifact must not mint another active turn.
@@ -1169,15 +1179,28 @@ permission to reopen the session list. A plain historical chat with no current w
 | Queue / Goal watch | One qualified waiting episode for the visible next input or eligible Goal source; Pro uses a ten-minute floor. |
 | Compaction pickup | A durable continuation ticket whose current transport phase allows that pickup. |
 
-Unattributed recovery uses staged 0/30/60-second incident deadlines according to live suspects;
-these are separate from the recorder's 20-second request-id grace. Proven correlation dismisses
-the matching incident. No request id means there is no attribution proof to wait for first.
-Current repair cooldown is three minutes for Unattributed/assistant-error; silence, Goal,
-compaction and no-tab are independently gated rather than sharing that cooldown.
+Unattributed recovery keeps a bounded incident per exact unresolved request id, with one
+shared timer. At the first filed unattributed call it freezes the chats then shown Active,
+using the same shared activity predicate as the renderer. One candidate is eligible immediately;
+multiple candidates get a fixed one-minute window. The second and final attempt is due five
+minutes after that incident began, only if new unattributed work on that same request started
+after the first browser attempt and the request remains unresolved. Another request cannot
+renew this budget. Headerless activity cannot prove the same request and gets no second attempt.
+Exactly attributed current-owner MCP calls remove their chat from the original cohort; exact
+correlation resolves the matching request. The cohort survives activity-label expiry, but never
+Stop, block, a completed/replaced turn, session rebind or supersession. Later active chats do not
+join it. These deadlines follow the recorder's separate 20-second request-id grace.
+Attribution repair handouts retain their token after an absent acknowledgement. The extension
+claims the server-held attempt after its tab scan and immediately before its browser action;
+late attribution or lost owner authority denies that claim. A reload receipt proves the action,
+not that attribution recovered. Other repair reasons retain their own delivery policy.
+Assistant-error repairs retain their three-minute cooldown. Attribution, silence, Goal,
+compaction and no-tab follow their own eligibility and schedules.
 
 Silence handling gives ordinary positively known non-Pro work a two-minute policy and Pro a
-longer ten-minute evidence budget; unknown-model work remains conservative. A synthesized
-continuation additionally needs exact durable source-turn proof. Reloading Pro can file the next
+longer ten-minute evidence budget. Unknown work receives the ten-minute recovery floor whenever
+recovery is wanted, including without queued input. A synthesized continuation additionally
+needs exact durable source-turn proof. Reloading Pro can file the next
 queued after-turn input under §11, or an opted-in Pro Loop ticket under §17. User inputs take
 precedence. Goal's shorter watch is not a generic one-minute keepalive.
 Queue and Goal share the existing five pickup gaps: 2/2/5/10/15 minutes, each at least ten
@@ -1399,11 +1422,26 @@ and inject through the eligible tool response (§11).
 
 Opted-in Pro Loop uses the existing Goal reply ledger for real finals and acknowledged failure/silence refreshes (§11). Synthetic tickets require
 the same current-turn MCP proof as after-turn input; no MCP means no synthetic reply debt.
+**User decision, 2026-09-13:** every automatic Loop continuation requires at least one recorded,
+exactly attributed local MCP call in the source turn, including ordinary completed finals and
+finish follow-ups. Native page tools, another turn's calls and unattributed work do not qualify.
+The proof is existence in the exact source turn, not a requirement that its call be the latest
+stored row. Late attribution backfill without a turn must not erase earlier exact proof.
+Explicit user activation may proceed without that proof after the existing idle gate. Only the
+activation setter records that exemption in the existing reply ledger; browser parameters or
+reply-ID prefixes cannot grant it. Recheck restored automatic debt, provider start and delivery.
+This condition does not change ordinary Goal mode or user-message delivery.
 They retain the exact source turn, work sequence and Pro policy. Native busy durably defers the same ticket
 by five minutes, repeatedly if necessary. MCP/interim work revokes the ticket and pending draft
 and rearms ten minutes; fresh work/queue priority and exact document/draft authority are checked
 again before Send. The existing uncollected-ticket refresh schedule has a ten-minute floor for
 this mode and respects its listening deadline. No second scheduler or outbox is introduced.
+A Thinking-failed notice first learned from an already-confirmed silence refresh reuses that
+exact session/turn receipt. It must not reload the same failed view a second time; the five-minute
+listen window is anchored to the confirmed refresh. Genuine new work retires the receipt.
+Historical interim backfill after a refresh must retain an already-filed ticket: a new storage
+sequence is not new work. Authored chronology and the recorder's accepted activity grant decide
+revocation; genuinely new MCP/interim/user work still revokes the old automatic source.
 The default Loop instruction asks for substantial integrated work on large tasks and reconciles
 recorded progress after a failed view; only exact shipped defaults migrate, preserving custom text.
 Decision helpers/planners and workers cannot recursively start their own Goal/Loop driver.
@@ -1450,6 +1488,9 @@ final bounded decision schema before publication. Goal may return stop/no reply.
 a continuation and has a bounded three-retry invalid-stop policy. API SSE is used when publishing
 progress; legacy plain streaming is compatibility handling, not another driver authority.
 Cancellation/timeout must release only that exact attempt and leave an honest error/retry state.
+Cancelled automatic finish drafts are historical outbox records, displayed at their creation time
+with a timestamp. They must not remain beneath every newer message as though still awaiting Send.
+Keep manual failed-send notices and genuinely pending instructions in their existing controls.
 
 Reply obligations are durable and bounded (12 hours / 200 rows) with handled tombstones so old
 browser observations do not rearm discharged work. A provisional exact `turn:<id>` observation
@@ -1471,6 +1512,9 @@ The sidebar groups local projects/sessions, exposes worker state and retains del
 and expansion preferences. The chat keeps the current input queue/plan visible alongside a
 paged transcript. Main owns durable mutation acknowledgements; renderer optimism is not a
 receipt. Native edit context menus respect the focused editable control and selection.
+The plan heading is a native disclosure with a visible open/closed chevron. A newly opened
+chat starts with its plan collapsed. Collapsing it returns height to the conversation;
+status updates preserve the user's current disclosure state.
 
 Session metadata owns `titleSource` (authored fallback, provider, manual). The preview uses only
 the first authored user message, at one 80-character bound; injected instructions/AGENTS frames
@@ -1724,6 +1768,13 @@ a bundler. `electron-builder.yml` puts executable tunnel/rg, extension and requi
 payloads outside asar. `extension-path.ts` transactionally mirrors the packaged extension to
 stable `userData/extension`, never an ephemeral AppImage mount.
 
+Dependency updates retain upstream compatibility contracts: Node typings follow Electron's
+embedded Node major, and Vite stays within electron-vite's declared peer range. Electron 44
+clipboard reads/writes are asynchronous; await publication before reporting success or
+injecting Paste. A catalog update must refresh its exact package/license evidence. Bundled
+cloudflared belongs to the verified tunnel-client distribution; do not substitute unrelated
+upstream binaries while retaining that distribution's checksum or notices.
+
 | Build owner | Contract |
 | --- | --- |
 | `scripts/package.mjs` | Icons → bundle → explicit target resources/native staging → builder with publishing disabled. |
@@ -1770,10 +1821,10 @@ shared-tree change may already have addressed them.
 - **Startup opening:** `index.ts` still calls `startChatModelDiscovery(true)` on window show
   when the catalog is unknown. Desired policy requires a concrete operation to own any new
   browser document; app opening alone must not become a fallback opener.
-- **Repair handout vs action:** `/status` marks eligible repairs handed before extension tab
-  query/action. The extension now has single-flight maintenance and the app checks current
-  binding/block/Stop at handout, but no final atomic action claim closes cancellation after
-  handout. Intent requires the browser action to retain current authority through that boundary.
+- **Repair handout vs action:** attribution repairs now claim their exact attempt after the
+  extension's tab scan. Other repair reasons still mark handout before the tab query/action
+  without that final claim. Intent requires browser actions to retain current authority
+  through that boundary.
 - **Goal publication:** explicit switch writes serialize, but mutate shared memory before
   the awaited durable write; synchronous clear/move paths and objective/reply mutations do not
   all share the same semantic transaction. Intent is durable commit before visible state, with

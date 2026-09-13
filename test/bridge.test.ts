@@ -5077,9 +5077,14 @@ describe('a worker chat that never opens', () => {
  * the app can prove is mid-turn, or nothing is touched at all.
  */
 describe('unattributed activity recovery', () => {
-  const PRIME = 'abababab-1111-2222-3333-444444444444';
-  const WORKER = 'cdcdcdcd-1111-2222-3333-444444444444';
-  const OTHER = 'efefefef-1111-2222-3333-444444444444';
+  let PRIME: string, WORKER: string, OTHER: string;
+  let recoveryCase = 0;
+  beforeEach(() => {
+    const suffix = String(++recoveryCase).padStart(12, '0');
+    PRIME = `abababab-1111-2222-3333-${suffix}`;
+    WORKER = `cdcdcdcd-1111-2222-3333-${suffix}`;
+    OTHER = `efefefef-1111-2222-3333-${suffix}`;
+  });
 
   it('withholds a recovery ETA when the browser has no eligible active chat', async () => {
     await pair();
@@ -5217,7 +5222,7 @@ describe('unattributed activity recovery', () => {
         if (bytes.toString() === 'wake') resolve();
       }));
       await unattributed();
-      const delay = [0, 30_000, 60_000][count - 1]!;
+      const delay = count === 1 ? 0 : 60_000;
       if (delay) {
         await vi.advanceTimersByTimeAsync(delay - 1);
         expect(await maintenanceBatch()).toEqual([]);
@@ -5293,9 +5298,11 @@ describe('unattributed activity recovery', () => {
   it('replaces one recovery timeline row as the browser attempt fails, retries and succeeds', async () => {
     vi.useFakeTimers();
     try {
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
       await pair();
       await events(PRIME, [openTurn('turn-reload-note')]);
-      await unattributed();
+      await unattributedTurn('timeline-retry');
+      const openedAt = Date.now();
       await vi.advanceTimersByTimeAsync(60_000);
       const session = await findSessionByConversation(PRIME, { requireUnique: true });
       expect(session).not.toBeNull();
@@ -5313,6 +5320,7 @@ describe('unattributed activity recovery', () => {
       // the page paints it among the turn's tool calls rather than between turns.
       expect((await snapshots()).map((event) => event.turnId)).toEqual(['turn-reload-note']);
 
+      await request('POST', '/repairs/claim', { body: { token: handout!.token } });
       const failed = await request(
         'GET',
         `/status?repairFailed=${encodeURIComponent(handout!.token)}&repairAction=reloaded`
@@ -5320,9 +5328,12 @@ describe('unattributed activity recovery', () => {
       expect(failed.status).toBe(200);
       expect(failed.body.repairs).toEqual([]);
       expect(foldProgress(await snapshots()).map((event) => event.kind === 'progress' ? event.message.text : '')).toEqual([
-        'Reload failed while recovering missing connector attribution; will retry.'
+        'Reload failed while recovering missing connector attribution.'
       ]);
 
+      await vi.advanceTimersByTimeAsync(1);
+      await unattributedTurn('timeline-retry');
+      await vi.advanceTimersByTimeAsync(openedAt + 300_000 - Date.now());
       const retry = await maintenance();
       expect(chatOf(retry)).toBe(PRIME);
       expect(foldProgress(await snapshots()).map((event) => event.kind === 'progress' ? event.message.text : '')).toEqual([
@@ -5350,26 +5361,17 @@ describe('unattributed activity recovery', () => {
    * reported in the same request, while an action-level exception uses the explicit failure
    * receipt tested above. Either path must keep the repair retryable.
    */
-  it('hands the same repair out again until the browser says it carried one out', async () => {
+  it('retains an issued unattributed token without issuing another action on polling', async () => {
     vi.useFakeTimers();
     try {
-      await pair();
-      await events(PRIME, [openTurn('turn-live')]);
-      await unattributed();
-      await vi.advanceTimersByTimeAsync(60_000);
-
-      expect(chatOf(await maintenance())).toBe(PRIME);
-      expect(chatOf(await maintenance())).toBe(PRIME);
-      const third = await maintenance();
-      expect(chatOf(third)).toBe(PRIME);
-      // Nothing was opened while it was being retried, either.
-      expect(reopened(PRIME)).toEqual([]);
-
-      expect(await maintenance(third!.token)).toBeNull();
+      await pair(); await events(PRIME, [openTurn('held-token')]);
+      await unattributed(); await vi.advanceTimersByTimeAsync(0);
+      const first = await maintenance();
+      expect(chatOf(first)).toBe(PRIME);
       expect(await maintenance()).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
+      expect(await maintenance()).toBeNull();
+      expect(await maintenance(first!.token)).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 
   /**
@@ -5390,7 +5392,9 @@ describe('unattributed activity recovery', () => {
 
       // That turn ends without ever making an attributable call, and the next one breaks too.
       await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
-      await events(PRIME, [endTurn('turn-first', 'completed'), openTurn('turn-second')]);
+      await events(PRIME, [endTurn('turn-first', 'completed')]);
+      await vi.advanceTimersByTimeAsync(1);
+      await events(PRIME, [{ kind: 'user_message', messageId: 'next-authored-turn', time: Date.now(), text: 'new work' }, openTurn('turn-second')]);
       await unattributed();
       await vi.advanceTimersByTimeAsync(60_000);
       expect(chatOf(await maintenance())).toBe(PRIME);
@@ -5399,57 +5403,143 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  /**
-   * One reload per server turn. Ten reloads prove only that the first nine did not help.
-   *
-   * ChatGPT is sometimes broken in a way a fresh page does not mend, and the reload itself is
-   * what used to hide that: the replacement document re-observes the same generation and names
-   * it a new local turn, which looked exactly like the broken turn being over. So the repair was
-   * retired, the still-dead join produced the next unattributed call, and a minute later
-   * the same chat was reloaded again - for as long as the turn lasted, tearing down whatever
-   * work the page was doing each time.
-   *
-   * What an unattributed call still carries is its request id, and that is the server turn it
-   * belongs to. The reload is rationed by it: the same id after the reload is the same broken
-   * turn and buys nothing, however many local turns the reloaded page mints; a different id
-   * is a different turn — the user's next message from the phone, say — and gets its own.
-   */
-  it('reloads once per unattributed request id, however the reloaded page re-labels the turn', async () => {
+  it('retries a continuing request once at five minutes after the ordinary activity label expires', async () => {
     vi.useFakeTimers();
     try {
-      await pair();
-      await events(PRIME, [openTurn('turn-live')]);
-      await unattributedTurn('req-broken');
-      await vi.advanceTimersByTimeAsync(60_000);
-      const handout = await maintenance();
-      expect(chatOf(handout)).toBe(PRIME);
-      expect(await maintenance(handout!.token)).toBeNull();
-
-      // The page comes back mid-generation, so it reports the turn it found under a fresh local
-      // id, and the same server turn is still arriving with nothing to attribute it by.
-      await events(PRIME, [openTurn('turn-after-reload')]);
-      await unattributedTurn('req-broken');
-      await vi.advanceTimersByTimeAsync(60_000);
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+      await pair(); await events(PRIME, [openTurn('two-attempts')]);
+      await unattributedTurn('req-two-attempts');
+      const openedAt = Date.now();
+      await vi.advanceTimersByTimeAsync(0);
+      const first = await maintenance(); expect(chatOf(first)).toBe(PRIME);
+      await maintenance(first!.token);
+      await vi.advanceTimersByTimeAsync(1);
+      await unattributedTurn('req-two-attempts');
+      await vi.advanceTimersByTimeAsync(openedAt + 300_000 - Date.now() - 1);
       expect(await maintenance()).toBeNull();
-      expect(reopened(PRIME)).toEqual([]);
-
-      // An attributed call proves the reload worked, which is a reason not to need another one
-      // - never a reason to be handed one. The same request id stays spent.
-      await attributed(PRIME);
-      await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS);
-      await events(PRIME, [openTurn('turn-later')]);
-      await unattributedTurn('req-broken');
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(1);
+      const second = await maintenance(); expect(chatOf(second)).toBe(PRIME);
+      expect(second!.token).not.toBe(first!.token);
+      await maintenance(second!.token);
+      await unattributedTurn('req-two-attempts');
+      await vi.advanceTimersByTimeAsync(600_000);
       expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
 
-      // A different request id is a different server turn, and the first unplaceable call of
-      // it is news again: its own reload, whatever the local turn count says.
-      await unattributedTurn('req-next-turn');
-      await vi.advanceTimersByTimeAsync(60_000);
+  it('reports only the requested ID budget and withholds ETA without a qualified retry', async () => {
+    vi.useFakeTimers();
+    try {
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+      await pair(); await events(PRIME, [openTurn('eta-request-budget')]);
+      expect(unattributedRepairEta(Date.now(), 'eta-new-request')).toBe(0);
+      await unattributedTurn('eta-known-request'); const openedAt = Date.now();
+      await vi.advanceTimersByTimeAsync(0);
+      const first = await maintenance(); await maintenance(first!.token);
+      expect(unattributedRepairEta(Date.now(), 'eta-known-request')).toBeNull();
+      await vi.advanceTimersByTimeAsync(1); await unattributedTurn('eta-known-request');
+      expect(unattributedRepairEta(Date.now(), 'eta-known-request')).toBe(Math.ceil((openedAt + 300_000 - Date.now()) / 1000));
+      await vi.advanceTimersByTimeAsync(openedAt + 300_000 - Date.now());
+      const second = await maintenance(); await maintenance(second!.token);
+      await events(OTHER, [openTurn('another-incident-chat')]);
+      await unattributedTurn('eta-other-request');
+      expect(unattributedRepairEta(Date.now(), 'eta-known-request')).toBeNull();
+      await request('POST', '/correlations', { body: { conversationId: OTHER,
+        calls: [{ requestId: 'eta-other-request', messageId: 'eta-resolved', tool: 'read', order: 0, answered: false }] } });
+      expect(unattributedRepairEta(Date.now(), 'eta-other-request')).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps the opening minute fixed, excludes healthy chats and never admits a late newcomer', async () => {
+    vi.useFakeTimers();
+    try {
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+      await pair(); await events(PRIME, [openTurn('frozen-prime')]); await events(OTHER, [openTurn('frozen-other')]);
+      await unattributedTurn('frozen-cohort'); const openedAt = Date.now();
+      await vi.advanceTimersByTimeAsync(10_000);
+      await attributed(OTHER, false, Date.now());
+      await events(WORKER, [openTurn('late-newcomer')]);
+      await vi.advanceTimersByTimeAsync(openedAt + 59_999 - Date.now());
+      expect(await maintenanceBatch()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      const first = await maintenance(); expect(chatOf(first)).toBe(PRIME);
+      await maintenance(first!.token);
+      await vi.advanceTimersByTimeAsync(1); await unattributedTurn('frozen-cohort');
+      await vi.advanceTimersByTimeAsync(openedAt + 300_000 - Date.now());
       expect(chatOf(await maintenance())).toBe(PRIME);
-    } finally {
-      vi.useRealTimers();
-    }
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['mcp', 'completed', 'stopped', 'new-turn', 'blocked', 'resolved'])('refuses a handed action after its candidate is cleared: %s', async kind => {
+    vi.useFakeTimers();
+    try {
+      await pair(); await events(PRIME, [openTurn(`claim-${kind}`)]);
+      const id = `claim-request-${kind}`;
+      await unattributedTurn(id); await vi.advanceTimersByTimeAsync(0);
+      const first = await maintenance(); expect(first?.reason).toBe('unattributed');
+      await vi.advanceTimersByTimeAsync(1);
+      if (kind === 'mcp') await attributed(PRIME, false, Date.now());
+      if (kind === 'completed' || kind === 'stopped') await events(PRIME, [endTurn(`claim-${kind}`, kind)]);
+      if (kind === 'new-turn') await events(PRIME, [openTurn('replacement-turn')]);
+      if (kind === 'blocked') await setChatBlocked(PRIME, true);
+      if (kind === 'resolved') await request('POST', '/correlations', { body: { conversationId: PRIME,
+        calls: [{ requestId: id, messageId: `claim-proof-${kind}`, tool: 'read', order: 0, answered: false }] } });
+      expect((await request('POST', '/repairs/claim', { body: { token: first!.token } })).body.allowed).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('claims once and does not count unknown work before that claim as a failed refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+      await pair(); await events(PRIME, [openTurn('delayed-claim')]);
+      await unattributedTurn('delayed-claim-request'); const openedAt = Date.now();
+      await vi.advanceTimersByTimeAsync(0); const first = await maintenance();
+      await vi.advanceTimersByTimeAsync(1); await unattributedTurn('delayed-claim-request');
+      expect((await request('POST', '/repairs/claim', { body: { token: first!.token } })).body.allowed).toBe(true);
+      expect((await request('POST', '/repairs/claim', { body: { token: first!.token } })).body.allowed).toBe(false);
+      await maintenance(first!.token);
+      await vi.advanceTimersByTimeAsync(openedAt + 300_000 - Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('a slow pre-incident attributed call cannot cancel the queued refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair(); await events(PRIME, [openTurn('slow-healthy')]);
+      const oldStartedAt = Date.now(); await vi.advanceTimersByTimeAsync(10);
+      await unattributedTurn('slow-unknown'); await vi.advanceTimersByTimeAsync(0);
+      await attributed(PRIME, false, oldStartedAt);
+      expect((await maintenance())?.reason).toBe('unattributed');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['none', 'different-request', 'old-call', 'resolved'])('does not retry without continuing unresolved same-request work: %s', async kind => {
+    vi.useFakeTimers();
+    try {
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: false } });
+      await pair(); await events(PRIME, [openTurn(`no-retry-${kind}`)]);
+      const id = `request-no-retry-${kind}`;
+      await unattributedTurn(id);
+      const openedAt = Date.now();
+      await vi.advanceTimersByTimeAsync(0);
+      const first = await maintenance(); expect(first?.reason).toBe('unattributed');
+      await maintenance(first!.token);
+      await vi.advanceTimersByTimeAsync(1);
+      if (kind === 'different-request') await unattributedTurn(`${id}-other`);
+      if (kind === 'old-call') {
+        const call = recordToolCall({ tool: 'read', args: {}, content: [], outcome: 'ok', durationMs: 1,
+          startedAt: openedAt - 1, requestId: id });
+        await vi.advanceTimersByTimeAsync(REQUEST_ID_GRACE_MS); await call;
+      }
+      if (kind === 'resolved') {
+        await unattributedTurn(id);
+        await request('POST', '/correlations', { body: { conversationId: PRIME, calls: [{ requestId: id, messageId: 'resolved-message', tool: 'read', order: 0, answered: false }] } });
+      }
+      await vi.advanceTimersByTimeAsync(openedAt + 300_000 - Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 
   /**
@@ -5472,7 +5562,9 @@ describe('unattributed activity recovery', () => {
       expect(chatOf(first)).toBe(PRIME);
 
       // That turn ends before the receipt for it arrives, and the next one breaks the same way.
-      await events(PRIME, [endTurn('turn-first', 'completed'), openTurn('turn-second')]);
+      await events(PRIME, [endTurn('turn-first', 'completed')]);
+      await vi.advanceTimersByTimeAsync(1);
+      await events(PRIME, [{ kind: 'user_message', messageId: 'next-authored-turn', time: Date.now(), text: 'new work' }, openTurn('turn-second')]);
       await unattributed();
       await vi.advanceTimersByTimeAsync(60_000);
       const second = await maintenance();
@@ -5481,9 +5573,8 @@ describe('unattributed activity recovery', () => {
 
       // The late receipt lands. It says nothing about the second turn, which is still handed
       // out - and handed out afresh, because a pass that reported nothing is a pass that failed.
-      const again = await maintenance(first!.token);
-      expect(chatOf(again), 'the second turn was never reloaded').toBe(PRIME);
-      expect(await maintenance(again!.token)).toBeNull();
+      expect(await maintenance(first!.token)).toBeNull();
+      expect(await maintenance(second!.token)).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -5499,10 +5590,10 @@ describe('unattributed activity recovery', () => {
 
       await vi.advanceTimersByTimeAsync(10_000);
       await unattributed();
-      await vi.advanceTimersByTimeAsync(19_999);
+      await vi.advanceTimersByTimeAsync(49_999);
       expect(await maintenanceBatch()).toEqual([]);
 
-      // Thirty seconds from the first call, not a renewed budget after the second.
+      // Sixty seconds from the first call, not a renewed budget after the second.
       await vi.advanceTimersByTimeAsync(1);
       expect((await maintenanceBatch()).map(row => row.conversationId).sort()).toEqual([PRIME, OTHER].sort());
     } finally {
@@ -5562,7 +5653,7 @@ describe('unattributed activity recovery', () => {
       // same evidence path at once with no repair at all.
       //
       // Two suspects is also a rung up from one: there is now somebody to be told apart from.
-      await vi.advanceTimersByTimeAsync(29_999);
+      await vi.advanceTimersByTimeAsync(59_999);
       expect(await maintenanceBatch()).toEqual([]);
       await vi.advanceTimersByTimeAsync(1);
 
@@ -5588,9 +5679,8 @@ describe('unattributed activity recovery', () => {
       await attributed(OTHER);
       await vi.advanceTimersByTimeAsync(60_000);
       expect(chatOf(await maintenance())).toBe(PRIME);
-      // A handout the browser never confirmed comes back around; the chat that proved its join
-      // is simply never among them, however many passes go by.
-      expect(chatOf(await maintenance())).toBe(PRIME);
+      // Missing ACK retains custody and does not issue another action.
+      expect(await maintenance()).toBeNull();
     } finally {
       vi.useRealTimers();
     }
@@ -6121,7 +6211,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-dead')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-dead')]);
       await events(OTHER, [endTurn('turn-dead', 'failed')]);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
@@ -6263,7 +6353,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-heavy')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-heavy')]);
       await events(OTHER, [
         {
           kind: 'chat_error',
@@ -6300,7 +6390,7 @@ describe('unattributed activity recovery', () => {
       await pair();
       // An earlier transport failure, repaired and then retired by a turn the chat got through.
       // That spends this chat's browser action and starts its three-minute floor.
-      await events(OTHER, [openTurn('turn-first')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-first')]);
       await events(OTHER, [
         {
           kind: 'chat_error',
@@ -6317,7 +6407,7 @@ describe('unattributed activity recovery', () => {
       await events(OTHER, [openTurn('turn-through'), endTurn('turn-through', 'completed')]);
       expect(await maintenance()).toBeNull();
 
-      await events(OTHER, [openTurn('turn-broken')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-broken')]);
       await events(OTHER, [
         {
           kind: 'chat_error',
@@ -6402,7 +6492,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-silent-from-the-start')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-silent-from-the-start')]);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
       await sweepStaleSwarm(Date.now());
@@ -6432,7 +6522,7 @@ describe('unattributed activity recovery', () => {
       // that spent handout, and this is about arming a fresh episode on time.
       const PUNCTUAL = 'a1a1a1a1-1111-2222-3333-444444444444';
       await pair();
-      await events(PUNCTUAL, [openTurn('turn-silent-punctual')]);
+      await events(PUNCTUAL, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-silent-punctual')]);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
       expect(await maintenance()).toBeNull();
@@ -6445,7 +6535,7 @@ describe('unattributed activity recovery', () => {
     }
   });
 
-  it('makes a newly started session recoverable for the full two-minute opening window', async () => {
+  it('makes a newly started session recoverable for the full unknown-model opening window', async () => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -6457,7 +6547,7 @@ describe('unattributed activity recovery', () => {
         text: 'start working'
       }]);
 
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - 1);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
 
@@ -6520,6 +6610,7 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       await events(OTHER, [
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
         {
           kind: 'user_message',
           time: Date.now(),
@@ -6569,7 +6660,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-silent-across-detach')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-silent-across-detach')]);
       await request('POST', '/closed', { body: { conversationId: OTHER } });
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
@@ -6585,7 +6676,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-ends-uncertain')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-ends-uncertain')]);
       await events(OTHER, [
         { kind: 'turn_end', time: Date.now(), turnId: 'turn-ends-uncertain', outcome: 'unknown' }
       ]);
@@ -6618,7 +6709,7 @@ describe('unattributed activity recovery', () => {
     try {
       await pair();
       spawn({ workers: [{ task: 'hold the run open' }], caller: { conversationId: PRIME } });
-      await events(PRIME, [openTurn('turn-prime-silent')]);
+      await events(PRIME, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-prime-silent')]);
       await attributed(PRIME);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
@@ -6648,7 +6739,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-loop-silent')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-loop-silent')]);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toMatchObject({ conversationId: OTHER, reason: 'silence' });
@@ -6704,6 +6795,49 @@ describe('unattributed activity recovery', () => {
       await setSessionAutomation(sessionId, 'loop', true);
       expect(goalPendingReplyFor(chat)).toBeNull();
     } finally { await setSecret('openRouterApiKey', ''); vi.useRealTimers(); }
+  });
+
+  it.each([6_000, 180_000])('reuses the exact silence receipt when its replacement reveals Thinking failed after %i ms', async delay => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await setSecret('openRouterApiKey', 'sk-or-delayed-failure');
+    resetGoalStateForTests();
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn(`reload-source-${delay}`)]);
+      await attributed(OTHER, false, Date.now());
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      const repair = await maintenance();
+      expect(repair?.reason).toBe('silence');
+      const confirmedAt = Date.now();
+      await maintenance(repair!.token);
+      const pending = goalPendingReplyFor(OTHER)!;
+      expect(pending).not.toBeNull();
+      // Retire the activity before the large replacement document finishes loading.
+      await sweepStaleSwarm(Date.now());
+      await vi.advanceTimersByTimeAsync(delay);
+      await events(OTHER, [{ kind: 'turn_end', turnId: `reload-source-${delay}`, outcome: 'failed', reason: 'thinking_failed', time: Date.now() }]);
+      expect(await maintenance()).toBeNull();
+      expect(goalPendingReplyFor(OTHER)?.replyId).toBe(pending.replyId);
+      expect((await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending.turnId } })).body.error).toBe('chat_still_working');
+      await vi.advanceTimersByTimeAsync(confirmedAt + 5 * 60_000 - Date.now());
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      expect(goalPendingReplyFor(OTHER)?.replyId).toBe(pending.replyId);
+      expect((await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending.turnId } })).status).toBe(200);
+      // New authored work owns a new episode, so retaining this receipt cannot mute
+      // the next legitimate quiet recovery.
+      if (delay === 180_000) await events(OTHER, [openTurn(`next-reload-source-${delay}`)]);
+      await attributed(OTHER, false, Date.now());
+      // The replacement page has not supplied model evidence for this new episode.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ reason: 'silence' });
+    } finally {
+      resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers();
+    }
   });
 
   it('files a Goal ticket after the full silence window and confirmed reload without another grace period', async () => {
@@ -6957,7 +7091,9 @@ describe('unattributed activity recovery', () => {
       await events(conversationId, [endTurn('pro-final-' + proof, 'completed')]);
       if (proof === 'new turn') await events(conversationId, [openTurn('next-pro-turn')]);
       const result = await request('POST', '/goal/draft', { body: { conversationId: conversationId, turnId: 'pro-final-' + proof, clientId: 'tab-1' } });
-      expect(result.status, JSON.stringify(result.body)).toBe(afterTurn && proof === 'exact' ? 200 : 409);
+      // Even a canonical final cannot autonomously spend another Loop message
+      // when this source turn never reached the local MCP connector.
+      expect(result.status, JSON.stringify(result.body)).toBe(409);
     } finally {
       resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous);
     }
@@ -6986,6 +7122,51 @@ describe('unattributed activity recovery', () => {
     } finally { await saveConfig(previous); vi.useRealTimers(); }
   });
 
+  it.each(['unknown', 'normal'] as const)('uses the %s model recovery clock without queued input', async model => {
+    const chat = model === 'unknown' ? 'a7777777-1111-4111-8111-000000000001' : 'a7777777-1111-4111-8111-000000000002';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      expect(getConfig().multiAgent.recoverAgentTabs).toBe(true);
+      await events(chat, [
+        ...(model === 'normal' ? [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }] : []),
+        openTurn(`no-queue-${model}`)
+      ]);
+      const deadline = model === 'unknown' ? PRO_SILENCE_MS : CHAT_SILENCE_MS;
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
+      expect(await maintenance()).toBeNull();
+      if (model === 'unknown') {
+        await vi.advanceTimersByTimeAsync(deadline - CHAT_SILENCE_MS);
+        expect(await maintenance()).toBeNull();
+      }
+      await vi.advanceTimersByTimeAsync(1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
+      expect(goalPendingReplyFor(chat)).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('retires unknown activity after five minutes when recovery is off and no input is queued', async () => {
+    const previous = getConfig();
+    const chat = 'a7777777-1111-4111-8111-000000000003';
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: false },
+      multiAgent: { ...previous.multiAgent, recoverAgentTabs: false } });
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [openTurn('unknown-recovery-off')]);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_RETIRE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.activeTurnId).toBeNull();
+      expect(await maintenance()).toBeNull();
+      // Enabling recovery later must not resurrect the already-retired grant.
+      await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, recoverAgentTabs: true } });
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - PRO_SILENCE_RETIRE_MS);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally { await saveConfig(previous); vi.useRealTimers(); }
+  });
+
   for (const selection of ['missing', 'stale', 'after-start']) it(`does not synthesize a silence Goal from ${selection} model evidence`, async () => {
     // Persisted model observations survive the bridge reset: use a fresh conversation.
     const uncertainChat = `a4444444-1111-4111-8111-00000000000${["missing", "stale", "after-start"].indexOf(selection)}`;
@@ -6999,7 +7180,7 @@ describe('unattributed activity recovery', () => {
       await vi.advanceTimersByTimeAsync(1_000);
       await events(uncertainChat, [openTurn('uncertain-' + selection)]);
       if (selection === 'after-start') await events(uncertainChat, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() + 1 }]);
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const reload = await maintenance();
       expect(reload).toMatchObject({ reason: 'silence' });
@@ -7041,7 +7222,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events('a6666666-1111-4111-8111-000000000006', [openTurn('turn-loop-slow')]);
+      await events('a6666666-1111-4111-8111-000000000006', [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-loop-slow')]);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const handout = await maintenance();
@@ -7287,6 +7468,9 @@ describe('unattributed activity recovery', () => {
       await maintenance(repair!.token);
       const ticket = goalPendingReplyFor(OTHER)!;
       expect(ticket).toMatchObject({ silenceSourceTurnId: 'pro-loop-after-turn', silencePro: true });
+      const activity = (await request('GET', `/activity?conversationId=${OTHER}`)).body;
+      expect(activity.activeTurnId).toBeNull();
+      expect(activity.recordedTurnId).toBe('pro-loop-after-turn');
       const busy = await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: ticket.turnId, nativeBusy: true } });
       expect(busy.body.error).toBe('chat_still_working');
       const deferred = goalPendingReplyFor(OTHER)!;
@@ -7298,6 +7482,13 @@ describe('unattributed activity recovery', () => {
       await vi.advanceTimersByTimeAsync(5 * 60_000);
       const ready = await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: ticket.turnId, terminalRequired: true } });
       expect(`${ready.status} ${JSON.stringify(ready.body)}`).toMatch(/^200 /);
+      // Reload hydration discovers an older interim after the ticket was filed.
+      // Its new storage cursor cannot cancel the existing decision or source.
+      await events(OTHER, [{ kind: 'assistant_message', messageId: 'late-historical-interim',
+        turnId: 'pro-loop-after-turn', time: ticket.acceptedAt - 60_000,
+        authoredTime: true, text: 'Earlier research findings.', state: 'streaming', activeNow: false }]);
+      await request('GET', `/activity?conversationId=${OTHER}`);
+      expect(goalPendingReplyFor(OTHER)?.replyId).toBe(ticket.replyId);
       await vi.advanceTimersByTimeAsync(1000);
       await attributed(OTHER, false, Date.now());
       await request('GET', `/activity?conversationId=${OTHER}`);
@@ -7323,8 +7514,8 @@ describe('unattributed activity recovery', () => {
       await pair(); await goal.setGoalSwitchNow(OTHER, 'loop', true, true);
       const turn = `pro-loop-${kind}`;
       await events(OTHER, [{ kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: Date.now() }, openTurn(turn)]);
-      if (kind === 'thinking_failed') await attributed(OTHER, false, Date.now());
-      await vi.advanceTimersByTimeAsync(330000);
+      await attributed(OTHER, false, Date.now());
+      await vi.advanceTimersByTimeAsync(kind === 'completed' ? PRO_SILENCE_MS : 330000);
       if (kind === 'completed') {
         await events(OTHER, [{ kind: 'assistant_message', messageId: `answer-${turn}`, turnId: turn, time: Date.now(),
           text: 'The requested pass is complete.', final: true, state: 'final', activeNow: true, goalEligible: true }, endTurn(turn, 'completed')]);
@@ -7353,6 +7544,32 @@ describe('unattributed activity recovery', () => {
         expect((await request('POST', '/goal/draft', { body: { conversationId: OTHER, turnId: pending!.turnId } })).status).toBe(409);
       }
     } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); vi.useRealTimers(); }
+  });
+
+  it('blocks automatic Loop without source MCP but allows deliberate idle activation', async () => {
+    const chat = 'c9494949-1111-2222-3333-444444444444';
+    const goal = await import('../src/main/goal.js');
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await setSecret('openRouterApiKey', 'sk-or-loop-proof-test');
+    try {
+      await pair();
+      await events(chat, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        openTurn('loop-without-mcp'), { kind: 'assistant_message', turnId: 'loop-without-mcp', messageId: 'loop-no-tools-final',
+          time: Date.now(), text: 'I cannot access the MCP tools.', final: true, state: 'final', activeNow: true, goalEligible: true },
+        endTurn('loop-without-mcp', 'completed')]);
+      expect(goalPendingReplyFor(chat)).toBeNull();
+      const refused = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId: 'loop-without-mcp' } });
+      expect(refused.status).toBe(409);
+      expect(refused.body.error).toBe('goal_reply_not_pending');
+      expect(goal.goalViewFor(chat)).toBeNull();
+      await request('POST', '/settings', { body: { conversationId: chat, loop: false } });
+      await request('POST', '/settings', { body: { conversationId: chat, loop: true } });
+      expect(goalPendingReplyFor(chat)).toMatchObject({ turnId: 'loop-without-mcp' });
+      expect(goal.snapshotGoalReplies().replies.find(row => row.conversationId === chat)).toMatchObject({ explicitActivation: true });
+      const allowed = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId: 'loop-without-mcp', terminalRequired: true } });
+      expect(`${allowed.status} ${JSON.stringify(allowed.body)}`).toMatch(/^200 /);
+    } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); }
   });
 
   it('leaves a silent plain chat where it fell when tab recovery is off', async () => {
@@ -7468,7 +7685,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-solo-silent')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-solo-silent')]);
       await attributed(OTHER);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
@@ -7494,7 +7711,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-closed-while-tools-run')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-closed-while-tools-run')]);
       await request('POST', '/closed', { body: { conversationId: OTHER } });
 
       // The model keeps running server-side after Chrome has gone. Exact attribution is the
@@ -7528,7 +7745,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-reload-episode-one')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-reload-episode-one')]);
       await attributed(OTHER);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
@@ -7539,8 +7756,9 @@ describe('unattributed activity recovery', () => {
       await sweepStaleSwarm(Date.now());
 
       // A confirmed reload alone is spent. A new exact call is the sole fact that starts episode 2.
+      // Its replacement page has supplied no new model proof, so recovery is conservative.
       await attributed(OTHER);
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS - 1);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toBeNull();
 
@@ -7556,7 +7774,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-reload-interim-one')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-reload-interim-one')]);
       await attributed(OTHER);
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
@@ -7574,7 +7792,8 @@ describe('unattributed activity recovery', () => {
         final: false,
         activeNow: true
       }]);
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      // The old grant was spent; this unowned interim carries no fresh model selection.
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       expect(chatOf(await maintenance())).toBe(OTHER);
     } finally {
@@ -7664,7 +7883,7 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [openTurn('turn-lost-on-reload')]);
+      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-lost-on-reload')]);
       await events(OTHER, [endTurn('turn-lost-on-reload', 'unknown')]);
       await attributed(OTHER);
 
@@ -7722,7 +7941,7 @@ describe('unattributed activity recovery', () => {
       await request('POST', '/commands/ack', {
         body: { id: bootstrap.id, status: 'sent', conversationId: WORKER, agent: 'worker-1' }
       });
-      await events(WORKER, [openTurn('turn-worker-pruned')]);
+      await events(WORKER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn('turn-worker-pruned')]);
       await attributed(WORKER);
 
       await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
@@ -8738,6 +8957,8 @@ describe('the goal loop over the bridge', () => {
         choices: [{ message: { content: JSON.stringify({ action: 'continue', reply: 'still red' }) } }]
       })) as never;
     try {
+      const { recordLoopMcpProof } = await import('./goal-mcp-proof.js');
+      await recordLoopMcpProof((await findSessionByConversation(chat, { requireUnique: true }))!.id, 'g-on');
       await recordFinalForTest(chat, 'g-on');
       const again = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId: 'g-on' } });
       expect(again.status).toBe(200);
@@ -9702,7 +9923,7 @@ it('retires an already armed ordinary Goal repair when its conversation is now A
   const previous = getConfig();
   vi.useFakeTimers();
   try {
-    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' } });
     await setSecret('openRouterApiKey', 'test-goal-key');
     await pair();
     const chat = 'a5555555-1111-4111-8111-000000000005';

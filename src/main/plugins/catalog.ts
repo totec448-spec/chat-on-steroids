@@ -58,9 +58,8 @@ export const pluginCatalog: PluginCatalogEntry[] = [
     description: 'Fetch web pages and convert their content for model consumption.',
     icon: 'fetch',
     color: '#498edb',
-    // This upstream release declares mcp>=1.1.3 but imports v1's McpError. Resolve
-    // the reviewed SDK version with the server; unconstrained mcp2 crashes at import.
-    source: { kind: 'python', package: 'mcp-server-fetch', version: '2025.4.7', command: 'mcp-server-fetch', dependencies: [{ package: 'mcp', version: '1.30.0' }] },
+    // Upstream now constrains its own SDK to mcp>=1.29.0,<2.
+    source: { kind: 'python', package: 'mcp-server-fetch', version: '2026.8.18', command: 'mcp-server-fetch' },
     homepage: 'https://github.com/modelcontextprotocol/servers/tree/main/src/fetch',
     license: 'MIT',
     fields: [],

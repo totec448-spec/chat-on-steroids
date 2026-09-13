@@ -57,18 +57,18 @@
   {
     "id": "fetch",
     "package": "mcp-server-fetch",
-    "version": "2025.4.7",
+    "version": "2026.8.18",
     "license": "MIT",
-    "archive": "https://files.pythonhosted.org/packages/a7/ae/93cb99a40be35e7557f74af73b4b2fcb54c342a35f9dc5ff3db401b3d054/mcp_server_fetch-2025.4.7-py3-none-any.whl",
-    "integrity": "sha256-349b79754d9d5caeb7c3f427ef07af2a994d4c998dab33c060eb9fbeb9da8d6b",
+    "archive": "https://files.pythonhosted.org/packages/5a/2d/c8d2e50796d6e3c77fa1932b9b010df36168edb5f5387c98a524ef77f110/mcp_server_fetch-2026.8.18-py3-none-any.whl",
+    "integrity": "sha256-6642df733a1032e7f37d0f13849af8a944d46c02420d2c070cc14e0948f8fcc2",
     "notices": [
       {
         "file": "fetch-LICENSE",
-        "upstreamArchivePath": "mcp_server_fetch-2025.4.7.dist-info/licenses/LICENSE",
+        "upstreamArchivePath": "mcp_server_fetch-2026.8.18.dist-info/licenses/LICENSE",
         "sha256": "8cc7c6e33b24ed4ee8fcccc33eccf102549d04fa4cb9737cecc9770dad1080ff"
       }
     ],
-    "checkedOn": "2026-09-08",
+    "checkedOn": "2026-09-13",
     "bundledWithApp": false,
     "repository": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch"
   },

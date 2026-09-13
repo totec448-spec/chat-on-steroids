@@ -39,6 +39,15 @@ incorporate the rest of the native Desktop proposal.
 resume-selection ([#155](https://github.com/totec448-spec/chat-on-steroids/issues/155)) and Windows
 plugin-path ([#178](https://github.com/totec448-spec/chat-on-steroids/issues/178)) repairs.
 
+The receipt-promotion and adopted-answer ownership fixes adapt
+[@ventianima-lab](https://github.com/ventianima-lab)'s minimal reproductions and proposed repairs
+in [#185](https://github.com/totec448-spec/chat-on-steroids/issues/185#issuecomment-5650663451)
+and its [remounted-answer follow-up](https://github.com/totec448-spec/chat-on-steroids/issues/185#issuecomment-5651819276).
+[@rcnir](https://github.com/rcnir) reported the unknown-model recovery gap in
+[#172](https://github.com/totec448-spec/chat-on-steroids/issues/172), and
+[@Gauthammaster2012Code](https://github.com/Gauthammaster2012Code) reported the plan-collapse
+affordance issue in [#191](https://github.com/totec448-spec/chat-on-steroids/issues/191).
+
 Contributions also include reproductions, independent testing, designs and patches that are still under review or were superseded. Thank you to:
 
 - [@ventianima-lab](https://github.com/ventianima-lab) for detailed request-attribution and delivery investigations and controller, stream-observation and tab-reuse proposals, including [#108](https://github.com/totec448-spec/chat-on-steroids/issues/108), [#124](https://github.com/totec448-spec/chat-on-steroids/pull/124), [#159](https://github.com/totec448-spec/chat-on-steroids/pull/159) and [#170](https://github.com/totec448-spec/chat-on-steroids/pull/170).

@@ -9,6 +9,10 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## Unreleased
+
+- Refresh runtime, editor, MCP and plugin dependencies with corresponding license and native-source inventories. Electron 44 clipboard operations now await completion.
+
 ## [2.0.9] — they nerfed astra
 
 - Code mode combines local and plugin tools in one JavaScript call, with saved task plans and automatic background command results.
