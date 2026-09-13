@@ -6,13 +6,14 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
-  fileSilenceInput, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
+  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
-import { listUsageSessions } from '../src/main/session/store.js';
+import { stageInputAttachment } from '../src/main/session/input-attachments.js';
+import { listUsageSessions, turnHasMcpCall } from '../src/main/session/store.js';
 import { trackInFlight, emptyEvidence, type CallContext } from '../src/main/mcp/call-context.js';
 // Ownership tests inspect messages; batch-specific assertions use the complete delivery below.
 const offerToolInput = async (...args: Parameters<typeof offerToolInputBatch>) => (await offerToolInputBatch(...args)).messages;
@@ -20,6 +21,7 @@ vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async 
 
 const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, finishReleased: false, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; reason?: string; turnId: string; time: number; seq?: number } }));
 vi.mock('../src/main/session/store.js', () => ({
+  sessionsRoot: () => path.join(directory, 'sessions'),
   listUsageSessions: vi.fn(async () => []),
   conversationWasSuperseded: vi.fn(async () => false),
   readRecentEvents: vi.fn(async () => binding.end ? [binding.end] : []),
@@ -400,6 +402,22 @@ describe('durable user input ownership', () => {
     expect(durable).not.toContain('PRIVATE');
     expect(durable).toContain('temporary-planner');
   });
+  it('retains the opening Loop delivery preference across restart, Off and the exact send receipt', async () => {
+    const entry = await enqueueInput(input({ sessionId: null, automation: 'loop', loopAfterTurn: true }));
+    resetInputForTests();
+    expect((await listInputs()).find(row => row.id === entry.id)?.loopAfterTurn).toBe(true);
+    await claimBrowserInput(entry.id, 'browser-owner', null);
+    await setInputAutomation(entry.id, 'off');
+    await acknowledgeBrowserInput(entry.id, 'browser-owner', binding.conversationId);
+    expect(automate).toHaveBeenLastCalledWith(binding.conversationId, 'off', 'after-send', undefined, true);
+    await setInputAutomation(entry.id, 'loop', false);
+    expect(automate).toHaveBeenLastCalledWith(binding.conversationId, 'loop', 'after-send', undefined, false);
+    resetInputForTests();
+    expect((await listInputs()).find(row => row.id === entry.id)).toMatchObject({ automation: 'loop', loopAfterTurn: false });
+    automate.mockClear();
+    await acknowledgeBrowserInput(entry.id, 'browser-owner', binding.conversationId);
+    expect(automate).not.toHaveBeenCalled();
+  });
   it('persists fresh-chat Off before ACK and applies Off after ACK without resending', async () => {
     const entry = await enqueueInput(input({ sessionId: null, automation: 'goal', objective: 'Keep objective' }));
     await claimBrowserInput(entry.id, 'browser-owner', null);
@@ -532,7 +550,7 @@ describe('durable user input ownership', () => {
     expect(automate).not.toHaveBeenCalled();
     now = 2000;
     await claimBrowserInput(row.id, 'owner', binding.conversationId);
-    expect(automate).toHaveBeenCalledExactlyOnceWith(binding.conversationId, 'loop', 'before-send', undefined);
+    expect(automate).toHaveBeenCalledExactlyOnceWith(binding.conversationId, 'loop', 'before-send', undefined, undefined);
     await acknowledgeBrowserInput(row.id, 'owner', binding.conversationId);
     await acknowledgeBrowserInput(row.id, 'owner', binding.conversationId);
     expect(automate).toHaveBeenCalledTimes(1);
@@ -541,7 +559,7 @@ describe('durable user input ownership', () => {
   it('applies tool input automation before disclosure and never repeats on overlapping offers', async () => {
     await enqueueInput(input({ automation: 'off' }));
     expect(await offerToolInput(sessionId, binding.conversationId, 'first', 0)).toHaveLength(1);
-    expect(automate).toHaveBeenCalledExactlyOnceWith(binding.conversationId, 'off', 'before-send', undefined);
+    expect(automate).toHaveBeenCalledExactlyOnceWith(binding.conversationId, 'off', 'before-send', undefined, undefined);
     expect(await offerToolInput(sessionId, binding.conversationId, 'overlapping', 0)).toHaveLength(1);
     expect(automate).toHaveBeenCalledTimes(1);
   });
@@ -576,7 +594,7 @@ describe('durable user input ownership', () => {
     expect(await acknowledgeBrowserInput(row.id, 'owner')).toBe(false);
     expect(await acknowledgeBrowserInput(row.id, 'other', binding.conversationId)).toBe(false);
     expect(await acknowledgeBrowserInput(row.id, 'owner', binding.conversationId)).toBe(true);
-    expect(automate).toHaveBeenCalledExactlyOnceWith(binding.conversationId, 'goal', 'after-send', 'Build the requested project and test it');
+    expect(automate).toHaveBeenCalledExactlyOnceWith(binding.conversationId, 'goal', 'after-send', 'Build the requested project and test it', undefined);
     expect((await listInputs())[0]).toMatchObject({ sessionId: null, deliveredSessionId: sessionId, conversationId: binding.conversationId, state: 'sent' });
     expect(await enqueueInput(args)).toMatchObject({ state: 'sent', automation: 'goal' });
     expect(await acknowledgeBrowserInput(row.id, 'owner', 'conversation-other')).toBe(false);
@@ -1462,4 +1480,230 @@ it('delivers a legacy finish checkpoint after an ordinary turn without restoring
   await acknowledgeBrowserInput(row.id, 'page', binding.conversationId, 'native-checkpoint');
   resetInputForTests();
   expect(await pendingBrowserInputs()).toEqual([]);
+});
+
+describe('one silence delivery for a correction and its next checkpoint', () => {
+  async function stagedImage() {
+    const sharp = (await import('sharp')).default;
+    const bytes = await sharp({ create: { width: 1, height: 1, channels: 3, background: '#888888' } }).png().toBuffer();
+    return stageInputAttachment({ name: 'shape.png', bytes }, new Set());
+  }
+  it.each(['text', 'image'] as const)('keeps %s injection on the exact MCP grant after a native completed event', async kind => {
+    binding.model = 'gpt-6-pro'; binding.finishEnabled = false;
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'retained-mcp-turn', time: now, seq: 12 };
+    configureInputDelivery({ applyAutomation: automate, changed,
+      activity: () => ({ possible: true, exact: true, turnId: 'retained-mcp-turn', model: 'pro' }) });
+    expect(await sessionInputPolicy(sessionId)).toMatchObject({ canInject: true, injectionTurnId: 'retained-mcp-turn', settled: false, browserAllowed: false });
+    const image = kind === 'image' ? await stagedImage() : null;
+    const correction = await enqueueInput(input({ ...(image ? { attachments: [image], attachmentDelivery: 'tool' } : {}) }));
+    expect(correction.transportIntent).toBe('tool');
+    expect(await pendingBrowserInputs()).toEqual([]);
+    expect(await offerToolInput(sessionId, binding.conversationId, 'continued-exact-call', now)).toEqual([
+      expect.objectContaining({ text: correction.text, images: image ? [expect.objectContaining({ dataUrl: expect.stringMatching(/^data:image\/webp;base64,/) })] : [] })
+    ]);
+  });
+
+  it('rejects an image preparation whose retained exact turn changed during normalization', async () => {
+    binding.model = 'gpt-6-pro'; binding.finishEnabled = false;
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'retained-mcp-turn', time: now, seq: 12 };
+    let observations = 0;
+    configureInputDelivery({ applyAutomation: automate, changed,
+      activity: () => ({ possible: true, exact: true, turnId: ++observations === 1 ? 'retained-mcp-turn' : 'replacement-turn', model: 'pro' }) });
+    const image = await stagedImage();
+    await expect(enqueueInput(input({ attachments: [image], attachmentDelivery: 'tool' })))
+      .rejects.toThrow('active chat changed while preparing images');
+    expect(await listInputs()).toEqual([]);
+  });
+
+  async function bundle(manual: Partial<InputArgs> = {}, checkpoint: Partial<InputArgs> = {}) {
+    binding.model = 'gpt-6-pro'; binding.finishEnabled = false;
+    binding.activeTurnId = 'silent-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'silent-turn', time: now, seq: 12 };
+    const head = await seedLegacyInput(input({ mode: 'after-turn', text: 'Check geometry', ...checkpoint }));
+    const later = await enqueueInput(input({ mode: 'after-turn', text: 'Later checkpoint' }));
+    const correction = await enqueueInput(input({ text: 'Use real 3D shapes', ...manual }));
+    const listenUntil = now + 600_000;
+    expect(await fileSilenceInput(sessionId, binding.conversationId, 'silent-turn', () => true, listenUntil)).toBe(true);
+    expect(await pendingBrowserInputs()).toEqual([]);
+    // Recovery follows the correction's ticket even though the checkpoint came first.
+    expect(await pendingQueuedPickups()).toEqual([expect.objectContaining({ sourceTurnId: 'silent-turn', listenUntil })]);
+    now = listenUntil;
+    return { head, later, correction };
+  }
+
+  it('claims only the next checkpoint, restores exact bytes, and records one combined native receipt', async () => {
+    const { head, later, correction } = await bundle();
+    const history = vi.fn(async (_row: Readonly<InputEntry>) => true);
+    configureInputDelivery({ applyAutomation: automate, changed, recordDelivered: history });
+    const claim = await claimBrowserInput(correction.id, 'first-page', binding.conversationId, true);
+    expect(claim?.text).toBe('Use real 3D shapes\n\nNext queued instruction:\nCheck geometry');
+    expect(await claimBrowserInput(head.id, 'other-page', binding.conversationId, true)).toBeNull();
+    expect(await editQueuedInput(head.id, 'Racing edit')).toBe(false);
+    resetInputForTests();
+    const reclaimed = await claimBrowserInput(correction.id, 'replacement-page', binding.conversationId, true);
+    expect(reclaimed?.text).toBe(claim?.text);
+    expect(await authorizeBrowserInput(correction.id, 'first-page', binding.conversationId)).toBe(false);
+    expect(await authorizeBrowserInput(correction.id, 'replacement-page', binding.conversationId)).toBe(true);
+    expect(await acknowledgeBrowserInput(head.id, 'replacement-page', binding.conversationId, 'native-id')).toBe(false);
+    expect(await acknowledgeBrowserInput(correction.id, 'replacement-page', binding.conversationId, 'native-id')).toBe(true);
+    expect(history).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: correction.id, text: claim?.text, messageId: 'native-id' }));
+    const rows = await listInputs();
+    for (const id of [head.id, correction.id]) expect(rows.find(row => row.id === id)).toMatchObject({ state: 'sent', messageId: 'native-id', historyRecorded: true });
+    expect(rows.find(row => row.id === later.id)).toMatchObject({ state: 'queued' });
+    expect(await enqueueInput(input({ ...correction }))).toMatchObject({ text: 'Use real 3D shapes' });
+  });
+
+  it('releases both unsubmitted claims when real work resumes and injects only the correction', async () => {
+    const { head, correction } = await bundle();
+    await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+    await revokeSilenceInputs(sessionId);
+    now += 61_000;
+    const rows = await listInputs();
+    for (const id of [head.id, correction.id]) expect(rows.find(row => row.id === id)).toMatchObject({ state: 'queued', owner: null });
+    expect(rows.find(row => row.id === correction.id)?.companionInputId).toBeUndefined();
+    expect(await authorizeBrowserInput(correction.id, 'page', binding.conversationId)).toBe(false);
+    expect(await offerToolInput(sessionId, binding.conversationId, 'resumed-call', now)).toEqual([expect.objectContaining({ text: 'Use real 3D shapes' })]);
+  });
+
+  it.each(['cancel', 'failure', 'timeout'] as const)('keeps both originals under one late receipt after %s', async outcome => {
+    const { head, correction } = await bundle();
+    await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+    await authorizeBrowserInput(correction.id, 'page', binding.conversationId);
+    if (outcome === 'cancel') expect(await cancelInput(head.id)).toBe(true);
+    if (outcome === 'failure') expect(await failBrowserInput(correction.id, 'page', 'Lost response after Send')).toBe(true);
+    if (outcome === 'timeout') now += 45_001;
+    resetInputForTests();
+    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)).toMatchObject({ state: 'cancelled' });
+    expect(await pendingBrowserInputs()).toEqual([]);
+    expect(await acknowledgeBrowserInput(correction.id, 'page', binding.conversationId, 'late-native-id')).toBe(true);
+    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)).toMatchObject({ state: 'cancelled', messageId: 'late-native-id' });
+  });
+
+  it('preserves authorized bundle custody against a fresh-work revocation and false safe-withdrawal report', async () => {
+    const { head, correction } = await bundle();
+    await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+    await authorizeBrowserInput(correction.id, 'page', binding.conversationId);
+    await revokeSilenceInputs(sessionId);
+    expect((await listInputs()).filter(row => row.state === 'browser')).toHaveLength(2);
+    await failBrowserInput(correction.id, 'page', 'After-turn pickup was withdrawn before Send.');
+    expect((await listInputs()).find(row => row.id === head.id)?.state).toBe('cancelled');
+    expect(await offerToolInput(sessionId, binding.conversationId, 'resumed', now)).toEqual([]);
+  });
+
+  it('reserves both rows before a failing automation transition can publish either claim', async () => {
+    const { head, correction } = await bundle({ automation: 'off' });
+    automate.mockRejectedValueOnce(new Error('Control persistence failed'));
+    await expect(claimBrowserInput(correction.id, 'page', binding.conversationId, true)).rejects.toThrow('Control persistence failed');
+    resetInputForTests();
+    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)?.state).toBe('failed');
+    expect(await pendingBrowserInputs()).toEqual([]);
+  });
+
+  it('preserves the file preparation timeout when only the checkpoint has a native attachment', async () => {
+    const file = { id: randomUUID(), name: 'shape.stl', mimeType: 'application/octet-stream', size: 42 };
+    const { head, correction } = await bundle({}, { attachments: [file] });
+    const claim = await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+    expect(claim?.attachments).toEqual([file]);
+    now += 120_001;
+    resetInputForTests();
+    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)?.state).toBe('browser');
+    now += 600_000;
+    for (const id of [head.id, correction.id]) expect((await listInputs()).find(row => row.id === id)?.state).toBe('cancelled');
+  });
+
+  it.each(['text', 'images'] as const)('sends the correction alone if the optional checkpoint would exceed the %s bound', async kind => {
+    const image = { name: 'shape.webp', dataUrl: 'data:image/webp;base64,AAAA' };
+    const { head, correction } = kind === 'text'
+      ? await bundle({ text: 'x'.repeat(90_000) }, { text: 'y'.repeat(10_000) })
+      : await bundle({ images: [image, image, image, image] }, { images: [image] });
+    const claim = await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+    expect(claim?.text).toBe(correction.text);
+    expect(claim?.companionInputId).toBeUndefined();
+    expect((await listInputs()).find(row => row.id === head.id)?.state).toBe('queued');
+  });
+
+  it('lets failed-turn correction bypass the initial five-minute wait while retaining a native-busy five-minute deferral', async () => {
+    binding.model = 'gpt-6-pro'; binding.finishEnabled = false;
+    binding.activeTurnId = 'failed-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'failed-turn', time: now, seq: 12 };
+    const checkpoint = await enqueueInput(input({ mode: 'after-turn', text: 'Wait for automatic pickup' }));
+    const correction = await enqueueInput(input());
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-turn', time: now, seq: 13 };
+    await fileSilenceInput(sessionId, binding.conversationId, 'failed-turn', () => true, now + 300_000);
+    expect(await pendingBrowserInputs()).toHaveLength(1);
+    const immediate = await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+    expect(immediate?.text).toBe(correction.text);
+    expect(immediate?.companionInputId).toBeUndefined();
+    expect((await listInputs()).find(row => row.id === checkpoint.id)?.state).toBe('queued');
+    await failBrowserInput(correction.id, 'page', 'After-turn pickup was withdrawn before Send.');
+    expect(await deferSilenceInput(correction.id, binding.conversationId, 'failed-turn')).toBe(true);
+    expect(await pendingBrowserInputs()).toEqual([]);
+    now += 299_999;
+    expect(await pendingBrowserInputs()).toEqual([]);
+    now += 1;
+    expect(await pendingBrowserInputs()).toHaveLength(1);
+  });
+
+  it('retains immediate user intent for native files converted from Auto without injecting or advancing a checkpoint', async () => {
+    binding.model = 'gpt-6-pro'; binding.finishEnabled = false;
+    binding.activeTurnId = 'failed-files';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'failed-files', time: now, seq: 12 };
+    const file = await stageInputAttachment({ text: 'Native file correction' }, new Set());
+    const checkpoint = await enqueueInput(input({ mode: 'after-turn', text: 'Automatic checkpoint' }));
+    const correction = await enqueueInput(input({ text: 'Read this correction', attachments: [file] }));
+    expect(correction).toMatchObject({ mode: 'after-turn', requestedMode: 'auto', transportIntent: 'browser' });
+    expect(await offerToolInput(sessionId, binding.conversationId, 'running-call', now)).toEqual([]);
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-files', time: now, seq: 13 };
+    await fileSilenceInput(sessionId, binding.conversationId, 'failed-files', () => true, now + 300_000);
+    const claim = await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+    expect(claim).toMatchObject({ text: 'Read this correction', attachments: [file] });
+    expect(claim?.companionInputId).toBeUndefined();
+    expect(await authorizeBrowserInput(correction.id, 'page', binding.conversationId)).toBe(true);
+    expect((await listInputs()).find(row => row.id === checkpoint.id)?.state).toBe('queued');
+  });
+
+  it('retains native-busy waiting and its companion when a completed event arrives during the delay', async () => {
+    const { correction, head } = await bundle();
+    expect(await deferSilenceInput(correction.id, binding.conversationId, 'silent-turn')).toBe(true);
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'silent-turn', time: now, seq: 13 };
+    expect(await pendingBrowserInputs()).toEqual([]);
+    expect(await pendingQueuedPickups()).toEqual([expect.objectContaining({ listenUntil: now + 300_000 })]);
+    now += 299_999;
+    expect(await claimBrowserInput(correction.id, 'page', binding.conversationId, true)).toBeNull();
+    now += 1;
+    const claim = await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+    expect(claim?.companionInputId).toBe(head.id);
+    expect(claim?.text).toContain(head.text);
+  });
+
+  it('defers the first failed-view manual send before refresh without MCP proof or an automatic checkpoint', async () => {
+    binding.model = 'gpt-6-pro'; binding.finishEnabled = false;
+    binding.activeTurnId = null;
+    binding.end = { kind: 'turn_end', outcome: 'failed', reason: 'thinking_failed', turnId: 'failed-before-refresh', time: now, seq: 12 };
+    vi.mocked(turnHasMcpCall).mockResolvedValue(false);
+    try {
+      const checkpoint = await enqueueInput(input({ mode: 'after-turn', text: 'Automatic checkpoint' }));
+      const correction = await enqueueInput(input({ text: 'Immediate correction' }));
+      expect(correction.transportIntent).toBe('browser');
+      expect(correction.silenceBoundary).toBeUndefined();
+      expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: correction.id, silenceTurnId: 'failed-before-refresh' })]);
+      expect(await deferSilenceInput(correction.id, binding.conversationId, 'wrong-turn')).toBe(false);
+      expect(await deferSilenceInput(correction.id, 'wrong-conversation', 'failed-before-refresh')).toBe(false);
+      expect(await deferSilenceInput(correction.id, binding.conversationId, 'failed-before-refresh')).toBe(true);
+      now += 60_001;
+      resetInputForTests();
+      expect((await listInputs()).find(row => row.id === correction.id)?.state).toBe('queued');
+      expect(await pendingBrowserInputs()).toEqual([]);
+      now += 239_999;
+      const claim = await claimBrowserInput(correction.id, 'page', binding.conversationId, true);
+      expect(claim?.text).toBe(correction.text);
+      expect(claim?.companionInputId).toBeUndefined();
+      expect((await listInputs()).find(row => row.id === checkpoint.id)?.state).toBe('queued');
+    } finally { vi.mocked(turnHasMcpCall).mockResolvedValue(true); }
+  });
 });

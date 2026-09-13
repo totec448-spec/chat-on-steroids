@@ -134,7 +134,7 @@ async function settle(ms = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; sessions?: SessionSummary[] } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; sessions?: SessionSummary[]; pro?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -185,7 +185,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
   const api: any = new Proxy(
     {
       getState: () => ok(state),
-      getChatModels: () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['none', 'high'] }] }),
+      getChatModels: () => ok({ state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: options.pro ? ['high', 'pro'] : ['none', 'high'] }] }),
       getSessionControls: (id: string) => ok({ sessionId: id, conversationId: 'chat-a', automation: live.automation, activeTurnId: 'held-turn', finishHeld: live.finishHeld, blocked: '', job: live.compacting ? { busy: true } : null }),
       releaseSessionFinish: (id: string, turn: string) => { live.controlCalls.push({ id, action: `release:${turn}` }); live.finishHeld = false; return ok({}); },
       setSessionAutomation: (id: string, action: string) => { live.controlCalls.push({ id, action }); live.automation = action; return ok({}); },
@@ -1783,6 +1783,38 @@ it('follows the accepted New Chat receipt while preserving a typed follow-up', a
   await append([]);
   expect(w.document.querySelector('#sessionList [data-id].is-sel')).not.toBeNull();
   expect(composer.value).toBe('Follow-up while delivery is pending');
+});
+
+it('shows Pro Loop delivery before sending and freezes changes made while the opening is being accepted', async () => {
+  const { w, live } = await boot([], false, [], [], { pro: true });
+  const row = w.document.getElementById('loopDeliveryRow')!;
+  const effort = w.document.getElementById('composerReasoning') as HTMLSelectElement;
+  const delivery = w.document.getElementById('loopDelivery') as HTMLSelectElement;
+  const choose = (value: string) => { effort.value = value; effort.dispatchEvent(new w.Event('change')); };
+  w.document.querySelector<HTMLButtonElement>('#automationSwitch [data-mode="loop"]')!.click();
+  expect(row.hidden).toBe(true);
+  choose('pro'); expect(row.hidden).toBe(false);
+  expect(delivery.value).toBe('finish');
+  delivery.value = 'after-turn'; delivery.dispatchEvent(new w.Event('change'));
+  choose('high'); expect(row.hidden).toBe(true);
+  choose('pro'); expect(row.hidden).toBe(false);
+  expect(delivery.value).toBe('after-turn');
+  const api = (w as any).api;
+  const originalSend = api.sendInput;
+  let accept!: () => void;
+  api.sendInput = vi.fn((input: InputArgs) => new Promise(resolve => { accept = () => resolve(originalSend(input)); }));
+  api.setInputAutomation = vi.fn(async () => ({ ok: true, data: true }));
+  (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = 'First Pro Loop message';
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await settle();
+  expect(api.sendInput.mock.calls[0][0]).toMatchObject({ sessionId: null, automation: 'loop', loopAfterTurn: true });
+  delivery.value = 'finish'; delivery.dispatchEvent(new w.Event('change'));
+  accept(); await settle();
+  expect(api.setInputAutomation).toHaveBeenLastCalledWith(live.sent[0]!.id, 'loop', false);
+  w.document.querySelector<HTMLButtonElement>('#automationSwitch [data-mode="goal"]')!.click();
+  expect(row.hidden).toBe(true);
+  w.document.getElementById('newChat')!.click();
+  expect(delivery.value).toBe('finish');
 });
 
 it('applies Off to the exact accepted New Chat opening while preserving an unrelated composer draft', async () => {
