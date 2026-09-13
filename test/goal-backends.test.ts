@@ -130,6 +130,28 @@ async function settled(id: string) {
   return goal.goalViewFor(id)!;
 }
 describe('Goal decision backends', () => {
+  it.each(['api', 'chatgpt'] as const)('sends canonical interim and corrections to the %s Loop without a final answer', async backend => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, loopBackend: backend } });
+    await setSecret('openRouterApiKey', 'test-key');
+    const id = `failed-interim-${backend}`;
+    const session = await createSession({ title: 'Failed interim context', conversationId: id });
+    for (const [index, text] of ['Build the individual stage layers', 'Geometry is still shallow', 'Use no textures or color'].entries()) {
+      await appendEvent(session.id, { source: 'extension', time: index + 1,
+        ...(index === 1 ? { kind: 'assistant_message' as const, messageId: 'canonical-interim', state: 'streaming' as const, final: false } : { kind: 'user_message' as const }),
+        message: { text, chars: text.length, truncated: false } });
+    }
+    await appendEvent(session.id, { source: 'extension', kind: 'turn_end', turnId: 'failed-turn', outcome: 'failed', reason: 'thinking_failed', time: 4 });
+    browser.request.mockResolvedValue('{"action":"continue","reply":"Refine the geometry"}');
+    const fetcher = vi.fn(async () => Response.json({ choices: [{ message: { content: '{"action":"continue","reply":"Refine the geometry"}' } }] }));
+    vi.stubGlobal('fetch', fetcher);
+    await goal.setGoalSwitchNow(id, 'loop', true, true);
+    goal.startGoalDraft({ conversationId: id, sessionId: session.id, turnId: 'failed-turn' });
+    expect((await settled(id)).stage).toBe('ready');
+    const payload = backend === 'chatgpt' ? browser.request.mock.calls[0]?.[0]
+      : String((fetcher.mock.calls[0] as unknown as [unknown, RequestInit])?.[1]?.body);
+    for (const text of ['Build the individual stage layers', 'Geometry is still shallow', 'Use no textures or color']) expect(payload).toContain(text);
+    expect(payload.match(/Geometry is still shallow/g)).toHaveLength(1);
+  });
   it('restarts only the deliberately authorized failed source helper', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
     const id = 'source-retry-helper';

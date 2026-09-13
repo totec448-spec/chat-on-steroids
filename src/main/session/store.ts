@@ -1015,7 +1015,7 @@ export function upsertMessageEvent(
   sessionId: string,
   event: NewMessageEvent,
   options: { preferTime?: boolean } = {}
-): Promise<{ event: MessageEvent; changed: boolean }> {
+): Promise<{ event: MessageEvent; changed: boolean; contentChanged: boolean }> {
   const directKey = messageKey(event as MessageEvent);
   if (!directKey) throw new Error('Canonical message update requires ChatGPT messageId');
   return ensureOpen(sessionId).then((entry) => {
@@ -1045,7 +1045,7 @@ export function upsertMessageEvent(
         event.final !== true &&
         event.state !== 'final'
       ) {
-        return { event: previous, changed: false };
+        return { event: previous, changed: false, contentChanged: false };
       }
 
       // Message bodies can be hundreds of kilobytes. The old path JSON.stringify-compared the
@@ -1128,7 +1128,7 @@ export function upsertMessageEvent(
         (nextEvent.agent === undefined || previous.agent === nextEvent.agent) &&
         (!preferTime || previous.time === nextEvent.time)
       ) {
-        return { event: previous, changed: false };
+        return { event: previous, changed: false, contentChanged: false };
       }
       const full = {
         ...nextEvent,
@@ -1178,7 +1178,7 @@ export function upsertMessageEvent(
       }
       entry.historySeq = full.seq;
       scheduleMeta(entry);
-      return { event: full, changed: true };
+      return { event: full, changed: true, contentChanged: !sameMessage };
     });
     entry.queue = write.then(
       () => undefined,

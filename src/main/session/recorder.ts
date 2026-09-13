@@ -2024,7 +2024,9 @@ async function recordChatObservationsNow(
         // a new user turn. Old messages and explicit completed/stopped turns cannot.
         const resumedUncertainTurn = uncertainEnd?.kind === 'turn_end' && uncertainEnd.turnId === canonicalTurn &&
           uncertainEnd.outcome !== 'completed' && uncertainEnd.outcome !== 'stopped' && item.time > uncertainEnd.time;
-        const workingActivity = state !== 'final' && item.activeNow === true &&
+        // HTML, provider identity and authored-time promotion revise history, not work.
+        // In particular a post-failure Fiber backfill must not reopen the dead turn.
+        const workingActivity = written.contentChanged && state !== 'final' && item.activeNow === true &&
           (!canonicalTurn || canonicalTurn === live?.turnId || resumedUncertainTurn) &&
           !(live?.turnStartedAt === null && (live.lastTurnOutcome === 'stopped' || live.lastTurnOutcome === 'completed'));
         if (state === 'final' && written.event.kind === 'assistant_message' && canonicalTurn && recoverableTurns.has(canonicalTurn) &&
@@ -2063,7 +2065,7 @@ async function recordChatObservationsNow(
           activity.terminal = true;
           activity.meaningful = true;
         }
-        if (state !== 'final' && canonicalTurn && item.activeNow === true &&
+        if (workingActivity && canonicalTurn &&
             await reopenThinkingFailure(sessionId, live, item.time, canonicalTurn)) {
           activity.terminal = false;
         }

@@ -2717,13 +2717,40 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 
 html[data-theme="dark"] { color-scheme: dark; }
 html[data-theme="light"] { color-scheme: light; }
-/* Windows native menus must not inherit the composer's transparent select surface. */
-select option { background: var(--card); color: var(--ink); }
+/* Keep the native select's keyboard, focus and form semantics while styling both
+   the trigger and its top-layer picker consistently across the workspace. */
+select, select::picker(select) { appearance: base-select; }
+select { min-width: 0; gap: 12px; white-space: normal; cursor: pointer; transition: border-color 140ms, background 140ms; }
+select:hover:not(:disabled) { border-color: var(--soft); }
+select:disabled { opacity: .5; cursor: default; }
+select::picker-icon {
+  content: ''; width: 7px; height: 7px; margin-inline: auto 3px; flex-shrink: 0;
+  border-right: 1.5px solid var(--soft); border-bottom: 1.5px solid var(--soft);
+  transform: translateY(-2px) rotate(45deg); transition: rotate 140ms;
+}
+select:open::picker-icon { rotate: 180deg; }
+select::picker(select) {
+  padding: 5px; margin: 0; border: 1px solid var(--edge); border-radius: 9px;
+  width: anchor-size(width); box-sizing: border-box;
+  background: var(--card); color: var(--ink); box-shadow: 0 8px 30px #0004;
+  max-width: calc(100vw - 24px); max-height: min(360px, 60vh); overflow: auto;
+}
+select option {
+  min-height: 36px; padding: 8px 10px; gap: 12px; border-radius: 7px;
+  background: transparent; color: var(--ink); font: inherit; line-height: 1.4;
+  white-space: normal; overflow-wrap: anywhere;
+}
+select option:hover, select option:focus { background: var(--hover); outline: none; }
+select option:checked { background: color-mix(in srgb, #78aaff 16%, var(--card)); }
+select option:disabled { color: var(--soft); opacity: .55; }
+select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink); }
 
 .session-controls-menu { padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--line); }
 #composerSettings > summary { width: 36px; height: 36px; padding: 8px; justify-content: center; }
 #composerSettings > summary .ico { width: 20px; height: 20px; }
 #composerSettings .composer-popover { width: 280px; left: 50%; right: auto; translate: -50% 0; transform-origin: bottom center; max-height: min(520px, 70vh); overflow-y: auto; }
+#composerSettings #loopDeliveryRow { flex-direction: column; align-items: stretch; gap: 7px; padding: 12px 9px 6px; }
+#loopDeliveryRow select { width: 100%; max-width: 100%; padding: 9px 11px; border-radius: 9px; line-height: 1.4; }
 .automation-switch { display: flex; padding: 3px; gap: 3px; border-radius: 10px; background: var(--sunk); }
 .automation-switch button { justify-content: center; padding: 8px 12px; transition: background .15s ease; color: var(--soft); }
 .automation-switch button[aria-checked='true'] { background: color-mix(in srgb, #78aaff 18%, var(--card)); color: var(--ink); box-shadow: 0 1px 3px #0002; }

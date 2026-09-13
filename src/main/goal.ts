@@ -52,7 +52,7 @@ import { getConfig } from './config.js';
 import { writeDurableNow, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret } from './secrets.js';
-import { getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
+import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
 import { foldProgress } from '../shared/session.js';
 import { isAstraModel, isProModel } from '../shared/chat-models.js';
 
@@ -567,9 +567,11 @@ export async function acceptGoalReplyNow(input: {
   turnId: string;
   eventSeq: number;
   blocked: boolean;
+  /** Retain proved exhausted silence while Off without creating active debt. */
+  handledOnly?: true;
   current?: () => boolean;
 }): Promise<void> {
-  if (await astraFinishOnly(input.sessionId, input.conversationId)) return;
+  if (!input.handledOnly && await astraFinishOnly(input.sessionId, input.conversationId)) return;
   if (input.silenceSourceTurnId &&
       !await turnHasMcpCall(input.sessionId, input.conversationId, input.silenceSourceTurnId)) return;
   const current = goalReplies.get(input.conversationId);
@@ -583,7 +585,7 @@ export async function acceptGoalReplyNow(input: {
   const before = current ? { ...current } : null;
   const bounded = snapshotGoalReplies().replies;
   const active =
-    !input.blocked &&
+    !input.handledOnly && !input.blocked &&
     getConfig().sessions.record &&
     goalArmedFor(input.conversationId) &&
     await goalKeyPresent(goalSwitchFor(input.conversationId).mode);
@@ -1183,7 +1185,36 @@ export function retireGoalDraftsFor(conversationId: string): boolean {
  * old row leaves the reply safely retryable but can never let the now-revoked text reach the
  * composer. A later page simply drafts it again from the same durable reply identity.
  */
-export async function setGoalReplyActiveNow(conversationId: string, active: boolean): Promise<boolean> {
+export async function setGoalReplyActiveNow(conversationId: string, active: boolean, current: (silenceSourceTurnId?: string) => boolean = () => true): Promise<boolean> {
+  const activationReply = goalReplies.get(conversationId);
+  const silenceSource = (activationReply?.listenUntil ?? 0) <= Date.now() ? activationReply?.silenceSourceTurnId : undefined;
+  const stillCurrent = () => (!silenceSource || goalReplies.get(conversationId) === activationReply) && current(silenceSource);
+  // Deliberate On is also meaningful after an unsuccessful answer. No automatic
+  // observer may mint this activation: retain the exact ended source in the same
+  // reply ledger, without pretending a failure was a final or a refresh receipt.
+  if (active) {
+    if (!stillCurrent()) return false;
+    const control = goalSwitches.get(conversationId);
+    const session = await findSessionByConversation(conversationId, { requireUnique: true });
+    const [end] = session && (!session.activeTurnId || session.activeTurnId === silenceSource)
+      ? await readRecentEvents(session.id, 1, { kinds: ['turn_start', 'turn_end', 'user_message'] }) : [];
+    if (!stillCurrent() || control !== goalSwitches.get(conversationId) || !goalArmedFor(conversationId) ||
+        (session?.activeTurnId && session.activeTurnId !== silenceSource)) return false;
+    const held = goalReplies.get(conversationId);
+    if (held?.silencePro && !loopAfterTurnFor(conversationId)) return false;
+    if ((end?.kind === 'user_message' || end?.kind === 'turn_start') && (!held || held.eventSeq <= end.seq)) return false;
+    // On enables future completion pickup while work is running; it does not
+    // resurrect a prior answer's debt or bypass the failed-view listening window.
+    if (end?.kind === 'turn_end' && end.reason === 'thinking_failed' && end.time + 5 * 60_000 > Date.now()) return false;
+    if (session && end?.kind === 'turn_end' && end.turnId &&
+        (end.outcome === 'stopped' || (end.outcome === 'failed' && end.reason === 'thinking_failed')) &&
+        (!held || held.eventSeq < end.seq)) {
+      await acceptGoalReplyNow({ conversationId, sessionId: session.id, turnId: end.turnId,
+        replyId: `activation:${end.turnId}`.slice(0, 200), eventSeq: end.seq, blocked: false,
+        current: () => stillCurrent() && control === goalSwitches.get(conversationId) && goalArmedFor(conversationId) && !session.activeTurnId });
+      if (!stillCurrent() || control !== goalSwitches.get(conversationId) || !goalArmedFor(conversationId)) return false;
+    }
+  }
   const before = goalReplies.get(conversationId);
   const draft = drafts.get(conversationId);
   if (draft) {
@@ -1201,12 +1232,18 @@ export async function setGoalReplyActiveNow(conversationId: string, active: bool
   // A deliberate On is a new pickup episode for the same stable final reply. It gets the
   // recovery schedule from now, not from when that answer happened under an Off switch.
   if (active) before.acceptedAt = Math.max(Date.now(), previous.acceptedAt + 1);
+  const acceptedAt = before.acceptedAt;
   try {
     await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
   } catch (error) {
-    goalReplies.set(conversationId, previous);
+    if (goalReplies.get(conversationId) === before && before.acceptedAt === acceptedAt) goalReplies.set(conversationId, previous);
     persistGoalRepliesSoon();
     throw error;
+  }
+  if (active && !stillCurrent() && goalReplies.get(conversationId) === before && before.acceptedAt === acceptedAt) {
+    before.state = 'handled';
+    await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
+    return false;
   }
   return true;
 }
