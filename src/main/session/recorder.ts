@@ -28,7 +28,7 @@ import type {
   ToolOutcome,
   TurnOutcome
 } from '../../shared/session.js';
-import { estimateTokens, originTitle } from '../../shared/session.js';
+import { estimateTokens, originTitle, workSequence } from '../../shared/session.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
 import { redactCredentialText } from '../redaction.js';
@@ -40,6 +40,8 @@ import {
   MAX_USER_MESSAGE_CHARS,
   MAX_ASSET_BYTES,
   appendEvent,
+  recordProcessCall,
+  completeProcessCall,
   observeSessionModel,
   conversationAttachment,
   createSession,
@@ -1347,6 +1349,8 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     }
 
     const call: ToolCallRecord = {
+      ...(target.attribution === 'request_id' && target.conversationId && evidence.processCompletion && evidence.processSessionId && input.tool === 'exec_command'
+        ? { process: { sessionId: evidence.processSessionId } } : {}),
       ...callModel,
       callId: randomUUID(),
       tool: input.tool,
@@ -1369,7 +1373,8 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       ...(input.endsActivity === true ? { endsActivity: true as const } : {})
     };
 
-    await appendEvent(sessionId, {
+    const recordCall = call.process ? recordProcessCall : appendEvent;
+    await recordCall(sessionId, {
       time: input.startedAt,
       source: 'mcp',
       kind: 'tool_call',
@@ -1377,6 +1382,17 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       ...(eventAgent ? { agent: eventAgent } : {}),
       ...(target.turnId ? { turnId: target.turnId } : {})
     });
+    if (call.process && evidence.processCompletion) {
+      // Bind once to the recorded call, never look up a reusable numeric process id.
+      // A process that exited during recorder admission resolves this same promise.
+      void evidence.processCompletion.then(completion => {
+        const work = completeProcessCall(sessionId, call.callId, completion)
+          .then(() => notifyChanged())
+          .catch(() => logWarn('session recorder could not store process completion'));
+        pendingRecordings.add(work);
+        void work.then(() => pendingRecordings.delete(work));
+      });
+    }
     const reopenedTurnId = await serializeObservations(target.conversationId ?? sessionId, () => reopenFalselyEndedTurn(
       sessionId,
       target.conversationId,
@@ -2203,12 +2219,12 @@ async function recordChatObservationsNow(
       ]) : [[], []];
   // Repair a previously recorded false reopen only from its durable A/end/A
   // lineage and an exact native final. A page-authored new start is new work.
-  const [lastBoundary, priorBoundary] = recoveredFinal?.native && latestWork && latestWork.seq >= recoveredFinal.seq
+  const [lastBoundary, priorBoundary] = recoveredFinal?.native && latestWork && workSequence(latestWork) >= recoveredFinal.seq
     ? await readRecentEvents(sessionId, 2, { kinds: ['turn_start', 'turn_end'] }) : [];
   const nativeReopen = recoveredFinal?.native && lastBoundary?.kind === 'turn_start' && lastBoundary.source === 'app' &&
     lastBoundary.turnId === recoveredFinal.turnId && priorBoundary?.kind === 'turn_end' &&
     priorBoundary.turnId === recoveredFinal.turnId && priorBoundary.outcome === 'completed';
-  if (recoveredFinal && latestWork && (latestWork.seq < recoveredFinal.seq || nativeReopen) &&
+  if (recoveredFinal && latestWork && (workSequence(latestWork) < recoveredFinal.seq || nativeReopen) &&
       (!latestUser || (latestUser.kind === 'user_message' && (latestUser.origin ?? latestUser.seq) < recoveredFinal.origin)) &&
       runningToolCalls(conversationId) === 0 && live?.turnId === recoveredFinal.turnId && live.openTurns.has(recoveredFinal.turnId)) {
     const { turnId, time } = recoveredFinal;

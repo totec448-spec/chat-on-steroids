@@ -22,7 +22,7 @@ export function observeUsage(raw: unknown, capturedAt: unknown = Date.now()): vo
 }
 // One persisted derived cache owns both daily and model totals. Formula edits project
 // this baseline; only changed canonical session revisions reread transcripts.
-const CACHE_VERSION = 6;
+const CACHE_VERSION = 7;
 const modelTokens = z.object({ model: z.string().min(1).max(100), reasoningEffort: z.string().max(100).nullable(), assumed: z.boolean(), tokens: z.number().finite().nonnegative() });
 const cacheRow = z.object({ id: z.string().max(64), revision: z.string().max(200), days: z.array(z.tuple([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.array(modelTokens)])).max(36600) });
 const cacheSchema = z.object({ version: z.literal(CACHE_VERSION), rows: z.array(cacheRow).max(100000) });

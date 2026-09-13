@@ -87,7 +87,7 @@ function rule(selector: string): string {
 
 describe('the session card header', () => {
   it('indents rendered project tasks once and gives worker children their additional depth', () => {
-    expect(rule('.project-group > .sess, .project-group > .worker-group, .project-show-more')).toContain('margin-left: 20px');
+    expect(rule('.project-group > .sess, .project-group > .worker-group')).toContain('margin-inline-start: 24px');
     expect(rule('.worker-group')).toContain('padding-left: 16px');
     expect(css).not.toContain('.project-group .session-row');
   });
@@ -422,7 +422,7 @@ describe('the settings sheet', () => {
   it('asks for a single compaction threshold', () => {
     const pane = document.querySelector('.view[data-view="settings"]')!;
     const numbers = [...pane.querySelectorAll('input[type="number"]')].map((input) => input.id);
-    expect(numbers).toEqual(['sessRetain', 'autoCompactTokens', 'maWorkers']);
+    expect(numbers).toEqual(['maWorkers', 'sessRetain', 'autoCompactTokens']);
     for (const id of ['sessAdvisory', 'sessLimit']) {
       expect(document.getElementById(id), `#${id} is back`).toBeNull();
     }

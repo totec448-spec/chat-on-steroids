@@ -85,6 +85,71 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it('switches setup IDs and encrypted key ownership without changing shared settings', async () => {
+  const { getSecret } = await import('../src/main/secrets.js');
+  const original = getConfig();
+  const tunnelA = 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  await saveConfig({ ...original, tunnel: { ...original.tunnel, tunnelId: tunnelA } });
+  const secret = (value: string, profileId?: string) => handlers.get('secret:set')!(null, { value, profileId }) as Promise<any>;
+  const profile = (payload: unknown) => handlers.get('setup:profile')!(null, payload) as Promise<any>;
+  expect(await secret('fixture-setup-a')).toMatchObject({ ok: true });
+  const added = await profile({ action: 'add', name: 'Second account' });
+  expect(added).toMatchObject({ ok: true, data: { hasApiKey: false } });
+  const second = getConfig().tunnel.profileId!;
+  expect(getConfig().tunnel.tunnelId).toBe('');
+  const shared = getConfig();
+  expect(shared.roots).toEqual(original.roots); expect(shared.multiAgent).toEqual(original.multiAgent);
+  expect(await secret('fixture-setup-b', second)).toMatchObject({ ok: true });
+  const baseB = getConfig();
+  expect(await save({ ...baseB, tunnel: { ...baseB.tunnel, tunnelId: 'tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' } })).toMatchObject({ ok: true });
+  expect(await profile({ action: 'select', id: 'default' })).toMatchObject({ ok: true, data: { hasApiKey: true } });
+  expect(getConfig().tunnel.tunnelId).toBe(tunnelA);
+  expect(await getSecret('openaiApiKey')).toBe('fixture-setup-a');
+  expect(await getSecret(`setup:${second}`)).toBe('fixture-setup-b');
+  // A late write still names B even when A is now selected.
+  await secret('fixture-setup-b-edited', second);
+  expect(await getSecret('openaiApiKey')).toBe('fixture-setup-a');
+  const stored = await fs.readFile(path.join(dir, 'config.json'), 'utf8');
+  expect(stored).not.toContain('fixture-setup-');
+  expect((await profile({ action: 'select', id: second })).data.hasApiKey).toBe(true);
+  expect(getConfig().tunnel.tunnelId).toBe('tunnel_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+  expect(getConfig().setupProfiles).toHaveLength(1);
+});
+
+it('removes active and inactive profiles with their exact keys, preserving the final profile', async () => {
+  const { getSecret } = await import('../src/main/secrets.js');
+  const profile = (payload: unknown) => handlers.get('setup:profile')!(null, payload) as Promise<any>;
+  const secret = (value: string, profileId?: string) => handlers.get('secret:set')!(null, { value, profileId }) as Promise<any>;
+  await secret('fixture-default-key');
+  await profile({ action: 'add', name: 'Second' });
+  const second = getConfig().tunnel.profileId!;
+  await secret('fixture-second-key', second);
+  await profile({ action: 'add', name: 'Third' });
+  const third = getConfig().tunnel.profileId!;
+  await secret('fixture-third-key', third);
+  expect(await profile({ action: 'remove', id: second })).toMatchObject({ ok: true });
+  expect(getConfig().tunnel.profileId).toBe(third);
+  expect(await getSecret(`setup:${second}`)).toBeNull();
+  expect(await getSecret(`setup:${third}`)).toBe('fixture-third-key');
+  expect(await profile({ action: 'remove', id: third })).toMatchObject({ ok: true, data: { hasApiKey: true } });
+  expect(getConfig().tunnel.profileId).toBe('default');
+  expect(await getSecret(`setup:${third}`)).toBeNull();
+  expect(await secret('late-key', third)).toMatchObject({ ok: false });
+  expect(await profile({ action: 'select', id: third })).toMatchObject({ ok: false });
+  expect(await profile({ action: 'remove', id: 'default' })).toMatchObject({ ok: false });
+  expect(await getSecret('openaiApiKey')).toBe('fixture-default-key');
+});
+
+it('rejects stale profile tunnel edits after A to B to A while accepting unrelated settings', async () => {
+  const base = getConfig();
+  await handlers.get('setup:profile')!(null, { action: 'add', name: 'Other' });
+  await handlers.get('setup:profile')!(null, { action: 'select', id: 'default' });
+  expect(await save({ ...base, tunnel: { ...base.tunnel, tunnelId: 'tunnel_cccccccccccccccccccccccccccccccc' } }, base)).toMatchObject({ ok: false });
+  expect(await save({ ...base, ui: { ...base.ui, theme: 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().tunnel.profileEpoch).toBe(2);
+  expect(getConfig().setupProfiles).toHaveLength(1);
+});
+
 it('validates dropped file count and stages arbitrary native file types', async () => {
   const drop = (payload: unknown) => handlers.get('sessions:dropFiles')!(null, payload) as Promise<any>;
   expect(await drop({ files: [] })).toMatchObject({ ok: false });

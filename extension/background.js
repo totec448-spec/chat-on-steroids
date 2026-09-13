@@ -1877,20 +1877,13 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
     }
     if (input.close === true && input.lifetime === 'temporary-planner') {
       if (!tab || tab.pinned) continue;
-      // Preserve the warm planner until newer app work has an actual browser tab.
-      // Terminal input metadata is the lifecycle authority, including after restart;
-      // unrelated personal/catalog tabs are not a replacement for this handoff.
-      const replacements = Array.isArray(input.replacements) ? input.replacements : [];
-      const replacement = tabs.find(candidate => candidate.id !== tab.id && replacements.some(next => matchesInput(next, candidate)));
-      if (!replacement && input.retire !== true) continue;
       const documentId = tabDocuments[String(tab.id)];
       const source = { tab: tab.id, documentId, navigationEpoch: tabEpochs[String(tab.id)] };
       try {
         const proof = await tabReply(tab.id, { type: 'clf-close-temporary-planner', id: input.id, owner: input.owner }, { documentId });
         const current = await chrome.tabs.get(tab.id);
-        const successor = replacement ? await chrome.tabs.get(replacement.id) : null;
-        if (proof?.safe === true && ownsDocument(source) && !current.pinned && !current.pendingUrl && String(current.url || '').includes(marker) &&
-            (input.retire === true || (successor && replacements.some(next => matchesInput(next, successor))))) await chrome.tabs.remove(tab.id);
+        if (proof?.safe === true && ownsDocument(source) && !current.pinned && !current.pendingUrl && new URL(current.url).searchParams.get('cos-input') === input.id &&
+            new URL(current.url).searchParams.get('temporary-chat') === 'true') await chrome.tabs.remove(tab.id);
       } catch { /* only the exact still-owned temporary document may close */ }
       continue;
     }
@@ -2706,6 +2699,19 @@ const HANDLERS = {
     const result = await call(typeof message.partial === 'string' ? '/input/progress' : typeof message.response === 'string' ? '/input/answer' : message.fail === true ? '/input/fail' : message.ack === true ? '/input/ack' : '/input/claim', {
       method: 'POST', body: JSON.stringify({ id, owner, conversationId, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined })
     });
+    if (typeof message.response === 'string' && message.lifetime === 'temporary-planner' && result.ok && result.data?.ok === true && ownsDocument(source)) {
+      // Acceptance retires this exact helper immediately. Fresh page proof still
+      // protects generation, a user draft, pinning and document/navigation changes.
+      try {
+        const current = await chrome.tabs.get(source.tab);
+        if (!current.pinned && !current.pendingUrl && ownsDocument(source) && current.url === tab.url) {
+          const proof = await tabReply(source.tab, { type: 'clf-close-temporary-planner', id, owner }, { documentId: source.documentId });
+          const latest = await chrome.tabs.get(source.tab);
+          if (proof?.safe === true && ownsDocument(source) && !latest.pinned && !latest.pendingUrl && latest.url === tab.url &&
+              new URL(latest.url).searchParams.get('cos-input') === id) await chrome.tabs.remove(source.tab);
+        }
+      } catch { /* terminal outbox maintenance can retry the same exact safe close */ }
+    }
     if (typeof message.response === 'string' && message.lifetime !== 'temporary-planner' && result.ok && result.data?.ok === true && ownsDocument(source)) {
       // Accepting the answer retires the helper's work, not the user's tab or draft.
       // Use the same live page proof as maintenance before the final physical close.
@@ -3152,6 +3158,7 @@ const HANDLERS = {
       body: JSON.stringify({
         conversationId: message.conversationId,
         token: String(message.token || ''),
+        ...(message.nativeBusy === true ? { nativeBusy: true } : {}),
         clientId: String(source.tab)
       })
     });

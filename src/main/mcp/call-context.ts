@@ -14,9 +14,10 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { AssetRef, FileChange, ToolOutcome } from '../../shared/session.js';
-import type { OutputPublication } from '../codex/unified-exec.js';
+import type { OutputPublication, ProcessCompletion } from '../codex/unified-exec.js';
 
 export interface CallEvidence {
+  processCompletion?: Promise<ProcessCompletion>;
   changes: FileChange[];
   assets: AssetRef[];
   /** Result count for searches and listings. */
@@ -281,6 +282,7 @@ export function noteDetail(detail: string): void {
 }
 
 export function noteProcess(result: {
+  completion?: Promise<ProcessCompletion>;
   id?: string;
   running?: boolean;
   exitCode: number | null;
@@ -289,12 +291,14 @@ export function noteProcess(result: {
   const store = storage.getStore();
   if (!store) return;
   store.evidence.exitCode = result.exitCode;
+  if (result.completion) store.evidence.processCompletion = result.completion;
   if (typeof result.running === 'boolean') store.evidence.running = result.running;
   if (typeof result.id === 'string' && result.id) store.evidence.processSessionId = result.id;
   if (typeof result.durationMs === 'number') store.evidence.durationMs = result.durationMs;
 }
 
 export function noteExec(result: {
+  completion?: Promise<ProcessCompletion>;
   id?: string;
   running?: boolean;
   exitCode: number | null;

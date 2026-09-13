@@ -274,6 +274,9 @@ const configSchema = z.object({
   capabilities: capabilitiesSchema,
   readOnly: z.boolean(),
   tunnel: z.object({
+    profileId: z.string().min(1).max(64).optional(),
+    profileName: z.string().trim().min(1).max(80).optional(),
+    profileEpoch: z.number().int().nonnegative().optional(),
     kind: z.enum(['openai', 'cloudflared', 'manual']),
     tunnelId: z.string().max(128),
     // Optional with an empty default, so a config written before the connector split
@@ -283,6 +286,10 @@ const configSchema = z.object({
     pluginsTunnelId: z.string().max(128).optional().default(''),
     binaryPath: z.string().max(4096)
   }),
+  setupProfiles: z.array(z.object({
+    id: z.string().min(1).max(64), name: z.string().trim().min(1).max(80),
+    tunnelId: z.string().max(128), desktopTunnelId: z.string().max(128), pluginsTunnelId: z.string().max(128)
+  })).max(11).refine(rows => new Set(rows.map(row => row.id)).size === rows.length, 'Duplicate setup profile').optional(),
   ui: z.object({
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     developerMode: z.boolean().optional(),

@@ -42,3 +42,23 @@ it('anchors the logical reader row across late growth and replacement, while ret
     expect(pane.scrollTop).toBe(1500); // Browser clamps to the new bottom.
   } finally { dom.window.close(); }
 });
+
+it('uses another visible row when a paged activity group loses its old key', () => {
+  const dom = new JSDOM('<div id="pane"><div id="timeline"><div data-timeline-key="old-group"></div><div data-timeline-key="message"></div></div></div>');
+  try {
+    const pane = dom.window.document.getElementById('pane')!;
+    const timeline = dom.window.document.getElementById('timeline')!;
+    const group = timeline.children[0] as HTMLElement, message = timeline.children[1] as HTMLElement;
+    let added = 0;
+    pane.scrollTop = 0;
+    Object.defineProperties(pane, { clientHeight: { value: 400 }, scrollHeight: { value: 4000 } });
+    pane.getBoundingClientRect = () => ({ top: 0 } as DOMRect);
+    group.getBoundingClientRect = () => ({ top: added - pane.scrollTop, bottom: added + 30 - pane.scrollTop, height: 30 } as DOMRect);
+    message.getBoundingClientRect = () => ({ top: added + 30 - pane.scrollTop, bottom: added + 100 - pane.scrollTop, height: 70 } as DOMRect);
+    const restore = preserveTimelineViewport(pane, timeline, false);
+    group.remove(); added = 2000;
+    restore();
+    expect(message.getBoundingClientRect().top).toBe(30);
+    expect(pane.scrollTop).toBe(2000);
+  } finally { dom.window.close(); }
+});

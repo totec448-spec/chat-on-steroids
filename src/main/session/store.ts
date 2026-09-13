@@ -35,7 +35,7 @@ import type {
   SessionSummary,
   StoredText
 } from '../../shared/session.js';
-import { CONTINUATION_MARKER, eventTokens, normalizedToolOutcome } from '../../shared/session.js';
+import { CONTINUATION_MARKER, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, storedTextTokens, workSequence } from '../../shared/session.js';
 import { chronological } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, refreshUserTitle } from './title.js';
 import { agentPlanSchema, agentPlanUpdateSchema, MAX_AGENT_PLAN_BYTES, type AgentPlan, type AgentPlanUpdate } from '../../shared/agent-plan.js';
@@ -170,8 +170,8 @@ interface OpenSession {
   activityHydrated: boolean;
   /** Serialises appends so two events can never interleave inside one line. */
   queue: Promise<void>;
-  /** Canonical ChatGPT messages. A later streaming/final snapshot replaces by stable id. */
-  messages: Map<string, MessageEvent>;
+  /** Canonical messages and background calls, replaced by stable message/call identity. */
+  messages: Map<string, CanonicalEvent>;
   metaDirty: boolean;
   metaTimer: NodeJS.Timeout | null;
 }
@@ -181,7 +181,7 @@ const open = new Map<string, OpenSession>();
 const opening = new Map<string, Promise<OpenSession>>();
 interface DurableSessionSnapshot {
   summary: SessionSummary;
-  messages: Map<string, MessageEvent>;
+  messages: Map<string, CanonicalEvent>;
   historySeq: number;
   reconciled: boolean;
 }
@@ -200,6 +200,7 @@ let globalAssetUsage: number | null = null;
 let assetWriteQueue = Promise.resolve();
 
 type MessageEvent = Extract<SessionEvent, { kind: 'user_message' | 'assistant_message' }>;
+type CanonicalEvent = MessageEvent | Extract<SessionEvent, { kind: 'tool_call' }>;
 type NewMessageEvent = MessageEvent extends infer Event
   ? Event extends MessageEvent
     ? Omit<Event, 'seq'>
@@ -211,20 +212,24 @@ const META_HISTORY_SEQ = '__historySeq';
 // Alias shards remain forensic history, so the watermark alone cannot tell whether
 // their duplicate token/event contributions have already been removed from metadata.
 const META_CANONICAL_PROJECTION = '__canonicalProjection';
-type PersistedSummary = SessionSummary & { [META_HISTORY_SEQ]?: number; [META_CANONICAL_PROJECTION]?: number };
+const META_TOKEN_ESTIMATE = '__tokenEstimate';
+type PersistedSummary = SessionSummary & { [META_HISTORY_SEQ]?: number; [META_CANONICAL_PROJECTION]?: number; [META_TOKEN_ESTIMATE]?: number };
 interface MetaCheckpoint {
   summary: SessionSummary;
   /** Null means metadata written by a version that did not yet persist a history watermark. */
   historySeq: number | null;
   canonicalProjectionCurrent: boolean;
+  tokenEstimateCurrent: boolean;
   /** Derived migration signal; never persisted. */
   outcomeCountersMissing: boolean;
   /** Derived final-message activity boundary was added after the original summaries. */
   activityBoundaryMissing: boolean;
 }
 
-function messageKey(event: Pick<MessageEvent, 'kind' | 'messageId'>): string | null {
-  return event.messageId ? `${event.kind}\u0000${event.messageId}` : null;
+function messageKey(event: SessionEvent | Omit<MessageEvent, 'seq'>): string | null {
+  if (event.kind === 'tool_call') return event.call?.callId ? `tool_call\u0000${event.call.callId}` : null;
+  return (event.kind === 'user_message' || event.kind === 'assistant_message') && event.messageId
+    ? `${event.kind}\u0000${event.messageId}` : null;
 }
 
 /** Exact equality for the fixed StoredText wire shape without serialising large prose. */
@@ -285,7 +290,7 @@ async function writeSummary(summary: SessionSummary, historySeq: number): Promis
   const target = path.join(dir, 'meta.json');
   const backup = path.join(dir, 'meta.backup.json');
   const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
-  const persisted: PersistedSummary = { ...summary, [META_HISTORY_SEQ]: historySeq, [META_CANONICAL_PROJECTION]: 1 };
+  const persisted: PersistedSummary = { ...summary, [META_HISTORY_SEQ]: historySeq, [META_CANONICAL_PROJECTION]: 1, [META_TOKEN_ESTIMATE]: 1 };
   await fs.mkdir(dir, { recursive: true });
   try {
     await fs.writeFile(tmp, JSON.stringify(persisted, null, 2), 'utf8');
@@ -492,16 +497,16 @@ async function sealTornTail(id: string): Promise<void> {
 }
 
 /** Canonical message snapshot file. Unknown/legacy shapes are ignored, never guessed. */
-async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void): Promise<Map<string, MessageEvent>> {
-  const out = new Map<string, MessageEvent>();
+async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void): Promise<Map<string, CanonicalEvent>> {
+  const out = new Map<string, CanonicalEvent>();
   try {
     const raw = await fs.readFile(path.join(sessionDir(id), 'messages.json'), 'utf8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out;
     for (const [key, value] of Object.entries(parsed)) {
       if (!value || typeof value !== 'object') continue;
-      const event = value as MessageEvent;
-      if ((event.kind !== 'user_message' && event.kind !== 'assistant_message') || typeof event.seq !== 'number') continue;
+      const event = value as CanonicalEvent;
+      if ((event.kind !== 'user_message' && event.kind !== 'assistant_message' && event.kind !== 'tool_call') || typeof event.seq !== 'number') continue;
       const expected = messageKey(event);
       if (!expected || expected !== key) continue;
       out.set(key, event);
@@ -522,7 +527,7 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
       try {
         const raw = await fs.readFile(path.join(shards, name), 'utf8');
         if (Buffer.byteLength(raw, 'utf8') > MAX_CANONICAL_MESSAGE_BYTES) continue;
-        const event = JSON.parse(raw) as MessageEvent;
+        const event = JSON.parse(raw) as CanonicalEvent;
         const key = messageKey(event);
         if (!key) continue;
         const expectedName = `${createHash('sha256').update(key).digest('hex')}.json`;
@@ -566,7 +571,7 @@ async function readCanonicalMessages(id: string, aliasesCollapsed?: () => void):
   return out;
 }
 
-async function writeCanonicalMessage(id: string, key: string, event: MessageEvent): Promise<void> {
+async function writeCanonicalMessage(id: string, key: string, event: CanonicalEvent): Promise<void> {
   const dir = path.join(sessionDir(id), 'messages');
   await fs.mkdir(dir, { recursive: true });
   const name = `${createHash('sha256').update(key).digest('hex')}.json`;
@@ -594,13 +599,15 @@ async function writeCanonicalMessage(id: string, key: string, event: MessageEven
  */
 async function rebuildSummaryFromHistory(
   id: string,
-  messages: Map<string, MessageEvent>,
+  messages: Map<string, CanonicalEvent>,
   checkpoint: SessionSummary | null,
   historySeq: number,
-  preserveAttachmentTurn = false
+  preserveAttachmentTurn = false,
+  migrateTokenEstimate = false
 ): Promise<SessionSummary> {
   const rebuilt = emptySummary(id, 'Recovered session', null);
   let sawProjected = false;
+  let historicalReturnReduction = 0;
   const canonicalKeys = new Set(messages.keys());
   let carry = Buffer.alloc(0);
   const handle = await fs.open(path.join(sessionDir(id), 'events.jsonl'), 'r').catch(() => null);
@@ -612,7 +619,6 @@ async function rebuildSummaryFromHistory(
       // Once a stable website message has a canonical shard, any old append-only snapshot with
       // the same identity is legacy storage for that same logical event, not another event.
       if (
-        (event.kind === 'user_message' || event.kind === 'assistant_message') &&
         messageKey(event) &&
         canonicalKeys.has(messageKey(event)!)
       ) {
@@ -627,6 +633,12 @@ async function rebuildSummaryFromHistory(
       if (eventConversation) {
         rebuilt.conversationId = eventConversation;
         if (!rebuilt.chatIds.includes(eventConversation)) rebuilt.chatIds.push(eventConversation);
+      }
+      // Rebind already removed old frontends from current context. During estimation
+      // migration, their return reductions belong only to the lifetime total.
+      if (migrateTokenEstimate && event.kind === 'tool_call' && checkpoint?.conversationId &&
+          event.call.conversationId && event.call.conversationId !== checkpoint.conversationId) {
+        historicalReturnReduction += Math.max(0, storedTextTokens(event.call.result) - MAX_TOOL_RESULT_TOKENS);
       }
       applyToSummary(rebuilt, event);
       sawProjected = true;
@@ -690,7 +702,7 @@ async function rebuildSummaryFromHistory(
         // therefore cannot be reconstructed from the event log. Every history mutation changes
         // lifetime/context token totals by the same delta, so applying the rebuilt lifetime delta
         // to the checkpoint preserves that reset while still recovering message revisions exactly.
-        contextTokens: Math.max(0, checkpoint.contextTokens + (rebuilt.estimatedTokens - checkpoint.estimatedTokens)),
+        contextTokens: Math.max(0, checkpoint.contextTokens + (rebuilt.estimatedTokens - checkpoint.estimatedTokens) + historicalReturnReduction),
         lastHandoffId: rebuilt.lastHandoffId,
         lastHandoffAt: rebuilt.lastHandoffAt,
         lastTurnOutcome: rebuilt.lastTurnOutcome,
@@ -730,6 +742,7 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     // A pre-taxonomy checkpoint can have a current watermark but stale outcome classification.
     if (
       checkpoint?.historySeq === historySeq &&
+      checkpoint.tokenEstimateCurrent &&
       (!aliasesCollapsed || checkpoint.canonicalProjectionCurrent) &&
       !checkpoint.outcomeCountersMissing &&
       !checkpoint.activityBoundaryMissing &&
@@ -757,7 +770,7 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     }
     if (!checkpoint && historySeq === 0) return null;
 
-    const summary = await rebuildSummaryFromHistory(id, messages, checkpoint?.summary ?? null, historySeq, checkpoint?.historySeq === historySeq);
+    const summary = await rebuildSummaryFromHistory(id, messages, checkpoint?.summary ?? null, historySeq, checkpoint?.historySeq === historySeq, !!checkpoint && !checkpoint.tokenEstimateCurrent);
     return { summary, messages, historySeq, reconciled: true };
   })();
   reconciling.set(id, work);
@@ -826,7 +839,8 @@ function noteFinishWork(summary: SessionSummary, event: SessionEvent): void {
   const meaningful = event.kind === 'user_message' || event.kind === 'assistant_message' ||
     (event.kind === 'progress' && event.source !== 'app') ||
     (event.kind === 'tool_call' && !['keep_astra_on_forever', 'session_finish'].includes(event.call.tool));
-  if (meaningful) summary.finishTurn = { ...summary.finishTurn, workSeq: Math.max(summary.finishTurn.workSeq, event.seq) };
+  if (meaningful) summary.finishTurn = { ...summary.finishTurn, workSeq: Math.max(summary.finishTurn.workSeq,
+    workSequence(event)) };
 }
 
 function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
@@ -1030,7 +1044,8 @@ export function upsertMessageEvent(
             candidate.providerMessageId === providerMessageId)
         : [];
       const key = !entry.messages.has(directKey) && providerMatches.length === 1 ? providerMatches[0]![0] : directKey;
-      const previous = entry.messages.get(key);
+      const candidate = entry.messages.get(key);
+      const previous = candidate?.kind === 'tool_call' ? undefined : candidate;
       // A changed provider timestamp caused this alias; it is not a correction of
       // the original anchor. Same-key DOM-to-Fiber timestamp promotion still applies.
       const preferTime = options.preferTime === true && key === directKey;
@@ -1188,6 +1203,54 @@ export function upsertMessageEvent(
   });
 }
 
+/** Canonical background launch: the call UUID owns its later process status. */
+export async function recordProcessCall(sessionId: string, event: Omit<Extract<SessionEvent, { kind: 'tool_call' }>, 'seq'>): Promise<void> {
+  const entry = await ensureOpen(sessionId);
+  await enqueueSessionOperation(entry, 'process call', async () => {
+    const key = messageKey({ ...event, seq: 0 })!;
+    if (entry.messages.has(key)) throw new Error('Process call identity already recorded');
+    const full = { ...event, seq: entry.nextSeq, origin: entry.nextSeq };
+    await writeCanonicalMessage(sessionId, key, full);
+    entry.messages.set(key, full);
+    entry.nextSeq += 1;
+    entry.historySeq = full.seq;
+    applyToSummary(entry.summary, full);
+    scheduleMeta(entry);
+  });
+}
+
+/** Exit revises its launch; it is not a tool invocation, output receipt or turn boundary. */
+export async function completeProcessCall(sessionId: string, callId: string, completion: {
+  completedAt: number; durationMs: number; exitCode: number | null;
+}): Promise<void> {
+  const entry = await ensureOpen(sessionId);
+  await enqueueSessionOperation(entry, 'process completion', async () => {
+    const key = `tool_call\u0000${callId}`;
+    const previous = entry.messages.get(key);
+    if (previous?.kind !== 'tool_call' || !previous.call.process || previous.call.process.completedAt !== undefined) return;
+    const { exitCode } = completion;
+    const failed = exitCode !== null && exitCode !== 0;
+    const full: Extract<SessionEvent, { kind: 'tool_call' }> = {
+      ...previous, seq: entry.nextSeq,
+      call: { ...previous.call, process: { ...previous.call.process, ...completion }, summary: {
+        ...previous.call.summary,
+        title: previous.call.summary.title.replace(/^Started /, failed ? 'Command failed ' : 'Completed '),
+        metric: exitCode === null ? 'finished (exit unknown)' : failed ? `✕ exit ${exitCode}` : '✓ finished',
+        tone: exitCode === null ? 'warn' : failed ? 'bad' : 'good'
+      } }
+    };
+    await writeCanonicalMessage(sessionId, key, full);
+    entry.messages.set(key, full);
+    entry.nextSeq += 1;
+    entry.historySeq = full.seq;
+    const delta = eventTokens(full) - eventTokens(previous);
+    entry.summary.estimatedTokens = Math.max(0, entry.summary.estimatedTokens + delta);
+    if (full.call.conversationId === entry.summary.conversationId)
+      entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens + delta);
+    scheduleMeta(entry);
+  });
+}
+
 // ------------------------------------------------------------------- read
 
 export interface ReadOptions {
@@ -1260,7 +1323,7 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
     if (options.agent && parsed.agent !== options.agent) continue;
     // Once a message has a canonical record, a pre-1.8 append-only snapshot with the same
     // ChatGPT identity is legacy journal history, not another transcript item.
-    if ((parsed.kind === 'user_message' || parsed.kind === 'assistant_message') && messageKey(parsed) && canonicalKeys.has(messageKey(parsed)!)) {
+    if (messageKey(parsed) && canonicalKeys.has(messageKey(parsed)!)) {
       continue;
     }
     out.push(parsed);
@@ -1290,7 +1353,8 @@ export async function readEvents(sessionId: string, options: ReadOptions = {}): 
  * This exists for UI/default-history tails. Full-text search, call expansion and explicit old
  * cursors still use `readEvents()` because they genuinely need older rows. The scan walks the
  * journal backwards and stops once it has enough matching rows (or reaches the bounded byte
- * budget), so `limit: 1` cannot turn into a 40 MB read. Canonical messages are merged by seq.
+ * budget), so `limit: 1` cannot turn into a 40 MB read. Tool status revisions retain their
+ * invocation position; they cannot displace newer model work from a limit-one read.
  */
 export async function readRecentEvents(
   sessionId: string,
@@ -1344,8 +1408,8 @@ async function readRecentEventsFromDisk(
   const cap = Math.max(1, Math.min(MAX_EVENT_TAIL, Math.floor(limit)));
   const active = open.get(sessionId);
   const needsMessages =
-    !options.kinds || options.kinds.includes('user_message') || options.kinds.includes('assistant_message');
-  const messages = needsMessages ? active?.messages ?? (await readCanonicalMessages(sessionId)) : new Map<string, MessageEvent>();
+    !options.kinds || options.kinds.includes('user_message') || options.kinds.includes('assistant_message') || options.kinds.includes('tool_call');
+  const messages = needsMessages ? active?.messages ?? (await readCanonicalMessages(sessionId)) : new Map<string, CanonicalEvent>();
   const canonicalKeys = new Set(messages.keys());
   // Pre-canonical sessions could append every streaming revision of one stable website
   // message to events.jsonl. This reader builds a *presentation* tail, so those revisions are
@@ -1380,7 +1444,7 @@ async function readRecentEventsFromDisk(
     if (options.kinds && !options.kinds.includes(parsed.kind)) return;
     if (options.agent && parsed.agent !== options.agent) return;
     if (options.acceptEvent && !options.acceptEvent(parsed)) return;
-    if (parsed.kind === 'user_message' || parsed.kind === 'assistant_message') {
+    if (messageKey(parsed)) {
       const key = messageKey(parsed);
       if (key) {
         if (canonicalKeys.has(key) || legacyMessageKeys.has(key)) return;
@@ -1433,12 +1497,13 @@ async function readRecentEventsFromDisk(
 
   const candidates: SessionEvent[] = [...rawTail];
   for (const message of messages.values()) {
-    if (options.before !== undefined && message.seq >= options.before) continue;
+    if (options.before !== undefined && workSequence(message) >= options.before) continue;
     if (options.kinds && !options.kinds.includes(message.kind)) continue;
     if (options.agent && message.agent !== options.agent) continue;
+    if (options.acceptEvent && !options.acceptEvent(message)) continue;
     candidates.push(message);
   }
-  candidates.sort((left, right) => left.seq - right.seq);
+  candidates.sort((left, right) => workSequence(left) - workSequence(right));
   const selected = candidates.slice(Math.max(0, candidates.length - cap));
   if (damaged > 0) logWarn(`session ${sessionId}: skipped ${damaged} unreadable recent event line(s)`);
   return chronological(selected);
@@ -1456,7 +1521,7 @@ export async function readActivityEvents(sessionId: string, since: number, limit
   return enqueueSessionOperation(entry, 'activity read', async () => {
     if (!entry.activityHydrated) {
       const recent = await readRecentEventsFromDisk(sessionId, MAX_EVENT_TAIL);
-      entry.tail = recent.filter((event) => !((event.kind === 'user_message' || event.kind === 'assistant_message') && entry.messages.has(messageKey(event)!)));
+      entry.tail = recent.filter((event) => !(messageKey(event) && entry.messages.has(messageKey(event)!)));
       // Old canonical messages do not prove that intervening journal rows fitted inside
       // the byte budget. Only the retained journal suffix establishes cursor coverage.
       entry.tailFrom = entry.tail.reduce((first, event) => Math.min(first, event.seq), entry.nextSeq);
@@ -1609,7 +1674,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
       Number.isSafeInteger(parsed[META_HISTORY_SEQ]) && (parsed[META_HISTORY_SEQ] as number) >= 0
         ? (parsed[META_HISTORY_SEQ] as number)
         : null;
-    const { [META_HISTORY_SEQ]: _historySeq, [META_CANONICAL_PROJECTION]: canonicalProjection, ...publicFields } = parsed;
+    const { [META_HISTORY_SEQ]: _historySeq, [META_CANONICAL_PROJECTION]: canonicalProjection, [META_TOKEN_ESTIMATE]: tokenEstimate, ...publicFields } = parsed;
     const publicSummary = publicFields as SessionSummary;
     if (publicSummary.titleSource !== undefined && !['fallback', 'provider', 'manual'].includes(publicSummary.titleSource)) delete publicSummary.titleSource;
     const selected = publicSummary.selectedModel;
@@ -1639,6 +1704,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
     return {
       historySeq,
       canonicalProjectionCurrent: canonicalProjection === 1,
+      tokenEstimateCurrent: tokenEstimate === 1,
       outcomeCountersMissing,
       activityBoundaryMissing,
       summary: {
@@ -1728,7 +1794,7 @@ async function readCatalogSummary(id: string): Promise<SessionSummary | null> {
   try {
     const metadata = await fs.stat(path.join(dir, 'meta.json'));
     const checkpoint = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.json'), 'utf8'));
-    if (checkpoint && checkpoint.historySeq !== null && checkpoint.canonicalProjectionCurrent &&
+    if (checkpoint && checkpoint.historySeq !== null && checkpoint.canonicalProjectionCurrent && checkpoint.tokenEstimateCurrent &&
         !checkpoint.outcomeCountersMissing && !checkpoint.activityBoundaryMissing && checkpoint.summary.finishTurn !== undefined && !legacyContextTitle(checkpoint.summary)) {
       const mutations = await Promise.all(['events.jsonl', 'messages.json', 'messages'].map(async name => {
         try { return (await fs.stat(path.join(dir, name))).mtimeMs; }

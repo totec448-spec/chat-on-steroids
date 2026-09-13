@@ -97,6 +97,10 @@ export interface Root {
 export type TunnelKind = 'openai' | 'cloudflared' | 'manual';
 
 export interface TunnelSettings {
+  /** Active setup owns these tunnel IDs; inactive setups live in Config.setupProfiles. */
+  profileId?: string;
+  profileName?: string;
+  profileEpoch?: number;
   kind: TunnelKind;
   /**
    * OpenAI tunnel id for the Core connector, format tunnel_<32 hex>. Not a secret.
@@ -317,6 +321,8 @@ export interface ArtifactSettings {
 }
 
 export interface Config {
+  /** Inactive setups only. Keys remain in encrypted secret slots addressed by profile ID. */
+  setupProfiles?: Array<{ id: string; name: string; tunnelId: string; desktopTunnelId: string; pluginsTunnelId: string }>;
   artifacts: ArtifactSettings;
   roots: Root[];
   capabilities: Capabilities;

@@ -1496,6 +1496,39 @@ describe('session store', () => {
     expect(listed?.contextTokens).toBe(eventTokens(revised.event));
   });
 
+  it.each([false, true])('migrates legacy return estimates once while preserving frontend resets (rebound=%s)', async rebound => {
+    const summary = await createSession({ title: 'return estimate migration', conversationId: 'estimate-source' });
+    const call = (conversationId: string, chars: number) => ({ time: Date.now(), source: 'mcp' as const,
+      kind: 'tool_call' as const, call: {
+        callId: conversationId, conversationId, tool: 'read', attribution: 'request_id' as const,
+        requestId: `request-${conversationId}`, attributionMethod: 'request_id' as const,
+        args: { text: '{}', chars: 2, truncated: false },
+        result: { text: 'preview', chars, truncated: true },
+        outcome: 'ok' as const, durationMs: 1, summary: { title: 'Read', tone: 'neutral' as const, kind: 'read' as const }
+      } });
+    await appendEvent(summary.id, call('estimate-source', 524582));
+    if (rebound) {
+      expect(await rebindSession(summary.id, 'estimate-source', 'estimate-destination')).toBe(true);
+      await appendEvent(summary.id, call('estimate-destination', 80000));
+    }
+    await flushSessions();
+    const metaPath = path.join(sessionsRoot(), summary.id, 'meta.json');
+    const meta = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+    const expected = { estimatedTokens: meta.estimatedTokens, contextTokens: meta.contextTokens };
+    delete meta.__tokenEstimate;
+    meta.estimatedTokens += 121146 + (rebound ? 10000 : 0);
+    meta.contextTokens += rebound ? 10000 : 121146;
+    await fs.writeFile(metaPath, JSON.stringify(meta));
+    resetSessionStoreForTests();
+    expect((await listSessions()).find(entry => entry.id === summary.id)).toMatchObject(expected);
+    expect(JSON.parse(await fs.readFile(metaPath, 'utf8')).__tokenEstimate).toBe(1);
+    resetSessionStoreForTests();
+    expect(await getSession(summary.id)).toMatchObject(expected);
+    const events = await readEvents(summary.id);
+    expect(events.find(event => event.kind === 'tool_call' && event.call.conversationId === 'estimate-source'))
+      .toMatchObject({ call: { result: { chars: 524582, text: 'preview' } } });
+  });
+
   it('stores assets once per content and refuses a malformed asset id', async () => {
     const summary = await createSession({ title: 'assets' });
     const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
@@ -1894,7 +1927,7 @@ describe('handoff storage', () => {
 // ---------------------------------------------------------------- recorder
 
 describe('canonical recorder 1.8', () => {
-  it('counts a full tool result after rebind while keeping its recorder preview bounded', async () => {
+  it('caps the estimated tool return after rebind while retaining its full recorded result', async () => {
     const config = defaultConfig();
     await saveConfig({ ...config, compaction: { ...config.compaction, auto: true, autoTokens: 10000 } });
     try {
@@ -1919,7 +1952,7 @@ describe('canonical recorder 1.8', () => {
       expect(call?.result).toMatchObject({ truncated: true, chars: result.length });
       expect(call!.result.text.length).toBeLessThan(8200);
       expect((await readAsset(sessionId, call!.result.assetId!))?.toString('utf8')).toBe(result);
-      const expected = estimateTokens(JSON.stringify(args)) + estimateTokens(result) + estimateTokens(call!.summary.title);
+      const expected = estimateTokens(JSON.stringify(args)) + 10000 + estimateTokens(call!.summary.title);
       const after = (await getSession(sessionId))!;
       expect(after.estimatedTokens - before.estimatedTokens).toBe(expected);
       expect(after.contextTokens).toBe(estimateTokens('h'.repeat(13237)) + expected);
@@ -2949,7 +2982,7 @@ describe('tool summaries', () => {
     );
     expect(
       summarize('exec_command', { cmd: 'npm run verify' }, { exitCode: null, durationMs: 10_000 })
-    ).toMatchObject({ title: 'Started npm run verify', metric: 'running', tone: 'neutral' });
+    ).toMatchObject({ title: 'Started npm run verify', metric: 'started', tone: 'neutral' });
   });
 
   it('says which way a session was interrupted', () => {
@@ -3152,7 +3185,7 @@ describe('token estimation', () => {
     expect(eventTokens(event)).toBe(100 + 200 + Math.ceil('Read a.ts'.length / 4));
   });
 
-  it('counts full truncated tool text once, independently of its preview and asset reference', () => {
+  it('caps a truncated tool return independently of its preview and asset reference', () => {
     const event = { seq: 1, time: 1, source: 'mcp', kind: 'tool_call', call: {
       callId: 'full-result', tool: 'read', attribution: 'turn',
       args: { text: 'short preview with a recorder annotation', truncated: true, chars: 20001, assetId: 'args.txt' },
@@ -3160,11 +3193,19 @@ describe('token estimation', () => {
       outcome: 'ok', durationMs: 1, summary: { title: 'Read 3 paths', tone: 'neutral', kind: 'read' },
       assets: [{ id: 'result.txt', mimeType: 'text/plain', bytes: 60306 }]
     } } as SessionEvent;
-    expect(eventTokens(event)).toBe(Math.ceil(20001 / 4) + Math.ceil(60306 / 4) + estimateTokens('Read 3 paths'));
+    expect(eventTokens(event)).toBe(Math.ceil(20001 / 4) + 10000 + estimateTokens('Read 3 paths'));
     if (event.kind !== 'tool_call') throw new Error('fixture');
     delete event.call.result.assetId;
     event.call.result.text = 'Another bounded preview; overflow asset unavailable';
-    expect(eventTokens(event)).toBe(Math.ceil(20001 / 4) + Math.ceil(60306 / 4) + estimateTokens('Read 3 paths'));
+    expect(eventTokens(event)).toBe(Math.ceil(20001 / 4) + 10000 + estimateTokens('Read 3 paths'));
+  });
+
+  it.each([0, 39996, 40000, 40004, 524582])('caps inline MCP returns at the boundary (%i characters)', chars => {
+    const event = { seq: 1, time: 1, source: 'mcp', kind: 'tool_call', call: {
+      args: { text: 'a'.repeat(80000), truncated: false, chars: 80000 },
+      result: { text: 'r'.repeat(chars), truncated: false, chars }, summary: { title: '' }
+    } } as SessionEvent;
+    expect(eventTokens(event)).toBe(20000 + Math.min(10000, Math.ceil(chars / 4)));
   });
 
   it.each([undefined, -1, NaN, Infinity, 2.5])('keeps legacy or malformed original lengths bounded by actual inline text (%s)', chars => {

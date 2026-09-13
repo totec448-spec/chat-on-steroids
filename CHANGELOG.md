@@ -9,9 +9,11 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## Unreleased
+## [2.1.0] — 6 sol in 2 weeks
 
-- Refresh runtime, editor, MCP and plugin dependencies with corresponding license and native-source inventories. Electron 44 clipboard operations now await completion.
+- Cleaner setup, compact profiles and better sidebar controls.
+- More reliable Goal/Loop recovery, queued messages and conversation history.
+- Updated runtime, MCP and plugin dependencies.
 
 ## [2.0.9] — they nerfed astra
 

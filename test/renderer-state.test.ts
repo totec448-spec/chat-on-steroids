@@ -422,6 +422,49 @@ async function mountChat(
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+it('always offers setup collapse and preserves the choice across incomplete status updates', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const button = doc.getElementById('wizExpand') as HTMLButtonElement;
+  expect(button.hidden).toBe(false);
+  button.click();
+  expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(true);
+  expect(button.getAttribute('aria-expanded')).toBe('false');
+  mounted.push({ ...mounted.state, hasApiKey: true });
+  expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(true);
+  button.click();
+  expect(doc.getElementById('wizard')!.classList.contains('is-tidy')).toBe(false);
+});
+
+it('adds and selects setup profiles and rejects an older profile status response', async () => {
+  const add = vi.fn(); const select = vi.fn();
+  const mounted = await mountChat({}, [], { addSetupProfile: add, selectSetupProfile: select });
+  const doc = mounted.window.document;
+  // jsdom does not implement native dialogs/popovers; Chromium acceptance covers their UI.
+  const dialog = doc.getElementById('setupProfileDialog') as HTMLDialogElement;
+  dialog.showModal = vi.fn(); dialog.close = vi.fn();
+  doc.getElementById('setupProfileMenu')!.hidePopover = vi.fn();
+  const initial = structuredClone(mounted.state);
+  const next = { ...initial, config: { ...initial.config, tunnel: { ...initial.config.tunnel,
+    profileId: 'second', profileName: 'Work', profileEpoch: 1, tunnelId: '' },
+    setupProfiles: [{ id: 'default', name: 'Default', tunnelId: initial.config.tunnel.tunnelId, desktopTunnelId: '', pluginsTunnelId: '' }] } };
+  add.mockResolvedValue({ ok: true, data: next });
+  (doc.getElementById('setupProfileAdd') as HTMLButtonElement).click();
+  expect(dialog.showModal).toHaveBeenCalled();
+  (doc.getElementById('setupProfileName') as HTMLInputElement).value = 'Work';
+  doc.getElementById('setupProfileForm')!.dispatchEvent(new mounted.window.Event('submit', { cancelable: true }));
+  await vi.waitFor(() => expect(doc.getElementById('setupProfileCurrent')!.textContent).toBe('Work'));
+  expect(add).toHaveBeenCalledWith('Work');
+  expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe('');
+  mounted.push(initial);
+  expect(doc.querySelector('[data-profile-id="second"]')!.getAttribute('aria-pressed')).toBe('true');
+  select.mockResolvedValue({ ok: true, data: { ...initial, config: { ...initial.config, tunnel: {
+    ...initial.config.tunnel, profileId: 'default', profileEpoch: 2 }, setupProfiles: [] } } });
+  (doc.querySelector('[data-profile-id="default"]') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(select).toHaveBeenCalledWith('default'));
+  await vi.waitFor(() => expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe(initial.config.tunnel.tunnelId));
+});
+
 it('attaches pasted screenshot files with previews while preserving ordinary text paste', async () => {
   const dropFiles = vi.fn(async () => ({ ok: true, data: [{ id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'screenshot.png', size: 4, mimeType: 'image/png', preview: 'data:image/webp;base64,AAAA' }] }));
   const mounted = await mountChat({}, [], { dropFiles });
@@ -686,6 +729,74 @@ it('guides rootless setup from the capabilities that actually need a filesystem 
   expect(connect.disabled).toBe(false);
 });
 
+it('preserves optional Desktop disclosures and inline screenshots across status pushes', async () => {
+  const mounted = await mountChat();
+  const state = structuredClone(mounted.state) as any;
+  state.status.surfaces = [{
+    id: 'desktop', connectorName: 'Desktop', description: 'Desktop control', cardSummary: '', optional: true,
+    available: true, localUrl: null, publicUrl: null, tools: ['observe'], state: 'off', detail: '',
+    lastRequestAt: null, lastToolCallAt: null
+  }];
+  mounted.push(state);
+  const doc = mounted.window.document;
+  const field = doc.getElementById('desktopTunnelField') as HTMLDetailsElement;
+  const card = () => doc.querySelector<HTMLDetailsElement>('#connectorCards details')!;
+  expect(field.hidden).toBe(false);
+  expect(field.open).toBe(false);
+  expect(card().open).toBe(false);
+  field.querySelector('summary')!.click(); card().querySelector('summary')!.click();
+  const guide = doc.querySelector('[data-setup-guide="tunnel"]')!;
+  expect(guide.querySelectorAll('img')).toHaveLength(1);
+  expect(doc.querySelectorAll('[data-setup-guide="developer"] img')).toHaveLength(1);
+  expect(doc.querySelectorAll('[data-setup-guide="plugin"] img')).toHaveLength(2);
+  const image = guide.querySelector('img')!;
+  mounted.push(structuredClone(state));
+  expect(field.open).toBe(true);
+  expect(card().open).toBe(true);
+  expect(guide.querySelector('img')).toBe(image);
+  expect(image.src).toContain('workspace.png');
+  expect(mounted.calls).toEqual([]);
+  card().querySelector('summary')!.click();
+  mounted.push(structuredClone(state));
+  expect(card().open).toBe(false);
+  expect(field.open).toBe(true);
+});
+
+it('highlights missing required setup fields while respecting drafts and a stored API key', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const tunnel = doc.getElementById('tunnelId') as HTMLInputElement;
+  const key = doc.getElementById('apiKey') as HTMLInputElement;
+  expect(tunnel.classList.contains('is-empty')).toBe(false);
+  expect(key.classList.contains('is-empty')).toBe(true);
+  expect(doc.getElementById('desktopTunnelId')!.classList.contains('setup-required')).toBe(false);
+
+  tunnel.focus();
+  tunnel.value = '  ';
+  tunnel.dispatchEvent(new mounted.window.Event('input'));
+  expect(tunnel.classList.contains('is-empty')).toBe(true);
+  mounted.push(structuredClone(mounted.state));
+  expect(tunnel.value).toBe('  ');
+  expect(tunnel.classList.contains('is-empty')).toBe(true);
+  tunnel.value = 'tunnel_draft';
+  tunnel.dispatchEvent(new mounted.window.Event('input'));
+  expect(tunnel.classList.contains('is-empty')).toBe(false);
+
+  key.value = 'example-draft';
+  key.dispatchEvent(new mounted.window.Event('input'));
+  expect(key.classList.contains('is-empty')).toBe(false);
+  key.value = '';
+  key.dispatchEvent(new mounted.window.Event('input'));
+  expect(key.classList.contains('is-empty')).toBe(true);
+  mounted.push({ ...structuredClone(mounted.state), hasApiKey: true });
+  expect(key.classList.contains('is-empty')).toBe(false);
+  expect(key.getAttribute('aria-required')).toBe('false');
+  mounted.push({ ...structuredClone(mounted.state), hasApiKey: false });
+  expect(key.classList.contains('is-empty')).toBe(true);
+  expect(mounted.keys).toEqual([]);
+  expect(mounted.calls).toEqual([]);
+});
+
 it('keeps folder access discoverable after setup and navigates without granting access', async () => {
   const addRoot = vi.fn();
   const mounted = await mountChat({ hasApiKey: true }, [], { addRoot });
@@ -906,7 +1017,7 @@ it('keeps plugin connection controls out of general Setup and preserves its tunn
   input.value = 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
   input.dispatchEvent(new mounted.window.Event('change')); await settle();
   expect(mounted.calls.at(-1).tunnel.pluginsTunnelId).toBe(next.config.tunnel.pluginsTunnelId);
-  expect(doc.querySelector('[data-panel="setup"] [data-link="https://chatgpt.com/#settings/Plugins"]')).not.toBeNull();
+  expect(doc.querySelector('[data-panel="setup"] [data-link="https://chatgpt.com/plugins"]')).not.toBeNull();
 });
 
 /**

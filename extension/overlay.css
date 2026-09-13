@@ -245,6 +245,7 @@
 
 .clf-stage-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 0.5rem;
   min-width: 0;
@@ -259,9 +260,8 @@
 .clf-stage-detail {
   flex: 1 1 auto;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
   font-variant-numeric: tabular-nums;
   opacity: 0.82;
 }

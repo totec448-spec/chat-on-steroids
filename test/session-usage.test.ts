@@ -201,7 +201,7 @@ describe('passive usage limits and canonical token totals', () => {
     expect(await usage.usageOverview()).toMatchObject({ contextTokenCap: 256_000, tokens: 128_000 });
     expect(store.readEvents).toHaveBeenCalledTimes(1);
   });
-  it.each([4, 5])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
+  it.each([4, 5, 6])('rebuilds old cache version %i and reuses the corrected cache after restart', async (version) => {
     const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     durable.readDurable.mockResolvedValue({ version, rows: [{ id: 'one', revision: `${timezone}:1:1:2000000`, days: [['2026-09-05', [{ model: 'gpt-6-pro', reasoningEffort: null, assumed: false, tokens: 1_000_000 }]]] }] });
     store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 1, estimatedTokens: 2_000_000 }]);
@@ -209,12 +209,20 @@ describe('passive usage limits and canonical token totals', () => {
     expect((await usage.usageOverview()).tokens).toBe(128_000);
     expect(store.readEvents).toHaveBeenCalledTimes(1);
     const persisted = durable.writeDurableSoon.mock.calls.at(-1)![1];
-    expect(persisted.version).toBe(6);
+    expect(persisted.version).toBe(7);
     vi.resetModules(); durable.readDurable.mockResolvedValue(persisted); store.readEvents.mockClear();
     usage = await import('../src/main/session/usage.js');
     expect((await usage.usageOverview()).tokens).toBe(128_000);
     expect(store.readEvents).not.toHaveBeenCalled();
   });
+  it('caps each return before aggregating frontend context and repeated call usage', async () => {
+    store.listUsageSessions.mockResolvedValue([{ id: 'one', updatedAt: 1, events: 3, estimatedTokens: 400000 }]);
+    store.readEvents.mockResolvedValue(Array.from({ length: 3 }, (_, i) => ({ kind: 'tool_call', time: now,
+      call: { callId: String(i), conversationId: 'chat', args: { text: '' },
+        result: { text: 'preview', truncated: true, chars: 524582 }, summary: { title: '' } } })));
+    expect((await usage.usageOverview()).tokens).toBe(30000 / 2 * 3);
+  });
+
   it('releases a failed calculation so opening again can retry', async () => {
     store.listUsageSessions.mockRejectedValueOnce(new Error('temporary read failure'));
     await expect(usage.usageOverview()).rejects.toThrow('temporary read failure');
