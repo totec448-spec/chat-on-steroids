@@ -64,7 +64,6 @@ const {
   STALE_SWARM_MS,
   CHAT_SILENCE_MS,
   GOAL_QUIET_MS,
-  GOAL_SILENCE_LISTEN_MS,
   PRO_SILENCE_RETIRE_MS,
   PRO_SILENCE_MS,
   PRO_ACTIVITY_MS,
@@ -6661,13 +6660,53 @@ describe('unattributed activity recovery', () => {
 
   /**
    * The prime stops writing with no final answer. Two minutes of silence earn the reload; the
-   * fresh page shows the same dead turn; one more minute of nothing — no tool call, no page
-   * change — and the loop treats it as it treats a finished answer: the chat is owed the next
+   * fresh page shows the same dead turn with no new work, and the loop files the next
    * user message, filed as the same durable obligation a finished answer files, under a turn
    * of its own. On 2026-09-02 that chat would otherwise have sat on its dead turn for good,
    * because a turn that never ends is a turn Goal never answers.
    */
-  it('files a Goal ticket for a Goal/Loop chat that stays silent for a minute after its reload', async () => {
+  it.each(['pro', 'other'] as const)('retains handled exhausted silence while Off for later explicit %s Loop activation', async model => {
+    const chat = model === 'pro' ? 'a2222222-1111-4111-8111-000000000091' : 'a2222222-1111-4111-8111-000000000092';
+    const goal = await import('../src/main/goal.js');
+    const { setSessionAutomation } = await import('../src/main/bridge.js');
+    await setSecret('openRouterApiKey', 'sk-or-off-silence');
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [{ kind: 'model_selection', model: model === 'pro' ? 'gpt-6-pro' : 'GPT-5.6 Sol', reasoningEffort: model === 'pro' ? 'pro' : 'high', time: Date.now() }, openTurn('off-silence-source')]);
+      const sessionId = (await request('GET', `/activity?conversationId=${chat}`)).body.sessionId;
+      await setSessionAutomation(sessionId, 'off');
+      await attributed(chat, false, Date.now());
+      await setSessionAutomation(sessionId, 'loop', true);
+      expect(goalPendingReplyFor(chat)).toBeNull();
+      await setSessionAutomation(sessionId, 'off');
+      await vi.advanceTimersByTimeAsync(model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS);
+      await sweepStaleSwarm(Date.now());
+      const repair = await maintenance();
+      expect(repair).toMatchObject({ conversationId: chat, reason: 'silence' });
+      await maintenance(repair!.token);
+      await sweepStaleSwarm(Date.now());
+      expect(goalPendingReplyFor(chat)).toBeNull();
+      const held = goal.snapshotGoalReplies().replies.find(row => row.conversationId === chat);
+      expect(held).toMatchObject({ state: 'handled', silenceSourceTurnId: 'off-silence-source' });
+      if (model === 'pro') {
+        await setSessionAutomation(sessionId, 'loop', false);
+        expect(goalPendingReplyFor(chat)).toBeNull();
+      }
+      await setSessionAutomation(sessionId, 'loop', true);
+      expect(goalPendingReplyFor(chat)?.replyId).toBe(held!.replyId);
+      await setSessionAutomation(sessionId, 'off');
+      await events(chat, [{ kind: 'user_message', time: Date.now(), messageId: 'new-question-after-silence', text: 'new work before its turn starts' }]);
+      await setSessionAutomation(sessionId, 'loop', true);
+      expect(goalPendingReplyFor(chat)).toBeNull();
+      await setSessionAutomation(sessionId, 'off');
+      await events(chat, [openTurn('new-work-after-silence')]);
+      await setSessionAutomation(sessionId, 'loop', true);
+      expect(goalPendingReplyFor(chat)).toBeNull();
+    } finally { await setSecret('openRouterApiKey', ''); vi.useRealTimers(); }
+  });
+
+  it('files a Goal ticket after the full silence window and confirmed reload without another grace period', async () => {
     const previous = getConfig();
     await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
     await setSecret('openRouterApiKey', 'sk-or-silence');
@@ -6682,16 +6721,14 @@ describe('unattributed activity recovery', () => {
       const handout = await maintenance();
       expect(handout).toMatchObject({ conversationId: OTHER, reason: 'silence' });
       expect(await maintenance(handout!.token)).toBeNull();
-      expect(goalPendingReplyFor(OTHER)).toBeNull();
-
-      // Half a minute in, nothing yet: the page is still being listened to.
-      await vi.advanceTimersByTimeAsync(30_000);
-      await sweepStaleSwarm(Date.now());
-      expect(goalPendingReplyFor(OTHER)).toBeNull();
-
-      await vi.advanceTimersByTimeAsync(30_000);
-      await sweepStaleSwarm(Date.now());
       expect(goalPendingReplyFor(OTHER)?.turnId).toMatch(/^g-silence-/);
+      const source = goalPendingReplyFor(OTHER)!;
+      const sessionId = (await request('GET', `/activity?conversationId=${OTHER}`)).body.sessionId;
+      const { setSessionAutomation } = await import('../src/main/bridge.js');
+      expect((await getSession(sessionId))?.activeTurnId).toBe('turn-loop-dead');
+      await setSessionAutomation(sessionId, 'off');
+      await setSessionAutomation(sessionId, 'loop');
+      expect(goalPendingReplyFor(OTHER)).toMatchObject({ replyId: source.replyId, turnId: source.turnId });
     } finally {
       resetGoalStateForTests();
       await setSecret('openRouterApiKey', '');
@@ -6784,6 +6821,40 @@ describe('unattributed activity recovery', () => {
       expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(began + 60_000 + PRO_ACTIVITY_MS);
       await attributed(timingChat, false, Date.now());
       expect(sessionActivityExpiresAt((await getSession(sessionId))!)).toBe(began + 120_000 + PRO_ACTIVITY_MS);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['pro', 'other'] as const)('retains the exact MCP quiet window after a native final for %s', async model => {
+    const chat = model === 'pro' ? 'a2222222-1111-4111-8111-000000000081' : 'a2222222-1111-4111-8111-000000000082';
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(chat, [{ kind: 'model_selection', model: model === 'pro' ? 'gpt-6-pro' : 'GPT-5.6 Sol', reasoningEffort: model === 'pro' ? 'pro' : 'high', time: Date.now() }, openTurn('mcp-native-final')]);
+      const sessionId = (await request('GET', `/activity?conversationId=${chat}`)).body.sessionId;
+      const { sessionInputActivity, setSessionAutomation } = await import('../src/main/bridge.js');
+      await setSessionAutomation(sessionId, 'loop', true);
+      await attributed(chat, false, Date.now());
+      let lastWork = Date.now();
+      await vi.advanceTimersByTimeAsync(1000);
+      await events(chat, [{ kind: 'assistant_message', messageId: 'native-final', turnId: 'mcp-native-final', time: Date.now(),
+        text: 'The page says complete.', final: true, state: 'final', activeNow: true, goalEligible: true }, endTurn('mcp-native-final', 'completed')]);
+      expect((await getSession(sessionId))?.activeTurnId).toBeNull();
+      expect(sessionInputActivity((await getSession(sessionId))!)).toMatchObject({ exact: true, possible: true, model, turnId: 'mcp-native-final' });
+      // A result that started before the native final is still genuine work
+      // inside the exact retained MCP episode; completion renews quiet time.
+      await vi.advanceTimersByTimeAsync(1000);
+      await attributed(chat, false, lastWork);
+      lastWork = Date.now();
+      await setSessionAutomation(sessionId, 'off'); await setSessionAutomation(sessionId, 'loop', true);
+      expect(goalPendingReplyFor(chat)).toBeNull();
+      const quietMs = model === 'pro' ? PRO_SILENCE_MS : CHAT_SILENCE_MS;
+      await vi.advanceTimersByTimeAsync(lastWork + quietMs - Date.now() - 1);
+      expect(sessionInputActivity((await getSession(sessionId))!)).toMatchObject({ exact: true, possible: true });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(sessionInputActivity((await getSession(sessionId))!)).toMatchObject({ exact: false, possible: false });
+      expect(sessionInputActivity((await getSession(sessionId))!).turnId).toBeUndefined();
+      await setSessionAutomation(sessionId, 'off'); await setSessionAutomation(sessionId, 'loop', true);
+      expect(goalPendingReplyFor(chat)?.replyId).toBe('native-final');
     } finally { vi.useRealTimers(); }
   });
 
@@ -6995,13 +7066,13 @@ describe('unattributed activity recovery', () => {
    * The other two signs of life, so the listen window is proven against every kind of signal a
    * working chat gives off: an interim assistant row the fresh page reports, and a message the
    * user typed. Each pushes the chat back onto its two-minute clock, so a chat that stops
-   * again later gets the same reload and the same minute again — the loop carries on.
+   * again later gets the same silence window and confirmed reload — the loop carries on.
    */
   for (const [what, sign] of [
     ['an interim assistant message', (turnId: string) => [{ kind: 'assistant_message', time: Date.now(), turnId, text: 'still on it', renderedHtml: '<p>still on it</p>', messageId: 'a-interim', state: 'streaming', activeNow: true }]],
     ['a user message', () => [{ kind: 'user_message', time: Date.now(), text: 'carry on', messageId: 'u-alive', authoredNow: true }]]
   ] as const) {
-    it(`files no Goal ticket when ${what} arrives within the minute, and re-arms the silence clock`, async () => {
+    it(`withdraws a silence ticket when ${what} arrives, and re-arms the silence clock`, async () => {
       const previous = getConfig();
       await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
       await setSecret('openRouterApiKey', 'sk-or-silence');
@@ -7024,13 +7095,12 @@ describe('unattributed activity recovery', () => {
         await sweepStaleSwarm(Date.now());
         expect(goalPendingReplyFor(OTHER)).toBeNull();
 
-        // Quiet again for the full two minutes: the same reload, the same minute, then the ticket.
+        // Quiet again for the full two minutes: confirmed refresh files the ticket.
         await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
         await sweepStaleSwarm(Date.now());
         const again = await maintenance();
         expect(again).toMatchObject({ conversationId: OTHER, reason: 'silence' });
         expect(await maintenance(again!.token)).toBeNull();
-        await vi.advanceTimersByTimeAsync(GOAL_SILENCE_LISTEN_MS);
         await sweepStaleSwarm(Date.now());
         expect(goalPendingReplyFor(OTHER)?.turnId).toMatch(/^g-silence-/);
       } finally {
@@ -7051,7 +7121,7 @@ describe('unattributed activity recovery', () => {
    * so no page loses it — until the chat has been quiet for the minute.
    */
   it.each(['exact final', 'different turn final', 'new active turn'] as const)(
-    'uses canonical completion rather than the tool quiet timer: %s', async (proof) => {
+    'does not spend the MCP quiet window on a native completion: %s', async (proof) => {
     const previous = getConfig();
     await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
     await setSecret('openRouterApiKey', 'sk-or-final');
@@ -7071,8 +7141,8 @@ describe('unattributed activity recovery', () => {
       const result = await request('POST', '/goal/draft', {
         body: { conversationId: OTHER, turnId, clientId: 'tab-1' }
       });
-      expect(result.status).toBe(proof === 'exact final' ? 200 : 409);
-      if (proof !== 'exact final') expect(result.body).toMatchObject({ error: 'chat_still_working' });
+      expect(result.status).toBe(409);
+      expect(result.body).toMatchObject({ error: 'chat_still_working' });
     } finally {
       resetGoalStateForTests();
       await setSecret('openRouterApiKey', '');
@@ -7099,7 +7169,7 @@ describe('unattributed activity recovery', () => {
       });
       expect(early.status).toBe(409);
       expect(early.body).toMatchObject({ error: 'chat_still_working', retryable: true });
-      expect(goalPendingReplyFor(OTHER)?.turnId).toBe('turn-false-end');
+      expect(goalPendingReplyFor(OTHER)).toBeNull();
       expect(goalDraftBusy(OTHER)).toBe(false);
 
       await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
@@ -7145,7 +7215,7 @@ describe('unattributed activity recovery', () => {
       const ended = await request('POST', '/goal/draft', {
         body: { conversationId: OTHER, turnId: 'turn-still-open', clientId: 'tab-1' }
       });
-      expect(ended.status).toBe(200);
+      expect(ended.status).toBe(409);
     } finally {
       resetGoalStateForTests();
       await setSecret('openRouterApiKey', '');
@@ -7175,7 +7245,6 @@ describe('unattributed activity recovery', () => {
       const handout = await maintenance();
       expect(handout).toMatchObject({ conversationId: OTHER, reason: 'silence' });
       expect(await maintenance(handout!.token)).toBeNull();
-      await vi.advanceTimersByTimeAsync(GOAL_SILENCE_LISTEN_MS);
       await sweepStaleSwarm(Date.now());
       const ticket = goalPendingReplyFor(OTHER);
       expect(ticket?.turnId).toMatch(/^g-silence-/);
@@ -8837,6 +8906,23 @@ describe('the goal loop over the bridge', () => {
         replies: expect.arrayContaining([expect.objectContaining({ conversationId: chat, replyId: 'objective-new-final', state: 'pending' })])
       });
     }
+  });
+
+  it.each(['generating', 'thinking-failed'])('does not re-arm an older final on Loop Off/On while %s', async state => {
+    await pair();
+    const chat = state === 'generating' ? 'cafe0077-0000-4000-8000-000000000077' : 'cafe0078-0000-4000-8000-000000000078';
+    await request('POST', '/events', { body: { conversationId: chat, events: [
+      { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'old-question' },
+      { kind: 'assistant_message', time: Date.now(), messageId: 'old-final', text: 'Finished this pass.', state: 'final', final: true, goalEligible: true, activeNow: true }
+    ] } });
+    await request('POST', '/settings', { body: { conversationId: chat, goal: false } });
+    await request('POST', '/events', { body: { conversationId: chat, events: [
+      { kind: 'user_message', time: Date.now(), text: 'new work', messageId: 'new-question' },
+      { kind: 'turn_start', time: Date.now(), turnId: 'new-turn' },
+      ...(state === 'thinking-failed' ? [{ kind: 'turn_end', time: Date.now(), turnId: 'new-turn', outcome: 'failed', reason: 'thinking_failed' }] : [])
+    ] } });
+    expect((await request('POST', '/settings', { body: { conversationId: chat, loop: true } })).status).toBe(200);
+    expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).toBeNull();
   });
 
   it('makes Goal Off a durable ticket cancel and On a fresh pickup of the same final', async () => {

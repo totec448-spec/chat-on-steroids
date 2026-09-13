@@ -716,6 +716,35 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     await h.maintain();
     expect(h.create).toHaveBeenCalledTimes(reason === 'explicit-failure' ? 1 : 0);
   });
+  it.each(['empty', 'draft', 'navigated', 'pinned', 'personal', 'epoch-changed'])('retires an abandoned managed New Chat after fallback only with exact empty proof (%s)', async mode => {
+    const h = await worker([{ id: firstId, conversationId: null }]);
+    const initial = mode === 'personal' ? 'https://chatgpt.com/' : `https://chatgpt.com/c/${secondId}`;
+    h.tabs.push({ id: 7, url: initial });
+    const sender = { tab: { id: 7 }, documentId: 'reuse-source', frameId: 0, url: initial };
+    await h.authorizeDocument(sender, { navigationEpoch: 1 });
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, ok: true,
+      inputs: [{ id: firstId, conversationId: null }], reusableConversations: [secondId] }) });
+    h.sendMessage.mockImplementation(async (_id, message): Promise<any> => {
+      if (message.type === 'clf-input-reuse-state') return { safe: true, navigationEpoch: 1 };
+      if (message.type === 'clf-prepare-desktop-input') {
+        h.tabs[0] = { id: 7, url: 'https://chatgpt.com/' };
+        await h.authorizeDocument({ ...sender, url: h.tabs[0].url }, { navigationEpoch: 2 });
+        return { ready: false, fallback: true, preSend: true };
+      }
+      if (message.type === 'clf-tab-close-check') {
+        expect(h.create).toHaveBeenCalledTimes(1);
+        if (mode === 'navigated') h.tabs[0]!.url = `https://chatgpt.com/c/${firstId}`;
+        if (mode === 'pinned') h.tabs[0]!.pinned = true;
+        if (mode === 'epoch-changed') await h.authorizeDocument({ ...sender, url: h.tabs[0]!.url }, { navigationEpoch: 3 });
+        return { safe: mode !== 'draft', conversationId: null, navigationEpoch: 2 };
+      }
+      return { ok: true };
+    });
+    await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(1);
+    expect(h.remove).toHaveBeenCalledTimes(mode === 'empty' ? 1 : 0);
+    if (mode === 'empty') expect(h.remove).toHaveBeenCalledWith(7);
+  });
   it('delivers follow-up messages into an already open waiting conversation without closing or creating tabs', async () => {
     const h = await worker([{ id: firstId, conversationId: secondId }]);
     h.tabs.push({ id: 7, url: `https://chatgpt.com/c/${secondId}` });

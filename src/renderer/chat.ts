@@ -10,7 +10,7 @@ import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation } from './chat-error.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
-import { isAstraModel } from '../shared/chat-models.js';
+import { isAstraModel, isProModel } from '../shared/chat-models.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
@@ -155,6 +155,7 @@ function restoreDraft(): void {
   $('activeGoalRow').hidden = true; $('recoveryStatus').hidden = true;
   $<HTMLTextAreaElement>('chatInput').value = inputDrafts.get(draftKey()) ?? '';
   const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = 'off'; delete automation.dataset.edited;
+  $<HTMLSelectElement>('loopDelivery').value = 'finish';
   $<HTMLTextAreaElement>('sessionObjective').value = ''; delete $('sessionObjective').dataset.edited; delete $('sessionObjective').dataset.sessionId;
   paintTaskPlan(); paintComposerImages();
 }
@@ -1044,7 +1045,16 @@ function paintTaskActions(): void {
     ui(button, 'title', () => planMode ? t("Return to a normal message; keep your draft") : text ? t("Split your message into editable stages") : t("Write a message in the composer first"));
   }
 }
+function paintLoopDelivery(): void {
+  const model = confirmedComposerModel();
+  $('loopDeliveryRow').hidden = $<HTMLSelectElement>('chatAutomation').value !== 'loop' ||
+    !model || !isProModel(model.model, model.reasoningEffort);
+}
+function openingLoopDelivery(): boolean | undefined {
+  return selectedId === null ? $<HTMLSelectElement>('loopDelivery').value === 'after-turn' : undefined;
+}
 function paintAutomationSwitch(): void {
+  paintLoopDelivery();
   paintGoalProgress();
   paintActiveGoal();
   const select = $<HTMLSelectElement>('chatAutomation');
@@ -1063,7 +1073,6 @@ async function refreshSessionControls(): Promise<void> {
   const planHost = $('agentPlan');
   if (planHost.dataset.sessionId !== (id ?? '')) renderAgentPlan(planHost, id, null);
   const menu = $('sessionControls');
-  $('loopDeliveryRow').hidden = true;
   if (controlledSessionId !== id || controlledSelection !== selectionGeneration) {
     // Retire the previous selection's projection before awaiting the new owner's IPC.
     // Replace the translation binding too, so a locale refresh cannot revive its status.
@@ -1106,8 +1115,8 @@ async function refreshSessionControls(): Promise<void> {
   paintTaskActions();
   const draftMode = $<HTMLSelectElement>('chatAutomation');
   if (!draftMode.dataset.edited) draftMode.value = controls.automation;
-  $('loopDeliveryRow').hidden = controls.automation !== 'loop' || !controls.proLoopDelivery;
-  $<HTMLSelectElement>('loopDelivery').value = controls.loopAfterTurn ? 'after-turn' : 'finish';
+  if (!$<HTMLSelectElement>('loopDelivery').disabled)
+    $<HTMLSelectElement>('loopDelivery').value = controls.loopAfterTurn ? 'after-turn' : 'finish';
   paintAutomationSwitch();
   $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
   $('cancelCompaction').hidden = !controls.job?.busy;
@@ -3175,9 +3184,9 @@ async function retryPlannedInput(entry: InputEntry): Promise<void> {
   if (dismissedInputNotices.has(entry.id) || entry.stagesApplied || !['failed', 'cancelled'].includes(entry.state)) return;
   // The outbox retains the authored workflow after failure. Retry that payload, not
   // its stage-one display text, and never revive the old browser claim/receipt.
-  const { sessionId, projectId, text, objective, stages, images, attachments, attachmentDelivery, automation, model, reasoningEffort, afterTurn } = entry;
+  const { sessionId, projectId, text, objective, stages, images, attachments, attachmentDelivery, automation, loopAfterTurn, model, reasoningEffort, afterTurn } = entry;
   const args: InputArgs = { id: crypto.randomUUID(), sessionId, projectId, text, objective, stages, images, attachments, attachmentDelivery,
-    automation, model, reasoningEffort, afterTurn, mode: entry.requestedMode ?? entry.mode, dueAt: Date.now() };
+    automation, loopAfterTurn, model, reasoningEffort, afterTurn, mode: entry.requestedMode ?? entry.mode, dueAt: Date.now() };
   const generation = selectionGeneration;
   // Hide during the attempt, but persist dismissal only after its replacement is durable.
   dismissedInputNotices.add(entry.id); void refreshInputQueue();
@@ -3277,7 +3286,7 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, stages: plan?.slice(1), objective, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       if (selectedId === sessionId && selectionGeneration === generation && !input.value) input.value = authoredDraft;
@@ -3292,8 +3301,8 @@ async function sendComposer(delivery?: 'finish', plan?: string[], planObjective?
     inputQueueGeneration++;
     pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== result.id), result];
     if (sessionId === null && selectionGeneration === generation && pendingNewInput?.id === id && result.automation &&
-        $<HTMLSelectElement>('chatAutomation').value !== result.automation)
-      await run(api.setInputAutomation(result.id, $<HTMLSelectElement>('chatAutomation').value as InputAutomation));
+        ($<HTMLSelectElement>('chatAutomation').value !== result.automation || openingLoopDelivery() !== result.loopAfterTurn))
+      await run(api.setInputAutomation(result.id, $<HTMLSelectElement>('chatAutomation').value as InputAutomation, openingLoopDelivery()));
     if (sessionId === null && selectionGeneration === generation) pendingNewInput = { id: result.id, generation };
     $('composerStatus').textContent = '';
     void refreshInputQueue();
@@ -3389,6 +3398,7 @@ export function initChat(next: Deps): void {
     }
   });
   initChatModels(() => {
+    paintLoopDelivery();
     const config = deps.state()?.config;
     if (config) paintContextMeter(sessions.find(session => session.id === selectedId) ?? null, config, confirmedComposerModel());
   });
@@ -3435,8 +3445,13 @@ export function initChat(next: Deps): void {
   });
   $('loopDelivery').addEventListener('change', async () => {
     const id = selectedId, generation = selectionGeneration;
-    if (!id) return;
     const select = $<HTMLSelectElement>('loopDelivery');
+    if (!id) {
+      const pending = pendingNewInput;
+      if (pending?.generation === generation)
+        await run(api.setInputAutomation(pending.id, $<HTMLSelectElement>('chatAutomation').value as InputAutomation, select.value === 'after-turn'));
+      return;
+    }
     select.disabled = true;
     try { await run(api.setSessionAutomation(id, 'loop', select.value === 'after-turn')); }
     finally {
@@ -3472,6 +3487,7 @@ export function initChat(next: Deps): void {
           if (!opening) { if (goalProgress?.requestId === requestId) { goalProgress.phase = 'failed'; goalProgress.error ||= 'Opening message generation failed'; paintGoalProgress(); } return; }
           const dueAt = Date.now(), inputId = crypto.randomUUID();
           const entry: InputEntry = { id: inputId, sessionId: null, projectId, text: opening.reply, objective: draft.trim(), automation: mode,
+            loopAfterTurn: openingLoopDelivery(),
             mode: 'auto', dueAt, model, reasoningEffort, state: 'queued', owner: null, createdAt: dueAt, conversationId: null };
           startingInputs.set(inputId, entry); pendingNewInput = { id: inputId, generation: selection };
           goalProgress = { requestId, selection, inputId, phase: 'queued', text: '' }; paintDeliveryControls();
@@ -3480,8 +3496,9 @@ export function initChat(next: Deps): void {
             if (accepted) { inputQueueGeneration++; pendingComposerInputs = [...pendingComposerInputs.filter(row => row.id !== inputId), accepted];
               // Off may arrive while sendInput is still validating/enqueuing, before
               // the outbox row exists. Reconcile that same pending intent after acceptance.
-              if (selectionGeneration === selection && pendingNewInput?.id === inputId && automation.value !== mode)
-                await run(api.setInputAutomation(inputId, automation.value as InputAutomation));
+              if (selectionGeneration === selection && pendingNewInput?.id === inputId &&
+                  (automation.value !== mode || openingLoopDelivery() !== entry.loopAfterTurn))
+                await run(api.setInputAutomation(inputId, automation.value as InputAutomation, openingLoopDelivery()));
               if (current()) objective.dataset.saved = draft;
             } else if (goalProgress?.requestId === requestId) { goalProgress.phase = 'failed'; goalProgress.error = 'Opening message could not be queued'; }
           } finally { startingInputs.delete(inputId); paintDeliveryControls(); void refreshInputQueue(); }

@@ -1937,6 +1937,23 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
             tab = await createChatTab(url, background);
             await elect(input.id, { tab: tab.id, stage: 'ready', fallbackUsed: true });
             tabs.push(tab);
+            // A failed New Chat transition can leave the borrowed managed page
+            // empty. Its conversation ownership is gone, so ordinary pruning can
+            // never retire it. The same preparation owns this exact one-hop home;
+            // close it only after the replacement exists and a fresh draft check.
+            if (reusable.has(conversationFromUrl(candidate.url)) && latest.url === 'https://chatgpt.com/' &&
+                tabEpochs[String(candidate.id)] === source.navigationEpoch + 1) {
+              const abandoned = { ...source, navigationEpoch: source.navigationEpoch + 1 };
+              try {
+                const proof = await tabReply(candidate.id, { type: 'clf-tab-close-check', conversationId: null }, { documentId: source.documentId });
+                const current = await chrome.tabs.get(candidate.id);
+                if (proof?.safe === true && proof.conversationId === null && proof.navigationEpoch === abandoned.navigationEpoch &&
+                    ownsDocument(abandoned) && current && !current.pinned && !current.pendingUrl && current.url === 'https://chatgpt.com/') {
+                  await chrome.tabs.remove(candidate.id);
+                  tabs = tabs.filter(row => row.id !== candidate.id);
+                }
+              } catch { /* A draft, navigation or missing proof keeps the document. */ }
+            }
           }
           break;
         }

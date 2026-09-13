@@ -7785,6 +7785,26 @@ describe('how a turn is recorded as having ended', () => {
     expect(emitted(live!.sent, 'turn_end')).toHaveLength(1);
     expect(emitted(live!.sent, 'assistant_message').some(row => row.event.final)).toBe(false);
   });
+  it('does not publish HTML-only interim hydration as fresh work after Thinking failed', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'metadata-failure', []);
+    live.hook.observe(); await settle();
+    const message = { messageId: 'metadata-interim', rawMessageId: 'metadata-interim', stable: true,
+      rawText: 'The geometry needs deeper relief.', renderedHtml: '<p>The geometry needs deeper relief.</p>' };
+    const turn = { turnId: 'metadata-failure', messages: [message], activities: [] };
+    await bindFiberTurns([{ section, turn }]);
+    thinkingFailed(section); stopGenerating(live.document);
+    live.hook.observe(); await settle();
+    await bindFiberTurns([{ section, turn: { ...turn, messages: [{ ...message,
+      renderedHtml: '<p data-is-last-node="">The geometry needs deeper relief.</p>' }] } }]);
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').at(-1)?.event).toMatchObject({ outcome: 'failed', reason: 'thinking_failed' });
+    const revisions = emitted(live.sent, 'assistant_message').filter(row => row.event.messageId === message.messageId);
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0]?.event.activeNow).toBe(true);
+    expect(revisions[1]?.event.activeNow).toBeUndefined();
+  });
   it.each(['tool_call', 'page_tool', 'progress', 'assistant_message'])('resumes the same failed turn on fresh %s even within 30 seconds', async kind => {
     const { id } = await failedThinkingTurn();
     live!.advance(1000);

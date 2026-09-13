@@ -1803,6 +1803,30 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalPendingReplyFor(conversationId)!.acceptedAt).toBeGreaterThan(firstPickupAt);
   });
 
+  it.each(['already-working', 'work-arrived-during-read'])('does not re-arm a handled reply when activation is %s', async scenario => {
+    const conversationId = `c-activation-${scenario}`;
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: `session-${scenario}`, replyId: 'old-final', turnId: 'old-turn', eventSeq: 14, blocked: false });
+    await goal.setGoalReplyActiveNow(conversationId, false);
+    const before = goal.snapshotGoalReplies().replies.find(row => row.conversationId === conversationId);
+    const current = vi.fn().mockReturnValue(false);
+    if (scenario === 'work-arrived-during-read') current.mockReturnValueOnce(true);
+    expect(await goal.setGoalReplyActiveNow(conversationId, true, current)).toBe(false);
+    expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    expect(goal.snapshotGoalReplies().replies.find(row => row.conversationId === conversationId)).toEqual(before);
+    expect(current).toHaveBeenCalledTimes(scenario === 'already-working' ? 1 : 2);
+  });
+
+  it.each(['user_message', 'turn_start'] as const)('does not re-arm an older final across a newer %s without active metadata', async kind => {
+    const conversationId = `activation-boundary-${kind}`;
+    const session = await createSession({ conversationId });
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'older-final', turnId: 'older-turn', eventSeq: 1, blocked: false });
+    await goal.setGoalReplyActiveNow(conversationId, false);
+    await appendEvent(session.id, { time: Date.now(), source: 'extension', turnId: 'new-turn',
+      ...(kind === 'user_message' ? { kind, message: { text: 'new request', chars: 11, truncated: false } } : { kind }) });
+    expect(await goal.setGoalReplyActiveNow(conversationId, true)).toBe(false);
+    expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+  });
+
   it('keeps an expired ticket as the stable-final tombstone a later On can re-arm', async () => {
     vi.useFakeTimers();
     try {

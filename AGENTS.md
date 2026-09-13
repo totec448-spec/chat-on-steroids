@@ -21,7 +21,7 @@ changed lines before applying an older patch. Document the work and its actual v
 the code currently does it. Known implementation gaps are collected in §21 instead of being
 mixed into the happy path as features.
 
-Source alignment: **2026-09-12**, including current working-tree changes. App/extension **2.0.9**,
+Source alignment: **2026-09-13**, including current working-tree changes. App/extension **2.0.9**,
 bridge protocol **13** in the checked declarations (`package.json`, `src/main/version.ts`,
 `extension/manifest.json`). This does not prove release, installation or live Chrome behavior.
 
@@ -670,30 +670,64 @@ current assistant turn, excluding quoted Markdown, old turns and app UI. It imme
 failed `turn_end` with structured `thinking_failed` reason and releases ordinary manual browser
 input. This is a failed view, not a successful final and not automatic queue-delivery authority.
 Fresh exact MCP/native-tool/interim work can immediately reopen the same durable generation.
-Replay, old-turn activity and manual Stop cannot. An exact native final supersedes the failed view and releases ordinary completion delivery.
+Only changed assistant text counts as fresh interim work. HTML, timestamp, identity-strengthening
+and duplicate revisions still update canonical history, but cannot reopen the turn or reset its
+work clock. Replay, old-turn activity and manual Stop cannot. An exact native final supersedes
+the failed view, but never overrides a still-live exact MCP work window.
+
+**User decision, 2026-09-13:** only the exact Thinking-failed error releases a pending immediate
+user correction without waiting. A missing Stop button, Stop-to-Send repaint, or generic
+finished/stalled observation does not grant that exception. While genuine requests keep arriving,
+the correction remains eligible for injection into its exact turn. A running MCP call vetoes
+browser Send; a later exact work observation revokes pre-send authority and restores injection.
+This also applies when ChatGPT supplies a canonical final or completed `turn_end`: for an
+MCP-backed turn, retain the existing ten-minute Pro / two-minute normal work deadline. New exact
+MCP work renews it. Native completion does not erase that work ownership or manufacture a new
+turn; only exhaustion of the quiet window permits ordinary recovery and idle Loop activation.
+Explicit native files remain browser-only, including an Immediate request temporarily represented
+as after-turn input for upload. Queued checkpoints and generated Loop instructions are different
+from this immediate correction and retain their automatic boundary policy.
 
 The bridge's existing silence grant separately requests a refresh immediately when the view fails.
 There is no initial grace period and no ignored-activity window. The recovery grant does not
 count as active input. The confirmed refresh files the existing outbox or
-opted-in Pro Loop ticket with five minutes of durable listening; native busy extends that same
+opted-in Pro Loop ticket with **five minutes** of durable listening; native busy extends that same
 ticket by five minutes as often as necessary. New work revokes the ticket and restores the normal
 silence clock. An already reloading page retains its existing hydration/cooldown protection.
 Failure/silence-based automatic delivery requires a recorded, exactly attributed local MCP call
 in that source turn. Native ChatGPT tools, request-id sightings without a call, and earlier-turn
 MCP history do not qualify. Refresh and manual sends need no MCP proof. Recheck recorded proof
-for restored tickets and before claims; a genuine final retains ordinary completion policy.
+for restored tickets and before claims; a genuine final without a live MCP work window retains
+ordinary completion policy.
 
-Queued after-turn work uses the normal model's two-minute silence/refresh authority plus one
-minute of listening after its ACK; Pro retains ten minutes and its native-busy five-minute
-extension. Thinking failed retains immediate refresh and five minutes of listening. An ACK
+Queued after-turn work and pending immediate corrections use the normal model's **two-minute**
+silence/refresh authority; Pro uses **ten minutes**. There is **no additional one-minute wait**
+after the acknowledged refresh for Goal/Loop or queued delivery. Thinking failed instead uses
+immediate refresh plus **five minutes** for automatic continuation. The final user decision
+retains that original five-minute window; the earlier proposed reduction to two is withdrawn. An ACK
 for that exact refresh files `silenceBoundary` on the next existing outbox row before publication.
 It records source conversation/turn and work sequence; no parallel ticket ledger or scheduler.
 Native Stop prevents claiming/sending and durably extends listening by five minutes, rechecking
-again if it remains busy. A genuine final can release the message normally during that window.
+again if it remains busy. Native completion cannot bypass an unexpired MCP work window or the
+existing native-busy deferral.
 New work withdraws an unspent ticket/pre-send claim and rearms the model's silence clock. Authorized
 sends retain exclusive custody until their exact receipt or proven pre-send failure. Source work,
 document epoch, question, draft and native Send are rechecked across preparation awaits. An
 unclassified `stalled` end alone does not release a message; the refresh receipt is required.
+
+At ordinary silence recovery, a never-offered immediate correction takes priority over generated
+Goal/Loop work and is sent as a normal native user message. Include at most the next eligible
+visible queue checkpoint in that same message, never the whole queue or an additional Loop
+instruction. Preserve both authored outbox identities and one exclusive native send/receipt;
+claim, cancel, timeout, restart, late ACK and history publication apply to the same pair.
+The transport's text/file limits still apply; an oversized companion stays queued instead of
+discarding the correction. No companion is pulled early into the immediate Thinking-failed send.
+User delivery spends that source's automatic obligation; a new turn must earn new continuation.
+
+The **extra five minutes when the native page is still busy at a send attempt remain unchanged**,
+for normal-silence user delivery and Thinking-failed recovery alike. This is a deferral of the
+same existing ticket, repeatable if still busy, not a new ticket or an initial five-minute wait.
+Its reason and deadline belong to the existing outbox/Goal obligation; do not add another timer.
 
 The displayed follow-up order also governs browser and finish-tool delivery: an ineligible
 head cannot be skipped by a later checkpoint. Immediate injection keeps its explicit semantics.
@@ -1111,6 +1145,14 @@ cleanup, rechecks pins/selection/navigation after the page proof and refuses unr
 drafts, attachments or generation. Explicit terminal cleanup retains its two-minute grace;
 superseded sources and duplicate documents keep their existing retirement rules.
 
+An abandoned managed tab must **close**, not remain parked on an empty `chatgpt.com` page.
+If New Chat reuse fails before Send and opens its one allowed replacement, that same operation
+retires the now-empty source using its original document, exact navigation epoch and fresh
+no-draft/no-work proof. Preserve pins, personal home pages and intervening navigation or input.
+Worker completion never authorizes deleting its durable history or revival identity. The three
+empty tabs reported on 2026-09-13 were already user-closed; the proven reuse leak and its
+regressions do not establish those tabs' original cause or live validation of the fix.
+
 ### Recovery policy
 
 `tabRecoveryWanted()` means **active Goal/Loop OR the user's recoverAgentTabs switch**. It gates
@@ -1333,9 +1375,25 @@ its pending attempt. Objective text survives Off/completion for later reuse. Rep
 → On → Off must operate on current durable authority, not an old callback's enabled snapshot.
 Master Off clears ordinary chat overrides while keeping internal helper-role records.
 
+Deliberate On files/rearms an obligation **only when the chat is idle**: a proven eligible final
+or an exhausted model-specific silence/failure window with no current work. Generating chats,
+running MCP calls and an unexpired ten-/two-minute window do not file a ticket merely because
+the switch toggled. The switch stays enabled for the next eligible boundary. A stopped/failed
+answer with no final can be rearmed deliberately after that gate using its exact recorded end;
+do not fabricate final prose or a refresh receipt. Check current switch identity and work again
+after asynchronous reads so rapid Off/On and a new turn cannot publish stale debt.
+If the switch stayed Off through a proven silence recovery, the same Goal ledger retains only
+a handled source record. This creates no pending ticket or draft. Later explicit On can rearm
+that exact exhausted source, including an unreconciled open recorder turn, only while no newer
+question/work exists and the current model's continuation setting permits it.
+
 Ordinary non-Pro Goal/Loop considers verified **completed final answers**, not interrupted
 turns or generic composer idleness. Pro Loop defaults to **Only finish**. Its per-chat switch
 can opt into **After this turn + finish**; the preference survives toggles, restart and resume.
+The desktop shows this choice as soon as its account-observed composer selection is Pro and
+Loop is selected, including before the first message. A new-chat opening freezes `loopAfterTurn`
+in its existing outbox entry; pending edits and the exact send receipt transfer it to the chat
+switch through the same serialized automation path. Retry retains that explicit preference.
 Astra Goal remains finish-only. At `session_finish`, both modes use the Loop decision policy
 and inject through the eligible tool response (§11).
 
@@ -1377,7 +1435,10 @@ receive the explicitly assembled reference context; local recording is not a pro
 Goal API requests stay on the device.
 
 The driver context includes canonical authored user messages, stable assistant interim/progress
-and final text. Tool rows are opt-in (`includeToolCalls`, default Off); finish-control calls do
+and final text. **Interim messages remain included when Thinking failed leaves no final answer**:
+both the ChatGPT helper and API Loop receive the original task, subsequent user corrections and
+canonical interim text once, in chronology. Missing hidden thinking is not permission to drop
+public interim prose; app status/error notices are not model-authored work. Tool rows are opt-in (`includeToolCalls`, default Off); finish-control calls do
 not recursively dominate the reference. Preserve original task/steering and committed handoff
 provenance under the message budget. Helper prefix digests prove whether a bounded delta is
 valid; changed history/instructions replace context in the same helper instead of spawning
@@ -1429,6 +1490,10 @@ with the selected locale in `cos.ui.language`. Changing language repaints owned 
 retaining drafts/selections; never translate authored messages, provider text or file paths.
 Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
 Theme and layout preferences do not change backend authority.
+Dropdowns use native customizable selects (`appearance: base-select`) with theme-matched
+top-layer pickers, wrapping option labels and native keyboard/focus semantics. Pro Loop delivery
+stacks its label and full-width control within the composer menu. `scripts/verify-dropdown-layout.cjs`
+checks the real Electron layout and opened pickers at normal and enlarged zoom.
 
 `renderer/plugin-refresh-reminder.ts` owns the chat-header reminder to refresh plugins
 in ChatGPT. Its X stores only the acknowledged running `state.update.current` version in
