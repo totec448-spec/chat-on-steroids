@@ -33,7 +33,7 @@ export function renderAgentPlan(host: HTMLElement, sessionId: string | null, pla
   }
   const shell = el('details', 'agent-plan-shell') as HTMLDetailsElement;
   shell.dataset.complete = String(complete);
-  shell.open = previous?.open ?? completed < plan.plan.length;
+  shell.open = previous?.open ?? false;
   const heading = el('summary', 'agent-plan-heading');
   heading.append(icon('i-steps'), el('span', 'agent-plan-title', () => completed === plan.plan.length ? t("Plan complete") : t("Plan")),
     el('span', 'agent-plan-count', `${completed} / ${plan.plan.length}`));

@@ -172,7 +172,10 @@ describe('silence after a confirmed assistant-error repair', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events([{ kind: 'turn_start', time: Date.now(), turnId: TURN }]);
+      await events([
+        { kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        { kind: 'turn_start', time: Date.now(), turnId: TURN }
+      ]);
 
       // Keep the turn alive up to the transport failure, as the live Prime did with connector work.
       await vi.advanceTimersByTimeAsync(60_000);

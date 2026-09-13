@@ -153,13 +153,13 @@ describe('semantic desktop ref lifetime', () => {
   it('invalidates refs as soon as their helper dies, before a replacement starts', async () => {
     const found = await findUi({ window: 77, maxResults: 5 });
     const ref = found.elements[0]!.ref;
-    expect(fake.spawn).toHaveBeenCalledTimes(1);
+    expect(fake.children).toHaveLength(1);
 
     fake.children[0].exitCode = 0;
     fake.children[0].emit('close');
 
     await expect(act([{ type: 'click_ref', ref }])).rejects.toThrow(/STALE_REF/);
-    expect(fake.spawn).toHaveBeenCalledTimes(1);
+    expect(fake.children).toHaveLength(1);
   });
 
   it('binds refs from a snapshot reply to the nested window id, never Number(windowObject)', async () => {

@@ -660,7 +660,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('log:json', async () => formatLogAsJson());
   handle('clipboard:write', async (payload) => {
     const { text } = z.object({ text: z.string().max(1_000_000) }).parse(payload);
-    clipboard.writeText(text);
+    await clipboard.writeText(text);
     return true;
   });
 

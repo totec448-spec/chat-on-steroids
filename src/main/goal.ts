@@ -398,6 +398,8 @@ function notifyGoalChange(): void { for (const listener of goalListeners) listen
  * only an explicit later activation may turn that exact tombstone into a fresh pickup.
  */
 interface GoalReplyObligation {
+  /** Only the deliberate user activation setter may grant this exemption. */
+  explicitActivation?: true;
   /** Exact source turn captured before its silence grant retired. Pro also requires opt-in. */
   silenceSourceTurnId?: string;
   silencePro?: boolean;
@@ -486,6 +488,7 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
         { silenceSourceTurnId: raw.silenceSourceTurnId.slice(0, 200) } : {}),
       ...(Number.isSafeInteger(raw.listenUntil) && raw.listenUntil! > 0 ? { listenUntil: raw.listenUntil } : {}),
       ...(raw.silencePro === true ? { silencePro: true } : {}),
+      ...(raw.explicitActivation === true ? { explicitActivation: true } : {}),
       eventSeq: raw.eventSeq,
       acceptedAt: raw.acceptedAt,
       state: raw.state
@@ -588,7 +591,9 @@ export async function acceptGoalReplyNow(input: {
     !input.handledOnly && !input.blocked &&
     getConfig().sessions.record &&
     goalArmedFor(input.conversationId) &&
-    await goalKeyPresent(goalSwitchFor(input.conversationId).mode);
+    await goalKeyPresent(goalSwitchFor(input.conversationId).mode) &&
+    (goalSwitchFor(input.conversationId).mode !== 'loop' ||
+      await automaticLoopHasMcpWork(input.sessionId, input.conversationId, input.silenceSourceTurnId ?? input.turnId));
   if (input.current && !input.current()) return;
   goalReplies.set(input.conversationId, {
     conversationId: input.conversationId,
@@ -642,6 +647,22 @@ export async function goalReplySourceTurn(sessionId: string, turnId: string): Pr
   if (!turnId.startsWith('reply:')) return turnId;
   const events = await readRecentEvents(sessionId, 256, { kinds: ['assistant_message'] });
   return events.find(event => event.kind === 'assistant_message' && event.messageId === turnId.slice(6))?.turnId ?? undefined;
+}
+
+/** Automatic Loop pickup needs local MCP truth from this exact source, not page tools. */
+export async function automaticLoopHasMcpWork(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
+  const session = await getSession(sessionId);
+  if (session?.conversationId !== conversationId) return false;
+  const source = await goalReplySourceTurn(sessionId, turnId);
+  return !!source && await turnHasMcpCall(sessionId, conversationId, source);
+}
+
+/** Older restored automatic debt has no exemption; URL/reply-id prefixes grant none. */
+export async function loopReplyHasAuthority(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
+  if (goalSwitchFor(conversationId).mode !== 'loop') return true;
+  const reply = goalReplies.get(conversationId);
+  if (reply?.sessionId === sessionId && reply.turnId === turnId && reply.state === 'pending' && reply.explicitActivation) return true;
+  return automaticLoopHasMcpWork(sessionId, conversationId, reply?.turnId === turnId ? reply.silenceSourceTurnId ?? turnId : turnId);
 }
 
 /** Durable state file for per-chat Goal objectives. */
@@ -1232,6 +1253,7 @@ export async function setGoalReplyActiveNow(conversationId: string, active: bool
   // A deliberate On is a new pickup episode for the same stable final reply. It gets the
   // recovery schedule from now, not from when that answer happened under an Off switch.
   if (active) before.acceptedAt = Math.max(Date.now(), previous.acceptedAt + 1);
+  if (active) before.explicitActivation = true;
   const acceptedAt = before.acceptedAt;
   try {
     await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
@@ -1582,6 +1604,7 @@ async function requestDrivingDecision(
 
 async function run(draft: GoalDraft): Promise<void> {
   if (await astraFinishOnly(draft.sessionId, draft.conversationId)) return settle(draft, 'no-reply');
+  if (draft.mode === 'loop' && !await loopReplyHasAuthority(draft.sessionId, draft.conversationId, draft.turnId)) return settle(draft, 'no-reply');
   const { endpoint, reasoning } = draft;
   const key = draft.backend === 'api' ? await goalProviderKey(endpoint.kind) : null;
   if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
@@ -1716,6 +1739,11 @@ export async function draftFastFollowup(sessionId: string, signal: AbortSignal =
   if (backend === 'api' && !key && endpoint.kind === 'openrouter') throw new Error('Configure the Goal API key for automatic finish follow-ups, or choose Notify me');
   const session = await getSession(sessionId);
   if (!session?.conversationId) throw new Error('This session has no current conversation');
+  if (mode === 'loop') {
+    const [start] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start'] });
+    const source = session.activeTurnId ?? start?.turnId;
+    if (!source || !await automaticLoopHasMcpWork(sessionId, session.conversationId, source)) return null;
+  }
   const objective = goalObjectiveFor(session.conversationId);
   const { listInputs } = await import('./session/input.js');
   const inputs = await listInputs();

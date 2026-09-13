@@ -41,6 +41,7 @@ import {
   foldProgress
 } from '../shared/session.js';
 import { chronological } from '../shared/chronology.js';
+import { recentChatActivity, sessionWorkingAt, workerReportedFinish } from '../shared/session-activity.js';
 import {
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
@@ -261,54 +262,9 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  * first badge is durable and comes from the session itself; the second is live and comes
  * from the swarm or the compaction currently reported by the app.
  */
-/**
- * How long after its session start or last exact attributed tool call a chat still reads as
- * working.
- *
- * Prime owns the run for its whole life, so its agent state alone would light this badge
- * permanently and say nothing. An open turn was the gate instead, which is exact but too
- * narrow: when a page loses its answer stream the recorder has no open turn, while the model
- * behind it goes on calling tools for minutes. That is a chat very much at work, shown as idle
- * — and the moment a user most wants to see that it is still going.
- *
- * The bridge's recovery window is deliberately the shorter of the two, and the authorities remain
- * separate: this derives display state from the durable session summary; the bridge derives a
- * browser action from exact observations and attributed calls. The label outliving the reload
- * window is the point — a chat being reloaded on the app's instruction is mid-repair, and the
- * badge going dark first is what made that reload look like it came out of nowhere.
- */
-/**
- * Pro uses the bridge's live ten-minute activity deadline.
- * Other sessions and exact calls stay active for three minutes unless a later turn end finished
- * them — the model's final answer, or the turn ending any other way, the user's stop included.
- * A refused call in a blocked chat still counts as the call it was: the badge is how the user
- * sees that something is still trying, and it goes dark the moment the turn is stopped.
- */
-function recentChatActivity(summary: SessionSummary, now = Date.now()): boolean {
-  if (summary.activityExpiresAt !== undefined) {
-    return summary.activityExpiresAt !== null && now < summary.activityExpiresAt;
-  }
-  const lastActivityAt = Math.max(summary.startedAt, summary.lastToolCallAt ?? 0);
-  const finishedAt = Math.max(summary.lastAssistantFinalAt ?? 0, summary.lastTurnEndAt ?? 0);
-  return lastActivityAt > finishedAt && now - lastActivityAt < CHAT_ACTIVE_MS;
-}
-
-/**
- * A worker whose newest call was its own finish report has stopped working, whatever the swarm
- * currently says or fails to say: the run parks the moment its last worker stops, and a parked
- * run has no agent view for the list to read.
- */
-function workerReportedFinish(summary: SessionSummary): boolean {
-  return (
-    summary.origin?.kind === 'worker' &&
-    typeof summary.lastFinishReportAt === 'number' &&
-    summary.lastFinishReportAt >= (summary.lastToolCallAt ?? 0)
-  );
-}
-
-/** Reload-generated turn boundaries are not activity authority; session start, calls and finals are. */
+/** Keep callback arguments separate from the shared predicate's explicit clock. */
 function sessionWorking(summary: SessionSummary): boolean {
-  return summary.endedAt === null && !workerReportedFinish(summary) && recentChatActivity(summary);
+  return sessionWorkingAt(summary, Date.now());
 }
 
 /**
@@ -2205,7 +2161,33 @@ function paintDetail(followBottom = true): void {
       if (recoverySession) dismissedRecoveryNotices.set(recoverySession, recoveryRevision);
       recoveryStatus.hidden = true; recoveryStatus.replaceChildren();
     }));
+  const oldest = shown.length ? Math.min(...shown.map(event => event.time)) : 0;
+  const newest = shown.length ? Math.max(...shown.map(event => event.time)) : 0;
+  const retiredInputs = pendingComposerInputs.filter(entry => historicalAutomaticInput(entry) &&
+    (entry.sessionId ?? entry.deliveredSessionId) === selectedId && !dismissedInputNotices.has(entry.id) &&
+    agentFilter === null && entry.createdAt >= oldest && (historyBefore === null || entry.createdAt <= newest))
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const appendRetiredInputs = (until: number) => {
+    while (retiredInputs.length && retiredInputs[0]!.createdAt <= until) {
+      const entry = retiredInputs.shift()!;
+      const key = `retired-input:${entry.id}`;
+      const sig = JSON.stringify([entry.text, entry.error, entry.createdAt]);
+      keep.add(key);
+      const cached = rowCache.get(key);
+      const row = cached?.sig === sig ? cached.row : inputMessageRow(entry, true);
+      if (row !== cached?.row) {
+        const time = document.createElement('time');
+        time.textContent = new Date(entry.createdAt).toLocaleString();
+        row.prepend(time);
+      }
+      row.dataset.timelineKey = key;
+      rowCache.set(key, { sig, row });
+      timelineRows.push(row);
+      activityBoundary = key;
+    }
+  };
   for (const item of timelineItems(shown)) {
+    appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
     if (item.kind === 'compaction' || !['tool_call', 'page_tool', 'agent_message'].includes(item.event.kind)) activityBoundary = itemKey(item);
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && ['session_start', 'session_end', 'turn_start', 'turn_end', 'note'].includes(item.event.kind)) continue;
@@ -2227,6 +2209,7 @@ function paintDetail(followBottom = true): void {
     rowCache.set(key, { sig, row });
     timelineRows.push(row);
   }
+  appendRetiredInputs(Infinity);
   for (const key of rowCache.keys()) if (!keep.has(key)) rowCache.delete(key);
   reconcileChildren($('timeline'), groupToolRows(timelineRows));
   $('timelineEmpty').hidden = timelineRows.length > 0 || $('inputQueue').childElementCount > 0;
@@ -2955,6 +2938,74 @@ function scheduleReload(): void {
   }, 400);
 }
 
+/** Retired automatic drafts belong to their creation time, never the live composer queue. */
+function historicalAutomaticInput(entry: InputEntry): boolean {
+  return !!entry.finishOwner && !entry.finishOwner.userRequested && entry.state === 'cancelled' && !!entry.error;
+}
+
+function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
+  const row = el('div', 'pending-message');
+  row.classList.toggle('is-delivered', !entry.error && ['sent', 'tool'].includes(entry.state));
+  row.classList.toggle('is-delivery-error', !!entry.error || entry.state === 'failed');
+  row.dataset.inputId = entry.id;
+  if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
+  visibleInputIds.add(entry.id);
+  if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
+  const status = () => entry.error || (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString()]) : t("Queued"));
+  const files = el('div', 'message-attachments');
+  if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
+  for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
+  if (files.childElementCount) row.append(files);
+  if (entry.text) {
+    const text = el('div', 'pending-message-text', entry.text);
+    text.setAttribute('dir', 'auto');
+    row.append(text);
+  }
+  const receipt = el('span', 'pending-message-status');
+  ui(receipt, 'title', status); ui(receipt, 'aria-label', status);
+  if (entry.error || entry.state === 'failed') {
+    ui(receipt, 'textContent', status);
+  }
+  else receipt.append(icon(['sent', 'tool'].includes(entry.state) ? 'i-check' : 'i-clock'));
+  receipt.hidden = !entry.error && ['sent', 'tool'].includes(entry.state) && hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt);
+  row.append(receipt);
+  if (notice) {
+    row.append(dockAction(() => t("Dismiss delivery notice"), 'i-x', () => dismissInputNotice(entry.id)));
+    const retry = dockAction(() => t("Retry delivery"), 'i-retry', () => {});
+    retry.classList.add('delivery-retry');
+    const unqueuedPlan = entry.stages !== undefined && !entry.stagesApplied;
+    ui(retry, 'title', () => unqueuedPlan ? t("Retry stage one with the complete plan and queued checkpoints") : t("Restore this message to the composer for review and sending"));
+    retry.onclick = () => {
+      if (unqueuedPlan) { void retryPlannedInput(entry); return; }
+      const input = $<HTMLTextAreaElement>('chatInput');
+      if (input.value.trim() || imageDrafts.get(draftKey())?.length) { toast(t("Send or clear your current draft before retrying this message.")); return; }
+      input.value = entry.text;
+      if (entry.images?.length) imageDrafts.set(draftKey(), [...entry.images]);
+      if (entry.attachments?.length) imageDrafts.set(draftKey(), [...(entry.images ?? []), ...entry.attachments]);
+      rememberDraft(); paintComposerImages(); paintDeliveryControls(); input.focus();
+      dismissInputNotice(entry.id);
+    };
+    row.append(retry);
+  }
+  if (['queued', 'browser'].includes(entry.state)) {
+    const cancel = dockAction(() => t("Cancel delivery"), 'i-x', () => {});
+    cancel.onclick = async () => {
+      cancel.disabled = true;
+      const result = await run(api.cancelInput(entry.id));
+      if (result) dismissInputNotice(entry.id);
+      void refreshInputQueue();
+    };
+    row.append(cancel);
+  }
+  if (entry.state === 'queued' && entry.error?.startsWith('Message queued. Browser startup failed:')) {
+    const retry = dockAction(() => t("Retry browser"), 'i-retry', () => {});
+    retry.classList.add('delivery-retry');
+    retry.onclick = async () => { retry.setAttribute('disabled', ''); await run(api.retryInputBrowser(entry.id)); void refreshInputQueue(); };
+    row.append(retry);
+  }
+  return row;
+}
+
 async function refreshInputQueue(): Promise<void> {
   const request = ++inputQueueGeneration;
   const selection = selectionGeneration;
@@ -3100,68 +3151,8 @@ async function refreshInputQueue(): Promise<void> {
     (notice(entry) || unbound(entry) || selectedId !== null || projectGroup(entry.projectId) === selectedProjectId) &&
     (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !entry.historyRecorded)));
   for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);
-  $('inputQueue').replaceChildren(...rows.map((entry) => {
-    const row = el('div', 'pending-message');
-    row.classList.toggle('is-delivered', !entry.error && ['sent', 'tool'].includes(entry.state));
-    row.classList.toggle('is-delivery-error', !!entry.error || entry.state === 'failed');
-    row.dataset.inputId = entry.id;
-    if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
-    visibleInputIds.add(entry.id);
-    if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-    const status = () => entry.error || (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString()]) : t("Queued"));
-    const files = el('div', 'message-attachments');
-    if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
-    for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
-    if (files.childElementCount) row.append(files);
-    if (entry.text) {
-      const text = el('div', 'pending-message-text', entry.text);
-      text.setAttribute('dir', 'auto');
-      row.append(text);
-    }
-    const receipt = el('span', 'pending-message-status');
-    ui(receipt, 'title', status); ui(receipt, 'aria-label', status);
-    if (entry.error || entry.state === 'failed') {
-      ui(receipt, 'textContent', status);
-    }
-    else receipt.append(icon(['sent', 'tool'].includes(entry.state) ? 'i-check' : 'i-clock'));
-    receipt.hidden = !entry.error && ['sent', 'tool'].includes(entry.state) && hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt);
-    row.append(receipt);
-    if (notice(entry)) {
-      row.append(dockAction(() => t("Dismiss delivery notice"), 'i-x', () => dismissInputNotice(entry.id)));
-      const retry = dockAction(() => t("Retry delivery"), 'i-retry', () => {});
-      retry.classList.add('delivery-retry');
-      const unqueuedPlan = entry.stages !== undefined && !entry.stagesApplied;
-      ui(retry, 'title', () => unqueuedPlan ? t("Retry stage one with the complete plan and queued checkpoints") : t("Restore this message to the composer for review and sending"));
-      retry.onclick = () => {
-        if (unqueuedPlan) { void retryPlannedInput(entry); return; }
-        const input = $<HTMLTextAreaElement>('chatInput');
-        if (input.value.trim() || imageDrafts.get(draftKey())?.length) { toast(t("Send or clear your current draft before retrying this message.")); return; }
-        input.value = entry.text;
-        if (entry.images?.length) imageDrafts.set(draftKey(), [...entry.images]);
-        if (entry.attachments?.length) imageDrafts.set(draftKey(), [...(entry.images ?? []), ...entry.attachments]);
-        rememberDraft(); paintComposerImages(); paintDeliveryControls(); input.focus();
-        dismissInputNotice(entry.id);
-      };
-      row.append(retry);
-    }
-    if (['queued', 'browser'].includes(entry.state)) {
-      const cancel = dockAction(() => t("Cancel delivery"), 'i-x', () => {});
-      cancel.onclick = async () => {
-        cancel.disabled = true;
-        const result = await run(api.cancelInput(entry.id));
-        if (result) dismissInputNotice(entry.id);
-        void refreshInputQueue();
-      };
-      row.append(cancel);
-    }
-    if (entry.state === 'queued' && entry.error?.startsWith('Message queued. Browser startup failed:')) {
-      const retry = dockAction(() => t("Retry browser"), 'i-retry', () => {});
-      retry.classList.add('delivery-retry');
-      retry.onclick = async () => { retry.setAttribute('disabled', ''); await run(api.retryInputBrowser(entry.id)); void refreshInputQueue(); };
-      row.append(retry);
-    }
-    return row;
-  }));
+  $('inputQueue').replaceChildren(...rows.filter(entry => !historicalAutomaticInput(entry)).map(entry => inputMessageRow(entry, notice(entry))));
+  paintDetail(false);
   $('timelineEmpty').hidden = events.length > 0 || rows.length > 0;
   for (const helper of pausedHelpers ?? []) {
     if (helper.sourceSessionId !== selectedId) continue;

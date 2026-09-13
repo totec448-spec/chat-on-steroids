@@ -50,6 +50,7 @@ import {
   acceptGoalReplyNow,
   astraFinishOnly,
   loopAfterTurnFor,
+  loopReplyHasAuthority,
   deferSilenceGoalReplyNow,
   ackGoalDraftNow,
   applyGoalSwitch,
@@ -182,6 +183,8 @@ import type { ContinuationView } from './session/continuation.js';
 import { noteResumeOpening } from './session/resume-gate.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
+import { conversationHasMcpCallSince } from './session/store.js';
+import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
 import { bindAgentWorkspace } from './workspace.js';
 
@@ -1605,6 +1608,25 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { input }, origin);
   }
 
+  if (route === '/repairs/claim' && req.method === 'POST') {
+    let body: unknown;
+    try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    const token = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).token : null;
+    if (typeof token !== 'string' || token.length > 128) return json(res, 400, { error: 'bad_request' }, origin);
+    const found = [...repairsInFlight].find(([, repair]) => repair.reason === 'unattributed' && repair.token === token && repair.state === 'handed');
+    if (!found) return json(res, 200, { allowed: false }, origin);
+    const [conversationId, repair] = found;
+    const session = await getSession(repair.sessionId);
+    const current = await attributionRepairAllowed(repair, session);
+    const allowed = current && repairsInFlight.get(conversationId) === repair && repair.state === 'handed' && !repair.claimed;
+    if (allowed) {
+      repair.claimed = true;
+      if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
+        repair.attribution.incident.firstAttemptAt = Date.now();
+    }
+    return json(res, 200, { allowed }, origin);
+  }
+
   if (route === '/correlations' && req.method === 'POST') {
     let body: Record<string, unknown>;
     try {
@@ -1716,6 +1738,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (woke?.revived) tidyCommands();
     }
     observationWritesInFlight += 1;
+    let committed: { sessionId: string | null; stored: number; wake: boolean } | undefined;
     try {
       const agent = agentForOwnedConversation(id);
       // The command acknowledgement normally supplies this origin before the worker's first
@@ -1822,11 +1845,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // no input row changed: finish stages and after-turn sends can now be claimed.
       // Publish that boundary to the existing wake channel instead of waiting for
       // the extension's idle maintenance poll. Claims still recheck exact state.
-      if (!superseded && result.activity.terminal) wakeBrowserWork();
-      return json(res, 200, { sessionId: result.sessionId, stored: result.stored }, origin);
+      committed = { sessionId: result.sessionId, stored: result.stored, wake: !superseded && result.activity.terminal };
     } finally {
       observationWritesInFlight -= 1;
     }
+    // A replacement page may discover Thinking failed after this source's ordinary
+    // silence ticket was already filed. Publish its receipt-anchored listening
+    // deadline into that same outbox row before acknowledging the observation.
+    if (activeUntil.get(id)?.thinkingFailed) await fileSilenceInputTicket(id, Date.now());
+    if (committed?.wake) wakeBrowserWork();
+    return json(res, 200, { sessionId: committed!.sessionId, stored: committed!.stored }, origin);
   }
 
   if (route === '/closed' && req.method === 'POST') {
@@ -1896,7 +1924,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const hasKey = await goalKeyPresent(goalModeFor(id));
       let draft = superseded || silenceSuppressed ? null : goalViewFor(id, goalClient);
       if (draft && loopAfterTurnFor(id) && astraSession && await chatStillWorking(id, draft.turnId, astraSession.id)) draft = null;
-      const pending = goalPendingReplyFor(id);
+      let pending = goalPendingReplyFor(id);
+      const sourceTurn = pending?.turnId ?? draft?.turnId;
+      if (sourceTurn && (!astraSession || !await loopReplyHasAuthority(astraSession.id, id, sourceTurn))) {
+        pending = null;
+        draft = null;
+      }
       const queuePending = !!astraSession && !!await goalInputPriority(id, astraSession.id, pending?.turnId ?? draft?.turnId);
       if (queuePending) draft = null;
       return ({
@@ -2226,6 +2259,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // has just been reloaded into a turn already in flight adopts this instead of
         // minting a second id for the same run. See liveConversations().
         activeTurnId: hasActivityDeadline && !activityCurrent && !pendingStop ? null : live.activeTurnId ?? null,
+        // Durable answer identity survives a quiet deadline and app/extension restart.
+        // Boot adoption must not mint a replacement turn merely because liveness expired.
+        recordedTurnId: live.activeTurnId ?? null,
         ...(pendingStop?.spec.type === 'stop' ? { stopTurn: { turnId: pendingStop.spec.turnId, userMessageId: pendingStop.spec.userMessageId ?? null } } : {}),
         // A revival names an existing worker conversation. The extension, which alone can
         // inspect Chrome's real tab set, routes it to that tab before it considers opening one.
@@ -2844,6 +2880,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (await goalInputPriority(id, sessionId, turnId)) {
       discardPreparedGoalDraft(id, draft.token);
       return json(res, 409, { error: 'user_input_pending', retryable: true }, origin);
+    }
+    if (goalPendingReplyFor(id)?.turnId !== turnId || !await loopReplyHasAuthority(sessionId, id, turnId)) {
+      discardPreparedGoalDraft(id, draft.token);
+      return json(res, 409, { error: 'goal_reply_not_pending', retryable: false }, origin);
     }
     beginGoalDraft(id, draft.token);
     return json(res, 200, { goal: draft, sessionId }, origin);
@@ -5110,7 +5150,10 @@ async function silenceContinuationAllowed(conversationId: string, sessionId?: st
   if (!await turnHasMcpCall(session.id, conversationId, sourceTurnId)) return false;
   if (pending && loopAfterTurnFor(conversationId)) {
     const work = await readRecentEvents(session.id, 1, { kinds: ['user_message', 'assistant_message', 'tool_call', 'page_tool', 'turn_start'] });
-    if (work.some(event => event.seq > pending.eventSeq || event.time > pending.acceptedAt)) return false;
+    // A refresh can discover an older interim for the first time, or replace its
+    // HTML/identity under a newer storage sequence. Neither is newly authored work.
+    // The recorder's accepted activity renews the grant below for real revisions.
+    if (work.some(event => event.time > pending.acceptedAt)) return false;
     if (grant?.turnId === sourceTurnId && grant.evidenceAt > pending.acceptedAt) return false;
   }
   return !pending || goalPendingReplyFor(conversationId)?.replyId === pending.replyId;
@@ -5294,7 +5337,11 @@ async function fileSilenceInputTicket(conversationId: string, now: number, liste
       repair?.reason !== 'silence' || repair.state !== 'done' || repair.sessionId !== grant.sessionId) return false;
   const current = () => activeUntil.get(conversationId) === grant && repairsInFlight.get(conversationId) === repair &&
     !stopRequestedFor(conversationId) && !isChatBlocked(conversationId) &&
-    !continuationForSession(grant.sessionId) && runningToolCalls(conversationId) === 0 && observationWritesInFlight === 0;
+    !continuationForSession(grant.sessionId) && runningToolCalls(conversationId) === 0 &&
+    // Ordinary silence needs a quiet recorder. An exact failed-source receipt can
+    // publish its existing listening deadline while an unrelated chat is recording;
+    // grant identity and the outbox's source/work checks still fence renewed work.
+    (observationWritesInFlight === 0 || (grant.thinkingFailed === true && repair.progress?.turnId === grant.turnId));
   return fileSilenceInput(grant.sessionId, conversationId, grant.turnId, current, grant.thinkingFailed ? grant.until : listenUntil);
 }
 
@@ -5377,127 +5424,55 @@ function armSilenceSweep(now = Date.now()): void {
   silenceTimer.unref?.();
 }
 
-/**
- * How long a suspect is given to prove itself wrong, by how many suspects there are.
- *
- * Unattributed activity means a chat is running tools while the request-id join is broken —
- * usually because that page's content script or Fiber helper died under it. It never says which
- * chat, so nothing here guesses one, and the wait is the whole of how they are told apart: a
- * healthy chat keeps producing attributed calls and leaves the incident on its own.
- *
- * That makes the wait a discrimination budget, and the count is the only thing entitled to
- * scale it. One suspect needs no discrimination at all — there is nobody to tell it apart from
- * — so it is eligible immediately. Three pay the longest, because the live probes in
- * docs/chatgpt-turn-signals.md show ChatGPT can sit for more than a minute on a genuinely live
- * request, and reloading a chat that was merely thinking destroys the answer it was writing.
- *
- * The recorder's request-id grace precedes this incident. Do not add another round-trip
- * floor for a single suspect; existing exact attribution still cancels a pending repair.
- */
-const UNATTRIBUTED_RUNGS = [0, 30_000, 60_000] as const;
-/** Three suspects or more; the measured ceiling a genuinely live request can sit inside. */
-const UNATTRIBUTED_CEILING_MS = UNATTRIBUTED_RUNGS[2];
+/** The first incident owns both deadlines; later calls never move them. */
+const UNATTRIBUTED_FIRST_WINDOW_MS = 60_000;
+const UNATTRIBUTED_FINAL_WINDOW_MS = 5 * 60_000;
 
-function unattributedRung(suspects: number): number {
-  return (
-    UNATTRIBUTED_RUNGS[Math.min(Math.max(suspects, 1), UNATTRIBUTED_RUNGS.length) - 1] ??
-    UNATTRIBUTED_CEILING_MS
-  );
+interface UnattributedCandidate {
+  conversationId: string;
+  sessionId: string;
+  endedTurns: number;
+  turnId: string | null;
 }
-
-/**
- * Seconds until the next eligible unattributed-recovery check, or null with no candidate.
- *
- * The caller is by definition a chat this app cannot name, so it cannot be told its own
- * deadline. The earliest eligible pending check is all the caller can be told; it is not
- * a promise that this particular chat will reload. With no
- * incident open the answer is a whole rung, because the call asking this is the one about to
- * open it. With no browser in sight there is no answer at all — nothing can reload a tab this
- * app cannot see, and promising a chat a repair that will never come is worse than saying
- * nothing.
- */
-export function unattributedRepairEta(now = Date.now()): number | null {
-  if (!browserPresent()) return null;
-  const incident = unattributedIncident;
-  const suspects = pendingSuspects(incident, now);
-  if (suspects.length === 0) return null;
-  const rung = unattributedRung(suspects.length);
-  if (!incident) return Math.round(rung / 1000);
-  const due = suspects.map((entry) =>
-    Math.min(
-      incident.due.get(entry.conversationId) ?? Number.POSITIVE_INFINITY,
-      (incident.seen.get(entry.conversationId) ?? now) + rung
-    )
-  );
-  const earliest = Math.min(...due);
-  return Math.max(0, Math.round((earliest - now) / 1000));
-}
-
 interface UnattributedIncident {
   startedAt: number;
-  timer: NodeJS.Timeout | null;
-  /** Chats whose calls kept being attributed while this incident was open. Not the broken one. */
+  firstDueAt: number;
+  pass: 0 | 1 | 2;
+  firstAttemptAt: number | null;
+  lastUnknownStartedAt: number;
+  ready: Promise<void>;
+  requestId: string | null;
+  /** Fixed opening cohort. Activity expiry is presentation, not a terminal verdict. */
+  candidates: UnattributedCandidate[];
   proven: Set<string>;
-  /**
-   * Suspects this incident has stopped waiting for, because a reload for them was refused for
-   * the rest of the turn. Kept apart from `proven`, which is a statement about evidence.
-   */
   dismissed: Set<string>;
-  /**
-   * The server turns whose calls opened or fed this incident. Once the incident has reloaded
-   * anybody, these are the request ids a reload has been tried for — see
-   * `unattributedReloadedRequests`.
-   */
-  requestIds: Set<string>;
-  /**
-   * When each suspect first came under suspicion, and therefore what its own deadline counts
-   * from. A chat that joined the incident late has not been silent as long as one that was here
-   * at the start, and judging both from `startedAt` would reload it for somebody else's silence.
-   */
-  seen: Map<string, number>;
-  /**
-   * Each suspect's own deadline, which only ever moves closer.
-   *
-   * Every chat is its own failure. A second suspect turning up is not a reason for the first to
-   * wait longer — it has already served the time its own evidence was worth — so a rung that
-   * rises with the count may not push a deadline that is already set. A rung that falls still
-   * pulls it in, which is the point of re-reading the count at every wake instead of freezing it
-   * when the incident opened.
-   *
-   * Latched per chat rather than held as one rung for the incident, because one rung cannot say
-   * both things at once: the pass that lowers it for a newcomer is the same pass that would
-   * raise it for everybody already waiting.
-   */
-  due: Map<string, number>;
 }
 
-let unattributedIncident: UnattributedIncident | null = null;
+/** Next fixed repair deadline, never an attribution claim for the anonymous caller. */
+export function unattributedRepairEta(now = Date.now(), requestId?: string | null): number | null {
+  if (!browserPresent() || (requestId && requestCorrelation(requestId))) return null;
+  const known = requestId ? unattributedIncidents.get(requestId) : undefined;
+  const eligible = (incident: UnattributedIncident): boolean => incident.pass < 2 && pendingSuspects(incident).length > 0 &&
+    (incident.pass === 0 || (incident.requestId !== null && incident.firstAttemptAt !== null &&
+      incident.lastUnknownStartedAt > incident.firstAttemptAt));
+  // A request-specific budget cannot borrow another incident's ETA or become fresh again.
+  if (known && !eligible(known)) return null;
+  const pending = known ? [known] : requestId ? [] : [...unattributedIncidents.values()].filter(eligible);
+  if (pending.length) return Math.max(0, Math.ceil((Math.min(...pending.map(incident =>
+    incident.pass === 0 ? incident.firstDueAt : incident.startedAt + UNATTRIBUTED_FINAL_WINDOW_MS)) - now) / 1000));
+  const count = pendingSuspects(null).length;
+  return count ? (count === 1 ? 0 : 60) : null;
+}
 
-/**
- * One repair per chat, and how far along it is.
- *
- *   `queued`  decided, and waiting for the browser to collect it.
- *   `handed`  the browser has it. Nothing is known yet about whether it worked.
- *   `done`    it was carried out — that exact tab reloaded, or the chat reopened.
- *
- * Only `done` suppresses a further repair, because only `done` is an action whose effect there
- * is any point waiting to observe. An explicitly failed or unconfirmed browser action must go
- * back in the queue, or the one failure this path exists for would be recorded as handled and
- * never tried again.
- *
- * `endedTurns` is how many turns the chat had already finished when this repair was filed, and
- * one more of them is what retires the entry: the broken turn is over. Without that, this map
- * would be permanent conversation state, and one repaired turn that never makes another tool
- * call would block every later broken turn in the same chat.
- *
- * A count rather than the turn's own id, because the repair changes the id. The replacement
- * document re-observes a generation that never ended and names it something new, so a repair
- * pinned to an id looked spent seconds after its own reload landed — and while ChatGPT stayed
- * broken, the next incident reloaded the same chat again, and the one after that again. A turn
- * that has actually ended is the only thing that means the failure this repair answered is
- * over, and it says so whether or not the broken turn ever named itself.
- */
+/** One scheduler for bounded, request-specific incidents, including their spent budgets. */
+const unattributedIncidents = new Map<string, UnattributedIncident>();
+let unattributedTimer: NodeJS.Timeout | null = null;
+const UNATTRIBUTED_REQUEST_MEMORY = 500;
+
+/** One existing browser-action owner per chat: queued, issued, or acknowledged. */
 interface Repair {
+  attribution?: { incident: UnattributedIncident; candidate: UnattributedCandidate };
+  claimed?: boolean;
   /** Stable local owner; the browser action is valid only while this session is still here. */
   sessionId: string;
   endedTurns: number;
@@ -5552,7 +5527,7 @@ const lastBrowserRecoveryAt = new Map<string, number>();
  *
  * This is the error reload's budget alone. Silence answers a different question — is this chat
  * alive at all — and carries no budget beyond its own two minutes; an `unattributed` reload is
- * rationed by the request id it was tried for, see `unattributedReloadedRequests`. None of the
+ * rationed by its request-specific two-attempt incident. None of the
  * three waits on, or is refused because of, another.
  *
  * Written only once the browser confirms the action, so a handout nobody carried out spends
@@ -5563,30 +5538,6 @@ const turnRepairSpent = new Map<string, { sessionId: string; turnKey: string }>(
 /** The identity of the turn a chat is on right now, for the error reload's budget. */
 function turnKeyFor(live: { activeTurnId: string | null; endedTurns: number } | undefined): string {
   return live?.activeTurnId ?? `ended:${live?.endedTurns ?? 0}`;
-}
-
-/**
- * Request ids of unattributed calls that have already had their reload.
- *
- * An unattributed call is a server turn this app cannot place, and a broken join produces one
- * every few seconds for as long as that turn runs. The reload is tried once per such turn: a
- * later call carrying the same request id is the same broken turn, and a second reload for it
- * would only prove again what the first one proved. A *different* request id is a different
- * turn — a new message from the phone, say — and gets its own reload. Bounded so a day of
- * foreign turns cannot grow it without limit.
- */
-const unattributedReloadedRequests = new Set<string>();
-const UNATTRIBUTED_REQUEST_MEMORY = 500;
-
-function rememberUnattributedReload(incident: UnattributedIncident): void {
-  for (const requestId of incident.requestIds) {
-    unattributedReloadedRequests.delete(requestId);
-    unattributedReloadedRequests.add(requestId);
-  }
-  for (const oldest of unattributedReloadedRequests) {
-    if (unattributedReloadedRequests.size <= UNATTRIBUTED_REQUEST_MEMORY) break;
-    unattributedReloadedRequests.delete(oldest);
-  }
 }
 
 /**
@@ -5642,8 +5593,8 @@ function queueBrowserRecovery(
   if (held && held.state !== 'done' && !supersedes) return false;
   // Silence already paid its complete two-minute inactivity boundary. Once genuine new activity
   // starts another episode, layering the unrelated browser-action floor on top delays the next
-  // stuck-page recovery beyond its own contract. Error/unattributed repairs keep that shared
-  // floor. `goal` is exempt for the same reason and a stronger one: it carries its own backoff,
+  // stuck-page recovery beyond its own contract. Assistant-error repairs keep that shared
+  // floor; attribution owns its fixed two-attempt schedule. `goal` is exempt for the same reason and a stronger one: it carries its own backoff,
   // which after the opening step is already longer than the shared floor, so applying both would
   // only move the user's stated schedule without changing what protects the page. `no-tab` is
   // exempt because the floor protects a page that is still loading from a second reload, and a
@@ -5651,7 +5602,7 @@ function queueBrowserRecovery(
   // floor for two and a half minutes because a silence reopen had landed moments earlier. One
   // close is one reopen, and it is immediate.
   const notBefore =
-    reason === 'silence' || reason === 'goal' || reason === 'compaction' || reason === 'no-tab'
+    reason === 'silence' || reason === 'goal' || reason === 'compaction' || reason === 'no-tab' || reason === 'unattributed'
       ? now
       : Math.max(now, (lastBrowserRecoveryAt.get(conversationId) ?? 0) + BROWSER_RECOVERY_COOLDOWN_MS);
   const repair: Repair = {
@@ -5726,6 +5677,18 @@ async function noteRecoveryObservations(
   // of evidence, not a model choice to pin forever. Resolve it from this exact chat
   // without treating picker/presence updates as new work or changing a known model.
   const recorded = sessionId ? await getSession(sessionId) : null;
+  const ended = observations.findLast(item => item.kind === 'turn_end');
+  const thinkingFailed = ended?.outcome === 'failed' && ended.reason === 'thinking_failed' &&
+    recorded?.lastTurnOutcome === 'failed' && !recorded.activeTurnId;
+  // The replacement document can reveal the failure that the silence reload was
+  // already repairing. That same source has spent its reload; learning its outcome
+  // is not new work and must not restart the browser or the five-minute clock.
+  const repaired = repairsInFlight.get(conversationId);
+  const confirmedAt = lastBrowserRecoveryAt.get(conversationId);
+  const sameFailedRepair = thinkingFailed && activity.terminal && ended.turnId &&
+    repaired?.reason === 'silence' && repaired.state === 'done' &&
+    repaired.sessionId === sessionId && repaired.progress?.sessionId === sessionId &&
+    repaired.progress.turnId === ended.turnId && confirmedAt !== undefined ? repaired : null;
   const selected = recorded?.selectedModel;
   const provenModel = selected?.conversationId === conversationId
     ? isProModel(selected.model, selected.reasoningEffort) ? 'pro' as const : 'unknown' as const
@@ -5753,7 +5716,7 @@ async function noteRecoveryObservations(
       await revokeSilenceInputs(sessionId);
       await revokeSilenceLoop(conversationId);
     }
-    if (!activity.terminal || !observations.some(item => item.kind === 'turn_end' && item.outcome === 'stalled'))
+    if (!sameFailedRepair && (!activity.terminal || !observations.some(item => item.kind === 'turn_end' && item.outcome === 'stalled')))
       noteRecoveryActivity(conversationId);
     noteGoalWatchActivity(conversationId);
     // A current-turn interim can push an existing deadline; historical transcript/page rows
@@ -5781,16 +5744,15 @@ async function noteRecoveryObservations(
       grantActivity(conversationId, sessionId, Math.min(Date.now(), activity.at ?? Date.now()), CHAT_SILENCE_MS, turn);
     }
   }
-  const ended = observations.findLast(item => item.kind === 'turn_end');
   const lastEnd = ended?.outcome ?? null;
-  const thinkingFailed = ended?.outcome === 'failed' && ended.reason === 'thinking_failed' &&
-    recorded?.lastTurnOutcome === 'failed' && !recorded.activeTurnId;
   let terminalGrant = activeUntil.get(conversationId);
   if (thinkingFailed && ended.turnId && sessionId && activity.terminal) {
     // The recorder closes input immediately. The existing silence owner separately
     // owes one early refresh; real work replaces this grant and cancels the episode.
     terminalGrant = { sessionId, turnId: ended.turnId, model: terminalGrant?.model ?? provenModel,
-      evidenceAt: Math.min(Date.now(), ended.time), until: Date.now(), thinkingFailed: true };
+      evidenceAt: Math.min(Date.now(), ended.time),
+      until: sameFailedRepair && repairsInFlight.get(conversationId) === sameFailedRepair
+        ? confirmedAt! + 5 * 60_000 : Date.now(), thinkingFailed: true };
     activeUntil.set(conversationId, terminalGrant);
     await inspectSilentChats(Date.now());
     armSilenceSweep();
@@ -6046,9 +6008,10 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
       spent.push(conversationId);
       continue;
     }
-    // Queue and Goal share the model's work clock. Unknown models retain the
-    // conservative ten-minute input floor; known normal models use two minutes.
-    if (afterTurn && grant.model !== 'other' && !grant.thinkingFailed && now < grant.evidenceAt + PRO_SILENCE_MS) {
+    // Recovery and queued delivery share the same model clock. Missing selection
+    // is not evidence of a normal model, even when no follow-up input is queued.
+    // Thinking failed keeps its separately proven immediate refresh authority.
+    if ((afterTurn || tabRecoveryWanted(conversationId)) && grant.model !== 'other' && !grant.thinkingFailed && now < grant.evidenceAt + PRO_SILENCE_MS) {
       grant.until = grant.evidenceAt + PRO_SILENCE_MS;
       deferred = true;
       continue;
@@ -6095,7 +6058,7 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
     if (queueBrowserRecovery(conversationId, grant.sessionId, `silence:${grant.until}`, 'silence', 0, now)) {
       queued = true;
       logInfo(
-        `bridge: active chat silent for ${grant.model === 'pro' ? 'ten' : 'two'} minutes — asking the browser to reload ${conversationId} once`
+        `bridge: active chat silent for ${grant.model === 'other' ? 'two' : 'ten'} minutes — asking the browser to reload ${conversationId} once`
       );
     }
   }
@@ -6107,7 +6070,11 @@ async function inspectSilentChats(now: number): Promise<{ queued: boolean; spent
 function finishSilentChats(conversationIds: readonly string[]): void {
   for (const conversationId of conversationIds) {
     forgetActivity(conversationId);
-    repairsInFlight.delete(conversationId);
+    // Keep the existing exact receipt until genuine activity retires it. A large
+    // replacement page can report Thinking failed after this maintenance pass.
+    const repair = repairsInFlight.get(conversationId);
+    if (repair?.reason !== 'unattributed' && (repair?.reason !== 'silence' || repair.state !== 'done' || !repair.progress?.turnId))
+      repairsInFlight.delete(conversationId);
   }
 }
 
@@ -6257,7 +6224,8 @@ async function owedPickups(now: number): Promise<Map<string, { conversationId: s
   for (const reply of pendingGoalReplies(now)) {
     const pending = goalPendingReplyFor(reply.conversationId);
     if (!pending) continue;
-    if (!goalActiveFor(reply.conversationId) || await goalInputPriority(reply.conversationId, reply.sessionId, pending.turnId) ||
+    if (!goalActiveFor(reply.conversationId) || !await loopReplyHasAuthority(reply.sessionId, reply.conversationId, pending.turnId) ||
+        await goalInputPriority(reply.conversationId, reply.sessionId, pending.turnId) ||
         await astraFinishOnly(reply.sessionId, reply.conversationId) || await suppressProSilence(reply.conversationId)) continue;
     const source = await goalReplySourceTurn(reply.sessionId, pending.silenceSourceTurnId ?? pending.turnId);
     if (!source) continue;
@@ -6464,17 +6432,13 @@ async function queueMissingTab(conversationId: string, working: boolean, now = D
  * mid-turn already filed its exact no-tab repair at `/closed`; treating every durable `detached`
  * agent as still mid-turn made completed Prime chats reopen merely because they owned a run.
  */
-function repairCandidates(
-  now = Date.now()
-): Array<{ conversationId: string; sessionId: string; endedTurns: number }> {
+function repairCandidates(): UnattributedCandidate[] {
   // Deliberately read-only. `inspectSilentChats` is the ledger's sole owner and runs every
   // thirty seconds, forgetting each expired grant once its turn is closed or its one reload is
   // spent. A second expiry clock here used to delete a grant whose reload had been carried out
   // but not yet judged, which left that repair in flight forever and never released its slot.
   const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
-  const candidates = new Set(
-    [...activeUntil].filter(([, grant]) => grant.until > now).map(([conversationId]) => conversationId)
-  );
+  const candidates = new Set(activeUntil.keys());
   // Unattributed recovery is the one place a browser-local open turn remains useful: it narrows
   // an identity failure without itself creating a silence-reload episode. A reload-generated
   // turn_start therefore cannot re-arm ordinary recovery, while a genuinely open page can still
@@ -6488,37 +6452,15 @@ function repairCandidates(
           {
             conversationId,
             sessionId,
-            endedTurns: live.get(conversationId)?.endedTurns ?? 0
+            endedTurns: live.get(conversationId)?.endedTurns ?? 0,
+            turnId: live.get(conversationId)?.activeTurnId ?? activeUntil.get(conversationId)?.turnId ?? null
           }
         ]
       : [];
   });
 }
 
-/**
- * Forgets repairs whose broken turn is over.
- *
- * One rule, because one fact means what this needs: the chat has finished a turn since the
- * repair was filed. A repair answers one broken turn, so that turn ending is what spends it,
- * whether or not the browser ever carried it out and whether or not a new turn has begun since.
- *
- * Everything a turn id could have been asked here is worse. The reload this path performs mints
- * a new one for a generation that never ended, so id inequality reads a repair that is working
- * as a repair that is spent — and a join the reload did not fix goes on producing unattributed
- * calls, so the next incident reloaded the same chat again, and the one after that again, every
- * minute for as long as ChatGPT stayed broken. One reload per failure; ten reloads
- * prove only that the first nine did not help. Generation stopping is not the fact either: a
- * turn that ends and a turn that begins can reach this app in one batch, and by the time this
- * runs the chat is simply generating again.
- *
- * What ends a repair early is proof it worked: an attributed call from that chat, in
- * `noteCallAttribution`. That is the only thing that says the join this repair existed to
- * restore is restored.
- *
- * A chat with no live record at all is judged by nothing here: that is a detached worker whose
- * conversation was closed, and its reopen is retired when its replacement page reports — see
- * `repairCandidates` — or by the attributed call that proves its join.
- */
+/** A terminal recorder verdict retires turn-scoped repairs; attribution also proves its own join. */
 function retireSpentRepairs(): void {
   const live = new Map(liveConversations().map((entry) => [entry.conversationId, entry]));
   for (const [conversationId, repair] of repairsInFlight) {
@@ -6577,14 +6519,15 @@ function noteCallAttribution(
       forgetGoalWatch(conversationId);
       logInfo(`goal: withdrew the decision owed for turn ${reopenedTurnId} of ${conversationId} — the turn is still running`);
     }
-    if (unattributedIncident && !unattributedIncident.proven.has(conversationId)) {
-      unattributedIncident.proven.add(conversationId);
-      // One suspect fewer is a shorter rung for everybody still waiting. Re-read it now instead
-      // of at a wake armed for the longer queue, or the last chat standing serves out a wait
-      // sized for company it no longer has. Deferred by a zero timer so the incident is never
-      // decided on the recorder's own filing stack.
-      armUnattributedTick(unattributedIncident, 0);
+    for (const incident of unattributedIncidents.values()) {
+      const candidate = incident.candidates.find(entry => entry.conversationId === conversationId && entry.sessionId === sessionId);
+      if (currentConversation && candidate && filedSession?.conversationId === conversationId &&
+          filedSession.id === sessionId && startedAt >= incident.startedAt &&
+          (filedSession.activeTurnId ?? null) === candidate.turnId) {
+        incident.proven.add(conversationId);
+      }
     }
+    armUnattributedTick();
     // Exact recording authority follows the durable lineage, but recovery authority does not.
     // A late request from handoff source A is still filed in the A->B session above; once that
     // session says B is current, the same request must not put A back on the silence/Goal clock.
@@ -6614,9 +6557,8 @@ function noteCallAttribution(
     const continuingMcp = previous?.sessionId === sessionId && previous.mcpBacked && !previous.thinkingFailed &&
       (!!filedSession?.activeTurnId ? filedSession.activeTurnId === previous.turnId : previous.until > Date.now());
     if (!continuingMcp && lastAssistantFinalAt !== null && startedAt <= lastAssistantFinalAt) {
-      if (repairsInFlight.get(conversationId)?.reason === 'unattributed') {
-        repairsInFlight.delete(conversationId);
-      }
+      const repair = repairsInFlight.get(conversationId);
+      if (repair?.reason === 'unattributed' && !attributionRepairCurrent(repair, filedSession)) repairsInFlight.delete(conversationId);
       return;
     }
     const selection = filedSession?.selectedModel;
@@ -6639,148 +6581,115 @@ function noteCallAttribution(
     // load-bearing: fifteen attributed calls arrived while the page sat on "Connection
     // interrupted. Waiting for the complete answer", each one deleting the reload that notice had
     // just asked for. That repair is retired by its own turn ending - see `retireSpentRepairs`.
-    if (repairsInFlight.get(conversationId)?.reason !== 'assistant-error') {
+    const repair = repairsInFlight.get(conversationId);
+    if (repair?.reason !== 'assistant-error' && (!repair?.attribution || !attributionRepairCurrent(repair, filedSession)))
       repairsInFlight.delete(conversationId);
-    }
     return;
   }
-  // The same broken turn, already reloaded for. A reload is tried once per request id; a call
-  // that carries one the app has reloaded for is the turn going on being broken, not news.
-  if (requestId && unattributedReloadedRequests.has(requestId)) return;
-  if (unattributedIncident) {
-    if (requestId) unattributedIncident.requestIds.add(requestId);
+  if (requestId && requestCorrelation(requestId)) return;
+  retireSpentRepairs();
+  const opening = repairCandidates().filter(unattributedCandidateCurrent);
+  const key = requestId ?? `headerless:${opening.map(entry => `${entry.sessionId}:${entry.turnId}`).sort().join(',')}`;
+  const heldIncident = unattributedIncidents.get(key);
+  if (heldIncident) {
+    heldIncident.lastUnknownStartedAt = Math.max(heldIncident.lastUnknownStartedAt, startedAt);
     return;
+  }
+  if (opening.length === 0 && !requestId) return;
+  if (unattributedIncidents.size >= UNATTRIBUTED_REQUEST_MEMORY) {
+    const spent = [...unattributedIncidents].find(([, incident]) => incident.pass === 2);
+    if (!spent) return;
+    for (const [id, repair] of repairsInFlight) if (repair.attribution?.incident === spent[1]) repairsInFlight.delete(id);
+    unattributedIncidents.delete(spent[0]);
   }
   const openedAt = Date.now();
-  // Seeded now, not at the first wake. Everyone already under suspicion when the incident opens
-  // has been silent since this instant, and dating them from the first tick instead would hand
-  // each of them a free rung nobody was waiting through.
-  const opening = pendingSuspects(null, openedAt);
-  const rung = unattributedRung(opening.length);
   const incident: UnattributedIncident = {
-    startedAt: openedAt,
-    timer: null,
-    proven: new Set(),
-    dismissed: new Set(),
-    requestIds: new Set(requestId ? [requestId] : []),
-    seen: new Map(opening.map((entry) => [entry.conversationId, openedAt])),
-    due: new Map(opening.map((entry) => [entry.conversationId, openedAt + rung]))
+    startedAt: openedAt, firstDueAt: openedAt, pass: opening.length ? 0 : 2,
+    firstAttemptAt: null, lastUnknownStartedAt: startedAt, ready: Promise.resolve(), requestId,
+    candidates: opening, proven: new Set(), dismissed: new Set()
   };
-  unattributedIncident = incident;
-  armUnattributedTick(incident, rung);
+  unattributedIncidents.set(key, incident);
+  // Freeze the identities synchronously; read their existing activity projection at T0.
+  // Later arrivals cannot become candidates while this asynchronous read completes.
+  incident.ready = Promise.all(opening.map(async candidate => {
+    const summary = await getSession(candidate.sessionId);
+    if (!summary || summary.conversationId !== candidate.conversationId ||
+        (summary.activeTurnId ?? null) !== candidate.turnId ||
+        !sessionWorkingAt({ ...summary, activityExpiresAt: sessionActivityExpiresAt(summary) }, openedAt))
+      incident.dismissed.add(candidate.conversationId);
+  })).then(() => {
+    incident.firstDueAt = openedAt + (incident.candidates.filter(candidate => !incident.dismissed.has(candidate.conversationId)).length === 1 ? 0 : UNATTRIBUTED_FIRST_WINDOW_MS);
+    armUnattributedTick();
+  });
 }
 
-/**
- * The chats an open incident is still deciding about.
- *
- * Exactly the set the acting pass acts on, because a count that meant anything else would size
- * the wait for a set that is not the one being judged. A chat that has proved its join, that has
- * been dismissed, or that already holds a repair is neither a suspect nor a reason for anybody
- * else to wait longer. A null incident asks the same question of a fresh one.
- */
-function pendingSuspects(
-  incident: UnattributedIncident | null,
-  now = Date.now()
-): Array<{ conversationId: string; sessionId: string; endedTurns: number }> {
-  return repairCandidates(now).filter(
-    (entry) =>
-      !incident?.proven.has(entry.conversationId) &&
-      !incident?.dismissed.has(entry.conversationId) &&
-      !repairsInFlight.has(entry.conversationId)
-  );
+/** Frozen generation identity survives TTL expiry, but never a new turn or owner. */
+function unattributedCandidateCurrent(target: UnattributedCandidate): boolean {
+  const live = liveConversations().find(entry => entry.conversationId === target.conversationId);
+  const agent = agentInfoForOwnedConversation(target.conversationId);
+  if (agent?.role === 'worker' && ['sleeping', 'finished', 'failed'].includes(agent.state)) return false;
+  return !isChatBlocked(target.conversationId) && !stopRequestedFor(target.conversationId) &&
+    !supersededSourceConversations().includes(target.conversationId) &&
+    (!live || (live.sessionId === target.sessionId && live.endedTurns === target.endedTurns && live.activeTurnId === target.turnId));
 }
 
-/** Replaces the pending wake rather than stacking a second one on top of it. */
-function armUnattributedTick(incident: UnattributedIncident, delay: number): void {
-  if (incident.timer) clearTimeout(incident.timer);
-  incident.timer = setTimeout(tickUnattributedIncident, Math.max(0, delay));
-  incident.timer.unref?.();
+function pendingSuspects(incident: UnattributedIncident | null): UnattributedCandidate[] {
+  if (incident?.requestId && requestCorrelation(incident.requestId)) return [];
+  return (incident?.candidates ?? repairCandidates()).filter(entry =>
+    !incident?.proven.has(entry.conversationId) && !incident?.dismissed.has(entry.conversationId) &&
+    unattributedCandidateCurrent(entry) && (incident !== null || !repairsInFlight.has(entry.conversationId)));
 }
 
-/**
- * Reattaches every chat whose own deadline has passed, and re-arms for the ones whose has not.
- *
- * Health is a per-chat fact, not a competition between chats. This used to act only when
- * exactly one candidate existed, so the case it exists for — several workers losing the same
- * evidence path at once — was the one case it refused. Two silent mid-turn chats are not an
- * ambiguity to resolve, they are two broken chats. Each is judged on its own evidence and on its
- * own clock, and a chat that proves its join with an attributed call has already left the
- * incident by here.
- *
- * The incident outlives a pass that acted, for as long as a suspect remains. That is what lets a
- * chat which came under suspicion late be judged on its own time rather than swept along by
- * somebody else's deadline, and it is why the acting decision lives here rather than in a
- * one-shot the incident cannot survive.
- */
-function tickUnattributedIncident(): void {
-  const incident = unattributedIncident;
-  if (!incident) return;
-  if (incident.timer) clearTimeout(incident.timer);
-  incident.timer = null;
-  const now = Date.now();
+/** One timer across all request-specific budgets. Additional anonymous calls do not reset it. */
+function armUnattributedTick(): void {
+  if (unattributedTimer) clearTimeout(unattributedTimer);
+  unattributedTimer = null;
+  const pending = [...unattributedIncidents.values()].filter(incident => incident.pass < 2);
+  if (!pending.length) return;
+  const due = Math.min(...pending.map(incident => incident.pass === 0 ? incident.firstDueAt : incident.startedAt + UNATTRIBUTED_FINAL_WINDOW_MS));
+  unattributedTimer = setTimeout(() => { unattributedTimer = null; void tickUnattributedIncident().catch(error =>
+    logWarn(`bridge: attribution recovery failed: ${String(error)}`)); }, Math.max(0, due - Date.now()));
+  unattributedTimer.unref?.();
+}
+
+async function tickUnattributedIncident(): Promise<void> {
   retireSpentRepairs();
-  // Acting shrinks the set, and a smaller set is worth a shorter rung. Re-read it in this same
-  // pass so the chats left behind are not held to a budget sized for company they no longer
-  // have. Bounded: every turn of this loop takes at least one chat out of `pendingSuspects`.
-  for (;;) {
-    const suspects = pendingSuspects(incident, now);
-    if (suspects.length === 0) {
-      closeUnattributedIncident();
-      return;
-    }
-    const rung = unattributedRung(suspects.length);
-    let next: number | null = null;
-    let acted = false;
+  for (const incident of unattributedIncidents.values()) {
+    if (incident.pass === 2) continue;
+    await incident.ready;
+    if (incident.pass >= 2 || ![...unattributedIncidents.values()].includes(incident)) continue;
+    const suspects = pendingSuspects(incident);
+    if (!suspects.length) { incident.pass = 2; continue; }
+    const due = incident.pass === 0 ? incident.firstDueAt : incident.startedAt + UNATTRIBUTED_FINAL_WINDOW_MS;
+    if (Date.now() < due) continue;
+    const pass = ++incident.pass;
+    // No fresh same-request work after the issued first action means no second refresh.
+    if (pass === 2 && (!incident.requestId || incident.firstAttemptAt === null ||
+        incident.lastUnknownStartedAt <= incident.firstAttemptAt)) continue;
     for (const target of suspects) {
-      let seenAt = incident.seen.get(target.conversationId);
-      if (seenAt === undefined) {
-        seenAt = now;
-        incident.seen.set(target.conversationId, seenAt);
-      }
-      const dueAt = Math.min(
-        incident.due.get(target.conversationId) ?? Number.POSITIVE_INFINITY,
-        seenAt + rung
-      );
-      incident.due.set(target.conversationId, dueAt);
-      if (dueAt > now) {
-        next = next === null ? dueAt : Math.min(next, dueAt);
+      const session = await getSession(target.sessionId);
+      if (![...unattributedIncidents.values()].includes(incident)) break;
+      if (!session || session.conversationId !== target.conversationId ||
+          (session.activeTurnId ?? null) !== target.turnId || session.finishTurn?.released ||
+          await attributionCandidateProven(incident, target, session) ||
+          !pendingSuspects(incident).includes(target)) {
+        incident.dismissed.add(target.conversationId);
         continue;
       }
-      acted = true;
-      // The browser owns the final open-vs-reload decision for both cases. It scans actual tabs at
-      // action time, so a stale close event cannot open a duplicate and an open chat is reloaded
-      // rather than copied. One queue is also what prevents an unattributed incident and an agent
-      // silence incident from each performing their own recovery.
-      if (
-        queueBrowserRecovery(
-          target.conversationId,
-          target.sessionId,
-          `unattributed:${target.endedTurns}`,
-          'unattributed',
-          target.endedTurns,
-          now
-        )
-      ) {
-        logInfo(`bridge: unattributed activity — asking the browser to reload ${target.conversationId}`);
-        continue;
+      if (![...unattributedIncidents.values()].includes(incident)) break;
+      const held = repairsInFlight.get(target.conversationId);
+      if (held?.attribution?.incident === incident) repairsInFlight.delete(target.conversationId);
+      else if (held) continue;
+      if (queueBrowserRecovery(target.conversationId, target.sessionId,
+          `unattributed:${incident.startedAt}:${pass}`, 'unattributed', target.endedTurns)) {
+        const repair = repairsInFlight.get(target.conversationId)!;
+        repair.attribution = { incident, candidate: target };
+        if (held) { repair.progressId = held.progressId; repair.progress = held.progress; }
+        logInfo(`bridge: unattributed activity — requesting refresh ${pass}/2 for ${target.conversationId}`);
       }
-      // Refused, and it will keep being refused: the chat is blocked, or a repair is already
-      // running for it. Holding the incident open for a deadline nothing will act on would keep
-      // every other suspect's rung pinned to a suspect that is no longer one.
-      incident.dismissed.add(target.conversationId);
-      incident.seen.delete(target.conversationId);
-      incident.due.delete(target.conversationId);
     }
-    if (acted) {
-      // Reloads went out for these request ids. What arrives under them from here is the same
-      // broken turn and buys nothing; the next request id is the next turn and buys its own.
-      rememberUnattributedReload(incident);
-      continue;
-    }
-    if (next === null) closeUnattributedIncident();
-    else armUnattributedTick(incident, next - now);
-    return;
   }
+  armUnattributedTick();
 }
 
 /**
@@ -6825,7 +6734,10 @@ async function takePendingRepairs(
     const session = await getSession(repair.sessionId);
     const superseded = await conversationWasSuperseded(conversationId);
     if (!isChatBlocked(conversationId) && !superseded && session?.conversationId === conversationId &&
-        !stopRequestedFor(conversationId, session.activeTurnId)) continue;
+        !stopRequestedFor(conversationId, session.activeTurnId)) {
+      if (!await attributionRepairAllowed(repair, session) && repairsInFlight.get(conversationId) === repair) repairsInFlight.delete(conversationId);
+      continue;
+    }
     repairsInFlight.delete(conversationId);
     turnRepairSpent.delete(conversationId);
     const grant = activeUntil.get(conversationId);
@@ -6843,7 +6755,7 @@ async function takePendingRepairs(
   // in place let the first entry win every pass, so one repair the browser could not carry out
   // starved every other chat behind it — precisely when several chats break at once.
   for (const [conversationId, repair] of [...repairsInFlight]) {
-    if (repair.state !== 'handed' || repair.reason === 'goal') continue;
+    if (repair.state !== 'handed' || repair.reason === 'goal' || repair.reason === 'unattributed') continue;
     repair.state = 'queued';
     repairsInFlight.delete(conversationId);
     repairsInFlight.set(conversationId, repair);
@@ -6854,6 +6766,7 @@ async function takePendingRepairs(
     reason: Repair['reason'];
     /** Raise the tab (or open the chat in front) before acting: a background tab is throttled. */
     focus: boolean;
+    requiresClaim?: boolean;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'queued') continue;
@@ -6875,10 +6788,45 @@ async function takePendingRepairs(
         continue;
       }
     }
-    if (repairsInFlight.get(conversationId) === repair && !stopRequestedFor(conversationId))
-      ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction' });
+    const currentSession = repair.attribution ? await getSession(repair.sessionId) : null;
+    const allowed = await attributionRepairAllowed(repair, currentSession);
+    if (allowed && repairsInFlight.get(conversationId) === repair && !isChatBlocked(conversationId) &&
+        !stopRequestedFor(conversationId))
+      {
+        ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
+          ...(repair.attribution ? { requiresClaim: true } : {}) });
+      }
   }
   return ready;
+}
+
+async function attributionCandidateProven(incident: UnattributedIncident, candidate: UnattributedCandidate, session: SessionSummary): Promise<boolean> {
+  if (session.lastToolCallAt === null || session.lastToolCallAt < incident.startedAt) return false;
+  const proof = await conversationHasMcpCallSince(candidate.sessionId, candidate.conversationId, incident.startedAt, candidate.turnId);
+  if (!proof) return false;
+  const current = await getSession(candidate.sessionId);
+  if (current?.conversationId !== candidate.conversationId || (current.activeTurnId ?? null) !== candidate.turnId ||
+      !unattributedCandidateCurrent(candidate) || ![...unattributedIncidents.values()].includes(incident)) return false;
+  incident.proven.add(candidate.conversationId);
+  return true;
+}
+
+async function attributionRepairAllowed(repair: Repair, session: SessionSummary | null): Promise<boolean> {
+  if (!attributionRepairCurrent(repair, session)) return false;
+  const scope = repair.attribution;
+  if (!scope || !session) return true;
+  if (await attributionCandidateProven(scope.incident, scope.candidate, session)) return false;
+  return attributionRepairCurrent(repair, await getSession(repair.sessionId));
+}
+
+function attributionRepairCurrent(repair: Repair, session: SessionSummary | null): boolean {
+  const scope = repair.attribution;
+  return !scope || (!!session && session.endedAt === null && [...unattributedIncidents.values()].includes(scope.incident) &&
+    session.conversationId === scope.candidate.conversationId &&
+    (session.activeTurnId ?? null) === scope.candidate.turnId && !session.finishTurn?.released &&
+    (!scope.incident.requestId || !requestCorrelation(scope.incident.requestId)) &&
+    !scope.incident.proven.has(scope.candidate.conversationId) &&
+    !scope.incident.dismissed.has(scope.candidate.conversationId) && unattributedCandidateCurrent(scope.candidate));
 }
 
 /**
@@ -6892,6 +6840,8 @@ async function confirmRepair(token: string, action: 'reloaded' | 'reopened' | nu
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state === 'handed' && repair.token === token) {
       repair.state = 'done';
+      if (repair.attribution && repair.attribution.incident.firstAttemptAt === null)
+        repair.attribution.incident.firstAttemptAt = Date.now();
       lastBrowserRecoveryAt.set(conversationId, Date.now());
       awaitingReturn.add(conversationId);
       if (repair.reason === 'silence') {
@@ -6949,11 +6899,15 @@ async function failRepairAttempt(token: string, action: 'reloaded' | 'reopened' 
     await updateRepairProgress(
       conversationId,
       repair,
-      `${action === 'reopened' ? 'Reopen' : 'Reload'} failed while recovering ${repairReason(repair)}; will retry.`
+      `${action === 'reopened' ? 'Reopen' : 'Reload'} failed while recovering ${repairReason(repair)}${repair.attribution ? '.' : '; will retry.'}`
     );
-    repair.state = 'queued';
-    repairsInFlight.delete(conversationId);
-    repairsInFlight.set(conversationId, repair);
+    if (repairsInFlight.get(conversationId) !== repair) return;
+    if (repair.reason === 'unattributed') repair.state = 'done';
+    else {
+      repair.state = 'queued';
+      repairsInFlight.delete(conversationId);
+      repairsInFlight.set(conversationId, repair);
+    }
     return;
   }
 }
@@ -6990,6 +6944,8 @@ async function updateRepairProgress(conversationId: string, repair: Repair, text
   const turnId =
     repair.progress?.turnId ??
     liveConversations().find((entry) => entry.conversationId === conversationId)?.activeTurnId ??
+    (repair.reason === 'silence' && activeUntil.get(conversationId)?.sessionId === sessionId
+      ? activeUntil.get(conversationId)?.turnId : null) ??
     null;
   const recorded = await recordProgress(sessionId, repair.progressId, text, anchor, turnId);
   if (recorded) repair.progress = { sessionId, ...recorded, text, turnId };
@@ -7001,13 +6957,10 @@ async function updateRepairProgress(conversationId: string, repair: Repair, text
  * Deliberately separate from `clearUnattributedIncident`, which is a teardown: an incident that
  * has finished deciding must not take the repairs it just queued down with it.
  */
-function closeUnattributedIncident(): void {
-  if (unattributedIncident?.timer) clearTimeout(unattributedIncident.timer);
-  unattributedIncident = null;
-}
-
 function clearUnattributedIncident(): void {
-  closeUnattributedIncident();
+  if (unattributedTimer) clearTimeout(unattributedTimer);
+  unattributedTimer = null;
+  unattributedIncidents.clear();
   repairsInFlight.clear();
   lastBrowserRecoveryAt.clear();
   turnRepairSpent.clear();

@@ -680,7 +680,7 @@ it.each([false, true])('normal queued recovery uses two minutes without an extra
   } finally { clock.mockRestore(); }
 });
 
-it.each(['open', 'stalled', 'final-during-listen', 'failure-during-listen'])('files one durable after-turn ticket only after the silence refresh ACK (%s)', async boundary => {
+it.each(['open', 'stalled', 'final-during-listen', 'failure-during-listen', 'failure-before-claim', 'failure-after-claim'])('files one durable after-turn ticket only after the silence refresh ACK (%s)', async boundary => {
   const bridge = await import('../src/main/bridge.js');
   let now = Date.now();
   const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
@@ -706,20 +706,46 @@ it.each(['open', 'stalled', 'final-during-listen', 'failure-during-listen'])('fi
     const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs.find((row: any) => row.conversationId === conversationId);
     expect(repair).toBeDefined();
     expect(await input.pendingBrowserInputs()).toEqual([]);
+    const confirmedAt = now;
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
     expect((await input.listInputs()).find(row => row.id === first.id)?.silenceBoundary?.turnId).toBe('silence-turn');
     input.resetInputForTests();
     expect(await input.pendingBrowserInputs()).toEqual([expect.objectContaining({ id: first.id, silenceTurnId: 'silence-turn' })]);
     const claim = { id: first.id, owner: 'refreshed-page', conversationId };
-    expect((await post('/input/claim', { ...claim, silenceBusyTurnId: 'silence-turn' })).body.ok).toBe(true);
-    expect(await input.pendingBrowserInputs()).toEqual([]);
-    if (boundary === 'final-during-listen' || boundary === 'failure-during-listen') {
+    if (boundary === 'failure-after-claim') {
+      expect((await post('/input/claim', { ...claim, requiresAuthorization: true })).body.input?.id).toBe(first.id);
+    } else if (boundary !== 'failure-before-claim') {
+      if (boundary === 'failure-during-listen') now += 10_000;
+      expect((await post('/input/claim', { ...claim, silenceBusyTurnId: 'silence-turn' })).body.ok).toBe(true);
+      expect(await input.pendingBrowserInputs()).toEqual([]);
+    }
+    if (boundary === 'final-during-listen' || boundary === 'failure-during-listen' || boundary === 'failure-before-claim' || boundary === 'failure-after-claim') {
       now++;
       await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId: 'silence-turn', time: now,
         ...(boundary === 'final-during-listen' ? { outcome: 'completed' } : { outcome: 'failed', reason: 'thinking_failed' }) }] });
     }
-    // A reload already in flight keeps its existing three-minute hydration protection.
-    if (boundary === 'failure-during-listen') await refreshFailedView(conversationId, ms => { now += ms; }, 3 * 60_000);
+    // The exact source already has a confirmed refresh. Learning its failure must
+    // keep that receipt and native-busy deadline, not ask for a second reload.
+    if (boundary === 'failure-during-listen' || boundary === 'failure-before-claim') {
+      const status = await post('/status', { openConversations: [conversationId] });
+      expect(status.body.repairs.some((row: any) => row.conversationId === conversationId)).toBe(false);
+      const row = (await input.listInputs()).find(row => row.id === first.id)!;
+      expect(row.silenceBoundary?.listenUntil).toBe(confirmedAt + 5 * 60_000 + (boundary === 'failure-during-listen' ? 10_000 : 0));
+      input.resetInputForTests();
+      expect(await input.pendingBrowserInputs()).toEqual([]);
+    }
+    if (boundary === 'failure-after-claim') {
+      // An already offered automatic row is immutable. The new failure changes
+      // the source work sequence, so its old claim cannot cross final Send.
+      expect((await input.listInputs()).find(row => row.id === first.id)?.state).toBe('browser');
+      expect((await post('/input/claim', { ...claim, authorize: true })).body.ok).toBe(false);
+      expect((await post('/input/fail', { ...claim, error: 'After-turn pickup was withdrawn before Send.' })).body.ok).toBe(true);
+      now = confirmedAt + 5 * 60_000 - 1;
+      await bridge.sweepStaleSwarm(now);
+      expect((await post('/input/claim', { ...claim, requiresAuthorization: true })).body.input).toBeNull();
+      now++;
+      await bridge.sweepStaleSwarm(now);
+    }
     const until = (await input.listInputs()).find(row => row.id === first.id)!.silenceBoundary!.listenUntil!;
     if (until > now) {
       now = until - 1;
@@ -738,6 +764,55 @@ it.each(['open', 'stalled', 'final-during-listen', 'failure-during-listen'])('fi
     input.resetInputForTests();
     expect(await input.pendingBrowserInputs()).toEqual([]);
   } finally { clock.mockRestore(); }
+});
+
+it('commits a failed-source listening deadline while another chat observation is still recording', async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const recorder = await import('../src/main/session/recorder.js');
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  let release = () => {};
+  let otherPost: Promise<unknown> | undefined;
+  let held: ReturnType<typeof vi.spyOn> | undefined;
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Failed receipt concurrency', conversationId });
+    const first = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' });
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-6-pro', reasoningEffort: 'pro', time: now },
+      { kind: 'turn_start', turnId: 'concurrent-failed-source', time: now }
+    ] });
+    await attributedMcp(conversationId);
+    now += bridge.PRO_SILENCE_MS;
+    await bridge.sweepStaleSwarm(now);
+    const repair = (await post('/status', { openConversations: [conversationId] })).body.repairs.find((row: any) => row.conversationId === conversationId);
+    expect(repair).toBeDefined();
+    const confirmedAt = now;
+    await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
+    expect(await input.pendingBrowserInputs()).toHaveLength(1);
+    const otherId = randomUUID();
+    let entered = () => {};
+    const recording = new Promise<void>(resolve => { entered = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const record = recorder.recordChatObservations;
+    held = vi.spyOn(recorder, 'recordChatObservations').mockImplementation(async (...args) => {
+      if (args[0] === otherId) { entered(); await gate; }
+      return record(...args);
+    });
+    otherPost = post('/events', { conversationId: otherId, events: [{ kind: 'turn_start', turnId: 'unrelated-turn', time: now }] });
+    await recording;
+    now += 6_000;
+    expect((await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId: 'concurrent-failed-source',
+      outcome: 'failed', reason: 'thinking_failed', time: now }] })).status).toBe(200);
+    input.resetInputForTests();
+    expect((await input.listInputs()).find(row => row.id === first.id)?.silenceBoundary?.listenUntil).toBe(confirmedAt + 5 * 60_000);
+    const claim = { id: first.id, owner: 'replacement', conversationId, requiresAuthorization: true };
+    now = confirmedAt + 5 * 60_000 - 1;
+    expect((await post('/input/claim', claim)).body.input).toBeNull();
+    release(); await otherPost;
+    now++;
+    expect((await post('/input/claim', claim)).body.input?.id).toBe(first.id);
+  } finally { release(); await otherPost; held?.mockRestore(); clock.mockRestore(); }
 });
 
 it.each(['queued', 'claimed', 'tool', 'settled-failure'])('withdraws a silence ticket on new work and rearms refresh (%s)', async change => {

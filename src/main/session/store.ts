@@ -1304,15 +1304,42 @@ export async function readRecentEvents(
 
 /** Recorded local execution, not a native tool label or a request-id sighting alone. */
 export async function turnHasMcpCall(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
-  const [call] = await readRecentEvents(sessionId, 1, { kinds: ['tool_call'] });
-  return call?.kind === 'tool_call' && call.turnId === turnId && call.source === 'mcp' &&
-    call.call.conversationId === conversationId && call.call.attribution === 'request_id';
+  assertSessionId(sessionId);
+  await flushSession(sessionId);
+  // Attribution repair appends historical calls, often without a known turn. Such a tail
+  // cannot erase earlier exact proof. Filter inside one bounded-buffer reverse scan so a
+  // missing proof does not repeatedly rescan the journal for each presentation page.
+  const calls = await readRecentEventsFromDisk(sessionId, 1, {
+    kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
+    acceptEvent: call => call.kind === 'tool_call' && call.turnId === turnId && call.source === 'mcp' &&
+      call.call?.conversationId === conversationId && call.call.attribution === 'request_id'
+  });
+  return calls.length > 0;
+}
+
+/** Late exact attribution can prove chat health without pretending historical work is new. */
+export async function conversationHasMcpCallSince(
+  sessionId: string, conversationId: string, startedAt: number, turnId: string | null
+): Promise<boolean> {
+  assertSessionId(sessionId);
+  await flushSession(sessionId);
+  const calls = await readRecentEventsFromDisk(sessionId, 1, {
+    kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
+    // Repaired calls may lack a local turn id. Exact conversation and original call
+    // time still prove attribution; an explicitly different turn does not.
+    acceptEvent: event => event.kind === 'tool_call' && event.source === 'mcp' && event.time >= startedAt &&
+      (!event.turnId || event.turnId === turnId) && event.call?.conversationId === conversationId &&
+      event.call.attribution === 'request_id'
+  });
+  return calls.length > 0;
 }
 
 async function readRecentEventsFromDisk(
   sessionId: string,
   limit: number,
-  options: Pick<ReadOptions, 'kinds' | 'agent'> & { maxBytes?: number; before?: number } = {}
+  options: Pick<ReadOptions, 'kinds' | 'agent'> & {
+    maxBytes?: number; before?: number; acceptEvent?: (event: SessionEvent) => boolean
+  } = {}
 ): Promise<SessionEvent[]> {
   const cap = Math.max(1, Math.min(MAX_EVENT_TAIL, Math.floor(limit)));
   const active = open.get(sessionId);
@@ -1352,6 +1379,7 @@ async function readRecentEventsFromDisk(
     if (options.before !== undefined && parsed.seq >= options.before) return;
     if (options.kinds && !options.kinds.includes(parsed.kind)) return;
     if (options.agent && parsed.agent !== options.agent) return;
+    if (options.acceptEvent && !options.acceptEvent(parsed)) return;
     if (parsed.kind === 'user_message' || parsed.kind === 'assistant_message') {
       const key = messageKey(parsed);
       if (key) {
