@@ -3654,6 +3654,10 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(later)).toContain('background-e2e-once');
     expect(textOf(later)).not.toContain(`write_stdin(session_id=${sessionId}`);
 
+    // Publication receipts require a strictly later timestamp; loopback calls can
+    // otherwise share one millisecond even though this response was already read.
+    const receivedAt = Date.now();
+    await vi.waitFor(() => expect(Date.now()).toBeGreaterThan(receivedAt), { timeout: 1000, interval: 1 });
     const after = await asChat('wfr_background_owner', 'read', { paths: ['/workspace/src/app.ts'] });
     expect(textOf(after)).not.toContain(`Background session ${sessionId}`);
     expect(unifiedExecManager.exitedUnread(owned)).toEqual([]);
