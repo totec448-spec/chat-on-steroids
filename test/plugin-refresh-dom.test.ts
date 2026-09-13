@@ -46,6 +46,14 @@ it('rejects oversized or cyclic schemas before projecting them to the isolated w
   (props.actions[0]!.params as any).properties.self = props.actions[0]!.params;
   expect(await api.pluginRefreshView('Chat On Steroids Core')).toBeNull();
 });
+it('accepts more than 64 declarations for the Plugins connector', async () => {
+  const { api, props } = page();
+  props.connector.name = 'Chat On Steroids Plugins';
+  props.actions = Array.from({ length: 118 }, (_, i) => ({ name: `plugin_tool_${i}`, description: `Plugin tool ${i}`, description_model: null,
+    params: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }));
+  const view = await api.pluginRefreshView('Chat On Steroids Plugins');
+  expect(view?.tools).toHaveLength(118);
+});
 it('refuses ambiguous native actions and never copies unrelated connector properties', async () => {
   const { api } = page(); const messages: unknown[] = [];
   dom.window.addEventListener('message', event => { if (event.data?.source === 'clf-plugin-reply') messages.push(event.data); });
