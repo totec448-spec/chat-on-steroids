@@ -850,6 +850,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
                 )
               : nonZeroExitIsBenign(boundCommand, output.exitCode, responseText);
             noteExec({
+              completion: output.completion,
               ...(output.processId === null ? {} : { id: String(output.processId) }),
               running: output.processId !== null,
               exitCode: output.exitCode,

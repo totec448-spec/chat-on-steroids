@@ -427,7 +427,7 @@ it.each(['auto', 'after-turn'] as const)('reserves the failed-view five-minute w
 it.each([
   ['gpt-6-pro', false], ['gpt-5.6-sol', false],
   ['gpt-6-pro', true], ['gpt-5.6-sol', true]
-] as const)('recovers the pending injection plus only the next checkpoint after the %s silence window (native completed: %s)', async (model, nativeCompleted) => {
+] as const)('delivers after the full final or recovers after %s silence (full final: %s)', async (model, nativeCompleted) => {
   const bridge = await import('../src/main/bridge.js');
   let now = Date.now();
   const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
@@ -448,11 +448,18 @@ it.each([
     expect(manual.transportIntent).toBe('tool');
     if (nativeCompleted) {
       await post('/events', { conversationId, events: [
-        { kind: 'assistant_message', turnId: 'silent-source', messageId: 'premature-final', text: 'Provider reports a result', state: 'final', final: true, time: now },
+        { kind: 'assistant_message', turnId: 'silent-source', messageId: 'full-final', text: 'Provider reports a result', state: 'final', final: true, time: now },
         { kind: 'turn_end', turnId: 'silent-source', outcome: 'completed', time: now }
       ] });
-      expect((await post('/input/claim', { id: manual.id, owner: 'premature-page', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+      const ready = await post('/input/claim', { id: manual.id, owner: 'finished-page', conversationId, requiresAuthorization: true });
+      expect(ready.body.input?.text).toBe(manual.text);
       expect((await post('/goal/draft', { conversationId, turnId: 'silent-source', terminalRequired: true })).status).toBe(409);
+      now += model === 'gpt-6-pro' ? 600001 : 120001;
+      await bridge.sweepStaleSwarm(now);
+      const repairs = (await post('/status', { openConversations: [conversationId] })).body.repairs;
+      expect(repairs.some((repair: any) => repair.conversationId === conversationId && repair.reason === 'silence')).toBe(false);
+      expect((await input.listInputs()).find(row => row.id === later.id)?.state).toBe('queued');
+      return;
     }
     const window = model === 'gpt-6-pro' ? 600000 : 120000;
     now += window - 1;
@@ -464,6 +471,11 @@ it.each([
     expect(repair?.reason).toBe('silence');
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
     input.resetInputForTests();
+    if (model === 'gpt-5.6-sol') {
+      expect((await input.pendingBrowserInputs()).some(r => r.conversationId === conversationId)).toBe(false);
+      now += 60_000;
+      await bridge.sweepStaleSwarm(now);
+    }
     expect((await input.pendingBrowserInputs()).filter(r => r.conversationId === conversationId)).toEqual([expect.objectContaining({ id: manual.id })]);
     expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
     const claim = { id: manual.id, owner: 'recovered-page', conversationId, requiresAuthorization: true };
@@ -638,7 +650,7 @@ it('does not turn generic failed/error prose or an unknown wire reason into queu
   expect(await input.pendingBrowserInputs()).toEqual([]);
 });
 
-it.each([false, true])('normal queued recovery uses two minutes without an extra minute and spends its source before Goal (Goal enabled: %s)', async enabled => {
+it.each([false, true])('normal queued recovery uses two minutes plus one minute after ACK and spends its source before Goal (Goal enabled: %s)', async enabled => {
   const bridge = await import('../src/main/bridge.js');
   let now = Date.now();
   const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
@@ -663,8 +675,14 @@ it.each([false, true])('normal queued recovery uses two minutes without an extra
     expect(repair).toMatchObject({ reason: 'silence' });
     await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [conversationId] });
     const boundary = (await input.listInputs()).find(row => row.id === first.id)!.silenceBoundary!;
-    expect(boundary.listenUntil ?? 0).toBeLessThanOrEqual(now);
+    expect(boundary.listenUntil).toBe(now + 60_000);
+    expect((await bridge.sessionControlsFor(session.id)).recovery).toEqual([{ kind: 'post-reload', next: 'queue', deadline: boundary.listenUntil }]);
     input.resetInputForTests();
+    expect(await input.pendingBrowserInputs()).toEqual([]);
+    now += 59_999;
+    expect((await post('/input/claim', { id: first.id, owner: 'normal-page', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    now++;
+    await bridge.sweepStaleSwarm(now);
     expect(await input.pendingBrowserInputs()).toEqual([expect.objectContaining({ id: first.id })]);
     const activity = await fetch(`http://127.0.0.1:${bridgePort()}/activity?conversationId=${conversationId}`, { headers: {
       authorization: `Bearer ${bearer}`, 'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL)

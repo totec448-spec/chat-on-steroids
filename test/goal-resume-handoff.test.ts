@@ -31,6 +31,12 @@ const { makeTempDir, removeTempDir } = await import('./helpers.js');
 let dir: string;
 const realFetch = globalThis.fetch;
 
+function referenceTranscript(messages: Array<{ role: string; content: string }>): Array<{ role: string; content: string }> {
+  expect(messages.some(message => message.role === 'assistant')).toBe(false);
+  const reference = messages.find(message => message.role === 'user')!.content;
+  return JSON.parse(reference.slice(reference.indexOf('\n\n') + 2));
+}
+
 async function settled(conversationId: string): Promise<NonNullable<ReturnType<typeof goal.goalViewFor>>> {
   for (let attempt = 0; attempt < 200; attempt++) {
     const view = goal.goalViewFor(conversationId);
@@ -131,7 +137,7 @@ it('sends the Compact & Resume handoff to Goal as chat B actually received it', 
   expect((await settled(to)).stage).toBe('no-reply');
 
   // Inspect the actual provider payload, not just conversationMessages()/handoff metadata.
-  const transcript = requestMessages.filter((message) => message.role !== 'system');
+  const transcript = referenceTranscript(requestMessages);
   expect(transcript).toEqual([
     { role: 'user', content: original },
     { role: 'assistant', content: handoff.text },
@@ -240,7 +246,7 @@ it('anchors the last committed resume, never a later captured handoff whose cont
   goal.startGoalDraft({ sessionId: session.id, conversationId: to, turnId: 'goal-after-aborted-h2' });
   expect((await settled(to)).stage).toBe('no-reply');
 
-  const transcript = requestMessages.filter((message) => message.role !== 'system');
+  const transcript = referenceTranscript(requestMessages);
   expect(transcript[0]).toEqual({ role: 'user', content: original });
   expect(transcript.filter((message) => message.content === h1Bootstrap)).toHaveLength(1);
   expect(transcript.filter((message) => message.content === resumeBootstrapText(h2.text))).toHaveLength(0);

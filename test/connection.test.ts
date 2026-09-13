@@ -133,6 +133,26 @@ describe('connection surface state', () => {
     vi.resetModules();
   });
 
+  it('reconnects with the selected setup key even when both profiles use the same tunnel ID', async () => {
+    mocks.config.tunnel.kind = 'openai';
+    mocks.config.tunnel.tunnelId = 'same-core';
+    Object.assign(mocks.config.tunnel, { profileId: 'default', profileEpoch: 0 });
+    const connection = await import('../src/main/connection.js');
+    const { getSecret } = await import('../src/main/secrets.js');
+    try {
+      await connection.connect();
+      expect(getSecret).toHaveBeenLastCalledWith('openaiApiKey');
+      Object.assign(mocks.config.tunnel, { profileId: 'second', profileEpoch: 1 });
+      await connection.applySettings();
+      expect(getSecret).toHaveBeenLastCalledWith('setup:second');
+      expect(mocks.endpointStop).toHaveBeenCalled();
+      expect(mocks.starts).toBe(2);
+    } finally {
+      await connection.disconnect();
+      delete (mocks.config.tunnel as any).profileId; delete (mocks.config.tunnel as any).profileEpoch;
+    }
+  });
+
   it('ignores retired Plugins tunnel reports after changing only its tunnel', async () => {
     mocks.config.tunnel.kind = 'openai';
     mocks.config.tunnel.tunnelId = 'core-test';

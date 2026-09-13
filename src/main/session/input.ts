@@ -1,4 +1,4 @@
-import { REASONING_EFFORTS } from '../../shared/session.js';
+import { REASONING_EFFORTS, workSequence } from '../../shared/session.js';
 /** User-authored input has one durable owner across browser and MCP delivery.
  * A claimed browser send is never automatically retried: losing the ACK is ambiguous.
  * Tool delivery repeats under a stable message id until a later request proves receipt.
@@ -639,7 +639,7 @@ async function eligibleStageEnd(entry: InputEntry): Promise<string | null> {
       if ((boundary.listenUntil ?? 0) > Date.now() ||
           (end.kind === 'turn_end' && (session.lastToolCallAt ?? 0) > end.time)) return null;
       const [work] = await readRecentEvents(entry.sessionId, 1, { kinds: INPUT_WORK_KINDS });
-      return work?.seq === boundary.workSeq ? boundary.turnId : null;
+      return work && workSequence(work) === boundary.workSeq ? boundary.turnId : null;
     }
     // A real final supersedes the silence assumption and spends the same source turn.
   }
@@ -741,10 +741,10 @@ export function fileSilenceInput(sessionId: string, conversationId: string, turn
     if (!work || !currentOwner()) return false;
     const previous = current.find(entry => entry.sessionId === sessionId && entry.silenceBoundary?.turnId === turnId)?.silenceBoundary;
     const listening = Math.max(listenUntil ?? 0, previous?.listenUntil ?? 0);
-    if (row.silenceBoundary?.turnId === turnId && row.silenceBoundary.workSeq === work.seq &&
+    if (row.silenceBoundary?.turnId === turnId && row.silenceBoundary.workSeq === workSequence(work) &&
         (row.silenceBoundary.listenUntil ?? 0) === listening) return true;
     await commit(current.map(entry => entry === row ? { ...entry,
-      silenceBoundary: { turnId, conversationId, workSeq: work.seq, acceptedAt: previous ? previous.acceptedAt : Date.now(), ...(listening ? { listenUntil: listening } : {}), ...(previous?.nativeBusy ? { nativeBusy: true } : {}) } }
+      silenceBoundary: { turnId, conversationId, workSeq: workSequence(work), acceptedAt: previous ? previous.acceptedAt : Date.now(), ...(listening ? { listenUntil: listening } : {}), ...(previous?.nativeBusy ? { nativeBusy: true } : {}) } }
       : entry.sessionId === sessionId && entry.state === 'queued' && entry.silenceBoundary?.turnId === turnId ? { ...entry, silenceBoundary: undefined } : entry));
     return true;
   });
@@ -764,7 +764,7 @@ export function deferSilenceInput(id: string, conversationId: string, turnId: st
       if (!manualInput(row) || end?.kind !== 'turn_end' || end.turnId !== turnId || end.outcome !== 'failed' || end.reason !== 'thinking_failed') return false;
       const [work] = await readRecentEvents(row.sessionId, 1, { kinds: INPUT_WORK_KINDS });
       if (!work) return false;
-      boundary = { conversationId, turnId, workSeq: work.seq, acceptedAt: Date.now() };
+      boundary = { conversationId, turnId, workSeq: workSequence(work), acceptedAt: Date.now() };
     }
     if (boundary.conversationId !== conversationId || boundary.turnId !== turnId) return false;
     await commit(current.map(entry => entry === row ? { ...row,
@@ -1084,7 +1084,7 @@ export function failBrowserInput(id: string, owner: string, error: string): Prom
     await commit(current.map((row) => sameDelivery(entry, row) ? pickupCancelled
       ? withoutSilenceClaim(row, row === entry && preserveBoundary)
       : { ...row, state: entry.companionInputId ? 'cancelled' : 'failed', error: error.slice(0, 200) } : row));
-    decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed'));
+    decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + error.slice(0, 200)));
     decisionWaiters.delete(id);
     return true;
   });

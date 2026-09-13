@@ -892,7 +892,7 @@ describe('browser decision lifetime', () => {
   it('rejects a pre-send failure without waiting for timeout', async () => {
     const controller = new AbortController();
     const answer = requestBrowserDecision('Choose one', controller.signal);
-    const rejection = expect(answer).rejects.toThrow('goal_browser_send_failed');
+    const rejection = expect(answer).rejects.toThrow('goal_browser_send_failed: composer missing');
     const row = (await listInputs())[0]!;
     await claimBrowserInput(row.id, 'document', null);
     await failBrowserInput(row.id, 'document', 'composer missing');

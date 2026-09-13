@@ -475,11 +475,11 @@ describe('the goal loop settings', () => {
     expect(config.goal.model).toBe('z-ai/glm-5.3');
     expect(config.goal.reasoning).toBe('default');
     expect(config.goal.prompt).toContain('Your job is to prompt ChatGPT');
-    expect(config.goal.prompt).toContain('Nobody handed you a separate goal');
+    expect(config.goal.prompt).toContain('No separate objective is supplied');
     // The driver ships beside the gate rather than staying hardcoded, so a fresh install has
     // both editable instructions on disk and the settings screen has something to paint.
     expect(config.goal.objectivePrompt).toContain('Your job is to prompt ChatGPT');
-    expect(config.goal.objectivePrompt).toContain('they have handed you the wheel');
+    expect(config.goal.objectivePrompt).toContain('Read it together with the original task');
   });
 
   it('keeps the model, reasoning level and system prompt that were chosen', async () => {

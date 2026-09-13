@@ -309,7 +309,7 @@ function build(
         tone: failed ? 'bad' : running ? 'neutral' : 'good',
         title: failed ? `Command failed ${command}` : running ? `Started ${command}` : `Ran ${command}`,
         metric: running
-          ? 'running'
+          ? 'started'
           : evidence.timedOut
           ? '✕ timed out'
           : failed
