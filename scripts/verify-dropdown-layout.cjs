@@ -73,6 +73,17 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(output, `${theme}-${zoom}-${id}.png`), (await win.webContents.capturePage()).toPNG());
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'ESCAPE' });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'ESCAPE' });
+      // Native input is queued: wait for this picker to close before opening the
+      // next one, otherwise the previous Escape can dismiss that next picker.
+      await win.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+        const deadline = performance.now() + 3000;
+        const check = () => {
+          if (!document.getElementById('${id}').matches(':open')) return resolve();
+          if (performance.now() >= deadline) return reject(new Error('Picker did not close after Escape'));
+          requestAnimationFrame(check);
+        };
+        requestAnimationFrame(check);
+      })`);
     }
   }
   // Selection remains a native form action, with one change event and Escape cancellation.
