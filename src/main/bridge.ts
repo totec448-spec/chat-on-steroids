@@ -155,6 +155,7 @@ import {
   abortContinuation,
   abortContinuationNow,
   abortContinuationSourceBeforeSendNow,
+  releaseContinuationSourceSendNow,
   attachSummary,
   beginContinuationDestinationSendNow,
   beginContinuationSourceSendNow,
@@ -2364,7 +2365,23 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           origin
         );
       }
-      if (!aborted) return json(res, 409, { error: 'source_send_not_releasable' }, origin);
+      if (!aborted) {
+        // The two pre-Send states are handled above. An armed dispatch that the page then
+        // proved unaccepted - none of send()'s five acceptance signals inside its window, on
+        // a chat this flow had already stopped and settled - falls past them, and refusing it
+        // leaves the ticket armed until the six-hour TTL with the chat kept out of browser
+        // recovery for all of it. Nothing is re-offered on either path; only the transaction
+        // ends.
+        const released = await releaseContinuationSourceSendNow(
+          checkpointToken,
+          'ChatGPT did not take the handoff instruction, and an armed dispatch is never sent twice'
+        );
+        if (!released) return json(res, 409, { error: 'source_send_not_releasable' }, origin);
+        compactionWatch.delete(id);
+        if (repairsInFlight.get(id)?.reason === 'compaction') repairsInFlight.delete(id);
+        changed();
+        return json(res, 200, { released: true, sessionId: entry.sessionId }, origin);
+      }
       compactionWatch.delete(id);
       if (repairsInFlight.get(id)?.reason === 'compaction') repairsInFlight.delete(id);
       changed();

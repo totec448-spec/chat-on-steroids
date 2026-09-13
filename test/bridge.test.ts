@@ -1620,6 +1620,34 @@ describe('automatic compaction', () => {
     expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).status).toBe(409);
   });
 
+  /**
+   * The same proof, one state later. Once the click is armed the pre-Send abort no longer
+   * applies, and refusing here is what left the ticket standing for its whole six-hour TTL
+   * with the chat out of browser recovery for all of it.
+   */
+  it('ends an armed handoff the page proves ChatGPT never took', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0a';
+    await request('POST', '/events', {
+      body: {
+        conversationId,
+        events: [{ kind: 'user_message', time: Date.now(), text: 'armed but never taken', messageId: 'm-armed-lost' }]
+      }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    const token = filed.body.token as string;
+    expect((await request('POST', '/compact', { body: { conversationId, token, sourceAttempt: true } })).body.allowed).toBe(true);
+    // Armed: past this point the pre-Send states are gone and only this path can end it.
+    expect((await request('POST', '/compact', { body: { conversationId, token, sourceDispatch: true } })).body.armed).toBe(true);
+
+    const lost = await request('POST', '/compact', { body: { conversationId, token, sourceLost: true } });
+
+    expect(lost.status).toBe(200);
+    expect(lost.body.released).toBe(true);
+    expect(continuationByToken(token)?.state).toBe('aborted');
+    expect(continuationForSession(filed.body.sessionId as string)).toBeNull();
+  });
+
   it('does not immediately refile a rejected automatic compaction in the same working turn', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac09';

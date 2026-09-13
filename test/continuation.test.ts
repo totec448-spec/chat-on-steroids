@@ -53,6 +53,8 @@ const {
   CONTINUATION_TTL_MS,
   abortContinuation,
   abortContinuationSourceBeforeSendNow,
+  releaseContinuationSourceSendNow,
+  pendingContinuations,
   attachSummary,
   beginContinuationDestinationSendNow,
   beginContinuationSourceSendNow,
@@ -976,6 +978,52 @@ describe('restart lifetime recovery', () => {
     await restoreContinuations(saved);
     expect(compactingConversation(CHAT_A)).toBeNull();
     expect(continuationForSession(summary.id)).toBeNull();
+  });
+
+  /**
+   * The same wedge as above, ended in seconds rather than six hours.
+   *
+   * The test above is the backstop: an armed dispatch that nobody resolves is eventually given
+   * up by the TTL. A 2026-09-04 QA run measured what that costs when the click simply did not
+   * land — three phase pickups firing and expiring against a chat whose composer had never
+   * received the prompt, and, because `pendingContinuations()` still named it and
+   * `inspectSilentChats()` skips those, no browser recovery for the whole window either.
+   *
+   * The page can say so: `send()` watches five acceptance signals and this flow settles the turn
+   * before typing, so none of them inside its window is the strongest negative the page has.
+   * Aborting rather than re-arming is deliberate — the prompt may still be with ChatGPT, and
+   * nothing is ever sent twice.
+   */
+  it('gives up an armed source dispatch the page proves ChatGPT never took', async () => {
+    const summary = await createSession({ title: 'source send lost', conversationId: CHAT_A });
+    const opened = await openContinuationNow(summary.id, CHAT_A, true);
+    expect((await beginContinuationSourceSendNow(opened.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(opened.token)).toBe(true);
+    // Armed: chat A is refused every tool from here until something resolves it.
+    expect(compactingConversation(CHAT_A)?.token).toBe(opened.token);
+
+    expect(await releaseContinuationSourceSendNow(opened.token, 'nothing was taken')).toBe(true);
+
+    // Ended, without waiting out the TTL: the fence is down, the chat is out of the pending set
+    // that was costing it browser recovery, and the record is terminal rather than re-armed.
+    expect(compactingConversation(CHAT_A)).toBeNull();
+    expect(continuationForSession(summary.id)).toBeNull();
+    expect(continuationByToken(opened.token)?.state).toBe('aborted');
+    expect(pendingContinuations().some((entry) => entry.token === opened.token)).toBe(false);
+  });
+
+  it('refuses to give up a source dispatch ChatGPT is proven to have taken', async () => {
+    const summary = await createSession({ title: 'source send landed', conversationId: CHAT_A });
+    const opened = await openContinuationNow(summary.id, CHAT_A, true);
+    expect((await beginContinuationSourceSendNow(opened.token))?.allowed).toBe(true);
+    expect(await dispatchContinuationSourceSendNow(opened.token)).toBe(true);
+    // ChatGPT's own marker landed, so the send is not in doubt and a late "nothing was taken"
+    // from some other document must not tear down a handover that is genuinely under way.
+    expect(await bindContinuationSourceMessageNow(opened.token, 'msg-source-landed')).toBe(true);
+
+    expect(await releaseContinuationSourceSendNow(opened.token, 'nothing was taken')).toBe(false);
+    expect(continuationForSession(summary.id)?.state).toBe('awaiting-summary');
+    expect(compactingConversation(CHAT_A)?.token).toBe(opened.token);
   });
 
   it('keeps a committed record committed when the session has since moved on again', async () => {
