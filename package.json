@@ -53,26 +53,26 @@
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "fflate": "^0.8.3",
-    "marked": "18.0.11",
+    "marked": "18.0.13",
     "node-pty": "1.2.0-beta.15",
     "quickjs-emscripten-core": "0.32.0",
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
     "tree-sitter": "0.25.1",
     "tree-sitter-bash": "0.25.1",
     "ws": "8.21.3",
-    "zod": "^4.4.3"
+    "zod": "^4.6.4"
   },
   "devDependencies": {
     "@types/jsdom": "^30.0.0",
-    "@types/node": "^22.15.0",
+    "@types/node": "^24.13.4",
     "@types/ws": "8.18.1",
-    "electron": "43.4.1",
-    "electron-builder": "^26.15.7",
+    "electron": "44.3.0",
+    "electron-builder": "^26.16.1",
     "electron-vite": "^5.0.0",
     "jsdom": "^30.0.1",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
-    "vitest": "^4.1.10"
+    "vitest": "^5.0.0"
   },
   "overrides": {
     "@anthropic-ai/mcpb": {

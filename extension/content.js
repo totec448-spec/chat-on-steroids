@@ -1735,6 +1735,13 @@
    * whole point of this batch is that the local session log stops containing those.
    */
   function generationTurn(turns = CLF_DOM.turns()) {
+    // Hydration may remount an old answer with a new node after our baseline.
+    // An adopted generation still belongs after the latest question; DOM novelty
+    // above that boundary cannot establish or retain its assistant owner.
+    if (unwitnessedGeneration) {
+      const question = turns.findLastIndex(turn => turn.role === 'user');
+      if (question >= 0) turns = turns.slice(question + 1);
+    }
     if (genNode) {
       const held = turnForNode(genNode, turns);
       if (held) return held;
@@ -2324,7 +2331,13 @@
     // version that asked only whether *this page load* had journalled the message closed a
     // live turn on every reload, and split every chat's opening turn in two.
     if (generating && newUserMessage) {
-      const ended = quietTurn || generationTurn(observedTurns);
+      // A newly authored question closes the adopted turn before it. If its answer
+      // and this question hydrated together, apply the original-question guard to
+      // that prefix, not to the next turn. Missing exact boundaries stay unowned.
+      const nextQuestion = unwitnessedGeneration ? observedTurns.findIndex(turn =>
+        turn.role === 'user' && CLF_DOM.messagesIn(turn).some(message => message.id === newUserMessage)) : -1;
+      const closingTurns = unwitnessedGeneration ? observedTurns.slice(0, Math.max(0, nextQuestion)) : observedTurns;
+      const ended = quietTurn || generationTurn(closingTurns);
       const fresh = endOutcome(ended);
       const result = quietOutcome && quietOutcome.outcome !== 'unknown' ? quietOutcome : fresh;
       // A new user message is an actual boundary, unlike a disappearing Stop control. Once
@@ -5893,13 +5906,17 @@
       appActiveTurnId = typeof data.activeTurnId === 'string' && data.activeTurnId ? data.activeTurnId : null;
       if (!generating && pendingTools > 0 && appActiveTurnId === turnId && fiberSettled?.reason === 'thinking_failed') noteTurnProgress();
       if (resumeIdentityPending) {
+        // Runtime activity can expire while the durable generation still owns
+        // this question. Reload must retain that identity without turning the
+        // expired activity projection into a new user send.
+        const recordedTurnId = typeof data.recordedTurnId === 'string' && data.recordedTurnId ? data.recordedTurnId : appActiveTurnId;
         // A reopened Stop target must prove the original question before adoption
         // can anchor native messages under its old local turn. Hydration may lag
         // this first response; retain the existing gate until proof or expiry.
-        const stopReady = !data.stopTurn || (data.stopTurn.turnId === appActiveTurnId && stopQuestionMatches(data.stopTurn.userMessageId));
-        if (!appActiveTurnId || stopReady) {
+        const stopReady = !data.stopTurn || (data.stopTurn.turnId === recordedTurnId && stopQuestionMatches(data.stopTurn.userMessageId));
+        if (!recordedTurnId || stopReady) {
           resumeIdentityPending = false;
-          if (appActiveTurnId) adoptOpenTurn(appActiveTurnId, data.stopTurn?.userMessageId ?? null);
+          if (recordedTurnId) adoptOpenTurn(recordedTurnId, data.stopTurn?.userMessageId ?? null);
         }
       }
       tokens = Number.isFinite(Number(data.tokens)) ? Number(data.tokens) : 0;
@@ -10378,7 +10395,8 @@
       const accepted = acknowledged?.data?.ok === true;
       if (accepted && deliveredConversation && receipt.user?.id && sendingTarget() &&
           userSendReceipt === witnessedSendReceipt && witnessedSendReceipt?.text === submittedText &&
-          witnessedSendReceipt.conversationId === target &&
+          (witnessedSendReceipt.conversationId === target ||
+            (!target && witnessedSendReceipt.conversationId === deliveredConversation)) &&
           (witnessedSendReceipt.previousMessageId ?? null) === (previousUserId ?? null) &&
           Date.now() - witnessedSendReceipt.at <= USER_SEND_RECEIPT_MS) {
         witnessedSendReceipt.accepted = { messageId: receipt.user.id, conversationId: deliveredConversation, epoch };

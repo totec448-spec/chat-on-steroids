@@ -358,10 +358,11 @@ async function withBackgroundExecRecovery(
  */
 function withUnattributedNotice(
   conversationId: string | null | undefined,
-  result: ToolResult
+  result: ToolResult,
+  requestId: string | null
 ): ToolResult {
   if (conversationId) return result;
-  const eta = unattributedRepairEta();
+  const eta = unattributedRepairEta(Date.now(), requestId);
   if (eta === null) return result;
   return {
     ...result,
@@ -775,7 +776,8 @@ async function dispatchTracked(
   const baseResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
   let delivered = nested ? baseResult : withUnattributedNotice(
     context.caller.conversationId,
-    withInbox(context.caller.conversationId, context.agent, baseResult, isFinish)
+    withInbox(context.caller.conversationId, context.agent, baseResult, isFinish),
+    context.caller.requestId
   );
   // Ordinary tools carry direct user input, but only the explicit finish signal
   // advances a planned stage. Successful work is not evidence that a stage is done.

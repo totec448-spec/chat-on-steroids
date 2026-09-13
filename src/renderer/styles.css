@@ -2867,6 +2867,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .agent-plan summary::-webkit-details-marker { display: none; }
 .agent-plan summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -3px; border-radius: 7px; }
 .agent-plan-heading { min-height: 38px; padding: 8px 12px; }
+.agent-plan-heading::after { content: ''; width: 7px; height: 7px; flex: none; margin: 0 4px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); }
+.agent-plan-shell[open] > .agent-plan-heading::after { transform: rotate(225deg); }
+.agent-plan-heading:hover { background: var(--hover); color: var(--ink); }
 .agent-plan-heading .ico { width: 15px; height: 15px; }
 .agent-plan-title { flex: 1; font-weight: 550; }
 .agent-plan-count { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }

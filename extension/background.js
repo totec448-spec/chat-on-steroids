@@ -59,11 +59,9 @@ const RETRY_ALARM = 'clf-bridge-drain';
  * exempt, which is the trap: 0.25 works on this machine and silently becomes 0.5 for everybody
  * who installs a release.
  *
- * So this is a sleeping-service-worker fallback with an honest bound, not a fast path. The app
- * arms a repair fifteen to sixty seconds into an unattributed incident, depending on how many
- * chats are still suspect; the browser sees it on the next pass, which is up to thirty seconds
- * later. Anything better would need a keepalive, an offscreen document or a second timer
- * framework to beat a browser API floor, and a broken turn is not worth that.
+ * The app owns repair deadlines and normally wakes this worker over its socket.
+ * This alarm is the fallback when that wake is unavailable; it can add up to
+ * thirty seconds before the next collection pass.
  *
  * That floor is also why one pass collects *every* repair now due rather than one: the app can
  * decide three at the same instant, and handing them out one per pass would spread three
@@ -2303,6 +2301,7 @@ async function maintainOnce() {
     .map((entry) => ({
       conversationId: cleanConversationId(entry && entry.conversationId),
       token: entry && typeof entry.token === 'string' ? entry.token : '',
+      requiresClaim: entry?.requiresClaim === true,
       focus: Boolean(entry && entry.focus === true)
     }))
     .filter((entry) => entry.conversationId && entry.token);
@@ -2392,7 +2391,7 @@ async function maintainOnce() {
 }
 
 async function performBrowserRepairs(repairs, policy) {
-  for (const { conversationId, token, focus } of repairs) {
+  for (const { conversationId, token, focus, requiresClaim } of repairs) {
     // Re-scanned per repair rather than reused from above. Earlier entries in this same batch
     // may have created a tab, and the scan has to be the state immediately before the action or
     // the duplicate rule below is deciding on a tab list that no longer exists.
@@ -2411,14 +2410,20 @@ async function performBrowserRepairs(repairs, policy) {
     const [target] = (owned.length > 0 ? owned : candidates).sort((a, b) => a.id - b.id);
     const repairAction = target ? 'reloaded' : 'reopened';
     try {
+      if (!target && policy.browserOnly === true) continue;
       // Select the working tab within Chrome without stealing OS focus from the
       // desktop app. Tab selection and window activation are separate operations.
       if (target && focus) {
         await chrome.tabs.update(target.id, { active: true });
       }
+      // The tab scan can yield while exact MCP evidence clears an attribution
+      // incident. Claim this server-held attempt only at the browser action boundary.
+      if (requiresClaim) {
+        const claim = await call('/repairs/claim', { method: 'POST', body: JSON.stringify({ token }) });
+        if (!claim.ok || claim.data?.allowed !== true) continue;
+      }
       if (target) await chrome.tabs.reload(target.id);
       else {
-        if (policy.browserOnly === true) continue;
         await createChatTab(`https://chatgpt.com/c/${encodeURIComponent(conversationId)}`, policy.background === true, focus);
       }
     } catch {

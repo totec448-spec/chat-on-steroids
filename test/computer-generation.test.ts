@@ -21,7 +21,7 @@ const fake = vi.hoisted(() => {
   }
   const requests: Array<Record<string, any>> = [];
   const children: Array<Transport> = [];
-  const clipboard = { writeText: vi.fn(), readText: vi.fn(() => '') };
+  const clipboard = { writeText: vi.fn(async (_text: string) => {}), readText: vi.fn(async () => '') };
   const overrides: { focusFailure: boolean; geometry: boolean } = { focusFailure: false, geometry: false };
   class Transport extends Emitter {
     readonly pid = 9000 + children.length;
@@ -242,6 +242,26 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     fake.clipboard.writeText.mockClear();
     await expect(computer.act([{ type: 'paste', text }, { type: 'write_clipboard', text: 'later' }], { window: 77 })).rejects.toThrow(/PASTE_SEQUENCE/);
     expect(fake.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it.runIf(transport === 'stdio')('waits for asynchronous clipboard publication before injecting paste', async () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    let finishWrite!: () => void;
+    fake.clipboard.writeText.mockImplementationOnce(() => new Promise<void>(resolve => { finishWrite = resolve; }));
+    const work = computer.act([{ type: 'paste', text: 'pending clipboard' }], { window: 77 });
+    await vi.waitFor(() => expect(fake.clipboard.writeText).toHaveBeenCalled());
+    expect(fake.requests.filter(request => request.op === 'act')).toHaveLength(1);
+    finishWrite();
+    expect((await work).completedCount).toBe(1);
+    expect(fake.requests.filter(request => request.op === 'act').at(-1)?.actions).toEqual([{ type: 'keypress', keys: ['ctrl', 'v'] }]);
+  });
+
+  it.runIf(transport === 'stdio')('refuses paste when asynchronous clipboard publication fails', async () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    fake.clipboard.writeText.mockRejectedValueOnce(new Error('clipboard unavailable'));
+    await expect(computer.act([{ type: 'paste', text: 'pending clipboard' }], { window: 77 }))
+      .rejects.toMatchObject({ completedCount: 0, failedIndex: 0 });
+    expect(fake.requests.filter(request => request.op === 'act')).toHaveLength(1);
   });
 
   it.runIf(transport === 'stdio')('does not replace the clipboard when target activation fails before paste', async () => {

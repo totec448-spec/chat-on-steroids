@@ -12,6 +12,7 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { recordLoopMcpProof } from './goal-mcp-proof.js';
 
 vi.mock('electron', () => ({
   app: { getPath: () => '', getVersion: () => '0.0.0' },
@@ -26,7 +27,7 @@ vi.mock('electron', () => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
 const { initDurableStore } = await import('../src/main/durable.js');
-const { appendEvent, createSession, observeSessionModel, initSessionStore, resetSessionStoreForTests } = await import(
+const { appendEvent, createSession, observeSessionModel, initSessionStore, resetSessionStoreForTests, readRecentEvents } = await import(
   '../src/main/session/store.js'
 );
 const goal = await import('../src/main/goal.js');
@@ -127,6 +128,32 @@ it('keeps a withdrawn synthetic reply revoked when the deletion write fails and 
     expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
     expect(goal.goalViewFor(conversationId)).toBeNull();
   } finally { spy.mockRestore(); }
+});
+
+it.each(['activity-cancel', 'ready-ack'] as const)('accepts the next quiet source after %s and rejects the old ACK', async cancellation => {
+  const conversationId = `quiet-after-${cancellation}`;
+  const session = await createSession({ conversationId });
+  await goal.setGoalSwitchNow(conversationId, 'loop', true);
+  await appendEvent(session.id, { source: 'extension', time: 1000, kind: 'user_message', message: { text: 'Continue this task', chars: 18, truncated: false } });
+  await recordLoopMcpProof(session.id, 'source-work');
+  const firstSeq = (await readRecentEvents(session.id, 1))[0]!.seq;
+  await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, silenceSourceTurnId: 'source-work', replyId: 'silence:first', turnId: 'g-silence-first', eventSeq: firstSeq, blocked: false });
+  globalThis.fetch = vi.fn(async () => decision('continue', 'Check the remaining work'));
+  goal.startGoalDraft({ conversationId, sessionId: session.id, turnId: 'g-silence-first' });
+  const first = await settled(conversationId);
+  expect(first.stage).toBe('ready');
+  if (cancellation === 'activity-cancel') goal.retireGoalDraftsFor(conversationId);
+  else await goal.ackGoalDraftNow(conversationId, first.token);
+  expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+  // The next genuine MCP activity and its later quiet boundary are new debt,
+  // even when the failed/cancelled helper belonged to the same source turn.
+  await recordLoopMcpProof(session.id, 'source-work');
+  const nextSeq = (await readRecentEvents(session.id, 1))[0]!.seq;
+  await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, silenceSourceTurnId: 'source-work', replyId: 'silence:next', turnId: 'g-silence-next', eventSeq: nextSeq, blocked: false });
+  expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe('silence:next');
+  goal.startGoalDraft({ conversationId, sessionId: session.id, turnId: 'g-silence-next', deferStart: true });
+  expect(await goal.ackGoalDraftNow(conversationId, first.token)).toBe(false);
+  expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe('silence:next');
 });
 
 it('projects the driver for each mode and preserves the active draft identity', async () => {
@@ -242,6 +269,7 @@ describe('what leaves this machine', () => {
   it('preserves transient API retry classification and Retry-After for finish follow-ups', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, loopBackend: 'api' } });
     const session = await createSession({ title: 'finish retry', conversationId: 'finish-api-retry' });
+    await recordLoopMcpProof(session.id);
     const context = [{ role: 'user' as const, content: 'Finish checking the project' }];
     globalThis.fetch = vi.fn(async () => new Response('busy', { status: 429, headers: { 'Retry-After': '37' } }));
     await expect(goal.draftFastFollowup(session.id, undefined, context)).rejects.toMatchObject({ retryable: true, retryAfterMs: 37000 });
@@ -270,6 +298,7 @@ describe('what leaves this machine', () => {
     expect(projected.some(message => message.content.includes('/project/example'))).toBe(includeToolCalls);
     let sent = '';
     globalThis.fetch = vi.fn(async (_url, init) => { sent = String(init?.body); return decision('continue', 'Continue checking the project.'); });
+    await recordLoopMcpProof(session.id);
     await goal.draftFastFollowup(session.id);
     expect(sent.includes('Inspecting the project')).toBe(true);
     expect(sent.includes('tool-result-evidence')).toBe(includeToolCalls);
@@ -1768,6 +1797,40 @@ describe('a chat driven towards a specific goal', () => {
     );
   });
 
+  it.each(['none', 'page-only', 'other-turn', 'unattributed', 'exact'] as const)('requires exact recorded MCP for automatic Loop, while explicit On may proceed (%s)', async proof => {
+    const conversationId = `automatic-loop-proof-${proof}`;
+    const session = await createSession({ conversationId });
+    await goal.setGoalSwitchNow(conversationId, 'loop', true);
+    await appendEvent(session.id, { source: 'extension', time: 1000, kind: 'user_message', message: { text: 'Continue the task', chars: 17, truncated: false } });
+    await appendEvent(session.id, { source: 'extension', time: 1100, kind: 'turn_start', turnId: 'source-turn' });
+    if (proof === 'page-only') await appendEvent(session.id, { source: 'extension', time: 1200, kind: 'page_tool', turnId: 'source-turn', messageId: 'page-read', label: 'Called read' });
+    if (['other-turn', 'unattributed', 'exact'].includes(proof)) await appendEvent(session.id, {
+      source: 'mcp', time: 1300, kind: 'tool_call', turnId: proof === 'other-turn' ? 'older-turn' : 'source-turn', call: {
+        callId: 'proof-call', tool: 'read', attribution: proof === 'unattributed' ? 'unattributed' : 'request_id',
+        requestId: proof === 'unattributed' ? null : 'proof-request', conversationId: proof === 'unattributed' ? null : conversationId,
+        attributionMethod: 'request_id', outcome: 'ok', durationMs: 1,
+        args: { text: '{}', chars: 2, truncated: false }, result: { text: 'ok', chars: 2, truncated: false },
+        summary: { kind: 'read', tone: 'neutral', title: 'Read' }
+      }
+    });
+    await appendEvent(session.id, { source: 'extension', time: 1400, kind: 'turn_end', turnId: 'source-turn', outcome: 'completed' });
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'source-final', turnId: 'source-turn', eventSeq: 100, blocked: false });
+    expect(goal.goalPendingReplyFor(conversationId) !== null).toBe(proof === 'exact');
+    const fetch = vi.fn(async () => decision('continue', 'Continue the task'));
+    globalThis.fetch = fetch;
+    expect(await goal.draftFastFollowup(session.id)).toBe(proof === 'exact' ? 'Continue the task' : null);
+    expect(fetch).toHaveBeenCalledTimes(proof === 'exact' ? 1 : 0);
+    const legacy = goal.snapshotGoalReplies();
+    legacy.replies.find(row => row.conversationId === conversationId)!.state = 'pending';
+    goal.restoreGoalReplies(legacy);
+    expect(await goal.loopReplyHasAuthority(session.id, conversationId, 'source-turn')).toBe(proof === 'exact');
+    await goal.setGoalReplyActiveNow(conversationId, false);
+    await goal.setGoalReplyActiveNow(conversationId, true);
+    expect(goal.goalPendingReplyFor(conversationId)?.replyId).toBe('source-final');
+    goal.restoreGoalReplies(goal.snapshotGoalReplies());
+    expect(await goal.loopReplyHasAuthority(session.id, conversationId, 'source-turn')).toBe(true);
+  });
+
   it('durably cancels a pending ticket on Off and re-arms that stable final on On', async () => {
     const conversationId = 'c-reply-switch-rearm';
     await goal.acceptGoalReplyNow({
@@ -2278,6 +2341,7 @@ describe('the loop that never stops', () => {
       return decision('continue', 'go over the whole thing again and tell me what changed');
     }) as never;
 
+    await recordLoopMcpProof(sessionId, 'g-loop-1');
     goal.startGoalDraft({ sessionId, conversationId: 'c-loop-1', turnId: 'g-loop-1' });
     const view = await settled('c-loop-1');
 
@@ -2305,6 +2369,7 @@ describe('the loop that never stops', () => {
       return decision('continue', 'the suite is still red. fix it');
     }) as never;
 
+    await recordLoopMcpProof(sessionId, 'g-loop-goal');
     goal.startGoalDraft({ sessionId, conversationId: 'c-loop-goal', turnId: 'g-loop-goal' });
     expect((await settled('c-loop-goal')).stage).toBe('ready');
 
@@ -2358,6 +2423,7 @@ describe('the loop that never stops', () => {
       return bodies.length === 1 ? decision('continue', 'NO_REPLY') : decision('continue', 'keep going, the export is missing');
     }) as never;
 
+    await recordLoopMcpProof(sessionId, 'g-loop-retry');
     goal.startGoalDraft({ sessionId, conversationId: 'c-loop-retry', turnId: 'g-loop-retry' });
     const view = await settled('c-loop-retry');
 
@@ -2381,6 +2447,7 @@ describe('the loop that never stops', () => {
       return decision('continue', 'NO_REPLY');
     }) as never;
 
+    await recordLoopMcpProof(sessionId, 'g-loop-refused');
     goal.startGoalDraft({ sessionId, conversationId: 'c-loop-refused', turnId: 'g-loop-refused' });
     const view = await settled('c-loop-refused');
 

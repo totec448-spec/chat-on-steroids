@@ -18,6 +18,8 @@ import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { filterSettingsSections } from '../src/renderer/dom.js';
+import { sessionWorkingAt } from '../src/shared/session-activity.js';
+import { CHAT_ACTIVE_MS, type SessionSummary } from '../src/shared/session.js';
 
 let document: Document;
 let css = '';
@@ -168,8 +170,11 @@ describe('a session row', () => {
   it('does not call an idle prime active merely because it still owns the run', () => {
     expect(chatSource).toMatch(/else if \(agent && agent\.role !== 'prime'\)/);
     // Idle means idle: generic recording traffic cannot renew the exact tool clock.
-    expect(chatSource).toMatch(/Math\.max\(summary\.lastAssistantFinalAt \?\? 0, summary\.lastTurnEndAt \?\? 0\)/);
-    expect(chatSource).toMatch(/lastActivityAt > finishedAt/);
+    const summary = { startedAt: 100, lastToolCallAt: 200, lastAssistantFinalAt: 300,
+      lastTurnEndAt: 300, updatedAt: 400, activeTurnId: 'old-open-turn', agents: ['prime'],
+      endedAt: null, origin: null } as SessionSummary;
+    expect(sessionWorkingAt(summary, 400)).toBe(false);
+    expect(sessionWorkingAt({ ...summary, lastToolCallAt: 350 }, 400)).toBe(true);
   });
 
   /**
@@ -178,8 +183,12 @@ describe('a session row', () => {
    * one a user most wants to see is still going - as idle.
    */
   it('uses session start and exact calls rather than reload-generated turn boundaries for visible activity', () => {
-    expect(chatSource).toMatch(/Math\.max\(summary\.startedAt, summary\.lastToolCallAt \?\? 0\)/);
-    expect(chatSource).toMatch(/return summary\.endedAt === null && !workerReportedFinish\(summary\) && recentChatActivity\(summary\)/);
+    const summary = { startedAt: 100, lastToolCallAt: null, endedAt: null, origin: null,
+      activeTurnId: 'reload-turn', updatedAt: 100 + CHAT_ACTIVE_MS } as SessionSummary;
+    expect(sessionWorkingAt(summary, 101)).toBe(true);
+    expect(sessionWorkingAt(summary, 101 + CHAT_ACTIVE_MS)).toBe(false);
+    expect(sessionWorkingAt({ ...summary, activityExpiresAt: 100 + 10 * 60_000 }, 101 + CHAT_ACTIVE_MS)).toBe(true);
+    expect(sessionWorkingAt({ ...summary, activityExpiresAt: null }, 101)).toBe(false);
     expect(chatSource).toMatch(/else if \(!agent && workerReportedFinish\(summary\)\) badges\.push\(AGENT_BADGE\.sleeping\)/);
     expect(chatSource).toMatch(/if \(sessionWorking\(summary\)\) badges\.push\(AGENT_BADGE\.active\)/);
     expect(chatSource).toMatch(/scheduleToolActivityExpiry/);

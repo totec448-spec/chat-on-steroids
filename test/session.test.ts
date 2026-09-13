@@ -45,6 +45,8 @@ import {
   readAsset,
   readEvents,
   readRecentEvents,
+  turnHasMcpCall,
+  conversationHasMcpCallSince,
   readHandoff,
   rebindSession,
   renameSession,
@@ -100,6 +102,71 @@ const evidence = (patch: Partial<ReturnType<typeof emptyEvidence>> = {}) => ({ .
 // ------------------------------------------------------------------- store
 
 describe('session store', () => {
+  it('uses original call time and exact conversation for late attribution health proof', async () => {
+    const conversationId = 'health-current';
+    const session = await createSession({ title: 'attribution health', conversationId });
+    let index = 0;
+    const append = (time: number, owner: string, turnId?: string, exact = true, source: 'mcp' | 'extension' = 'mcp') =>
+      appendEvent(session.id, { time, source, kind: 'tool_call', turnId,
+        call: { callId: `health-${++index}`, tool: 'read', requestId: `health-request-${index}`,
+          conversationId: owner, attribution: exact ? 'request_id' : 'unattributed',
+          attributionMethod: exact ? 'request_id' : 'unattributed',
+          args: { text: '{}', truncated: false, chars: 2 }, result: { text: 'ok', truncated: false, chars: 2 },
+          outcome: 'ok', durationMs: 1, summary: { title: 'read', tone: 'neutral', kind: 'read' } } });
+    await append(999, conversationId); // Stored now, but started before the incident.
+    await append(1_100, 'health-retired-source');
+    await append(1_100, conversationId, 'older-turn');
+    await append(1_100, conversationId, 'current-turn', false);
+    await append(1_100, conversationId, 'current-turn', true, 'extension');
+    expect(await conversationHasMcpCallSince(session.id, conversationId, 1_000, 'current-turn')).toBe(false);
+    // Exact repaired work can have no local turn id, and need not be the newest append.
+    await append(1_001, conversationId);
+    await append(1_200, 'health-retired-source');
+    expect(await conversationHasMcpCallSince(session.id, conversationId, 1_000, 'current-turn')).toBe(true);
+    expect(await conversationHasMcpCallSince(session.id, conversationId, 1_002, 'current-turn')).toBe(false);
+  });
+
+  it('retains exact turn execution proof behind paginated historical attribution repairs', async () => {
+    const conversationId = 'mcp-proof-conversation';
+    const session = await createSession({ title: 'turn execution proof', conversationId });
+    let callIndex = 0;
+    const appendCall = (turnId: string | undefined, owner = conversationId, exact = true, source: 'mcp' | 'extension' = 'mcp') =>
+      appendEvent(session.id, {
+        time: 1_000, source, kind: 'tool_call', turnId,
+        call: {
+          callId: `proof-${++callIndex}`, tool: 'read', requestId: 'request-proof',
+          conversationId: owner, attribution: exact ? 'request_id' : 'unattributed',
+          attributionMethod: exact ? 'request_id' : 'unattributed',
+          args: { text: '{}', truncated: false, chars: 2 },
+          result: { text: 'ok', truncated: false, chars: 2 },
+          outcome: 'ok', durationMs: 1,
+          summary: { title: 'read', tone: 'neutral', kind: 'read' }
+        }
+      });
+    await appendCall('older-turn');
+    expect(await turnHasMcpCall(session.id, conversationId, 'source-turn')).toBe(false);
+    await appendCall('source-turn', 'foreign-conversation');
+    await appendCall('source-turn', conversationId, false);
+    await appendCall('source-turn', conversationId, true, 'extension');
+    expect(await turnHasMcpCall(session.id, conversationId, 'source-turn')).toBe(false);
+    await appendCall('source-turn');
+    // More than one presentation page of repairs must neither hide proof nor restart scans.
+    for (let index = 0; index < 105; index++) await appendCall(undefined);
+    expect(await turnHasMcpCall(session.id, conversationId, 'source-turn')).toBe(true);
+    await appendCall('newer-turn', 'foreign-conversation');
+    expect(await turnHasMcpCall(session.id, conversationId, 'source-turn')).toBe(true);
+    const openFile = vi.spyOn(fs, 'open');
+    try {
+      expect(await turnHasMcpCall(session.id, conversationId, 'newer-turn')).toBe(false);
+      expect(openFile.mock.calls.filter(([file]) => String(file).endsWith('events.jsonl'))).toHaveLength(1);
+    } finally {
+      openFile.mockRestore();
+    }
+    await fs.appendFile(path.join(sessionsRoot(), session.id, 'events.jsonl'),
+      JSON.stringify({ seq: 9999, time: 1000, kind: 'tool_call', source: 'mcp', turnId: 'source-turn' }) + '\n');
+    expect(await turnHasMcpCall(session.id, conversationId, 'source-turn')).toBe(true);
+  });
+
   it('preserves tool calls appended after an unattributed repair snapshot', async () => {
     const summary = await createSession({ title: 'Unattributed activity', conversationId: null });
     const call = (callId: string, time: number) => ({
