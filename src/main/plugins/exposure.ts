@@ -1,6 +1,8 @@
 import type { Tool } from '@modelcontextprotocol/client';
 
-export const PLUGIN_MAX_TOOLS = 64;
+// Schema bytes are the normal publication bound. Keep the manager's existing
+// catalog ceiling only as an emergency guard against pathological catalogs.
+export const PLUGIN_MAX_TOOLS = 256;
 export const PLUGIN_MAX_SCHEMA_BYTES = 250000;
 
 export interface PluginExposureSource {
