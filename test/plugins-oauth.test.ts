@@ -12,7 +12,7 @@ import { PluginOAuth, PluginNeedsAuth, PluginOAuthSetupError, clearPluginOAuth }
 const endpoint = new URL('https://tools.example/mcp');
 const issuer = 'https://accounts.example';
 const providers: PluginOAuth[] = [];
-afterEach(() => { providers.splice(0).forEach(provider => provider.dispose()); stored.clear(); vi.restoreAllMocks(); });
+afterEach(() => { providers.splice(0).forEach(provider => provider.dispose()); stored.clear(); vi.useRealTimers(); vi.restoreAllMocks(); });
 function authority() {
   const requests: Array<{ url: string; body: string }> = [];
   const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
@@ -110,11 +110,18 @@ it.each(['cancel', 'timeout'] as const)('retires the callback and pending browse
   const server = authority(), controller = new AbortController(), provider = await load(server.fetcher, 'one', endpoint, controller.signal);
   let opened!: (value: URL) => void;
   const browserOpened = new Promise<URL>(resolve => { opened = resolve; });
-  const operation = provider.signIn(async url => { opened(url); await new Promise<void>(() => undefined); }, action === 'timeout' ? 70 : 5000);
-  const rejected = expect(operation).rejects.toThrow('cancelled');
-  const url = await browserOpened;
+  // Exercise cancellation while the browser callback is pending, independently of
+  // runner speed during discovery and crypto. Keep real loopback I/O below.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const operation = provider.signIn(async url => { opened(url); await new Promise<void>(() => undefined); }, 70);
+  const outcome = operation.catch(error => error);
+  const url = await Promise.race([browserOpened, operation.then(() => { throw new Error('Sign-in completed before opening its browser'); })]);
   if (action === 'cancel') controller.abort();
-  await rejected;
+  else await vi.advanceTimersByTimeAsync(70);
+  const error = await outcome;
+  expect(error).toBeInstanceOf(Error);
+  expect(error.message).toContain('cancelled');
+  vi.useRealTimers();
   await expect(fetch(url.searchParams.get('redirect_uri')!)).rejects.toThrow();
   expect(stored.get('plugin:one:oauth:state')).not.toContain('access-private-token');
 });

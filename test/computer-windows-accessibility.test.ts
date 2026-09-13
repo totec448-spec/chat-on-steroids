@@ -1,9 +1,10 @@
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { HELPER_SCRIPT } from '../src/main/computer/helper.js';
+import { terminateProcessTree } from '../src/main/exec.js';
 
 // An owned, non-activating WPF window supplies real UIA providers. The test only
 // invokes semantic patterns on its cached elements; no physical user input occurs.
@@ -71,7 +72,7 @@ public static class AccessibilityFixture {
 `;
 
 describe.runIf(process.platform === 'win32')('Windows semantic accessibility actions', () => {
-  it('executes only supported native patterns and returns bounded observation context', () => {
+  it('executes only supported native patterns and returns bounded observation context', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'cos-uia-test-'));
     try {
       writeFileSync(path.join(dir, 'fixture.cs'), fixture, 'utf8');
@@ -183,21 +184,36 @@ try {
 } finally {
   if (-not $owned.HasExited) {
     $owned.StandardInput.WriteLine('quit'); $owned.StandardInput.Flush()
-    if (-not $owned.WaitForExit(3000)) { $owned.Kill() }
+    if (-not $owned.WaitForExit(3000)) { $owned.Kill(); $owned.WaitForExit() }
   }
   $owned.Dispose()
 }
 `;
       const file = path.join(dir, 'probe.ps1');
       writeFileSync(file, helper + probe, 'utf8');
-      const result = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], {
-        encoding: 'utf8', timeout: 35_000, windowsHide: true
+      const child = spawn('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], {
+        windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
       });
-      expect(result.error, result.stderr).toBeUndefined();
-      expect(result.status, result.stderr + result.stdout).toBe(0);
-      expect(result.stdout).toContain('WINDOWS_ACCESSIBILITY_PROBE_OK');
+      let stdout = '', stderr = '', timedOut = false;
+      child.stdout.setEncoding('utf8').on('data', text => { stdout += text; });
+      child.stderr.setEncoding('utf8').on('data', text => { stderr += text; });
+      // Keep the launcher alive until tree termination owns its WPF child. A
+      // spawnSync timeout kills only PowerShell and strands the fixture executable.
+      const timer = setTimeout(() => {
+        timedOut = true;
+        if (child.pid) void terminateProcessTree(child.pid, true);
+      }, 60_000);
+      try {
+        const status = await new Promise<number | null>((resolve, reject) => {
+          child.once('error', reject);
+          child.once('close', resolve);
+        });
+        expect(timedOut, stderr + stdout).toBe(false);
+        expect(status, stderr + stdout).toBe(0);
+        expect(stdout).toContain('WINDOWS_ACCESSIBILITY_PROBE_OK');
+      } finally { clearTimeout(timer); }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5 });
     }
-  }, 40_000);
+  }, 70_000);
 });
