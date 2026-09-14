@@ -1,5 +1,3 @@
-<p align="center"><a href="https://x.com/dummerspast39"><img src="docs/images/model-picker-warning.svg?v=4" width="960" alt="Bug support: @dummerspast39" /></a></p>
-
 <p align="center"><img src="docs/images/readme-hero.svg?v=2" width="960" alt="Turn ChatGPT into Codex-style local coding. Chat On Steroids: Your files. Your terminal. Your ChatGPT plan." /></p>
 
 <p align="center">
