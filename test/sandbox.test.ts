@@ -44,6 +44,21 @@ afterAll(async () => {
 });
 
 describe('virtual paths embedded in shell text', () => {
+  it('does not reject an approved native POSIX spelling that collides with a virtual alias', () => {
+    const nativeRoots = [{ name: 'users', path: '/Users' }];
+    expect(strayVirtualPath('test -d /Users', nativeRoots)).toBeNull();
+    expect(strayVirtualPath("os.scandir('/Users')", nativeRoots)).toBeNull();
+    expect(strayVirtualPath('cat /Users/example/file.txt', nativeRoots)).toBeNull();
+    expect(strayVirtualPath('cat /users/example/file.txt', nativeRoots)).toBe('/users/example/file.txt');
+    expect(strayVirtualPath('cat /Users/file.txt /users/file.txt', nativeRoots)).toBe('/users/file.txt');
+  });
+
+  it('does not confuse a native root prefix or Windows drive path with a matching POSIX root', () => {
+    expect(strayVirtualPath('cat /Users/file.txt', [{ name: 'users', path: '/User' }])).toBe('/Users/file.txt');
+    expect(strayVirtualPath('cat /Users/file.txt', [{ name: 'users', path: 'C:\\Users' }])).toBe('/Users/file.txt');
+    expect(strayVirtualPath('cat /project/file.txt', [{ name: 'project', path: '/Users/project' }])).toBe('/project/file.txt');
+  });
+
   it('finds only approved virtual roots at token boundaries', () => {
     expect(strayVirtualPath('Get-Content /project/sub/nested.txt', roots)).toBe('/project/sub/nested.txt');
     expect(strayVirtualPath("Get-Content '/project/file.txt'", roots)).toBe('/project/file.txt');

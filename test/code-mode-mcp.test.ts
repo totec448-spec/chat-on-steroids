@@ -40,6 +40,28 @@ async function identity() {
 const call = (requestId: string | undefined, code: string) => rpc('tools/call', { name: 'exec', arguments: { code } }, requestId);
 const text = (response: any) => response.result.content.filter((item: any) => item.type === 'text').map((item: any) => item.text).join('\n');
 
+it('delivers one recovered-identity notice on the real structured MCP wire after a refused plan update', async () => {
+  const requestId = `wfr_${randomUUID().replaceAll('-', '')}`;
+  const rejected = await rpc('tools/call', { name: 'update_plan', arguments: { plan: [{ step: 'Verify recovery', status: 'in_progress' }] } }, requestId);
+  expect(rejected.result.isError).toBe(true);
+  expect(text(rejected)).toContain('Exact chat identity is required');
+  const conversationId = randomUUID();
+  const session = await createSession({ conversationId, title: 'Identity recovery wire' });
+  observeRequestCorrelation({ requestId, conversationId, sessionId: session.id, messageId: randomUUID(), tool: 'update_plan', observedAt: Date.now() });
+  vi.spyOn(unifiedExecManager, 'execCommand').mockResolvedValue({ chunkId: 'fixture', wallTimeMs: 1,
+    rawOutput: Buffer.from('command output'), truncationPolicy: { kind: 'tokens', tokens: 1000 },
+    maxOutputTokens: undefined, processId: null, exitCode: 0, originalTokenCount: 2, outputOmittedBytes: null });
+  const send = () => rpc('tools/call', { name: 'exec_command', arguments: { cmd: 'echo fixture', workdir: '/workspace' } }, requestId);
+  const recovered = await send();
+  expect(recovered.result.isError, text(recovered)).not.toBe(true);
+  expect(recovered.result.structuredContent.output).toBe('command output');
+  expect(recovered.result.structuredContent.supplemental_context).toContain('Earlier update_plan calls were refused');
+  expect(text(recovered).match(/--- Identity recovered ---/g)).toHaveLength(1);
+  expect(text(await send())).not.toContain('Identity recovered');
+  const recorded = (await readEvents(session.id)).filter(event => event.kind === 'tool_call' && event.call.tool === 'exec_command');
+  expect(JSON.stringify(recorded)).toContain('Identity recovered');
+});
+
 it.each(['exec_command', 'write_stdin'] as const)('delivers terminal corrections through the actual %s structured wire without changing process output', async name => {
   const who = await identity();
   const processId = 739100;

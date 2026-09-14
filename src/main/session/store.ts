@@ -2228,6 +2228,23 @@ export async function getSession(id: string): Promise<SessionSummary | null> {
   return summary ? { ...summary } : null;
 }
 
+/** Positive absence for retiring an exact delivered receipt, never corrupt metadata. */
+export async function sessionDirectoryMissing(id: string): Promise<boolean> {
+  assertSessionId(id);
+  const dir = sessionDir(id);
+  if (open.has(id) || opening.has(id)) return false;
+  try {
+    await fs.lstat(dir);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+  }
+  // An unavailable history root is not evidence that the user removed this session.
+  try {
+    return (await fs.stat(root)).isDirectory() && !open.has(id) && !opening.has(id);
+  } catch { return false; }
+}
+
 /** A plan is one replaceable session document, not another execution queue. */
 async function readPlanFile(id: string): Promise<AgentPlan | null> {
   let handle;

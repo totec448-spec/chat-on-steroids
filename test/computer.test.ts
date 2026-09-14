@@ -248,14 +248,24 @@ describe.runIf(IS_WINDOWS)('desktop helper', () => {
     for (const element of state.elements) {
       if (!element.imageBounds || !element.imageCenter) continue;
       checked++;
-      // Recompute the mapping from the screenshot that came back with these elements.
-      // Any other frame's region or scale gives different numbers.
-      expect(element.imageBounds.x).toBe(Math.round((element.bounds.x - shot.region.x) * shot.width / shot.region.width));
-      expect(element.imageBounds.y).toBe(Math.round((element.bounds.y - shot.region.y) * shot.height / shot.region.height));
-      expect(element.imageBounds.x + element.imageBounds.width).toBe(Math.round((element.bounds.x + element.bounds.width - shot.region.x) * shot.width / shot.region.width));
-      expect(element.imageCenter.x).toBe(
-        Math.min(element.imageBounds.x + element.imageBounds.width - 1, Math.round(element.imageBounds.x + element.imageBounds.width / 2))
-      );
+      // Recompute every edge from the screenshot returned with these elements. This keeps the
+      // assertion independent of both the scalar `scale` and the imageBounds values under test.
+      const expectedLeft = Math.round(((element.bounds.x - shot.region.x) * shot.width) / shot.region.width);
+      const expectedTop = Math.round(((element.bounds.y - shot.region.y) * shot.height) / shot.region.height);
+      const expectedRight = Math.round(((element.bounds.x + element.bounds.width - shot.region.x) * shot.width) / shot.region.width);
+      const expectedBottom = Math.round(((element.bounds.y + element.bounds.height - shot.region.y) * shot.height) / shot.region.height);
+      expect(element.imageBounds.x).toBe(expectedLeft);
+      expect(element.imageBounds.y).toBe(expectedTop);
+      expect(element.imageBounds.width).toBe(expectedRight - expectedLeft);
+      expect(element.imageBounds.height).toBe(expectedBottom - expectedTop);
+      if (expectedRight > expectedLeft && expectedBottom > expectedTop) {
+        expect(element.imageCenter.x).toBe(
+          Math.min(expectedRight - 1, Math.round((expectedLeft + expectedRight) / 2))
+        );
+        expect(element.imageCenter.y).toBe(
+          Math.min(expectedBottom - 1, Math.round((expectedTop + expectedBottom) / 2))
+        );
+      }
       expect(element.imageBounds.x + element.imageBounds.width).toBeLessThanOrEqual(shot.width);
       expect(element.imageBounds.y + element.imageBounds.height).toBeLessThanOrEqual(shot.height);
     }

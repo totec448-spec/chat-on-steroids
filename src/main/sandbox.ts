@@ -459,10 +459,10 @@ export async function validateNewRoot(folderPath: string, existing: readonly Roo
 /**
  * A virtual path written inside a shell command, which nothing will translate.
  *
- * `exec_command` resolves `cwd` and hands `cmd` to PowerShell verbatim — it has to, since
+ * `exec_command` resolves `cwd` and hands `cmd` to the shell verbatim — it has to, since
  * a command is a program and not a path, and rewriting text inside one would corrupt
  * quoting, regexes and URLs the moment it guessed wrong. But every other field of every
- * other tool takes virtual paths, and the sandbox refuses native ones outright, so the
+ * other tool takes virtual paths as well as approved native paths, so the
  * model is taught exactly one path dialect and then meets one field that does not speak
  * it. Path-taking fields can normalize a native path, but command text is an opaque program
  * and cannot be rewritten safely. What the model wrote was `/project/example/...`, and PowerShell reads a leading
@@ -470,8 +470,9 @@ export async function validateNewRoot(folderPath: string, existing: readonly Roo
  * exist, and failed in a way that looks like a missing folder rather than a wrong dialect.
  *
  * So the one field that cannot translate says so instead of running. Only a `/name/…`
- * whose first segment is an approved root is claimed — that is the form that is certainly
- * a virtual path and certainly wrong here, while `de/example/doppel` inside a regex or
+ * whose first segment is an approved root is claimed, unless it also spells an approved
+ * native POSIX path. This is a command diagnostic, not filesystem authorization.
+ * `de/example/doppel` inside a regex or
  * `https://host/example` are left alone because neither starts at a boundary a virtual path
  * can start at.
  */
@@ -484,7 +485,16 @@ export function strayVirtualPath(text: string, roots: readonly Root[]): string |
   for (let match = candidate.exec(text); match; match = candidate.exec(text)) {
     const found = match[2]!;
     const first = found.slice(1).split('/')[0]!.toLowerCase();
-    if (names.has(first)) return found;
+    if (!names.has(first)) continue;
+    // Root paths carry the native dialect. A POSIX /Users root may have the alias
+    // "users"; that must not make its real spelling virtual-only. Keep exact case
+    // and a segment boundary, and never reinterpret a Windows drive-rooted path.
+    const native = roots.some(root => {
+      if (!path.posix.isAbsolute(root.path)) return false;
+      const prefix = root.path.replace(/\/+$/, '');
+      return found === prefix || found.startsWith(`${prefix}/`);
+    });
+    if (!native) return found;
   }
   return null;
 }

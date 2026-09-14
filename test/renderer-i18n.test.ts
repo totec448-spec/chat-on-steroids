@@ -86,6 +86,7 @@ describe('Chinese app interface', () => {
     const first = await import('../src/renderer/i18n.js');
     first.initLanguage();
     const node = document.createElement('div');
+    document.body.append(node);
     first.ui(node, 'textContent', () => first.t('New chat'));
     node.textContent = 'User title — 保留原文';
     first.setLanguage('zh-CN');
@@ -97,6 +98,36 @@ describe('Chinese app interface', () => {
     expect(next.t('not in the catalog')).toBe('not in the catalog');
     expect(next.t('__proto__')).toBe('__proto__');
     expect(next.t('toString')).toBe('toString');
+  });
+
+  it('only refreshes mounted bindings after repeated row replacement, including hidden labels and text nodes', async () => {
+    const { ui, uiText, t, setLanguage } = await import('../src/renderer/i18n.js');
+    const pane = document.createElement('div');
+    pane.hidden = true;
+    document.body.append(pane);
+    const retiredReads = vi.fn(() => t('Settings'));
+    const retired: Node[] = [];
+    for (let i = 0; i < 1024; i++) {
+      const label = ui(document.createElement('span'), 'textContent', retiredReads);
+      pane.replaceChildren(label);
+      retired.push(label);
+    }
+    const live = ui(document.createElement('button'), 'title', () => t('Settings'));
+    const text = uiText(() => t('Copy'));
+    live.append(text);
+    pane.replaceChildren(live);
+    retiredReads.mockClear();
+    for (const locale of ['zh-CN', 'en', 'zh-CN'] as const) {
+      setLanguage(locale);
+      expect(live.title).toBe(locale === 'zh-CN' ? '设置' : 'Settings');
+      expect(text.textContent).toBe(locale === 'zh-CN' ? '复制' : 'Copy');
+      expect(live.firstChild).toBe(text);
+    }
+    expect(retiredReads).not.toHaveBeenCalled();
+    expect(retired).toHaveLength(1024);
+    const fresh = ui(document.createElement('span'), 'textContent', () => t('Settings'));
+    pane.append(fresh);
+    expect(fresh.textContent).toBe('设置');
   });
 
   it('translates plan chrome while preserving model-authored headlines and details', async () => {

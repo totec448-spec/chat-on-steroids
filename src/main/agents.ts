@@ -127,12 +127,12 @@ export class AgentsBusyError extends AgentError {
  * may append the current recovery status; the refusal itself only describes this operation.
  */
 export class IdentityLostError extends AgentError {
-  constructor() {
+  constructor(message?: string) {
     super(
-      'WORKER_IDENTITY_LOST: Chat On Steroids could not tell which conversation this call came from, so it cannot ' +
+      message ?? ('WORKER_IDENTITY_LOST: Chat On Steroids could not tell which conversation this call came from, so it cannot ' +
         'act on the run from here. No agent operation was performed. Wait briefly and retry this operation once. ' +
         'If it is still refused, preserve your result in the chat and report that delivery is unconfirmed; ' +
-        'do not claim the message or finish report reached its recipient.'
+        'do not claim the message or finish report reached its recipient.')
     );
   }
 }
@@ -1284,7 +1284,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
 
   const conversationId = input.caller.conversationId ?? null;
   if (!conversationId) {
-    throw new AgentError(
+    throw new IdentityLostError(
       'UNIDENTIFIED_CALLER: this app could not prove which ChatGPT conversation this call came from, so it will not ' +
         'make this chat the prime agent of a run. No workers were created. The paired browser extension has to be ' +
         'connected and this conversation has to be showing its connector activity; wait a moment and call ' +
