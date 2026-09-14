@@ -1076,6 +1076,13 @@ interface SpawnOptions {
   deferDelivery?: boolean;
   /** Internal half of stageSpawn(): hide new topology from ordinary publication until commit. */
   stageTopology?: boolean;
+  /**
+   * Signed external-authority fence: require the broker's deterministic next worker id to equal
+   * this exact id before creating anything. Ordinary `agents spawn` never supplies this.
+   */
+  expectedWorkerId?: string;
+  /** Preserve the exact task bytes after validating they contain non-whitespace content. */
+  preserveTask?: boolean;
 }
 
 function settleSpawnStage(stage: SpawnStageState, accepted: boolean): void {
@@ -1195,6 +1202,37 @@ function validateWorkerModel(index: number, model: string | null, effort: Reason
  */
 export function stageSpawn(input: SpawnInput): StagedSpawn {
   const result = spawn(input, { deferDelivery: true, stageTopology: true });
+  return stagedSpawnResult(result);
+}
+
+/**
+ * V2 remote-steering seam: stage exactly ONE worker only when the broker itself would assign
+ * the signed future worker id. This does not create a second spawn implementation and does not
+ * let an external caller pick arbitrary broker ids: a stale/occupied/skipped id refuses before
+ * topology mutation. Publication still requires the caller to cross the normal durable barrier
+ * and commit, then explicitly request the browser bootstrap.
+ */
+export function stageExpectedSpawn(input: SpawnInput, expectedWorkerId: string, expectedRunId: string): StagedSpawn {
+  if (input.workers.length !== 1) {
+    throw new AgentError('REMOTE_SPAWN_ONE_WORKER_ONLY: a signed remote spawn may create exactly one worker.');
+  }
+  const conversationId = input.caller.conversationId ?? null;
+  if (!conversationId) {
+    throw new AgentError('UNIDENTIFIED_CALLER: a signed remote spawn requires the exact existing prime conversation.');
+  }
+  if (currentRunId(conversationId) !== expectedRunId) {
+    throw new AgentError('RUN_ID_MISMATCH: the prime is not bound to the exact run named by this signed spawn.');
+  }
+  const result = spawn(input, {
+    deferDelivery: true,
+    stageTopology: true,
+    expectedWorkerId,
+    preserveTask: true
+  });
+  return stagedSpawnResult(result);
+}
+
+function stagedSpawnResult(result: SpawnResult): StagedSpawn {
   const owner = runs.get(result.runId);
   const stage = owner ? activeSpawnStages.get(owner) : undefined;
   // An exact retry can match workers that were already accepted earlier. That is not a new
@@ -1265,8 +1303,9 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
 
   const observedModels = getChatModels().models;
   const planned = input.workers.map((worker, index) => {
-    const task = worker.task.trim();
-    if (!task) throw new AgentError(`Worker ${index + 1} has no task. Every worker needs one.`);
+    const trimmedTask = worker.task.trim();
+    if (!trimmedTask) throw new AgentError(`Worker ${index + 1} has no task. Every worker needs one.`);
+    const task = options.preserveTask ? worker.task : trimmedTask;
     if (task.length > MAX_TASK_CHARS) throw new AgentError(`Worker ${index + 1}'s task is too long`);
     const label = worker.label?.trim() ?? '';
     if (label.length > MAX_LABEL_CHARS) {
@@ -1347,7 +1386,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
   // slot-holding/in flight. Once a worker has stopped and become part of durable history,
   // `spawn` means exactly what it says: create a fresh worker. Reusing an old sleeper is an
   // explicit `message` operation, never an implicit side effect of another spawn.
-  const repeat = matchExistingRequest(planned, live);
+  const repeat = options.expectedWorkerId ? null : matchExistingRequest(planned, live);
   if (repeat) {
     const runId = activeRun.runId;
     if (!options.deferDelivery) requestWorkerBootstraps(repeat.map((agent) => agent.info.id), run.runId);
@@ -1371,6 +1410,13 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
   for (let n = 1; ids.length < planned.length; n++) {
     const id = `worker-${n}`;
     if (!activeRun.agents.has(id)) ids.push(id);
+  }
+  if (options.expectedWorkerId !== undefined && ids[0] !== options.expectedWorkerId) {
+    if (resumedDormant) parkRun(run, 'a signed expected-id spawn was rejected before changing its dormant history');
+    else if (createdFreshRun) runs.delete(run.runId);
+    throw new AgentError(
+      `EXPECTED_WORKER_ID_MISMATCH: the signed operation names ${options.expectedWorkerId}, but the broker's next deterministic worker id is ${ids[0] ?? 'unavailable'}. Nothing was created.`
+    );
   }
 
   const created: AgentInfo[] = [];

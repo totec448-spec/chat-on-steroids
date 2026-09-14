@@ -273,7 +273,7 @@
   "Remote steering": "远程控制",
   "No key pinned. Paste the public key Command Center shows, check its fingerprint, then pin it.": "尚未固定密钥。请粘贴 Command Center 显示的公钥，核对其指纹，然后固定该密钥。",
   "Accept signed remote steering": "接受已签名的远程控制",
-  "Off by default. Accepts only short-lived signed STATUS and MESSAGE operations for an exact existing run; ordinary agent identity checks stay unchanged.": "默认关闭。仅接受针对一个明确现有运行的短时已签名 STATUS 和 MESSAGE 操作；普通智能体身份检查保持不变。",
+  "Off by default. Accepts only short-lived Command Center-signed remote-steering operations: V1 STATUS/MESSAGE and explicit V2 STATUS/MESSAGE/SPAWN for an exact run and allowlist; ordinary agent identity checks stay unchanged.": "默认关闭。仅接受由 Command Center 签名的短时远程控制操作：V1 的 STATUS/MESSAGE，以及针对明确运行和允许列表显式授权的 V2 STATUS/MESSAGE/SPAWN；普通智能体身份检查保持不变。",
   "Command Center Ed25519 public key": "Command Center Ed25519 公钥",
   "Check fingerprint": "检查指纹",
   "Pin key": "固定密钥",

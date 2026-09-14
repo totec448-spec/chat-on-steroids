@@ -1082,7 +1082,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
 
   // ------------------------------------------------------- remote steering
   //
-  // Gated on the agents surface as well as its own switch. Both of its actions are about a
+  // Gated on the agents surface as well as its own switch. Every versioned action is about a
   // worker run, so an install with multi-agent off must not meet worker vocabulary here —
   // and a signed envelope for a run that cannot exist authorizes nothing anyway.
   if (reg.remoteSteeringToolsExposed && reg.agentToolsExposed) registerRemoteSteeringTool(reg);
@@ -1569,9 +1569,10 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
  * for ordinary tools. The signed handler below is the first code allowed to decide whether a
  * relay has authority or to touch the exact signed run.
  *
- * The whole verify → replay → authorize → remeasure → claim → deliver transaction belongs to
- * `remote-steering.ts`. This function is the schema, the feature switch and the projection
- * back into an MCP result.
+ * The whole verify → replay → authorize → claim → broker transaction belongs to
+ * `remote-steering.ts`. V1 remains STATUS/MESSAGE. V2 adds exactly one signed SPAWN of one
+ * exact future worker id and one exact task; it still grants no caller identity. This function
+ * is only the envelope transport, feature switch and minimized projection back to MCP.
  */
 function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
   reg.register(
@@ -1581,8 +1582,9 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
       description:
         'Relay one Command Center signed operation envelope, verbatim. The user minted it at their PC; ' +
         'pass its exact JSON text. It is not an identity and grants nothing beyond the single act it already names, ' +
-        'once, inside its own short window: status returns that one run’s worker ids and states; message delivers its ' +
-        'own signed text to the one worker its lease allows. Relaying the same envelope twice repeats nothing. ' +
+        'once, inside its own short window: V1 supports status and message; V2 can additionally spawn exactly one ' +
+        'signed future worker id with its signed task, using app-configured worker model/reasoning defaults. ' +
+        'Relaying the same envelope twice repeats nothing. ' +
         'Never edit, re-sign, summarize or construct one — an altered envelope is refused.',
       inputSchema: z
         .object({
@@ -1609,6 +1611,8 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
               ? 'Already carried out. This is the recorded result of that exact operation; nothing was repeated.'
               : outcome.action === 'MESSAGE'
                 ? `Delivered to ${outcome.delivered?.targetWorkerId ?? 'the named worker'}${outcome.delivered?.waking ? ', which was asleep and is being woken in its existing chat' : ''}.`
+                : outcome.action === 'SPAWN'
+                  ? `Created ${outcome.spawned?.workerId ?? 'the signed worker'}; its worker chat is being opened through the ordinary broker path.`
                 : 'Read the signed run’s current state.'
             : `Refused: ${outcome.reason}.`;
         return {
@@ -1641,6 +1645,14 @@ function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
                   message_sha256: outcome.delivered.messageSha256,
                   message_length: outcome.delivered.messageLength,
                   waking: outcome.delivered.waking
+                }
+              : null,
+            spawned: outcome.spawned
+              ? {
+                  worker_id: outcome.spawned.workerId,
+                  state: outcome.spawned.state,
+                  task_sha256: outcome.spawned.taskSha256,
+                  task_length: outcome.spawned.taskLength
                 }
               : null,
             run: outcome.run

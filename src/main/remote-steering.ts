@@ -2,11 +2,11 @@
  * The verifier/broker half of Nexora remote steering.
  *
  * WHAT THIS IS. Command Center, attended on this PC, mints a signed
- * `cc_remote_steering_operation_envelope_v1`. The operator hands that envelope to an
+ * V1 or V2 remote-steering operation envelope. The operator hands that envelope to an
  * unattributed mobile/ChatGPT turn, which relays it verbatim into the `remote_steering` MCP
  * tool. This module decides whether the document is authentic, what exactly it authorizes,
- * whether it has already been carried out, and — for the two actions in the closed V1 set —
- * carries it out against the existing multi-agent broker.
+ * whether it has already been carried out, and carries the closed action through the existing
+ * multi-agent broker. V1 remains MESSAGE/STATUS; V2 adds only one-worker SPAWN.
  *
  * WHAT THIS IS NOT. It is not a caller identity and it does not create one. The ordinary
  * `agents` surface keeps requiring the exact caller conversation; an identity-lost ordinary
@@ -36,8 +36,10 @@
  *     `persistCriticalSwarmNow()` → commit → `requestWorkerRevivals()` transaction the prime
  *     itself uses, with the same slot reservation, the same at-least-once inbox, the same
  *     revival/wake custody and the same context-ceiling remeasurement. There is no second
- *     delivery path, and nothing here can spawn, finish, change a model or configuration,
- *     run a shell command or reach a provider.
+ *     delivery path. V2 `SPAWN` likewise uses the broker's staged spawn → durable barrier →
+ *     commit → browser-bootstrap transaction, with an exact signed future worker-id fence.
+ *     Nothing here can finish, change a model/reasoning setting, run a shell command or reach
+ *     a provider.
  *
  * NO LISTENER. This module owns no socket, no daemon, no watcher and no poller. It is
  * reached only when the existing Core MCP surface dispatches a `remote_steering` tool call.
@@ -53,7 +55,9 @@ import {
   activeRunIds,
   persistCriticalSwarmNow,
   primeConversation,
+  requestWorkerBootstraps,
   requestWorkerRevivals,
+  stageExpectedSpawn,
   stageMessages,
   swarmState,
   type Caller
@@ -62,6 +66,7 @@ import { getConfig } from './config.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { logInfo, logWarn } from './logger.js';
 import {
+  REMOTE_STEERING_ENVELOPE_CONTRACT,
   REMOTE_STEERING_VERIFIER_CONTRACT_VERSION,
   REMOTE_STEERING_VERIFIER_ID,
   canonicalLeaseBytes,
@@ -83,6 +88,21 @@ import {
   type RemoteSteeringOperationEnvelopeV1,
   type RemoteSteeringOperationV1
 } from './remote-steering-contract.js';
+import {
+  REMOTE_STEERING_ENVELOPE_CONTRACT_V2,
+  REMOTE_STEERING_VERIFIER_CONTRACT_VERSION_V2,
+  canonicalLeaseBytesV2,
+  canonicalOperationBytesV2,
+  remoteSteeringOperationDigestV2,
+  remoteSteeringOperationLeaseMismatchV2,
+  validateRemoteSteeringEnvelopeV2,
+  validateRemoteSteeringSignedLeaseV2,
+  validateRemoteSteeringSignedOperationV2,
+  type RemoteSteeringActionV2,
+  type RemoteSteeringLeaseV2,
+  type RemoteSteeringOperationEnvelopeV2,
+  type RemoteSteeringOperationV2
+} from './remote-steering-contract-v2.js';
 import { recordAgentMessage } from './session/recorder.js';
 
 // ---------------------------------------------------------------------------
@@ -170,6 +190,7 @@ export type RemoteSteeringRefusal =
   | 'REMOTE_STEERING_RUN_NOT_FOUND'
   | 'REMOTE_STEERING_WORKER_NOT_IN_RUN'
   | 'REMOTE_STEERING_DELIVERY_REFUSED'
+  | 'REMOTE_STEERING_SPAWN_REFUSED'
   | 'REMOTE_STEERING_RECEIPT_WRITE_FAILED'
   | 'REMOTE_STEERING_RECEIPT_STORE_FULL';
 
@@ -209,9 +230,24 @@ export interface RemoteSteeringDeliveryView {
   readonly waking: boolean;
 }
 
+/** `SPAWN`'s content-blind answer. The task is identified, never repeated. */
+export interface RemoteSteeringSpawnView {
+  readonly workerId: string;
+  readonly state: AgentState;
+  readonly taskSha256: string;
+  readonly taskLength: number;
+}
+
+type RemoteSteeringActionAny = RemoteSteeringAction | RemoteSteeringActionV2;
+type RemoteSteeringLeaseAny = RemoteSteeringLeaseV1 | RemoteSteeringLeaseV2;
+type RemoteSteeringOperationAny = RemoteSteeringOperationV1 | RemoteSteeringOperationV2;
+type RemoteSteeringEnvelopeAny = RemoteSteeringOperationEnvelopeV1 | RemoteSteeringOperationEnvelopeV2;
+
 export interface RemoteSteeringOutcome {
   readonly verifierId: typeof REMOTE_STEERING_VERIFIER_ID;
-  readonly verifierContractVersion: typeof REMOTE_STEERING_VERIFIER_CONTRACT_VERSION;
+  readonly verifierContractVersion:
+    | typeof REMOTE_STEERING_VERIFIER_CONTRACT_VERSION
+    | typeof REMOTE_STEERING_VERIFIER_CONTRACT_VERSION_V2;
   readonly status: 'accepted' | 'refused';
   readonly reason: RemoteSteeringRefusal | null;
   /** Bounded broker/verifier explanation. Never carries the message text. */
@@ -219,12 +255,13 @@ export interface RemoteSteeringOutcome {
   /** Null only when the document never parsed far enough to name an operation. */
   readonly operationId: string | null;
   readonly operationDigest: string | null;
-  readonly action: RemoteSteeringAction | null;
+  readonly action: RemoteSteeringActionAny | null;
   readonly runId: string | null;
   /** True when this exact operation had already been decided and nothing was repeated. */
   readonly replay: boolean;
   readonly decidedAt: string;
   readonly delivered: RemoteSteeringDeliveryView | null;
+  readonly spawned: RemoteSteeringSpawnView | null;
   readonly run: RemoteSteeringRunView | null;
 }
 
@@ -448,6 +485,28 @@ export async function unpinRemoteSteeringKey(): Promise<RemoteSteeringPinView> {
 // Verification.
 // ---------------------------------------------------------------------------
 
+function isV2Operation(operation: RemoteSteeringOperationAny): operation is RemoteSteeringOperationV2 {
+  return operation.contract === 'cc_remote_steering_operation_v2';
+}
+
+function isV2Lease(lease: RemoteSteeringLeaseAny): lease is RemoteSteeringLeaseV2 {
+  return lease.contract === 'cc_remote_steering_lease_v2';
+}
+
+function operationDigestAny(operation: RemoteSteeringOperationAny): string {
+  return isV2Operation(operation)
+    ? remoteSteeringOperationDigestV2(operation)
+    : remoteSteeringOperationDigest(operation);
+}
+
+function canonicalLeaseBytesAny(lease: RemoteSteeringLeaseAny): Buffer {
+  return isV2Lease(lease) ? canonicalLeaseBytesV2(lease) : canonicalLeaseBytes(lease);
+}
+
+function canonicalOperationBytesAny(operation: RemoteSteeringOperationAny): Buffer {
+  return isV2Operation(operation) ? canonicalOperationBytesV2(operation) : canonicalOperationBytes(operation);
+}
+
 function outcome(partial: Partial<RemoteSteeringOutcome> & { status: 'accepted' | 'refused' }): RemoteSteeringOutcome {
   return {
     verifierId: REMOTE_STEERING_VERIFIER_ID,
@@ -461,6 +520,7 @@ function outcome(partial: Partial<RemoteSteeringOutcome> & { status: 'accepted' 
     replay: false,
     decidedAt: new Date().toISOString(),
     delivered: null,
+    spawned: null,
     run: null,
     ...partial
   };
@@ -469,14 +529,15 @@ function outcome(partial: Partial<RemoteSteeringOutcome> & { status: 'accepted' 
 function refuse(
   reason: RemoteSteeringRefusal,
   detail: string | null,
-  operation?: RemoteSteeringOperationV1
+  operation?: RemoteSteeringOperationAny
 ): RemoteSteeringOutcome {
   return outcome({
     status: 'refused',
+    verifierContractVersion: operation?.verifierContractVersion ?? REMOTE_STEERING_VERIFIER_CONTRACT_VERSION,
     reason,
     detail,
     operationId: operation?.operationId ?? null,
-    operationDigest: operation ? remoteSteeringOperationDigest(operation) : null,
+    operationDigest: operation ? operationDigestAny(operation) : null,
     action: operation?.action ?? null,
     runId: operation?.runId ?? null
   });
@@ -494,26 +555,43 @@ function refuse(
  */
 function diagnose(
   parsed: unknown
-): { envelope: RemoteSteeringOperationEnvelopeV1 } | { reason: RemoteSteeringRefusal; detail: string | null } {
+): { envelope: RemoteSteeringEnvelopeAny } | { reason: RemoteSteeringRefusal; detail: string | null } {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { reason: 'REMOTE_STEERING_ENVELOPE_MALFORMED', detail: 'the envelope is not a JSON object' };
   }
   const record = parsed as Record<string, unknown>;
-  const lease = validateRemoteSteeringSignedLease(record['lease']);
+  const contract = record['contract'];
+  const v2 = contract === REMOTE_STEERING_ENVELOPE_CONTRACT_V2;
+  if (contract !== REMOTE_STEERING_ENVELOPE_CONTRACT && !v2) {
+    return { reason: 'REMOTE_STEERING_ENVELOPE_MALFORMED', detail: 'the envelope contract/version is not supported' };
+  }
+  const lease = v2
+    ? validateRemoteSteeringSignedLeaseV2(record['lease'])
+    : validateRemoteSteeringSignedLease(record['lease']);
   if (lease === null) {
     return { reason: 'REMOTE_STEERING_LEASE_MALFORMED', detail: 'the signed lease failed closed-schema validation' };
   }
-  const operation = validateRemoteSteeringSignedOperation(record['operation']);
+  const operation = v2
+    ? validateRemoteSteeringSignedOperationV2(record['operation'])
+    : validateRemoteSteeringSignedOperation(record['operation']);
   if (operation === null) {
     return {
       reason: 'REMOTE_STEERING_ENVELOPE_MALFORMED',
       detail: 'the signed operation failed closed-schema validation'
     };
   }
-  const mismatch = remoteSteeringOperationLeaseMismatch(operation.payload, lease.payload);
+  const mismatch = v2
+    ? remoteSteeringOperationLeaseMismatchV2(
+        operation.payload as RemoteSteeringOperationV2,
+        lease.payload as RemoteSteeringLeaseV2
+      )
+    : remoteSteeringOperationLeaseMismatch(
+        operation.payload as RemoteSteeringOperationV1,
+        lease.payload as RemoteSteeringLeaseV1
+      );
   if (mismatch !== null) return { reason: mismatch, detail: 'the operation is not authorized by its own lease' };
 
-  const envelope = validateRemoteSteeringEnvelope(parsed);
+  const envelope = v2 ? validateRemoteSteeringEnvelopeV2(parsed) : validateRemoteSteeringEnvelope(parsed);
   if (envelope === null) {
     return {
       reason: 'REMOTE_STEERING_ENVELOPE_MALFORMED',
@@ -524,9 +602,9 @@ function diagnose(
 }
 
 interface VerifiedEnvelope {
-  readonly envelope: RemoteSteeringOperationEnvelopeV1;
-  readonly lease: RemoteSteeringLeaseV1;
-  readonly operation: RemoteSteeringOperationV1;
+  readonly envelope: RemoteSteeringEnvelopeAny;
+  readonly lease: RemoteSteeringLeaseAny;
+  readonly operation: RemoteSteeringOperationAny;
   readonly operationDigest: string;
   readonly authorityEpoch: number;
 }
@@ -592,12 +670,12 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { refusa
       )
     };
   }
-  if (!verifyRemoteSteeringSignature(canonicalLeaseBytes(lease), envelope.lease.signature, pinned.publicKeySpkiBase64)) {
+  if (!verifyRemoteSteeringSignature(canonicalLeaseBytesAny(lease), envelope.lease.signature, pinned.publicKeySpkiBase64)) {
     return { refusal: refuse('REMOTE_STEERING_LEASE_SIGNATURE_INVALID', null, operation) };
   }
   if (
     !verifyRemoteSteeringSignature(
-      canonicalOperationBytes(operation),
+      canonicalOperationBytesAny(operation),
       envelope.operation.signature,
       pinned.publicKeySpkiBase64
     )
@@ -610,7 +688,7 @@ function verify(envelopeText: string): { verified: VerifiedEnvelope } | { refusa
       envelope,
       lease,
       operation,
-      operationDigest: remoteSteeringOperationDigest(operation),
+      operationDigest: operationDigestAny(operation),
       authorityEpoch
     }
   };
@@ -655,7 +733,7 @@ function replayVerdict(verified: VerifiedEnvelope): RemoteSteeringOutcome | null
   // The stored decision verbatim, including the moment it was made. Only the replay flag is
   // added, because "when this app decided" is part of the answer and inventing a fresh
   // timestamp would make a replay look like a second execution.
-  return { ...existing.outcome, replay: true };
+  return { ...existing.outcome, spawned: existing.outcome.spawned ?? null, replay: true };
 }
 
 /**
@@ -667,7 +745,7 @@ function replayVerdict(verified: VerifiedEnvelope): RemoteSteeringOutcome | null
  * rather than claim the operation was refused.
  */
 async function persistReceipt(
-  operation: RemoteSteeringOperationV1,
+  operation: RemoteSteeringOperationAny,
   digest: string,
   phase: 'claimed' | 'decided',
   decided: RemoteSteeringOutcome | null,
@@ -700,7 +778,7 @@ async function persistReceipt(
  * never resurrect a claim the caller was told had failed.
  */
 async function claimReceipt(
-  operation: RemoteSteeringOperationV1,
+  operation: RemoteSteeringOperationAny,
   digest: string,
   nowMs: number
 ): Promise<RemoteSteeringOutcome | null> {
@@ -726,7 +804,7 @@ async function claimReceipt(
         operation
       );
     }
-    return { ...previous.outcome, replay: true };
+    return { ...previous.outcome, spawned: previous.outcome.spawned ?? null, replay: true };
   }
   const result = await persistReceipt(operation, digest, 'claimed', null, nowMs);
   if (result.stored) return null;
@@ -749,7 +827,7 @@ async function claimReceipt(
  * the same envelope be attempted again after a restart, which is the opposite of one-shot.
  */
 async function settleWithoutEffect(
-  operation: RemoteSteeringOperationV1,
+  operation: RemoteSteeringOperationAny,
   digest: string,
   verdict: RemoteSteeringOutcome,
   nowMs: number
@@ -779,7 +857,7 @@ async function settleWithoutEffect(
  * than delivering a second time.
  */
 async function settleAfterEffect(
-  operation: RemoteSteeringOperationV1,
+  operation: RemoteSteeringOperationAny,
   digest: string,
   verdict: RemoteSteeringOutcome,
   nowMs: number
@@ -900,6 +978,7 @@ export async function steerRemotely(
     // which a crash could make a replay indeterminate.
     const accepted = outcome({
       status: 'accepted',
+      verifierContractVersion: operation.verifierContractVersion,
       operationId: operation.operationId,
       operationDigest,
       action: 'STATUS',
@@ -907,6 +986,25 @@ export async function steerRemotely(
       run: runView(operation.runId, lease.workerAllowlist)
     });
     return settleWithoutEffect(operation, operationDigest, accepted, nowMs);
+  }
+
+  if (operation.action === 'SPAWN') {
+    if (!isV2Operation(operation) || !isV2Lease(lease)) {
+      return settleWithoutEffect(
+        operation,
+        operationDigest,
+        refuse('REMOTE_STEERING_SPAWN_REFUSED', 'SPAWN is valid only inside the V2 signed protocol', operation),
+        nowMs
+      );
+    }
+    return spawnRemotely(
+      operation,
+      lease,
+      operationDigest,
+      primeConversationId,
+      verified.authorityEpoch,
+      nowMs
+    );
   }
 
   return deliver(
@@ -928,13 +1026,13 @@ export async function steerRemotely(
  * star topology, the route check, the per-recipient queue bound, the free-slot reservation
  * for a sleeping recipient, the durable acceptance barrier, the rollback on a failed write,
  * the browser revival custody and the at-least-once inbox all apply unchanged. What this
- * cannot do is anything that is not that one delivery: it cannot spawn, finish, clear, wake
- * by any other means, change a model or a setting, run a command or reach a provider,
- * because there is no code path here that calls one.
+ * cannot do is anything that is not that one delivery: V2 SPAWN has its own separately-signed
+ * branch below; MESSAGE cannot finish, clear, wake by any other means, change a model or a
+ * setting, run a command or reach a provider.
  */
 async function deliver(
-  operation: RemoteSteeringOperationV1,
-  lease: RemoteSteeringLeaseV1,
+  operation: RemoteSteeringOperationAny,
+  lease: RemoteSteeringLeaseAny,
   digest: string,
   primeConversationId: string,
   verifiedAuthorityEpoch: number,
@@ -1087,6 +1185,7 @@ async function deliver(
   const message = staged.messages[0];
   const accepted = outcome({
     status: 'accepted',
+    verifierContractVersion: operation.verifierContractVersion,
     operationId: operation.operationId,
     operationDigest: digest,
     action: 'MESSAGE',
@@ -1105,10 +1204,174 @@ async function deliver(
   return settleAfterEffect(operation, digest, accepted, nowMs);
 }
 
+/**
+ * V2 `SPAWN` — external representation of one exact prime spawn already authorized by the
+ * attended V2 lease and narrowed again by one signed operation.
+ *
+ * No remote chat becomes the prime. The signed run resolves to its real prime conversation,
+ * then the ordinary broker stages exactly one worker using that caller. The expected-id fence
+ * additionally requires the broker's own next deterministic worker id to equal the signed id;
+ * a stale or already-consumed authorization therefore cannot slide onto another slot.
+ *
+ * Publication follows the same safety ordering as local spawn: topology plan → critical durable
+ * barrier → commit → browser bootstrap. The operation receipt is claimed before the topology
+ * plan, so a crash can never make the same signed spawn safe to execute twice.
+ */
+async function spawnRemotely(
+  operation: RemoteSteeringOperationV2,
+  lease: RemoteSteeringLeaseV2,
+  digest: string,
+  primeConversationId: string,
+  verifiedAuthorityEpoch: number,
+  nowMs: number
+): Promise<RemoteSteeringOutcome> {
+  const target = operation.targetWorkerId;
+  const task = operation.spawnTaskText;
+  if (target === null || task === null || !lease.workerAllowlist.includes(target)) {
+    return settleWithoutEffect(
+      operation,
+      digest,
+      refuse('REMOTE_STEERING_WORKER_NOT_ALLOWLISTED', 'the V2 SPAWN names no allowlisted future worker', operation),
+      nowMs
+    );
+  }
+
+  const present = swarmState(operation.runId).agents.find((info) => info.id === target);
+  if (present) {
+    return settleWithoutEffect(
+      operation,
+      digest,
+      refuse(
+        'REMOTE_STEERING_SPAWN_REFUSED',
+        `${target} already exists in that run; a signed spawn never replaces, revives or retasks an existing worker`,
+        operation
+      ),
+      nowMs
+    );
+  }
+
+  if (!authorityStillLive(verifiedAuthorityEpoch, operation.signingKeyFingerprint)) {
+    return refuse(
+      'REMOTE_STEERING_DISABLED',
+      'remote-steering authority changed while this spawn was being checked; nothing was carried out',
+      operation
+    );
+  }
+
+  const claimFailure = await claimReceipt(operation, digest, nowMs);
+  if (claimFailure) return claimFailure;
+
+  if (!authorityStillLive(verifiedAuthorityEpoch, operation.signingKeyFingerprint)) {
+    return settleWithoutEffect(
+      operation,
+      digest,
+      refuse(
+        'REMOTE_STEERING_DISABLED',
+        'remote-steering authority was revoked before the spawn broker mutation; nothing was carried out',
+        operation
+      ),
+      nowMs
+    );
+  }
+
+  const caller: Caller = { conversationId: primeConversationId };
+  let staged: ReturnType<typeof stageExpectedSpawn>;
+  try {
+    staged = stageExpectedSpawn(
+      { caller, workers: [{ task }] },
+      target,
+      operation.runId
+    );
+  } catch (error) {
+    return settleWithoutEffect(
+      operation,
+      digest,
+      refuse('REMOTE_STEERING_SPAWN_REFUSED', brokerDetailOf(error, 'the broker refused the signed spawn'), operation),
+      nowMs
+    );
+  }
+
+  let durable = false;
+  let barrierError: unknown = null;
+  try {
+    durable = await persistCriticalSwarmNow();
+  } catch (error) {
+    barrierError = error;
+  }
+  if (!durable) {
+    staged.rollback();
+    return settleWithoutEffect(
+      operation,
+      digest,
+      refuse(
+        'REMOTE_STEERING_SPAWN_REFUSED',
+        barrierError
+          ? detailOf(barrierError, 'the spawn could not cross its durable acceptance barrier; no worker was published')
+          : 'the spawn could not cross its durable acceptance barrier; no worker was published',
+        operation
+      ),
+      nowMs
+    );
+  }
+
+  if (!authorityStillLive(verifiedAuthorityEpoch, operation.signingKeyFingerprint)) {
+    staged.rollback();
+    let rollbackDurable = false;
+    try {
+      rollbackDurable = await persistCriticalSwarmNow();
+    } catch {
+      rollbackDurable = false;
+    }
+    if (!rollbackDurable) {
+      return refuse(
+        'REMOTE_STEERING_OPERATION_INDETERMINATE',
+        'remote-steering authority was revoked during the durable spawn barrier and the rollback could not be proven durable; do not retry this operation id',
+        operation
+      );
+    }
+    return settleWithoutEffect(
+      operation,
+      digest,
+      refuse(
+        'REMOTE_STEERING_DISABLED',
+        'remote-steering authority was revoked before spawn publication; the staged worker was rolled back durably',
+        operation
+      ),
+      nowMs
+    );
+  }
+
+  staged.commit();
+  requestWorkerBootstraps(staged.created.map((worker) => worker.id), operation.runId);
+  const created = staged.created[0];
+  const accepted = outcome({
+    status: 'accepted',
+    verifierContractVersion: operation.verifierContractVersion,
+    operationId: operation.operationId,
+    operationDigest: digest,
+    action: 'SPAWN',
+    runId: operation.runId,
+    spawned: {
+      workerId: target,
+      state: created?.state ?? 'invited',
+      taskSha256: operation.spawnTaskSha256 ?? '',
+      taskLength: operation.spawnTaskLength ?? 0
+    }
+  });
+  logInfo(`remote steering: operation ${operation.operationId} spawned ${target} in run ${operation.runId}`);
+  return settleAfterEffect(operation, digest, accepted, nowMs);
+}
+
 /** Bounded, text-free-ish explanation. Broker refusals name ids and counts, never content. */
 function detailOf(error: unknown, fallback: string): string {
   const message = error instanceof AgentError || error instanceof Error ? error.message : String(error);
   return (message || fallback).slice(0, 300);
+}
+
+/** Broker errors may include local account-entitlement detail that an unattributed relay does not need. */
+function brokerDetailOf(error: unknown, fallback: string): string {
+  const detail = detailOf(error, fallback);
+  return detail.replace(/\.?\s*Observed model ids and reasoning:.*$/s, '').slice(0, 300);
 }
 
 /** Test seam: drops in-memory pin/receipt state without touching disk. */
