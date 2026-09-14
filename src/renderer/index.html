@@ -842,6 +842,35 @@
                     <button class="btn" id="swarmReset" type="button">Clear swarm</button>
                   </div>
                 </div>
+
+                <h2 class="settings-section-title">Remote steering</h2>
+                <div class="pane">
+                  <div class="field">
+                    <p class="hint" id="remoteSteeringStatus">
+                      No key pinned. Paste the public key Command Center shows, check its fingerprint, then pin it.
+                    </p>
+                  </div>
+
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Accept signed remote steering</b>
+                      <em>Off by default. Accepts only short-lived Command Center-signed remote-steering operations: V1 STATUS/MESSAGE and explicit V2 STATUS/MESSAGE/SPAWN for an exact run and allowlist; ordinary agent identity checks stay unchanged.</em>
+                    </span>
+                    <input id="remoteSteeringEnabled" type="checkbox" disabled />
+                  </label>
+
+                  <div class="field">
+                    <label for="remoteSteeringKey">Command Center Ed25519 public key</label>
+                    <textarea id="remoteSteeringKey" rows="4" spellcheck="false" autocomplete="off" placeholder="Paste the base64 SPKI public key shown by Command Center"></textarea>
+                    <p class="hint" id="remoteSteeringPreview"></p>
+                  </div>
+
+                  <div class="step-actions">
+                    <button class="btn" id="remoteSteeringCheck" type="button">Check fingerprint</button>
+                    <button class="btn primary" id="remoteSteeringPin" type="button">Pin key</button>
+                    <button class="btn" id="remoteSteeringUnpin" type="button" disabled>Unpin key</button>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>

@@ -121,6 +121,7 @@ import {
   type Caller
 } from '../agents.js';
 import { repairPrimeFromResumeShadow } from '../session/continuation.js';
+import { REMOTE_STEERING_MAX_ENVELOPE_CHARS, steerRemotely } from '../remote-steering.js';
 import {
   currentCall,
   currentCaller,
@@ -1078,6 +1079,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
   // ----------------------------------------------------------------- agents
 
   if (reg.agentToolsExposed) registerAgentsTool(reg);
+
+  // ------------------------------------------------------- remote steering
+  //
+  // Gated on the agents surface as well as its own switch. Every versioned action is about a
+  // worker run, so an install with multi-agent off must not meet worker vocabulary here —
+  // and a signed envelope for a run that cannot exist authorizes nothing anyway.
+  if (reg.remoteSteeringToolsExposed && reg.agentToolsExposed) registerRemoteSteeringTool(reg);
 }
 
 
@@ -1117,11 +1125,12 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
  * can wake a worker, is what makes the ceiling survive a crash rather than a restart quietly
  * handing back a worker the prime was already told was finished.
  */
-async function measureSleepingWorkers(caller: Caller): Promise<void> {
+async function measureSleepingWorkers(caller: Caller, onlyWorkerId?: string): Promise<void> {
   const state = swarmStateForCaller(caller);
   if (state.agents.length === 0) return;
   for (const info of state.agents) {
     if (info.role !== 'worker' || info.state !== 'sleeping' || !info.conversationId) continue;
+    if (onlyWorkerId && info.id !== onlyWorkerId) continue;
     const summary = await findSessionByConversation(info.conversationId, { requireUnique: true }).catch(() => null);
     if (summary) noteAgentContextTokens(info.conversationId, summary.contextTokens);
   }
@@ -1535,6 +1544,133 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         };
       });
     }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// remote_steering
+// ---------------------------------------------------------------------------
+
+/**
+ * The Command Center signed-operation bridge — a distinct authority, not an `agents` action.
+ *
+ * It is deliberately its own tool rather than a fifth action on `agents`, because it is the
+ * one thing in this connector whose authority does NOT come from caller identity. Every
+ * `agents` action resolves the exact ChatGPT conversation that made the call and refuses
+ * without it; this one resolves nothing, adopts no agent, and is expected to be called by an
+ * unattributed relay turn. Folding the two together would mean one schema where identity is
+ * sometimes required and sometimes not, which is exactly the ambiguity `agents` exists
+ * without.
+ *
+ * Nothing about the ordinary identity rules is relaxed to make room for it. Instead, the
+ * dispatcher gives this exact direct tool name an identity-neutral lane: it never adopts a
+ * caller, acknowledges/offers a caller inbox, changes worker liveness, or consults another
+ * chat's retired/dormant/blocked/superseded fences. Those rules remain byte-for-byte in force
+ * for ordinary tools. The signed handler below is the first code allowed to decide whether a
+ * relay has authority or to touch the exact signed run.
+ *
+ * The whole verify → replay → authorize → claim → broker transaction belongs to
+ * `remote-steering.ts`. V1 remains STATUS/MESSAGE. V2 adds exactly one signed SPAWN of one
+ * exact future worker id and one exact task; it still grants no caller identity. This function
+ * is only the envelope transport, feature switch and minimized projection back to MCP.
+ */
+function registerRemoteSteeringTool(reg: SurfaceRegistrar): void {
+  reg.register(
+    'remote_steering',
+    {
+      title: 'Relay a signed remote-steering envelope',
+      description:
+        'Relay one Command Center signed operation envelope, verbatim. The user minted it at their PC; ' +
+        'pass its exact JSON text. It is not an identity and grants nothing beyond the single act it already names, ' +
+        'once, inside its own short window: V1 supports status and message; V2 can additionally spawn exactly one ' +
+        'signed future worker id with its signed task, using app-configured worker model/reasoning defaults. ' +
+        'Relaying the same envelope twice repeats nothing. ' +
+        'Never edit, re-sign, summarize or construct one — an altered envelope is refused.',
+      inputSchema: z
+        .object({
+          envelope: z
+            .string()
+            .min(1)
+            .max(REMOTE_STEERING_MAX_ENVELOPE_CHARS)
+            .describe('The envelope JSON exactly as the user supplied it.')
+        })
+        .strict(),
+      // Idempotent because the durable receipt makes it so, not because the action is a read:
+      // a repeated envelope returns the first decision and delivers nothing again.
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+    },
+    async (input) =>
+      guard('remote_steering', async () => {
+        if (!reg.remoteSteeringToolsLive) {
+          return reg.featureDisabled('Remote steering', 'Remote steering (Command Center bridge)');
+        }
+        const outcome = await steerRemotely(input.envelope, { measureSleepingWorkers });
+        const headline =
+          outcome.status === 'accepted'
+            ? outcome.replay
+              ? 'Already carried out. This is the recorded result of that exact operation; nothing was repeated.'
+              : outcome.action === 'MESSAGE'
+                ? `Delivered to ${outcome.delivered?.targetWorkerId ?? 'the named worker'}${outcome.delivered?.waking ? ', which was asleep and is being woken in its existing chat' : ''}.`
+                : outcome.action === 'SPAWN'
+                  ? `Created ${outcome.spawned?.workerId ?? 'the signed worker'}; its worker chat is being opened through the ordinary broker path.`
+                : 'Read the signed run’s current state.'
+            : `Refused: ${outcome.reason}.`;
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text:
+                `${headline}\n` +
+                (outcome.detail ? `${outcome.detail}\n` : '') +
+                'Report this result to the user as it stands. Do not retry, edit or rebuild the envelope; ' +
+                'a refused or expired operation needs a new one minted at their PC.'
+            }
+          ],
+          structuredContent: {
+            verifier: outcome.verifierId,
+            verifier_contract_version: outcome.verifierContractVersion,
+            status: outcome.status,
+            reason: outcome.reason,
+            detail: outcome.detail,
+            operation_id: outcome.operationId,
+            operation_digest: outcome.operationDigest,
+            action: outcome.action,
+            run_id: outcome.runId,
+            replay: outcome.replay,
+            decided_at: outcome.decidedAt,
+            delivered: outcome.delivered
+              ? {
+                  target_worker_id: outcome.delivered.targetWorkerId,
+                  message_id: outcome.delivered.messageId,
+                  message_sha256: outcome.delivered.messageSha256,
+                  message_length: outcome.delivered.messageLength,
+                  waking: outcome.delivered.waking
+                }
+              : null,
+            spawned: outcome.spawned
+              ? {
+                  worker_id: outcome.spawned.workerId,
+                  state: outcome.spawned.state,
+                  task_sha256: outcome.spawned.taskSha256,
+                  task_length: outcome.spawned.taskLength
+                }
+              : null,
+            run: outcome.run
+                ? {
+                  run_id: outcome.run.runId,
+                  agents: outcome.run.agents.map((info) => ({
+                    id: info.id,
+                    role: info.role,
+                    state: info.state,
+                    revivable: info.revivable,
+                    waiting: info.waiting
+                  }))
+                }
+              : null
+          },
+          ...(outcome.status === 'refused' ? { isError: true } : {})
+        };
+      })
   );
 }
 

@@ -80,6 +80,7 @@ const {
   stageFinishAgent,
   stageWorkerConversationFinish,
   stageMessages,
+  stageExpectedSpawn,
   stageSpawn,
   snapshotSwarm,
   spawn,
@@ -2139,6 +2140,46 @@ describe('restart', () => {
     expect(swarmState().agents.some((entry) => entry.id === 'worker-2')).toBe(false);
     expect(snapshotSwarm()?.agents.map((entry) => entry.info.id)).toEqual(before?.agents.map((entry) => entry.info.id));
     expect(pendingWorkerSpawns().map((entry) => entry.id)).toEqual(['worker-1']);
+  });
+
+  it('stages a signed expected-id spawn only when that id is the broker deterministic next worker', () => {
+    spawn({ workers: [{ task: 'accepted worker' }], caller: prime });
+    const runId = currentRunId(prime.conversationId ?? undefined);
+    expect(runId).toBeTruthy();
+    const before = snapshotSwarm();
+
+    const staged = stageExpectedSpawn(
+      { workers: [{ task: 'remote bounded work' }], caller: prime },
+      'worker-2',
+      runId!
+    );
+    expect(staged.created.map((entry) => entry.id)).toEqual(['worker-2']);
+    expect(snapshotSwarm()?.agents.some((entry) => entry.info.id === 'worker-2')).toBe(false);
+    staged.rollback();
+    expect(snapshotSwarm()?.agents.map((entry) => entry.info.id)).toEqual(before?.agents.map((entry) => entry.info.id));
+
+    expect(() => stageExpectedSpawn(
+      { workers: [{ task: 'wrong signed slot' }], caller: prime },
+      'worker-3',
+      runId!
+    )).toThrow(/EXPECTED_WORKER_ID_MISMATCH/);
+    expect(snapshotSwarm()?.agents.some((entry) => entry.info.id === 'worker-3')).toBe(false);
+  });
+
+  it('signed expected-id spawn is one worker only and never folds onto an existing repeated task', () => {
+    spawn({ workers: [{ label: 'W', task: 'same task' }], caller: prime });
+    const runId = currentRunId(prime.conversationId ?? undefined);
+    expect(runId).toBeTruthy();
+    expect(() => stageExpectedSpawn(
+      { workers: [{ label: 'W', task: 'same task' }], caller: prime },
+      'worker-1',
+      runId!
+    )).toThrow(/EXPECTED_WORKER_ID_MISMATCH/);
+    expect(() => stageExpectedSpawn(
+      { workers: [{ task: 'one' }, { task: 'two' }], caller: prime },
+      'worker-2',
+      runId!
+    )).toThrow(/ONE_WORKER_ONLY/);
   });
 
   it('carries the run, its bindings and its in-flight messages through a snapshot', () => {

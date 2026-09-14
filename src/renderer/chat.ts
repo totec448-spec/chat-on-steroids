@@ -48,7 +48,12 @@ import {
   DEFAULT_GOAL_SYSTEM_PROMPT,
   MAX_GOAL_SYSTEM_PROMPT_CHARS
 } from '../shared/goal.js';
-import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
+import {
+  browserExtensionRequired,
+  type AppState,
+  type Config,
+  type RemoteSteeringPinView
+} from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, el, filterSettingsSections, icon, run, toast } from './dom.js';
 
 const api = window.api;
@@ -96,10 +101,13 @@ const UNATTRIBUTED = '\u0000unattributed';
 let agentFilter: string | null = null;
 /** The session the current filter was chosen in; selecting a different one resets it. */
 let filterFor: string | null = null;
+let remoteSteeringPreviewedKey: string | null = null;
 
 interface Deps {
   /** The renderer's single save path — reads every control, including ours. */
   save: () => Promise<void>;
+  /** Re-read the authoritative main-process snapshot after an attended authority change. */
+  refresh?: () => Promise<void>;
   state: () => AppState | null;
 }
 
@@ -2475,11 +2483,12 @@ function urgentFrom(threshold: number): number {
   return Math.min(4_000_000, Math.max(10_000, Math.round((threshold * 4) / 3)));
 }
 
-/** Reads the three config sections this panel owns, for the renderer's save path. */
+/** Reads the config sections this panel owns, for the renderer's save path. */
 export function chatSettingsPatch(current: Config): {
   sessions: Config['sessions'];
   compaction: Config['compaction'];
   multiAgent: Config['multiAgent'];
+  remoteSteering: Config['remoteSteering'];
   goal: Config['goal'];
   mcp: Config['mcp'];
 } {
@@ -2510,6 +2519,14 @@ export function chatSettingsPatch(current: Config): {
       maxWorkers: number('maWorkers', current.multiAgent.maxWorkers, 1, 8),
       allowUnattributedCalls: $<HTMLInputElement>('allowUnattributedCalls').checked,
       recoverAgentTabs: $<HTMLInputElement>('recoverAgentTabs').checked
+    },
+    // The switch is only ever meaningful beside a pinned key, so the control is disabled
+    // until one exists and a disabled checkbox reads back as unchecked — which is the honest
+    // answer: an unpinned bridge verifies nothing whatever this field says.
+    remoteSteering: {
+      enabled: document.getElementById('remoteSteeringEnabled')
+        ? $<HTMLInputElement>('remoteSteeringEnabled').checked
+        : current.remoteSteering?.enabled ?? false
     },
     goal: {
       enabled: current.goal.enabled, mode: current.goal.mode,
@@ -2654,6 +2671,29 @@ function applyChatValue(
 function applyChatChecked(input: HTMLInputElement, value: boolean, previous: boolean | undefined): void {
   if (document.activeElement === input && previous !== undefined && input.checked !== previous) return;
   input.checked = value;
+}
+
+/**
+ * Paints the remote-steering pin.
+ *
+ * Two facts, said plainly, because they are the two an operator has to be able to check at a
+ * glance: which key this machine will honour, and whether the bridge is switched on at all.
+ * The switch is disabled without a pin — not because the setting would be dangerous, but
+ * because it would be a lie: with nothing pinned, no envelope verifies.
+ */
+function paintRemoteSteering(pin: RemoteSteeringPinView | undefined): void {
+  const status = document.getElementById('remoteSteeringStatus') as HTMLElement | null;
+  const toggle = document.getElementById('remoteSteeringEnabled') as HTMLInputElement | null;
+  const unpin = document.getElementById('remoteSteeringUnpin') as HTMLButtonElement | null;
+  if (!status || !toggle || !unpin) return;
+  const pinned = pin?.pinned === true;
+  status.textContent = pinned
+    ? t("Pinned key {0}", [pin?.fingerprint ?? ''])
+    : t("No key pinned. Paste the public key Command Center shows, check its fingerprint, then pin it.");
+  status.classList.toggle('is-ok', pinned);
+  toggle.disabled = !pinned;
+  toggle.title = pinned ? '' : t("Pin a Command Center key first");
+  unpin.disabled = !pinned;
 }
 
 /** Writes the goal block from app state. Called from chatApply, so it never guesses. */
@@ -2857,6 +2897,7 @@ const CHAT_INPUTS = [
   'goalProvider',
   'goalBaseUrl',
   'goalCustomModel',
+  'remoteSteeringEnabled',
   'goalReasoning',
   'goalPrompt',
   'goalObjectivePrompt',
@@ -2893,6 +2934,16 @@ export function chatApply(state: AppState, previous?: Config): void {
     config.multiAgent.recoverAgentTabs,
     previous?.multiAgent.recoverAgentTabs
   );
+
+  const remoteSteeringToggle = document.getElementById('remoteSteeringEnabled') as HTMLInputElement | null;
+  if (remoteSteeringToggle) {
+    applyChatChecked(
+      remoteSteeringToggle,
+      config.remoteSteering?.enabled ?? false,
+      previous?.remoteSteering?.enabled
+    );
+    paintRemoteSteering(state.remoteSteeringPin);
+  }
 
   applyChatValue($<HTMLSelectElement>('workerModel'), config.multiAgent.defaultModel ?? '', previous?.multiAgent.defaultModel);
   applyChatValue($<HTMLSelectElement>('workerReasoning'), config.multiAgent.defaultReasoning ?? '', previous?.multiAgent.defaultReasoning);
@@ -3695,6 +3746,52 @@ export function initChat(next: Deps): void {
     }
   });
 
+  // Preview, then confirm. The operator pastes a public key, is shown the fingerprint this
+  // app derived from it, and only then presses the button that makes it authority. Nothing
+  // about that is typed from memory, and the fingerprint they confirm is the one every later
+  // envelope has to carry.
+  document.getElementById('remoteSteeringCheck')?.addEventListener('click', async () => {
+    const key = $<HTMLTextAreaElement>('remoteSteeringKey').value.trim();
+    if (!key) return toast(t("Paste the Command Center public key first"));
+    const preview = await run(api.previewRemoteSteeringKey(key));
+    if (!preview) return;
+    remoteSteeringPreviewedKey = key;
+    $<HTMLElement>('remoteSteeringPreview').textContent = preview.matchesExistingPin
+      ? t("Fingerprint {0} — this is the key already pinned.", [preview.fingerprint])
+      : t("Fingerprint {0}. Compare it with Command Center before pinning.", [preview.fingerprint]);
+  });
+
+  document.getElementById('remoteSteeringPin')?.addEventListener('click', async () => {
+    const key = $<HTMLTextAreaElement>('remoteSteeringKey').value.trim();
+    if (!key) return toast(t("Paste the Command Center public key first"));
+    if (remoteSteeringPreviewedKey !== key) {
+      return toast(t("Check this key fingerprint before pinning it"));
+    }
+    const pin = await run(api.pinRemoteSteeringKey(key));
+    if (!pin) return;
+    remoteSteeringPreviewedKey = null;
+    $<HTMLTextAreaElement>('remoteSteeringKey').value = '';
+    $<HTMLElement>('remoteSteeringPreview').textContent = '';
+    paintRemoteSteering(pin);
+    toast(t("Command Center key pinned"));
+  });
+
+  document.getElementById('remoteSteeringUnpin')?.addEventListener('click', async () => {
+    const pin = await run(api.unpinRemoteSteeringKey());
+    if (!pin) return;
+    paintRemoteSteering(pin);
+    // Unpinning also switches the bridge off in the main process, so re-read rather than
+    // leaving this panel showing a toggle whose stored value has just changed underneath it.
+    if (deps.refresh) await deps.refresh();
+    toast(t("Key unpinned — no envelope verifies until one is pinned again"));
+  });
+
+  document.getElementById('remoteSteeringKey')?.addEventListener('input', () => {
+    remoteSteeringPreviewedKey = null;
+    const preview = document.getElementById('remoteSteeringPreview');
+    if (preview) preview.textContent = '';
+  });
+
   // Which of the two things happened is decided in the main process and reported back,
   // so the toast describes the actual outcome rather than the intent of the click.
   $('swarmList').addEventListener('click', async (event) => {
@@ -3715,7 +3812,7 @@ export function initChat(next: Deps): void {
   });
 
   for (const id of CHAT_INPUTS) {
-    $(id).addEventListener('change', () => void deps.save());
+    document.getElementById(id)?.addEventListener('change', () => void deps.save());
   }
 
   wireGoal(() => deps.save());

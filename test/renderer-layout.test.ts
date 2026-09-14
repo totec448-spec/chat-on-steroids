@@ -449,6 +449,16 @@ describe('the settings sheet', () => {
       // Interface language persists in the renderer; the event/storage behavior is
       // covered by renderer-i18n, independently of the app configuration channel.
       if (field.id === 'uiLanguage') continue;
+      // The remote-steering public key is deliberately action-backed rather than persisted in
+      // the settings snapshot: Check fingerprints the exact current bytes and Pin writes the
+      // attended trust anchor through its dedicated IPC channel. Treating it as an ordinary
+      // settings textarea would make half-typed authority material part of unrelated saves.
+      if (field.id === 'remoteSteeringKey') {
+        expect(chatSource).toContain("document.getElementById('remoteSteeringKey')?.addEventListener('input'");
+        expect(chatSource).toContain("api.previewRemoteSteeringKey(key)");
+        expect(chatSource).toContain("api.pinRemoteSteeringKey(key)");
+        continue;
+      }
       expect(listened![1], `#${field.id} never saves`).toContain(`'${field.id}'`);
     }
   });

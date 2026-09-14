@@ -81,6 +81,13 @@ import {
 import { activeSessionId, forgetSession, onSessionChange } from './session/recorder.js';
 import { blockedChatIds, setChatBlocked } from './session/blocked-chats.js';
 import {
+  noteRemoteSteeringAuthorityConfigChanged,
+  pinRemoteSteeringKey,
+  previewRemoteSteeringPin,
+  remoteSteeringPin,
+  unpinRemoteSteeringKey
+} from './remote-steering.js';
+import {
   clearAgent,
   primeForOwnedConversation,
   onSwarmChange,
@@ -169,6 +176,9 @@ const settingsPatch = z.object({
     recoverAgentTabs: z.boolean()
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS) }).strict().optional(),
+  // One switch. Scope, run, worker, action and window all live inside the signed envelope,
+  // so there is nothing else here for a settings form to disagree with.
+  remoteSteering: z.object({ enabled: z.boolean() }).optional(),
   goal: z.object({
     impulseMinutes: z.number().int().min(0).max(60).optional(),
     includeToolCalls: z.boolean().optional(),
@@ -299,6 +309,12 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         wanted.multiAgent.recoverAgentTabs
       )
     },
+    remoteSteering: {
+      enabled:
+        base.remoteSteering && wanted.remoteSteering
+          ? pick(current.remoteSteering.enabled, base.remoteSteering.enabled, wanted.remoteSteering.enabled)
+          : current.remoteSteering.enabled
+    },
     goal: {
       impulseMinutes: pick(current.goal.impulseMinutes, base.goal.impulseMinutes, wanted.goal.impulseMinutes),
       includeToolCalls: pick(current.goal.includeToolCalls, base.goal.includeToolCalls, wanted.goal.includeToolCalls),
@@ -358,6 +374,7 @@ async function buildState(): Promise<AppState> {
     bundledTunnelVersion: bundledVersion(),
     bridge: await bridgeStatus(),
     update: updateStatus(),
+    remoteSteeringPin: remoteSteeringPin(),
     desktopAccess: getMacOSDesktopAccess()
   };
 }
@@ -444,7 +461,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Explicit settings changes replace discovery's monotonic snapshot. Otherwise
     // disabled permissions/finish/session tools remain published and no schema change
     // reaches automatic plugin refresh. Cosmetic saves must not invalidate discovery.
+    if (before.remoteSteering.enabled !== next.remoteSteering.enabled) {
+      noteRemoteSteeringAuthorityConfigChanged();
+    }
     if (before.multiAgent.enabled !== next.multiAgent.enabled || before.sessions.record !== next.sessions.record ||
+        before.remoteSteering.enabled !== next.remoteSteering.enabled ||
         before.ui.finishTool !== next.ui.finishTool ||
         JSON.stringify(effectiveCapabilities(before)) !== JSON.stringify(effectiveCapabilities(next))) forgetExposedSurface();
     // Order matters, and it used to be wrong. Pausing the run and withdrawing worker browser
@@ -891,6 +912,37 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // user pressing Block on a worker is usually about to start something in its place.
     if (blocked) await sweepStaleSwarm().catch(() => undefined);
     return blockedChatIds();
+  });
+
+  /**
+   * The attended half of the Command Center remote-steering bridge.
+   *
+   * Three narrow operations and no fourth. The renderer may ask what a pasted key *would*
+   * mean, pin it, or forget it — it can never name a fingerprint, supply a signature, or
+   * reach an envelope. `preview` exists so the operator confirms a fingerprint they can see
+   * rather than one they have to trust, which is what makes the pin a deliberate signature
+   * instead of a paste that silently becomes authority over this machine's workers.
+   */
+  const remoteSteeringKeyArg = z
+    .object({ publicKeySpkiBase64: z.string().min(1).max(1024) })
+    .strict();
+
+  handle('remoteSteering:get', async () => remoteSteeringPin());
+  handle('remoteSteering:preview', async (payload) =>
+    previewRemoteSteeringPin(remoteSteeringKeyArg.parse(payload).publicKeySpkiBase64)
+  );
+  handle('remoteSteering:pin', async (payload) =>
+    pinRemoteSteeringKey(remoteSteeringKeyArg.parse(payload).publicKeySpkiBase64)
+  );
+  handle('remoteSteering:unpin', async () => {
+    const pinView = await unpinRemoteSteeringKey();
+    // Unpinning leaves the switch on but nothing verifying, which reads as a broken feature.
+    // Turn it off in the same transaction so the app's state says what is true.
+    if (getConfig().remoteSteering.enabled) {
+      await updateConfig((config) => ({ ...config, remoteSteering: { ...config.remoteSteering, enabled: false } }));
+      forgetExposedSurface();
+    }
+    return pinView;
   });
 
   handle('sessions:delete', async (payload) => {
