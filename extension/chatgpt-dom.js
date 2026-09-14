@@ -2166,29 +2166,40 @@ var CLF_DOM = (() => {
   async function enterProject(entry, stillCurrent = () => true) {
     if (!entry || !/^g-p-[0-9a-f]{32}$/.test(entry.id) || conversationId() !== entry.sourceConversationId) return false;
     return new Promise(resolve => {
-      let clicked = false, done = false, sourceComposer = null;
+      const HYDRATION_TIMEOUT_MS = 45_000;
+      const NAVIGATION_TIMEOUT_MS = 12_000;
+      const RETRY_DELAY_MS = 2_000;
+      const MAX_CLICKS = 3;
+      let clicks = 0, done = false, sourceComposer = null, retryNotBefore = 0, retryTimer = null;
       const interrupt = event => { if (event.isTrusted) finish(false); };
       const finish = result => {
         if (done) return;
-        done = true; observer.disconnect(); clearTimeout(timer);
+        done = true; observer.disconnect(); clearTimeout(timer); clearTimeout(retryTimer);
         document.removeEventListener('pointerdown', interrupt, true);
         document.removeEventListener('keydown', interrupt, true);
         resolve(result);
       };
+      const scheduleRetry = () => {
+        clearTimeout(retryTimer);
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          check();
+        }, RETRY_DELAY_MS);
+      };
       const check = () => {
         if (done) return;
         if (!stillCurrent()) return finish(false);
-        if (clicked && projectHomeId() === entry.id && composer()?.isConnected && composer() !== sourceComposer && !turns().length) return finish(true);
+        if (clicks > 0 && projectHomeId() === entry.id && composer()?.isConnected && composer() !== sourceComposer && !turns().length) return finish(true);
         if (conversationId() !== entry.sourceConversationId) {
           if (projectHomeId() !== entry.id) finish(false);
           return;
         }
-        if (clicked) return;
+        if (clicks >= MAX_CLICKS || Date.now() < retryNotBefore) return;
         // The native header arrives before the source chat finishes loading. Its link
-        // alone is not readiness: an early click can be swallowed during hydration and
-        // would also leave us comparing the destination editor with a null source.
-        // Preserve the source draft/generation and spend our one click only once its
-        // actual editor is mounted and ready.
+        // alone is not readiness: an early click can be swallowed during hydration.
+        // Revalidate every safety condition before each bounded retry so a swallowed
+        // click never turns into navigation after the user edits, attaches a file,
+        // starts a generation, changes chats, or cancels the command.
         const source = composer();
         if (!source?.isConnected || !composerSubmitReady() || hasComposerAttachments()) return;
         const links = [...document.querySelectorAll('header a[href], [role="banner"] a[href]')].filter(link =>
@@ -2196,18 +2207,22 @@ var CLF_DOM = (() => {
           new URL(link.href, location.href).origin === location.origin && projectHomeId(new URL(link.href, location.href).pathname) === entry.id);
         if (links.length !== 1) return;
         sourceComposer = source;
-        clicked = true;
-        // Loading the source and following its link are separate page transitions.
-        // Reuse the same deadline timer; source loading must not consume the budget
-        // for observing the replacement editor after the one permitted click.
-        clearTimeout(timer);
-        timer = setTimeout(() => finish(false), 12_000);
+        clicks += 1;
+        retryNotBefore = Date.now() + RETRY_DELAY_MS;
+        if (clicks === 1) {
+          // Loading the source and following its link are separate page transitions.
+          // Source hydration gets a larger allowance, while every retry still shares
+          // one bounded post-click deadline rather than extending the operation forever.
+          clearTimeout(timer);
+          timer = setTimeout(() => finish(false), NAVIGATION_TIMEOUT_MS);
+        }
         links[0].click();
+        if (clicks < MAX_CLICKS) scheduleRetry();
         check();
       };
       const observer = new MutationObserver(check);
       observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true });
-      let timer = setTimeout(() => finish(false), 12_000);
+      let timer = setTimeout(() => finish(false), HYDRATION_TIMEOUT_MS);
       document.addEventListener('pointerdown', interrupt, true);
       document.addEventListener('keydown', interrupt, true);
       check();
