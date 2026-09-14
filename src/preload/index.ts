@@ -1,4 +1,5 @@
 import type { ChatModelCatalog } from '../shared/chat-models.js';
+import type { SkillLibrary } from '../shared/skills.js';
 import type { GoalModel } from '../shared/goal-reasoning.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { BrowserPreferences } from '../shared/browser-preferences.js';
@@ -76,6 +77,10 @@ export interface SessionDetail {
 }
 
 const api = {
+  skillsList: () => call<SkillLibrary>('skills:list'),
+  skillsImport: () => call<SkillLibrary | null>('skills:import'),
+  skillsOpenFolder: () => call<void>('skills:openFolder'),
+  skillsRemove: (id: string) => call<SkillLibrary>('skills:remove', { id }),
   openLegalNotices: () => call<void>('plugins:legalNotices'),
   pluginsSnapshot: () => call<PluginSnapshot>('plugins:snapshot'),
   pluginsInstall: (request: PluginInstallRequest) => call<PluginSnapshot>('plugins:install', request),

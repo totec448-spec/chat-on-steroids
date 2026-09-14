@@ -190,12 +190,13 @@ export async function offerBackgroundExecOutput(
  * anonymous callers; they are never adoptable by a later identified conversation. A process
  * with no registry entry at all is refused.
  */
-export function execOwnershipDenied(processId: number, sessionId: string | null): boolean {
-  if (!owners.has(processId)) return true;
+export function execOwnershipFailure(processId: number, sessionId: string | null):
+  'unavailable' | 'anonymous' | 'unidentified' | 'different-owner' | null {
+  if (!owners.has(processId)) return 'unavailable';
   const owner = owners.get(processId);
-  if (owner === null) return sessionId !== null;
-  if (!sessionId) return true;
-  return owner !== sessionId;
+  if (owner === null) return sessionId === null ? null : 'anonymous';
+  if (!sessionId) return 'unidentified';
+  return owner === sessionId ? null : 'different-owner';
 }
 
 /** Test seam: the registry is process-global state with no natural lifetime boundary. */

@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import type { SessionEvent } from '../src/shared/session.js';
-import { chatErrorPresentation } from '../src/renderer/chat-error.js';
+import { chatErrorPresentation, duplicateChatErrors } from '../src/renderer/chat-error.js';
 
 const error = (text: string, extra = {}): Extract<SessionEvent, { kind: 'chat_error' }> => ({
   seq: 1, time: 100, source: 'extension', kind: 'chat_error', turnId: 'turn-a',
@@ -9,6 +9,24 @@ const error = (text: string, extra = {}): Extract<SessionEvent, { kind: 'chat_er
 const repair = (text: string, extra = {}): Extract<SessionEvent, { kind: 'progress' }> => ({
   seq: 2, time: 101, source: 'app', kind: 'progress', turnId: 'turn-a', progressId: 'browser-repair:one',
   message: { text, chars: text.length, truncated: false }, ...extra
+});
+
+it('projects one recoverable notice across reloads and uses the eventual canonical final', () => {
+  const question: SessionEvent = { seq: 1, time: 90, source: 'extension', kind: 'user_message', messageId: 'q1', message: { text: 'Build', chars: 5, truncated: false } };
+  const failed = error('Connection interrupted', { seq: 3, recoverable: true });
+  const duplicate = error('Connection interrupted', { seq: 5, turnId: undefined, recoverable: true });
+  const reminted = error('Connection interrupted', { seq: 7, turnId: 'replacement', recoverable: true });
+  const receipt = repair('Reloaded chat', { seq: 8, turnId: 'replacement' });
+  const history: SessionEvent[] = [question, failed, duplicate, reminted, receipt];
+  expect([...duplicateChatErrors(history)]).toEqual([5, 7]);
+  expect(chatErrorPresentation(failed, history).next).toContain('Reloaded chat');
+  history.push({ seq: 9, origin: 2, time: 120, source: 'extension', kind: 'assistant_message', messageId: 'answer', final: true, message: { text: 'Done', chars: 4, truncated: false } });
+  history.push({ seq: 6, time: 115, source: 'app', kind: 'turn_start', turnId: 'replacement', detail: 'Work resumed' });
+  expect(chatErrorPresentation(failed, history).next).toContain('later completed');
+  history.push({ ...question, seq: 10, messageId: 'q2' }, { ...reminted, seq: 11 });
+  expect([...duplicateChatErrors(history)]).toEqual([5, 7]);
+  history.push({ seq: 12, origin: 2, time: 120, source: 'extension', kind: 'assistant_message', messageId: 'answer', final: true, finalContentSeq: 9, message: { text: 'Done', chars: 4, truncated: false } });
+  expect(chatErrorPresentation({ ...reminted, seq: 11 }, history).next).not.toContain('later completed');
 });
 
 it('explains every error without promising an unknown automatic retry', () => {

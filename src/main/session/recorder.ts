@@ -52,6 +52,7 @@ import {
   readAsset,
   readEvents,
   readRecentEvents,
+  readLatestUserMessage,
   indexedSessions,
   renameSession,
   reopenSession,
@@ -67,7 +68,7 @@ import {
   requestCorrelation,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
-import { resumeOpeningChat } from './resume-gate.js';
+import { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } from './resume-gate.js';
 import { summarizeToolCall } from './summarize.js';
 
 interface LiveConversation {
@@ -236,14 +237,13 @@ export async function restoreRecordedConversation(conversationId: string): Promi
 }
 
 /**
- * How long to let a resume's commit land before recording a conversation it may be about to
- * claim. Generous next to the milliseconds a commit actually takes, and bounded because a
- * commit that never lands must not stop the chat being recorded at all.
+ * Honor the continuation's existing claim window before creating an unknown conversation.
+ * An independent shorter deadline can mint a shadow session while the destination still
+ * legitimately awaits its commit. Cap each wait at one claim window so overlapping claims
+ * cannot indefinitely prevent an unrelated new chat from being recorded.
  */
-const RESUME_COMMIT_SETTLE_MS = 5_000;
-
 async function settleResumeCommit(): Promise<void> {
-  const deadline = Date.now() + RESUME_COMMIT_SETTLE_MS;
+  const deadline = Date.now() + RESUME_CLAIM_WINDOW_MS;
   while (resumeOpeningChat() && Date.now() < deadline) {
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 50);
@@ -272,9 +272,8 @@ async function initializeSessionForConversation(
     // A compaction is opening its replacement chat right now, and this unknown conversation
     // may be it. Creating a session here is what breaks the move: the commit that follows
     // finds its own destination owned by a session it has never heard of and refuses to
-    // rebind. Waiting is cheap and lossless — the commit is already in flight and takes
-    // milliseconds, after which this conversation resolves to the session that was moved
-    // onto it and the batch that triggered this is recorded in the right place. See
+    // rebind. Wait within the claim's existing bound, then resolve this conversation to the
+    // session that was moved onto it so the batch is recorded in the right place. See
     // resume-gate.ts for what this cost the session it was written for.
     await settleResumeCommit();
     const moved = conversations.get(conversationId);
@@ -2107,17 +2106,18 @@ async function recordChatObservationsNow(
       }
       case 'chat_error': {
         if (item.reason === 'thinking_failed' && !item.turnId) continue;
-        // Documents identify rendered nodes, not a shared notice: remounts, duplicate
-        // tabs and journal retries can all report the same problem. Coalesce a short
-        // burst here, inside the conversation's serialized writer, using committed history
-        // so restart/retry needs no second ledger. Access-limit dialogs are page-wide;
-        // ordinary failures retain their turn identity so a new failed attempt stays visible.
+        // Reloads lose/remint document turn ids. A recoverable notice belongs to the
+        // canonical question, not that document. Keep the original notice throughout
+        // recovery; a genuinely new question gives the same error a new owner.
         const text = (item.text ?? '').replace(/\s+/g, ' ').trim();
+        const question = item.recoverable === true ? await readLatestUserMessage(sessionId) : undefined;
         const recent = await readRecentEvents(sessionId, 32, { kinds: ['chat_error'], maxBytes: 256 * 1024 });
         if (recent.some(event => event.kind === 'chat_error' &&
-            (Math.abs(item.time - event.time) <= 30_000 ||
+            ((question && event.recoverable === true && event.seq > (question.origin ?? question.seq)) ||
+            ((Math.abs(item.time - event.time) <= 30_000 ||
               (item.reason === 'thinking_failed' && event.reason === item.reason && event.turnId === item.turnId)) &&
             (item.blocking === true || (event.turnId ?? '') === (item.turnId ?? '')) &&
+            (!question || event.seq > (question.origin ?? question.seq)))) &&
             event.message.text.replace(/\s+/g, ' ').trim() === text)) continue;
         await appendEvent(sessionId, {
           ...base,

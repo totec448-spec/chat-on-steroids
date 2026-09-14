@@ -9,6 +9,15 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.13] — Skills and reliability
+
+- Import text skills through **+ → Skills**, select them from the library, or autocomplete their commands with **/**.
+- Selected skill instructions precede project instructions. The 96,000-character message limit preserves skills and user text while shortening AGENTS.md when necessary.
+- Models can read and install skills in the managed `/skills` directory using the existing Core tools. No skills are preinstalled and no extra MCP tools are required.
+- Includes the updated ChatGPT model-picker support from 2.1.12 for main chats and workers.
+- More reliable request attribution, answer boundaries, recovery, Goal/Loop continuation and worker revival.
+- Clearer plugin, permission and terminal-ownership errors; repeated transport notices stay with their original question.
+
 ## [2.1.12] — Model picker compatibility
 
 - Model discovery tolerates effort-only labels and missing family prefixes in the refreshed ChatGPT picker.

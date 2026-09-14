@@ -29,19 +29,14 @@
   // those tabs from runtime.onInstalled. The normal static injection can race that recovery
   // on a freshly loaded page, so one live isolated-world recorder stays the invariant.
   //
-  // What that used to be, and why it was wrong: a bare `__CLF_CONTENT_RECORDER_ACTIVE__`
-  // boolean with the note that "a real extension reload invalidates the old isolated world,
-  // so its marker disappears with it". It does not. Chrome keys the isolated world by
-  // extension id and leaves that JS context standing when the extension reloads; what it
-  // invalidates is `chrome.runtime`. The orphan therefore keeps its globals — including
-  // this marker — and the recovery injection from runtime.onInstalled returned at this very
-  // line. The document was then left with a recorder that can never send again, which is
-  // precisely the state that produces a healthy MCP tunnel, a visibly alive MAIN-world
-  // fiber.js, and every single call filed under `Unattributed activity`.
-  //
-  // So: publish a handle instead of a flag and let a replacement supersede a dead one. A
-  // *healthy* incumbent still wins, so the ordinary static/recovery race is unchanged.
-  const RECORDER_VERSION = 11;
+  // Reload invalidates chrome.runtime but can leave the old context's globals and observers
+  // alive. This handle arbitrates reinjection within one context; Chrome can also create a
+  // separate replacement context, which cannot stop an incumbent through its private global.
+  // Every observer therefore checks its OWN runtime synchronously and retires through stop()
+  // before touching the shared DOM. Otherwise old and new composer observers can continually
+  // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
+  // A healthy incumbent in this context still wins the static/recovery injection race.
+  const RECORDER_VERSION = 13;
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -192,7 +187,6 @@
     events: 0,
     lastKind: null,
     lastAt: 0,
-    requestId: null,
     calls: 0,
     sends: 0,
     failures: 0,
@@ -233,7 +227,7 @@
     let row = trace.get(requestId);
     if (!row) {
       if (trace.size >= TRACE_MAX) trace.delete(trace.keys().next().value);
-      row = { requestId, tool: null, read: 0, sent: 0, app: null, appAt: 0 };
+      row = { requestId, tool: null, read: 0, queued: 0, sent: 0, confirmed: 0, app: null, appAt: 0 };
       trace.set(requestId, row);
     }
     if (stage === 'tool') row.tool = value || row.tool;
@@ -1075,7 +1069,7 @@
       return await chrome.runtime.sendMessage(message);
     } catch (err) {
       const text = String(err && err.message ? err.message : err);
-      if (text.includes('Extension context invalidated')) alive = false;
+      if (text.includes('Extension context invalidated')) recorderHandle.stop();
       return null;
     }
   }
@@ -1277,7 +1271,7 @@
         if (desktopProjectInput && reply.projectBound === desktopProjectInput.id) desktopProjectInput = null;
         for (const entry of batch) {
           if (entry?.event?.kind !== 'tool_evidence') continue;
-          for (const call of entry.event.calls || []) traceStage(call && call.requestId, 'sent');
+          for (const call of entry.event.calls || []) traceStage(call && call.requestId, 'queued');
         }
         const sent = new Set(batch);
         for (let index = queue.length - 1; index >= 0; index--) {
@@ -1842,13 +1836,14 @@
    * Deliberately conservative. "The model hit its output limit" is a claim this page
    * gives no evidence for, so it is never made: an unexplained stop stays unknown.
    */
-  function endOutcome(turn) {
+  function endOutcome(turn, nativeFinal = false) {
     if (userStopped) return { outcome: 'stopped' };
     // Only this turn's failures. An error inside another turn's section is that turn's,
     // and a toast still on screen from an earlier failure was already on screen when this
     // turn began — neither says anything about how this one ended.
     const failures = CLF_DOM.errors().filter(
       (error) => !isStale(error.node) && Boolean(turnId) && localErrorGeneration(error) === turnId &&
+        (!nativeFinal || error.recoverable !== true) &&
         (error.reason !== 'thinking_failed' || unreportedError(error, turnId))
     );
     if (failures.length > 0) {
@@ -2603,12 +2598,12 @@
       const scope = recordedTurn || '';
       if (!unreportedError(error, scope)) continue;
       markErrorReported(error, scope);
-      // Recovery can reload as soon as this error reaches the bridge. Commit the
-      // exact broken generation's terminal observation first; the quiet-settle
-      // timer cannot survive that reload. Unowned or informational banners do
-      // not close a generation.
+      // A transport failure is not a provider terminal boundary: ChatGPT may
+      // still be generating, and reload must adopt this same open generation.
+      // Generic failures use the native quiet/settle path above. Only the exact
+      // Thinking failed header has policy authority to close immediately.
       if (generating && recordedTurn && recordedTurn === turnId &&
-          (error.recoverable === true || error.reason === 'thinking_failed')) {
+          error.reason === 'thinking_failed') {
         finishGeneration(quietTurn || turn, { outcome: userStopped ? 'stopped' : 'failed', detail: error.text,
           ...(!userStopped && error.reason === 'thinking_failed' ? { reason: error.reason } : {}) });
       }
@@ -2670,11 +2665,9 @@
       seededPath = null;
     }
     const observer = new MutationObserver((records) => {
-      // Recorder takeover cannot disconnect observers created by the predecessor's isolated
-      // world, so `alive` is the ownership fence. Without it every extension reload leaves a
-      // watcher behind that still scans connector mutations and starts a MAIN-world Fiber
-      // round-trip even though sendToWorker() has correctly gone inert.
-      if (!alive || !sameChat()) {
+      // A predecessor in another isolated context must retire on its own runtime validity,
+      // before starting another MAIN-world scan. A failed transport call can arrive too late.
+      if (!recorderHandle.healthy() || !sameChat()) {
         return;
       }
       let sawConnector = false;
@@ -2708,7 +2701,7 @@
     let timer = null;
     let urgentQueued = false;
     const observer = new MutationObserver((records) => {
-      if (!alive || !sameChat()) return;
+      if (!recorderHandle.healthy() || !sameChat()) return;
       // Attribute-only native updates matter when React reuses the submit button.
       // Ignore unrelated styling/Fiber stamps; they cannot change composer readiness.
       if (records.every(record => record.type === 'attributes')) {
@@ -3348,7 +3341,10 @@
   }
 
   async function confirmLiveRequestOwners(calls, ownerConversation, current = null) {
-    if (current && !current()) return;
+    const ownerEpoch = epoch;
+    const owns = () => alive && epoch === ownerEpoch && conversationId === ownerConversation &&
+      CLF_DOM.conversationId() === ownerConversation && (!current || current());
+    if (!owns()) return;
     if (!Array.isArray(calls) || calls.length === 0 || !ownerConversation) return;
     const byRequest = new Map();
     for (const call of calls) {
@@ -3358,6 +3354,7 @@
       if (requestOwnersPending.has(key) || (requestOwnerRetryAt.get(key) || 0) > Date.now()) continue;
       byRequest.set(call.requestId, call);
       requestOwnersPending.add(key);
+      traceStage(call.requestId, 'read');
     }
     const batch = [...byRequest.values()];
     if (batch.length === 0) return;
@@ -3366,27 +3363,30 @@
         type: 'correlate',
         conversationId: ownerConversation,
         calls: batch
-      }, current);
-      if (current && !current()) return;
+      }, owns);
+      if (!owns()) return;
       const data = reply && reply.ok === true && reply.data && typeof reply.data === 'object' ? reply.data : null;
       const confirmed = new Set(data && Array.isArray(data.confirmed) ? data.confirmed : []);
       for (const call of batch) {
         const key = `${ownerConversation}\u0000${call.requestId}`;
+        // Only an app response proves delivery. The worker accepting a journal entry
+        // is queued custody, and an owner ACK still does not prove an MCP call ran.
+        if (data?.conversationId === ownerConversation) traceStage(call.requestId, 'sent');
         // Judge each request id on its own read-back. This additionally required
         // `data.complete === true`, which is a *batch* verdict: a single id the app could
         // not place (a sticky conflict, or a call it has not ingested yet) threw away the
         // confirmation of every other id in the same message and re-queued them all.
         if (!data || data.conversationId !== ownerConversation || !confirmed.has(call.requestId)) {
           backOffRequestOwner(key);
+          if (data?.conversationId === ownerConversation && Array.isArray(data.conflicts) && data.conflicts.includes(call.requestId))
+            pendingStreamOrigins.delete(call.requestId);
           continue;
         }
         requestOwnerRetryAt.delete(key);
         requestOwnerAttempts.delete(key);
         requestOwnersConfirmed.set(call.requestId, ownerConversation);
-        // `app` becomes green only after the app has read the exact mapping back. This is a
-        // stronger diagnostic than the old "Fiber parser saw an id" indicator.
-        traceStage(call.requestId, 'sent');
-        traceStage(call.requestId, 'app', 'request_id');
+        pendingStreamOrigins.delete(call.requestId);
+        traceStage(call.requestId, 'confirmed');
       }
     } catch {
       for (const call of batch) backOffRequestOwner(`${ownerConversation}\u0000${call.requestId}`);
@@ -3467,13 +3467,13 @@
     const ownedPageNode = exactOwner?.pageTurn || null;
     const ownedPageTurnId = exactOwner?.pageTurnId || null;
     let ownedPageTurn = stampedFiberTurn(ownedPageNode, answer.turns, answer.scanToken);
-    if (!ownedPageTurn && ownedPageTurnId) {
-      for (let index = answer.turns.length - 1; index >= 0; index--) {
-        if (answer.turns[index].turnId === ownedPageTurnId) {
-          ownedPageTurn = answer.turns[index];
-          break;
-        }
-      }
+    if (!ownedPageTurn && ownedPageTurnId &&
+        CLF_DOM.turns().filter(turn => turn.id === ownedPageTurnId).length === 1) {
+      // A page id is only a hint when it is unique on both sides of this scan.
+      // An empty new response may have no descriptor yet; with a recycled id,
+      // choosing the last match then borrows the previous response's final.
+      const candidates = answer.turns.filter(turn => turn.turnId === ownedPageTurnId);
+      if (candidates.length === 1) ownedPageTurn = candidates[0];
     }
     // A destination Resume has a second exact owner that is even more fundamental than this
     // document's local generation: the *durably accepted* continuation marker and the answer
@@ -3542,7 +3542,6 @@
     observed.calls = acceptedCalls.length;
     for (const call of acceptedCalls) {
       if (!call.requestId) continue;
-      observed.requestId = call.requestId;
       traceStage(call.requestId, 'read');
       traceStage(call.requestId, 'tool', call.tool);
     }
@@ -3897,8 +3896,10 @@
       fiberTerminalMessageId = answer.turns[activeTurnIndex].endMessageId;
       const ended = generationTurn();
       if (ended) {
-        const local = endOutcome(ended);
-        // A later exact native final supersedes the stale Thinking failed header.
+        // Native completion resolves transport uncertainty even when its old
+        // banner remains mounted; explicit user stop still wins in endOutcome.
+        const local = endOutcome(ended, true);
+        // A later exact native final also supersedes the stale Thinking failed header.
         finishGeneration(ended, local.outcome === 'unknown' || local.reason === 'thinking_failed'
           ? { outcome: 'completed' } : local, false);
       }
@@ -3939,6 +3940,25 @@
       found = descriptor;
     }
     return found;
+  }
+
+  // Popup-only projection of the newest native turn. Historical scans and delivery
+  // counters cannot certify the current request; a newer user message clears the view.
+  function currentRequestStatus() {
+    const latest = CLF_DOM.turns().at(-1);
+    const descriptor = latest?.role === 'assistant' && CLF_DOM.conversationId() === conversationId
+      ? fiberTurnFor(latest) : null;
+    if (!descriptor || descriptor.conversationId !== conversationId) return { requestId: null, trace: [] };
+    const ids = [...new Set([...(descriptor.requests || []), ...(descriptor.calls || [])]
+      .map(call => call.requestId).filter(Boolean))].slice(-16);
+    const rows = ids.map(requestId => ({
+      ...trace.get(requestId), requestId, read: true,
+      sent: Boolean(trace.get(requestId)?.sent || requestOwnersConfirmed.get(requestId) === conversationId),
+      confirmed: requestOwnersConfirmed.get(requestId) === conversationId
+    })).reverse();
+    // Prefer the workflow identity over a provider's preliminary wrapper UUID.
+    const preferred = rows.find(row => row.requestId.startsWith('wfr_')) || rows[0];
+    return { requestId: preferred?.requestId || null, trace: rows };
   }
 
   /** Fiber turn descriptor stamped onto exactly one rendered assistant section. */
@@ -8944,13 +8964,15 @@
     // A turn that finished during the wait has taken the claim, and this retry is about an
     // older one. It says nothing and touches nothing: the phase on screen is that turn's now.
     if (!current()) return;
-    // Something else holds the loop while this turn is still the claimed one — a compaction
-    // brief, say. It will not be interrupted for a retry.
-    if (goalBusy) return;
-    // The conversation moved on while we waited: whatever this loop was going to write is
-    // about a turn that is no longer the last one, which is an answer of its own.
-    if (goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || (job && job.busy)) return void setGoalPhase('');
-    if (!goalUsable()) return void setGoalPhase('');
+    if (goalBusy || goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || (job && job.busy) || !goalUsable()) {
+      // This timer no longer owns a retry. Return its pickup to the existing
+      // activity feed: retaining the claim here strands still-owed recovery after
+      // temporary work/compaction ends. Only a current server obligation can collect
+      // it again; no draft is acknowledged and the elapsed backoff is not bypassed.
+      goalTicketId = null;
+      if (!goalBusy) setGoalPhase('');
+      return;
+    }
     goalBusy = true;
     try {
       await requestGoalDraft(forTurn, current);
@@ -10035,7 +10057,7 @@
     // hook, and a loop that ticked there could pass a case by accident on a stray tick.
     if (TEST_MODE) return;
     const tick = () => {
-      if (!alive) return;
+      if (!recorderHandle.healthy()) return;
       try {
         const result = fn();
         if (result && typeof result.catch === 'function') result.catch(() => undefined);
@@ -10077,7 +10099,7 @@
     if (activityTimer !== null) return;
     activityTimer = later(async () => {
       activityTimer = null;
-      if (!alive) return;
+      if (!recorderHandle.healthy()) return;
       try {
         await pullActivity();
       } catch {
@@ -10110,7 +10132,11 @@
   function watchComposer() {
     try {
       const observer = new MutationObserver(() => {
-        if (!alive) return;
+        // A reloaded extension can have a new isolated world before this old world's
+        // next transport/timer notices invalidation. It must not reinsert the controls
+        // its successor just removed: two composer observers would fight in microtasks
+        // forever, starving the very timer that could otherwise retire the old recorder.
+        if (!recorderHandle.healthy()) return;
         if (!control || !control.root.isConnected) injectControl();
         if (stagePanel && !stagePanel.root.isConnected) injectStage();
       });
@@ -10160,16 +10186,17 @@
   });
   function flushStreamRequestOrigins() {
     const route = CLF_DOM.conversationId();
+    const pendingEpoch = epoch, calls = [];
     for (const [requestId, pending] of pendingStreamOrigins) {
       if (!alive || pending.epoch !== epoch || Date.now() >= pending.deadline || (route && route !== pending.conversationId)) {
         pendingStreamOrigins.delete(requestId);
         continue;
       }
       if (route !== pending.conversationId || conversationId !== route) continue;
-      pendingStreamOrigins.delete(requestId);
-      const current = () => alive && epoch === pending.epoch && CLF_DOM.conversationId() === route;
-      void confirmLiveRequestOwners([{ requestId, messageId: null, createTime: pending.observedAt / 1000 }], route, current);
+      calls.push({ requestId, messageId: null, createTime: pending.observedAt / 1000 });
     }
+    const current = () => alive && epoch === pendingEpoch && CLF_DOM.conversationId() === route;
+    if (calls.length) void confirmLiveRequestOwners(calls, route, current);
   }
   function confirmStreamRequestOrigin(claimed, requestIds, observedAt) {
     const route = CLF_DOM.conversationId();
@@ -10177,8 +10204,8 @@
     // New chats can receive their stream id before /c/<id>. The existing observer
     // drains a bounded set when that exact route appears; navigation retires it.
     for (const requestId of requestIds) {
-      if (pendingStreamOrigins.has(requestId) || pendingStreamOrigins.size >= 16) continue;
-      pendingStreamOrigins.set(requestId, { conversationId: claimed, observedAt, epoch, deadline: Date.now() + 30_000 });
+      if (requestOwnersConfirmed.get(requestId) === claimed || pendingStreamOrigins.has(requestId) || pendingStreamOrigins.size >= 16) continue;
+      pendingStreamOrigins.set(requestId, { conversationId: claimed, observedAt, epoch, deadline: Date.now() + 15 * 60_000 });
     }
     flushStreamRequestOrigins();
   }
@@ -10709,7 +10736,7 @@
           generations: genCount,
           queued: queue.length,
           queueBytes,
-          trace: [...trace.values()].slice(-8).reverse(),
+          ...currentRequestStatus(),
           overwrite: RENDER_STREAM === true,
           painted,
           bridge: { connected: status.connected === true, paired: status.paired === true },
@@ -10880,10 +10907,12 @@
   recorderHandle.healthy = () => {
     if (!alive) return false;
     try {
-      return !!globalThis.chrome && !!chrome.runtime && typeof chrome.runtime.id === 'string';
+      if (globalThis.chrome && chrome.runtime && typeof chrome.runtime.id === 'string') return true;
     } catch {
-      return false;
+      // Runtime invalidation can throw instead of clearing id.
     }
+    recorderHandle.stop();
+    return false;
   };
   recorderHandle.stop = () => {
     // `alive` gates sendToWorker(), so this is what actually silences the old recorder:

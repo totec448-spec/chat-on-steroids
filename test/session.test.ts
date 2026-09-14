@@ -45,6 +45,7 @@ import {
   readAsset,
   readEvents,
   readRecentEvents,
+  readLatestUserMessage,
   turnHasMcpCall,
   conversationHasMcpCallSince,
   readHandoff,
@@ -2047,6 +2048,25 @@ describe('canonical recorder 1.8', () => {
     const errors = await readEvents(first.sessionId!, { kinds: ['chat_error'] });
     expect(errors).toHaveLength(3);
     expect(errors.map(event => event.turnId)).toEqual(['first', 'first', 'second']);
+  });
+
+  it('owns reload errors by the canonical question across missing and reminted document turns', async () => {
+    const conversationId = 'conv-reload-error-owner';
+    const error = { kind: 'chat_error' as const, time: 100_000, text: 'Connection interrupted', recoverable: true, turnId: 'original' };
+    const first = await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: 90_000, messageId: 'question-one', text: 'Build it', authoredNow: true }, error]);
+    await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+    for (const [turnId, time] of [[undefined, 110_000], ['replacement', 121_000], ['replacement-again', 200_000]] as const) {
+      const replay = await recordChatObservations(conversationId, [{ ...error, turnId, time }]);
+      expect(replay.activity.meaningful).not.toBe(true);
+    }
+    expect(await readEvents(first.sessionId!, { kinds: ['chat_error'] })).toHaveLength(1);
+    await recordChatObservations(conversationId, [
+      { kind: 'user_message', time: 210_000, messageId: 'question-two', text: 'Build it', authoredNow: true },
+      { kind: 'user_message', time: 90_000, messageId: 'question-one', text: 'Build it with corrected rendering' },
+      { ...error, time: 211_000 }]);
+    expect((await readLatestUserMessage(first.sessionId!))?.messageId).toBe('question-two');
+    expect(await readEvents(first.sessionId!, { kinds: ['chat_error'] })).toHaveLength(2);
   });
 
   it('keeps a failed error append eligible for retry', async () => {

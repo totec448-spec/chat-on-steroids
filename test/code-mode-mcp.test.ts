@@ -40,6 +40,33 @@ async function identity() {
 const call = (requestId: string | undefined, code: string) => rpc('tools/call', { name: 'exec', arguments: { code } }, requestId);
 const text = (response: any) => response.result.content.filter((item: any) => item.type === 'text').map((item: any) => item.text).join('\n');
 
+it.each(['current', 'superseded'] as const)('resolves late session_finish identity before enforcing its %s owner', async state => {
+  const conversationId = randomUUID(), requestId = `wfr_${randomUUID().replaceAll('-', '')}`;
+  const session = await createSession({ conversationId, title: 'Late finish identity' });
+  await appendEvent(session.id, { kind: 'turn_start', source: 'extension', turnId: randomUUID(), time: Date.now() });
+  const input = await enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'CONTINUE_AFTER_FINISH', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+  if (state === 'superseded') expect(await rebindSession(session.id, conversationId, randomUUID())).toBe(true);
+  const proof = setTimeout(() => {
+    observeRequestCorrelation({ requestId, conversationId, sessionId: session.id, messageId: randomUUID(), tool: 'session_finish', observedAt: Date.now() });
+  }, 40);
+  try {
+    const finish = await rpc('tools/call', { name: 'session_finish', arguments: { summary: 'checkpoint complete' } }, requestId);
+    if (state === 'current') {
+      expect(finish.result.isError, text(finish)).not.toBe(true);
+      expect(text(finish)).toContain('HELD:');
+      expect(text(finish)).toContain('CONTINUE_AFTER_FINISH');
+    } else {
+      expect(finish.result.isError).toBe(true);
+      expect(text(finish)).toMatch(/superseded/i);
+      expect(text(finish)).not.toContain('CONTINUE_AFTER_FINISH');
+      expect((await listInputs()).find(row => row.id === input.id)?.state).toBe('queued');
+    }
+  } finally {
+    clearTimeout(proof);
+    await cancelInput(input.id);
+  }
+});
+
 it('delivers one recovered-identity notice on the real structured MCP wire after a refused plan update', async () => {
   const requestId = `wfr_${randomUUID().replaceAll('-', '')}`;
   const rejected = await rpc('tools/call', { name: 'update_plan', arguments: { plan: [{ step: 'Verify recovery', status: 'in_progress' }] } }, requestId);
@@ -387,7 +414,7 @@ it('uses existing process custody for nested exec and write_stdin across a conve
   const processId = Number(text(started).match(/Process running with session ID (\d+)/)?.[1]);
   expect(Number.isInteger(processId), text(started)).toBe(true);
   const denied = await call(stranger.requestId, `text(await tools.write_stdin({session_id:${processId},chars:"stolen\\r",yield_time_ms:50}));`);
-  expect(text(denied)).toContain('not proven to belong to this durable');
+  expect(text(denied)).toContain('EXEC_SESSION_OWNER_MISMATCH');
   const replacement = randomUUID(), requestId = `wfr_${randomUUID().replaceAll('-', '')}`;
   expect(await rebindSession(a.session.id, a.conversationId, replacement)).toBe(true);
   observeRequestCorrelation({ requestId, conversationId: replacement, sessionId: a.session.id, messageId: randomUUID(), tool: 'exec', observedAt: Date.now() });

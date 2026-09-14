@@ -9,9 +9,19 @@ function harness() {
   class Clock extends Date { static override now() { return now; } }
   let response: unknown;
   let nextBodyGate: Promise<void> | null = null;
+  const timers = new Map<number, { at: number; run: () => void }>();
+  let timerId = 0;
   const listeners = new Map<string, Array<{ handler: (event: unknown) => void; once: boolean }>>();
   const document = { readyState: 'loading' };
+  class Socket {
+    static OPEN = 1;
+    handlers: Array<(event: { data: string }) => void> = [];
+    constructor(readonly url: string) {}
+    addEventListener(type: string, listener: (event: { data: string }) => void) { if (type === 'message') this.handlers.push(listener); }
+    receive(data: unknown) { for (const listener of this.handlers) listener({ data: JSON.stringify(data) }); }
+  }
   const window = {
+    WebSocket: Socket,
     fetch: (..._args: unknown[]) => Promise.resolve(response),
     postMessage: (data: unknown) => posts.push(JSON.parse(JSON.stringify(data))),
     addEventListener: (type: string, handler: (event: unknown) => void, options?: { once?: boolean }) => {
@@ -25,7 +35,9 @@ function harness() {
     listeners.set(type, rows.filter(row => !row.once));
     for (const row of rows) row.handler(event);
   };
-  runInNewContext(script, { window, document, location: { origin: 'https://chatgpt.com' }, URL, Date: Clock, TextDecoder, setTimeout, clearTimeout });
+  runInNewContext(script, { window, document, location: { origin: 'https://chatgpt.com' }, URL, Date: Clock, TextDecoder,
+    setTimeout: (run: () => void, ms: number) => { timers.set(++timerId, { at: now + ms, run }); return timerId; },
+    clearTimeout: (id: number) => timers.delete(id) });
   async function feed(data: unknown, url = 'https://chatgpt.com/backend-api/wham/usage', init: Record<string, unknown> = {}) {
     let done: () => void = () => {};
     const inspected = new Promise<void>(resolve => { done = resolve; });
@@ -64,8 +76,25 @@ function harness() {
   }
   return {
     posts,
+    nativeSocket: Socket,
+    socket: (url = 'wss://ws.chatgpt.com/ws') => new window.WebSocket(url),
     feed,
     feedSse,
+    openSse: async () => {
+      let resolve: (value: unknown) => void = () => {};
+      let cancelled = false, clones = 0;
+      const reader = {
+        read: () => new Promise(done => { resolve = done; }),
+        cancel: async () => { cancelled = true; resolve({ done: true }); }
+      };
+      response = { url: 'https://chatgpt.com/backend-api/f/conversation', ok: true,
+        headers: { get: () => 'text/event-stream' },
+        clone: () => { clones++; return { body: { getReader: () => reader } }; } };
+      await window.fetch('/backend-api/f/conversation', { method: 'POST' });
+      return { push: (data: unknown) => resolve({ done: false, value: new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`) }),
+        get cancelled() { return cancelled; }, get clones() { return clones; } };
+    },
+    hide: () => dispatch('pagehide', {}),
     replaceFetch: (wrapExisting = false) => {
       const previous = window.fetch;
       const replacement = (...args: unknown[]) => wrapExisting ? previous(...args) : Promise.resolve(response);
@@ -75,12 +104,67 @@ function harness() {
     ready: () => { document.readyState = 'interactive'; dispatch('DOMContentLoaded', {}); },
     currentFetch: () => window.fetch,
     holdNextBody: () => { let release = () => {}; nextBodyGate = new Promise<void>(resolve => { release = resolve; }); return () => release(); },
-    advance: (ms: number) => { now += ms; },
+    advance: (ms: number) => { now += ms; for (const [id, timer] of timers) if (timer.at <= now) { timers.delete(id); timer.run(); } },
     request: (source: unknown = window, origin = 'https://chatgpt.com') => dispatch('message', { source, origin, data: { type: 'cos-usage-request' } })
   };
 }
 
 describe('MAIN-world usage projection', () => {
+  it('observes the Pro socket handoff with exact inner/outer conversation proof and shares HTTP deduplication', async () => {
+    const h = harness(), socket = h.socket();
+    expect(socket).toBeInstanceOf(h.nativeSocket);
+    const conversation_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const frame = `data: ${JSON.stringify({ conversation_id, message: { metadata: { request_id: 'wfr_socket' } } })}\n\n`;
+    const envelope = [{ type: 'message', payload: { type: 'conversation-turn-stream', payload: {
+      type: 'stream-item', conversation_id, encoded_item: frame
+    } } }];
+    socket.receive(envelope); socket.receive(envelope);
+    expect(h.posts).toHaveLength(1);
+    await h.feedSse([frame]);
+    expect(h.posts).toHaveLength(1);
+    h.request(); expect(h.posts).toHaveLength(2);
+  });
+  it('rejects foreign sockets, contradictory envelopes and request IDs hidden in model text', () => {
+    const h = harness(), socket = h.socket();
+    const conversation_id = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const envelope = (value: unknown, owner = conversation_id) => [{ type: 'message', payload: {
+      type: 'conversation-turn-stream', payload: { type: 'stream-item', conversation_id: owner,
+        encoded_item: `data: ${JSON.stringify(value)}\n\n` }
+    } }];
+    const value = { conversation_id, message: { metadata: { request_id: 'wfr_exact' } } };
+    h.socket('wss://chatgpt.com.evil.test/ws').receive(envelope(value));
+    socket.receive(envelope(value, '11111111-2222-3333-4444-555555555555'));
+    socket.receive(envelope({ conversation_id, message: { content: JSON.stringify(value) } }));
+    socket.receive(envelope(value).concat(Array(33).fill({})));
+    expect(h.posts).toHaveLength(0);
+  });
+  it('listens beyond five minutes, deduplicates and replays bounded ID evidence, then cancels at fifteen minutes', async () => {
+    const h = harness();
+    const stream = await h.openSse();
+    h.advance(6 * 60_000);
+    expect(stream.cancelled).toBe(false);
+    const event = { conversation_id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', metadata: { request_id: 'wfr_late' } };
+    stream.push(event);
+    await Promise.resolve(); await Promise.resolve();
+    expect(h.posts).toHaveLength(1);
+    stream.push(event);
+    await Promise.resolve(); await Promise.resolve();
+    expect(h.posts).toHaveLength(1);
+    h.request();
+    expect(h.posts).toHaveLength(2);
+    expect(h.posts[1]).toEqual(h.posts[0]);
+    h.advance(9 * 60_000);
+    expect(stream.cancelled).toBe(true);
+    h.hide(); h.request();
+    expect(h.posts).toHaveLength(2);
+  });
+  it('bounds concurrent response clones and releases them on page exit', async () => {
+    const h = harness();
+    const a = await h.openSse(), b = await h.openSse(), c = await h.openSse();
+    expect([a.clones, b.clones, c.clones]).toEqual([1, 1, 0]);
+    h.hide();
+    expect(a.cancelled && b.cancelled).toBe(true);
+  });
   it('retains supported model counts without requiring a reset timestamp', async () => {
     const h = harness();
     await h.feed({ model_limits: [{ model_slug: 'model-a', remaining: 3 }, { model_slug: 'model-b', remaining: 0, resets_after: 'invalid' }, { model_slug: 'unknown' }] });

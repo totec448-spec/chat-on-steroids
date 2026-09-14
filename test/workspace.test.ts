@@ -14,7 +14,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import {
   execOwner,
-  execOwnershipDenied,
+  execOwnershipFailure,
   noteExecOwner,
   resetExecOwnershipForTests
 } from '../src/main/codex/ownership.js';
@@ -101,14 +101,16 @@ describe('live process ownership across chat replacement', () => {
     noteExecOwner(103, 'session-other');
 
     expect(execOwner(101)).toBe('session-a-b');
-    expect(execOwnershipDenied(101, 'session-a-b')).toBe(false);
-    expect(execOwnershipDenied(101, 'session-other')).toBe(true);
+    expect(execOwnershipFailure(101, 'session-a-b')).toBeNull();
+    expect(execOwnershipFailure(101, 'session-other')).toBe('different-owner');
+    expect(execOwnershipFailure(101, null)).toBe('unidentified');
 
     expect(execOwner(102)).toBeNull();
-    expect(execOwnershipDenied(102, null)).toBe(false);
-    expect(execOwnershipDenied(102, 'session-a-b')).toBe(true);
+    expect(execOwnershipFailure(102, null)).toBeNull();
+    expect(execOwnershipFailure(102, 'session-a-b')).toBe('anonymous');
+    expect(execOwnershipFailure(999, 'session-a-b')).toBe('unavailable');
     expect(execOwner(103)).toBe('session-other');
-    expect(execOwnershipDenied(103, 'session-other')).toBe(false);
+    expect(execOwnershipFailure(103, 'session-other')).toBeNull();
   });
 });
 

@@ -11,11 +11,12 @@ import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder } from './sidebar-order.js';
 import { toolResultText } from './tool-result.js';
-import { chatErrorPresentation } from './chat-error.js';
+import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication } from './agent-communication.js';
 import { initContextMeter, paintContextMeter } from './context-meter.js';
+import { createSkills, type SkillsController } from './skills.js';
 import { isAstraModel, isProModel } from '../shared/chat-models.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
 import { injectableAttachments } from '../shared/input.js';
@@ -115,6 +116,7 @@ interface Deps {
 
 let deps: Deps;
 let visible = false;
+let skillsController: SkillsController | null = null;
 
 let sessions: SessionSummary[] = [];
 let pressure = new Map<string, TokenPressure>();
@@ -166,6 +168,7 @@ function restoreDraft(): void {
   cancelGoalRequest();
   $('activeGoalRow').hidden = true; $('recoveryStatus').hidden = true;
   $<HTMLTextAreaElement>('chatInput').value = inputDrafts.get(draftKey()) ?? '';
+  skillsController?.syncDraft();
   const automation = $<HTMLSelectElement>('chatAutomation'); automation.value = 'off'; delete automation.dataset.edited;
   $<HTMLSelectElement>('loopDelivery').value = 'finish';
   $<HTMLTextAreaElement>('sessionObjective').value = ''; delete $('sessionObjective').dataset.edited; delete $('sessionObjective').dataset.sessionId;
@@ -2252,7 +2255,9 @@ function paintDetail(followBottom = historyBefore === null): void {
       activityBoundary = key;
     }
   };
+  const duplicateErrors = duplicateChatErrors(events);
   for (const item of timelineItems(shown)) {
+    if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
     if (item.kind === 'compaction' || !['tool_call', 'page_tool', 'agent_message'].includes(item.event.kind)) activityBoundary = itemKey(item);
     if (!deps.state()?.config.ui.developerMode && item.kind === 'event' && item.event.source === 'app' && item.event.kind === 'progress' && item.event.progressId?.startsWith('browser-repair:')) continue;
@@ -3486,6 +3491,11 @@ export function initChat(next: Deps): void {
     .filter(entry => entry.conversationId && entry.origin?.kind !== 'worker')
     .map(entry => ({ id: entry.id, scope: projectGroup(entry.projectId) ?? '' })), paintSessions);
   deps = next;
+  skillsController = createSkills({
+    api,
+    input: $<HTMLTextAreaElement>('chatInput'),
+    getDraftIdentity: () => `${selectionGeneration}:${draftKey()}`
+  });
   const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
   agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
   ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
@@ -3709,6 +3719,7 @@ export function initChat(next: Deps): void {
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
   $('chatInput').addEventListener('input', () => {
+    skillsController?.onInput();
     const hasText = !!$<HTMLTextAreaElement>('chatInput').value.trim();
     const plan = taskPlans.get(draftKey());
     if (plan && !plan.stages && (plan.requestId || !hasText)) {
@@ -3718,6 +3729,7 @@ export function initChat(next: Deps): void {
     paintDeliveryControls(); paintTaskActions();
   });
   $('chatInput').addEventListener('keydown', (event) => {
+    if (skillsController?.onKeydown(event)) return;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (currentPreparedPlan() || $<HTMLTextAreaElement>('chatInput').value.trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
   });
   $('composerSettings').addEventListener('toggle', paintTaskActions);

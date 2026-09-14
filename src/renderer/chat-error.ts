@@ -1,7 +1,23 @@
 import type { SessionEvent } from '../shared/session.js';
+import { positionOf } from '../shared/chronology.js';
 import { t } from './i18n.js';
 
 type ChatError = Extract<SessionEvent, { kind: 'chat_error' }>;
+
+/** Project legacy reload duplicates without rewriting their forensic history. */
+export function duplicateChatErrors(history: readonly SessionEvent[]): Set<number> {
+  const duplicates = new Set<number>();
+  let question: number | undefined;
+  const notices = new Map<string, number>();
+  for (const event of [...history].sort((a, b) => positionOf(a) - positionOf(b))) {
+    if (event.kind === 'user_message') { question = positionOf(event); notices.clear(); }
+    if (event.kind !== 'chat_error' || event.recoverable !== true || question === undefined) continue;
+    const key = event.message.text.replace(/\s+/g, ' ').trim();
+    if (notices.has(key)) duplicates.add(event.seq);
+    else notices.set(key, event.seq);
+  }
+  return duplicates;
+}
 
 /** Presentation only: never infer send/reload authority from error prose. */
 export function chatErrorPresentation(error: ChatError, history: readonly SessionEvent[] = []) {
@@ -23,24 +39,28 @@ export function chatErrorPresentation(error: ChatError, history: readonly Sessio
   // Use the existing recorded repair row, bounded by the next question/error.
   // Never borrow another turn's recovery, or treat a reload receipt as completion.
   let repair: Extract<SessionEvent, { kind: 'progress' }> | undefined;
-  let continued = false;
-  let completed = false;
-  for (const event of [...history].sort((a, b) => a.seq - b.seq)) {
-    if (event.seq <= error.seq) continue;
+  let continued = 0;
+  let completed = 0;
+  const duplicates = duplicateChatErrors(history);
+  const question = history.filter(event => event.kind === 'user_message' && positionOf(event) < error.seq)
+    .reduce((latest, event) => Math.max(latest, positionOf(event)), 0);
+  for (const event of [...history].sort((a, b) => positionOf(a) - positionOf(b))) {
+    if ((event.kind === 'assistant_message' ? event.seq : positionOf(event)) <= error.seq || duplicates.has(event.seq)) continue;
     if (event.kind === 'user_message' || event.kind === 'chat_error' ||
-        (event.kind === 'turn_start' && event.turnId !== error.turnId)) break;
+        (!question && event.kind === 'turn_start' && event.turnId !== error.turnId)) break;
     if (error.turnId && event.turnId === error.turnId && event.kind === 'turn_end' && event.outcome === 'completed') {
-      completed = true;
+      completed = Math.max(completed, event.seq);
     }
-    if (error.turnId && event.turnId === error.turnId && event.time > error.time &&
+    if (question && event.kind === 'assistant_message' && positionOf(event) > question && event.final === true &&
+        (event.finalContentSeq ?? event.seq) > error.seq) completed = Math.max(completed, event.finalContentSeq ?? event.seq);
+    if ((question || (error.turnId && event.turnId === error.turnId)) && event.time > error.time &&
         (event.kind === 'tool_call' || (event.kind === 'turn_start' && event.source === 'app'))) {
-      continued = true;
-      completed = false;
+      continued = Math.max(continued, positionOf(event));
     }
     if (event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:') &&
-        (!event.turnId || (!!error.turnId && event.turnId === error.turnId))) repair = event;
+        (question || !event.turnId || (!!error.turnId && event.turnId === error.turnId))) repair = event;
   }
-  if (completed) return { title, message, next: t('This turn later completed. You can continue with a new message.') };
+  if (completed > continued) return { title, message, next: t('This turn later completed. You can continue with a new message.') };
   if (continued) return { title, message, next: t('Work continued after this notice. Automatic continuation waits for work to settle; the failed page alone does not trigger another message.') };
   if (repair && error.blocking !== true) next = `${repair.message.text} ${thinking
     ? t('You can send a follow-up. After a confirmed refresh, automatic continuation waits five minutes and checks for new work before sending.')

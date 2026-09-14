@@ -20,6 +20,9 @@ export function getSessionFinishDraft(sessionId: string, turnId: string | null |
   return draft ? { ...draft } : null;
 }
 const finishCalls = new Map<string, number>();
+export function sessionFinishDeadline(startedAt: number): number {
+  return startedAt + 25_000;
+}
 export async function sessionFinishWaiting(sessionId: string, turnId: string | null | undefined, conversationId: string | null): Promise<boolean> {
   return !!turnId && finishCalls.has(`${sessionId}:${turnId}`) &&
     await sessionFinishHeld(sessionId, turnId, conversationId) &&
@@ -232,8 +235,7 @@ async function waitForFinishBoundary(sessionId: string, turnId: string, conversa
 }
 
 /** HELD is a model instruction, not a server-side lock on ChatGPT finalization. */
-export async function announceSessionFinish(sessionId: string, summary: string): Promise<string> {
-  const deadline = Date.now() + 25000;
+export async function announceSessionFinish(sessionId: string, summary: string, deadline = sessionFinishDeadline(Date.now())): Promise<string> {
   const session = await getSession(sessionId);
   const call = currentCall();
   if (!session?.activeTurnId || !session.conversationId || call?.caller.sessionId !== sessionId ||

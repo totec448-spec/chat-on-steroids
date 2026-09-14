@@ -443,23 +443,28 @@ describe('Goal decision backends', () => {
   });
 });
 
-it('retires an unretryable helper pickup durably without retiring a newer final', async () => {
+it.each(['goal_browser_send_failed', 'goal_browser_send_unconfirmed'])('preserves source debt after %s without automatic transport retry', async failure => {
   await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
   const id = 'failed-helper-pickup';
   await goal.setGoalSwitchNow(id, 'goal', true);
   const sessionId = await recording(id, 'Next task');
   await goal.acceptGoalReplyNow({ conversationId: id, sessionId, replyId: 'reply-one', turnId: 'turn-one', eventSeq: 10, blocked: false });
   expect(goal.goalPendingReplyFor(id)?.turnId).toBe('turn-one');
-  browser.request.mockRejectedValueOnce(new Error('goal_browser_send_failed'));
+  browser.request.mockRejectedValueOnce(new Error(failure));
   goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'turn-one' });
   expect(await settled(id)).toMatchObject({ stage: 'failed', retryable: false });
-  expect(goal.goalPendingReplyFor(id)).toBeNull();
-  expect(goal.pendingGoalReplies().some(row => row.conversationId === id)).toBe(false);
+  expect(goal.goalPendingReplyFor(id)?.turnId).toBe('turn-one');
+  expect(goal.goalDraftNeedsIntervention(id)).toBe(true);
+  const failed = goal.goalViewFor(id)!;
+  await goal.ackGoalDraftNow(id, failed.token);
+  expect(goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'turn-one' }).token).toBe(failed.token);
+  expect(browser.request).toHaveBeenCalledTimes(1);
   await flushDurable();
   const stored = await readDurable<any>(goal.GOAL_REPLIES_STATE);
-  expect(stored.replies.find((row: any) => row.conversationId === id).state).toBe('handled');
+  expect(stored.replies.find((row: any) => row.conversationId === id).state).toBe('pending');
   await goal.acceptGoalReplyNow({ conversationId: id, sessionId, replyId: 'reply-two', turnId: 'turn-two', eventSeq: 11, blocked: false });
   expect(goal.goalPendingReplyFor(id)?.turnId).toBe('turn-two');
+  expect(goal.goalDraftNeedsIntervention(id)).toBe(false);
 });
 
 it('generates a validated staged plan through the existing browser helper without an API key', async () => {

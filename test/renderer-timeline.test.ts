@@ -1414,6 +1414,20 @@ it('omits the selected worker identity but retains a different sender', async ()
   expect(w.document.querySelector('.timeline')?.textContent ?? w.document.body.textContent).toContain('Own reply');
 });
 
+it('renders one legacy interrupted-response card across reloads and updates it after completion', async () => {
+  const error: SessionEvent = { seq: 2, time: T0 + 2, source: 'extension', kind: 'chat_error', turnId: 'original', recoverable: true, message: text('Connection interrupted') };
+  const { w, append } = await boot([
+    { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'question', message: text('Build') },
+    error, { ...error, seq: 3, turnId: undefined }, { ...error, seq: 4, turnId: 'replacement' },
+    { seq: 5, time: T0 + 5, source: 'app', kind: 'progress', turnId: 'replacement', progressId: 'browser-repair:test', message: text('Reloaded chat') }
+  ]);
+  expect(w.document.querySelectorAll('.chat-error-notice')).toHaveLength(1);
+  expect(w.document.querySelector('.chat-error-notice')!.textContent).toContain('Reloaded chat');
+  await append([{ seq: 6, time: T0 + 6, source: 'extension', kind: 'assistant_message', final: true, messageId: 'answer', message: text('Done') }]);
+  expect(w.document.querySelectorAll('.chat-error-notice')).toHaveLength(1);
+  expect(w.document.querySelector('.chat-error-notice')!.textContent).toContain('later completed');
+});
+
 it('docks recent app repair progress without hiding authored lookalikes', async () => {
   const events: SessionEvent[] = [
     { seq: 1, time: Date.now(), source: 'app', kind: 'progress', progressId: 'browser-repair:test', message: text('Restored the browser connection') },

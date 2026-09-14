@@ -5,8 +5,9 @@ import { currentCoreInstructions } from '../mcp/instructions.js';
 import { getSessionProject, projectWorkspace } from '../projects.js';
 import { resolvePath } from '../sandbox.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt } from '../../shared/user-prompt.js';
+import { selectedSkillInstructions } from './skill-prompt.js';
 
-type PromptScope = { sessionId?: string | null; projectId?: string | null };
+type PromptScope = { sessionId?: string | null; projectId?: string | null; skillCommands?: readonly string[] };
 export type PromptLimits = { maxChars: number; maxBytes: number };
 type ProjectInstructions = { directory: string; text: string; truncated: boolean };
 const limits: PromptLimits = { maxChars: MAX_CHATGPT_MESSAGE_CHARS, maxBytes: Infinity };
@@ -50,12 +51,12 @@ async function projectInstructions(scope: PromptScope): Promise<ProjectInstructi
   }
 }
 
-/** User text and the complete Core prompt are mandatory; only project instructions spend slack. */
+/** User text, Core and selected skills are mandatory; only project instructions spend slack. */
 export function fitSessionPrompt(text: string, core: string, agents: ProjectInstructions | null = null, budget = limits): string {
   const fits = (value: string): boolean => value.length <= Math.min(MAX_CHATGPT_MESSAGE_CHARS, budget.maxChars) &&
     Buffer.byteLength(value, 'utf8') <= budget.maxBytes;
   const base = prependUserPrompt(text, core);
-  if (!fits(base)) throw new Error('The message and main instructions exceed the delivery limit (maximum 96,000 characters). Shorten the message or standing instructions.');
+  if (!fits(base)) throw new Error('The message, main instructions and selected skills exceed the delivery limit (maximum 96,000 characters). Shorten the message or standing instructions, or select fewer skills.');
   if (!agents) return base;
   const content = agents.text.replace(/\r\n?/g, '\n');
   const render = (length: number, shortened: boolean): string => {
@@ -79,7 +80,14 @@ export function fitSessionPrompt(text: string, core: string, agents: ProjectInst
 /** Opening normal/worker messages only. Callers own first-message eligibility;
  * follow-ups, helpers, handoff requests and resumed bootstraps never call this. */
 export async function prepareSessionPrompt(text: string, scope: PromptScope = {}, budget = limits): Promise<string> {
-  const core = await currentCoreInstructions();
+  const [main, skills] = await Promise.all([currentCoreInstructions(), selectedSkillInstructions(scope.skillCommands ?? [text])]);
+  const core = skills ? `${main}\n\n${skills}` : main;
   fitSessionPrompt(text, core, null, budget); // Reject mandatory overflow before reading optional files.
   return fitSessionPrompt(text, core, await projectInstructions(scope), budget);
+}
+
+/** Explicitly selected follow-up skills use the same hidden frame without repeating setup. */
+export async function prepareFollowupPrompt(text: string, commands: readonly string[] = [text], budget = limits): Promise<string> {
+  const skills = await selectedSkillInstructions(commands);
+  return skills ? fitSessionPrompt(text, skills, null, budget) : text;
 }

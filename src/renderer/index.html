@@ -409,7 +409,7 @@
                   <h3>Create an API key</h3>
                   <ol class="setup-instructions">
                     <li>Open API keys and click “Create new secret key” at the top right of the page.</li>
-                    <li>Leave Owned by set to You. Select your project, for example Default project. A name and expiration are optional.</li>
+                    <li>Leave Owned by set to You. Select your project, for example Default project. A name is optional. An expiration date is required.</li>
                     <li>Under Permissions, choose Restricted. Scroll down to Tunnels and enable Read and Use. Leave everything else at None.</li>
                     <li>Create the key, copy it and paste it below. You can only copy the secret once.</li>
                   </ol>
@@ -459,16 +459,16 @@
                   <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
                 </div>
                 <div class="step-body">
-                  <div class="step-heading">
-                    <h3>Add it in ChatGPT</h3>
-                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/plugins">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open ChatGPT Plugins
-                    </button>
-                  </div>
+                  <h3>Add it in ChatGPT</h3>
                   <h4 class="setup-subheading">A · Enable Developer mode</h4>
                   <p>In ChatGPT, open Settings → Security and login and turn on Developer mode.</p>
                   <div class="setup-guide" data-setup-guide="developer"></div>
                   <h4 class="setup-subheading">B · Create the Core plugin</h4>
+                  <div class="step-actions">
+                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/plugins">
+                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open ChatGPT Plugins
+                    </button>
+                  </div>
                   <ol class="setup-instructions">
                     <li>Open the ChatGPT Plugins page using the button above. Click + at the top right to open New Plugin.</li>
                     <li>Copy the name and description from the Core card below.</li>
@@ -505,11 +505,13 @@
                 </div>
                 <div class="step-body">
                   <h3>Add the Chrome extension</h3>
-                  <p>
-                    Open <code>chrome://extensions</code>, turn on <strong>Developer mode</strong>,
-                    choose <strong>Load unpacked</strong> and pick the folder the button opens. It
-                    pairs with this app by itself — there is no code to type.
-                  </p>
+                  <ol class="setup-instructions">
+                    <li>Open <code>chrome://extensions</code>.</li>
+                    <li>Turn on Developer mode at the top right.</li>
+                    <li>Click Open extension folder below and copy the folder path from the file manager’s address bar.</li>
+                    <li>In Chrome, click Load unpacked, paste the copied folder path and select that folder.</li>
+                  </ol>
+                  <p>The extension pairs with this app automatically — there is no code to type.</p>
                   <p class="hint is-required">
                     <strong>Required for sub-agents:</strong> the companion extension must be loaded
                     and connected in ChatGPT. Without it, Chat On Steroids cannot identify, open or
@@ -845,13 +847,14 @@
             <div class="composer-dock" id="composerDock"><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div>
             <form class="composer" id="composer">
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
-              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…"></textarea>
+              <div id="composerImages" class="composer-images" hidden></div><textarea dir="auto" id="chatInput" rows="1" placeholder="Ask anything…" aria-autocomplete="list"></textarea><div id="skillAutocomplete" class="skill-autocomplete" role="listbox" aria-label="Skills" hidden></div>
               <div class="composer-toolbar">
                 <details class="composer-menu" id="attachmentMenu">
                   <summary aria-label="Add attachments" title="Add attachments"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg></summary>
                   <div class="composer-popover">
                     <button id="attachImages" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-image" /></svg>Add photos &amp; files</button>
                     <button id="composerFolder" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-folder" /></svg>Share a folder</button>
+                    <button id="composerSkills" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-bolt" /></svg>Skills</button>
                   </div>
                 </details>
                 <div class="composer-options">
@@ -946,6 +949,22 @@
       <!-- --------------------------------------------------------------- nav -->
 
     </div>
+
+    <dialog id="skillsDialog" class="skills-dialog" aria-labelledby="skillsDialogTitle">
+      <div class="skills-dialog-head">
+        <div><h2 id="skillsDialogTitle">Skills</h2><p>Use reusable text instructions in this message.</p></div>
+        <button class="btn btn-icon" id="skillsClose" type="button" aria-label="Close skills"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-x" /></svg></button>
+      </div>
+      <div class="skills-dialog-body">
+        <label class="skills-search" for="skillsSearch"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="skillsSearch" type="search" autocomplete="off" placeholder="Search skills" /></label>
+        <p id="skillsStatus" class="skills-status" role="status"></p>
+        <div id="skillsList" class="skills-list"></div>
+      </div>
+      <div class="skills-dialog-actions">
+        <button class="btn" id="skillsImport" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-plus" /></svg>Import skill file</button>
+        <button class="btn" id="skillsOpenFolder" type="button"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg>Open skill directory</button>
+      </div>
+    </dialog>
 
     <dialog id="setupProfileDialog" class="setup-profile-dialog" aria-labelledby="setupProfileDialogTitle">
       <form id="setupProfileForm">

@@ -1,7 +1,7 @@
 import { toolDeclaration } from './tool-declarations.js';
 import { registerPlanTool } from './plan-tool.js';
 import { goalWorkerChat } from '../bridge.js';
-import { announceSessionFinish } from '../session/finish.js';
+import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
 import { getConfig } from '../config.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
@@ -52,7 +52,7 @@ import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.
 import { DEFAULT_TRUNCATION_POLICY, EXEC_OUTPUT_CEILING_POLICY, unifiedExecManager } from '../codex/manager.js';
 import {
   backgroundExecObligations,
-  execOwnershipDenied,
+  execOwnershipFailure,
   forgetExecOwner,
   MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
   noteExecAttended,
@@ -936,14 +936,19 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       })),
       async (input) =>
         reg.guarded('command', 'write_stdin', async () => {
-          // A session id is a small integer that means nothing outside the chat that was given
-          // it, and every chat reaches the same manager here. Refuse only what is proven to
-          // belong elsewhere; an unproven caller keeps working exactly as before.
+          // The ownership registry decides both admission and the reason for refusal.
+          // Missing caller proof is retryable; anonymous custody and a different owner are not.
           const asking = await execSession('write_stdin');
-          if (execOwnershipDenied(input.session_id, asking)) {
-            return fail(
-              `write_stdin failed: session ${input.session_id} is not proven to belong to this durable Chat On Steroids session. A completed process may already have delivered its output and been retired. This refusal concerns this process id, not Read-only mode or permission to edit files or launch other authorized work. Check earlier tool results before deciding whether any work remains; an unavailable session id alone is not a reason to rerun the command.`
-            );
+          const denied = execOwnershipFailure(input.session_id, asking);
+          if (denied) {
+            const reason = {
+              unavailable: 'EXEC_SESSION_UNAVAILABLE: This process id is not available to this call in the running app. Check the original exec_command response and earlier results for its exit/output before deciding what remains; do not rerun the command solely because its id is unavailable.',
+              anonymous: 'EXEC_SESSION_ANONYMOUS: This process was launched without proven chat identity. An identified chat cannot adopt it. Check the original command and its saved output; retrying from this identified chat cannot change its ownership.',
+              unidentified: 'EXEC_CALLER_UNIDENTIFIED: The current call has no proven chat identity, so it cannot access this owned process. After exact identity recovers, retry this same session_id once; do not launch a replacement command.',
+              'different-owner': 'EXEC_SESSION_OWNER_MISMATCH: This process belongs to a different local session. Only its owning session can poll it or send input; use a process id returned to this session.'
+            }[denied];
+            const message = `write_stdin failed for session ${input.session_id}: ${reason} No input was sent and no output was read. This refusal concerns this process id, not Read-only mode or permission to edit files or launch other authorized work.`;
+            return denied === 'unidentified' ? failIdentity(message) : fail(message);
           }
           // Both sides of the wait. An empty poll blocks for seconds by design, and a caller
           // sitting in one is attending its session rather than neglecting it.
@@ -1072,7 +1077,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       const caller = currentCaller();
       if (!caller.sessionId || !caller.conversationId) return failIdentity('Exact session identity is required');
       if (goalWorkerChat(caller.conversationId)) return fail('Session finish hold is not applicable to workers or decision helpers. Workers report with agents action=finish; decision helpers answer normally.');
-      return guard('session_finish', async () => ({ content: [{ type: 'text', text: await announceSessionFinish(caller.sessionId!, summary) }] }));
+      const deadline = sessionFinishDeadline(currentCall()?.startedAt ?? Date.now());
+      return guard('session_finish', async () => ({ content: [{ type: 'text', text: await announceSessionFinish(caller.sessionId!, summary, deadline) }] }));
     });
   }
 

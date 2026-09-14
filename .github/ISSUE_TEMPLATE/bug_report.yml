@@ -54,16 +54,26 @@ body:
   - type: dropdown
     id: chatgpt_access
     attributes:
-      label: ChatGPT workspace / custom MCP access
-      description: Select the closest match. OpenAI plan and workspace policy can affect custom app behavior.
+      label: ChatGPT plan
+      description: Report the plan shown in your account. This does not establish which models or connector actions are available.
       options:
+        - "Free"
+        - "Go"
+        - "Plus"
+        - "Pro"
         - "Business"
         - "Enterprise or Edu"
-        - "Pro (custom MCP read/fetch only)"
         - "Other or not sure"
         - "Not relevant to this bug"
     validations:
       required: true
+
+  - type: input
+    id: chatgpt_surface
+    attributes:
+      label: ChatGPT surface and workspace type
+      description: For connector or model issues, say whether you used Chat or Work and a Personal or managed workspace. Do not include workspace names or IDs.
+      placeholder: "Chat, Personal workspace"
 
   - type: textarea
     id: what
