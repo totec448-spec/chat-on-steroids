@@ -44,6 +44,26 @@ afterEach(async () => {
   await removeTempDir(dir);
 });
 describe('external plugin authority', () => {
+  it('keeps a server failure distinct from a disabled tool on subsequent cached calls', async () => {
+    const row = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
+    const upstream = vi.spyOn(Client.prototype, 'callTool').mockRejectedValueOnce(new Error('private transport details'));
+    expect(JSON.stringify(await manager.call('Echo.Mixed', { value: 'first' }))).toContain('PLUGIN_CALL_FAILED');
+    expect(manager.snapshot().plugins[0]?.status).toBe('error');
+    const outcome = vi.fn();
+    const next = JSON.stringify(await manager.call('Echo.Mixed', { value: 'second' }, outcome));
+    expect(next).toContain('PLUGIN_UNAVAILABLE');
+    expect(next).toContain('Restart this plugin');
+    expect(next).not.toContain('Refresh the Plugins connector');
+    expect(next).not.toContain('private transport details');
+    expect(upstream).toHaveBeenCalledTimes(1);
+    expect(outcome).toHaveBeenCalledWith('tool_rejected');
+    await manager.setEnabled(row.id, false);
+    const disabled = JSON.stringify(await manager.call('Echo.Mixed', { value: 'third' }));
+    expect(disabled).toContain('PLUGIN_DISABLED');
+    expect(disabled).toContain('Enable');
+    expect(disabled).not.toContain('Restart this plugin');
+  });
+
   it('keeps Windows package data below MAX_PATH across installation and replacement', async () => {
     const directories: string[] = [];
     vi.spyOn(pluginInstaller, 'installSource').mockImplementation(async (_source, directory) => {
@@ -154,6 +174,10 @@ describe('external plugin authority', () => {
     await manager.initialize(dir);
     expect(manager.tools()).toEqual([]);
     await vi.waitFor(() => expect(manager.snapshot().plugins[0]!.status).toBe('needs-auth'));
+    expect(fetcher).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
+    const refused = JSON.stringify(await manager.call('Echo.Mixed', { value: 'unavailable' }));
+    expect(refused).toContain('PLUGIN_NEEDS_AUTH');
+    expect(refused).toContain('Sign in');
     expect(fetcher).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled();
   });
   it('keeps needs-auth and unpublishes cached tools after an authenticated call retires its expired connection', async () => {

@@ -87,7 +87,7 @@ async function refuseBrowserChord(key: string, window: { id: number }): Promise<
   // Popup HWNDs may be absent from the ordinary top-level window list.
   const target = (await getWindowState({ window: window.id, includeScreenshot: false, includeUi: false })).window;
   if (!isBrowserProcess(target.process)) return null;
-  return `BROWSER_TAB_CHORD: ${chord} would manage tabs/windows or browser history in ${JSON.stringify(target.title)} (${target.process}). Use the page in its own browser window and native controls instead.`;
+  return `BROWSER_TAB_CHORD: ${chord} would manage tabs/windows or browser history in ${JSON.stringify(target.title)} (${target.process}). No keys were sent. For testing, observe the browser menu and choose its New window control, then list_windows and get_window_state to verify a separate window id before navigating there. Never fall back to replacing a ChatGPT page through its address bar.`;
 }
 
 export function registerWindowsDesktopTools(reg: SurfaceRegistrar): void {

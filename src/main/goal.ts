@@ -481,7 +481,8 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
       !raw.replyId ||
       !raw.turnId ||
       !Number.isSafeInteger(raw.eventSeq) ||
-      raw.eventSeq < 1 ||
+      raw.eventSeq < 0 ||
+      (raw.eventSeq === 0 && raw.replyId !== `turn:${raw.turnId}`.slice(0, 200)) ||
       !Number.isSafeInteger(raw.acceptedAt) ||
       raw.acceptedAt <= 0 ||
       (raw.state !== 'pending' && raw.state !== 'handled')
@@ -524,6 +525,13 @@ export function goalDraftBusy(conversationId: string): boolean {
   // kept the owed-goal inspection from ever nudging the chat again.
   if (!draft || draft.acknowledged) return false;
   return draft.stage === 'sending' || draft.stage === 'answering';
+}
+
+/** Reloading the source cannot repair a settled settings/transport refusal. */
+export function goalDraftNeedsIntervention(conversationId: string): boolean {
+  const draft = drafts.get(conversationId);
+  return draft?.stage === 'failed' && draft.turnId === goalReplies.get(conversationId)?.turnId &&
+    !retryableGoalFailure(draft.error ?? '');
 }
 
 export function goalPendingReplyFor(
@@ -1156,13 +1164,10 @@ export async function ackGoalDraftNow(
 }
 
 /**
- * Retires every outstanding generation when Goal authority/settings are revoked or replaced.
- *
- * Disabling Goal, changing the model/reasoning, or replacing its credential must affect work
- * that is already in flight, not only the next draft. Each entry stays as a spent tombstone so
- * a reload cannot re-draft the same finished ChatGPT turn after the cancellation.
+ * Revoke attempts made under replaced settings; pending source work survives.
+ * Only an explicit master Off also discharges all automatic reply obligations.
  */
-export function retireGoalDrafts(): number {
+export function retireGoalDrafts(retireReplies = false): number {
   let retired = 0;
   for (const draft of drafts.values()) {
     if (draft.acknowledged) continue;
@@ -1173,8 +1178,13 @@ export function retireGoalDrafts(): number {
     draft.reply = '';
     retired += 1;
   }
-  for (const reply of goalReplies.values()) reply.state = 'handled';
-  if (goalReplies.size > 0) persistGoalRepliesSoon();
+  // A settings/key replacement revokes prepared text, not the source obligation.
+  // Removing the attempt permits that same source to use the corrected settings.
+  drafts.clear();
+  if (retireReplies) {
+    for (const reply of goalReplies.values()) reply.state = 'handled';
+    if (goalReplies.size > 0) persistGoalRepliesSoon();
+  }
   return retired;
 }
 
@@ -1440,10 +1450,8 @@ function settle(draft: GoalDraft, stage: GoalStage, error: string | null = null)
   draft.error = error;
   draft.settledAt = Date.now();
   notifyGoalChange();
-  // A terminal browser-helper failure cannot be repaired by reloading the source chat.
-  // Retire this exact automatic pickup, retaining its visible failure and objective.
-  // A deliberate retry or new final may still start work; stale browser replay may not.
-  if (stage === 'failed' && error?.startsWith('goal_browser_') && !retryableGoalFailure(error)) handleGoalReply(draft.conversationId, draft.turnId);
+  // A failed helper has not answered the source. Keep its debt; the failed draft
+  // retains the transport's retry/ambiguity fence until a deliberate retry or change.
 }
 
 /**

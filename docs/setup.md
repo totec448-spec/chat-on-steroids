@@ -45,6 +45,10 @@ History is stored locally, with recording on and 30-day retention by default. Cr
 
 [Security policy](../SECURITY.md) · [Tool reference](tool-surface.md) · [Architecture](../AGENTS.md)
 
+## Skills
+
+Open **+ → Skills** to import a `.md` or `.txt` instruction file, browse installed skills or open their folder. Type **/** in the composer to autocomplete a skill command. Skills start empty and use existing Core file tools; they do not install additional tools. See the [skills guide](skills.md) for the file format and model-assisted installation.
+
 ## Sessions, workers and Astra
 
 **Session history** belongs to the local session, not a particular ChatGPT tab. The companion records messages and the actual local tool results so the app and the model can read earlier work.
@@ -60,6 +64,9 @@ History is stored locally, with recording on and 30-day retention by default. Cr
 ## Troubleshooting
 
 - **Missing or stale tools:** refresh the relevant CoS app in ChatGPT. Reloading the Chrome extension is a separate action.
+- **Tunnel rejects the API key or tunnel ID:** check the saved tunnel ID, the selected setup profile, and that its key has Tunnels Read + Use for that tunnel. Extension pairing does not authenticate the tunnel. If Platform offers no matching ChatGPT workspace, retain the exact error for an access investigation; a different tunnel does not establish account eligibility.
+- **ChatGPT blocks a tool for safety:** local permission alone does not prove that ChatGPT accepted or dispatched the call. Inspect the local tool history for the exact request. If no result exists, execution is unconfirmed; do not replay a potentially executed operation or route it through another connector. Keep the task's progress and report the provider's error, selected Chat/Work surface, and app/extension versions without credentials or private content. A plan label alone does not diagnose a provider refusal.
+- **CoS returns `TOOL_DISABLED`:** check Read-only and the named local capability. `CALLER_IDENTITY_REQUIRED` or `WORKER_IDENTITY_LOST` instead concerns exact caller ownership; neither proves that command execution is globally disabled.
 - **Extension version mismatch:** reload the unpacked companion after updating CoS, then reload the ChatGPT page.
 - **Models missing:** use **Reload ChatGPT models**. The picker reflects availability in your signed-in account.
 - **`UNIDENTIFIED_CALLER`:** use that conversation in the paired browser so the extension can prove its request identity. CoS does not guess from the active tab.

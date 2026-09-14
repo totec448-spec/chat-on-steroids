@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { addProject, assignSessionProject } from '../src/main/projects.js';
+import { initSkills, removeSkill } from '../src/main/skills.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from '../src/main/version.js';
 import * as browserWake from '../src/main/browser-wake.js';
 type Handler = (event: unknown, payload: unknown) => Promise<any>;
@@ -49,6 +50,7 @@ async function post(route: string, body: unknown) {
 beforeAll(async () => {
   directory = await makeTempDir('clf-input-integration-');
   initConfigPath(directory); initSecretsPath(directory); initDurableStore(directory); initSessionStore(directory);
+  await initSkills(directory);
   await saveConfig(defaultConfig());
   registerIpc(() => ({ isDestroyed: () => false, webContents: { send: pushed } }) as never, () => undefined);
   await startBridge();
@@ -613,6 +615,49 @@ it.each(['gpt-6-pro', 'gpt-5.6-sol'])('carries settled Thinking failed through H
   } finally { clock.mockRestore(); }
 });
 
+it.each(['gpt-6-pro', 'gpt-5.6-sol'])('preserves failed prime recovery while another worker tool outlives five minutes (%s)', async model => {
+  const bridge = await import('../src/main/bridge.js');
+  const calls = await import('../src/main/mcp/call-context.js');
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const conversationId = randomUUID(), worker = randomUUID();
+  await createSession({ title: 'Prime recovery with a busy worker', conversationId });
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, mode: 'loop', loopBackend: 'chatgpt' } });
+  await goal.setGoalSwitchNow(conversationId, 'loop', true, true);
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model, reasoningEffort: 'high', time: now },
+    { kind: 'user_message', messageId: 'prime-question', text: 'Finish the original task with its worker', time: now },
+    { kind: 'turn_start', turnId: 'prime-failed-view', time: now }
+  ] });
+  await attributedMcp(conversationId);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const running = calls.trackMcpRequest(() => calls.trackInFlight({ startedAt: now, transportKey: null,
+    agent: 'worker-1', outcome: null, evidence: calls.emptyEvidence(),
+    caller: { conversationId: worker, requestId: randomUUID(), transportKey: null } }, () => held));
+  try {
+    now++;
+    await post('/events', { conversationId, events: [
+      { kind: 'turn_end', turnId: 'prime-failed-view', outcome: 'failed', reason: 'thinking_failed', time: now }
+    ] });
+    await refreshFailedView(conversationId, ms => { now += ms; });
+    const pending = goal.goalPendingReplyFor(conversationId)!;
+    expect(pending).toMatchObject({ silenceSourceTurnId: 'prime-failed-view' });
+    expect(calls.runningToolCalls(worker)).toBe(1);
+    expect(calls.runningToolCalls(conversationId)).toBe(0);
+    now += 2 * 60_000;
+    await bridge.sweepStaleSwarm(now);
+    goal.restoreGoalReplies(goal.snapshotGoalReplies());
+    expect(goal.goalPendingReplyFor(conversationId)).toEqual(pending);
+    const drafted = await post('/goal/draft', { conversationId, turnId: pending.turnId, terminalRequired: true, clientId: 'prime-page' });
+    expect(drafted.status, JSON.stringify(drafted.body)).toBe(200);
+    expect(goal.goalPendingReplyFor(conversationId)).toEqual(pending);
+    release(); await running;
+    await bridge.sweepStaleSwarm(now);
+    expect(goal.goalPendingReplyFor(conversationId)).toEqual(pending);
+  } finally { release(); await running; clock.mockRestore(); }
+});
+
 it('refuses restored recovery tickets without MCP proof but still delivers a real final', async () => {
   const { readRecentEvents } = await import('../src/main/session/store.js');
   const conversationId = randomUUID();
@@ -1038,6 +1083,50 @@ it.each(['off', 'goal', 'loop'] as const)('does not repeat setup in an existing 
   expect(claim?.text).toBe('Continue the original work');
   input.resetInputForTests();
   expect((await input.claimBrowserInput(row.id, 'followup-page', conversationId, true))?.text).toBe(claim?.text);
+});
+
+it('freezes selected skills from a planned original request through browser claim and restart', async () => {
+  const id = `review-${randomUUID()}`;
+  const skillDirectory = path.join(directory, 'skills', id);
+  await fs.mkdir(skillDirectory);
+  await fs.writeFile(path.join(skillDirectory, 'SKILL.md'), `---\nname: Review\ndescription: Review code changes\n---\nSKILL_FROZEN_BODY 🐱`);
+  const objective = `/${id}\nOriginal constraints must survive.`;
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto',
+    text: `/${id}\nImplement the whole task.`, objective, stages: ['Verify all behavior.'] });
+  const claim = await input.claimBrowserInput(row.id, 'skills-browser-page', null, true);
+  expect(claim).not.toBeNull();
+  expect(claim!.text.match(/SKILL_FROZEN_BODY/g)).toHaveLength(1);
+  expect(claim!.text.indexOf('# Selected skills')).toBeGreaterThan(claim!.text.indexOf('# Local tools'));
+  expect(userPromptText(claim!.text)).toContain(objective);
+  expect(userPromptText(claim!.text)).toContain('Verify all behavior.');
+  expect(userPromptText(claim!.text)).not.toContain('SKILL_FROZEN_BODY');
+  expect(claim!.text.length).toBeLessThanOrEqual(96000);
+  await removeSkill(id);
+  input.resetInputForTests();
+  expect((await input.claimBrowserInput(row.id, 'skills-browser-page', null, true))!.text).toBe(claim!.text);
+  expect((await input.listInputs()).find(entry => entry.id === row.id)!.text).toBe(row.text);
+});
+
+it('freezes explicit follow-up skills for MCP delivery while preserving authored text and avoiding repeated setup', async () => {
+  const id = `followup-${randomUUID()}`;
+  const skillDirectory = path.join(directory, 'skills', id);
+  await fs.mkdir(skillDirectory);
+  await fs.writeFile(path.join(skillDirectory, 'SKILL.md'), `---\nname: Follow-up\ndescription: Explain an implementation\n---\nFOLLOWUP_SKILL_ORIGINAL`);
+  const session = await createSession({ title: 'Skill follow-up', conversationId: randomUUID() });
+  const text = `/prompt ${id}\nExplain the current changes.`;
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text });
+  const offered = await input.offerToolInput(session.id, session.conversationId, 'skill-offer', 0);
+  expect(offered.messages).toHaveLength(1);
+  const prepared = offered.messages[0]!.text;
+  expect(prepared).toContain('FOLLOWUP_SKILL_ORIGINAL');
+  expect(prepared).not.toContain('# Local tools');
+  expect(userPromptText(prepared)).toBe(text);
+  await fs.writeFile(path.join(skillDirectory, 'SKILL.md'), '# Changed\nFOLLOWUP_SKILL_CHANGED');
+  input.resetInputForTests();
+  const retry = await input.offerToolInput(session.id, session.conversationId, 'skill-offer-retry', 0);
+  expect(retry.messages[0]!.text).toBe(prepared);
+  expect((await input.listInputs()).find(entry => entry.id === row.id)!.text).toBe(text);
+  await removeSkill(id);
 });
 
 it('delivers only the selected project AGENTS.md, freezes claims across restart, and budgets the Astra appendix before cutting', async () => {

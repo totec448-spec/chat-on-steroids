@@ -56,8 +56,25 @@ it('requires this chat session receipt before claiming delivery even with global
   expect(waiting.proc[0]).toBe('running');
   expect(waiting.why[1]).toContain('this chat’s session receipt');
   const recorded = (popup!.window as any).pipeline({ ...info, page: { events: 3, session: 'local-session' } }, true);
-  expect(recorded.sent[0]).toBe('done');
-  expect(recorded.proc[0]).toBe('done');
+  expect(recorded.sent[0]).toBe('off');
+  expect(recorded.proc[0]).toBe('off');
+  expect(recorded.why[1]).toContain('latest turn');
+});
+
+it('distinguishes queued, received, owner confirmed and recorded tool activity for the current ID', () => {
+  openPopup(vi.fn());
+  const project = (trace: unknown[]) => (popup!.window as any).pipeline({
+    isChat: true, recorder: true, pending: 0, delivery: { ok: true, total: 999 },
+    page: { events: 1000, session: 'local-session', trace }
+  }, true);
+  const request = { requestId: 'wfr_current', read: 1, queued: 2 };
+  expect(project([request]).sent[0]).toBe('running');
+  expect(project([{ ...request, sent: 3 }]).why[1]).toContain('Waiting for owner confirmation');
+  const confirmed = project([{ ...request, sent: 3, confirmed: true }]);
+  expect(confirmed.proc[0]).toBe('done');
+  expect(confirmed.why[1]).toContain('No matching tool activity');
+  expect(project([{ ...request, app: 'request_id' }]).why[1]).toContain('matched to recorded tool activity');
+  expect(project([]).proc[0]).toBe('off');
 });
 
 it('keeps blocked delivery distinct from network unreachability and requires pairing too', () => {

@@ -1,11 +1,9 @@
 /**
  * Status UI, and the one place that answers "where did the stream stop?".
  *
- * Everything this browser observes has to survive three hand-offs before the desktop app
- * has it: this extension reads it off the page, the service worker delivers it, and the
- * app records it into a session for this chat. All three used to fail the same way from
- * here — nothing happens — so "Reaching the app" opens onto those three stages stated
- * separately, and names the one that did not complete.
+ * Current-turn request evidence is distinct from whole-chat recording counters.
+ * "Reaching the app" separates finding the ID, app receipt and exact owner confirmation;
+ * only the activity feed can additionally prove a matching tool invocation was recorded.
  *
  * It opens itself when something is wrong and stays shut when nothing is, because a panel
  * that is always expanded is a panel nobody reads.
@@ -72,16 +70,16 @@ const ATTRIBUTION = {
 /**
  * The three stages, from evidence each layer produced independently.
  *
- * Deliberately not one flag set by whoever ran last: "picked up" is the page's own count,
- * "sent to app" is the service worker's delivery log, and "app processed" is the app
- * naming a session for this chat on the feed the page polls. A stage is only green when
- * the layer that owns it said so.
+ * Global transport failures explain a blocked path. Success needs this chat's session
+ * receipt and exact evidence projected from its newest native turn. Queue custody and
+ * owner acknowledgement do not claim a matching MCP invocation has run.
  */
 function pipeline(info, ready) {
   const page = info && info.page;
   const sent = info && info.delivery;
   const pending = info ? info.pending : 0;
   const read = page ? page.events : 0;
+  const calls = page && Array.isArray(page.trace) ? page.trace : [];
 
   if (!info || !info.isChat) return { read: ['off'], sent: ['off'], proc: ['off'], why: ['', ''] };
   if (!info.recorder) {
@@ -91,7 +89,7 @@ function pipeline(info, ready) {
     return { read: ['running'], sent: ['off'], proc: ['off'], why: ['', 'Waiting for the first message.'] };
   }
 
-  const readStage = ['done', String(read)];
+  const readStage = calls.length ? ['done', String(calls.length)] : ['running'];
   if (!ready) {
     return {
       read: readStage,
@@ -145,9 +143,13 @@ function pipeline(info, ready) {
       why: ['', 'App reachable. Waiting for this chat’s session receipt.']
     };
   }
-  const sentStage = ['done', sent && sent.total ? String(sent.total) : ''];
-
-  const calls = Array.isArray(page.trace) ? page.trace : [];
+  if (!calls.length) return {
+    read: ['running'], sent: ['off'], proc: ['off'],
+    why: ['', 'Chat recorded. Waiting for a request ID from the latest turn.']
+  };
+  const received = calls.filter(call => call.sent || call.app === 'request_id').length;
+  const confirmed = calls.filter(call => call.confirmed || call.app === 'request_id').length;
+  const sentStage = [received === calls.length ? 'done' : 'running', `${received}/${calls.length}`];
   const placed = calls.filter((call) => call.app === 'request_id').length;
   const missed = calls.filter((call) => call.app && call.app !== 'request_id');
   if (missed.length > 0) {
@@ -162,10 +164,13 @@ function pipeline(info, ready) {
     };
   }
   return {
-    read: readStage,
+    read: ['done', String(calls.length)],
     sent: sentStage,
-    proc: ['done', calls.length ? `${placed}/${calls.length}` : ''],
-    why: ['', calls.length ? 'Every tool call matched end to end.' : 'Recording into the app.']
+    proc: [confirmed === calls.length ? 'done' : 'running', `${confirmed}/${calls.length}`],
+    why: ['', placed > 0 ? `${placed} request ID${placed === 1 ? '' : 's'} matched to recorded tool activity.`
+      : confirmed > 0 ? 'Request owner confirmed. No matching tool activity recorded yet.'
+        : received > 0 ? 'App received the ID. Waiting for owner confirmation.'
+          : 'ID found in the latest turn. Waiting for the app to confirm receipt.']
   };
 }
 
@@ -181,8 +186,8 @@ function paintCalls(page) {
     pips.className = 'pips';
     for (const state of [
       entry.read ? 'on' : '',
-      entry.sent ? 'on' : '',
-      entry.app ? (entry.app === 'request_id' ? 'on' : 'bad') : ''
+      entry.sent || entry.app === 'request_id' ? 'on' : '',
+      entry.confirmed || entry.app === 'request_id' ? 'on' : entry.app ? 'bad' : ''
     ]) {
       const pip = document.createElement('span');
       pip.className = `pip ${state}`;
@@ -190,11 +195,11 @@ function paintCalls(page) {
     }
     const tool = document.createElement('span');
     tool.className = 'tool';
-    tool.textContent = entry.tool || 'tool call';
+    tool.textContent = entry.tool || 'request ID';
     const id = document.createElement('span');
     id.className = 'id';
     id.textContent = shorten(entry.requestId, 5);
-    line.title = `${entry.requestId} — picked up ${entry.read ? 'yes' : 'no'} · sent ${entry.sent ? 'yes' : 'no'} · app ${ATTRIBUTION[entry.app] || 'no record'}`;
+    line.title = `${entry.requestId} — found ${entry.read ? 'yes' : 'no'} · app receipt ${entry.sent || entry.app === 'request_id' ? 'confirmed' : 'pending'} · owner ${entry.confirmed ? 'confirmed' : 'pending'} · tool activity ${ATTRIBUTION[entry.app] || 'no record'}`;
     line.append(pips, tool, id);
     box.append(line);
   }
@@ -335,11 +340,11 @@ async function refresh() {
   paintCalls(page);
 
   const broken = state.why[0] === 'bad';
-  const flowing = state.proc[0] === 'done';
+  const flowing = Array.isArray(page?.trace) && page.trace.some(call => call.app === 'request_id');
   row(
     'app',
     !isChat ? 'off' : broken ? 'no' : flowing ? 'ok' : 'wait',
-    !isChat ? '' : broken ? 'blocked' : flowing ? ago(info.delivery && info.delivery.at) || 'live' : 'waiting'
+    !isChat ? '' : broken ? 'blocked' : flowing ? 'tool matched' : state.proc[0] === 'done' ? 'ID confirmed' : 'waiting'
   );
   // Opens itself the first time something is actually wrong, so the panel that explains
   // the failure is already open when the popup is opened to look at one.

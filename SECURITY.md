@@ -15,7 +15,7 @@ the latest version, include that result in the private report.
 
 Chat On Steroids is a permission boundary between ChatGPT and the logged-in OS user running the app:
 
-- Filesystem tools validate paths against folders you explicitly approve.
+- Filesystem tools validate paths against folders you explicitly approve and the app's dedicated `/skills` library. The skills root exposes no other app-data folders; normal capability and Read-only checks still apply.
 - Read-only mode disables effective file writes, commands, desktop control and clipboard writes.
 - `exec_command` is intentionally **not** confined to approved folders. It starts in an approved working directory, then runs with the normal privileges of your account.
 - Screen, mouse/keyboard and clipboard permissions are desktop-wide capabilities on Windows and macOS, not folder permissions. On macOS they start off and also require the OS's own Screen Recording and Accessibility grants.

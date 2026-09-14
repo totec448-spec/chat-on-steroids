@@ -92,7 +92,7 @@ type InputDeliveryHooks = {
   wakeDecision?: (entry: Readonly<InputEntry>, signal: AbortSignal) => Promise<void>;
   bindHelper?: (conversationId: string, sourceSessionId: string | null) => Promise<void>;
   recordDelivered?: (entry: Readonly<InputEntry>) => Promise<boolean>;
-  prepareText?: (entry: Readonly<InputEntry>, limits: PromptLimits) => string | Promise<string>;
+  prepareText?: (entry: Readonly<InputEntry>, limits: PromptLimits, authored?: Readonly<Pick<InputEntry, 'text' | 'objective'>>) => string | Promise<string>;
   applyAutomation: (conversationId: string, automation: NonNullable<InputArgs['automation']>, phase: 'before-send' | 'after-send', objective?: string, loopAfterTurn?: boolean) => Promise<void>;
   changed: () => void;
 };
@@ -353,7 +353,7 @@ async function prepare(entry: InputEntry, suffix = ''): Promise<InputEntry> {
   const mandatoryOverhead = `${TOOL_INPUT_HEADER}\n\n${finishInstruction(getConfig().ui.finishLeadMinutes)}`;
   const deliveryText = entry.deliveryText ?? await deliveryHooks?.prepareText?.({ ...entry, text: text + suffix }, {
     maxChars: MAX_CHATGPT_MESSAGE_CHARS, maxBytes: TOOL_INPUT_TEXT_BYTES - Buffer.byteLength(mandatoryOverhead)
-  }) ?? text + suffix;
+  }, { text: entry.text, objective: entry.objective }) ?? text + suffix;
   // A single input must fit the tool envelope by itself. Aggregate batching below
   // may defer a second input, but cannot silently defer an individually impossible one.
   const envelope = `${TOOL_INPUT_HEADER}${deliveryText}\n\n${finishInstruction(getConfig().ui.finishLeadMinutes)}`;

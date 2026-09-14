@@ -113,7 +113,7 @@ describe('a non-zero exit that is a result rather than a failure', () => {
     expect(nonZeroExitIsBenign(`${BOUND_RG} -n "Max" $root | Select-Object -First 160`, 1, output)).toBe(true);
   });
 
-  it('keeps matches from valid paths when one ripgrep path is missing', () => {
+  it('keeps a partially answered search classified as failed when a requested path is unreadable', () => {
     const output = [
       'Process exited with code 2',
       'Output:',
@@ -121,10 +121,10 @@ describe('a non-zero exit that is a result rather than a failure', () => {
       'src/main.ts:9:export const found = true;'
     ].join('\n');
     const command = `${BOUND_RG} -n found src/missing.ts src/main.ts`;
-    expect(nonZeroExitIsBenign(command, 2, output)).toBe(true);
-    const note = benignExitNote(command, 'powershell', 2, output);
-    expect(note).toMatch(/not a failed search/);
-    expect(note).toContain('src/missing.ts');
+    expect(nonZeroExitIsBenign(command, 2, output)).toBe(false);
+    expect(nonZeroExitIsBenign(command, 2, output.replace(
+      'The system cannot find the file specified. (os error 2)', 'Access is denied. (os error 5)'
+    ))).toBe(false);
   });
 
   it('keeps diagnostic-only, multi-statement, and bare ripgrep exit 2 as failures', () => {
@@ -1281,11 +1281,12 @@ describe('hinting at a search path that does not exist', () => {
     'src/main/workspace.ts:67: export function workspaceKey(): string | null {'
   ].join('\n');
 
-  it('says the other matches are still a complete answer', () => {
+  it('preserves useful matches without claiming the requested search was complete', () => {
     const hints = execRecoveryHints('rg -n "workspaceKey" src/main/codex/workspace.ts src/main/workspace.ts', PARTIAL);
     expect(hints).toHaveLength(1);
     expect(hints[0]).toContain('does not exist');
-    expect(hints[0]).toContain('complete answer for the paths that do');
+    expect(hints[0]).toContain('incomplete');
+    expect(hints[0]).not.toContain('complete answer');
   });
 
   it('does not take over the unexpanded-glob case, which is a different error', () => {

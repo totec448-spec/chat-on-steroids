@@ -18,6 +18,7 @@ import { effectiveCapabilities, getConfig, MAX_MCP_INSTRUCTIONS_CHARS } from '..
 import { isGitRepository } from '../toolchain.js';
 import type { ToolContext } from './kernel.js';
 import { surfaceDefinition, type SurfaceId } from './surfaces.js';
+import { skillIndexInstructions, withSkillsRoot } from '../skill-context.js';
 
 export function serverInstructions(
   ctx: ToolContext,
@@ -31,8 +32,10 @@ export function serverInstructions(
 /** Same complete source as MCP initialization, evaluated when a user send is prepared. */
 export async function currentCoreInstructions(): Promise<string> {
   const config = getConfig();
-  return serverInstructions({ roots: config.roots, caps: effectiveCapabilities(config),
-    readOnly: config.readOnly, privacyScreenshots: config.ui.privacyScreenshots }, 'core', process.platform);
+  const core = serverInstructions(withSkillsRoot({ roots: config.roots, caps: effectiveCapabilities(config),
+    readOnly: config.readOnly, privacyScreenshots: config.ui.privacyScreenshots }), 'core', process.platform);
+  const skills = await skillIndexInstructions();
+  return skills ? `${core}\n\n${skills}` : core;
 }
 
 /**
@@ -81,6 +84,9 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform): string {
     'read batches paths, lists folders, expands globs and returns numbered text. Read related files together. Read whole files for orientation; use a known region when that is enough. A start_line/end_line range applies to every file the call reads.',
   );
   if (caps.read) lines.push('view_image inspects a local image. Use it when visual evidence matters.');
+  if (ctx.roots.some(root => root.name === 'skills')) lines.push(
+    'The managed skill library is /skills/<id>/SKILL.md. List and read it with the existing file tools when relevant. Install user-requested text skills there using the existing write tools. Skills do not register MCP tools or execute hooks. Keep explicit project workdir paths when installing skills.'
+  );
   if (caps.command) {
     lines.push(
       'Use rg or rg --files for repository searches; if unavailable, use the next best tool.',
@@ -199,7 +205,7 @@ function windowsDesktopInstructions(): string {
     'click accepts element_index or x/y with optional screenshotId, mouse_button and click_count. set_value uses element_index and value; perform_secondary_action uses element_index and a case-insensitive advertised label such as Raise, Toggle, Expand or Scroll Down. Indexes belong only to the latest accessibility observation for this conversation and window.',
     'Coordinate x/y values are pixels within the selected returned screenshot, starting at its top-left. Use screenshotId from the inspected state, especially for popup images; omit it for the main image. Do not apply DPI, monitor-origin or window-size scaling: the native frame owner converts image pixels to the actual screen. scroll uses scrollX/scrollY wheel deltas (120 per detent, positive Y down); drag uses from_x/from_y/to_x/to_y. All physical input activates and checks the exact target, app identity, frame geometry and related owner before input.',
     'press_key accepts keysym names and + chords such as Control_L+a or Control_L+Shift_L+period. Punctuation follows the target keyboard layout. type_text sends literal text; multiline input uses clipboard paste and requires the existing clipboard-write permission. set_value is preferable for an editable accessibility control. Observe the focused control before typing.',
-    'Input methods already activate their target. activate_window consumes the current observation too: if used explicitly, get_window_state again before clicking an index or coordinate. Browser tab/window switching and closing chords remain refused; address-bar focus (Control_L+l, Alt_L+d) is allowed for authorized navigation. Use a separate browser window for testing so navigation does not replace a running ChatGPT page. read_clipboard/write_clipboard remain available under their existing permissions.',
+    'Input methods already activate their target. activate_window consumes the current observation too: if used explicitly, get_window_state again before clicking an index or coordinate. Browser tab/window management chords, including Control_L+t and Control_L+n, remain refused. For testing, observe the browser menu and choose its New window control; refresh list_windows and get_window_state to verify a separate window id before navigating there. Never replace a ChatGPT page through its address bar when a new-tab chord is refused. Address-bar focus (Control_L+l, Alt_L+d) remains available for authorized navigation in the verified test window. read_clipboard/write_clipboard remain available under their existing permissions.',
     '',
     'JavaScript example: const apps = await sky.list_apps(); nodeRepl.write(apps.map(app => ({id:app.id,name:app.displayName,windows:app.windows})));',
     'Use nodeRepl.write(value) or text(value) for concise text. sky methods return their native arrays/objects or undefined, and throw tool failures. tools.<name> returns the normal MCP envelope with structuredContent.value. Only sky.get_window_state automatically displays images.',

@@ -18,7 +18,7 @@ vi.mock('../src/main/mcp/call-context.js', async (importOriginal) => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSessionStore, createSession, getSession, rebindSession, appendEvent, readRecentEvents, flushSessions, resetSessionStoreForTests, observeSessionModel } = await import('../src/main/session/store.js');
 const { resetRecorderForTests } = await import('../src/main/session/recorder.js');
-const { announceSessionFinish: announceTransport, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld } = await import('../src/main/session/finish.js');
+const { announceSessionFinish: announceTransport, sessionFinishDeadline, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld } = await import('../src/main/session/finish.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 async function announceSessionFinish(sessionId: string, summary: string): Promise<string> {
   const result = await announceTransport(sessionId, summary);
@@ -53,6 +53,25 @@ afterEach(() => {
 });
 afterAll(async () => { setFinishNotifier(null); resetSessionStoreForTests(); await removeTempDir(directory); });
 describe('session finish turn identity', () => {
+  it('spends only the remaining ingress budget after late identity resolution', async () => {
+    hooks.hasInput = false;
+    let complete!: (text: string) => void;
+    hooks.followup.mockImplementationOnce(() => new Promise<string>(resolve => { complete = resolve; }));
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const ingress = Date.now() - 24_000;
+    let settled = false;
+    const call = announceTransport(sessionId, 'Ready', sessionFinishDeadline(ingress)).then(value => { settled = true; return value; });
+    try {
+      await vi.waitFor(() => expect(hooks.followup).toHaveBeenCalledTimes(1));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(settled).toBe(true);
+      expect(await call).toContain('HELD:');
+    } finally {
+      complete('Continue verification');
+      await settleSessionFinishForTests();
+      vi.useRealTimers();
+    }
+  });
   it('keeps one Goal operation through transient retries and queues its eventual result once', async () => {
     let fail!: (error: Error) => void;
     hooks.followup.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));

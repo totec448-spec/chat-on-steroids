@@ -1771,7 +1771,7 @@ input[readonly] {
 #chatBody > [data-view='timeline']:has(#timelineEmpty:not([hidden])) { height: 100%; }
 .card.is-session:has(#timelineEmpty:not([hidden])) > h2, .card.is-session:has(#timelineEmpty:not([hidden])) > .subhead { visibility: hidden; }
 .card.is-session:has(#timelineEmpty:not([hidden])) #chatFoot { visibility: hidden; }
-.composer { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto 36px; align-items: center; gap: 8px; width: calc(100% - 48px); max-width: 860px; margin: 14px auto 24px; border: 1px solid var(--edge); border-radius: 22px; background: var(--card); padding: 14px 12px 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 10%); }
+.composer { position: relative; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto 36px; align-items: center; gap: 8px; width: calc(100% - 48px); max-width: 860px; margin: 14px auto 24px; border: 1px solid var(--edge); border-radius: 22px; background: var(--card); padding: 14px 12px 10px; box-shadow: 0 8px 28px rgb(0 0 0 / 10%); }
 .composer:focus-within { border-color: color-mix(in srgb, var(--ink) 22%, transparent); }
 .composer textarea:focus { box-shadow: none; }
 /* Chromium owns content height, including padding, hidden-to-visible layout and
@@ -2830,6 +2830,64 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 
 .settings-section-title { margin: 34px 0 14px; font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink); }
 .composer-popover .muted { margin: 6px 9px; font-size: 11px; line-height: 1.5; }
+
+/* Skills stay authored in the composer. The dialog manages the local library; the
+   lighter surface below it is only command completion and never owns draft state. */
+.skills-dialog { width: min(620px, calc(100vw - 32px)); max-height: min(720px, calc(100dvh - 32px)); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--edge); border-radius: var(--r-xl); background: var(--card); color: var(--ink); box-shadow: 0 24px 90px #0006; }
+.skills-dialog::backdrop { background: #0007; backdrop-filter: blur(3px); }
+.skills-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 20px 22px 16px; border-bottom: 1px solid var(--line); }
+.skills-dialog-head > div { min-width: 0; }
+.skills-dialog-head h2 { margin: 0; font-size: 18px; font-weight: 650; }
+.skills-dialog-head p { margin: 5px 0 0; color: var(--soft); font-size: 12px; line-height: 1.5; }
+.skills-dialog-head .btn-icon { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; padding: 7px; }
+.skills-dialog-body { padding: 18px 22px 8px; }
+.skills-search { display: flex; align-items: center; gap: 9px; min-height: 40px; padding: 0 12px; border: 1px solid var(--edge); border-radius: 11px; background: var(--sunk); color: var(--soft); }
+.skills-search:focus-within { border-color: var(--soft); box-shadow: 0 0 0 3px var(--ring); }
+.skills-search .ico { width: 16px; height: 16px; flex: 0 0 auto; }
+.skills-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13px; }
+.skills-status { min-height: 0; margin: 7px 1px 0; color: var(--soft); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skills-status:empty { display: none; }
+.skills-list { max-height: min(430px, 52vh); overflow-y: auto; padding: 10px 0; scrollbar-gutter: stable; }
+.skill-row { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+.skill-row:last-child { border-bottom: 0; }
+.skill-row-copy { flex: 1; min-width: 0; }
+.skill-row-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 7px; }
+.skill-row-heading strong { font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+.skill-row-heading code { color: var(--soft); font-size: 11px; overflow-wrap: anywhere; }
+.skill-row-copy p { margin: 4px 0 0; color: var(--soft); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.skill-row-actions { display: flex; flex: 0 0 auto; gap: 6px; }
+.skill-row-actions .btn { padding: 7px 10px; font-size: 11px; }
+.skill-row-actions .btn-solid { border-color: var(--ink); background: var(--ink); color: var(--page); }
+.skill-remove { color: var(--red); }
+.skills-empty { display: grid; gap: 6px; justify-items: center; margin: 0; padding: 34px 16px; color: var(--soft); text-align: center; font-size: 12px; line-height: 1.55; }
+.skills-empty strong { color: var(--ink); font-size: 14px; font-weight: 600; }
+.skills-errors { margin: 0 0 9px; padding: 10px 12px; border-radius: 9px; background: var(--red-wash); color: var(--red); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.skills-errors strong { display: block; margin-bottom: 3px; }
+.skills-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 14px 22px 18px; border-top: 1px solid var(--line); }
+.skills-dialog-actions .btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 12px; font-size: 12px; }
+.skills-dialog-actions .ico { width: 15px; height: 15px; }
+.skills-dialog :is(button, input):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+.skill-autocomplete { position: absolute; z-index: 46; left: 10px; right: 10px; bottom: 62px; max-height: min(280px, 44vh); overflow-y: auto; padding: 6px; border: 1px solid var(--edge); border-radius: 13px; background: var(--card); box-shadow: 0 12px 34px #0005; }
+.skill-autocomplete[hidden] { display: none; }
+.skill-autocomplete-option { display: block; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
+.skill-autocomplete-option:hover, .skill-autocomplete-option[aria-selected='true'] { background: var(--hover); }
+.skill-autocomplete-copy { display: grid; grid-template-columns: minmax(90px, auto) minmax(0, 1fr); gap: 2px 10px; align-items: baseline; min-width: 0; }
+.skill-autocomplete-copy strong { font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
+.skill-autocomplete-copy > span { min-width: 0; overflow: hidden; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.skill-autocomplete-copy small { grid-column: 1 / -1; overflow: hidden; color: var(--soft); font-size: 11px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.skill-autocomplete-empty { margin: 0; padding: 11px 10px; color: var(--soft); font-size: 11px; }
+
+@media (max-width: 520px) {
+  .skills-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .skills-dialog-head, .skills-dialog-body { padding-inline: 16px; }
+  .skills-dialog-actions { justify-content: stretch; padding-inline: 16px; }
+  .skills-dialog-actions .btn { flex: 1 1 180px; justify-content: center; }
+  .skill-row { align-items: stretch; flex-direction: column; }
+  .skill-row-actions { align-self: stretch; }
+  .skill-row-actions .btn { flex: 1; justify-content: center; }
+  .skill-autocomplete { left: 6px; right: 6px; }
+}
 
 .message-attachments { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; max-width: 100%; }
 .message-attachments img { display: block; width: 96px; height: 96px; object-fit: contain; border: 1px solid var(--line); border-radius: 12px; }

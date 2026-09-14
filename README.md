@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/model-picker-warning.svg?v=3" width="960" alt="They changed model picker, fix in 2 hours, not at home rn. Models will not load. Bug support: @dummerspast39" /></p>
+<p align="center"><a href="https://x.com/dummerspast39"><img src="docs/images/model-picker-warning.svg?v=4" width="960" alt="Bug support: @dummerspast39" /></a></p>
 
 <p align="center"><img src="docs/images/readme-hero.svg?v=2" width="960" alt="Turn ChatGPT into Codex-style local coding. Chat On Steroids: Your files. Your terminal. Your ChatGPT plan." /></p>
 
@@ -23,6 +23,8 @@
 **Work on the real project.** Let ChatGPT read and edit files, run tests, keep terminals open and use your desktop. Follow the actual tool results as they arrive.
 
 **Give it a team.** Split independent jobs across workers, then bring their results back. Workers keep their context, so the next task can pick up where they left off.
+
+**Bring your own skills.** Import a Markdown skill through **+ → Skills**, then select it from the list or type **/** in the composer. [Skills guide →](docs/skills.md)
 
 **Stay in control of long tasks.** Send a correction while work runs. Goal follows unfinished work; Loop keeps working within your brief. Compact & Resume carries the session and worker history into a fresh chat.
 

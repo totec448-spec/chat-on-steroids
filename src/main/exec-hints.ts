@@ -594,15 +594,6 @@ function commandOutputBody(outputText: string): string[] {
   );
 }
 
-/** A path-proven search answered for at least one path while naming another path it could not read. */
-function searchAnsweredDespiteBadPath(command: string, outputText: string): boolean {
-  if (splitTopLevel(command, [';', '\n']).length !== 1) return false;
-  const token = statusDeterminingToken(command);
-  if (token === null || !/[\\/]/.test(token.value) || !NO_MATCH_MEANS_EXIT_1.has(programName(token))) return false;
-  if (!SEARCH_DIAGNOSTIC.test(outputText)) return false;
-  return commandOutputBody(outputText).some((line) => !SEARCH_DIAGNOSTIC.test(line));
-}
-
 /**
  * Whether a non-zero exit is a reported result rather than a failure.
  *
@@ -629,7 +620,8 @@ export function nonZeroExitIsBenign(
   ) {
     return true;
   }
-  if (exitCode === 2) return searchAnsweredDespiteBadPath(command, outputText);
+  // Partial matches cannot prove the requested search completed. Exit 2 includes
+  // missing/unreadable paths and read failures even when other paths yielded matches.
   if (exitCode !== 1) return false;
   const token = statusDeterminingToken(command);
   const program = programName(token ?? undefined);
@@ -993,21 +985,6 @@ export function benignExitNote(
   exitCode?: number | null,
   outputText?: string
 ): string {
-  if (exitCode === 2 && outputText !== undefined && searchAnsweredDespiteBadPath(command, outputText)) {
-    const program = statusDeterminingProgram(command);
-    const missing = outputText
-      .split('\n')
-      .filter((line) => SEARCH_DIAGNOSTIC.test(line))
-      .slice(0, 3)
-      .map((line) => line.trim())
-      .join(' ');
-    return (
-      `Exit code 2 from \`${program}\` here is one path it could not read, not a failed search: ` +
-      'the matches above are a complete answer for every path that does exist. ' +
-      `${missing} Re-check that path's spelling and search it on its own — re-running the whole ` +
-      'search would return the same matches again.'
-    );
-  }
   // A search cut is only the better explanation once it actually printed matches.
   const cutGenerator =
     shellType === 'powershell' && cutPipelineGeneratorOnlyReports(command)
@@ -1492,7 +1469,7 @@ export function execRecoveryHints(
         : '`ls -ld -- \'<path>\'`';
     hints.push(
       'The search exited non-zero because a path it was given does not exist — the error line ' +
-        'above names it, and the rest of the output is a complete answer for the paths that do. ' +
+        'above names it. Retain the matches already returned, but the requested search is incomplete. ' +
         `Confirm the spelling with ${checkPath} before re-running, and re-run only the ` +
         'missing path rather than the whole search.'
     );
