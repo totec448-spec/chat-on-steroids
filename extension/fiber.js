@@ -1344,8 +1344,9 @@
     const node = document.querySelector('[data-testid="composer-intelligence-picker-content"]') || (triggers.length === 1 ? triggers[0] : null);
     let state = null;
     try { state = readPickerSnapshot(node); } catch { /* Unknown state invalidates prior proof. */ }
-    const selected = state?.choices.find(choice => choice.bucket === state.currentBucket && choice.available) ||
-      (triggers.length === 1 && node === triggers[0] ? closedPickerSelection(node) : null);
+    // A recognized account denial must never fall through to label-only observation.
+    const selected = state ? state.choices.find(choice => choice.bucket === state.currentBucket && choice.available)
+      : (triggers.length === 1 && node === triggers[0] ? closedPickerSelection(node) : null);
     for (const [attribute, value] of [['data-clf-selected-model', selected?.id], ['data-clf-selected-effort', selected?.effort], ['data-clf-selected-route', selected && location.pathname]]) {
       if (!value) node?.removeAttribute(attribute);
       else if (node.getAttribute(attribute) !== value) node.setAttribute(attribute, value);
@@ -1356,9 +1357,13 @@
   // Its own ancestor carries the current execution model; its visible label
   // carries the selected effort. These are observation, never catalog discovery.
   function closedPickerSelection(node) {
+    // Latest omits the family prefix; explicit versions and Pro may retain it.
+    // Adjacent native spans can yield "6Pro" rather than "6 Pro" in textContent.
+    const text = String(node.textContent || '').replace(/\s+/g, ' ').trim();
+    const selected = /^(?:(?:GPT[- ]?)?(\d+(?:\.\d+)?)\s*)?(instant|minimal|low|medium|high|extra\s*high|max|ultra|pro)$/i.exec(text);
+    if (!selected) return null;
     const effort = ({ instant: 'none', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high',
-      'extra high': 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[String(node.textContent || '').trim().toLowerCase()];
-    if (!effort) return null;
+      extrahigh: 'xhigh', max: 'max', ultra: 'ultra', pro: 'pro' })[selected[2].toLowerCase().replace(/\s/g, '')];
     let model = null;
     for (let fiber = fiberOf(node), up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
       const current = fiber.memoizedProps?.currentModelId;
@@ -1366,7 +1371,15 @@
       if (typeof current !== 'string' || !/^[a-zA-Z0-9._-]{1,80}$/.test(current) || (model && model !== current)) return null;
       model = current;
     }
-    return model ? { id: model, effort } : null;
+    if (!model) return null;
+    // A visible version is a consistency check, never a source of execution ids.
+    if (selected[1]) {
+      const actual = /^gpt-?(\d+)(?:[.-](\d+))?(?:-|$)/i.exec(model);
+      const [major, minor = '0'] = selected[1].split('.');
+      if (!actual || Number(actual[1]) !== Number(major) || Number(actual[2] || 0) !== Number(minor) ||
+          (effort === 'pro') !== /-pro$/i.test(model)) return null;
+    }
+    return { id: model, effort };
   }
   function readPickerSnapshot(node) {
     let fiber = node && fiberOf(node);
@@ -1386,13 +1399,21 @@
         : ['auto', 'instant'].includes(choice.category?.modelLane) ? 'none'
         : choice.thinkingEffort === 'max' && choice.modelConfig?.isWorkModeModel === true ? 'max'
         : ({ min: 'low', standard: 'medium', extended: 'high', max: 'xhigh', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'ultra' })[choice.thinkingEffort] || null;
+      // Titles are presentation, not entitlement or execution identity. Latest can
+      // suppress the family shortLabel, or display only an effort such as High.
+      const modelLabel = value => {
+        const name = label(value);
+        return name && !/^(instant|minimal|low|medium|high|extra\s*high|max|ultra|pro)$/i.test(name)
+          ? (/^\d/.test(name) ? `GPT-${name}` : name) : null;
+      };
       const choices = state.bucketSelections.map(choice => {
-        const name = label(choice.category?.shortLabel);
-        const familyId = groupId(choice.category?.modelVersion) || id(choice.modelSlug);
+        const modelId = id(choice.modelSlug);
+        const familyId = groupId(choice.category?.modelVersion) || modelId;
         const family = data.versions.find(version => version.id === familyId);
-        return { bucket: choice.bucket, id: id(choice.modelSlug),
-          label: name && (/^\d/.test(name) ? `GPT-${name}` : name), effort: effortOf(choice),
-          familyId, familyLabel: label(family?.displayTextForIntelligence) || label(choice.modelConfig?.title) || (name && (/^\d/.test(name) ? `GPT-${name}` : name)),
+        const name = modelLabel(choice.category?.shortLabel) || modelLabel(choice.modelConfig?.title) || modelId;
+        return { bucket: choice.bucket, id: modelId,
+          label: name, effort: effortOf(choice),
+          familyId, familyLabel: modelLabel(family?.displayTextForIntelligence) || modelLabel(choice.modelConfig?.title) || name,
           available: choice.availability?.status === 'available' && !props.modelSwitcherDenialsBySlug?.[choice.modelSlug] };
       });
       const versions = data.versions.filter(version => version.enabled === true).map(version => ({ id: groupId(version.id), label: label(version.displayTextForIntelligence) }));

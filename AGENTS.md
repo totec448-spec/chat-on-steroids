@@ -21,7 +21,7 @@ changed lines before applying an older patch. Document the work and its actual v
 the code currently does it. Known implementation gaps are collected in §21 instead of being
 mixed into the happy path as features.
 
-Source alignment: **2026-09-14**, including current working-tree changes. App/extension **2.1.11**,
+Source alignment: **2026-09-14**, including current working-tree changes. App/extension **2.1.12**,
 bridge protocol **13** in the checked declarations (`package.json`, `src/main/version.ts`,
 `extension/manifest.json`). This does not prove release, installation or live Chrome behavior.
 
@@ -1128,7 +1128,12 @@ uncertain catalog. Exact family rules live in `shared/chat-models.ts`.
 Direct Chrome selection is observed even with the picker closed. The existing MAIN scan reads
 the current native picker state, including September's retained `dropdownContent.props`, then
 stamps exact model/effort and document/route for the isolated reader. The older closed-trigger
-model/effort join remains supported. Ambiguous triggers and unrecognized state remain unknown.
+model/effort join remains supported, including effort-only labels and version-prefixed Pro;
+a visible version must agree with the observed execution id. Known account denials cannot
+fall through to closed-label observation. Model short labels are optional presentation;
+account family metadata, model titles and ultimately the exact execution slug supply display
+names without inferring identity from an effort label. Version navigation matches the leading
+native label separately from retirement captions. Ambiguous triggers and unrecognized state remain unknown.
 The closed snapshot describes only the selected native version's buckets; it is selection
 evidence, never a complete catalog. Discovery elects an idle composer, reads the account-evaluated
 choices once per enabled native version, and restores the original model/effort before publication.

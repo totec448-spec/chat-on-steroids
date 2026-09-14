@@ -9,6 +9,15 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.12] — Model picker compatibility
+
+- Model discovery tolerates effort-only labels and missing family prefixes in the refreshed ChatGPT picker.
+- Version-menu retirement captions no longer invalidate discovery or selection.
+- Closed-picker observation supports `6 Pro` and checks any visible version against the provider model id.
+- Account availability, exact model/effort confirmation and restoration of the original selection remain required.
+
+**Reload the companion extension and refresh your ChatGPT tabs after updating.**
+
 ## [2.1.11] — 2 weeks 6 sol
 
 - Goal/Loop decisions use authored conversation context without recorded tool bodies.
