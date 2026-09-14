@@ -3,6 +3,7 @@ import { registerPlanTool } from './plan-tool.js';
 import { goalWorkerChat } from '../bridge.js';
 import { announceSessionFinish } from '../session/finish.js';
 import { getConfig } from '../config.js';
+import { wakeBrowserWork } from '../browser-wake.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
  *
@@ -1415,6 +1416,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
             throw error;
           }
           const { info, report, repeat } = staged;
+          // A repeated finish publishes no new stop. A newly accepted one has already
+          // crossed the critical broker barrier above, so browser maintenance cannot outrun it.
+          if (!repeat) wakeBrowserWork();
           if (report) await recordAgentMessage(report, 'sent', info.conversationId);
           // A retry is answered as a retry. Repeating "marked finished" would read as a
           // second finish and invite the model to keep going until it gets a different

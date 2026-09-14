@@ -1856,6 +1856,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           // active incarnation here; wakeQueuedStoppedWorkers() runs first so already-accepted
           // unread work keeps the worker `waking` and therefore keeps the run active.
           if (staged.info.runId) releaseQuiescentRun({}, staged.info.runId);
+          // The durable stop is now public. Ask the browser to collect status immediately;
+          // /status still rechecks broker state and the extension still proves exact
+          // document ownership before any physical tab close.
+          wakeBrowserWork();
         }
       }
       // A committed terminal observation changes outbox eligibility even though
@@ -6031,7 +6035,8 @@ async function browserTabPolicy(openConversations: Set<string>) {
   // Existing cached metadata is the ownership index; never scan transcripts per browser poll.
   const summaries = await listUsageSessions();
   const managed = new Set(summaries.filter(row => row.origin && row.conversationId && openConversations.has(row.conversationId)).map(row => row.conversationId!));
-  for (const id of [...supersededSourceConversations(), ...closableWorkerConversations(0)]) if (openConversations.has(id)) managed.add(id);
+  const stoppedWorkers = closableWorkerConversations(0);
+  for (const id of [...supersededSourceConversations(), ...stoppedWorkers]) if (openConversations.has(id)) managed.add(id);
   for (const agent of swarmState().agents) if (agent.conversationId && openConversations.has(agent.conversationId)) managed.add(agent.conversationId);
   const protectedChats = new Set(nonDiscardableAgentConversations());
   for (const entry of pendingContinuations()) protectedChats.add(entry.from);
@@ -6130,7 +6135,12 @@ async function browserTabPolicy(openConversations: Set<string>) {
       !supersededSourceConversations().includes(id)).sort(),
     nonDiscardableConversations: [...protectedChats].sort(),
     blockedConversations: blocked.sort(),
-    closableConversations: [...new Set([...idlePages, ...idle, ...supersededSourceConversations().filter(id => openConversations.has(id) && !protectedChats.has(id))])].sort()
+    closableConversations: [...new Set([
+      ...stoppedWorkers.filter(id => openConversations.has(id) && !protectedChats.has(id)),
+      ...idlePages,
+      ...idle,
+      ...supersededSourceConversations().filter(id => openConversations.has(id) && !protectedChats.has(id))
+    ])].sort()
   };
 }
 
