@@ -490,6 +490,32 @@ it('uses the same separate image row for pending and recorded native attachments
   expect(recorded.querySelector('.composer-image')).toBeNull();
 });
 
+it('keeps a quota-blocked image injection at its delivery anchor and replaces the retained preview after backfill', async () => {
+  const message: SessionEvent = { seq: 1, time: T0, source: 'app', kind: 'user_message', messageId: 'input:quota-image',
+    inputId: 'quota-image', inputDelivery: 'confirmed', inputImageCount: 1, message: text('Image instruction') };
+  const app = await boot([message, toolCall(2, 'later-work')]);
+  app.live.inputs.push({ id: 'quota-image', sessionId: summary([]).id, text: 'Image instruction',
+    mode: 'auto', dueAt: 0, model: null, reasoningEffort: null, owner: 'image-request', conversationId: 'chat-b',
+    state: 'sent', createdAt: T0, offeredAt: T0, deliveredAt: T0 + 100,
+    messageId: 'input:quota-image', historyRecorded: false, toolImages: [{ name: 'reference.webp', dataUrl: 'data:image/webp;base64,YQ==' }] });
+  await app.append([]);
+  const row = app.w.document.querySelector('.said.is-user')!;
+  expect(row.querySelector('img')?.getAttribute('src')).toBe('data:image/webp;base64,YQ==');
+  expect(row.textContent).toContain('not yet saved to history');
+  expect(app.w.document.getElementById('inputQueue')!.textContent).not.toContain('Image instruction');
+  expect(app.w.document.querySelectorAll('.said.is-user')).toHaveLength(1);
+  const timeline = app.w.document.getElementById('timeline')!;
+  expect(timeline.children.length).toBeGreaterThan(1);
+  expect(timeline.children[0]!.contains(row)).toBe(true);
+  (app.w as any).api.getSessionImage = vi.fn(async () => ({ ok: true, data: 'data:image/webp;base64,Yg==' }));
+  app.live.events[0] = { ...message, seq: 3, origin: 1, assets: [{ id: 'aaaaaaaa.webp', mimeType: 'image/webp', bytes: 1 }] };
+  app.live.inputs[0]!.historyRecorded = true;
+  await app.append([]);
+  expect(app.w.document.querySelectorAll('.said.is-user')).toHaveLength(1);
+  expect(app.w.document.querySelector('.said.is-user img')?.getAttribute('src')).toBe('data:image/webp;base64,Yg==');
+  expect(app.w.document.querySelector('.said.is-user')!.textContent).not.toContain('not yet saved to history');
+});
+
 it('explains a legacy missing image recording without asserting a provider receipt', async () => {
   const app = await boot([]);
   const event = toolCall(1, 'missing-image') as Extract<SessionEvent, { kind: 'tool_call' }>;

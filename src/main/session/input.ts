@@ -85,6 +85,8 @@ export interface ToolInputBatch {
   messages: Array<{ text: string; images: InputImage[] }>;
   /** One transport instruction after the complete batch, including its images. */
   reminder: string;
+  /** Kernel calls this after the carrier tool row commits, including on failure. */
+  recordHistory?: () => Promise<void>;
 }
 export interface InputActivity { possible: boolean; exact: boolean; model?: 'pro' | 'other' | 'unknown'; turnId?: string }
 type InputDeliveryHooks = {
@@ -183,7 +185,7 @@ let entries: InputEntry[] | null = null;
 let chain: Promise<unknown> = Promise.resolve();
 // A timestamp written before the claim commit cannot prove that its response was
 // available. Restart discards this evidence and repeats the stable message id.
-const offered = new Map<string, number>();
+const offered = new Map<string, { at: number; historyReady: boolean }>();
 const terminal = (row: InputEntry): boolean => ['sent', 'cancelled', 'failed'].includes(row.state);
 const preparable = (row: InputEntry): boolean => row.state === 'queued' ||
   (row.state === 'browser' && row.requiresAuthorization === true && row.sendAuthorizedAt === undefined);
@@ -518,7 +520,7 @@ async function publishHistory(): Promise<void> {
   const current = await load();
   const recorded = new Set<string>();
   for (const row of current) {
-    if (!needsHistory(row) || companionOf(current, row)) continue;
+    if (!needsHistory(row) || companionOf(current, row) || offered.get(row.id)?.historyReady === false) continue;
     try { if (deliveryHooks?.recordDelivered && await deliveryHooks.recordDelivered(combinedInput(row, current.find(other => other.id === row.companionInputId)))) {
       recorded.add(row.id);
       if (row.companionInputId) recorded.add(row.companionInputId);
@@ -990,7 +992,7 @@ export function acknowledgeBrowserInput(id: string, owner: string, conversationI
 }
 /** A later exact call proves receipt of an earlier tool response, never of a queued task. */
 function toolInputReceipt(entry: InputEntry, sessionId: string, conversationId: string, startedAt: number): InputEntry {
-  const deliveredAt = offered.get(entry.id);
+  const deliveredAt = offered.get(entry.id)?.at;
   return entry.sessionId === sessionId && entry.conversationId === conversationId && entry.state === 'tool' &&
     deliveredAt !== undefined && startedAt > deliveredAt
     ? { ...entry, state: 'sent', messageId: `input:${entry.id}`, deliveredAt, historyRecorded: false } : entry;
@@ -1009,7 +1011,7 @@ export function acknowledgeToolInput(sessionId: string | null | undefined, conve
   });
 }
 
-export function offerToolInput(sessionId: string | null | undefined, conversationId: string | null | undefined, requestId: string | null | undefined, startedAt: number, finishBoundary = false): Promise<ToolInputBatch> {
+export function offerToolInput(sessionId: string | null | undefined, conversationId: string | null | undefined, requestId: string | null | undefined, startedAt: number, finishBoundary = false, deferHistory = false): Promise<ToolInputBatch> {
   return serial(async () => {
     const batch: ToolInputBatch = { messages: [], reminder: '' };
     if (!sessionId || !conversationId || !requestId || isChatBlocked(conversationId)) return batch;
@@ -1070,8 +1072,19 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
       const automated = next.filter((entry) => entry.state === 'tool' && entry.automation && current.some((row) => row.id === entry.id && row.state === 'queued'));
       await transition(current, next, automated, 'before-send');
     }
-    for (const id of delivered) if (!offered.has(id)) offered.set(id, Date.now());
+    for (const id of delivered) if (!offered.has(id)) offered.set(id, { at: Date.now(), historyReady: !deferHistory });
     for (const entry of next) if (terminal(entry)) offered.delete(entry.id);
+    if (deferHistory && delivered.length) {
+      // listInputs can race the recorder. Its ordinary retry must not give these
+      // rows an earlier sequence than the tool response that carries them.
+      batch.recordHistory = () => serial(async () => {
+        for (const id of delivered) {
+          const receipt = offered.get(id);
+          if (receipt) receipt.historyReady = true;
+        }
+        await publishHistory();
+      });
+    }
     await publishHistory();
     return batch;
   });

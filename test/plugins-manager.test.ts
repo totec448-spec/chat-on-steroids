@@ -44,6 +44,32 @@ afterEach(async () => {
   await removeTempDir(dir);
 });
 describe('external plugin authority', () => {
+  it('identifies a stale Core name on Plugins without dispatching or changing any permissions', async () => {
+    const upstream = vi.spyOn(Client.prototype, 'callTool');
+    const outcome = vi.fn();
+    const result = JSON.stringify(await manager.call('read', { paths: ['/project'] }, outcome));
+    expect(result).toContain('PLUGIN_TOOL_UNAVAILABLE');
+    expect(result).toContain('wrong connector');
+    expect(result).toContain('Chat On Steroids Core');
+    expect(result).toContain('This call was not dispatched');
+    expect(result).not.toContain('PLUGIN_DISABLED');
+    expect(upstream).not.toHaveBeenCalled();
+    expect(outcome).toHaveBeenCalledWith('tool_rejected');
+    expect(manager.tools()).toEqual([]);
+  });
+
+  it('keeps an actual disabled external read tool distinct from a wrong-connector call', async () => {
+    await fs.writeFile(entry, fixture.replaceAll('Echo.Mixed', 'read'));
+    const row = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
+    await manager.setEnabled(row.id, false);
+    const upstream = vi.spyOn(Client.prototype, 'callTool');
+    const result = JSON.stringify(await manager.call('read', { value: 'retained tool' }));
+    expect(result).toContain('PLUGIN_DISABLED');
+    expect(result).toContain('Enable this plugin and tool');
+    expect(result).not.toContain('Chat On Steroids Core');
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
   it('keeps a server failure distinct from a disabled tool on subsequent cached calls', async () => {
     const row = (await manager.install({ source: { kind: 'command', command: process.execPath, args: [entry] } })).plugins[0]!;
     const upstream = vi.spyOn(Client.prototype, 'callTool').mockRejectedValueOnce(new Error('private transport details'));

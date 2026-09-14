@@ -364,6 +364,11 @@ not intercepted.
 `mcp/instructions.ts` adds currently available local-tool guidance and the user's bounded
 standing additions. There is no extra instructions tool or per-chat “already sent prompt” flag.
 
+The opening frame also names the bound project's exact virtual path as the primary workdir,
+even if AGENTS.md is missing or cannot fit. This is mandatory project context, not a new root
+or a restriction against task-relevant work elsewhere. Durable session ownership beats a
+caller's currently selected project, including worker inheritance.
+
 The whole message has a **96,000 UTF-16-character ceiling**, plus the input transport's UTF-8
 byte envelope. For eligible openings, authored work and complete Core instructions are mandatory;
 selected skill bodies are mandatory too. Only AGENTS content spends remaining room. Read it as a bounded UTF-8 prefix, validate the same project/root/read
@@ -393,6 +398,30 @@ oversized selected skills fail visibly rather than silently losing instructions.
 refreshed from disk, including skills installed by the model with existing file/command tools.
 No bundled skills, new MCP surface, automatic script execution or permission expansion accompanies
 an import. Dialog and autocomplete replies must still belong to the current draft and request.
+
+### First-use ChatGPT approval guidance is not provider approval
+
+`chatgpt-permission-notice.ts` owns a durable first-use reminder after explicit model discovery
+successfully requests browser opening. Passive model reads do not request it. Acknowledgement
+commits before the renderer closes the dialog; the setup copy remains visible. Renderer revisions
+reject stale replies and defer the reminder while another dialog is open. This guidance describes
+browser-only tool approval prompts; it does not detect pending provider approvals, answer them,
+change plugin permissions or grant consent on the user's behalf.
+
+### Catalog diagnostics and injected image history
+
+The MCP observer reads bounded clones and returns the original SDK request/response unchanged.
+Only sanitized method, outcome, count and schema hash are retained. Completed external Core
+tools/list responses are separate evidence from loopback probes, tunnel health and other HTTP
+requests. A nonempty server response cannot prove ChatGPT accepted its cached Actions list or
+approved an operation. Never fix stale Plugins calls by dispatching Core tools across surfaces.
+
+Tool input records its canonical user row before optional image assets. Preview quota failures
+retain outbox bytes for retry and do not lose the transcript anchor. The kernel defers this row
+until its carrier tool record commits; concurrent outbox reads respect the same in-memory offer
+gate. A finally path releases it even if recording fails. Restart retries the durable receipt;
+history replay never resends the image. The renderer can use retained images while storage catches
+up, and later receipts or asset backfills keep the first message position.
 
 ### `exec({code})` composes tools; it is not a shell
 

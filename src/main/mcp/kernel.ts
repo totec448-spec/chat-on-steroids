@@ -1,4 +1,4 @@
-import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER } from '../session/input.js';
+import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER, type ToolInputBatch } from '../session/input.js';
 import { pluginManager } from '../plugins/manager.js';
 import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
 /**
@@ -848,10 +848,11 @@ async function dispatchTracked(
   );
   // Ordinary tools carry direct user input, but only the explicit finish signal
   // advances a planned stage. Successful work is not evidence that a stage is done.
-  const userInput = nested ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError).catch(() => {
+  const userInput: ToolInputBatch = nested ? { messages: [], reminder: '' } : await offerToolInput(context.caller.sessionId, context.caller.conversationId, context.caller.requestId, startedAt, name === 'session_finish' && !result.isError, true).catch(() => {
     logWarn('User input could not be attached; the completed tool result is preserved');
     return { messages: [], reminder: '' };
   });
+  try {
   if (userInput.messages.length) {
     const attachments: ToolResult['content'] = [];
     for (const [index, message] of userInput.messages.entries()) {
@@ -919,6 +920,9 @@ async function dispatchTracked(
   if (callerRunId) releaseQuiescentRun({}, callerRunId);
   markTiming('recorder', true);
   return delivered;
+  } finally {
+    await userInput.recordHistory?.().catch(() => logWarn('User input history will be retried from its retained delivery receipt'));
+  }
 }
 
 /** Whether this handler must know which chat it is before resolving its paths. */

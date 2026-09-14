@@ -1566,6 +1566,14 @@ function paintInputReceipt(row: HTMLElement, item: ReturnType<typeof timelineIte
   receipt.parentElement?.classList.toggle('has-input-receipt', !receipt.hidden);
 }
 
+function retainedInputImages(event: Extract<SessionEvent, { kind: 'user_message' }>, sessionId = selectedId): InputImage[] {
+  if (!sessionId || !event.inputId || event.assets?.length) return [];
+  const entry = pendingComposerInputs.find(row => row.id === event.inputId &&
+    (row.deliveredSessionId ?? row.sessionId) === sessionId);
+  return entry ? [...(entry.images ?? []), ...(entry.toolImages ?? [])]
+    .filter(image => /^data:image\/webp;base64,/.test(image.dataUrl)).slice(0, 4) : [];
+}
+
 function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }): HTMLElement {
   switch (event.kind) {
     case 'session_start':
@@ -1576,7 +1584,18 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       const attachments = el('div', 'message-attachments');
       if (event.attachments?.length) attachments.append(...event.attachments.map(file => attachmentCard(file)));
       const assets = event.assets?.filter(asset => asset.mimeType === 'image/webp').slice(0, 4) ?? [];
-      if (event.attachments?.length || assets.length) box.append(attachments);
+      const retained = retainedInputImages(event, context?.id ?? selectedId);
+      if (event.attachments?.length || assets.length || retained.length) box.append(attachments);
+      for (const attachment of retained) {
+        const image = document.createElement('img');
+        image.src = attachment.dataUrl; image.alt = t("User attachment"); image.loading = 'lazy';
+        attachments.append(image);
+      }
+      if ((event.inputImageCount ?? 0) > 0 && !assets.length) {
+        box.append(el('p', 'meta', () => retained.length
+          ? t("Image preview retained with this delivery; not yet saved to history.")
+          : t("Image preview unavailable in this recording.")));
+      }
       // Native ChatGPT can prepend a blank paragraph. Ignore it only when a
       // complete instruction frame validates; keep the authored suffix exact.
       const userText = event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text;
@@ -2105,7 +2124,8 @@ function itemSignature(item: TimelineItem): string {
   const parts: Array<string | number> = [event.seq, event.time, event.kind, event.agent ?? ''];
   switch (event.kind) {
     case 'user_message':
-      parts.push(event.message.chars, event.authoredText ?? '', event.inputDelivery ?? '');
+      parts.push(event.message.chars, event.authoredText ?? '', event.inputDelivery ?? '', event.inputImageCount ?? 0,
+        JSON.stringify(event.assets ?? []), JSON.stringify(event.attachments ?? []), retainedInputImages(event).length);
       break;
     case 'progress':
     case 'chat_error':
@@ -3267,7 +3287,9 @@ async function refreshInputQueue(): Promise<void> {
   const unbound = (entry: InputEntry) => selectedId === null && !entry.sessionId && !entry.deliveredSessionId && entry.purpose !== 'decision' && ['queued', 'browser'].includes(entry.state);
   const notice = (entry: InputEntry) => (belongsToSelection(entry) || (selectedId === null && !entry.sessionId && !entry.deliveredSessionId)) && entry.purpose !== 'decision' &&
     ['failed', 'cancelled'].includes(entry.state) && !!entry.error && !dismissedInputNotices.has(entry.id);
-  const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && !(entry.state === 'tool' && entry.historyRecorded) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) &&
+  const hasDeliveryAnchor = (entry: InputEntry) => events.some(event => event.kind === 'user_message' &&
+    (event.inputId === entry.id || (!!entry.messageId && event.messageId === entry.messageId)));
+  const rows = all.filter((entry) => !dismissedInputNotices.has(entry.id) && !(['tool', 'sent'].includes(entry.state) && hasDeliveryAnchor(entry)) && !(entry.state === 'tool' && entry.historyRecorded) && !(queuedFollowup(entry) && ['queued', 'tool', 'browser'].includes(entry.state)) && (belongsToSelection(entry) || unbound(entry) || notice(entry)) &&
     (notice(entry) || unbound(entry) || selectedId !== null || projectGroup(entry.projectId) === selectedProjectId) &&
     (notice(entry) || !['sent', 'cancelled'].includes(entry.state) || (entry.state === 'sent' && entry.messageId && !entry.historyRecorded)));
   for (const entry of startingInputs.values()) if (belongsToSelection(entry) && !all.some(row => row.id === entry.id)) rows.push(entry);

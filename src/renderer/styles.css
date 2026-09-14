@@ -1395,6 +1395,12 @@ details.connector[open] > summary::before { rotate: 90deg; }
 .setup-profile-dialog label { display: block; margin: 12px 0 6px; font-size: 12px; color: var(--soft); }
 .setup-profile-dialog .step-actions { justify-content: flex-end; margin-top: 16px; }
 .wizard.is-tidy .step-body > p, .wizard.is-tidy .setup-instructions, .wizard.is-tidy .setup-guide, .wizard.is-tidy .setup-subheading { display: none; }
+.chatgpt-permission-setup-notice { margin-top: 24px; padding: 18px 20px; border: 1px solid var(--accent-edge); border-radius: var(--r-md); background: var(--accent-wash); color: var(--ink); }
+.chatgpt-permission-setup-notice h3 { margin: 0 0 9px; font-size: 14px; font-weight: 650; }
+.chatgpt-permission-setup-notice p { margin: 7px 0 0; color: var(--soft); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.chatgpt-permission-example { margin: 16px 0 0; }
+.chatgpt-permission-example img { display: block; width: 100%; max-width: 520px; height: auto; margin: 0 auto; }
+.chatgpt-permission-example figcaption { margin-top: 7px; color: var(--soft); font-size: 11px; line-height: 1.5; text-align: center; }
 
 .sheet {
   max-width: 720px;
@@ -2868,6 +2874,21 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .skills-dialog-actions .ico { width: 15px; height: 15px; }
 .skills-dialog :is(button, input):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
+.chatgpt-permission-dialog { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; overflow: hidden; border: 1px solid var(--edge); border-radius: var(--r-xl); background: var(--card); color: var(--ink); box-shadow: 0 24px 90px #0006; }
+.chatgpt-permission-dialog::backdrop { background: #0008; backdrop-filter: blur(3px); }
+.chatgpt-permission-dialog-head { display: flex; align-items: flex-start; gap: 18px; padding: 20px 22px 15px; border-bottom: 1px solid var(--line); }
+.chatgpt-permission-dialog-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 18px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
+.chatgpt-permission-dialog-head .btn-icon { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; padding: 7px; color: var(--soft); }
+.chatgpt-permission-dialog-body { max-height: min(470px, 62vh); overflow-y: auto; padding: 18px 22px 10px; }
+.chatgpt-permission-dialog-body p { margin: 0 0 12px; color: var(--soft); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
+.chatgpt-permission-dialog-body p:last-of-type:not(.chatgpt-permission-status) { margin-bottom: 4px; }
+.chatgpt-permission-dialog-body .chatgpt-permission-example { margin-top: 16px; }
+.chatgpt-permission-status { min-height: 0; margin-top: 12px !important; padding: 0; color: var(--red) !important; font-size: 12px !important; }
+.chatgpt-permission-status:empty { display: none; }
+.chatgpt-permission-dialog-actions { display: flex; justify-content: flex-end; padding: 14px 22px 18px; border-top: 1px solid var(--line); }
+.chatgpt-permission-dialog-actions .btn { min-width: 120px; justify-content: center; padding: 9px 16px; }
+.chatgpt-permission-dialog :is(button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
 .skill-autocomplete { position: absolute; z-index: 46; left: 10px; right: 10px; bottom: 62px; max-height: min(280px, 44vh); overflow-y: auto; padding: 6px; border: 1px solid var(--edge); border-radius: 13px; background: var(--card); box-shadow: 0 12px 34px #0005; }
 .skill-autocomplete[hidden] { display: none; }
 .skill-autocomplete-option { display: block; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
@@ -2887,6 +2908,10 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   .skill-row-actions { align-self: stretch; }
   .skill-row-actions .btn { flex: 1; justify-content: center; }
   .skill-autocomplete { left: 6px; right: 6px; }
+  .chatgpt-permission-dialog { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
+  .chatgpt-permission-dialog-head, .chatgpt-permission-dialog-body { padding-inline: 16px; }
+  .chatgpt-permission-dialog-actions { padding-inline: 16px; }
+  .chatgpt-permission-dialog-actions .btn { width: 100%; }
 }
 
 .message-attachments { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; max-width: 100%; }

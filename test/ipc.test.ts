@@ -170,6 +170,42 @@ it('publishes Goal draft progress through the session refresh channel without a 
   }
 });
 
+it('requests the tool-approval notice on explicit successful model opening, persists its acknowledgement and leaves passive discovery alone', async () => {
+  const models = await import('../src/main/chat-models.js');
+  const notices = await import('../src/main/chatgpt-permission-notice.js');
+  const bridge = await import('../src/main/bridge.js');
+  const browser = await import('../src/main/browser-startup.js');
+  const bridgeStart = vi.spyOn(bridge, 'startBridge').mockResolvedValue(8765);
+  const wake = vi.spyOn(browser, 'wakeBrowserUrl').mockResolvedValue(undefined);
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  await writeDurableNow('chatgpt-permission-notice', null);
+  notices.resetChatgptPermissionNoticeForTests();
+  models.resetChatModelsForTests();
+  registerIpc(() => currentWindow as any, () => {});
+  const getNotice = () => handlers.get('chatgptPermissionNotice:get')!(null, undefined) as Promise<any>;
+  try {
+    await models.startChatModelDiscovery(false);
+    expect(wake).not.toHaveBeenCalled();
+    expect(await getNotice()).toMatchObject({ ok: true, data: { pending: false } });
+    wake.mockRejectedValueOnce(new Error('Browser opening failed'));
+    await handlers.get('chatModels:request')!(null, undefined);
+    await vi.waitFor(() => expect(models.getChatModels().error).toContain('Browser opening failed'));
+    expect(await getNotice()).toMatchObject({ ok: true, data: { pending: false } });
+    await handlers.get('chatModels:request')!(null, undefined);
+    await vi.waitFor(async () => expect(await getNotice()).toMatchObject({ ok: true, data: { pending: true } }));
+    await vi.waitFor(() => expect(currentWindow!.webContents.send).toHaveBeenCalledWith('chatgptPermissionNotice:changed', expect.objectContaining({ pending: true })));
+    expect(await handlers.get('chatgptPermissionNotice:ack')!(null, undefined)).toMatchObject({ ok: true, data: { pending: false } });
+    expect(await readDurable('chatgpt-permission-notice')).toEqual({ requested: true, acknowledged: true });
+    notices.resetChatgptPermissionNoticeForTests();
+    expect(await getNotice()).toMatchObject({ ok: true, data: { pending: false } });
+  } finally {
+    bridgeStart.mockRestore(); wake.mockRestore();
+    models.resetChatModelsForTests(); notices.resetChatgptPermissionNoticeForTests();
+    await writeDurableNow('chatgpt-permission-notice', null);
+    registerIpc(() => currentWindow as any, () => {});
+  }
+});
+
 it('stages clipboard image bytes with a preview through the general attachment owner', async () => {
   const drop = (payload: unknown) => handlers.get('sessions:dropFiles')!(null, payload) as Promise<any>;
   expect(await drop({ files: [] })).toMatchObject({ ok: false });
