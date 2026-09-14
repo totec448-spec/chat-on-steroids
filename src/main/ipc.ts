@@ -1,6 +1,7 @@
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { prepareFollowupPrompt, prepareSessionPrompt } from './session/prompt.js';
 import { importSkillFile, isSafeSkillId, listSkills, removeSkill } from './skills.js';
+import { acknowledgeChatgptPermissionNotice, getChatgptPermissionNotice, requestChatgptPermissionNotice } from './chatgpt-permission-notice.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { REASONING_EFFORTS } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
@@ -855,6 +856,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return requestSessionFinishGoal(id, expectedTurnId);
   });
   handle('chatModels:get', async () => getChatModels());
+  handle('chatgptPermissionNotice:get', async () => getChatgptPermissionNotice());
+  handle('chatgptPermissionNotice:ack', async () => {
+    const notice = await acknowledgeChatgptPermissionNotice();
+    push('chatgptPermissionNotice:changed', notice);
+    return notice;
+  });
   handle('browser:preferences', async (payload) => requestBrowserPreferences(payload));
   handle('chatModels:request', async () => startChatModelDiscovery());
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
@@ -1143,7 +1150,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   configureChatModelDiscovery({ changed: () => push('chatModels:changed', getChatModels()), wake: async (nonce, allowOpen) => {
     if (!await startBridge()) throw new Error('The browser bridge could not start');
-    if (allowOpen) await wakeBrowserUrl(`https://chatgpt.com/?cos-model-catalog=${nonce}`, true, true);
+    if (allowOpen) {
+      await wakeBrowserUrl(`https://chatgpt.com/?cos-model-catalog=${nonce}`, true, true);
+      push('chatgptPermissionNotice:changed', await requestChatgptPermissionNotice());
+    }
   } });
   onUpdateChange(pushState);
   onMacOSDesktopAccessChange(pushState);

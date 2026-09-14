@@ -7,10 +7,42 @@ import { appendEvent, createSession, getSession, initSessionStore, observeSessio
 import { recordDeliveredInput, recordedInputImage } from '../src/main/session/input-history.js';
 import type { InputEntry } from '../src/main/session/input.js';
 import { chronological } from '../src/shared/chronology.js';
+import * as store from '../src/main/session/store.js';
 
 let directory: string;
 beforeEach(async () => { directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-input-history-')); initSessionStore(directory); });
-afterEach(async () => { resetSessionStoreForTests(); await fs.rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { vi.restoreAllMocks(); resetSessionStoreForTests(); await fs.rm(directory, { recursive: true, force: true }); });
+
+it('keeps image handouts in place through quota failure, acknowledgement, restart and successful preview retry', async () => {
+  const session = await createSession({ title: 'Quota delivery' });
+  const bytes = await sharp({ create: { width: 3, height: 2, channels: 3, background: '#507040' } }).webp({ lossless: true }).toBuffer();
+  const entry: InputEntry = { id: 'quota-image', sessionId: session.id, text: 'Check this picture', state: 'tool',
+    mode: 'auto', dueAt: 0, createdAt: 100, offeredAt: 200, owner: 'first-call',
+    model: null, reasoningEffort: null, conversationId: null,
+    images: [{ name: 'reference.webp', dataUrl: `data:image/webp;base64,${bytes.toString('base64')}` }] };
+  const write = vi.spyOn(store, 'writeAsset').mockRejectedValue(new Error('Global asset quota reached'));
+  await expect(recordDeliveredInput(entry)).rejects.toThrow('Global asset quota reached');
+  const first = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
+  expect(first).toMatchObject({ time: 200, inputId: entry.id, inputImageCount: 1, inputDelivery: 'offered', authoredText: entry.text });
+  await appendEvent(session.id, { kind: 'progress', source: 'extension', time: 300, message: { text: 'Later work', chars: 10, truncated: false } });
+  const confirmed: InputEntry = { ...entry, state: 'sent', messageId: `input:${entry.id}`, deliveredAt: 400 };
+  await expect(recordDeliveredInput(confirmed)).rejects.toThrow('Global asset quota reached');
+  const afterFailure = (await readEvents(session.id)).find(event => event.kind === 'user_message')!;
+  expect(afterFailure).toMatchObject({ time: 200, origin: first.origin ?? first.seq, inputDelivery: 'confirmed', inputImageCount: 1 });
+  const logPath = path.join(directory, 'sessions', session.id, 'events.jsonl');
+  const count = (await fs.stat(logPath)).size;
+  await expect(recordDeliveredInput(confirmed)).rejects.toThrow('Global asset quota reached');
+  expect((await fs.stat(logPath)).size).toBe(count);
+  resetSessionStoreForTests(); initSessionStore(directory);
+  write.mockRestore();
+  expect(await recordDeliveredInput(confirmed)).toBe(true);
+  const messages = (await readEvents(session.id)).filter(event => event.kind === 'user_message');
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toMatchObject({ time: 200, origin: first.origin ?? first.seq, inputDelivery: 'confirmed', inputImageCount: 1 });
+  expect(await recordedInputImage(session.id, messages[0]!.assets![0]!.id)).toBe(entry.images![0]!.dataUrl);
+  expect(chronological(await readEvents(session.id)).findIndex(event => event.kind === 'user_message'))
+    .toBeLessThan(chronological(await readEvents(session.id)).findIndex(event => event.kind === 'progress'));
+});
 
 it('does not republish an inherited finish task model as a new picker observation', async () => {
   const session = await createSession({ conversationId: 'continued-chat', title: 'Finish inheritance' });

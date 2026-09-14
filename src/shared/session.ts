@@ -270,6 +270,8 @@ export type SessionEvent =
       inputId?: string;
       /** Tool handout remains unconfirmed until a later exact invocation proves receipt. */
       inputDelivery?: 'offered' | 'confirmed';
+      /** Kept even when the optional local preview cannot be stored. */
+      inputImageCount?: number;
       /** Original app-authored text, excluding transport-only control instructions. */
       authoredText?: string;
       attachments?: import('./input.js').InputAttachment[];

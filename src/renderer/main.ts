@@ -5,6 +5,7 @@ import { initSidebarResize } from './sidebar-resize.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
+import { initChatgptPermissionNotice } from './chatgpt-permission-notice.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
  *
@@ -45,6 +46,7 @@ declare global {
 const api = window.api;
 initLanguage();
 initSetupGuide();
+initChatgptPermissionNotice(api);
 
 /** Same shape the platform uses; mirrored here only to grey out step 2 until it is valid. */
 const TUNNEL_ID_PATTERN = /^tunnel_[0-9a-f]{32}$/;

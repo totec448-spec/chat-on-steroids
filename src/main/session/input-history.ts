@@ -11,35 +11,40 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>): Promise
   const confirmed = ['sent', 'cancelled'].includes(entry.state) && !!entry.messageId && Number.isFinite(entry.deliveredAt);
   if ((!offered && !confirmed) || !sessionId || entry.purpose === 'decision') return false;
   const messageId = offered ? `input:${entry.id}` : entry.messageId!;
-  const time = offered ? entry.offeredAt! : entry.deliveredAt!;
+  const time = offered || (messageId.startsWith('input:') && Number.isFinite(entry.offeredAt))
+    ? entry.offeredAt! : entry.deliveredAt!;
   if (!await getSession(sessionId)) return false;
   const images = [...entry.images ?? [], ...entry.toolImages ?? []];
   const text = entry.deliveryText ?? entry.text;
-  await validateInputImages(images);
-  const assets = [];
-  for (const image of images) {
-    assets.push(await writeAsset(sessionId, Buffer.from(image.dataUrl.split(',')[1]!, 'base64'), 'image/webp'));
-  }
   // Only an explicit native picker request proves model selection. Finish tasks
   // inherit the page model, so their old queued settings cannot become evidence.
   const selection = browserInputModel(entry);
   if (!messageId.startsWith('input:') && selection.model && entry.conversationId) {
     await observeSessionModel(sessionId, entry.conversationId, selection.model, entry.deliveredAt!, selection.reasoningEffort ?? undefined);
   }
-  await upsertMessageEvent(sessionId, {
-    time, source: 'app', kind: 'user_message',
+  const event = {
+    time, source: 'app' as const, kind: 'user_message' as const,
     // Browser delivery uses its exact native key, so a later page echo updates this row.
     // Tool delivery has no native user row and keeps the stable input id as its key.
-    messageId, inputId: entry.id, inputDelivery: offered ? 'offered' : 'confirmed', authoredText: entry.text,
+    messageId, inputId: entry.id, inputDelivery: offered ? 'offered' as const : 'confirmed' as const, authoredText: entry.text,
+    ...(images.length ? { inputImageCount: images.length } : {}),
     ...(entry.attachments?.length && entry.attachmentDelivery !== 'tool' ? { attachments: entry.attachments } : {}),
     // Injection does not change the running model. Only the native send path verifies
     // picker selection before delivery; a later sparse browser echo keeps this evidence.
     ...(!messageId.startsWith('input:') && selection.model
       ? { model: selection.model, ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) }
       : {}),
-    message: { text, chars: text.length, truncated: false },
-    ...(assets.length ? { assets } : {})
-  });
+    message: { text, chars: text.length, truncated: false }
+  };
+  // Optional image storage must never erase or delay the canonical delivery row.
+  // Failures retain historyRecorded=false for content-addressed outbox retries.
+  await upsertMessageEvent(sessionId, event);
+  await validateInputImages(images);
+  const assets = [];
+  for (const image of images) {
+    assets.push(await writeAsset(sessionId, Buffer.from(image.dataUrl.split(',')[1]!, 'base64'), 'image/webp'));
+  }
+  if (assets.length) await upsertMessageEvent(sessionId, { ...event, assets });
   return true;
 }
 

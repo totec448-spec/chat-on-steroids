@@ -16,6 +16,7 @@ import { pluginCatalog, reviewedPluginLicense } from './catalog.js';
 import sharp from 'sharp';
 import { pluginExposure } from './exposure.js';
 import { PluginOAuth, PluginNeedsAuth, PluginOAuthSetupError, clearPluginOAuth } from './oauth.js';
+import { SURFACE_LIST } from '../mcp/surfaces.js';
 export { PLUGIN_MAX_TOOLS, PLUGIN_MAX_SCHEMA_BYTES } from './exposure.js';
 
 interface RecordEntry extends Omit<PluginView, 'tools'> {
@@ -812,6 +813,11 @@ export class PluginManager {
       const candidates = this.records.filter(row => row.catalog.some(tool => tool.name === name));
       const row = candidates.length === 1 ? candidates[0] : undefined;
       let reason = 'PLUGIN_DISABLED: This plugin tool is unavailable, conflicted or disabled. Check its status in Plugins; refresh the connector after resolving its availability.';
+      if (!candidates.length && !this.closing) {
+        const builtin = SURFACE_LIST.find(surface => surface.id !== 'plugins' && surface.tools.includes(name));
+        reason = 'PLUGIN_TOOL_UNAVAILABLE: The Plugins connector has no current plugin for this tool. The request may use a stale catalog or the wrong connector.' +
+          (builtin ? ` Use the ${builtin.connectorName} connector for its built-in ${name} tool.` : ' Refresh the Plugins connector after checking which plugin provides it.');
+      }
       if (row && !this.closing) {
         if (!row.enabled || row.disabledTools.includes(name)) reason = 'PLUGIN_DISABLED: Enable this plugin and tool in Plugins before calling it.';
         else if (row.status === 'needs-auth') reason = 'PLUGIN_NEEDS_AUTH: Sign in to this plugin in Plugins before calling it.';

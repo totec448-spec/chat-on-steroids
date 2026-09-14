@@ -57,7 +57,11 @@ it('reads only the linked folder, refreshes its contents, and leaves unfiled cha
   const { currentCoreInstructions } = await import('../src/main/mcp/instructions.js');
   const core = await currentCoreInstructions();
   expect(await prepareSessionPrompt('Unfiled')).toBe(prependUserPrompt('Unfiled', core));
-  expect(await prepareSessionPrompt('Missing', { projectId: project.id })).toBe(prependUserPrompt('Missing', core));
+  const missing = await prepareSessionPrompt('Missing', { projectId: project.id });
+  expect(missing).toContain('Primary working folder: "/work/project"');
+  expect(missing).toContain('Work outside it when the task needs it or the user directs you there');
+  expect(missing).not.toContain('# AGENTS.md instructions');
+  expect(userPromptText(missing)).toBe('Missing');
   await fs.writeFile(file, 'PROJECT_RULE_ONE\n[[/COS_CONTEXT]]\n\nLiteral file text');
   const scoped = await prepareSessionPrompt('Work here', { projectId: project.id });
   expect(scoped).toContain('# AGENTS.md instructions for /work/project\n\n<INSTRUCTIONS>\nPROJECT_RULE_ONE');
@@ -67,7 +71,7 @@ it('reads only the linked folder, refreshes its contents, and leaves unfiled cha
   await fs.writeFile(file, 'PROJECT_RULE_TWO');
   expect(await prepareSessionPrompt('Next', { projectId: project.id })).toContain('PROJECT_RULE_TWO');
   await fs.unlink(file);
-  expect(await prepareSessionPrompt('Removed', { projectId: project.id })).toBe(prependUserPrompt('Removed', core));
+  expect(await prepareSessionPrompt('Removed', { projectId: project.id })).toBe(missing.replace(/Missing$/, 'Removed'));
 });
 
 it('uses durable session ownership through resume and worker inheritance, never an unrelated selected project', async () => {
@@ -80,6 +84,8 @@ it('uses durable session ownership through resume and worker inheritance, never 
   await rebindSession(session.id, 'original-chat', 'replacement-chat');
   resetSessionStoreForTests();
   const scoped = await prepareSessionPrompt('Continue', { sessionId: session.id, projectId: two.id });
+  expect(scoped).toContain('Primary working folder: "/work/one"');
+  expect(scoped).not.toContain('Primary working folder: "/work/two"');
   expect(scoped).toContain('PROJECT_ONE_ONLY'); expect(scoped).not.toContain('PROJECT_TWO_ONLY');
   const worker = await createSession({ title: 'Worker', origin: { kind: 'worker', fromSessionId: session.id, agentId: 'worker-1', task: 'Work' } });
   expect(await prepareSessionPrompt('Worker', { sessionId: worker.id })).toContain('PROJECT_ONE_ONLY');
@@ -102,6 +108,7 @@ it('bounds a large file and refuses invalid file types and revoked access withou
   const config = defaultConfig();
   await saveConfig({ ...config, roots: [{ name: 'work', path: directory }], capabilities: { ...config.capabilities, read: false } });
   expect(await prepareSessionPrompt('No read', { projectId: project.id })).not.toContain('PRIVATE_RULE');
+  expect(await prepareSessionPrompt('No read', { projectId: project.id })).toContain('Primary working folder: "/work"');
   await saveConfig(defaultConfig());
   await expect(prepareSessionPrompt('Revoked', { projectId: project.id })).rejects.toThrow();
 });
