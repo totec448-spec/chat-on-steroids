@@ -1028,6 +1028,7 @@
   "The app will try to refresh this chat when recovery is eligible. A refresh does not resend your message. If it stays stuck, open ChatGPT and check the page before retrying.": "满足恢复条件时，应用会尝试刷新此对话。刷新不会重新发送消息。如果仍然卡住，请先打开 ChatGPT 检查页面，再重试。",
   "Open this chat in ChatGPT and check the error. If your message is already there, do not send it again; otherwise retry when the page is ready.": "在 ChatGPT 中打开此对话并检查错误。如果消息已存在，请勿重复发送；否则请在页面就绪后重试。",
   "This turn later completed. You can continue with a new message.": "本轮随后已完成。你可以发送新消息继续。",
+  "Recovered after interruption": "中断后已恢复",
   "You can send a follow-up. After a confirmed refresh, automatic continuation waits five minutes and checks for new work before sending.": "你可以发送后续消息。确认刷新后，自动续接会等待五分钟，并在发送前检查是否有新进展。",
   "Queued messages still wait until sending is safe. If the chat stays stuck, open ChatGPT and check the page before retrying.": "排队消息仍会等待安全发送条件。如果对话仍然卡住，请先打开 ChatGPT 检查页面，再重试。",
   "Unattributed call": "未归属的工具调用",

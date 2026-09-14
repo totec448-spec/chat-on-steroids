@@ -62,3 +62,61 @@ it('only an exact completed boundary supersedes the error guidance', () => {
   expect(chatErrorPresentation(failed, [failed, end, reopened]).next).toContain('Work continued');
   expect(chatErrorPresentation(failed, [failed, { ...reopened, turnId: 'turn-b' }]).next).not.toContain('Work continued');
 });
+
+it('resolves a repeated reload error when the recorder later proves the stable final', () => {
+  const first = error('Connection interrupted. Waiting for the complete answer', { recoverable: true });
+  const replay = error(first.message.text, { seq: 3, time: 130, turnId: undefined, recoverable: true });
+  const remounted = error(first.message.text, { seq: 6, time: 160, turnId: 'turn-b', recoverable: true });
+  const final: SessionEvent = {
+    seq: 8,
+    origin: 8,
+    finalContentSeq: 8,
+    time: 150,
+    source: 'extension',
+    kind: 'assistant_message',
+    messageId: 'stable-final',
+    providerMessageId: 'provider-final',
+    message: { text: 'The answer completed on the server.', chars: 35, truncated: false },
+    state: 'final',
+    final: true,
+    goalEligible: true
+  };
+  const history = [first, repair('Reloaded chat.', { seq: 2, turnId: undefined }), replay,
+    { seq: 4, time: 140, source: 'extension', kind: 'turn_start', turnId: 'turn-b' } as SessionEvent,
+    remounted, final];
+
+  for (const failure of [first, replay, remounted]) {
+    const view = chatErrorPresentation(failure, history);
+    expect(view).toMatchObject({ title: 'Recovered after interruption', resolved: true });
+    expect(view.next).toContain('later completed');
+  }
+
+  const nextQuestion: SessionEvent = {
+    seq: 7, time: 170, source: 'extension', kind: 'user_message', messageId: 'next-question',
+    message: { text: 'Continue', chars: 8, truncated: false }
+  };
+  expect(chatErrorPresentation(remounted, [...history, nextQuestion]).resolved).toBe(false);
+});
+
+it('uses conversation origin when canonical snapshots have newer storage sequences', () => {
+  const failed = error('Connection interrupted. Waiting for the complete answer', {
+    seq: 31, time: 130, turnId: undefined, recoverable: true
+  });
+  const earlierQuestion: SessionEvent = {
+    seq: 141, origin: 23, time: 120, source: 'extension', kind: 'user_message', messageId: 'earlier-question',
+    message: { text: 'Earlier', chars: 7, truncated: false }
+  };
+  const final: SessionEvent = {
+    seq: 150, origin: 40, finalContentSeq: 40, time: 150, source: 'extension', kind: 'assistant_message',
+    messageId: 'stable-final', providerMessageId: 'provider-final',
+    message: { text: 'Completed.', chars: 10, truncated: false }, state: 'final', final: true, goalEligible: true
+  };
+  const nextQuestion: SessionEvent = {
+    seq: 142, origin: 42, time: 160, source: 'extension', kind: 'user_message', messageId: 'next-question',
+    message: { text: 'Next', chars: 4, truncated: false }
+  };
+
+  expect(chatErrorPresentation(failed, [failed, earlierQuestion, final, nextQuestion])).toMatchObject({
+    title: 'Recovered after interruption', resolved: true
+  });
+});

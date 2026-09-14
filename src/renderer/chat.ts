@@ -1628,6 +1628,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       const notice = el('div', 'chat-error-notice');
       notice.setAttribute('role', 'status');
       const presentation = () => chatErrorPresentation(event, context?.history ?? events);
+      notice.classList.toggle('is-resolved', presentation().resolved);
       const title = el('strong', '', () => presentation().title);
       notice.append(title, textBlock('msg', presentation().message, event.message.truncated, event.message.chars),
         el('p', 'chat-error-next', () => presentation().next));

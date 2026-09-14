@@ -929,6 +929,9 @@ without promising automatic retry. Show the existing matching repair receipt in 
 update it with the timeline, bounded by turn/question ownership. A reload proves only the page
 action, not recovered generation or message delivery. App silence reports lack of confirmed
 completion, never claims ChatGPT is still generating. No presentation rule grants recovery authority.
+When reload replaces the document-local turn id, a later stable final that the recorder explicitly
+marked Goal-eligible for that uncertain response downgrades the earlier red error card to recovered
+until the next authored question. An arbitrary later final cannot rewrite the earlier failure.
 Native Thinking failed notices require an exact local turn owner; unowned historical headers
 discovered after reload cannot become current errors. The recorded reason plus that turn identity
 deduplicates reload/restart reports beyond the generic 30-second burst window. Fresh exact tool
