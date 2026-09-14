@@ -57,11 +57,12 @@ it('searches whole settings sections without empty headings, orphaned controls o
   expect(document.getElementById('settingsSearchEmpty')!.hidden).toBe(true);
 });
 
-it('exposes Goal tool context as an opt-in setting wired into the existing form', () => {
+it('limits the existing tool-detail preference to handoff briefs', () => {
   const toggle = document.getElementById('goalIncludeToolCalls') as HTMLInputElement;
   expect(toggle.type).toBe('checkbox');
   expect(toggle.checked).toBe(false);
-  expect(toggle.closest('label')?.textContent).toContain('recorded tool arguments and results');
+  expect(toggle.closest('label')?.textContent).toContain('Include tool details in handoffs');
+  expect(toggle.closest('label')?.textContent).toContain('Goal and Loop use user messages and assistant updates and answers');
   expect(chatSource).toContain("includeToolCalls: $<HTMLInputElement>('goalIncludeToolCalls').checked");
   expect(chatSource).toContain("applyChatChecked($<HTMLInputElement>('goalIncludeToolCalls')");
 });

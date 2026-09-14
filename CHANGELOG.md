@@ -11,6 +11,8 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## [2.1.11] — 2 weeks 6 sol
 
+- Goal/Loop decisions use authored conversation context without recorded tool bodies.
+- API reasoning choices follow the selected OpenRouter model’s supported levels.
 - Reduced renderer memory growth during long-running sessions.
 - Clearer tool-permission and recovered-identity guidance.
 - More reliable plugin discovery, refresh and Windows paths.

@@ -81,6 +81,8 @@ import {
   goalObjectiveMessage
 } from '../shared/goal.js';
 import type { GoalMode, GoalProviderKind, GoalReasoning } from '../shared/types.js';
+import { parseGoalModelReasoning, type GoalModel } from '../shared/goal-reasoning.js';
+export type { GoalModel } from '../shared/goal-reasoning.js';
 
 /** Where OpenRouter lives. One host, both routes. */
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
@@ -2272,22 +2274,22 @@ async function committedResumeHandoffId(
  * The conversation as Goal sees it: the user request, visible interim updates and final answers.
  *
  * Read canonical authored segments once, including interim commentary. Id-less legacy
- * streaming snapshots cannot be joined safely and remain excluded. Optional tool rows
- * and finish-boundary input use this same bounded, anchored projection.
+ * streaming snapshots cannot be joined safely and remain excluded. Tool arguments/results
+ * never enter this projection, including for older installs with includeToolCalls enabled.
+ * That legacy preference now controls handoff briefs only. Finish uses this same projection.
  */
 export async function conversationMessages(sessionId: string, deliveredInput: readonly string[] = [], excludedInputIds: ReadonlySet<string> = new Set()): Promise<ChatMessage[]> {
-  const includeTools = getConfig().goal.includeToolCalls === true;
   const recentLimit = MAX_CONTEXT_MESSAGES * 2;
   const { listInputs } = await import('./session/input.js');
   const [recent, userReferences, inputs] = await Promise.all([
     readRecentEvents(sessionId, recentLimit, {
-      kinds: ['user_message', 'assistant_message', 'progress', ...(includeTools ? ['tool_call' as const] : [])]
+      kinds: ['user_message', 'assistant_message', 'progress']
     }),
     readRecentEvents(sessionId, MAX_CONTEXT_MESSAGES, { kinds: ['user_message'] }),
     listInputs()
   ]);
   const automaticIds = new Set(inputs.filter(input => input.sessionId === sessionId && input.finishOwner).map(input => input.id));
-  // Assistant/tool traffic must not evict the user's middle corrections before selection.
+  // Assistant traffic must not evict the user's middle corrections before selection.
   const events = [...new Map([...recent, ...userReferences].map(event => [event.seq, event])).values()]
     .sort((left, right) => ('origin' in left ? left.origin ?? left.seq : left.seq) - ('origin' in right ? right.origin ?? right.seq : right.seq));
   const ordered: ChatMessage[] = [];
@@ -2304,8 +2306,6 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     } else if ((event.kind === 'assistant_message' && (event.final || event.messageId)) || (event.kind === 'progress' && event.source === 'extension')) {
       const content = clip(event.message.text);
       if (content) next = { role: 'assistant', content };
-    } else if (includeTools && event.kind === 'tool_call' && !['keep_astra_on_forever', 'session_finish'].includes(event.call.tool)) {
-      next = { role: 'assistant', content: clip(`[Recorded tool ${event.call.tool} (${event.call.outcome})]\nArguments: ${event.call.args.text}\nResult: ${event.call.result.text}`) };
     }
     if (!next) continue;
 
@@ -2593,14 +2593,6 @@ function clip(text: string, limit = MAX_MESSAGE_CHARS): string {
   return `${trimmed.slice(0, head)}${marker}${trimmed.slice(-tail)}`;
 }
 
-export interface GoalModel {
-  id: string;
-  name: string;
-  /** Unix seconds, as OpenRouter publishes it. 0 when the listing did not say. */
-  created: number;
-  contextLength: number;
-}
-
 let modelCache: { at: number; keyScope: string; models: GoalModel[] } | null = null;
 
 /**
@@ -2611,11 +2603,13 @@ let modelCache: { at: number; keyScope: string; models: GoalModel[] } | null = n
  * exists than the one already chosen. Paged, because the listing is several hundred long and
  * nobody scrolls that.
  */
-export async function listGoalModels(offset = 0, limit = MODEL_PAGE_SIZE): Promise<{ models: GoalModel[]; total: number }> {
+export async function listGoalModels(offset = 0, limit = MODEL_PAGE_SIZE): Promise<{ models: GoalModel[]; total: number; selectedModel?: GoalModel }> {
+  const selectedId = getConfig().goal.model;
   const models = await allGoalModels();
   const from = Math.max(0, Math.floor(offset));
   const count = Math.max(1, Math.min(100, Math.floor(limit)));
-  return { models: models.slice(from, from + count), total: models.length };
+  const selectedModel = models.find(model => model.id === selectedId);
+  return { models: models.slice(from, from + count), total: models.length, ...(selectedModel ? { selectedModel } : {}) };
 }
 
 async function allGoalModels(): Promise<GoalModel[]> {
@@ -2685,7 +2679,7 @@ async function allGoalModels(): Promise<GoalModel[]> {
   for (const entry of raw) {
     if (models.length >= MAX_MODELS) break;
     if (!entry || typeof entry !== 'object') continue;
-    const model = entry as { id?: unknown; name?: unknown; created?: unknown; context_length?: unknown };
+    const model = entry as { id?: unknown; name?: unknown; created?: unknown; context_length?: unknown; reasoning?: unknown };
     if (typeof model.id !== 'string' || model.id === '' || model.id.length > MAX_MODEL_FIELD_CHARS) continue;
     models.push({
       id: model.id,
@@ -2694,6 +2688,7 @@ async function allGoalModels(): Promise<GoalModel[]> {
           ? model.name.slice(0, MAX_MODEL_FIELD_CHARS)
           : model.id,
       created: typeof model.created === 'number' && Number.isFinite(model.created) ? model.created : 0,
+      ...(model.reasoning ? { reasoning: parseGoalModelReasoning(model.reasoning) } : {}),
       contextLength:
         typeof model.context_length === 'number' && Number.isFinite(model.context_length) ? model.context_length : 0
     });

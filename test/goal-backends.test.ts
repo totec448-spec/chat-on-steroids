@@ -306,6 +306,59 @@ describe('Goal decision backends', () => {
     expect(browser.request.mock.calls[0]?.[0]).toContain('Continue the loop request.');
     expect(browser.request.mock.calls[0]?.[0]).toContain('Finish my exact objective');
   });
+  it.each(['api', 'chatgpt'] as const)('keeps the saved Loop task intact on every %s decision after history eviction', async backend => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, goal: { ...config.goal, enabled: true, mode: 'loop', loopBackend: backend,
+      includeToolCalls: true, loopPrompt: 'SYSTEM LOOP POLICY' } });
+    await setSecret('openRouterApiKey', 'test-key');
+    const conversationId = `saved-loop-task-${backend}`;
+    const sessionId = await recording(conversationId, 'Initial answer');
+    // This comes from Save task, not from an assistant summary or the reference-history tail.
+    const task = 'SAVED TASK START\n' + 'Preserve the whole requested product. '.repeat(150) + '\nSAVED TASK END';
+    await goal.setGoalObjectiveNow(conversationId, task);
+    for (let index = 0; index < 245; index++) {
+      const text = `Earlier result ${index}: ` + 'completed work '.repeat(80);
+      await appendEvent(sessionId, { source: 'extension', kind: 'assistant_message', final: true, time: 3000 + index,
+        message: { text, chars: text.length, truncated: false } });
+    }
+    const requests: string[] = [];
+    browser.request.mockImplementation(async (prompt: string) => {
+      requests.push(prompt);
+      return '{"action":"continue","reply":"Continue the requested product"}';
+    });
+    vi.stubGlobal('fetch', vi.fn(async (_url: unknown, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      requests.push(body.messages.map((message: { content: string }) => message.content).join('\n'));
+      return Response.json({ choices: [{ message: { content: '{"action":"continue","reply":"Continue the requested product"}' } }] });
+    }));
+    for (let round = 0; round < 2; round++) {
+      const turnId = `saved-task-round-${round}`;
+      await recordLoopMcpProof(sessionId, turnId);
+      for (const [kind, text] of [
+        ['user_message', `LATEST HUMAN CORRECTION ${round}`],
+        ['assistant_message', `LATEST INTERIM ${round}`],
+        ['assistant_message', `LATEST FINAL ${round}`]
+      ] as const) {
+        await appendEvent(sessionId, { source: 'extension', time: Date.now(), turnId,
+          ...(kind === 'assistant_message' ? { kind, messageId: text, final: text.includes('FINAL') } : { kind }),
+          message: { text, chars: text.length, truncated: false } });
+      }
+      goal.startGoalDraft({ conversationId, sessionId, turnId });
+      expect((await settled(conversationId)).stage).toBe('ready');
+      expect(await goal.draftFastFollowup(sessionId)).toBe('Continue the requested product');
+      for (const prompt of requests.slice(round * 2)) {
+        expect(prompt).toContain(task);
+        expect(prompt).toContain('SYSTEM LOOP POLICY');
+        expect(prompt).toContain('Finish the original task');
+        expect(prompt).toContain(`LATEST HUMAN CORRECTION ${round}`);
+        expect(prompt).toContain(`LATEST INTERIM ${round}`);
+        expect(prompt).toContain(`LATEST FINAL ${round}`);
+        expect(prompt).not.toContain('[Recorded tool');
+      }
+    }
+    expect(requests).toHaveLength(4);
+  });
+
   it('keeps periodic Goal checks on their own backend and completion contract', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'templates', loopBackend: 'chatgpt' } });
     const sessionId = await recording('periodic-offline', 'Done\n[[COS_GOAL:COMPLETE]]');

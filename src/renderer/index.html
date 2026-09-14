@@ -629,7 +629,7 @@
                   <div class="setting"><span class="setting-text"><b>Loop response source</b><em>Loop keeps going until you switch it off.</em></span><select id="loopBackend"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans. Select GPT-5.6 and High below for planning.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan reasoning</b><em>Used with the ChatGPT model above; independent from API reasoning.</em></span><select id="helperReasoning" aria-label="Goal, Loop and Plan reasoning"></select></div>
-                  <label class="setting"><span class="setting-text"><b>Include tool details in Goal and handoffs</b><em>Goal receives recorded tool arguments and results. Handoff briefs retain tool details.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Include tool details in handoffs</b><em>Handoff briefs retain tool details. Goal and Loop use user messages and assistant updates and answers.</em></span><input id="goalIncludeToolCalls" type="checkbox" /></label>
                   </div>
                 <h2 class="settings-section-title">ChatGPT models</h2>
                 <div class="pane">
@@ -766,14 +766,10 @@
                   <div class="setting">
                     <span class="setting-text">
                       <b>Reasoning</b>
-                      <em>Default lets the provider decide, which is right for nearly every model. The rest cost more and take longer.</em>
+                      <em>Choose a reasoning level supported by the selected API model. Default uses the provider's setting.</em>
                     </span>
                     <select id="goalReasoning">
                       <option value="default">Default</option>
-                      <option value="minimal">Minimal</option>
-                      <option value="low">Low</option>
-                      <option value="medium">Medium</option>
-                      <option value="high">High</option>
                     </select>
                   </div>
 

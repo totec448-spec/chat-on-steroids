@@ -6,6 +6,8 @@ import { createAgentPanel } from './agent-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { goalErrorMessage } from '../shared/goal-errors.js';
+import type { GoalModel } from '../shared/goal-reasoning.js';
+import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder } from './sidebar-order.js';
 import { toolResultText } from './tool-result.js';
@@ -2620,9 +2622,26 @@ export function chatSettingsPatch(current: Config): {
  */
 let goalModel = DEFAULT_GOAL_MODEL;
 /** The catalogue as far as it has been paged in, and how long it actually is. */
-let goalModels: Array<{ id: string; name: string; created: number; contextLength: number }> = [];
+let goalModels: GoalModel[] = [];
+let selectedGoalModel: GoalModel | undefined;
+let goalCatalogEpoch = 0;
 let goalTotal = 0;
 let goalLoading = false;
+
+function invalidateGoalModels(): void {
+  goalCatalogEpoch++;
+  goalModels = [];
+  selectedGoalModel = undefined;
+  goalTotal = 0;
+}
+
+function paintGoalReasoning(selected?: Config['goal']['reasoning'], changingModel = false): void {
+  const select = $<HTMLSelectElement>('goalReasoning');
+  const model = goalModels.find(model => model.id === goalModel) ?? (selectedGoalModel?.id === goalModel ? selectedGoalModel : undefined);
+  const custom = $<HTMLSelectElement>('goalProvider').value === 'custom';
+  renderGoalReasoning(select, custom ? undefined : model, custom,
+    selected ?? (select.value || 'default') as Config['goal']['reasoning'], changingModel);
+}
 
 /** The release date OpenRouter publishes, as a person would date a model. */
 function releasedOn(created: number): string {
@@ -2640,13 +2659,14 @@ async function loadGoalModels(reset: boolean): Promise<void> {
   if (goalLoading) return;
   goalLoading = true;
   if (reset) {
-    goalModels = [];
-    goalTotal = 0;
+    invalidateGoalModels();
   }
+  const epoch = goalCatalogEpoch;
   ui($('goalModelsState'), 'textContent', () => t("Loading models from OpenRouter…"));
   $<HTMLButtonElement>('goalMore').disabled = true;
   const page = await run(api.listGoalModels(goalModels.length));
   goalLoading = false;
+  if (epoch !== goalCatalogEpoch) return;
   if (!page) {
     // `run` has already shown the reason. Say what it means *here*: the list is empty and
     // the model in use has not changed.
@@ -2655,7 +2675,9 @@ async function loadGoalModels(reset: boolean): Promise<void> {
     return;
   }
   goalModels = [...goalModels, ...page.models];
+  selectedGoalModel = page.selectedModel;
   goalTotal = page.total;
+  paintGoalReasoning();
   paintGoalModels();
 }
 
@@ -2735,7 +2757,10 @@ function applyGoal(state: AppState, previous?: Config): void {
   // its own input and must not replace that selection during an unrelated repaint.
   // A session opened directly on custom starts with the picker's defined default.
   if (config.goal.provider?.kind !== 'custom') goalModel = config.goal.model;
-  applyChatValue($<HTMLSelectElement>('goalReasoning'), config.goal.reasoning, previous?.goal.reasoning);
+  const reasoningSelect = $<HTMLSelectElement>('goalReasoning');
+  const reasoning = document.activeElement === reasoningSelect && previous && reasoningSelect.value !== previous.goal.reasoning
+    ? reasoningSelect.value as Config['goal']['reasoning'] : config.goal.reasoning;
+  if (previous && JSON.stringify(previous.goal.provider) !== JSON.stringify(config.goal.provider)) invalidateGoalModels();
   applyChatValue($<HTMLTextAreaElement>('goalPrompt'), config.goal.prompt, previous?.goal.prompt);
   applyChatValue(
     $<HTMLTextAreaElement>('goalObjectivePrompt'),
@@ -2779,6 +2804,7 @@ function applyGoal(state: AppState, previous?: Config): void {
       : t("Optional. Stored with secure OS credential storage and sent only by the app to your configured API endpoint. The browser receives only the reply."));
   $('goalCustomKeyState').classList.toggle('is-warn', !secureStorageAvailable);
   $<HTMLButtonElement>('goalCustomKeyRemove').disabled = !state.hasCustomProviderKey || !secureStorageAvailable;
+  paintGoalReasoning(reasoning);
   if (goalModels.length > 0) paintGoalModels();
 }
 
@@ -2828,12 +2854,17 @@ function wireGoal(save: () => Promise<void>): void {
     if (!panel.hidden && goalModels.length === 0) void loadGoalModels(true);
   });
   $('goalMore').addEventListener('click', () => void loadGoalModels(false));
+  $('goalReasoning').addEventListener('focus', () => {
+    if ($<HTMLSelectElement>('goalProvider').value !== 'custom' && !goalModels.some(model => model.id === goalModel) && selectedGoalModel?.id !== goalModel)
+      void loadGoalModels(true);
+  });
   $('goalModelList').addEventListener('scroll', maybePageGoalModels);
   $('goalModelList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-model]');
     if (!row?.dataset.model) return;
     goalModel = row.dataset.model;
     $('goalModelName').textContent = goalModel;
+    paintGoalReasoning(undefined, true);
     paintGoalModels();
     void save();
     toast(`Goal model set to ${goalModel}`);
@@ -2849,6 +2880,7 @@ function wireGoal(save: () => Promise<void>): void {
     if (key === '') return;
     const next = await run(api.setGoalKey(key));
     if (next) {
+      invalidateGoalModels();
       // A blur can be followed immediately by refocus + new typing while IPC is in flight.
       // Clear only the exact value that successfully crossed the secret-store boundary.
       if (input.value === submitted) input.value = '';
@@ -2859,6 +2891,7 @@ function wireGoal(save: () => Promise<void>): void {
   $('goalKeyRemove').addEventListener('click', async () => {
     const next = await run(api.setGoalKey(''));
     if (next) {
+      invalidateGoalModels();
       applyGoal(next);
       toast('OpenRouter key removed');
     }

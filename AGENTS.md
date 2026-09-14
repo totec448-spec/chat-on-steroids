@@ -1539,7 +1539,13 @@ narrow. Goal stops at the requested outcome; Loop raises the quality of the same
 recursively shrinking to the latest detail or repeating settled reports. Verbatim old defaults
 live in `shared/goal-prompt-history.ts` only for exact-match migration; custom wording is preserved.
 API model discovery is bounded and cached by endpoint/key; a list entry does not prove an
-execution succeeded. Secrets remain in the main process's encrypted store. Custom endpoints
+execution succeeded. The API reasoning picker uses OpenRouter's per-model `reasoning` metadata,
+including supported efforts, mandatory reasoning and the default effort. Absent effort metadata
+does not imply support; an explicit null list accepts the gateway's efforts. The selected model's
+metadata accompanies every catalogue page, even when its row is on a later page. Saved unsupported
+values stay visible until the user changes them or selects another model. Custom endpoints retain
+manual effort selection. Exact effort values, including Max and Extra high, pass through the API
+request; the browser-helper reasoning setting remains separate. Secrets remain in the main process's encrypted store. Custom endpoints
 receive the explicitly assembled reference context; local recording is not a promise that
 Goal API requests stay on the device.
 
@@ -1547,8 +1553,11 @@ The driver context includes canonical authored user messages, stable assistant i
 and final text. **Interim messages remain included when Thinking failed leaves no final answer**:
 both the ChatGPT helper and API Loop receive the original task, subsequent user corrections and
 canonical interim text once, in chronology. Missing hidden thinking is not permission to drop
-public interim prose; app status/error notices are not model-authored work. Tool rows are opt-in (`includeToolCalls`, default Off); finish-control calls do
-not recursively dominate the reference. Read user-reference history separately so assistant/tool
+public interim prose; app status/error notices are not model-authored work. Goal/Loop and finish
+decisions never include recorded tool arguments/results, even on older installs with the tool
+preference enabled. `includeToolCalls` now controls handoff briefs only (default Off). The saved
+Loop task is supplied in full as a separate instruction on every decision, outside history
+selection; newer answers and history limits cannot replace it. Read user-reference history separately so assistant
 traffic cannot evict middle corrections before selection. Preserve original task/steering and
 committed handoff provenance under the message budget; user references have a larger per-message
 allowance and explicit clipping. Exact same-session outbox `finishOwner` identities label known
