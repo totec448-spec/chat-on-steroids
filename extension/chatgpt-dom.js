@@ -1989,6 +1989,21 @@ var CLF_DOM = (() => {
         node.id !== 'composer-plus-btn' && node.getAttribute('data-testid') !== 'composer-plus-btn');
     return candidates.length === 1 ? candidates[0] : null;
   }
+  // Version rows can include a retirement caption below their primary label.
+  // Match the leading label subtree, not the whole row or an arbitrary substring
+  // in its description. Duplicate primary labels still fail closed at the caller.
+  function pickerVersionLabelMatches(row, label) {
+    const text = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const expected = text(label);
+    let node = row;
+    for (let depth = 0; node && depth < 8; depth++) {
+      if (text(node.textContent) === expected) return true;
+      node = [...node.childNodes].find(child => text(child.textContent) &&
+        (child.nodeType === Node.TEXT_NODE || (child.nodeType === Node.ELEMENT_NODE &&
+          !child.matches('svg,[hidden],[aria-hidden="true"],[inert]'))));
+    }
+    return false;
+  }
   function modelPickerAccess(stillCurrent) {
     const shown = node => node && !node.closest('[hidden],[aria-hidden="true"],[inert]') && node.getClientRects().length > 0;
     const picker = () => document.querySelector('[data-testid="composer-intelligence-picker-content"]');
@@ -2037,7 +2052,7 @@ var CLF_DOM = (() => {
           toggle[0].click();
         }
         const option = await wait(() => {
-          const rows = versionRows().filter(node => node.textContent.trim() === label && node.getAttribute('aria-disabled') !== 'true');
+          const rows = versionRows().filter(node => pickerVersionLabelMatches(node, label) && node.getAttribute('aria-disabled') !== 'true');
           return rows.length === 1 ? rows[0] : null;
         });
         if (!key(option, 'Enter')) return null;
