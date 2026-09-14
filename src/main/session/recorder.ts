@@ -67,7 +67,7 @@ import {
   requestCorrelation,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
-import { resumeOpeningChat } from './resume-gate.js';
+import { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } from './resume-gate.js';
 import { summarizeToolCall } from './summarize.js';
 
 interface LiveConversation {
@@ -240,7 +240,7 @@ export async function restoreRecordedConversation(conversationId: string): Promi
  * claim. Generous next to the milliseconds a commit actually takes, and bounded because a
  * commit that never lands must not stop the chat being recorded at all.
  */
-const RESUME_COMMIT_SETTLE_MS = 5_000;
+const RESUME_COMMIT_SETTLE_MS = RESUME_CLAIM_WINDOW_MS;
 
 async function settleResumeCommit(): Promise<void> {
   const deadline = Date.now() + RESUME_COMMIT_SETTLE_MS;

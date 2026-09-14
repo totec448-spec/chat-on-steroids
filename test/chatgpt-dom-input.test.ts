@@ -206,7 +206,7 @@ describe('native Project entry readiness', () => {
     if (reason === 'cancelled') current = false;
     if (reason === 'foreign-route') dom.reconfigure({ url: 'https://chatgpt.com/c/bbbbbbbb-1111-4222-8333-444444444444' });
     if (reason !== 'missing') document.querySelector('form')!.prepend(box);
-    await vi.advanceTimersByTimeAsync(12_000);
+    await vi.advanceTimersByTimeAsync(45_000);
     expect(await entered).toBe(false);
     expect(clicks).not.toHaveBeenCalled();
     if (reason === 'draft') expect(box.textContent).toBe('Keep my draft');
