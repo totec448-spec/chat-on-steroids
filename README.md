@@ -1,4 +1,4 @@
-<p align="center"><img src="docs/images/model-picker-warning.svg" width="960" alt="They changed model picker, fix in 2 hours, not at home rn. Models will not load" /></p>
+<p align="center"><img src="docs/images/model-picker-warning.svg?v=3" width="960" alt="They changed model picker, fix in 2 hours, not at home rn. Models will not load. Bug support: @dummerspast39" /></p>
 
 <p align="center"><img src="docs/images/readme-hero.svg?v=2" width="960" alt="Turn ChatGPT into Codex-style local coding. Chat On Steroids: Your files. Your terminal. Your ChatGPT plan." /></p>
 
