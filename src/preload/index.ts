@@ -1,4 +1,5 @@
 import type { ChatModelCatalog } from '../shared/chat-models.js';
+import type { GoalModel } from '../shared/goal-reasoning.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { BrowserPreferences } from '../shared/browser-preferences.js';
 import type { SessionControlsView } from '../main/bridge.js';
@@ -45,8 +46,9 @@ export interface SettingsPatch {
 
 /** One page of the model catalogue, as the model picker asks for it. */
 export interface GoalModelPage {
-  models: Array<{ id: string; name: string; created: number; contextLength: number }>;
+  models: GoalModel[];
   total: number;
+  selectedModel?: GoalModel;
 }
 
 export interface SessionList {

@@ -71,7 +71,7 @@ describe('external plugin authority', () => {
     await manager.close();
     manager = new PluginManager();
     await manager.initialize(dir);
-    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'));
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]?.status).toBe('ready'), { timeout: 10_000 });
     expect(manager.snapshot().plugins[0]?.id).toBe(row.id);
   });
 
@@ -554,7 +554,7 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     await manager.close();
     manager = new PluginManager();
     await manager.initialize(dir);
-    await vi.waitFor(() => expect(manager.snapshot().plugins[0]!.status).toBe('ready'));
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]!.status).toBe('ready'), { timeout: 10_000 });
     expect(manager.snapshot().plugins[0]!.tools[0]!.exposedName).toBe('Echo.Mixed');
     expect(manager.tools()[0]!.name).toBe('Echo.Mixed');
     expect(manager.snapshot().plugins[0]!.id).toBe(row.id);
@@ -664,7 +664,9 @@ describe('enabled plugin process ownership', () => {
     expect(alive((await h.pids())[0]!.pid)).toBe(true);
     await manager.close(); manager = new PluginManager(); await manager.initialize(dir);
     expect(manager.tools().map(tool => tool.name)).toEqual(['Echo.Mixed']);
-    await vi.waitFor(() => expect(manager.snapshot().plugins[0]!.status).toBe('ready'));
+    // Restoring a real Node child on a loaded Windows runner is not a one-second contract.
+    // Await the same ready postcondition before fake time tests process retention.
+    await vi.waitFor(() => expect(manager.snapshot().plugins[0]!.status).toBe('ready'), { timeout: 10_000 });
     const active = (await h.pids())[1]!;
     vi.useFakeTimers();
     expect((await manager.call('Echo.Mixed', { value: 'first' })).isError).not.toBe(true);

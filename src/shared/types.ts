@@ -195,11 +195,10 @@ export interface CompactionSettings {
 /**
  * The reasoning budget asked of the goal model, in OpenRouter's own vocabulary.
  *
- * `default` sends no `reasoning` block at all, which is what the provider's own default
- * means. Every other value is passed through as `reasoning: { effort }` — a model that has
- * no reasoning mode ignores it, so the setting is safe to leave alone.
+ * `default` omits effort selection; reasoning text is still excluded from driver output.
+ * OpenRouter's model catalogue determines which explicit efforts the UI offers.
  */
-export const GOAL_REASONING_LEVELS = ['default', 'minimal', 'low', 'medium', 'high'] as const;
+export const GOAL_REASONING_LEVELS = ['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type GoalReasoning = (typeof GOAL_REASONING_LEVELS)[number];
 
 /**
@@ -250,7 +249,7 @@ export interface GoalProviderSettings {
 export interface GoalSettings {
   /** Optional active-turn Goal impulses; zero disables them. */
   impulseMinutes?: number;
-  /** Include bounded recorded tool arguments/results in Goal decision context. */
+  /** Include tool details in handoff briefs only; Goal/Loop always use authored conversation text. */
   includeToolCalls?: boolean;
   helperModel?: string;
   helperReasoning?: ReasoningEffort;

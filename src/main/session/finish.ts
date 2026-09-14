@@ -86,7 +86,7 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
     if (!userRequested && !automatic) return result;
     const generated = new Set(inputs.filter(entry => entry.finishOwner).map(entry => entry.id));
     // A request id, timestamp, hold result or app status is not new work. Hash actual
-    // authored context and tool output; identical streaming revisions are the same episode.
+    // authored context; tool-only work cannot change the provider's next decision input.
     const appInput = inputs.filter(entry => entry.sessionId === sessionId && entry.purpose !== 'decision' && !entry.finishOwner &&
       ['tool', 'sent'].includes(entry.state)).slice(-5).map(entry => ({ id: entry.id, text: entry.text }));
     const inputRevision = createHash('sha256').update(JSON.stringify({ mode, appInput })).digest('hex');

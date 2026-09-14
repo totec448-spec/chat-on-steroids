@@ -317,7 +317,7 @@ describe('session finish turn identity', () => {
     expect(identities.has('finish:turn-one')).toBe(false);
     expect([...identities].filter(id => id?.startsWith('finish-goal:turn-one:'))).toHaveLength(1);
   });
-  it('ignores its own empty wait output but reconsiders real tool results and delivered app input', async () => {
+  it('does not repeat for tool-only work even with legacy opt-in, but reconsiders delivered app input', async () => {
     const recordTool = (tool: string, result: string) => appendEvent(sessionId, {
       source: 'mcp', kind: 'tool_call', turnId: 'turn-one', time: 2200,
       call: { callId: randomUUID(), tool, attribution: 'request_id', requestId: 'same-server-turn', conversationId: hooks.caller.conversationId,
@@ -331,13 +331,13 @@ describe('session finish turn identity', () => {
     expect(hooks.followup).toHaveBeenCalledTimes(1);
     await recordTool('exec_command', 'The validation exposed a missing requirement');
     await announceSessionFinish(sessionId, 'Real tool output');
-    expect(hooks.followup).toHaveBeenCalledTimes(2);
+    expect(hooks.followup).toHaveBeenCalledTimes(1);
     hooks.delivered.push({ id: 'new-instruction', sessionId, text: 'Also cover the image workflow', state: 'tool' });
     await announceSessionFinish(sessionId, 'New app instruction');
-    expect(hooks.followup).toHaveBeenCalledTimes(2); // Undelivered user input goes first.
+    expect(hooks.followup).toHaveBeenCalledTimes(1); // Undelivered user input goes first.
     hooks.delivered[0]!.state = 'sent';
     await announceSessionFinish(sessionId, 'ACK alone');
-    expect(hooks.followup).toHaveBeenCalledTimes(3);
+    expect(hooks.followup).toHaveBeenCalledTimes(2);
     expect(notify).not.toHaveBeenCalled();
   });
   it('reconsiders new authored progress once while preserving the notification receipt', async () => {

@@ -455,7 +455,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       before.goal.provider.kind !== next.goal.provider.kind ||
       before.goal.provider.baseUrl !== next.goal.provider.baseUrl ||
       before.goal.reasoning !== next.goal.reasoning ||
-      before.goal.includeToolCalls !== next.goal.includeToolCalls ||
       before.goal.prompt !== next.goal.prompt ||
       before.goal.objectivePrompt !== next.goal.objectivePrompt ||
       before.goal.loopPrompt !== next.goal.loopPrompt

@@ -1246,6 +1246,45 @@ it('saves the chosen model id', async () => {
   expect(mounted.calls.at(-1)?.goal).toMatchObject({ model: 'vendor1/model-1' });
 });
 
+it('saves GLM High and Max from catalogue-specific options and drops unsupported levels on model selection', async () => {
+  const glm = { id: 'z-ai/glm-5.3', name: 'GLM 5.3', created: 100, contextLength: 200000,
+    reasoning: { supportedEfforts: ['max', 'high', 'low'], defaultEffort: 'max', mandatory: true } };
+  const plain = { id: 'plain/model', name: 'Plain', created: 1, contextLength: 1000 };
+  const mounted = await mountChat({ hasGoalKey: true }, [glm, plain]);
+  const doc = mounted.window.document;
+  (doc.getElementById('goalPick') as HTMLButtonElement).click();
+  await settle();
+  (doc.querySelector('[data-model="z-ai/glm-5.3"]') as HTMLButtonElement).click();
+  await settle();
+  const select = doc.getElementById('goalReasoning') as HTMLSelectElement;
+  expect([...select.options].filter(option => !option.disabled).map(option => option.value)).toEqual(['default', 'max', 'high', 'low']);
+  for (const reasoning of ['high', 'max']) {
+    select.value = reasoning;
+    select.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    await settle();
+    expect(mounted.calls.at(-1)?.goal).toMatchObject({ model: glm.id, reasoning });
+  }
+  (doc.querySelector('[data-model="plain/model"]') as HTMLButtonElement).click();
+  await settle();
+  expect([...select.options].map(option => option.value)).toEqual(['default']);
+  expect(mounted.calls.at(-1)?.goal).toMatchObject({ model: plain.id, reasoning: 'default' });
+});
+
+it('loads supported levels for the saved model without paging to its catalogue row', async () => {
+  const selectedModel = { id: 'saved/model', name: 'Saved', created: 1, contextLength: 200000,
+    reasoning: { supportedEfforts: ['max', 'high', 'low'], defaultEffort: 'max', mandatory: true } };
+  const mounted = await mountChat({}, [], {
+    listGoalModels: async () => ({ ok: true, data: { models: [], total: 500, selectedModel } })
+  }, { model: selectedModel.id, reasoning: 'high' });
+  const select = mounted.window.document.getElementById('goalReasoning') as HTMLSelectElement;
+  select.focus();
+  await settle();
+  expect(select.value).toBe('high');
+  expect(select.selectedOptions[0]?.disabled).toBe(false);
+  expect([...select.options].map(option => option.value)).toEqual(['default', 'max', 'high', 'low']);
+  expect(mounted.calls).toHaveLength(0);
+});
+
 /** A provider that cannot be reached says so and changes nothing about what is in use. */
 it('keeps the model in use when OpenRouter cannot be reached', async () => {
   const mounted = await mountChat({ hasGoalKey: true }, catalogue(2));

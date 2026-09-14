@@ -196,7 +196,7 @@ describe('what leaves this machine', () => {
     const timeout = AbortSignal.abort(new DOMException('Timed out', 'TimeoutError'));
     await expect(goal.draftFastFollowup(session.id, timeout, context)).rejects.toMatchObject({ retryable: true });
   });
-  it.each([false, true])('shares the bounded tool-context policy with fast finish follow-ups (%s)', async (includeToolCalls) => {
+  it.each([false, true])('excludes tool bodies from decisions and finish even with legacy tool opt-in (%s)', async (includeToolCalls) => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'api', loopBackend: 'api', includeToolCalls } });
     const session = await createSession({ title: 'tool context', conversationId: `tool-context-${includeToolCalls}` });
     await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Check the project', chars: 17, truncated: false } });
@@ -210,15 +210,15 @@ describe('what leaves this machine', () => {
     } });
     const projected = await goal.conversationMessages(session.id);
     expect(projected.some(message => message.content.includes('Inspecting the project'))).toBe(true);
-    expect(projected.some(message => message.content.includes('tool-result-evidence'))).toBe(includeToolCalls);
-    expect(projected.some(message => message.content.includes('/project/example'))).toBe(includeToolCalls);
+    expect(projected.some(message => message.content.includes('tool-result-evidence'))).toBe(false);
+    expect(projected.some(message => message.content.includes('/project/example'))).toBe(false);
     let sent = '';
     globalThis.fetch = vi.fn(async (_url, init) => { sent = String(init?.body); return decision('continue', 'Continue checking the project.'); });
     await recordLoopMcpProof(session.id);
     await goal.draftFastFollowup(session.id);
     expect(sent.includes('Inspecting the project')).toBe(true);
-    expect(sent.includes('tool-result-evidence')).toBe(includeToolCalls);
-    expect(sent.includes('/project/example')).toBe(includeToolCalls);
+    expect(sent.includes('tool-result-evidence')).toBe(false);
+    expect(sent.includes('/project/example')).toBe(false);
   });
 
   it('gives decision helpers authored requests without executor guidance in the reference transcript', async () => {
@@ -610,7 +610,7 @@ describe('what leaves this machine', () => {
 });
 
 describe('API task planner reasoning', () => {
-  it.each(['default', 'high', 'minimal'] as const)('uses the configured %s setting in the actual request body', async reasoning => {
+  it.each(['default', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const)('uses the configured %s setting in the actual request body', async reasoning => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', model: 'z-ai/glm-5.3-flash', reasoning } });
     const fetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body));
@@ -1361,6 +1361,22 @@ describe('the model catalogue', () => {
     // of the cache rather than off the network.
     expect(calls).toBe(1);
     expect(goal.MODEL_PAGE_SIZE).toBe(20);
+  });
+
+  it('returns catalogue reasoning metadata for the selected model even outside the requested page', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, model: 'selected/old-model' } });
+    globalThis.fetch = vi.fn(async () => Response.json({ data: [
+      { id: 'new/model', name: 'New', created: 9000 },
+      { id: 'selected/old-model', name: 'Selected', created: 1, reasoning: {
+        supported_efforts: ['max', 'high', 'low'], default_effort: 'max', mandatory: true
+      } }
+    ] }));
+    const page = await goal.listGoalModels(0, 1);
+    expect(page.models.map(model => model.id)).toEqual(['new/model']);
+    expect(page.selectedModel).toMatchObject({ id: 'selected/old-model', reasoning: {
+      supportedEfforts: ['max', 'high', 'low'], defaultEffort: 'max', mandatory: true
+    } });
+    expect((await goal.listGoalModels(1, 1)).models[0]).toEqual(page.selectedModel);
   });
 
   it('does not reuse a restricted model catalogue after the OpenRouter key is replaced', async () => {

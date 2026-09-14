@@ -6,7 +6,7 @@ let dom: JSDOM;
 afterEach(() => dom?.window.close());
 
 function fixture(saved?: string) {
-  dom = new JSDOM('<div class="scroll"><div id="list"></div></div>', { url: 'https://local.test' });
+  dom = new JSDOM('<div class="scroll"><div id="list"></div></div>', { url: 'https://local.test', pretendToBeVisual: true });
   const w = dom.window;
   Object.assign(globalThis, { window: w, document: w.document });
   if (saved) w.localStorage.setItem('chat-on-steroids.sidebar-order', saved);
