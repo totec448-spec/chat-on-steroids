@@ -1,7 +1,7 @@
 import { toolDeclaration } from './tool-declarations.js';
 import { registerPlanTool } from './plan-tool.js';
 import { goalWorkerChat } from '../bridge.js';
-import { announceSessionFinish } from '../session/finish.js';
+import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
 import { getConfig } from '../config.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
@@ -1072,7 +1072,8 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       const caller = currentCaller();
       if (!caller.sessionId || !caller.conversationId) return failIdentity('Exact session identity is required');
       if (goalWorkerChat(caller.conversationId)) return fail('Session finish hold is not applicable to workers or decision helpers. Workers report with agents action=finish; decision helpers answer normally.');
-      return guard('session_finish', async () => ({ content: [{ type: 'text', text: await announceSessionFinish(caller.sessionId!, summary) }] }));
+      const deadline = sessionFinishDeadline(currentCall()?.startedAt ?? Date.now());
+      return guard('session_finish', async () => ({ content: [{ type: 'text', text: await announceSessionFinish(caller.sessionId!, summary, deadline) }] }));
     });
   }
 

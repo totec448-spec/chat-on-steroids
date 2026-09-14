@@ -325,6 +325,23 @@ it('allows unattributed file edits through code mode while preserving permission
   }
 });
 
+it('waits for late exact identity before handling session_finish', async () => {
+  const conversationId = randomUUID();
+  const requestId = `wfr_${randomUUID().replaceAll('-', '')}`;
+  const session = await createSession({ conversationId, title: 'Late finish identity' });
+  await appendEvent(session.id, { kind: 'turn_start', source: 'extension', turnId: randomUUID(), time: Date.now() });
+  await enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'CONTINUE_AFTER_FINISH', mode: 'auto', dueAt: 0, model: null, reasoningEffort: null });
+  setTimeout(() => {
+    observeRequestCorrelation({ requestId, conversationId, sessionId: session.id, messageId: randomUUID(), tool: 'session_finish', observedAt: Date.now() });
+  }, 40).unref?.();
+
+  const finish = await rpc('tools/call', { name: 'session_finish', arguments: { summary: 'checkpoint complete' } }, requestId);
+
+  expect(finish.result.isError).not.toBe(true);
+  expect(text(finish)).toContain('HELD:');
+  expect(text(finish)).toContain('CONTINUE_AFTER_FINISH');
+});
+
 it('rechecks live permissions and approved roots between awaited children', async () => {
   const original = backend.readTextFile;
   for (const revoke of [() => { ctx.caps = { ...ctx.caps, read: false }; }, () => { ctx.roots = []; }]) {

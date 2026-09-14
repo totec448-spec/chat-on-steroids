@@ -77,6 +77,52 @@ it.each(['missing', 'replaced', 'matching', 'restart'])('closes the canonical re
   expect(await readEvents(sessionId, { kinds: ['turn_end'] })).toHaveLength(1);
 });
 
+it.each([
+  { restart: false, pageTurnId: undefined },
+  { restart: true, pageTurnId: undefined },
+  { restart: true, pageTurnId: 'replacement-page-turn' }
+])('closes a distinct final message from its exact response owner (restart=$restart, page=$pageTurnId)', async ({ restart, pageTurnId }) => {
+  const conversationId = `response-owner-${restart}-${pageTurnId ?? 'missing'}`;
+  const responseId = 'response:working-branch:exchange-branch';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId: 'response-turn' },
+    { kind: 'assistant_message', time: 11, turnId: 'response-turn', messageId: 'interim', responseId,
+      text: 'Work in progress', state: 'streaming' }
+  ]);
+  if (restart) { await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests(); }
+  const recovered = await recordChatObservations(conversationId, [
+    { kind: 'assistant_message', time: 20, messageId: 'separate-final',
+      providerMessageId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', responseId,
+      text: 'Complete answer', state: 'final', final: true, activeNow: true,
+      ...(pageTurnId ? { turnId: pageTurnId } : {}) }
+  ]);
+  const messages = await readEvents(opened.sessionId!, { kinds: ['assistant_message'] });
+  expect(messages.at(-1)).toMatchObject({ messageId: 'separate-final', turnId: 'response-turn', responseId, state: 'final' });
+  expect((await getSession(opened.sessionId!))?.activeTurnId).toBeNull();
+  expect(recovered.activity).toMatchObject({ terminal: true, endedTurnId: 'response-turn' });
+});
+
+it('rejects a response branch already owned by two page turns', async () => {
+  const conversationId = 'response-owner-conflict';
+  const responseId = 'response:reused-working:reused-exchange';
+  const opened = await recordChatObservations(conversationId, [
+    { kind: 'turn_start', time: 10, turnId: 'old-turn' },
+    { kind: 'assistant_message', time: 11, turnId: 'old-turn', messageId: 'old-message', responseId,
+      text: 'Old answer', state: 'final', final: true },
+    { kind: 'turn_end', time: 12, turnId: 'old-turn', outcome: 'completed' },
+    { kind: 'turn_start', time: 20, turnId: 'current-turn' },
+    { kind: 'assistant_message', time: 21, turnId: 'current-turn', messageId: 'current-interim', responseId,
+      text: 'Current work', state: 'streaming' }
+  ]);
+  await recordChatObservations(conversationId, [
+    { kind: 'assistant_message', time: 30, turnId: 'replacement-page-turn', messageId: 'ambiguous-final', responseId,
+      text: 'Ambiguous final', state: 'final', final: true, activeNow: true }
+  ]);
+  const messages = await readEvents(opened.sessionId!, { kinds: ['assistant_message'] });
+  expect(messages.find(message => message.kind === 'assistant_message' && message.messageId === 'ambiguous-final')?.turnId).toBeUndefined();
+  expect((await getSession(opened.sessionId!))?.activeTurnId).toBe('current-turn');
+});
+
 it.each(['missing', 'current-page-id'])('never closes newer work from an old canonical answer with %s identity', async mode => {
   const conversationId = `historical-final-${mode}`;
   const opened = await recordChatObservations(conversationId, [

@@ -3106,6 +3106,7 @@
       const message = {
         messageId,
         rawMessageId: cap(entry.rawMessageId, 200),
+        responseId: cap(entry.responseId, 200),
         role: entry.role === 'user' ? 'user' : 'assistant',
         stable: entry.stable === true,
         order:
@@ -3131,7 +3132,8 @@
         continue;
       }
       const prior = messages[priorAt];
-      if (prior.rawText === rawText && prior.renderedHtml === renderedHtml && JSON.stringify(prior.attachments || []) === JSON.stringify(attachments)) {
+      if (prior.rawText === rawText && prior.renderedHtml === renderedHtml && prior.responseId === message.responseId &&
+          JSON.stringify(prior.attachments || []) === JSON.stringify(attachments)) {
         if (message.stable) prior.stable = true;
         continue;
       }
@@ -3847,7 +3849,7 @@
         // claim is different and fails closed instead of choosing either generation.
         const signature =
           `${state}\u0000${message.rawText}\u0000${message.renderedHtml}\u0000${owner}` +
-          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}`;
+          `\u0000${message.createTime || ''}\u0000${message.rawMessageId || ''}\u0000${message.responseId || ''}`;
         if (priorMessage?.signature === signature) continue;
         messagesReported.set(message.messageId, { signature, owner, conflicted: ownerConflict, text: message.rawText });
         if (state === 'streaming' && owner && priorMessage?.text !== message.rawText) noteTurnProgress(owner);
@@ -3858,6 +3860,7 @@
           kind: 'assistant_message',
           messageId: message.messageId,
           providerMessageId: message.rawMessageId,
+          responseId: message.responseId || undefined,
           turnId: localOwner || undefined,
           text: message.rawText,
           renderedHtml: message.renderedHtml,

@@ -1800,6 +1800,34 @@ function offerAgentMessages(agent: Agent, onFinish = false): AgentMessage[] {
   return waiting.map((message) => ({ ...message }));
 }
 
+/**
+ * The exact broker rows that had already been offered when an MCP request entered the app.
+ *
+ * Wall-clock milliseconds cannot order two back-to-back tool calls reliably, and using only
+ * `offeredAt < callStartedAt` therefore leaves a message pending when the result carrying it
+ * and the recipient's next call happen in the same millisecond. Capture object identity at
+ * ingress instead: a browser revival or another concurrent result that offers a row while this
+ * call is waiting for identity is deliberately absent, so this call can never acknowledge work
+ * that was delivered after it began. The snapshot is process-local by design; restored rows use
+ * the existing durable timestamp rule until a fresh call captures them.
+ */
+export interface AgentOfferSnapshot {
+  has(message: AgentMessage): boolean;
+}
+
+export function captureAgentOfferSnapshot(): AgentOfferSnapshot {
+  const offered = new WeakSet<AgentMessage>();
+  const families = [...runs.values(), ...dormantRuns.values()].map((owner) => owner.agents);
+  for (const agents of families) {
+    for (const agent of agents.values()) {
+      for (const message of agent.queue) {
+        if (message.ackedAt === null && message.offeredAt !== null) offered.add(message);
+      }
+    }
+  }
+  return { has: (message) => offered.has(message) };
+}
+
 /** Caller-scoped inbox offer that remains safe when another owner has an active worker-1. */
 export function offerMessagesForConversation(
   conversationId: string | null | undefined,
@@ -1842,7 +1870,8 @@ export function acknowledgeOffers(id: string, byFinish = false, callStartedAt = 
 function acknowledgeAgentOffers(
   agent: Agent,
   byFinish = false,
-  callStartedAt = Number.POSITIVE_INFINITY
+  callStartedAt = Number.POSITIVE_INFINITY,
+  offeredBeforeCall?: AgentOfferSnapshot
 ): AgentMessage[] {
   const offered = agent.queue.filter(
     (message) =>
@@ -1853,7 +1882,7 @@ function acknowledgeAgentOffers(
       // is still running. Letting that older call retire the newly offered row would make a
       // post-crash retry indistinguishable from successful acknowledgement. Strictly earlier,
       // rather than <=, also closes the same-millisecond ordering ambiguity.
-      message.offeredAt < callStartedAt &&
+      (offeredBeforeCall ? offeredBeforeCall.has(message) : message.offeredAt < callStartedAt) &&
       !(byFinish && message.offeredOnFinish)
   );
   if (offered.length === 0) return [];
@@ -1870,12 +1899,16 @@ export function acknowledgeOffersForConversation(
   conversationId: string | null | undefined,
   byFinish = false,
   callStartedAt = Number.POSITIVE_INFINITY,
-  allowDormantWorkerFinishRetry = false
+  allowDormantWorkerFinishRetry = false,
+  offeredBeforeCall?: AgentOfferSnapshot
 ): { agentId: string; messages: AgentMessage[] } | null {
   if (!conversationId) return null;
   const active = boundAgent(conversationId);
   if (active) {
-    return { agentId: active.info.id, messages: acknowledgeAgentOffers(active, byFinish, callStartedAt) };
+    return {
+      agentId: active.info.id,
+      messages: acknowledgeAgentOffers(active, byFinish, callStartedAt, offeredBeforeCall)
+    };
   }
   const dormant = dormantAgentForConversation(conversationId);
   if (!dormant) return null;
@@ -1883,10 +1916,13 @@ export function acknowledgeOffersForConversation(
     if (!allowDormantWorkerFinishRetry || !byFinish || !hasStopped(dormant.agent.info.state)) return null;
     return {
       agentId: dormant.agent.info.id,
-      messages: acknowledgeAgentOffers(dormant.agent, true, callStartedAt)
+      messages: acknowledgeAgentOffers(dormant.agent, true, callStartedAt, offeredBeforeCall)
     };
   }
-  return { agentId: PRIME_ID, messages: acknowledgeAgentOffers(dormant.agent, byFinish, callStartedAt) };
+  return {
+    agentId: PRIME_ID,
+    messages: acknowledgeAgentOffers(dormant.agent, byFinish, callStartedAt, offeredBeforeCall)
+  };
 }
 
 export function pendingCount(id: string, runId?: string): number {

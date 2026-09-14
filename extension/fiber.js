@@ -441,6 +441,13 @@
     return value.length <= 190 ? value : id;
   }
 
+  /** Exact server-authored response branch shared by every public message in one answer. */
+  function assistantResponseId(workingTurnId, turnExchangeId) {
+    if (!workingTurnId || !turnExchangeId) return null;
+    const value = `response:${workingTurnId}:${turnExchangeId}`;
+    return value.length <= 190 ? value : null;
+  }
+
   /** Public assistant messages in ChatGPT's own turn model, in model order. */
   function authoredAssistantMessages(messages, budget) {
     const out = [];
@@ -470,6 +477,7 @@
       const workingTurnId = meta ? str(meta.working_turn_id) : null;
       const turnExchangeId = meta ? str(meta.turn_exchange_id) : null;
       const createTime = authoredTime(message);
+      const responseId = assistantResponseId(workingTurnId, turnExchangeId);
       const authoredId = assistantLogicalId(id, parentId, workingTurnId, turnExchangeId, createTime);
       // Two messages of one branch sharing a creation millisecond would collide on that
       // identity. Keep the first and hand the later one the parent tuple instead, so a
@@ -518,7 +526,8 @@
         stable,
         rawText,
         order: index,
-        createTime
+        createTime,
+        ...(responseId ? { responseId } : {})
       });
       logicalIds.add(logicalId);
     }
@@ -741,6 +750,7 @@
         stable: assistantCandidates[c].stable,
         order: assistantCandidates[c].order,
         createTime: assistantCandidates[c].createTime,
+        ...(assistantCandidates[c].responseId ? { responseId: assistantCandidates[c].responseId } : {}),
         rawText: assistantCandidates[c].rawText,
         renderedHtml: ''
       });

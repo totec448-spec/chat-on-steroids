@@ -18,7 +18,7 @@ vi.mock('../src/main/mcp/call-context.js', async (importOriginal) => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSessionStore, createSession, getSession, rebindSession, appendEvent, readRecentEvents, flushSessions, resetSessionStoreForTests, observeSessionModel } = await import('../src/main/session/store.js');
 const { resetRecorderForTests } = await import('../src/main/session/recorder.js');
-const { announceSessionFinish: announceTransport, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld } = await import('../src/main/session/finish.js');
+const { announceSessionFinish: announceTransport, sessionFinishDeadline, settleSessionFinishForTests, requestSessionFinishGoal, sessionFinishWaiting, setFinishNotifier, releaseSessionFinish, sessionFinishHeld } = await import('../src/main/session/finish.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 async function announceSessionFinish(sessionId: string, summary: string): Promise<string> {
   const result = await announceTransport(sessionId, summary);
@@ -53,6 +53,10 @@ afterEach(() => {
 });
 afterAll(async () => { setFinishNotifier(null); resetSessionStoreForTests(); await removeTempDir(directory); });
 describe('session finish turn identity', () => {
+  it('derives one 25-second end-to-end deadline from MCP ingress', () => {
+    expect(sessionFinishDeadline(12_345)).toBe(37_345);
+  });
+
   it('keeps one Goal operation through transient retries and queues its eventual result once', async () => {
     let fail!: (error: Error) => void;
     hooks.followup.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));

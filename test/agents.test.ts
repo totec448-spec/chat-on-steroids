@@ -2963,6 +2963,28 @@ describe('through the MCP endpoint', () => {
     expect(pendingCount('worker-1')).toBe(0);
   });
 
+  it('acknowledges a prior result when the offer and next call share one wall-clock millisecond', async () => {
+    startSwarm(1);
+    bindConversation('worker-1', 'c-worker-1');
+    sendMessage(prime, 'worker-1', 'same-millisecond delivery');
+
+    // Date.now() has only millisecond resolution. The ingress snapshot, rather than a guessed
+    // <= comparison, proves that this row existed before the second call while still excluding
+    // anything a browser revival might offer after that call began.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_789_380_000_000);
+    try {
+      const withMessage = await asChat('c-worker-1', 'status');
+      expect(withMessage).toContain('same-millisecond delivery');
+      expect(pendingCount('worker-1')).toBe(1);
+
+      const after = await asChat('c-worker-1', 'status');
+      expect(after).not.toContain('same-millisecond delivery');
+      expect(pendingCount('worker-1')).toBe(0);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
   it('does not let an MCP call already in flight across a browser revival ACK consume or repeat the wake text', async () => {
     startSwarm(1);
     bindConversation('worker-1', 'c-worker-1');

@@ -256,6 +256,7 @@ interface TurnEvidence {
     stable: boolean;
     order: number;
     createTime?: number | null;
+    responseId?: string | null;
     rawText: string;
     renderedHtml: string;
   }>;
@@ -753,6 +754,8 @@ describe('the calls a turn says it made', () => {
       'assistant:working-43a30177:exchange-43a30177:1787211141137'
     );
     expect(reloaded.turns[0]!.messages[0]!.messageId).toBe(live.turns[0]!.messages[0]!.messageId);
+    expect(live.turns[0]!.messages[0]!.responseId).toBe('response:working-43a30177:exchange-43a30177');
+    expect(reloaded.turns[0]!.messages[0]!.responseId).toBe(live.turns[0]!.messages[0]!.responseId);
     expect(live.turns[0]!.messages[0]!.stable).toBe(true);
     expect(reloaded.turns[0]!.messages[0]!.stable).toBe(true);
   });

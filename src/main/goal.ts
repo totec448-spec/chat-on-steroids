@@ -474,6 +474,7 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
   goalReplies.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.replies)) return;
   for (const raw of snapshot.replies) {
+    const provisional = raw?.eventSeq === 0 && raw?.replyId === `turn:${raw?.turnId}`.slice(0, 200);
     if (
       !raw ||
       !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId) ||
@@ -481,7 +482,7 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
       !raw.replyId ||
       !raw.turnId ||
       !Number.isSafeInteger(raw.eventSeq) ||
-      raw.eventSeq < 1 ||
+      (raw.eventSeq < 1 && !provisional) ||
       !Number.isSafeInteger(raw.acceptedAt) ||
       raw.acceptedAt <= 0 ||
       (raw.state !== 'pending' && raw.state !== 'handled')

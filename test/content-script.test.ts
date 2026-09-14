@@ -2796,6 +2796,7 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     const section = assistantTurn(live.document, 'provider-id-revision-turn', []);
     const message = {
       messageId: 'assistant:working:exchange:1787165100125',
+      responseId: 'response:working:exchange',
       role: 'assistant', stable: true, createTime: 1_787_165_100_125,
       rawText: 'The same authored answer.', renderedHtml: '<p>The same authored answer.</p>'
     };
@@ -2811,10 +2812,27 @@ describe('canonical Fiber transcript ingestion in 1.8', () => {
     expect(revisions).toHaveLength(2);
     expect(revisions.map(entry => entry.providerMessageId)).toEqual(['provider-before', 'provider-after']);
     expect(new Set(revisions.map(entry => entry.messageId))).toEqual(new Set([message.messageId]));
+    expect(revisions.every(entry => entry.responseId === message.responseId)).toBe(true);
     expect(revisions[1]).toMatchObject({
       text: revisions[0].text, renderedHtml: revisions[0].renderedHtml,
       time: revisions[0].time, state: revisions[0].state
     });
+  });
+
+  it('reports exact response identity when it appears after the first message snapshot', async () => {
+    live = await harness();
+    const section = assistantTurn(live.document, 'response-identity-promotion', []);
+    const message = { messageId: 'response-message', rawMessageId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+      role: 'assistant', stable: true, rawText: 'Same response.', renderedHtml: '<p>Same response.</p>' };
+    await bindFiberTurns([{ section, turn: { turnId: 'response-identity-promotion', messages: [message] } }]);
+    await live.hook.flush();
+    await bindFiberTurns([{ section, turn: { turnId: 'response-identity-promotion',
+      messages: [{ ...message, responseId: 'response:working-response:exchange-response' }] } }]);
+    await live.hook.flush();
+    const revisions = emitted(live.sent, 'assistant_message').map(entry => entry.event);
+    expect(revisions).toHaveLength(2);
+    expect(revisions[0]?.responseId).toBeUndefined();
+    expect(revisions[1]?.responseId).toBe('response:working-response:exchange-response');
   });
 
   it('records the first unstable assistant interim before any MCP request id exists', async () => {

@@ -1758,6 +1758,37 @@ describe('a chat driven towards a specific goal', () => {
     });
   });
 
+  it('restores only an exact provisional turn obligation at sequence zero', async () => {
+    const conversationId = 'c-reply-provisional-restored';
+    const turnId = 'g-reply-provisional-restored';
+    await goal.acceptGoalReplyNow({
+      conversationId,
+      sessionId: 'session-reply-provisional-restored',
+      replyId: `turn:${turnId}`,
+      turnId,
+      eventSeq: 0,
+      blocked: false
+    });
+    const saved = goal.snapshotGoalReplies();
+    saved.replies.push({
+      ...saved.replies[0]!,
+      conversationId: 'c-reply-invalid-zero',
+      replyId: 'assistant-without-durable-event',
+      turnId: 'g-reply-invalid-zero'
+    });
+    goal.resetGoalStateForTests();
+    goal.restoreGoalReplies(saved);
+
+    expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({
+      replyId: `turn:${turnId}`,
+      turnId,
+      eventSeq: 0
+    });
+    expect(goal.snapshotGoalReplies().replies).not.toContainEqual(
+      expect.objectContaining({ conversationId: 'c-reply-invalid-zero' })
+    );
+  });
+
   it('stores a handled tombstone when Goal was off at terminal acceptance', async () => {
     await saveConfig({
       ...defaultConfig(),

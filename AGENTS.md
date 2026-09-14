@@ -1605,7 +1605,8 @@ Keep manual failed-send notices and genuinely pending instructions in their exis
 
 Reply obligations are durable and bounded (12 hours / 200 rows) with handled tombstones so old
 browser observations do not rearm discharged work. A provisional exact `turn:<id>` observation
-can later gain durable event-sequence evidence. “Invalidating an attempt” must not silently mean
+survives restart at sequence zero and can later gain durable event-sequence evidence; arbitrary
+zero-sequence identities are rejected. “Invalidating an attempt” must not silently mean
 “the user's continuation is handled.” Current persistence/publication exceptions are in §21.
 
 ## 18. Desktop workspace, plugins, connection and native control
@@ -2003,9 +2004,6 @@ shared-tree change may already have addressed them.
   `retireGoalDrafts()` marks reply debt handled while cancelling attempts. Recording Off also
   lacks a uniform runtime gate for retained per-chat overrides. Invalidating a provider attempt
   must preserve any still-owed eligible continuation and respect effective current settings.
-- **Provisional Goal restart:** live exact `turn:<id>` debt can begin with `eventSeq=0`, while
-  reply restore rejects sequences below 1. The accepted identity should survive until durable
-  turn evidence strengthens it, without losing or duplicating the obligation on restart.
 - **Resume projections and Goal debt:** normal commit and restored committed-B projection
   still duplicate parts of the repair path. Objective/switch move, but source reply-ledger
   disposition is absent. Current watchdog checks already fence superseded A; do not claim the

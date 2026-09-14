@@ -295,6 +295,8 @@ export type SessionEvent =
       renderedHtml?: StoredText;
       /** Public provider object UUID. Evidence for identity drift; not a canonical key or turn owner. */
       providerMessageId?: string;
+      /** Exact server-authored working-turn/turn-exchange branch shared by this response. */
+      responseId?: string;
       state?: MessageState;
       /** Compatibility mirror for older consumers; equivalent to state === 'final'. */
       final: boolean;

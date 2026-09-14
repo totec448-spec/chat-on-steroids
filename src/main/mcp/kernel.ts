@@ -46,6 +46,7 @@ import { getConfig } from '../config.js';
 import {
   AgentError,
   IdentityLostError,
+  captureAgentOfferSnapshot,
   currentRunId,
   acknowledgeOffersForConversation,
   dormantWorkerNotice,
@@ -91,6 +92,7 @@ import { acknowledgeBackgroundExecOutput, backgroundExecRecoveryNotices, offerBa
 import { DEFAULT_MAX_OUTPUT_TOKENS } from '../codex/unified-exec-constants.js';
 import { unattributedRepairEta } from '../bridge.js';
 import { conversationAttachment, readOverflowText } from '../session/store.js';
+import { sessionFinishDeadline } from '../session/finish.js';
 import type { StoredText, ToolOutcome } from '../../shared/session.js';
 
 export interface ToolContext {
@@ -516,9 +518,14 @@ export async function dispatch(
     outcome: null,
     evidence: emptyEvidence()
   };
+  // Capture causal ordering before any identity wait or handler can overlap a browser revival
+  // or another call's result. Millisecond timestamps alone cannot distinguish those cases.
+  const offeredBeforeCall = parent ? undefined : captureAgentOfferSnapshot();
   try {
     const result = await trackMcpRequest(() =>
-      trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent))
+      trackInFlight(context, () =>
+        dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent, offeredBeforeCall)
+      )
     );
     // In-process callers have no socket; resolving their outer invocation publishes it.
     if (!parent && !inboundPublication()) context.publication!.completedAt = Date.now();
@@ -551,7 +558,8 @@ async function dispatchTracked(
   requestId: string | null,
   surface: SurfaceId,
   run: () => Promise<ToolResult>,
-  nested: boolean
+  nested: boolean,
+  offeredBeforeCall?: ReturnType<typeof captureAgentOfferSnapshot>
 ): Promise<ToolResult> {
   noteTransportIdentity(transportKey);
   const markTiming = beginToolTiming();
@@ -574,16 +582,28 @@ async function dispatchTracked(
   // mate while a swarm is active. Use the full exact-id window, not the shorter prime window:
   // the live worker failure that motivated IDENTITY_EVIDENCE_MS arrived ~8 seconds late.
   const identitySensitive = needsWorkspaceIdentity(name, args);
-  // update_plan always consumes this exact session, even outside a swarm. Resolve it
-  // before the shared blocked/superseded checks rather than guessing from selection.
+  // update_plan and session_finish always consume this exact session, even outside a swarm.
+  // Resolve them before the shared blocked/superseded checks rather than guessing from
+  // selection. A refused finish is not cheaply retryable: it can end the provider turn and
+  // strand the durable Goal hold, so give its exact request-id mate the same bounded window
+  // as spawn. The wait is event-driven and returns immediately when proof already exists.
   // Observation and its dependent input must resolve the same caller before either
   // handler runs. Recording a late identity cannot recover a discarded anonymous frame.
   const desktopContext = surface === 'desktop' && (name === 'get_window_state' ||
     (WINDOWS_COMPUTER_STATE_INPUT_METHODS as readonly string[]).includes(name));
-  if (!context.caller.conversationId && (desktopContext || name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())) && requestId) {
+  const finishDeadline = name === 'session_finish' ? sessionFinishDeadline(startedAt) : null;
+  const identityWindow = (requested: number): number => finishDeadline === null
+    ? requested
+    : Math.min(requested, Math.max(0, finishDeadline - Date.now()));
+  if (!context.caller.conversationId && (desktopContext || name === 'exec' || name === 'update_plan' || name === 'session_finish' || (identitySensitive && swarmRunning())) && requestId) {
     setCallerConversation(
       context,
-      await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId })
+      await awaitFreshCallOrigin(
+        name,
+        startedAt,
+        identityWindow(name === 'session_finish' ? SPAWN_EVIDENCE_MS : IDENTITY_EVIDENCE_MS),
+        { requestId }
+      )
     );
   }
   // A run that ended leaves an explicit short-lived lease tombstone for each open worker
@@ -592,7 +612,7 @@ async function dispatchTracked(
   if (!context.caller.conversationId && hasRetiredWorkerLeases() && requestId) {
     setCallerConversation(
       context,
-      await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId })
+      await awaitFreshCallOrigin(name, startedAt, identityWindow(IDENTITY_EVIDENCE_MS), { requestId })
     );
   }
   // Dormant histories are long-lived identity fences, not active slot claims. An old worker tab
@@ -603,7 +623,7 @@ async function dispatchTracked(
   if (!context.caller.conversationId && hasDormantWorkerLeases() && requestId) {
     setCallerConversation(
       context,
-      await awaitFreshCallOrigin(name, startedAt, IDENTITY_EVIDENCE_MS, { requestId })
+      await awaitFreshCallOrigin(name, startedAt, identityWindow(IDENTITY_EVIDENCE_MS), { requestId })
     );
   }
   // And the user's own block, which needs identity resolved to the same depth as everything
@@ -628,7 +648,7 @@ async function dispatchTracked(
   if (!context.caller.conversationId && (anyChatBlocked() || anyContinuationOpen()) && requestId) {
     setCallerConversation(
       context,
-      await awaitFreshCallOrigin(name, startedAt, REQUEST_ID_GRACE_MS, { requestId })
+      await awaitFreshCallOrigin(name, startedAt, identityWindow(REQUEST_ID_GRACE_MS), { requestId })
     );
   }
   const supersededConversation = context.caller.conversationId
@@ -818,7 +838,8 @@ async function dispatchTracked(
         context.caller.conversationId,
         isFinish,
         startedAt,
-        isFinish
+        isFinish,
+        offeredBeforeCall
       );
   const acknowledged = acknowledgedForConversation?.messages ?? [];
   for (const message of acknowledged) {

@@ -1079,6 +1079,7 @@ export function upsertMessageEvent(
               // identity through every revision; a different id is a different logical row.
               messageId: previous.messageId,
               providerMessageId: event.providerMessageId ?? previous.providerMessageId,
+              responseId: event.responseId ?? previous.responseId,
               // `final` is a compatibility mirror of state, not an independent truth.
               state: event.state === 'final' || event.final === true ? 'final' : 'streaming',
               final: event.state === 'final' || event.final === true,
@@ -1136,7 +1137,8 @@ export function upsertMessageEvent(
             previous.state === nextEvent.state &&
             previous.final === nextEvent.final &&
             previous.goalEligible === nextEvent.goalEligible &&
-            previous.providerMessageId === nextEvent.providerMessageId)) &&
+            previous.providerMessageId === nextEvent.providerMessageId &&
+            previous.responseId === nextEvent.responseId)) &&
         (nextEvent.kind !== 'user_message' || previous.kind !== 'user_message' ||
           (nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
         (previous.turnId ?? undefined) === settledTurnId &&
@@ -1201,6 +1203,19 @@ export function upsertMessageEvent(
     );
     return write;
   });
+}
+
+/** The sole durable local turn named by one exact provider response branch, or no owner. */
+export async function uniqueAssistantResponseOwner(sessionId: string, responseId: string): Promise<string | null> {
+  const entry = await ensureOpen(sessionId);
+  await entry.queue;
+  const owners = new Set<string>();
+  for (const event of entry.messages.values()) {
+    if (event.kind !== 'assistant_message' || event.responseId !== responseId || !event.turnId) continue;
+    owners.add(event.turnId);
+    if (owners.size > 1) return null;
+  }
+  return owners.size === 1 ? owners.values().next().value ?? null : null;
 }
 
 /** Canonical background launch: the call UUID owns its later process status. */

@@ -768,7 +768,8 @@ describe('observations', () => {
         events: [
           { kind: 'user_message', time: Date.now(), text: 'first requirement', messageId: 'm1' },
           { kind: 'turn_start', time: Date.now(), turnId: 'turn-1' },
-          { kind: 'assistant_message', time: Date.now(), text: 'reading files', renderedHtml: '<p><strong>reading</strong> files</p>', messageId: 'a1', state: 'streaming' },
+          { kind: 'assistant_message', time: Date.now(), text: 'reading files', renderedHtml: '<p><strong>reading</strong> files</p>',
+            messageId: 'a1', responseId: 'response:working-branch:exchange-branch', state: 'streaming' },
           { kind: 'invented_kind', time: Date.now(), text: 'should be dropped' },
           { kind: 'turn_end', time: Date.now(), turnId: 'turn-1', outcome: 'not-a-real-outcome' }
         ]
@@ -786,6 +787,9 @@ describe('observations', () => {
       'turn_end'
     ]);
     const end = events.at(-1)!;
+    expect(events.find(event => event.kind === 'assistant_message')).toMatchObject({
+      responseId: 'response:working-branch:exchange-branch'
+    });
     // An outcome the page invented must not be believed.
     expect(end.kind === 'turn_end' && end.outcome).toBe('unknown');
   });

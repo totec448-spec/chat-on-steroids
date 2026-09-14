@@ -906,6 +906,10 @@ function parseObservations(input: unknown): ChatObservation[] {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item['providerMessageId'])) {
       observation.providerMessageId = item['providerMessageId'];
     }
+    if (kind === 'assistant_message' && typeof item['responseId'] === 'string' &&
+        /^response:[a-zA-Z0-9_-]{1,80}:[a-zA-Z0-9_-]{1,80}$/.test(item['responseId'])) {
+      observation.responseId = item['responseId'];
+    }
     if (typeof item['turnId'] === 'string') observation.turnId = item['turnId'].slice(0, 100);
     if (typeof item['renderedHtml'] === 'string') observation.renderedHtml = item['renderedHtml'].slice(0, 120_000);
     if (item['state'] === 'streaming' || item['state'] === 'final') observation.state = item['state'];
