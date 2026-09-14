@@ -4,9 +4,11 @@ import { readDurable, writeDurableNow } from './durable.js';
 import { wakeBrowserWork } from './browser-wake.js';
 import { logInfo, logWarn } from './logger.js';
 import { surfaceDefinition } from './mcp/surfaces.js';
+import { PLUGIN_MAX_TOOLS } from './plugins/exposure.js';
 import type { PluginPublication, PluginRefreshRequest, PluginSurface, PluginToolSchema } from '../shared/plugin-refresh.js';
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
+const LEGACY_PLUGIN_MAX_TOOLS = 64;
 const rowSchema = z.object({ surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(), completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false), error: z.string().max(200).optional(), versionId: z.string().max(200).optional() });
 type Row = z.infer<typeof rowSchema>;
 const publications = new Map<PluginSurface, PluginPublication>();
@@ -34,7 +36,8 @@ function canonical(value: unknown): string {
 const hash = (value: unknown) => createHash('sha256').update(canonical(value)).digest('hex');
 const declaration = (tools: PluginToolSchema[]) => tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })).sort((a, b) => a.name.localeCompare(b.name));
 function recognizable(tools: unknown, surface: PluginSurface = 'core'): tools is PluginToolSchema[] {
-  if (!Array.isArray(tools) || (!tools.length && surface !== 'plugins') || tools.length > (surface === 'plugins' ? 64 : 16) || JSON.stringify(tools).length > 300000) return false;
+  // The registrar can append one local exec tool to the bounded upstream catalog.
+  if (!Array.isArray(tools) || (!tools.length && surface !== 'plugins') || tools.length > (surface === 'plugins' ? PLUGIN_MAX_TOOLS + 1 : 16) || JSON.stringify(tools).length > 300000) return false;
   if (tools.some(tool => !tool || typeof tool.name !== 'string' || typeof tool.description !== 'string' || !tool.inputSchema || typeof tool.inputSchema !== 'object')) return false;
   return tools.every(tool => tool.inputSchema.type === 'object') && new Set(tools.map(tool => tool.name)).size === tools.length;
 }
@@ -42,6 +45,17 @@ function enrollable(tools: unknown, publication: PluginPublication): boolean {
   if (!recognizable(tools, publication.surface)) return false;
   const names = (items: PluginToolSchema[]) => canonical(items.map(tool => tool.name).sort());
   if (names(tools) === names(publication.tools)) return true;
+  // Older releases could publish only the first 64 external tools even when the
+  // complete catalog fit within the byte budget. During first enrollment, accept
+  // that stale Plugins subset (plus optional local exec) only when every installed declaration is an exact
+  // declaration from the current publication. A foreign or changed tool still
+  // fails closed, and completion below still requires the complete new catalog.
+  const legacyCount = tools.length === LEGACY_PLUGIN_MAX_TOOLS ||
+    (tools.length === LEGACY_PLUGIN_MAX_TOOLS + 1 && tools.some(tool => tool.name === 'exec'));
+  if (publication.surface === 'plugins' && legacyCount && publication.tools.length > tools.length) {
+    const expected = new Map(publication.tools.map(tool => [tool.name, hash(declaration([tool]))]));
+    return tools.every(tool => expected.get(tool.name) === hash(declaration([tool])));
+  }
   // Enabling or disabling Core capabilities can change the set before enrollment.
   // Two unchanged full declarations identify the older known surface; names alone
   // do not, and a foreign tool cannot join that evidence through a matching name.

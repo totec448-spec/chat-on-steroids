@@ -23,6 +23,7 @@ const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversa
 vi.mock('../src/main/session/store.js', () => ({
   sessionsRoot: () => path.join(directory, 'sessions'),
   listUsageSessions: vi.fn(async () => []),
+  sessionDirectoryMissing: vi.fn(async () => false),
   conversationWasSuperseded: vi.fn(async () => false),
   readRecentEvents: vi.fn(async () => binding.end ? [binding.end] : []),
   turnHasMcpCall: vi.fn(async () => true),

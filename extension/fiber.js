@@ -1459,7 +1459,7 @@
         if (observedActions) return null;
         observedActions = props.actions;
         const externalPlugins = props.connector.name === 'Chat On Steroids Plugins';
-        if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 64 : 16) || typeof props.connector.name !== 'string') return null;
+        if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 257 : 16) || typeof props.connector.name !== 'string') return null;
         const budget = { bytes: 280000, nodes: 20000 };
         const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
         if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||

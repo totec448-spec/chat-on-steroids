@@ -18,8 +18,6 @@ export function t(source: string, args: readonly unknown[] = []): string {
 type Property = 'textContent' | 'title' | 'placeholder' | 'aria-label' | 'aria-valuetext' | 'data-usage-hint';
 type Binding = { read: () => string; last: string };
 const bindings = new WeakMap<Node, Map<Property, Binding>>();
-const nodes = new Set<WeakRef<Node>>();
-let registrations = 0;
 
 function read(node: Node, property: Property): string | null {
   return property === 'textContent' ? node.textContent : (node as Element).getAttribute(property);
@@ -34,9 +32,6 @@ export function ui<T extends Node>(node: T, property: Property, value: () => str
   let properties = bindings.get(node);
   if (!properties) {
     bindings.set(node, properties = new Map());
-    nodes.add(new WeakRef(node));
-    // Dead DOM nodes must not accumulate during long recorded conversations.
-    if (++registrations % 256 === 0) for (const ref of nodes) if (!ref.deref()) nodes.delete(ref);
   }
   const last = value();
   properties.set(property, { read: value, last });
@@ -53,9 +48,13 @@ export function setLanguage(next: Language): void {
   try { window.localStorage.setItem(STORAGE_KEY, next); } catch { /* The current window can still change language. */ }
   document.documentElement.lang = next;
   syncLanguageControls();
-  for (const ref of nodes) {
-    const node = ref.deref();
-    if (!node) { nodes.delete(ref); continue; }
+  // The document owns the live labels, including hidden settings and collapsed
+  // history. Do not index every label ever created: sweeping WeakRefs during
+  // rendering keeps their detached DOM trees alive until the job ends and makes
+  // each repaint revisit accumulated history. Bindings alone do not retain nodes.
+  const walker = document.createTreeWalker(document.body, 1 | 4 /* elements + text */);
+  do {
+    const node = walker.currentNode;
     for (const [property, binding] of bindings.get(node) ?? []) {
       // A renderer may replace a placeholder with an authored title or an error.
       // That newer value owns the node; a language change cannot overwrite it.
@@ -63,7 +62,7 @@ export function setLanguage(next: Language): void {
       binding.last = binding.read();
       write(node, property, binding.last);
     }
-  }
+  } while (walker.nextNode());
 }
 
 /** Setup and settings project the same saved preference. */

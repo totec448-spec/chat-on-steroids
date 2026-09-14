@@ -9,6 +9,13 @@ The app and the `extension/` companion are versioned together. **Reload the
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.11] — 2 weeks 6 sol
+
+- Reduced renderer memory growth during long-running sessions.
+- Clearer tool-permission and recovered-identity guidance.
+- More reliable plugin discovery, refresh and Windows paths.
+- Deleted conversation history stays deleted after restart.
+
 ## [2.1.0] — 6 sol in 2 weeks
 
 - Cleaner setup, compact profiles and better sidebar controls.

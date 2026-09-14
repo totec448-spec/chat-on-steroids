@@ -10,7 +10,7 @@ import { getConfig } from '../config.js';
 import { randomUUID } from 'node:crypto';
 import { userTitle } from './title.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from '../durable.js';
-import { getSession, findSessionByConversation, createSession, conversationWasSuperseded, readRecentEvents, listUsageSessions, turnHasMcpCall } from './store.js';
+import { getSession, findSessionByConversation, createSession, conversationWasSuperseded, readRecentEvents, listUsageSessions, turnHasMcpCall, sessionDirectoryMissing } from './store.js';
 import { assignSessionProject, projectWorkspace, getSessionProject } from '../projects.js';
 import { isChatBlocked } from './blocked-chats.js';
 import { wakeBrowserWork } from '../browser-wake.js';
@@ -216,6 +216,8 @@ async function load(): Promise<InputEntry[]> {
   const parsed = z.array(entrySchema).safeParse(raw ?? []);
   if (!parsed.success) throw new Error('The message outbox could not be read safely');
   entries = parsed.data;
+  try { await retireRemovedSessionReceipts(entries); }
+  catch (error) { entries = null; throw error; }
   // Old receipts are recovery evidence, not a reason to replay every already-stamped
   // transcript before the sidebar appears. The existing catalog proves an origin is
   // durable; only missing/ambiguous rows need the normal origin repair path below.
@@ -248,6 +250,31 @@ async function load(): Promise<InputEntry[]> {
     catch (error) { entries = null; throw error; }
   }
   return expireQueued(entries);
+}
+/** The outbox retains delivery proof until its exact history owner is removed.
+ * Run under its existing serial queue, before origin repair or checkpoint publication.
+ * Unconfirmed sends and missing/corrupt metadata never establish removal. */
+async function retireRemovedSessionReceipts(current: InputEntry[], pendingOnly = false): Promise<InputEntry[]> {
+  const missing = new Map<string, boolean>();
+  const removed = new Set<string>();
+  for (const row of current) {
+    const sessionId = row.sessionId ?? row.deliveredSessionId;
+    if (!sessionId || row.purpose === 'decision' || !['sent', 'cancelled'].includes(row.state) ||
+        !row.messageId || !Number.isFinite(row.deliveredAt) ||
+        (pendingOnly && !needsHistory(row) && !pendingStages(row))) continue;
+    if (!missing.has(sessionId)) missing.set(sessionId, await sessionDirectoryMissing(sessionId));
+    if (missing.get(sessionId)) removed.add(row.id);
+  }
+  // A combined delivery keeps both originals until both can be retired together.
+  for (const row of current) {
+    if (row.companionInputId && removed.has(row.id) !== removed.has(row.companionInputId)) {
+      removed.delete(row.id); removed.delete(row.companionInputId);
+    }
+  }
+  if (!removed.size) return current;
+  const next = current.filter(row => !removed.has(row.id));
+  await commit(next);
+  return next;
 }
 async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
   const next = await Promise.all(current.map(async (row): Promise<InputEntry> => {
@@ -469,7 +496,7 @@ function materializeStages(current: InputEntry[], entry: InputEntry): InputEntry
 }
 export function listInputs(): Promise<InputEntry[]> {
   return serial(async () => {
-    const current = await load();
+    const current = await retireRemovedSessionReceipts(await load(), true);
     let next: InputEntry[] = [];
     for (const entry of current) {
       if (entry.purpose !== 'decision' && (entry.state === 'sent' || (entry.state === 'cancelled' && entry.deliveredAt !== undefined)) && !entry.sessionId && entry.conversationId && !entry.deliveredSessionId) {

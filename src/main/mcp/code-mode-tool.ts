@@ -1,6 +1,6 @@
 import { currentCall, type CallContext } from './call-context.js';
 import { getConfig } from '../config.js';
-import { guard, fail, type SurfaceRegistrar, type ToolResult } from './kernel.js';
+import { guard, failIdentity, type SurfaceRegistrar, type ToolResult } from './kernel.js';
 import { codeModeSchema, runCodeMode, CODE_MODE_LIMITS, type CodeModeTool, type CodeModeOptions } from './code-mode-runtime.js';
 import { toolDeclaration } from './tool-declarations.js';
 
@@ -29,7 +29,7 @@ export function codeModeHandler(
     const parent = currentCall();
     if (!parent || ((!parent.caller.requestId || !parent.caller.conversationId || !parent.caller.sessionId) &&
       !getConfig().multiAgent.allowUnattributedCalls)) {
-      return fail('CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.');
+      return failIdentity('CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.');
     }
     return runCodeMode(code, getTools().filter(tool => tool.name !== 'exec'), (name, args) => invoke(name, args, parent), CODE_MODE_LIMITS, options);
   });
