@@ -409,7 +409,7 @@
                   <h3>Create an API key</h3>
                   <ol class="setup-instructions">
                     <li>Open API keys and click “Create new secret key” at the top right of the page.</li>
-                    <li>Leave Owned by set to You. Select your project, for example Default project. A name and expiration are optional.</li>
+                    <li>Leave Owned by set to You. Select your project, for example Default project. A name is optional. An expiration date is required.</li>
                     <li>Under Permissions, choose Restricted. Scroll down to Tunnels and enable Read and Use. Leave everything else at None.</li>
                     <li>Create the key, copy it and paste it below. You can only copy the secret once.</li>
                   </ol>
@@ -459,16 +459,16 @@
                   <svg class="ico tick" viewBox="0 0 24 24"><use href="#i-check" /></svg>
                 </div>
                 <div class="step-body">
-                  <div class="step-heading">
-                    <h3>Add it in ChatGPT</h3>
-                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/plugins">
-                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open ChatGPT Plugins
-                    </button>
-                  </div>
+                  <h3>Add it in ChatGPT</h3>
                   <h4 class="setup-subheading">A · Enable Developer mode</h4>
                   <p>In ChatGPT, open Settings → Security and login and turn on Developer mode.</p>
                   <div class="setup-guide" data-setup-guide="developer"></div>
                   <h4 class="setup-subheading">B · Create the Core plugin</h4>
+                  <div class="step-actions">
+                    <button class="btn btn-solid" type="button" data-link="https://chatgpt.com/plugins">
+                      <svg class="ico" viewBox="0 0 24 24"><use href="#i-out" /></svg>Open ChatGPT Plugins
+                    </button>
+                  </div>
                   <ol class="setup-instructions">
                     <li>Open the ChatGPT Plugins page using the button above. Click + at the top right to open New Plugin.</li>
                     <li>Copy the name and description from the Core card below.</li>
@@ -505,11 +505,13 @@
                 </div>
                 <div class="step-body">
                   <h3>Add the Chrome extension</h3>
-                  <p>
-                    Open <code>chrome://extensions</code>, turn on <strong>Developer mode</strong>,
-                    choose <strong>Load unpacked</strong> and pick the folder the button opens. It
-                    pairs with this app by itself — there is no code to type.
-                  </p>
+                  <ol class="setup-instructions">
+                    <li>Open <code>chrome://extensions</code>.</li>
+                    <li>Turn on Developer mode at the top right.</li>
+                    <li>Click Open extension folder below and copy the folder path from the file manager’s address bar.</li>
+                    <li>In Chrome, click Load unpacked, paste the copied folder path and select that folder.</li>
+                  </ol>
+                  <p>The extension pairs with this app automatically — there is no code to type.</p>
                   <p class="hint is-required">
                     <strong>Required for sub-agents:</strong> the companion extension must be loaded
                     and connected in ChatGPT. Without it, Chat On Steroids cannot identify, open or

@@ -192,7 +192,6 @@
     events: 0,
     lastKind: null,
     lastAt: 0,
-    requestId: null,
     calls: 0,
     sends: 0,
     failures: 0,
@@ -233,7 +232,7 @@
     let row = trace.get(requestId);
     if (!row) {
       if (trace.size >= TRACE_MAX) trace.delete(trace.keys().next().value);
-      row = { requestId, tool: null, read: 0, sent: 0, app: null, appAt: 0 };
+      row = { requestId, tool: null, read: 0, queued: 0, sent: 0, confirmed: 0, app: null, appAt: 0 };
       trace.set(requestId, row);
     }
     if (stage === 'tool') row.tool = value || row.tool;
@@ -1277,7 +1276,7 @@
         if (desktopProjectInput && reply.projectBound === desktopProjectInput.id) desktopProjectInput = null;
         for (const entry of batch) {
           if (entry?.event?.kind !== 'tool_evidence') continue;
-          for (const call of entry.event.calls || []) traceStage(call && call.requestId, 'sent');
+          for (const call of entry.event.calls || []) traceStage(call && call.requestId, 'queued');
         }
         const sent = new Set(batch);
         for (let index = queue.length - 1; index >= 0; index--) {
@@ -3348,7 +3347,10 @@
   }
 
   async function confirmLiveRequestOwners(calls, ownerConversation, current = null) {
-    if (current && !current()) return;
+    const ownerEpoch = epoch;
+    const owns = () => alive && epoch === ownerEpoch && conversationId === ownerConversation &&
+      CLF_DOM.conversationId() === ownerConversation && (!current || current());
+    if (!owns()) return;
     if (!Array.isArray(calls) || calls.length === 0 || !ownerConversation) return;
     const byRequest = new Map();
     for (const call of calls) {
@@ -3358,6 +3360,7 @@
       if (requestOwnersPending.has(key) || (requestOwnerRetryAt.get(key) || 0) > Date.now()) continue;
       byRequest.set(call.requestId, call);
       requestOwnersPending.add(key);
+      traceStage(call.requestId, 'read');
     }
     const batch = [...byRequest.values()];
     if (batch.length === 0) return;
@@ -3366,27 +3369,30 @@
         type: 'correlate',
         conversationId: ownerConversation,
         calls: batch
-      }, current);
-      if (current && !current()) return;
+      }, owns);
+      if (!owns()) return;
       const data = reply && reply.ok === true && reply.data && typeof reply.data === 'object' ? reply.data : null;
       const confirmed = new Set(data && Array.isArray(data.confirmed) ? data.confirmed : []);
       for (const call of batch) {
         const key = `${ownerConversation}\u0000${call.requestId}`;
+        // Only an app response proves delivery. The worker accepting a journal entry
+        // is queued custody, and an owner ACK still does not prove an MCP call ran.
+        if (data?.conversationId === ownerConversation) traceStage(call.requestId, 'sent');
         // Judge each request id on its own read-back. This additionally required
         // `data.complete === true`, which is a *batch* verdict: a single id the app could
         // not place (a sticky conflict, or a call it has not ingested yet) threw away the
         // confirmation of every other id in the same message and re-queued them all.
         if (!data || data.conversationId !== ownerConversation || !confirmed.has(call.requestId)) {
           backOffRequestOwner(key);
+          if (data?.conversationId === ownerConversation && Array.isArray(data.conflicts) && data.conflicts.includes(call.requestId))
+            pendingStreamOrigins.delete(call.requestId);
           continue;
         }
         requestOwnerRetryAt.delete(key);
         requestOwnerAttempts.delete(key);
         requestOwnersConfirmed.set(call.requestId, ownerConversation);
-        // `app` becomes green only after the app has read the exact mapping back. This is a
-        // stronger diagnostic than the old "Fiber parser saw an id" indicator.
-        traceStage(call.requestId, 'sent');
-        traceStage(call.requestId, 'app', 'request_id');
+        pendingStreamOrigins.delete(call.requestId);
+        traceStage(call.requestId, 'confirmed');
       }
     } catch {
       for (const call of batch) backOffRequestOwner(`${ownerConversation}\u0000${call.requestId}`);
@@ -3542,7 +3548,6 @@
     observed.calls = acceptedCalls.length;
     for (const call of acceptedCalls) {
       if (!call.requestId) continue;
-      observed.requestId = call.requestId;
       traceStage(call.requestId, 'read');
       traceStage(call.requestId, 'tool', call.tool);
     }
@@ -3939,6 +3944,25 @@
       found = descriptor;
     }
     return found;
+  }
+
+  // Popup-only projection of the newest native turn. Historical scans and delivery
+  // counters cannot certify the current request; a newer user message clears the view.
+  function currentRequestStatus() {
+    const latest = CLF_DOM.turns().at(-1);
+    const descriptor = latest?.role === 'assistant' && CLF_DOM.conversationId() === conversationId
+      ? fiberTurnFor(latest) : null;
+    if (!descriptor || descriptor.conversationId !== conversationId) return { requestId: null, trace: [] };
+    const ids = [...new Set([...(descriptor.requests || []), ...(descriptor.calls || [])]
+      .map(call => call.requestId).filter(Boolean))].slice(-16);
+    const rows = ids.map(requestId => ({
+      ...trace.get(requestId), requestId, read: true,
+      sent: Boolean(trace.get(requestId)?.sent || requestOwnersConfirmed.get(requestId) === conversationId),
+      confirmed: requestOwnersConfirmed.get(requestId) === conversationId
+    })).reverse();
+    // Prefer the workflow identity over a provider's preliminary wrapper UUID.
+    const preferred = rows.find(row => row.requestId.startsWith('wfr_')) || rows[0];
+    return { requestId: preferred?.requestId || null, trace: rows };
   }
 
   /** Fiber turn descriptor stamped onto exactly one rendered assistant section. */
@@ -8944,13 +8968,15 @@
     // A turn that finished during the wait has taken the claim, and this retry is about an
     // older one. It says nothing and touches nothing: the phase on screen is that turn's now.
     if (!current()) return;
-    // Something else holds the loop while this turn is still the claimed one — a compaction
-    // brief, say. It will not be interrupted for a retry.
-    if (goalBusy) return;
-    // The conversation moved on while we waited: whatever this loop was going to write is
-    // about a turn that is no longer the last one, which is an answer of its own.
-    if (goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || (job && job.busy)) return void setGoalPhase('');
-    if (!goalUsable()) return void setGoalPhase('');
+    if (goalBusy || goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || (job && job.busy) || !goalUsable()) {
+      // This timer no longer owns a retry. Return its pickup to the existing
+      // activity feed: retaining the claim here strands still-owed recovery after
+      // temporary work/compaction ends. Only a current server obligation can collect
+      // it again; no draft is acknowledged and the elapsed backoff is not bypassed.
+      goalTicketId = null;
+      if (!goalBusy) setGoalPhase('');
+      return;
+    }
     goalBusy = true;
     try {
       await requestGoalDraft(forTurn, current);
@@ -10160,16 +10186,17 @@
   });
   function flushStreamRequestOrigins() {
     const route = CLF_DOM.conversationId();
+    const pendingEpoch = epoch, calls = [];
     for (const [requestId, pending] of pendingStreamOrigins) {
       if (!alive || pending.epoch !== epoch || Date.now() >= pending.deadline || (route && route !== pending.conversationId)) {
         pendingStreamOrigins.delete(requestId);
         continue;
       }
       if (route !== pending.conversationId || conversationId !== route) continue;
-      pendingStreamOrigins.delete(requestId);
-      const current = () => alive && epoch === pending.epoch && CLF_DOM.conversationId() === route;
-      void confirmLiveRequestOwners([{ requestId, messageId: null, createTime: pending.observedAt / 1000 }], route, current);
+      calls.push({ requestId, messageId: null, createTime: pending.observedAt / 1000 });
     }
+    const current = () => alive && epoch === pendingEpoch && CLF_DOM.conversationId() === route;
+    if (calls.length) void confirmLiveRequestOwners(calls, route, current);
   }
   function confirmStreamRequestOrigin(claimed, requestIds, observedAt) {
     const route = CLF_DOM.conversationId();
@@ -10177,8 +10204,8 @@
     // New chats can receive their stream id before /c/<id>. The existing observer
     // drains a bounded set when that exact route appears; navigation retires it.
     for (const requestId of requestIds) {
-      if (pendingStreamOrigins.has(requestId) || pendingStreamOrigins.size >= 16) continue;
-      pendingStreamOrigins.set(requestId, { conversationId: claimed, observedAt, epoch, deadline: Date.now() + 30_000 });
+      if (requestOwnersConfirmed.get(requestId) === claimed || pendingStreamOrigins.has(requestId) || pendingStreamOrigins.size >= 16) continue;
+      pendingStreamOrigins.set(requestId, { conversationId: claimed, observedAt, epoch, deadline: Date.now() + 15 * 60_000 });
     }
     flushStreamRequestOrigins();
   }
@@ -10709,7 +10736,7 @@
           generations: genCount,
           queued: queue.length,
           queueBytes,
-          trace: [...trace.values()].slice(-8).reverse(),
+          ...currentRequestStatus(),
           overwrite: RENDER_STREAM === true,
           painted,
           bridge: { connected: status.connected === true, paired: status.paired === true },

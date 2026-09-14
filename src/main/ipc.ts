@@ -459,7 +459,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       before.goal.objectivePrompt !== next.goal.objectivePrompt ||
       before.goal.loopPrompt !== next.goal.loopPrompt
     ) {
-      retireGoalDrafts();
+      retireGoalDrafts(before.goal.enabled && !next.goal.enabled);
     }
     // The app-wide switch going off is the master stop, and has to actually stop things. Chats
     // carry their own Goal/Loop answer now, so without this the one control that looks like it

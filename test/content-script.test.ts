@@ -8591,6 +8591,37 @@ describe('evidence from the page context', () => {
     ]);
   });
 
+  it('retains one-shot stream proof through a failed ACK without overlapping or repeating a confirmed request', async () => {
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', requestId = 'wfr_retry_once';
+    live.reply.set('correlate', () => ({ ok: false }));
+    live.window.dispatchEvent(new live.window.MessageEvent('message', {
+      source: live.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-request-origin', conversationId, requestIds: [requestId] }
+    }));
+    await settle();
+    live.hook.observe(); await settle();
+    expect(live.sent.filter(m => m.type === 'correlate')).toHaveLength(1);
+    live.reply.set('correlate', () => ({ ok: true, data: { conversationId, confirmed: [requestId] } }));
+    live.advance(35_000); live.hook.observe(); await settle();
+    expect(live.sent.filter(m => m.type === 'correlate')).toHaveLength(2);
+    live.advance(65_000); live.hook.observe(); await settle();
+    expect(live.sent.filter(m => m.type === 'correlate')).toHaveLength(2);
+  });
+
+  it('shows only exact IDs of the newest native turn and does not call an owner ACK tool activity', async () => {
+    live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', requestId = 'wfr_popup_current';
+    live.reply.set('correlate', () => ({ ok: true, data: { conversationId, confirmed: [requestId] } }));
+    const section = assistantTurn(live.document, 'current-native-turn', ['Called tool']);
+    await bindFiberRequest(section, requestId);
+    const status = await live.runtimeMessage({ type: 'clf-page-status' }) as any;
+    expect(status.requestId).toBe(requestId);
+    expect(status.trace).toEqual([expect.objectContaining({ requestId, confirmed: true, app: null })]);
+    userTurn(live.document, 'next-question', 'Next question');
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ requestId: null, trace: [] });
+  });
+
   it('keeps a fresh-chat stream identity until the address bar publishes its exact route', async () => {
     live = await harness('https://chatgpt.com/?cos-input=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee');
     const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
@@ -13862,6 +13893,45 @@ describe('the goal loop', () => {
     wakes[1]?.();
     await settle();
     expect(drafts(live)).toHaveLength(2);
+  });
+
+  it.each(['native', 'compaction'] as const)('recollects the same recovery ticket after a delayed retry meets temporary %s work', async busyKind => {
+    const pending = { replyId: 'silence:retry-busy', turnId: 'g-silence-retry-busy',
+      silenceSourceTurnId: 'g-original', eventSeq: 12, acceptedAt: 1000, listenUntil: 0 };
+    let offered = false, busy = false, requests = 0;
+    live = await harness(`https://chatgpt.com/c/${CHAT}`, {
+      ...goalReplies(),
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: 0,
+        job: busy && busyKind === 'compaction' ? { busy: true, state: 'awaiting-summary' } : null,
+        goal: { enabled: true, own: true, hasKey: true, model: MODEL, pending: offered ? pending : null, draft: null } } }),
+      goal_draft: () => ++requests === 1
+        ? { ok: false, status: 409, data: { error: 'chat_still_working', retryable: true } }
+        : goalReplies().goal_draft()
+    });
+    (live.window as any).CLF_DOM.generating = () => busy && busyKind === 'native';
+    const timer = live.window.setTimeout;
+    const wakes: Array<() => void> = [];
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === live!.hook.GOAL_RETRY_MS) { wakes.push(fn); return 0; }
+      return timer(fn, ms);
+    }) as typeof live.window.setTimeout;
+    offered = true;
+    await live.hook.pullActivity(); await settle();
+    expect(requests).toBe(1);
+    expect(wakes).toHaveLength(1);
+    busy = true;
+    await live.hook.pullActivity();
+    wakes[0]!(); await settle();
+    for (let n = 0; n < 3; n++) { await live.hook.pullActivity(); await settle(); }
+    expect(requests).toBe(1);
+    expect(acks(live)).toHaveLength(0);
+    busy = false;
+    await live.hook.pullActivity(); await settle();
+    expect(requests).toBe(2);
+    expect(drafts(live).at(-1)).toMatchObject({ turnId: pending.turnId, terminalRequired: true });
+    for (let n = 0; n < 3; n++) { await live.hook.pullActivity(); await settle(); }
+    expect(requests).toBe(2);
+    expect(acks(live)).toHaveLength(0);
   });
 
   it('continues the first resumed answer that finished while the replacement tab was hidden', async () => {

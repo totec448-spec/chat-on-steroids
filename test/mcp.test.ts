@@ -56,6 +56,7 @@ import {
   execOwner,
   MAX_UNREAD_EXEC_RESULTS_PER_CONVERSATION,
   noteExecOwner,
+  forgetExecOwner,
   resetExecOwnershipForTests,
   UNATTENDED_EXEC_NOTICE_MS
 } from '../src/main/codex/ownership.js';
@@ -3200,6 +3201,18 @@ describe('exec_command and write_stdin', () => {
     expect(brokenText).toContain('Batch: command 2 exited 3; the other command exited 0.');
   }, 60_000);
 
+  it('returns partial search results without exonerating an unreadable batch path', async () => {
+    const result = await core('tools/call', { name: 'exec_command', arguments: {
+      cmds: ['rg -n "export const name" src/app.ts missing-search-file.ts', 'rg -n "export const name" src/app.ts'],
+      workdir: '/workspace', yield_time_ms: 8_000
+    } });
+    expect(result.body.result?.structuredContent).toMatchObject({ exit_code: 2 });
+    expect(textOf(result)).toContain('export const name');
+    expect(textOf(result)).toContain('Batch: command 1 exited 2; the other command exited 0.');
+    expect(textOf(result)).toContain('incomplete');
+    expect(textOf(result)).not.toContain('not a failed search');
+  });
+
   it.skipIf(!IS_WINDOWS)('scopes parser recovery to its failed batch command after an earlier mutation', async () => {
     const reply = await core('tools/call', {
       name: 'exec_command',
@@ -3440,11 +3453,11 @@ describe('exec sessions belong to the chat that opened them', () => {
       yield_time_ms: 250
     });
     expect(stranger.body.result?.isError).toBe(true);
-    expect(textOf(stranger)).toContain(
-      `write_stdin failed: session ${sessionId} is not proven to belong to this durable Chat On Steroids session.`
-    );
+    expect(textOf(stranger)).toContain(`write_stdin failed for session ${sessionId}`);
     expect(textOf(stranger)).not.toContain('echo=stolen');
     expect(textOf(stranger)).toContain('This refusal concerns this process id, not Read-only mode');
+    expect(textOf(stranger)).toContain('EXEC_SESSION_OWNER_MISMATCH');
+    expect(textOf(stranger)).not.toContain('may already have delivered');
 
     // Caller identity is the authorization boundary. An unattributed call must not inherit
     // the owner's authority merely because it can guess the small numeric session id.
@@ -3454,9 +3467,11 @@ describe('exec sessions belong to the chat that opened them', () => {
       yield_time_ms: 1_000
     });
     expect(unproven.body.result?.isError).toBe(true);
-    expect(textOf(unproven)).toContain('is not proven to belong to this durable Chat On Steroids session');
+    expect(textOf(unproven)).toContain('current call has no proven chat identity');
     expect(textOf(unproven)).not.toContain('echo=anon');
     expect(textOf(unproven)).toContain('This refusal concerns this process id, not Read-only mode');
+    expect(textOf(unproven)).toContain('EXEC_CALLER_UNIDENTIFIED');
+    expect(textOf(unproven)).toContain('retry this same session_id once');
 
     // The replacement session contract exposes recordings only; the removed status action no
     // longer gives either owner or stranger a side channel into the process manager. Terminal
@@ -3473,6 +3488,34 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(owner.body.result?.isError).not.toBe(true);
     expect(textOf(owner)).toContain('echo=bye');
     expect(textOf(owner)).toContain('Process exited with code 0');
+  });
+
+  it('distinguishes anonymous launch custody from an unavailable terminal and reports identity recovery', async () => {
+    const source = await createSession({ conversationId: 'exec-return-owner' });
+    expect(prove('wfr_exec_return_owner', 'exec-return-owner', source.id)).toBe('stored');
+    noteExecOwner(987001, source.id);
+    noteExecOwner(987002, null);
+    try {
+      const unknown = await asChat('wfr_exec_return_late', 'write_stdin', { session_id: 987001, chars: '' });
+      expect(textOf(unknown)).toContain('EXEC_CALLER_UNIDENTIFIED');
+      expect(prove('wfr_exec_return_late', 'exec-return-owner', source.id)).toBe('stored');
+      const recovered = await asChat('wfr_exec_return_owner', 'read', { paths: ['/workspace/src/app.ts'] });
+      expect(textOf(recovered)).toContain('Earlier write_stdin calls were refused');
+      expect(textOf(await asChat('wfr_exec_return_owner', 'read', { paths: ['/workspace/src/app.ts'] })))
+        .not.toContain('Identity recovered');
+      const anonymous = await asChat('wfr_exec_return_owner', 'write_stdin', { session_id: 987002, chars: '' });
+      expect(textOf(anonymous)).toContain('EXEC_SESSION_ANONYMOUS');
+      expect(textOf(anonymous)).toContain('cannot adopt');
+      expect(textOf(anonymous)).not.toContain('retry this same');
+      const absent = await asChat('wfr_exec_return_owner', 'write_stdin', { session_id: 987003, chars: '' });
+      expect(textOf(absent)).toContain('EXEC_SESSION_UNAVAILABLE');
+      expect(textOf(absent)).not.toContain('retry this same');
+      expect(textOf(await asChat('wfr_exec_return_owner', 'read', { paths: ['/workspace/src/app.ts'] })))
+        .not.toContain('Identity recovered');
+    } finally {
+      forgetExecOwner(987001);
+      forgetExecOwner(987002);
+    }
   });
 
   it('keeps a live process with the durable session across Compact & Resume and retires A', async () => {
@@ -3598,7 +3641,7 @@ describe('exec sessions belong to the chat that opened them', () => {
         yield_time_ms: 50
       });
       expect(stolen.body.result?.isError).toBe(true);
-      expect(textOf(stolen)).toContain('is not proven to belong to this durable Chat On Steroids session');
+      expect(textOf(stolen)).toContain('EXEC_SESSION_UNAVAILABLE');
 
       const started = await starting;
       expect(started.body.result?.isError, textOf(started)).not.toBe(true);

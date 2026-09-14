@@ -1698,7 +1698,7 @@ describe('automatic compaction', () => {
    * reloads, and a ticket that still has not been sent after them is abandoned: nothing was
    * fenced, and the next working turn opens a fresh one. Every pickup asks for the tab in front.
    */
-  it('reloads an unsent automatic ticket in front every 2 minutes, then gives it up after five', async () => {
+  it.each([false, true])('reloads an unsent automatic ticket every 2 minutes with bounded attempts (restored: %s)', async restored => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -1713,6 +1713,15 @@ describe('automatic compaction', () => {
         body: { conversationId, ticket: true, automatic: true }
       });
       const token = filed.body.token as string;
+
+      if (restored) {
+        const { snapshotContinuations } = await import('../src/main/session/continuation.js');
+        const snapshot = snapshotContinuations();
+        resetBridgeForTests();
+        await pair();
+        await restoreContinuations({ ...snapshot, entries: snapshot.entries.map(entry => entry.token === token
+          ? { ...entry, openedAt: Date.now() - 60_000 } : entry) });
+      }
 
       const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string; focus: boolean } | null> => {
         await sweepStaleSwarm(Date.now());
@@ -6100,6 +6109,99 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it.each(['goal', 'loop'] as const)('preserves the existing %s silence deadline after a provider access limit', async mode => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, mode, true, true);
+      await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }, openTurn('limited-goal')]);
+      const deadline = Date.now() + CHAT_SILENCE_MS;
+      const notice = () => events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'limited-goal',
+        recoverable: false, blocking: true, text: 'provider access limit' }]);
+      await notice();
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS - 1);
+      await notice(); // Re-rendering cannot renew the original deadline.
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(2);
+      expect(Date.now()).toBe(deadline + 1);
+      await sweepStaleSwarm(Date.now());
+      const repair = await maintenance();
+      expect(repair).toMatchObject({ conversationId: PRIME, reason: 'silence' });
+      await vi.advanceTimersByTimeAsync(31_000);
+      await notice(); // A diagnostic cannot revoke custody of the handed repair.
+      expect(await maintenance(repair!.token)).toBeNull();
+      await vi.advanceTimersByTimeAsync(31_000);
+      await notice();
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('renews Goal silence for genuine work beside a provider access limit', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }, openTurn('limited-work')]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await events(PRIME, [
+        { kind: 'chat_error', time: Date.now(), turnId: 'limited-work', recoverable: false, blocking: true, text: 'provider access limit' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'limited-work', messageId: 'new-work', text: 'Continuing the checks.', state: 'streaming', activeNow: true }
+      ]);
+      await vi.advanceTimersByTimeAsync(60_001);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toMatchObject({ conversationId: PRIME, reason: 'silence' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([false, true])('retires a %s handed silence repair when completion accompanies a provider access limit', async handed => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }, openTurn('limited-completed')]);
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 1);
+      await sweepStaleSwarm(Date.now());
+      const repair = handed ? await maintenance() : null;
+      if (handed) expect(repair).toMatchObject({ conversationId: PRIME, reason: 'silence' });
+      await events(PRIME, [
+        { kind: 'chat_error', time: Date.now(), turnId: 'limited-completed', recoverable: false, blocking: true, text: 'provider access limit' },
+        endTurn('limited-completed', 'completed'),
+        { kind: 'assistant_message', time: Date.now(), turnId: 'limited-completed', messageId: 'completed-answer', text: 'The checks are complete.', state: 'final', final: true }
+      ]);
+      expect(await maintenance()).toBeNull();
+      if (repair) expect(await maintenance(repair.token)).toBeNull();
+      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS + 1);
+      await sweepStaleSwarm(Date.now());
+      expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['off', 'wrong-turn', 'no-grant'] as const)('does not create Goal recovery authority from a provider access limit (%s)', async scenario => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      if (scenario !== 'no-grant') {
+        await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }, openTurn('limited-negative')]);
+      }
+      if (scenario === 'off') await setGoalSwitchNow(PRIME, 'loop', false);
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: scenario === 'wrong-turn' ? 'different-turn' : 'limited-negative',
+        recoverable: false, blocking: true, text: 'provider access limit' }]);
+      expect(await maintenance()).toBeNull();
+      await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS + 1);
+      expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each([false, undefined])('does not spend recovery on an informational alert (recoverable: %s)', async recoverable => {
     await pair();
     // Older loaded extension documents queued this toast before New Chat had an id.
@@ -7007,7 +7109,11 @@ describe('unattributed activity recovery', () => {
     } finally { await setSecret('openRouterApiKey', ''); vi.useRealTimers(); }
   });
 
-  it.each([6_000, 180_000])('reuses the exact silence receipt when its replacement reveals Thinking failed after %i ms', async delay => {
+  it.each([
+    { pro: false, delay: 6_000 }, { pro: false, delay: 180_000 },
+    { pro: true, delay: 6_000 }, { pro: true, delay: 180_000 }
+  ])('reuses the exact silence receipt when its replacement reveals Thinking failed (Pro: $pro, delay: $delay)', async ({ pro, delay }) => {
+    const goal = await import('../src/main/goal.js');
     const previous = getConfig();
     await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
     await setSecret('openRouterApiKey', 'sk-or-delayed-failure');
@@ -7015,9 +7121,10 @@ describe('unattributed activity recovery', () => {
     vi.useFakeTimers();
     try {
       await pair();
-      await events(OTHER, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() }, openTurn(`reload-source-${delay}`)]);
+      if (pro) await goal.setGoalSwitchNow(OTHER, 'loop', true, true);
+      await events(OTHER, [{ kind: 'model_selection', model: pro ? 'gpt-6-pro' : 'GPT-5.6 Sol', reasoningEffort: pro ? 'pro' : 'high', time: Date.now() }, openTurn(`reload-source-${delay}`)]);
       await attributed(OTHER, false, Date.now());
-      await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS);
+      await vi.advanceTimersByTimeAsync(pro ? PRO_SILENCE_MS : CHAT_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
       const repair = await maintenance();
       expect(repair?.reason).toBe('silence');
@@ -7046,6 +7153,7 @@ describe('unattributed activity recovery', () => {
       // the next legitimate quiet recovery.
       if (delay === 180_000) await events(OTHER, [openTurn(`next-reload-source-${delay}`)]);
       await attributed(OTHER, false, Date.now());
+      expect(goalPendingReplyFor(OTHER)).toBeNull();
       // The replacement page has not supplied model evidence for this new episode.
       await vi.advanceTimersByTimeAsync(PRO_SILENCE_MS);
       await sweepStaleSwarm(Date.now());
@@ -9546,10 +9654,8 @@ describe('the goal loop over the bridge', () => {
    * was — the reply landed at 21:56:46 and the app first heard a Goal was owed at 22:00:33,
    * when a human reloaded the page by hand.
    *
-   * So the schedule is the silence rule's two minutes, and then two, five, ten, fifteen. Five
-   * reloads, a little over half an hour, and then it stops for good: every one of them is this
-   * app typing into somebody's browser about an answer already on screen, and a page that has
-   * not come back inside half an hour is not coming back.
+   * The schedule starts at two minutes, then two, five, ten and fifteen. Further
+   * confirmed attempts retain fifteen minutes until the durable obligation expires.
    */
   it('hands one queued Goal recovery to the shared browser startup owner and revokes it on Off', async () => {
     vi.useFakeTimers();
@@ -9619,7 +9725,7 @@ describe('the goal loop over the bridge', () => {
         if (index === 1) expect(await cancelInput(second)).toBe(true);
         if (index === 2) await request('POST', '/settings', { body: { conversationId: chat, goal: false } });
       }
-      await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
+      await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs).toEqual([]);
       expect(await cancelInput(id)).toBe(true);
@@ -9630,7 +9736,32 @@ describe('the goal loop over the bridge', () => {
     }
   });
 
-  it('reloads a chat whose finished reply nothing ever came to collect, then stops', async () => {
+  it('does not recover restored Goal debt over a newer question', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0073-0000-4000-8000-000000000173';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'first question', messageId: 'old-question' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'old-source' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'old-source', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'old-source', messageId: 'old-answer',
+          text: 'First pass', final: true, state: 'final', goalEligible: true, activeNow: true }
+      ] } });
+      const goal = await import('../src/main/goal.js');
+      const saved = goal.snapshotGoalReplies();
+      expect(goal.goalPendingReplyFor(chat)).not.toBeNull();
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'new question', messageId: 'new-question' }
+      ] } });
+      goal.restoreGoalReplies({ ...saved, replies: saved.replies.map(row => ({ ...row, acceptedAt: Date.now() - 60_000 })) });
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs).toEqual([]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([false, true])('recovers pending Goal work past five attempts until expiry, including restored debt (%s)', async restored => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -9666,6 +9797,16 @@ describe('the goal loop over the bridge', () => {
       });
       expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).not.toBeNull();
 
+      if (restored) {
+        const goal = await import('../src/main/goal.js');
+        const saved = goal.snapshotGoalReplies();
+        // The durable obligation predates bridge startup, as it would after an app restart.
+        resetBridgeForTests();
+        await pair();
+        goal.restoreGoalReplies({ ...saved, replies: saved.replies.map(row => row.conversationId === chat
+          ? { ...row, acceptedAt: Date.now() - 60_000 } : row) });
+      }
+
       const takeRepair = async (): Promise<{ conversationId: string; token: string; reason: string } | null> => {
         await sweepStaleSwarm(Date.now());
         return (await request('GET', '/status')).body.repairs?.[0] ?? null;
@@ -9679,7 +9820,7 @@ describe('the goal loop over the bridge', () => {
       // Two minutes, then 2 / 5 / 10 / 15 between the retries. Each reload is confirmed the way
       // the extension confirms it, so what is measured here is the schedule and not a handout
       // being retried because nobody said it worked.
-      const gaps = [1_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000];
+      const gaps = [1_000, 2 * 60_000, 5 * 60_000, 10 * 60_000, 15 * 60_000, 15 * 60_000, 15 * 60_000];
       for (const [index, gap] of gaps.entries()) {
         await vi.advanceTimersByTimeAsync(gap);
         const handout = await takeRepair();
@@ -9695,11 +9836,10 @@ describe('the goal loop over the bridge', () => {
         expect(await takeRepair()).toBeNull();
       }
 
-      // Five is all it gets. The obligation is still on file — it stays there for the page to
-      // redeem if it ever comes back — but this app has stopped asking.
-      await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
+      // The existing durable expiry still bounds unattended browser recovery.
+      await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
       expect(await takeRepair()).toBeNull();
-      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).not.toBeNull();
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).toBeNull();
     } finally {
       vi.useRealTimers();
     }

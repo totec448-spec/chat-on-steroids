@@ -613,6 +613,49 @@ it.each(['gpt-6-pro', 'gpt-5.6-sol'])('carries settled Thinking failed through H
   } finally { clock.mockRestore(); }
 });
 
+it.each(['gpt-6-pro', 'gpt-5.6-sol'])('preserves failed prime recovery while another worker tool outlives five minutes (%s)', async model => {
+  const bridge = await import('../src/main/bridge.js');
+  const calls = await import('../src/main/mcp/call-context.js');
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const conversationId = randomUUID(), worker = randomUUID();
+  await createSession({ title: 'Prime recovery with a busy worker', conversationId });
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, mode: 'loop', loopBackend: 'chatgpt' } });
+  await goal.setGoalSwitchNow(conversationId, 'loop', true, true);
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model, reasoningEffort: 'high', time: now },
+    { kind: 'user_message', messageId: 'prime-question', text: 'Finish the original task with its worker', time: now },
+    { kind: 'turn_start', turnId: 'prime-failed-view', time: now }
+  ] });
+  await attributedMcp(conversationId);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const running = calls.trackMcpRequest(() => calls.trackInFlight({ startedAt: now, transportKey: null,
+    agent: 'worker-1', outcome: null, evidence: calls.emptyEvidence(),
+    caller: { conversationId: worker, requestId: randomUUID(), transportKey: null } }, () => held));
+  try {
+    now++;
+    await post('/events', { conversationId, events: [
+      { kind: 'turn_end', turnId: 'prime-failed-view', outcome: 'failed', reason: 'thinking_failed', time: now }
+    ] });
+    await refreshFailedView(conversationId, ms => { now += ms; });
+    const pending = goal.goalPendingReplyFor(conversationId)!;
+    expect(pending).toMatchObject({ silenceSourceTurnId: 'prime-failed-view' });
+    expect(calls.runningToolCalls(worker)).toBe(1);
+    expect(calls.runningToolCalls(conversationId)).toBe(0);
+    now += 2 * 60_000;
+    await bridge.sweepStaleSwarm(now);
+    goal.restoreGoalReplies(goal.snapshotGoalReplies());
+    expect(goal.goalPendingReplyFor(conversationId)).toEqual(pending);
+    const drafted = await post('/goal/draft', { conversationId, turnId: pending.turnId, terminalRequired: true, clientId: 'prime-page' });
+    expect(drafted.status, JSON.stringify(drafted.body)).toBe(200);
+    expect(goal.goalPendingReplyFor(conversationId)).toEqual(pending);
+    release(); await running;
+    await bridge.sweepStaleSwarm(now);
+    expect(goal.goalPendingReplyFor(conversationId)).toEqual(pending);
+  } finally { release(); await running; clock.mockRestore(); }
+});
+
 it('refuses restored recovery tickets without MCP proof but still delivers a real final', async () => {
   const { readRecentEvents } = await import('../src/main/session/store.js');
   const conversationId = randomUUID();

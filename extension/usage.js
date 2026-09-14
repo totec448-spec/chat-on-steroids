@@ -17,6 +17,21 @@
   const CONVERSATION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const REQUEST = /^wfr_[a-zA-Z0-9_-]{1,96}$/;
   const CONVERSATION_FIELD = /(?:^|[,{\s])\"conversation_id\"\s*:\s*\"([0-9a-f-]{36})\"/gi;
+  // Passive evidence only: no polling, and no full response survives a scan. Retain a
+  // small replay window for document_start -> content-script readiness and deduplicate
+  // repeated provider observations across responses as well as inside one stream.
+  const origins = new Map();
+  const originReaders = new Set();
+  const ORIGIN_LISTEN_MS = 15 * 60_000;
+  function publishOrigin(conversationId, requestIds, observedAt) {
+    const fresh = requestIds.filter(id => !origins.has(`${conversationId}:${id}`));
+    if (!fresh.length) return;
+    for (const requestId of fresh) {
+      if (origins.size >= 64) origins.delete(origins.keys().next().value);
+      origins.set(`${conversationId}:${requestId}`, { conversationId, requestId, observedAt });
+    }
+    post({ type: 'cos-request-origin', conversationId, requestIds: fresh, observedAt }, location.origin);
+  }
   const project = (data, observedAt, order) => {
     if (!data || typeof data !== 'object') return;
     const rows = [];
@@ -74,18 +89,7 @@
    * Reads bounded complete SSE events from a clone without changing the page's response.
    * Only a conversation id and server request metadata from the same event are projected.
    */
-  async function inspectRequestOrigins(response, observedAt) {
-    let url;
-    try { url = new URL(response.url); } catch { return; }
-    if (url.origin !== location.origin || !/^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname)) return;
-    if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) return;
-    const copy = response.clone(), reader = copy.body?.getReader();
-    if (!reader) return;
-    const timer = setTimeout(() => void reader.cancel().catch(() => {}), 90_000);
-    const decoder = new TextDecoder();
-    const emitted = new Set();
-    let bytes = 0, buffer = '';
-    const scan = (frame) => {
+  function readOrigin(frame) {
       if (!frame || frame.length > 512 * 1024) return;
       const conversations = new Set();
       CONVERSATION_FIELD.lastIndex = 0;
@@ -107,10 +111,27 @@
       if (event?.conversation_id !== conversationId) return;
       const requestIds = new Set([event.metadata?.request_id, event.message?.metadata?.request_id]
         .filter(id => typeof id === 'string' && REQUEST.test(id)));
-      const fresh = [...requestIds].filter((id) => !emitted.has(id)).slice(0, 16 - emitted.size);
+      return requestIds.size ? { conversationId, requestIds: [...requestIds] } : null;
+  }
+  async function inspectRequestOrigins(response, observedAt) {
+    let url;
+    try { url = new URL(response.url); } catch { return; }
+    if (url.origin !== location.origin || !/^\/backend-api\/(?:f\/)?conversation$/.test(url.pathname)) return;
+    if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) return;
+    if (originReaders.size >= 2) return;
+    const copy = response.clone(), reader = copy.body?.getReader();
+    if (!reader) return;
+    originReaders.add(reader);
+    const timer = setTimeout(() => void reader.cancel().catch(() => {}), ORIGIN_LISTEN_MS);
+    const decoder = new TextDecoder(), emitted = new Set();
+    let bytes = 0, buffer = '';
+    const scan = (frame) => {
+      const origin = readOrigin(frame);
+      if (!origin) return;
+      const fresh = origin.requestIds.filter((id) => !emitted.has(id)).slice(0, 16 - emitted.size);
       if (fresh.length === 0) return;
       for (const id of fresh) emitted.add(id);
-      post({ type: 'cos-request-origin', conversationId, requestIds: fresh, observedAt }, location.origin);
+      publishOrigin(origin.conversationId, fresh, observedAt);
     };
     try {
       while (true) {
@@ -126,6 +147,7 @@
           if (split < 0) break;
           const width = buffer.startsWith('\r\n\r\n', split) ? 4 : 2;
           scan(buffer.slice(0, split));
+          if (emitted.size >= 16) return;
           buffer = buffer.slice(split + width);
         }
         if (buffer.length > 512 * 1024) return;
@@ -133,9 +155,50 @@
       buffer += decoder.decode();
       scan(buffer);
     } catch { /* A missing stream observation leaves the existing Fiber path in charge. */ }
-    finally { clearTimeout(timer); void reader.cancel().catch(() => {}); }
+    finally { clearTimeout(timer); originReaders.delete(reader); void reader.cancel().catch(() => {}); }
   }
   let observedFetch = null;
+  let observedWebSocket = null;
+  const observedSockets = new WeakSet();
+  function inspectSocketMessage(event) {
+    // Pro hands its HTTP stream to the native conversation-turn-stream socket.
+    // Observe only complete server envelopes; never subscribe, send or join deltas.
+    if (typeof event.data !== 'string' || event.data.length > 2 * 1024 * 1024 || !event.data.includes('wfr_')) return;
+    let rows;
+    try { rows = JSON.parse(event.data); } catch { return; }
+    if (!Array.isArray(rows) || rows.length > 32) return;
+    for (const row of rows) {
+      const payload = row?.payload?.payload;
+      if (row?.type !== 'message' || row.payload?.type !== 'conversation-turn-stream' ||
+          payload?.type !== 'stream-item' || typeof payload.conversation_id !== 'string' || !CONVERSATION.test(payload.conversation_id) ||
+          typeof payload.encoded_item !== 'string' || payload.encoded_item.length > 512 * 1024) continue;
+      const frames = payload.encoded_item.split(/\r?\n\r?\n/);
+      if (frames.length > 16) continue;
+      for (const frame of frames) {
+        const origin = readOrigin(frame);
+        if (origin?.conversationId === payload.conversation_id)
+          publishOrigin(origin.conversationId, origin.requestIds, Date.now());
+      }
+    }
+  }
+  function installSocketObserver() {
+    if (typeof window.WebSocket !== 'function' || window.WebSocket === observedWebSocket) return;
+    observedWebSocket = new Proxy(window.WebSocket, {
+      construct(target, args, newTarget) {
+        const socket = Reflect.construct(target, args, newTarget);
+        try {
+          const url = new URL(socket.url);
+          if (url.protocol === 'wss:' && (url.hostname === 'chatgpt.com' || url.hostname.endsWith('.chatgpt.com')) &&
+              !observedSockets.has(socket)) {
+            observedSockets.add(socket);
+            socket.addEventListener('message', inspectSocketMessage);
+          }
+        } catch { /* Foreign/unsupported transport remains untouched. */ }
+        return socket;
+      }
+    });
+    window.WebSocket = observedWebSocket;
+  }
   const inspectedResponses = new WeakSet();
   const installFetchObserver = () => {
     if (window.fetch === observedFetch || typeof window.fetch !== 'function') return;
@@ -166,10 +229,21 @@
     window.fetch = observedFetch;
   };
   installFetchObserver();
+  installSocketObserver();
   if (document.readyState === 'loading') {
     window.addEventListener('DOMContentLoaded', installFetchObserver, { once: true });
+    window.addEventListener('DOMContentLoaded', installSocketObserver, { once: true });
   }
   window.addEventListener('message', (event) => {
-    if (event.source === window && event.origin === location.origin && event.data?.type === 'cos-usage-request' && latest) post(latest, location.origin);
+    if (event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-usage-request') return;
+    if (latest) post(latest, location.origin);
+    // Newest first: old evidence must not fill content's 16-ID pending capacity
+    // before the current workflow can enter it during document startup.
+    for (const { conversationId, requestId, observedAt } of [...origins.values()].slice(-16).reverse())
+      post({ type: 'cos-request-origin', conversationId, requestIds: [requestId], observedAt }, location.origin);
+  });
+  window.addEventListener('pagehide', () => {
+    for (const reader of originReaders) void reader.cancel().catch(() => {});
+    origins.clear();
   });
 })();

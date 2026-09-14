@@ -63,7 +63,7 @@ import {
   thawPrimeTransfer
 } from '../agents.js';
 import { clearChatWorkspace, moveChatWorkspace, workspaceForChat } from '../workspace.js';
-import { clearGoalObjective, clearGoalSwitch, goalObjectiveFor, goalSwitchFor, moveGoalObjective, moveGoalSwitch } from '../goal.js';
+import { clearGoalObjective, clearGoalSwitch, goalObjectiveFor, goalSwitchFor, moveGoalObjective, moveGoalSwitch, retireGoalDraftsFor } from '../goal.js';
 import { writeDurableNow, writeDurableSoon } from '../durable.js';
 import { prepareHandoff, resumeBootstrapMatches } from './handoff.js';
 import { ensureHandoffRecorded, recordHandoff, recordNote, rebindConversation } from './recorder.js';
@@ -1166,6 +1166,8 @@ function publishCommittedProjection(
   moveChatWorkspace(entry.from, toConversationId);
   moveGoalObjective(entry.from, toConversationId);
   moveGoalSwitch(entry.from, toConversationId);
+  // A's final is superseded, never a completed turn in B. B earns its own debt.
+  retireGoalDraftsFor(entry.from);
   if (swarm === 'frozen') {
     if (!commitPrimeTransfer(entry.from, toConversationId)) {
       // The frozen handover cannot expire. A miss here means the run ended outright while
@@ -1613,12 +1615,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
             );
           }
         }
-        rebindConversation(entry.sessionId, entry.from, entry.to);
-        moveChatWorkspace(entry.from, entry.to);
-        moveGoalObjective(entry.from, entry.to);
-        moveGoalSwitch(entry.from, entry.to);
-        const repaired = recoveryHooks.repairPrimeTransfer?.(entry.from, entry.to) ?? false;
-        if (!repaired) commitPrimeTransfer(entry.from, entry.to);
+        publishCommittedProjection(entry, entry.to, 'recovery');
         entry.state = 'committed';
         entry.error = null;
         logInfo(`continuation ${entry.token.slice(0, 8)} recovered after durable commit`);

@@ -67,7 +67,7 @@ import {
   requestCorrelation,
   resetCorrelationRegistryForTests,
 } from './correlation.js';
-import { resumeOpeningChat } from './resume-gate.js';
+import { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } from './resume-gate.js';
 import { summarizeToolCall } from './summarize.js';
 
 interface LiveConversation {
@@ -236,14 +236,13 @@ export async function restoreRecordedConversation(conversationId: string): Promi
 }
 
 /**
- * How long to let a resume's commit land before recording a conversation it may be about to
- * claim. Generous next to the milliseconds a commit actually takes, and bounded because a
- * commit that never lands must not stop the chat being recorded at all.
+ * Honor the continuation's existing claim window before creating an unknown conversation.
+ * An independent shorter deadline can mint a shadow session while the destination still
+ * legitimately awaits its commit. Cap each wait at one claim window so overlapping claims
+ * cannot indefinitely prevent an unrelated new chat from being recorded.
  */
-const RESUME_COMMIT_SETTLE_MS = 5_000;
-
 async function settleResumeCommit(): Promise<void> {
-  const deadline = Date.now() + RESUME_COMMIT_SETTLE_MS;
+  const deadline = Date.now() + RESUME_CLAIM_WINDOW_MS;
   while (resumeOpeningChat() && Date.now() < deadline) {
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, 50);
@@ -272,9 +271,8 @@ async function initializeSessionForConversation(
     // A compaction is opening its replacement chat right now, and this unknown conversation
     // may be it. Creating a session here is what breaks the move: the commit that follows
     // finds its own destination owned by a session it has never heard of and refuses to
-    // rebind. Waiting is cheap and lossless — the commit is already in flight and takes
-    // milliseconds, after which this conversation resolves to the session that was moved
-    // onto it and the batch that triggered this is recorded in the right place. See
+    // rebind. Wait within the claim's existing bound, then resolve this conversation to the
+    // session that was moved onto it so the batch is recorded in the right place. See
     // resume-gate.ts for what this cost the session it was written for.
     await settleResumeCommit();
     const moved = conversations.get(conversationId);

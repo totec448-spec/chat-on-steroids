@@ -427,11 +427,19 @@ reads them back before returning `confirmed[]`. `/events` may publish the same e
 Ownership acknowledgement is separate from slow transcript/image writes.
 
 `usage.js` can also project an exact conversation/request pair from a complete live POST
-conversation SSE event before Fiber exposes it. Reads are bounded to 4 MiB / 90 seconds and
-16 request ids; only server metadata is accepted. Content requires the matching route and
-document epoch, using the existing observer for brief fresh-route convergence. Missing stream
+conversation SSE event before Fiber exposes it. Reads are bounded to 4 MiB / 15 minutes,
+two simultaneous clones and 16 request ids per stream; only server metadata is accepted.
+The native WebSocket `conversation-turn-stream` handoff uses the same complete-event parser,
+requiring its outer conversation to match the inner event. It observes existing messages on
+ChatGPT secure sockets without sending, subscribing or polling; envelopes and frames are bounded.
+A 64-pair document cache deduplicates both transports and replays IDs at content readiness.
+Content requires the matching route and document epoch, retaining one-shot stream proof through
+temporary ACK failures for at most 15 minutes using the existing observer/backoff. Missing stream
 metadata retains the Fiber path. Fetch reattachment at DOM readiness captures each downstream
 wrapper separately and deduplicates responses to avoid recursion through page instrumentation.
+Popup request diagnostics derive from the newest exact native/Fiber turn; older scanned turns
+cannot leave a stale current-ID success. Worker queue custody, app receipt, owner confirmation
+and actual recorded tool activity remain distinct facts.
 
 For a newly created chat, an exact locally owned provisional Fiber turn can acquire the durable
 native conversation id as the route/server identity materializes. A `WEB:` local id, unmatched
@@ -589,6 +597,10 @@ or drains output. Caller isolation is in `ownership.ts`, not separate managers p
 The owner is the **durable local session principal** established by correlation. A→B compaction
 keeps that principal, so B can continue A's live terminal without an adoption/move fallback.
 Another session/worker cannot poll or write it. Anonymous process custody is non-adoptable.
+Refusals distinguish unavailable ids, anonymous launch custody, missing caller proof and a
+different owning session. Only missing caller proof invites retry after identity recovery and
+participates in the existing recovered-identity notice. No refusal proves a command should be
+replayed or implies Read-only mode; unavailable ids require checking original launch/output.
 
 A yielded command records a launch acknowledgement, not a permanent claim that the child is
 running. For an exactly attributed launch, the process instance's exit promise revises that
@@ -602,6 +614,8 @@ so use its accessors rather than creating both `Path` and `PATH`. Preserve inher
 override an explicit reachable toolchain. `exec-hints.ts` repairs only provable narrow shell
 mismatches and otherwise abstains. Ambiguous globs/control flow keep original command semantics.
 Search exit 1 can mean no matches; git/build/mutation failure must not be relabeled success.
+Search exit 2 remains a failure even with partial matches: missing or unreadable paths leave
+the requested search incomplete. Preserve returned matches and repair the failed path.
 The shell's virtual-path diagnostic excludes an exact approved native POSIX spelling, even
 when `/Users` collides with a `users` alias. This classification never rewrites command text
 or grants filesystem permission; genuine virtual paths retain their native-path guidance.
@@ -730,6 +744,8 @@ count as active input. The confirmed refresh files the existing outbox or
 opted-in Pro Loop ticket with **five minutes** of durable listening; native busy extends that same
 ticket by five minutes as often as necessary. New work revokes the ticket and restores the normal
 silence clock. An already reloading page retains its existing hydration/cooldown protection.
+If that refresh later reveals Thinking failed, its error-observation timestamp is not fresh
+work and must retain the exact pending Pro Loop ticket and original listening deadline.
 Failure/silence-based automatic delivery requires a recorded, exactly attributed local MCP call
 in that source turn. Native ChatGPT tools, request-id sightings without a call, and earlier-turn
 MCP history do not qualify. Refresh and manual sends need no MCP proof. Recheck recorded proof
@@ -891,6 +907,9 @@ remain, and complete newly delivered work. It is not a progress tool or a way to
 checkpoints in a loop. Hidden reminder framing never removes original recorded bytes.
 
 `session/finish.ts` validates exact active session/conversation/turn and invocation start.
+An unproven `session_finish` request waits for its exact request-id evidence at MCP admission,
+before blocked/superseded checks. That wait and the finish hold share the existing 25-second
+ingress deadline; late identity cannot add a second full wait or borrow another session.
 The turn's recorded finish authority owns held/released/notified/decision state. Pending user
 instructions and checkpoints take priority. A successful finish response can deliver one
 checkpoint; empty holds can wait without inventing new work. “End turn” durably releases the
@@ -1233,6 +1252,11 @@ regressions do not establish those tabs' original cause or live validation of th
 silence/no-tab recovery for workers, primes and ordinary chats. Reload repair for exact errors,
 Unattributed incidents and compaction has its own evidence. “Recover agents” is not blanket
 permission to reopen the session list. A plain historical chat with no current work is unprotected.
+Provider access-limit notices preserve only an active Goal/Loop's existing exact session/turn
+recovery grant. They neither renew its deadline nor discard a pending/spent repair or postpone
+Goal pickup. Genuine new work in the same batch keeps its ordinary rearming authority, and an
+accepted terminal boundary still retires its pending repair, including after handout. Ordinary
+chats retain their no-reload behavior for these blocking notices; no new grant comes from a dialog.
 
 | Trigger | Required meaning |
 | --- | --- |
@@ -1267,11 +1291,12 @@ recovery is wanted, including without queued input. A synthesized continuation a
 needs exact durable source-turn proof. Reloading Pro can file the next
 queued after-turn input under §11, or an opted-in Pro Loop ticket under §17. User inputs take
 precedence. Goal's shorter watch is not a generic one-minute keepalive.
-Queue and Goal share the existing five pickup gaps: 2/2/5/10/15 minutes, each at least ten
-minutes for Pro. Reordering, replacing the head on the same source and Goal Off cannot refund
-a queue episode's spent attempts. Missing pickup ACK retains its original action custody;
-status polling does not issue a fresh token. Startup excludes pre-start obligations, and a
-twelve-hour source age retires automatic pickup authority without deleting queued text. Fresh
+Queue and Goal share pickup gaps of 2/2/5/10/15 minutes, then retain fifteen minutes until
+expiry; each gap is at least ten minutes for Pro. Reordering, replacing the head on the same
+source and Goal Off cannot reset the backoff. Missing pickup ACK retains its original action
+custody; status polling does not issue a fresh token. Startup restores eligible durable debt
+with the normal first grace period. A twelve-hour source age retires automatic pickup authority
+without deleting queued text. Newer questions veto older Goal debt. Fresh
 source/session/stop/block/continuation and listening checks apply again at repair handout.
 Publishing a repair wakes the extension over the existing authenticated socket; due repairs run
 before window layout, input preparation and idle-tab pruning. The MV3 30-second maintenance
@@ -1306,7 +1331,10 @@ task and must not turn source A into an independently recoverable chat.
 
 `session/continuation.ts` owns the transaction; `handoff.ts` validates the brief; `bridge.ts`
 and the extension transport it. `resume-gate.ts` is a short pre-commit admission gate, not a
-second continuation owner. The ledger phases are:
+second continuation owner. Unknown-chat recording honors its existing 60-second claim window
+instead of creating a shadow session after five seconds. Commit/abort releases the wait early;
+one claim window bounds each admission wait even when overlapping claims appear. Known sessions
+remain immediately readable. The ledger phases are:
 
 ```text
 awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
@@ -1519,6 +1547,9 @@ envelope or the transport's top-level failure, then use the existing delayed ret
 `chat_still_working` stays on Answer settling; rate limits and transport failures cannot
 release the claim for every activity update to collect again. Off or a new pickup invalidates
 the old delayed retry, and a settled refusal waits for a new authorized episode.
+If a delayed retry yields to temporary native work or compaction after its wait elapsed,
+release its page pickup claim. The existing activity feed may collect the same still-pending
+server obligation once safe; do not acknowledge it as handled or require a reload to recover.
 
 ### Three backends, two different helper roles
 
@@ -1605,8 +1636,13 @@ Keep manual failed-send notices and genuinely pending instructions in their exis
 
 Reply obligations are durable and bounded (12 hours / 200 rows) with handled tombstones so old
 browser observations do not rearm discharged work. A provisional exact `turn:<id>` observation
-can later gain durable event-sequence evidence. “Invalidating an attempt” must not silently mean
-“the user's continuation is handled.” Current persistence/publication exceptions are in §21.
+with `eventSeq=0` survives restart and can later gain durable event-sequence evidence without
+rearming an already handled decision. Settings/key replacement cancels and removes stale attempts
+while preserving pending source debt; master Off explicitly retires that debt. Helper failure
+never counts as a source decision. Settled transport/settings failures retain their retry fence
+and do not trigger source reloads while awaiting intervention. Normal and restored committed
+resumes share one projection: move objective/switch, retire A's debt, and let B earn its own.
+Current persistence/publication exceptions are in §21.
 
 ## 18. Desktop workspace, plugins, connection and native control
 
@@ -1732,6 +1768,9 @@ shutdown. Accept bounded validated schemas (up to 256 upstream tools and 250,000
 upstream names, and fail closed on collisions, including retained disabled-name claims. A
 cached unauthorized schema is not live exposure. External servers retain their own OS/account
 permissions; the app's approved-path wrapper is not an OS sandbox around a third-party process.
+Refused cached calls explain a uniquely known plugin's disabled, sign-in or server-error state.
+Connector refresh cannot repair those states. Retained declarations explain refusal only;
+they never route a call or resolve conflicting owners. Refusals state no call was dispatched.
 Refresh observations allow the registrar's one additional code-mode tool. Legacy 64-tool
 snapshots (plus optional code mode) can enroll only as an exact declaration subset of the
 current Plugins publication; refresh completion still requires the complete current catalog.
@@ -1999,18 +2038,10 @@ shared-tree change may already have addressed them.
   the awaited durable write; synchronous clear/move paths and objective/reply mutations do not
   all share the same semantic transaction. Intent is durable commit before visible state, with
   rollback unable to overwrite a newer accepted change.
-- **Goal retirement scope:** master/config/secret changes cross separate ledgers, and
-  `retireGoalDrafts()` marks reply debt handled while cancelling attempts. Recording Off also
-  lacks a uniform runtime gate for retained per-chat overrides. Invalidating a provider attempt
-  must preserve any still-owed eligible continuation and respect effective current settings.
-- **Provisional Goal restart:** live exact `turn:<id>` debt can begin with `eventSeq=0`, while
-  reply restore rejects sequences below 1. The accepted identity should survive until durable
-  turn evidence strengthens it, without losing or duplicating the obligation on restart.
-- **Resume projections and Goal debt:** normal commit and restored committed-B projection
-  still duplicate parts of the repair path. Objective/switch move, but source reply-ledger
-  disposition is absent. Current watchdog checks already fence superseded A; do not claim the
-  old historical-A reopening bug is unconditionally present. Intent is one idempotent committed
-  projection and explicit supersession of A's debt, never treating it as B's completed turn.
+- **Goal cross-ledger controls:** master/config/secret changes still cross separate ledgers.
+  Recording Off lacks a uniform runtime gate for retained per-chat overrides. Attempt
+  invalidation now preserves debt, but these remaining controls still need one durable
+  semantic transaction and effective current-setting enforcement.
 
 Do not restore obsolete claims while investigating: two MCP surfaces, one global prime run,
 fresh `saveArtifact=false`, three browser command kinds, fixed 60s Unattributed repair, tab-query
