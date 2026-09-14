@@ -5974,7 +5974,14 @@ async function noteRecoveryObservations(
       item.blocking === true ||
       /^too many requests\b.*temporarily limited.*access.*few minutes/i.test((item.text ?? '').replace(/\s+/g, ' '))
     ) {
-      endActivity(conversationId);
+      // Ordinary chats stop their response watchdog exactly as before. Goal/Loop is different:
+      // its standing instruction already owns this chat's bounded silence recovery, so consuming
+      // the exact current grant here parks an unattended run forever after the DOM acknowledges
+      // the dialog. Preserve only that existing owner; the notice itself grants no retry.
+      const grant = activeUntil.get(conversationId);
+      const preserveGoalRecovery = !!sessionId && goalActiveFor(conversationId) &&
+        grant?.sessionId === sessionId && (!item.turnId || grant.turnId === item.turnId);
+      if (!preserveGoalRecovery) endActivity(conversationId);
       continue;
     }
     if (item.recoverable !== true) continue;
