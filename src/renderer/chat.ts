@@ -3,6 +3,7 @@ import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedCo
 import { marked, Marked } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel } from './agent-panel.js';
+import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { goalErrorMessage } from '../shared/goal-errors.js';
@@ -135,6 +136,18 @@ const projectVisibleCounts = new Map<string, number>();
 function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
 }
+function selectedLocalProject(): LocalProject | null {
+  if (selectedId) {
+    const selected = sessions.find(row => row.id === selectedId);
+    const inherited = selected?.origin?.kind === 'worker' && selected.origin.fromSessionId
+      ? sessions.find(row => row.id === selected.origin?.fromSessionId)?.projectId
+      : undefined;
+    const id = selected?.projectId ?? inherited;
+    return id ? projects.find(project => project.id === id) ?? null : null;
+  }
+  if (!newChatSelected || !selectedProjectId) return null;
+  return projects.find(project => project.id === selectedProjectId && !project.ungrouped) ?? null;
+}
 const PROJECT_TASK_PAGE_SIZE = 5;
 const PROJECT_TASK_PAGE_INCREMENT = 8;
 let sidebarOrder: ReturnType<typeof createSidebarOrder> | undefined;
@@ -142,6 +155,7 @@ function draftKey(): string { return selectedId ?? (selectedProjectId ? `project
 let selectionGeneration = 0;
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
+let filePanel: ReturnType<typeof createFilePanel> | null = null;
 const expandedWorkers = new Set<string>();
 const inputDrafts = new Map<string, string>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
@@ -686,6 +700,7 @@ function paintSessions(): void {
   // Projects must remain discoverable without scrolling through the entire ungrouped history.
   list.replaceChildren(...projectSections, ...rows);
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
+  filePanel?.update(selectedLocalProject());
   badgeKey = badgeSignature();
   $('sessionsEmpty').hidden = sessions.length > 0 || projects.some(project => !project.ungrouped);
 
@@ -2223,9 +2238,14 @@ function groupToolRows(rows: HTMLElement[], scope = selectedId, groups = toolGro
 function paintDetail(followBottom = historyBefore === null): void {
   paintStateLine();
   const summary = sessions.find((s) => s.id === selectedId) ?? null;
+  const project = selectedLocalProject();
   applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, summary?.selectedModel ?? null);
   const config = deps.state()?.config;
   if (config) paintContextMeter(summary, config, confirmedComposerModel());
+  const projectContext = $('chatProjectContext');
+  projectContext.hidden = !project;
+  projectContext.title = project?.path ?? '';
+  $('chatProjectName').textContent = project?.name ?? '';
   ui($('chatTitle'), 'textContent', () => summary ? summary.title || t("Untitled session") : t("New chat"));
 
   paintDeliveryControls();
@@ -3518,13 +3538,18 @@ export function initChat(next: Deps): void {
     input: $<HTMLTextAreaElement>('chatInput'),
     getDraftIdentity: () => `${selectionGeneration}:${draftKey()}`
   });
+  const fileToggle = el('button', 'btn file-panel-toggle') as HTMLButtonElement;
+  fileToggle.id = 'filePanelToggle'; fileToggle.type = 'button'; fileToggle.hidden = true;
+  fileToggle.append(icon('i-folder'), el('span', '', () => t('Files')));
+  ui(fileToggle, 'aria-label', () => t('Toggle Files side panel')); fileToggle.setAttribute('aria-expanded', 'false');
   const agentToggle = el('button', 'btn btn-icon', '◫') as HTMLButtonElement;
   agentToggle.id = 'agentPanelToggle'; agentToggle.type = 'button'; agentToggle.hidden = true;
   ui(agentToggle, 'aria-label', () => t("Toggle sub-agent side panel")); agentToggle.setAttribute('aria-expanded', 'false');
-  $('themeBtn').before(agentToggle);
+  $('themeBtn').before(fileToggle, agentToggle);
   const agentToolGroups = new Map<string, HTMLDetailsElement>();
   agentPanel = createAgentPanel({
     host: document.querySelector<HTMLElement>('[data-panel="chat"]')!, toggle: agentToggle,
+    onShow: () => filePanel?.hide(),
     load: id => run(api.getSession(id, { limit: 160 })), openMain: selectSession, working: sessionWorking,
     render: (source, id, current) => {
       let boundary = '';
@@ -3678,6 +3703,13 @@ export function initChat(next: Deps): void {
     if (combined.length > 20 || combined.reduce((sum, file) => sum + ('size' in file ? file.size : 0), 0) > 512 * 1024 * 1024) { toast(t("Attach up to 20 files and 512 MB per message")); return; }
     imageDrafts.set(key, combined); if (draftKey() === key) paintComposerImages();
   };
+  filePanel = createFilePanel({
+    host: document.querySelector<HTMLElement>('[data-panel="chat"]')!,
+    toggle: fileToggle,
+    onShow: () => agentPanel?.hide(),
+    onAttach: attachment => appendImages(draftKey(), [attachment])
+  });
+  filePanel.update(selectedLocalProject());
   $('attachImages').addEventListener('click', async () => {
     const key = draftKey();
     appendImages(key, await run(api.chooseFiles()));

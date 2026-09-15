@@ -53,6 +53,15 @@ import { runDiagnostics } from './diagnostics.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, onLog } from './logger.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
 import { addProject, listProjects, removeProject } from './projects.js';
+import {
+  createProjectEntry,
+  listProjectDirectory,
+  previewProjectFile,
+  projectFileTarget,
+  renameProjectEntry,
+  saveProjectTextFile
+} from './project-files.js';
+import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setSecret } from './secrets.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
@@ -415,6 +424,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     await removeSkill(id);
     return listSkills();
   });
+  const projectFileWatches = new ProjectFileWatchSet((event) => {
+    const target = getWindow();
+    if (!target || target.isDestroyed()) return;
+    target.webContents.send('projectFiles:changed', event);
+  });
   handle('setup:profile', async payload => {
     const request = z.discriminatedUnion('action', [
       z.object({ action: z.literal('add'), name: z.string().trim().min(1).max(80) }),
@@ -587,6 +601,90 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const project = await addProject(folder);
     push('session:changed');
     return project;
+  });
+
+  const projectFileId = z.string().uuid();
+  const projectRelativePath = z.string().max(4096);
+  handle('projectFiles:list', async (payload) => {
+    const { projectId, directory } = z.object({
+      projectId: projectFileId,
+      directory: projectRelativePath.default('')
+    }).strict().parse(payload ?? {});
+    return listProjectDirectory(projectId, directory);
+  });
+  handle('projectFiles:watch', async (payload) => {
+    const { projectId, directories } = z.object({
+      projectId: projectFileId.nullable(),
+      directories: z.array(projectRelativePath).max(128)
+    }).strict().parse(payload);
+    await projectFileWatches.sync(projectId, projectId ? directories : []);
+    return true;
+  });
+  handle('projectFiles:preview', async (payload) => {
+    const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
+    return previewProjectFile(projectId, path);
+  });
+  handle('projectFiles:create', async (payload) => {
+    const { projectId, directory, name, kind } = z.object({
+      projectId: projectFileId,
+      directory: projectRelativePath.default(''),
+      name: z.string().min(1).max(255),
+      kind: z.enum(['file', 'directory'])
+    }).strict().parse(payload);
+    return createProjectEntry(projectId, directory, name, kind);
+  });
+  handle('projectFiles:rename', async (payload) => {
+    const { projectId, path, name } = z.object({
+      projectId: projectFileId,
+      path: projectRelativePath.min(1),
+      name: z.string().min(1).max(255)
+    }).strict().parse(payload);
+    return renameProjectEntry(projectId, path, name);
+  });
+  handle('projectFiles:save', async (payload) => {
+    const { projectId, path, text, expectedModifiedAt, expectedBytes } = z.object({
+      projectId: projectFileId,
+      path: projectRelativePath.min(1),
+      text: z.string().max(512 * 1024),
+      expectedModifiedAt: z.string().min(1).max(64),
+      expectedBytes: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)
+    }).strict().parse(payload);
+    return saveProjectTextFile(projectId, path, text, expectedModifiedAt, expectedBytes);
+  });
+  handle('projectFiles:delete', async (payload) => {
+    const { projectId, path: relative } = z.object({
+      projectId: projectFileId,
+      path: projectRelativePath.min(1)
+    }).strict().parse(payload);
+    const target = await projectFileTarget(projectId, relative, { allowRoot: false });
+    if (target.kind !== 'file' && target.kind !== 'directory') throw new Error('Only regular files and folders can be deleted');
+    // The renderer owns the user confirmation so Files uses one consistent in-app dialog style.
+    // The actual mutation still happens here, against the re-resolved project-scoped target, and
+    // still uses the OS Trash so an accidental deletion remains recoverable.
+    await shell.trashItem(target.real);
+    return true;
+  });
+  handle('projectFiles:reveal', async (payload) => {
+    const { projectId, path: relative } = z.object({
+      projectId: projectFileId,
+      path: projectRelativePath.default('')
+    }).strict().parse(payload);
+    const target = await projectFileTarget(projectId, relative, { allowRoot: true });
+    shell.showItemInFolder(target.real);
+    return true;
+  });
+  handle('projectFiles:attach', async (payload) => {
+    const { projectId, path: relative } = z.object({
+      projectId: projectFileId,
+      path: projectRelativePath.min(1)
+    }).strict().parse(payload);
+    const target = await projectFileTarget(projectId, relative, { allowRoot: false, fileOnly: true });
+    const retained = new Set(
+      (await listInputs())
+        .filter(row => !['sent', 'failed', 'cancelled'].includes(row.state))
+        .flatMap(row => row.attachments?.map(file => file.id) ?? [])
+    );
+    return stageInputAttachment(target.real, retained);
   });
 
   // A folder dropped onto the Folders card. The renderer never sees a system path itself:
